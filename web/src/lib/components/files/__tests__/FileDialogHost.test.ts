@@ -28,9 +28,65 @@ describe('FileDialogHost', () => {
 		rendered.unmount();
 	});
 
+	it('does not present File Sessions on mobile', () => {
+		const rendered = render(FileDialogHostTestHost, {
+			request: 'open-files',
+			isMobile: true,
+		});
+
+		expect(screen.queryByRole('dialog')).toBeNull();
+		rendered.unmount();
+	});
+
+	it('omits File Sessions recovery from the mobile threshold dialog', async () => {
+		const rendered = render(FileDialogHostTestHost, {
+			request: 'threshold',
+			isMobile: true,
+		});
+
+		await screen.findByRole('dialog');
+		expect(screen.queryByRole('button', { name: m.file_session_review_open() })).toBeNull();
+		expect(screen.getByRole('button', { name: m.file_session_open_anyway() })).toBeTruthy();
+		rendered.unmount();
+	});
+
 	it('resolves a dirty-file guard as Cancel when Escape dismisses it', async () => {
 		const onResolve = vi.fn();
 		render(FileDialogHostTestHost, { request: 'guard', onResolve });
+		await screen.findByRole('dialog');
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+
+		await waitFor(() => expect(onResolve).toHaveBeenCalledWith('cancel'));
+	});
+
+	it('uses a discard-only confirmation for a dirty refresh', async () => {
+		const onResolve = vi.fn();
+		render(FileDialogHostTestHost, { request: 'refresh', onResolve });
+
+		expect(await screen.findByText(m.file_session_discard_refresh_title())).toBeTruthy();
+		expect(screen.queryByRole('button', { name: m.file_session_save() })).toBeNull();
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.file_session_discard_and_refresh() }),
+		);
+		expect(onResolve).toHaveBeenCalledWith('discard');
+	});
+
+	it('requires an explicit destructive choice before overwriting external changes', async () => {
+		const onResolve = vi.fn();
+		render(FileDialogHostTestHost, { request: 'overwrite', onResolve });
+
+		expect(await screen.findByText(m.file_session_overwrite_title())).toBeTruthy();
+		const overwrite = screen.getByRole('button', { name: m.file_session_save_anyway() });
+		expect(overwrite.getAttribute('data-slot')).toBe('button');
+		expect(overwrite.className).toContain('bg-destructive');
+		await fireEvent.click(overwrite);
+		expect(onResolve).toHaveBeenCalledWith('overwrite');
+	});
+
+	it('cancels an overwrite request when Escape dismisses it', async () => {
+		const onResolve = vi.fn();
+		render(FileDialogHostTestHost, { request: 'overwrite', onResolve });
 		await screen.findByRole('dialog');
 
 		await fireEvent.keyDown(document, { key: 'Escape' });

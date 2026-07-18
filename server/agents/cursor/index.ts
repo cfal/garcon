@@ -31,6 +31,7 @@ export function createCursorAgent(args: CreateCursorAgentArgs): Agent {
     transcript: {
       loadMessages: transcript.loadMessages,
       getPreview: transcript.getPreview,
+      resolveSearchLoadPlan: transcript.resolveSearchLoadPlan,
       async resolveNativePath(session) {
         if (!session.agentSessionId) return null;
         return createCursorAcpNativePath(session.agentSessionId);

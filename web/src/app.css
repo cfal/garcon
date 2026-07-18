@@ -204,6 +204,9 @@
 	--input: 0 0% 90%;
 	--ring: 0 0% 40%;
 	--radius: 0.5rem;
+	--transient-backdrop-color: 0 0% 0%;
+	--transient-backdrop-opacity: 0.32;
+	--transient-backdrop-blur: 2px;
 	--chat-header-bg: 0 0% 97%;
 	--chat-header-border: 0 0% 88%;
 	--chat-thinking-bg: 0 0% 93%;
@@ -322,11 +325,11 @@
 	--user-bubble-selected: 214 22% 30%;
 	--user-bubble-foreground: 0 0% 98%;
 	--user-bubble-timestamp: 0 0% 82%;
-		--markdown-code-background: 220 23% 97%;
-		--markdown-code-foreground: 217 19% 18%;
-		--markdown-code-border: 220 16% 84%;
-		--markdown-code-keyword: 343 72% 40%;
-		--markdown-code-title: 266 48% 44%;
+	--markdown-code-background: 220 23% 97%;
+	--markdown-code-foreground: 217 19% 18%;
+	--markdown-code-border: 220 16% 84%;
+	--markdown-code-keyword: 343 72% 40%;
+	--markdown-code-title: 266 48% 44%;
 	--markdown-code-meta: 211 100% 35%;
 	--markdown-code-string: 210 94% 20%;
 	--markdown-code-symbol: 26 92% 42%;
@@ -349,7 +352,7 @@
 	--file-icon-doc: 214 82% 45%;
 	--file-icon-image: 271 76% 53%;
 	--file-icon-folder: 214 82% 45%;
-	--terminal-bg: 0 0% 96%;
+	--terminal-bg: 0 0% 100%;
 
 	--git-action-commit: 214 82% 51%;
 	--git-action-commit-hover: 214 82% 43%;
@@ -414,6 +417,8 @@
 	--border: 0 0% 20%;
 	--input: 0 0% 40%;
 	--ring: 0 0% 60%;
+	--transient-backdrop-color: 0 0% 0%;
+	--transient-backdrop-opacity: 0.36;
 	--chat-header-bg: 0 0% 12%;
 	--chat-header-border: 0 0% 24%;
 	--chat-thinking-bg: 0 0% 5%;
@@ -543,7 +548,7 @@
 	--file-icon-doc: 214 92% 68%;
 	--file-icon-image: 271 81% 72%;
 	--file-icon-folder: 214 92% 68%;
-	--terminal-bg: 0 0% 12%;
+	--terminal-bg: 0 0% 11.76%;
 
 	--git-action-commit: 214 82% 55%;
 	--git-action-commit-hover: 214 82% 48%;
@@ -570,11 +575,11 @@
 	--diff-del-line-num: 9 50% 55%;
 	--diff-hunk-header-bg: 214 40% 18%;
 
-		--markdown-code-background: 0 0% 11%;
-		--markdown-code-foreground: 0 0% 84%;
-		--markdown-code-border: 0 0% 23%;
-		--markdown-code-keyword: 4 100% 72%;
-		--markdown-code-title: 273 79% 82%;
+	--markdown-code-background: 0 0% 11%;
+	--markdown-code-foreground: 0 0% 84%;
+	--markdown-code-border: 0 0% 23%;
+	--markdown-code-keyword: 4 100% 72%;
+	--markdown-code-title: 273 79% 82%;
 	--markdown-code-meta: 209 97% 72%;
 	--markdown-code-string: 206 90% 80%;
 	--markdown-code-symbol: 28 100% 68%;
@@ -657,6 +662,18 @@
 }
 
 @layer components {
+	.transient-backdrop {
+		background-color: hsl(var(--transient-backdrop-color) / var(--transient-backdrop-opacity));
+		-webkit-backdrop-filter: blur(var(--transient-backdrop-blur));
+		backdrop-filter: blur(var(--transient-backdrop-blur));
+	}
+
+	:root[data-overlay-backdrop-effects='disabled'] .transient-backdrop {
+		background-color: transparent;
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+	}
+
 	/* Prevent prose from overriding chat code-block styles */
 	.markdown-body pre {
 		background-color: transparent;

@@ -138,6 +138,8 @@ Refactoring rules:
 - Leave code better than it was found.
 - Theme all UI with semantic design tokens (`background`, `foreground`, `muted`, `card`, `border`, `accent`) and avoid hard-coded color utility palettes in app surfaces.
 - For domain/status/provider color accents (for example provider tags, unread indicators, warning states), define semantic intent tokens in `app.css` and consume those tokens in components instead of hard-coded palette classes.
+- Use the global `transient-backdrop` class for modal, dialog, drawer, and overlay-sidebar scrims instead of local color or blur utilities; exclude interaction-only layers and opaque surfaces.
+- Keep dialog and mobile-surface form controls at a computed font size of at least 16px on touch devices to prevent iPhone Safari from zooming on focus.
 
 ## What "Good" Looks Like in This Repo
 

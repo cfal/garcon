@@ -37,4 +37,21 @@ describe('buildThinkingOptions', () => {
 	it('keeps Ultra out of other agents', () => {
 		expect(buildThinkingOptions('claude').some((option) => option.value === 'ultra')).toBe(false);
 	});
+
+	it('offers the current global interactive efforts to every Direct agent', () => {
+		for (const agentId of [
+			'direct-openai-compatible',
+			'direct-openai-responses-compatible',
+			'direct-anthropic-compatible',
+		]) {
+			expect(buildThinkingOptions(agentId).map((option) => option.value)).toEqual([
+				'none',
+				'low',
+				'medium',
+				'high',
+				'xhigh',
+				'max',
+			]);
+		}
+	});
 });

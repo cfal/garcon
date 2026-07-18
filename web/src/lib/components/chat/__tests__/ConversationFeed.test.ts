@@ -1,5 +1,9 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('$lib/components/chat/ConversationTranscript.svelte', async () => ({
+	default: (await import('./GenericStub.svelte')).default,
+}));
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
 
@@ -33,5 +37,17 @@ describe('ConversationFeed', () => {
 		expect(spacer?.compareDocumentPosition(bottomAnchor as Node)).toBe(
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);
+	});
+
+	it('hides the local truncation control during the automatic initial reveal', () => {
+		render(ConversationFeedTestHost, { transcriptScenario: 'initial-reveal' });
+
+		expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
+	});
+
+	it('still shows the local truncation control after the automatic reveal window', () => {
+		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation' });
+
+		expect(screen.getByRole('button', { name: /load more/i })).toBeTruthy();
 	});
 });

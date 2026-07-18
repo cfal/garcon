@@ -4,6 +4,7 @@
 	import { cn } from '$lib/utils/cn.js';
 	import SavedSearchPills from './SavedSearchPills.svelte';
 	import SidebarSearchResults from './SidebarSearchResults.svelte';
+	import SidebarTranscriptSearchStatus from './SidebarTranscriptSearchStatus.svelte';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
 	import Search from '@lucide/svelte/icons/search';
 	import Save from '@lucide/svelte/icons/save';
@@ -12,12 +13,19 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
+	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchDialogProps {
 		open: boolean;
 		query: string;
 		filteredChats: ChatSessionRecord[];
 		savedSearches: SavedChatSearch[];
+		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchEnabled?: boolean;
+		transcriptSearchLoading?: boolean;
+		transcriptSearchIndexing?: boolean;
+		transcriptSearchIndex?: ChatSearchIndexStatus | null;
+		transcriptSearchError?: string | null;
 		currentTime: Date;
 		highlightedIndex: number;
 		onQueryChange: (query: string) => void;
@@ -26,9 +34,11 @@
 		onCreateSavedSearch: () => void;
 		onOpenManager: () => void;
 		onHighlightChange: (index: number) => void;
+		onRetryTranscriptSearch?: () => void;
 		onClose: () => void;
 		showSavedSearchActions?: boolean;
 		overlayClass?: string;
+		backdropTreatment?: 'standard' | 'interaction-only';
 		contentRole?: 'dialog' | 'presentation';
 	}
 
@@ -37,6 +47,12 @@
 		query,
 		filteredChats,
 		savedSearches,
+		transcriptMatchesByChatId = new Map(),
+		transcriptSearchEnabled = false,
+		transcriptSearchLoading = false,
+		transcriptSearchIndexing = false,
+		transcriptSearchIndex = null,
+		transcriptSearchError = null,
 		currentTime,
 		highlightedIndex,
 		onQueryChange,
@@ -45,14 +61,17 @@
 		onCreateSavedSearch,
 		onOpenManager,
 		onHighlightChange,
+		onRetryTranscriptSearch = () => {},
 		onClose,
 		showSavedSearchActions = true,
 		overlayClass,
+		backdropTreatment = 'standard',
 		contentRole = 'dialog',
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let helpDialogOpen = $state(false);
+	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
 	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
 
@@ -74,12 +93,14 @@
 		if (e.ctrlKey && key === 'j') {
 			e.preventDefault();
 			onHighlightChange(Math.min(highlightedIndex + 1, filteredChats.length - 1));
+			highlightRevealVersion += 1;
 			return;
 		}
 
 		if (e.ctrlKey && key === 'k') {
 			e.preventDefault();
 			onHighlightChange(Math.max(highlightedIndex - 1, 0));
+			highlightRevealVersion += 1;
 			return;
 		}
 
@@ -124,7 +145,11 @@
 
 {#if open}
 	<div
-		class={cn('fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm', overlayClass)}
+		class={cn(
+			'fixed inset-0 z-50',
+			backdropTreatment === 'standard' && 'transient-backdrop',
+			overlayClass,
+		)}
 		role="presentation"
 	>
 		<button
@@ -163,7 +188,7 @@
 								value={query}
 								oninput={handleQueryInput}
 								placeholder={m.sidebar_projects_search_placeholder()}
-								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-[16px] leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:text-sm sm:leading-5"
+								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-base leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm sm:pointer-fine:leading-5"
 							/>
 							{#if query.length > 0}
 								<button
@@ -230,10 +255,21 @@
 					{/if}
 				</div>
 
+				<SidebarTranscriptSearchStatus
+					enabled={transcriptSearchEnabled}
+					loading={transcriptSearchLoading}
+					indexing={transcriptSearchIndexing}
+					index={transcriptSearchIndex}
+					error={transcriptSearchError}
+					onRetry={onRetryTranscriptSearch}
+				/>
+
 				<SidebarSearchResults
 					{filteredChats}
+					{transcriptMatchesByChatId}
 					{currentTime}
 					{highlightedIndex}
+					{highlightRevealVersion}
 					{onSelectChat}
 					{onHighlightChange}
 				/>

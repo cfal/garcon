@@ -13,6 +13,13 @@
 	const transientLayers = getOptionalTransientLayers();
 	const initiallyOpen = untrack(() => open);
 	let wasOpen = initiallyOpen;
+	let focusReturnTarget = activeElement();
+
+	function activeElement(): HTMLElement | null {
+		return typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
+	}
 	if (initiallyOpen && !transientLayers?.hasPendingMainInert) {
 		transientLayers?.open('main-inert', () => undefined);
 	}
@@ -27,10 +34,14 @@
 		onOpenChange?.(next);
 	}
 
-	setDialogLayerControl({ close: () => updateOpen(false) });
+	setDialogLayerControl({
+		close: () => updateOpen(false),
+		focusReturnTarget: () => focusReturnTarget,
+	});
 
 	$effect.pre(() => {
 		const nextOpen = open;
+		if (nextOpen && !wasOpen) focusReturnTarget = activeElement();
 		if (nextOpen && !wasOpen && !transientLayers?.hasPendingMainInert) {
 			transientLayers?.open('main-inert', () => undefined);
 		}

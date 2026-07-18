@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { tick } from 'svelte';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
-import { createAuthStore } from '$lib/stores/auth.svelte.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import {
 	configuredFilePlacement,
 	createWorkspaceServices,
@@ -46,8 +46,13 @@ describe('createWorkspaceServices', () => {
 		ghCapability.available = true;
 		const localSettings = createLocalSettingsStore();
 		localSettings.showQuickCommitTray = false;
+		const ws = {
+			isConnected: false,
+			sendMessage: () => false,
+			addMessageConsumer: () => () => undefined,
+			onConnectionChange: () => () => undefined,
+		} satisfies PrimaryWsConnectionPort;
 		services = createWorkspaceServices({
-			auth: createAuthStore(),
 			appShell: createAppShellStore(),
 			chatSessions: createChatSessionsStore(),
 			ghCapability,
@@ -56,6 +61,7 @@ describe('createWorkspaceServices', () => {
 			navigation: createNavigationStore(),
 			notifications: createNotificationsStore(),
 			terminalIdentity: { clientId: 'test-client' },
+			ws,
 			getRouteIdentity: () => '/',
 			onTerminalLauncherDismissed: () => {},
 			isTerminalLauncherDismissed: () => false,

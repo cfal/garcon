@@ -1,9 +1,4 @@
-import type {
-  AmpAgentMode,
-  ClaudeThinkingMode,
-  PermissionMode,
-  ThinkingMode,
-} from './chat-modes.js';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { QueueState } from './queue-state.js';
@@ -16,6 +11,10 @@ export type CommandErrorCode =
   | 'VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
   | 'IDEMPOTENCY_CONFLICT'
+  | 'QUEUE_ENTRY_NOT_FOUND'
+  | 'QUEUE_ENTRY_ALREADY_SENT'
+  | 'QUEUE_ENTRY_REVISION_CONFLICT'
+  | 'QUEUE_PAUSE_CHANGED'
   | 'UNSUPPORTED_AGENT'
   | 'PROJECT_PATH_UPDATE_UNSUPPORTED'
   | 'CHAT_NOT_IDLE'
@@ -25,6 +24,7 @@ export type CommandErrorCode =
   | 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
+  | 'SERVER_RESTART_INTERRUPTED'
   | 'INTERNAL_ERROR';
 
 export interface CommandAcceptedResponse {
@@ -106,22 +106,60 @@ export interface ForkRunCommandRequest {
   modelProtocol?: ApiProtocol | null;
 }
 
-export interface QueueEnqueueCommandRequest {
+export interface QueueEntryCreateCommandRequest {
   clientRequestId: string;
   chatId: string;
   content: string;
-  delivery?: 'queue' | 'active';
 }
 
-export interface QueueEnqueueResponse extends CommandAcceptedResponse {
+export interface QueueEntryReplaceCommandRequest {
+  clientRequestId: string;
+  chatId: string;
   entryId: string;
-  merged: boolean;
+  content: string;
+  expectedRevision: number;
+}
+
+export interface QueueEntryDeleteCommandRequest {
+  clientRequestId: string;
+  chatId: string;
+  entryId: string;
+}
+
+export interface QueueEntryCommandResponse extends CommandAcceptedResponse {
+  entryId: string;
   queue: QueueState;
+}
+
+export interface QueueEntryDeleteResponse extends CommandAcceptedResponse {
+  entryId: string;
+  queue: QueueState;
+}
+
+export interface ActiveInputCommandRequest {
+  clientRequestId: string;
+  chatId: string;
+  content: string;
+}
+
+export interface ActiveInputCommandResponse extends CommandAcceptedResponse {
+  delivery: 'active' | 'queued';
+  entryId?: string;
+  queue: QueueState;
+}
+
+export interface QueueCommandErrorResponse extends HttpErrorResponse {
+  queue?: QueueState;
 }
 
 export interface QueueMutationRequest {
   chatId: string;
-  entryId?: string;
+}
+
+export type QueuePauseRequest = QueueMutationRequest;
+
+export interface QueueResumeRequest extends QueueMutationRequest {
+  pauseId: string;
 }
 
 export interface QueueMutationResponse {
@@ -135,26 +173,19 @@ export interface AskUserQuestionAnswerPayload {
   selectedOptionIds: string[];
 }
 
-export interface AskUserQuestionAnsweredResponse extends Record<
-  string,
-  unknown
-> {
+export interface AskUserQuestionAnsweredResponse extends Record<string, unknown> {
   type: 'ask-user-question-response';
   outcome: 'answered';
   answers: AskUserQuestionAnswerPayload[];
 }
 
-export interface AskUserQuestionSkippedResponse extends Record<
-  string,
-  unknown
-> {
+export interface AskUserQuestionSkippedResponse extends Record<string, unknown> {
   type: 'ask-user-question-response';
   outcome: 'skipped';
   reason?: string;
 }
 
-export type AskUserQuestionDecisionResponse =
-  AskUserQuestionAnsweredResponse | AskUserQuestionSkippedResponse;
+export type AskUserQuestionDecisionResponse = AskUserQuestionAnsweredResponse | AskUserQuestionSkippedResponse;
 
 export interface PermissionDecisionPayload {
   allow: boolean;
@@ -176,6 +207,17 @@ export interface AgentStopCommandRequest {
 }
 
 export interface AgentStopResponse extends CommandAcceptedResponse {
+  stopped: boolean;
+  queue: QueueState;
+}
+
+export interface AgentInterruptAndSendCommandRequest {
+  clientRequestId: string;
+  chatId: string;
+  agentId?: string;
+}
+
+export interface AgentInterruptAndSendResponse extends CommandAcceptedResponse {
   stopped: boolean;
 }
 

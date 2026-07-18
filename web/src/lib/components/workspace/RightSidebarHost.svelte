@@ -172,7 +172,7 @@
 		bind:this={backdropElement}
 		type="button"
 		data-workspace-sidebar-backdrop
-		class="absolute inset-0 z-30 bg-foreground/40"
+		class="absolute inset-0 z-30 transient-backdrop"
 		aria-label={m.workspace_close_sidebar()}
 		onkeydown={handleKeydown}
 		onclick={() => void workspace.closeSidebar()}

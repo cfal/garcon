@@ -50,16 +50,29 @@ describe('sanitizeBranchForPath', () => {
 });
 
 describe('deriveWorktreePath', () => {
-	it('derives path from branch name', () => {
-		expect(deriveWorktreePath('fix/login-bug')).toBe('../.worktrees/fix-login-bug');
+	it('derives a path inside the repository root', () => {
+		expect(deriveWorktreePath('/workspace/repo', 'fix/login-bug')).toBe(
+			'/workspace/repo/.worktrees/fix-login-bug',
+		);
 	});
 
-	it('returns empty string for empty branch', () => {
-		expect(deriveWorktreePath('')).toBe('');
-		expect(deriveWorktreePath('   ')).toBe('');
+	it('returns empty string for an empty repository root or branch', () => {
+		expect(deriveWorktreePath('', 'feature')).toBe('');
+		expect(deriveWorktreePath('   ', 'feature')).toBe('');
+		expect(deriveWorktreePath('/workspace/repo', '')).toBe('');
+		expect(deriveWorktreePath('/workspace/repo', '   ')).toBe('');
 	});
 
-	it('handles complex branch names', () => {
-		expect(deriveWorktreePath('feat/ui/dark-mode')).toBe('../.worktrees/feat-ui-dark-mode');
+	it('handles repository roots with trailing separators', () => {
+		expect(deriveWorktreePath('/workspace/repo/', 'feat/ui/dark-mode')).toBe(
+			'/workspace/repo/.worktrees/feat-ui-dark-mode',
+		);
+		expect(deriveWorktreePath('/', 'feature')).toBe('/.worktrees/feature');
+	});
+
+	it('preserves Windows path separators', () => {
+		expect(deriveWorktreePath('C:\\workspace\\repo\\', 'feat/ui')).toBe(
+			'C:\\workspace\\repo\\.worktrees\\feat-ui',
+		);
 	});
 });

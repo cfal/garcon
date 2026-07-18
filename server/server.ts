@@ -28,10 +28,15 @@ import { QueueManager, queueDrainOptions } from './queue.js';
 import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
+import { PrimaryWsHandler } from './ws/primary.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
+import { ChatExecutionActivity } from './chats/chat-execution-activity.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
+import { TranscriptSearchController } from './chats/search/controller.js';
+import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
+import { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   ChatCarryOverStore,
   renderCarriedTranscript,
@@ -53,21 +58,29 @@ import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
+  waitForShutdownTaskWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
+import { migrateDirectNativePaths } from './agents/direct/native-path-migration.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
+import { SnippetStore } from './snippets/store.js';
+import {
+  SnippetProjectPathService,
+  SnippetService,
+} from './snippets/service.js';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
+import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
@@ -75,13 +88,9 @@ import {
 
 const logger = createLogger('server');
 
-type WsPath = '/shell' | '/ws';
-
 interface WsConnectionData {
-  pathname: WsPath;
   connectionId: string;
   principal: ServerPrincipal;
-  expiresAtMs: number | null;
 }
 
 type ServeOptionsWithConnectionLimit = Parameters<
@@ -90,18 +99,21 @@ type ServeOptionsWithConnectionLimit = Parameters<
   maxConnections?: number;
 };
 
-function isWsPath(value: unknown): value is WsPath {
-  return value === '/shell' || value === '/ws';
-}
-
 export async function startServer(): Promise<void> {
   process.on('unhandledRejection', (err: unknown) => {
     logger.error('unhandled rejection (non-fatal):', errorMessage(err));
   });
 
+  let workspaceLease: WorkspaceLease | null = null;
   try {
     const config = initializeServerConfig();
-    const workspaceDir = config.workspaceDir;
+    workspaceLease = await acquireWorkspaceLease(config.workspaceDir, {
+      onCompromised(error) {
+        logger.error('Workspace lease was compromised:', errorMessage(error));
+        process.kill(process.pid, 'SIGTERM');
+      },
+    });
+    const workspaceDir = workspaceLease.workspaceDir;
     const chatIdMigration = await migrateWorkspaceChatIds(workspaceDir);
     const migratedChatIdCount = Object.keys(
       chatIdMigration.migratedChatIds,
@@ -118,10 +130,7 @@ export async function startServer(): Promise<void> {
     const pathCache = new PathCache();
     const terminalManager = new TerminalManager();
     const terminalStream = new TerminalStreamHandler(terminalManager);
-    const wsAdmission = new WebSocketAdmissionController(
-      config.maxWsClients,
-      config.reservedChatWsSlots,
-    );
+    const wsAdmission = new WebSocketAdmissionController(config.maxWsClients);
 
     await initAuthStore();
     await chatRegistry.init();
@@ -158,6 +167,10 @@ export async function startServer(): Promise<void> {
       endpointResolver,
     });
 
+    await migrateDirectNativePaths(
+      chatRegistry,
+      (session) => agentRegistry.resolveNativePath(session),
+    );
     await chatRegistry.reconcileSessions((session) =>
       agentRegistry.resolveNativePath(session),
     );
@@ -193,9 +206,10 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
-    const chatViews = new ChatViewStore((chatId) =>
-      agentRegistry.isChatRunning(chatId),
-    );
+    const chatExecutionActivity = new ChatExecutionActivity(agentRegistry);
+    const chatViews = new ChatViewStore(chatExecutionActivity.isActive);
+    const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
+    chatViewPruneTimer.unref();
     // Prepends carried-over segments, interleaved with agent-switch boundary
     // markers, and strips the seed from the new session's first user turn so a
     // switched chat shows its full history once and only once.
@@ -211,26 +225,67 @@ export async function startServer(): Promise<void> {
       });
       return [...carried, ...stripFirstUserSeed(native)];
     };
+    const loadNativeMessagePage = async (chatId: string, limit: number, offset: number) => {
+      const session = chatRegistry.getChat(chatId);
+      // Falls back to the composite full loader because carried segments and the
+      // stripped continuation seed do not share the native transcript's offsets.
+      if (!session || carryOver.getSegments(chatId).length > 0) return null;
+      return agentRegistry.loadMessagePage(session, limit, offset, chatId);
+    };
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
       { loadNativeMessages },
-      (chatId) => agentRegistry.isChatRunning(chatId),
+      chatExecutionActivity.isActive,
     );
-    const chatMessageReader = {
-      async ensureLoaded(chatId: string) {
-        return chatViews.getOrCreateMessages(chatId, () =>
-          loadNativeMessages(chatId),
-        );
+    const chatSearch = new TranscriptSearchController({
+      workspaceDir,
+      listChats: () => Object.entries(chatRegistry.listAllChats()).map(([chatId, session]) => ({
+        chatId,
+        lastActivityAt: metadata.getChatMetadata(chatId)?.lastActivity ?? null,
+        agentId: session.agentId,
+        model: session.model,
+      })),
+      async resolveSearchLoadPlan(chatId) {
+        const session = chatRegistry.getChat(chatId);
+        if (!session) return { kind: 'live-only', reasonCode: 'chat-not-found' };
+        const agent = agentDirectory.get(session.agentId);
+        if (!agent) return { kind: 'live-only', reasonCode: 'agent-unsupported' };
+        return agent.transcript.resolveSearchLoadPlan(session, { chatId });
       },
+      getCarryOverDescriptor: (chatId) => carryOver.getSearchDescriptor(chatId),
+    });
+    await chatSearch.initialize(
+      settings.getFeatureSettings().transcriptSearch.enabled,
+    );
+    const transcriptSearchSettings = new TranscriptSearchSettingsCoordinator(
+      settings,
+      chatSearch,
+    );
+
+    const indexedNativeReloader: Pick<ChatNativeReloader, 'reloadFromNative'> = {
+      async reloadFromNative(chatId, mode, processErrorReason) {
+        const reload = await chatNativeReloader.reloadFromNative(chatId, mode, processErrorReason);
+        chatSearch.markDirty(chatId);
+        return reload;
+      },
+    };
+    const chatMessageReader = {
+      loadNativeMessages,
       getMessages(chatId: string) {
         return chatViews.getLoadedMessages(chatId);
+      },
+      getRetainedHistoryMessages(chatId: string) {
+        return chatViews.getRetainedHistoryMessages(chatId);
       },
     };
     const chatViewPages = {
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
         return chatViews.getOrCreatePage(
           chatId,
-          () => loadNativeMessages(chatId),
+          {
+            loadAll: () => loadNativeMessages(chatId),
+            loadPage: (limit, offset) => loadNativeMessagePage(chatId, limit, offset),
+          },
           limit,
           beforeSeq,
         );
@@ -259,8 +314,27 @@ export async function startServer(): Promise<void> {
       pendingInputs,
       chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
+      (chatId) => Boolean(chatRegistry.getChat(chatId)),
     );
+    chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
+    const pendingRecovery = new PendingUserInputRecoveryCoordinator(
+      {
+        ledger: commandLedger,
+        pendingInputs,
+        chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      },
+      (error) => {
+        logger.warn('pending-inputs: failed to settle durable recovery:', errorMessage(error));
+      },
+    );
+    pendingRecovery.start();
+    const pendingRecoveryResult = await pendingRecovery.restore();
+    if (pendingRecoveryResult.restored > 0 || pendingRecoveryResult.discardedMissingChat > 0) {
+      logger.warn(
+        `pending-inputs: restart recovery restored=${pendingRecoveryResult.restored} missingChats=${pendingRecoveryResult.discardedMissingChat}`,
+      );
+    }
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
@@ -297,6 +371,14 @@ export async function startServer(): Promise<void> {
       }),
       chats: chatRegistry,
       agents: agentRegistry,
+    });
+
+    const snippetStore = new SnippetStore(workspaceDir);
+    await snippetStore.init();
+    const snippets = new SnippetService({
+      store: snippetStore,
+      chats: chatRegistry,
+      projectPaths: new SnippetProjectPathService(),
     });
 
     // Telegram notifications wire themselves to agent and queue events.
@@ -348,7 +430,10 @@ export async function startServer(): Promise<void> {
       modelCatalogResponseCache,
       lastSelectedChat,
       scheduledPrompts,
+      snippets,
       terminals: terminalManager,
+      searchIndex: chatSearch,
+      transcriptSearchSettings,
     });
 
     const chatHandler = new ChatHandler({
@@ -358,13 +443,12 @@ export async function startServer(): Promise<void> {
         readReplay: (chatId, generationId, afterSeq) =>
           chatViews.readReplay(chatId, generationId, afterSeq),
       },
-      nativeReloader: chatNativeReloader,
+      nativeReloader: indexedNativeReloader,
+      queue,
+      pendingInputs,
       registry: chatRegistry,
     });
-    const wsHandlers = {
-      '/shell': terminalStream.createHandler(),
-      '/ws': chatHandler.createHandler(),
-    };
+    const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);
 
     const listenPort = config.port;
     const bindAddress = config.bindAddress;
@@ -388,9 +472,7 @@ export async function startServer(): Promise<void> {
         const url = new URL(request.url);
 
         if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-          const { pathname } = url;
-
-          if (!isWsPath(pathname)) {
+          if (url.pathname !== '/ws') {
             return new Response('Not found', { status: 404 });
           }
 
@@ -413,7 +495,7 @@ export async function startServer(): Promise<void> {
           }
 
           const connectionId = crypto.randomUUID();
-          const admission = wsAdmission.tryReserve(connectionId, pathname);
+          const admission = wsAdmission.tryReserve(connectionId);
           if (!admission.ok)
             return new Response(admission.reason, { status: 503 });
 
@@ -422,10 +504,8 @@ export async function startServer(): Promise<void> {
             headers?: HeadersInit;
           } = {
             data: {
-              pathname,
               connectionId,
               principal,
-              expiresAtMs: principal.expiresAtMs,
             },
           };
           const headers = webSocketUpgradeHeaders(request);
@@ -455,56 +535,38 @@ export async function startServer(): Promise<void> {
         maxPayloadLength: config.wsMaxPayloadLength,
         perMessageDeflate: true,
         open(ws) {
-          const admission = wsAdmission.confirm(
-            ws.data.connectionId,
-            ws.data.pathname,
-          );
+          const admission = wsAdmission.confirm(ws.data.connectionId);
           if (!admission.ok) {
             ws.close(1013, admission.reason);
             return;
           }
-          const handler = isWsPath(ws.data?.pathname)
-            ? wsHandlers[ws.data.pathname]
-            : null;
-          if (handler) {
-            handler.open(ws);
-          } else {
-            ws.close();
-          }
+          primaryWs.open(ws);
         },
         async message(ws, message) {
-          const handler = isWsPath(ws.data?.pathname)
-            ? wsHandlers[ws.data.pathname]
-            : null;
-          if (!handler) return;
           const text = decodeWebSocketMessage(message);
           let data;
           try {
             data = JSON.parse(text);
           } catch {
-            if (ws.data.pathname === '/shell') {
-              sendWebSocketJson(ws, {
-                type: 'terminal-error',
-                code: 'terminal-validation',
-                message: 'Malformed terminal stream JSON.',
-              });
-            } else {
-              sendWebSocketJson(ws, new WsFaultMessage('Malformed JSON'));
-            }
+            sendWebSocketJson(ws, new WsFaultMessage('Malformed JSON'));
             return;
           }
-          await handler.message(ws, data);
+          try {
+            await primaryWs.message(ws, data);
+          } catch (error) {
+            logger.error('primary WebSocket message failed:', error);
+            sendWebSocketJson(ws, new WsFaultMessage('WebSocket operation failed'));
+          }
         },
         drain(ws) {
-          if (ws.data.pathname === '/shell') terminalStream.drain(ws);
+          primaryWs.drain(ws);
         },
-        close(ws) {
-          wsAdmission.release(ws.data.connectionId);
-          const handler = isWsPath(ws.data?.pathname)
-            ? wsHandlers[ws.data.pathname]
-            : null;
-          if (!handler) return;
-          handler.close(ws);
+        close(ws, code, reason) {
+          try {
+            primaryWs.close(ws, code, reason);
+          } finally {
+            wsAdmission.release(ws.data.connectionId);
+          }
         },
       },
     } satisfies ServeOptionsWithConnectionLimit;
@@ -519,14 +581,16 @@ export async function startServer(): Promise<void> {
       queue,
       metadata,
       chatViews,
-      chatNativeReloader,
+      chatNativeReloader: indexedNativeReloader,
       pendingInputs,
       commandLedger,
       shareStore,
       telegramNotifier,
       telegramSettings,
       scheduledPrompts,
+      snippets,
       loadNativeMessages,
+      searchIndex: chatSearch,
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.
@@ -538,6 +602,8 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
+        await server.stop(true);
+        clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
@@ -555,14 +621,30 @@ export async function startServer(): Promise<void> {
             `server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`,
           );
         }
+        const backgroundTasksCompleted = await waitForShutdownTaskWithTimeout(
+          chatCommands.waitForBackgroundTasks(),
+        );
+        if (!backgroundTasksCompleted) {
+          cleanupFailed = true;
+          logger.warn('server: shutdown command-task wait timed out');
+        }
         agentRegistry.shutdown();
         terminalManager.shutdown();
         await metadata.flush();
         await carryOver.flush();
         await chatRegistry.flush();
+        await chatSearch.close();
       } catch (err) {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
+      } finally {
+        try {
+          await workspaceLease?.release();
+        } catch (err) {
+          cleanupFailed = true;
+          logger.warn('server: workspace lease release error:', errorMessage(err));
+        }
+        workspaceLease = null;
       }
       process.exit(shutdownExitCode({ abortTimedOut, cleanupFailed }));
     };
@@ -583,6 +665,9 @@ export async function startServer(): Promise<void> {
       );
     }
   } catch (error) {
+    await workspaceLease?.release().catch((releaseError) => {
+      logger.warn('Failed to release workspace lease:', errorMessage(releaseError));
+    });
     logger.error('Failed to start server:', error);
     process.exit(1);
   }

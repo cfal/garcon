@@ -7,6 +7,7 @@ import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
 import { buildCodexAppServerEndpointRuntime } from './app-server/endpoint-runtime.js';
 import { getCodexSlashCommands } from './slash-command-discovery.js';
+import { rewriteCodexForkTranscriptEntry } from './fork-transcript.js';
 
 export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
   return {
@@ -26,6 +27,12 @@ export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
       resolveNativePath(session) {
         return codex.resolveNativePath(session);
       },
+      async resolveSearchLoadPlan(session) {
+        const nativePath = session.nativePath ?? await codex.resolveNativePath(session);
+        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
+        return { kind: 'detached', source: { kind: 'codex-jsonl', nativePath } };
+      },
+      rewriteForkTranscriptEntry: rewriteCodexForkTranscriptEntry,
     },
     auth: {
       getAuthStatus: () => getCodexAuthStatus(),

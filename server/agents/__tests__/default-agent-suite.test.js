@@ -42,4 +42,31 @@ describe('default agent suite', () => {
     expect(agent.capabilities.supportsForkWhileRunning).toBe(false);
     expect(agent.forkSession).toBeDefined();
   });
+
+  it('advertises idle fork and project-path support for every Direct agent', () => {
+    const apiProviderReader = {
+      list: () => [],
+      getEndpoint: () => null,
+    };
+
+    for (const id of [
+      'direct-openai-compatible',
+      'direct-openai-responses-compatible',
+      'direct-anthropic-compatible',
+    ]) {
+      const module = defaultAgentModules.find((entry) => entry.id === id);
+      const agent = module.createAgent({
+        workspaceDir: '/tmp/project',
+        apiProviderReader,
+      });
+
+      expect(agent.capabilities).toMatchObject({
+        supportsFork: true,
+        supportsForkAtMessage: true,
+        supportsForkWhileRunning: false,
+        supportsUpdateProjectPath: true,
+        requiresNativePathForProjectPathUpdate: false,
+      });
+    }
+  });
 });

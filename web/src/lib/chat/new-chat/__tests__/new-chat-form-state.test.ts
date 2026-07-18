@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
+import * as gitApi from '$lib/api/git';
+import type { GitWorktreeItem } from '$lib/api/git';
 import type { ModelOption } from '$lib/stores/model-catalog.svelte';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
@@ -10,6 +12,11 @@ vi.mock('$lib/api/files', () => ({
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
+}));
+
+vi.mock('$lib/api/git', () => ({
+	getGitWorktrees: vi.fn(),
+	gitCreateWorktree: vi.fn(),
 }));
 
 type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executionDefaults'>> & {
@@ -23,6 +30,7 @@ type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executi
 function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
 	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
@@ -221,6 +229,8 @@ describe('NewChatFormState', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
+		vi.mocked(gitApi.getGitWorktrees).mockReset();
+		vi.mocked(gitApi.gitCreateWorktree).mockReset();
 		mockModelCatalog.getSelectableAgents.mockImplementation(() => [
 			'claude',
 			'codex',
@@ -251,6 +261,59 @@ describe('NewChatFormState', () => {
 		expect(formState.agentId).toBe('claude');
 		expect(formState.validationStatus).toBe('idle');
 		expect(formState.canSubmit).toBe(false);
+	});
+
+	it('ignores a worktree load superseded after the modal closes', async () => {
+		const first = deferred<{ worktrees: GitWorktreeItem[] }>();
+		const second = deferred<{ worktrees: GitWorktreeItem[] }>();
+		let firstSignal: AbortSignal | null | undefined;
+		vi.mocked(gitApi.getGitWorktrees)
+			.mockImplementationOnce((_project, options) => {
+				firstSignal = options?.signal;
+				return first.promise;
+			})
+			.mockImplementationOnce(() => second.promise);
+
+		formState.projectPath = '/workspace/repo-a';
+		const firstLoad = formState.loadWorktrees();
+		formState.closeWorktreeModal();
+		expect(firstSignal?.aborted).toBe(true);
+		expect(formState.isLoadingWorktrees).toBe(false);
+
+		formState.projectPath = '/workspace/repo-b';
+		const secondLoad = formState.loadWorktrees();
+		second.resolve({
+			worktrees: [
+				{
+					name: 'repo-b',
+					path: '/workspace/repo-b',
+					branch: 'main',
+					isCurrent: true,
+					isMain: true,
+					isPathMissing: false,
+					lastModifiedAt: '2026-07-15T10:00:00.000Z',
+				},
+			],
+		});
+		await secondLoad;
+
+		first.resolve({
+			worktrees: [
+				{
+					name: 'repo-a',
+					path: '/workspace/repo-a',
+					branch: 'main',
+					isCurrent: true,
+					isMain: true,
+					isPathMissing: false,
+					lastModifiedAt: '2026-07-14T10:00:00.000Z',
+				},
+			],
+		});
+		await firstLoad;
+
+		expect(formState.worktreeItems.map((worktree) => worktree.path)).toEqual(['/workspace/repo-b']);
+		expect(formState.isLoadingWorktrees).toBe(false);
 	});
 
 	it('loads startup defaults from server settings', async () => {

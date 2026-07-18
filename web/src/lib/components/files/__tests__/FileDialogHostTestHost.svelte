@@ -16,7 +16,7 @@
 		onResolve = () => undefined,
 		isMobile = false,
 	}: {
-		request: 'guard' | 'threshold' | 'file';
+		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file' | 'open-files';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
 	} = $props();
@@ -34,8 +34,17 @@
 	fileSession.loading = true;
 	const dialogSurfaceId = initialRequest === 'file' ? fileSurfaceId(fileSession.id) : null;
 	let guardRequest = $state(
-		initialRequest === 'guard'
-			? { sessionId: 'file-session', fileName: 'dirty.ts', reason: 'close' as const }
+		initialRequest === 'guard' || initialRequest === 'refresh'
+			? {
+					sessionId: 'file-session',
+					fileName: 'dirty.ts',
+					reason: initialRequest === 'refresh' ? ('refresh' as const) : ('close' as const),
+				}
+			: null,
+	);
+	let overwriteRequest = $state(
+		initialRequest === 'overwrite'
+			? { sessionId: 'file-session', fileName: 'dirty.ts' }
 			: null,
 	);
 	let thresholdRequest = $state(
@@ -49,7 +58,7 @@
 				}
 			: null,
 	);
-	let openFilesVisible = $state(false);
+	let openFilesVisible = $state(initialRequest === 'open-files');
 
 	setAppShell({
 		get isMobile() {
@@ -79,6 +88,9 @@
 		get thresholdRequest() {
 			return thresholdRequest;
 		},
+		get overwriteRequest() {
+			return overwriteRequest;
+		},
 		get openFilesVisible() {
 			return openFilesVisible;
 		},
@@ -88,6 +100,10 @@
 		get: (sessionId: string) => (sessionId === fileSession.id ? fileSession : null),
 		resolveGuard: (choice: string) => {
 			guardRequest = null;
+			onResolve(choice);
+		},
+		resolveOverwrite: (choice: string) => {
+			overwriteRequest = null;
 			onResolve(choice);
 		},
 		resolveThreshold: (choice: string) => {

@@ -21,6 +21,8 @@ import type {
 } from '$shared/chat-list';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import type {
+  AgentInterruptAndSendCommandRequest,
+  AgentInterruptAndSendResponse,
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
 	AgentStopResponse,
@@ -36,10 +38,16 @@ import type {
 	PermissionDecisionCommandRequest,
 	ProjectPathPatchRequest,
 	ProjectPathPatchResponse,
-	QueueEnqueueCommandRequest,
-	QueueEnqueueResponse,
+	ActiveInputCommandRequest,
+	ActiveInputCommandResponse,
+	QueueEntryCommandResponse,
+	QueueEntryCreateCommandRequest,
+	QueueEntryDeleteCommandRequest,
+	QueueEntryDeleteResponse,
+	QueueEntryReplaceCommandRequest,
 	QueueMutationResponse,
-	RunningChatsResponse,
+	QueuePauseRequest,
+	QueueResumeRequest,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type {
@@ -50,6 +58,7 @@ import type {
 	AgentModelPatchRequest,
 	AgentModelPatchResponse,
 } from '$shared/chat-command-contracts';
+import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
 import type { QueueState } from '$shared/queue-state';
 import type { AgentCommandImage } from '$shared/ws-requests';
 
@@ -137,6 +146,12 @@ export async function stopChat(params: AgentStopCommandRequest): Promise<AgentSt
 	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
 }
 
+export async function interruptAndSendChat(
+	params: AgentInterruptAndSendCommandRequest,
+): Promise<AgentInterruptAndSendResponse> {
+	return apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params);
+}
+
 export async function compactChat(params: CompactCommandRequest): Promise<CommandAcceptedResponse> {
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/compact', params);
 }
@@ -147,10 +162,28 @@ export async function sendPermissionDecision(
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
 }
 
-export async function enqueueChatMessage(
-	params: QueueEnqueueCommandRequest,
-): Promise<QueueEnqueueResponse> {
-	return apiPost<QueueEnqueueResponse>('/api/v1/chats/queue/enqueue', params);
+export async function createQueuedInput(
+	params: QueueEntryCreateCommandRequest,
+): Promise<QueueEntryCommandResponse> {
+	return apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params);
+}
+
+export async function replaceQueuedInput(
+	params: QueueEntryReplaceCommandRequest,
+): Promise<QueueEntryCommandResponse> {
+	return apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params);
+}
+
+export async function deleteQueuedInput(
+	params: QueueEntryDeleteCommandRequest,
+): Promise<QueueEntryDeleteResponse> {
+	return apiDelete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', params);
+}
+
+export async function sendActiveInput(
+	params: ActiveInputCommandRequest,
+): Promise<ActiveInputCommandResponse> {
+	return apiPost<ActiveInputCommandResponse>('/api/v1/chats/active-input', params);
 }
 
 export async function getChatQueue(
@@ -161,23 +194,18 @@ export async function getChatQueue(
 	);
 }
 
-export async function dequeueChatMessage(
-	chatId: string,
-	entryId: string,
-): Promise<QueueMutationResponse> {
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/dequeue', { chatId, entryId });
-}
-
 export async function clearChatQueue(chatId: string): Promise<QueueMutationResponse> {
 	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/clear', { chatId });
 }
 
 export async function pauseChatQueue(chatId: string): Promise<QueueMutationResponse> {
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', { chatId });
+	const request: QueuePauseRequest = { chatId };
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', request);
 }
 
-export async function resumeChatQueue(chatId: string): Promise<QueueMutationResponse> {
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', { chatId });
+export async function resumeChatQueue(chatId: string, pauseId: string): Promise<QueueMutationResponse> {
+	const request: QueueResumeRequest = { chatId, pauseId };
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request);
 }
 
 export async function updateExecutionSettings(
@@ -204,10 +232,6 @@ export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
 ): Promise<ProjectPathPatchResponse> {
 	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
-}
-
-export async function getRunningChats(): Promise<RunningChatsResponse> {
-	return apiGet<RunningChatsResponse>('/api/v1/chats/running');
 }
 
 function requireNonEmptyString(value: unknown, fieldName: string): string {
@@ -290,6 +314,13 @@ export async function getChatMessages(params: {
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
 	};
+}
+
+export async function searchChatTranscripts(
+	request: ChatSearchRequest,
+	options?: ApiFetchOptions,
+): Promise<ChatSearchResponse> {
+	return apiPost<ChatSearchResponse>('/api/v1/chats/search', request, options);
 }
 
 export interface DeleteChatResponse {

@@ -20,7 +20,7 @@ import type {
   StartedAgentSession,
 } from "./session-types.js";
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
-import type { Agent, AgentTranscriptPage } from './types.js';
+import type { Agent, AgentTranscriptPage, ForkTranscriptEntryContext } from './types.js';
 import {
   isVisibleAgentId,
   type AgentCatalogEntry,
@@ -59,6 +59,7 @@ export interface AgentRegistryServiceContract {
     beforeDelivery: () => Promise<void>,
   ): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
+  getRunningChatIdsSnapshot(): string[];
   startSession(chatId: string, command: string, opts?: {
     images?: AgentCommandImage[];
     model?: string;
@@ -78,7 +79,7 @@ export interface AgentRegistryServiceContract {
   }): Promise<StartedAgentSession | null>;
   compactSession(chatId: string, opts?: { instructions?: string; clientRequestId?: string; turnId?: string }): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(): Promise<Record<string, unknown>>;
+    getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
@@ -96,6 +97,11 @@ export interface AgentRegistryServiceContract {
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
   prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
   resolveNativePath(session: AgentChatEntry): Promise<string | null>;
+  rewriteForkTranscriptEntry(
+    agentId: string,
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ): unknown;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
@@ -239,6 +245,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.getRunningSessions();
   }
 
+  getRunningChatIdsSnapshot(): string[] {
+    return this.#runtime.getRunningChatIdsSnapshot();
+  }
+
   getRunningSessionCount(): number {
     return this.#runtime.getRunningSessionCount();
   }
@@ -320,6 +330,15 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return agent.transcript.resolveNativePath(session);
   }
 
+  rewriteForkTranscriptEntry(
+    agentId: string,
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ): unknown {
+    const rewrite = this.#directory.get(agentId)?.transcript.rewriteForkTranscriptEntry;
+    return rewrite ? rewrite(entry, context) : entry;
+  }
+
   async launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {
     const agent = this.#directory.get(agentId);
     if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
@@ -362,13 +381,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return Object.fromEntries(authEntries);
   }
 
-  async getAgentReadinessMap(): Promise<Record<string, {
+  async getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, {
     ready: boolean;
     nativeReady: boolean;
     endpointReady: boolean;
     reason: string;
   }>> {
-    const auth = await this.getAgentAuthStatusMap();
+    const auth = authByAgent ?? await this.getAgentAuthStatusMap();
     const result: Record<string, { ready: boolean; nativeReady: boolean; endpointReady: boolean; reason: string }> = {};
     for (const agent of this.#directory.list()) {
       const agentId = agent.id;

@@ -36,4 +36,20 @@ describe('ConversationMessage delivery status', () => {
 
 		expect(screen.getByLabelText('Failed to send')).toBeTruthy();
 	});
+
+	it('renders a byte-free recovered attachment as a file chip', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage('2026-05-14T00:00:00.000Z', '', [{
+				name: 'context.pdf',
+				mimeType: 'application/octet-stream',
+				data: '',
+			}], {
+				clientRequestId: 'req-attachment',
+				deliveryStatus: 'failed',
+			}),
+		});
+
+		expect(screen.getByText('context.pdf')).toBeTruthy();
+		expect(container.querySelector('img')).toBeNull();
+	});
 });

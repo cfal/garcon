@@ -1,4 +1,4 @@
-import { applyChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
+import { applyChatViewMessages, type ChatViewMessage, type ChatViewPage } from '$shared/chat-view';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
@@ -8,9 +8,12 @@ import { createRandomId } from '$lib/utils/random-id';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
+export const INITIAL_SWITCH_VISIBLE_MESSAGES = 20;
+const SWITCH_REVEAL_BATCH_SIZE = 20;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
 type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
+type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -68,15 +71,25 @@ export class ActiveTranscriptState {
 	loadError = $state<string | null>(null);
 	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
 	#loadEpoch = 0;
-	#isLoadingMore = false;
+	#loadMorePromise: Promise<boolean> | null = null;
+	#loadingMoreChatId: string | null = null;
+	#loadMoreOperationEpoch = 0;
+	#initialRevealPhase = $state<InitialRevealPhase>('complete');
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
 		this.transcriptCache = transcriptCache;
 	}
 
+	#renderEntries = $derived.by(() =>
+		applyPendingDeliveryFailures(
+			uniqueEntriesByClientRequestId(this.entries),
+			this.pendingUserInputs,
+		),
+	);
+
 	#echoedClientRequestIds = $derived.by(() => {
 		const ids = new Set<string>();
-		for (const entry of this.entries) {
+		for (const entry of this.#renderEntries) {
 			const message = entry.message;
 			if (message instanceof UserMessage && message.metadata?.clientRequestId) {
 				ids.add(message.metadata.clientRequestId);
@@ -86,7 +99,7 @@ export class ActiveTranscriptState {
 	});
 
 	#displayRows = $derived.by(() => {
-		const durableRows = this.entries.map((entry) => ({
+		const durableRows = this.#renderEntries.map((entry) => ({
 			kind: 'message' as const,
 			id: `${this.generationId}:${entry.seq}`,
 			seq: entry.seq,
@@ -104,13 +117,28 @@ export class ActiveTranscriptState {
 		this.#displayRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
 	);
 
-	#displayMessageCount = $derived.by(() => this.#displayRows.length);
+	#displayMessageCount = $derived.by(
+		() => this.#renderEntries.length + this.visiblePendingInputs.length + this.localNotices.length,
+	);
 
 	#visibleRows = $derived.by(() => {
-		if (this.#displayRows.length <= this.visibleMessageCount) {
-			return this.#displayRows;
-		}
-		return this.#displayRows.slice(-this.visibleMessageCount);
+		const noticeCount = Math.min(this.localNotices.length, this.visibleMessageCount);
+		const visibleNotices = this.localNotices.slice(-noticeCount);
+		const messageLimit = this.visibleMessageCount - noticeCount;
+		if (messageLimit === 0) return visibleNotices;
+
+		const durableRows = this.#renderEntries.slice(-messageLimit).map((entry) => ({
+			kind: 'message' as const,
+			id: `${this.generationId}:${entry.seq}`,
+			seq: entry.seq,
+			message: entry.message,
+		}));
+		const pendingInputs = this.visiblePendingInputs;
+		const messageRows =
+			pendingInputs.length === 0
+				? durableRows
+				: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
+		return [...messageRows, ...visibleNotices];
 	});
 
 	#bottomVisibleRowId = $derived.by(() => this.#visibleRows.at(-1)?.id ?? null);
@@ -120,7 +148,7 @@ export class ActiveTranscriptState {
 	);
 
 	get chatMessages(): ChatMessage[] {
-		return this.entries.map((entry) => entry.message);
+		return this.#renderEntries.map((entry) => entry.message);
 	}
 
 	get displayMessages(): ChatMessage[] {
@@ -164,21 +192,14 @@ export class ActiveTranscriptState {
 			return 'applied';
 		}
 		if (this.generationId && generationId !== this.generationId) {
+			this.#invalidateLoadMoreOperation();
 			this.transcriptCache.markStale(chatId);
-			this.entries = [];
-			this.lastSeq = 0;
-			this.oldestSeq = 0;
-			this.generationId = generationId;
-			this.localNotices = [];
 			return 'generation-changed';
 		}
 		const result = this.transcriptCache.applyMessages(chatId, generationId, messages);
 		if (result.status === 'generation-changed') {
-			this.entries = [];
-			this.lastSeq = 0;
-			this.oldestSeq = 0;
-			this.generationId = generationId;
-			this.localNotices = [];
+			this.#invalidateLoadMoreOperation();
+			this.transcriptCache.markStale(chatId);
 			return 'generation-changed';
 		}
 		if (result.status !== 'applied') {
@@ -234,28 +255,37 @@ export class ActiveTranscriptState {
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
-		options: { lastSeq: number; pendingUserInputs?: PendingUserInput[] } = { lastSeq: 0 },
+		options: Pick<ChatViewPage, 'lastSeq' | 'pageOldestSeq' | 'hasMore'> & {
+			pendingUserInputs?: PendingUserInput[];
+		},
 	): void {
+		this.#invalidateLoadMoreOperation();
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
-		this.transcriptCache.replace(chatId, generationId, messages, options.lastSeq);
+		this.transcriptCache.replaceFromPage(chatId, {
+			generationId,
+			messages,
+			lastSeq: options.lastSeq,
+			pageOldestSeq: options.pageOldestSeq,
+			hasMore: options.hasMore,
+		});
 		this.generationId = generationId;
 		this.entries = messages;
 		this.lastSeq = options.lastSeq;
-		this.oldestSeq = messages.length > 0 ? messages[0].seq : 0;
-		this.hasMoreMessages = false;
+		this.oldestSeq = options.pageOldestSeq;
+		this.hasMoreMessages = options.hasMore;
 		this.totalMessages = messages.length;
 		this.pendingUserInputs = options.pendingUserInputs
 			? sortPendingInputs(options.pendingUserInputs)
 			: [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
+		this.#initialRevealPhase = 'complete';
 		this.localNotices = [];
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.isLoadingMoreMessages = false;
-		this.#isLoadingMore = false;
 	}
 
 	setFromPage(
@@ -278,10 +308,12 @@ export class ActiveTranscriptState {
 			(batch) => batch.generationId !== page.generationId,
 		);
 		if (hasBufferedGenerationChange) {
+			this.#invalidateLoadMoreOperation();
 			this.isLoadingMessages = false;
 			return 'generation-changed';
 		}
 
+		this.#invalidateLoadMoreOperation();
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.generationId = page.generationId;
 		this.entries = page.messages;
@@ -298,6 +330,7 @@ export class ActiveTranscriptState {
 			const result = this.applyMessages(chatId, batch.generationId, batch.messages);
 			if (result !== 'applied') return result;
 		}
+		this.#resolvePendingInitialReveal();
 		return 'applied';
 	}
 
@@ -340,18 +373,41 @@ export class ActiveTranscriptState {
 	}
 
 	async loadMoreMessages(chatId: string): Promise<boolean> {
-		if (this.#isLoadingMore || this.isLoadingMoreMessages) return false;
+		if (this.#loadMorePromise) {
+			return this.#loadingMoreChatId === chatId ? this.#loadMorePromise : false;
+		}
 		if (!this.hasMoreMessages || !chatId) return false;
 
-		this.#isLoadingMore = true;
+		const generationId = this.generationId;
+		const operationEpoch = this.#loadMoreOperationEpoch;
 		this.isLoadingMoreMessages = true;
+		const loadPromise = this.#performLoadMoreMessages(chatId, generationId, operationEpoch);
+		this.#loadMorePromise = loadPromise;
+		this.#loadingMoreChatId = chatId;
+		try {
+			return await loadPromise;
+		} finally {
+			if (this.#loadMorePromise === loadPromise) {
+				this.#loadMorePromise = null;
+				this.#loadingMoreChatId = null;
+				this.isLoadingMoreMessages = false;
+			}
+		}
+	}
+
+	async #performLoadMoreMessages(
+		chatId: string,
+		generationId: string,
+		operationEpoch: number,
+	): Promise<boolean> {
 		try {
 			const page = await getChatMessages({
 				chatId,
 				limit: MESSAGES_PER_PAGE,
 				beforeSeq: this.oldestSeq,
 			});
-			if (page.generationId !== this.generationId) {
+			if (!this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch)) return false;
+			if (page.generationId !== generationId) {
 				await this.loadMessages(chatId);
 				return false;
 			}
@@ -369,10 +425,26 @@ export class ActiveTranscriptState {
 		} catch (error) {
 			console.error('Error loading more messages:', error);
 			return false;
-		} finally {
-			this.#isLoadingMore = false;
-			this.isLoadingMoreMessages = false;
 		}
+	}
+
+	#isCurrentLoadMoreOperation(
+		chatId: string,
+		generationId: string,
+		operationEpoch: number,
+	): boolean {
+		return (
+			this.#loadMoreOperationEpoch === operationEpoch &&
+			this.activeChatId === chatId &&
+			this.generationId === generationId
+		);
+	}
+
+	#invalidateLoadMoreOperation(): void {
+		this.#loadMoreOperationEpoch += 1;
+		this.#loadMorePromise = null;
+		this.#loadingMoreChatId = null;
+		this.isLoadingMoreMessages = false;
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
@@ -421,6 +493,7 @@ export class ActiveTranscriptState {
 	}
 
 	clearMessages(): void {
+		this.#invalidateLoadMoreOperation();
 		this.entries = [];
 		this.generationId = '';
 		this.lastSeq = 0;
@@ -432,18 +505,50 @@ export class ActiveTranscriptState {
 		this.loadStatus = 'idle';
 		this.loadError = null;
 		this.#snapshotBuffer = null;
+		this.#initialRevealPhase = 'complete';
 	}
 
 	loadEarlierMessages(): void {
 		this.visibleMessageCount += 100;
 	}
 
+	get hasInitialMessagesToReveal(): boolean {
+		return this.#initialRevealPhase === 'revealing';
+	}
+
+	revealInitialMessages(): void {
+		if (!this.hasInitialMessagesToReveal) return;
+		const nextCount = Math.min(
+			INITIAL_VISIBLE_MESSAGES,
+			this.visibleMessageCount + SWITCH_REVEAL_BATCH_SIZE,
+		);
+		if (nextCount >= Math.min(INITIAL_VISIBLE_MESSAGES, this.displayMessageCount)) {
+			this.completeInitialMessagesReveal();
+			return;
+		}
+		this.visibleMessageCount = nextCount;
+	}
+
+	completeInitialMessagesReveal(): void {
+		this.visibleMessageCount = Math.max(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+		this.#initialRevealPhase = 'complete';
+	}
+
 	async loadAllMessages(chatId: string): Promise<void> {
-		while (this.hasMoreMessages) {
+		const generationId = this.generationId;
+		const operationEpoch = this.#loadMoreOperationEpoch;
+		const isCurrentTranscript = () =>
+			this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch);
+		if (!isCurrentTranscript()) return;
+
+		while (isCurrentTranscript() && this.hasMoreMessages) {
 			const loaded = await this.loadMoreMessages(chatId);
+			if (!isCurrentTranscript()) return;
 			if (!loaded) break;
 		}
+		if (!isCurrentTranscript()) return;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
+		this.#initialRevealPhase = 'complete';
 	}
 
 	resetForNewChat(): void {
@@ -456,6 +561,8 @@ export class ActiveTranscriptState {
 		this.activeChatId = chatId;
 		this.resetForNewChat();
 		if (!chatId) return null;
+		this.visibleMessageCount = INITIAL_SWITCH_VISIBLE_MESSAGES;
+		this.#initialRevealPhase = 'pending';
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
 		this.entries = restored.messages;
@@ -465,7 +572,17 @@ export class ActiveTranscriptState {
 		this.totalMessages = restored.messages.length;
 		this.hasMoreMessages = false;
 		this.loadStatus = restored.messages.length === 0 ? 'empty' : 'loaded';
+		this.#resolvePendingInitialReveal();
 		return { count: restored.messages.length, stale: restored.stale };
+	}
+
+	#resolvePendingInitialReveal(): void {
+		if (this.#initialRevealPhase !== 'pending') return;
+		if (this.displayMessageCount > INITIAL_SWITCH_VISIBLE_MESSAGES) {
+			this.#initialRevealPhase = 'revealing';
+			return;
+		}
+		this.completeInitialMessagesReveal();
 	}
 
 	removeCachedMessages(chatId: string): void {
@@ -477,8 +594,50 @@ function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
 	return inputs.slice().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMessage[] {
+	const seenClientRequestIds = new Set<string>();
+	return entries.filter((entry) => {
+		const message = entry.message;
+		if (!(message instanceof UserMessage) || !message.metadata?.clientRequestId) return true;
+		if (seenClientRequestIds.has(message.metadata.clientRequestId)) return false;
+		seenClientRequestIds.add(message.metadata.clientRequestId);
+		return true;
+	});
+}
+
+function applyPendingDeliveryFailures(
+	entries: ChatViewMessage[],
+	pendingInputs: PendingUserInput[],
+): ChatViewMessage[] {
+	const failedRequestIds = new Set(
+		pendingInputs
+			.filter((input) => input.deliveryStatus === 'failed')
+			.map((input) => input.clientRequestId),
+	);
+	if (failedRequestIds.size === 0) return entries;
+
+	return entries.map((entry) => {
+		const message = entry.message;
+		if (!(message instanceof UserMessage)) return entry;
+		const clientRequestId = message.metadata?.clientRequestId;
+		if (!clientRequestId || !failedRequestIds.has(clientRequestId)) return entry;
+		return {
+			...entry,
+			message: new UserMessage(message.timestamp, message.content, message.images, {
+				...message.metadata,
+				deliveryStatus: 'failed',
+			}),
+		};
+	});
+}
+
 function pendingInputToMessage(input: PendingUserInput): UserMessage {
-	return new UserMessage(input.createdAt, input.content, input.images, {
+	const placeholderAttachments = input.attachments?.map((attachment) => ({
+		name: attachment.name,
+		mimeType: 'application/octet-stream',
+		data: '',
+	}));
+	return new UserMessage(input.createdAt, input.content, input.images ?? placeholderAttachments, {
 		clientRequestId: input.clientRequestId,
 		turnId: input.turnId,
 		deliveryStatus: input.deliveryStatus,

@@ -249,7 +249,7 @@
 					onSend={() => {}}
 					sendTitle=""
 					sendButtonClass=""
-					showAttachmentControl={false}
+					showAddMenu={false}
 					showSendButton={false}
 					mobileRightGroupFullRow={true}
 				>
@@ -277,6 +277,7 @@
 
 {#if startup.worktreeModalOpen}
 	<GitWorktreePickerModal
+		repositoryRoot={startup.trimmedPath}
 		worktrees={startup.worktreeItems}
 		isLoading={startup.isLoadingWorktrees}
 		isCreating={startup.isCreatingWorktree}

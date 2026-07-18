@@ -9,10 +9,22 @@ export const TRANSIENT_PRIMITIVE_CONTENT = [
 export const CUSTOM_TRANSIENT_SOURCES = [
 	'components/chat/DirectoryBrowser.svelte',
 	'components/chat/FileMentionMenu.svelte',
+	'components/chat/NewChatForm.svelte',
+	'components/chat/PromptComposer.svelte',
 	'components/chat/SlashCommandMenu.svelte',
 	'components/git/GitCommentPopover.svelte',
 	'components/git/GitDiffLineContextMenu.svelte',
 	'components/shared/CommandMenu.svelte',
+] as const;
+
+export const TRANSIENT_BACKDROP_SOURCES = [
+	'components/ui/dialog/dialog-overlay.svelte',
+	'components/shared/CommandMenu.svelte',
+	'components/sidebar/SidebarSearchDialog.svelte',
+	'components/git/GitPushModal.svelte',
+	'components/git/GitReviewChangesModal.svelte',
+	'components/workspace/RightSidebarHost.svelte',
+	'components/layout/AppShell.svelte',
 ] as const;
 
 export const GLOBAL_KEYBOARD_OWNER = 'components/shared/KeyboardShortcuts.svelte';

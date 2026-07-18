@@ -2,7 +2,7 @@
 	// New-chat form used inside the NewChatDialog. Delegates state management
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
@@ -10,7 +10,11 @@
 		isImageAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
-	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer/composer-controls.js';
+	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
+	import {
+		buildPermissionOptions,
+		buildThinkingOptions,
+	} from '$lib/chat/composer/composer-controls.js';
 	import {
 		CLAUDE_PERMISSION_MODES,
 		NON_CLAUDE_PERMISSION_MODES,
@@ -24,6 +28,9 @@
 		getModelCatalog,
 		getRemoteSettings,
 		getChatSessions,
+		getNotifications,
+		getSnippets,
+		getTransientLayers,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
@@ -40,6 +47,15 @@
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
+	import {
+		parseSnippetCommand,
+		type SnippetCommandParseResult,
+	} from '$lib/chat/composer/slash-commands.js';
+	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { ApiError } from '$lib/api/client.js';
+	import type { Snippet } from '$shared/snippets';
+	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
 	interface Props {
 		prefill?: string;
@@ -54,7 +70,22 @@
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
+	const notifications = getNotifications();
+	const snippets = getSnippets();
+	const transientLayers = getTransientLayers();
 	const form = new NewChatFormState(modelCatalog, remoteSettings);
+	const snippetExpansion = new SnippetExpansionController();
+	const snippetExpansionLayer = transientLayerAttachment({
+		registry: transientLayers,
+		id: allocateTransientLayerId('snippet-expansion'),
+		kind: 'prompt-transform',
+		modality: 'nonmodal',
+		onEscape: () => {
+			snippetExpansion.cancel();
+			return true;
+		},
+		restoreFocus: () => void restoreTextareaFocus(),
+	});
 
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
@@ -64,8 +95,22 @@
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
+	let expansionProjectPath = '';
+	let snippetInteractionGeneration = $state(0);
+	const snippetInteractionKey = $derived(
+		`${snippetInteractionGeneration}\u0000${form.trimmedPath}`,
+	);
+
+	function canFocusTextarea(): boolean {
+		return (
+			!transientLayers.makesMainInert ||
+			transientLayers.ownsTopModalTarget(textareaRef ?? null)
+		);
+	}
 
 	function reseed(): void {
+		snippetExpansion.cancel();
+		snippetInteractionGeneration += 1;
 		form.reseed(prefill);
 		pendingTextareaFocus = true;
 		setTimeout(() => {
@@ -105,7 +150,7 @@
 
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
-		if (form.validationStatus === 'valid' && !form.showBrowser) {
+		if (form.validationStatus === 'valid' && !form.showBrowser && canFocusTextarea()) {
 			textareaRef?.focus();
 		}
 	});
@@ -113,7 +158,13 @@
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
 	$effect(() => {
-		if (!pendingTextareaFocus || !form.settingsLoaded || form.showBrowser) return;
+		if (
+			!pendingTextareaFocus ||
+			!form.settingsLoaded ||
+			form.showBrowser ||
+			!canFocusTextarea()
+		)
+			return;
 		if (!textareaRef) return;
 		if (prefill) {
 			textareaRef.setSelectionRange(0, 0);
@@ -131,15 +182,21 @@
 
 	// Debounced path validation reacts to path changes.
 	$effect(() => {
-		void form.trimmedPath;
+		const projectPath = form.trimmedPath;
+		if (projectPath !== expansionProjectPath) {
+			expansionProjectPath = projectPath;
+			snippetExpansion.cancel();
+		}
 		form.validatePath();
 	});
 
 	onDestroy(() => {
+		snippetExpansion.cancel();
 		form.revokeAllImageUrls();
 	});
 
 	function openImagePicker(): void {
+		if (snippetExpansion.pending) return;
 		imageInputRef?.click();
 	}
 
@@ -151,6 +208,7 @@
 	}
 
 	function handleMessagePaste(event: ClipboardEvent): void {
+		if (snippetExpansion.pending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const pastedImages: File[] = [];
@@ -168,12 +226,140 @@
 		textareaRef.style.height = `${textareaRef.scrollHeight}px`;
 	}
 
+	function snippetErrorDetail(error: unknown): string {
+		if (error instanceof ApiError) return error.details || error.message;
+		return error instanceof Error ? error.message : String(error);
+	}
+
+	async function restoreTextareaFocus(caret?: number): Promise<void> {
+		await tick();
+		if (caret !== undefined) textareaRef?.setSelectionRange(caret, caret);
+		autoResizeTextarea();
+		textareaRef?.focus();
+	}
+
+	async function focusPendingSnippetExpansion(): Promise<void> {
+		await tick();
+		if (snippetExpansion.pending) textareaRef?.focus();
+	}
+
+	function expansionContext() {
+		const projectPath = form.trimmedPath;
+		if (projectPath) return { type: 'project' as const, projectPath };
+		notifications.error(m.chat_new_chat_errors_project_path_required());
+		return null;
+	}
+
+	async function insertSnippet(
+		snippet: Snippet,
+		argumentsText: string,
+	): Promise<SnippetInsertionResult> {
+		if (snippetExpansion.pending || !textareaRef) return 'cancelled';
+		const context = expansionContext();
+		if (!context) {
+			await restoreTextareaFocus();
+			return 'cancelled';
+		}
+		const sourceText = form.firstMessage;
+		const projectPath = context.projectPath;
+		const start = textareaRef.selectionStart;
+		const end = textareaRef.selectionEnd;
+		try {
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: snippet.shortName,
+					arguments: argumentsText,
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
+			if (result.kind !== 'expanded') return 'cancelled';
+			if (
+				result.response.snippetId !== snippet.id ||
+				result.response.snippetUpdatedAt !== snippet.updatedAt
+			) {
+				void snippets.refreshIfLoaded();
+				notifications.error(m.snippets_changed_before_expansion());
+				await restoreTextareaFocus();
+				return 'cancelled';
+			}
+			if (
+				form.trimmedPath !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				form.firstMessage !== sourceText
+			)
+				return 'cancelled';
+			form.firstMessage =
+				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
+			await restoreTextareaFocus(start + result.response.expandedText.length);
+			return 'inserted';
+		} catch (error) {
+			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
+			await restoreTextareaFocus();
+			return 'failed';
+		}
+	}
+
+	async function expandSnippetInvocation(
+		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
+	): Promise<void> {
+		const context = expansionContext();
+		if (!context) return;
+		const sourceText = form.firstMessage;
+		const projectPath = context.projectPath;
+		try {
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: command.shortName,
+					arguments: command.arguments,
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
+			if (result.kind !== 'expanded') return;
+			if (
+				form.trimmedPath !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				form.firstMessage !== sourceText
+			)
+				return;
+			form.firstMessage = result.response.expandedText;
+			await restoreTextareaFocus(result.response.expandedText.length);
+		} catch (error) {
+			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
+			await restoreTextareaFocus();
+		}
+	}
+
+	function editSnippets(): void {
+		appShell.openSnippets(() => {
+			void tick().then(() => textareaRef?.focus());
+		});
+	}
+
 	function handleSubmit(): void {
+		if (!form.canSubmit || snippetExpansion.pending) return;
+		const command = parseSnippetCommand(form.firstMessage);
+		if (command.kind === 'invalid') {
+			notifications.error(
+				command.error === 'short-name-required'
+					? m.snippets_command_name_required()
+					: m.snippets_command_name_invalid(),
+			);
+			return;
+		}
+		if (command.kind === 'valid') {
+			void expandSnippetInvocation(command);
+			return;
+		}
 		const config = form.buildConfig();
 		if (config) onStartChat(config);
 	}
 
 	function handleKeyDown(e: KeyboardEvent): void {
+		if (snippetExpansion.pending) return;
 		if (
 			e.key === 'Enter' &&
 			shouldSubmitOnEnter({
@@ -224,7 +410,10 @@
 	}
 </script>
 
-<div class="p-2 sm:p-4">
+<div
+	class="p-2 sm:p-4"
+	{@attach snippetExpansion.pending && snippetExpansionLayer}
+>
 	<div class="relative">
 		<div
 			class="space-y-6"
@@ -367,13 +556,16 @@
 				{/if}
 			</div>
 
-			<div class="relative min-h-[120px] border border-border rounded-lg">
-					<input
-						bind:this={imageInputRef}
-						type="file"
-						accept={CHAT_ATTACHMENT_ACCEPT}
-						multiple
-						class="hidden"
+			<div
+				class="relative min-h-[120px] border border-border rounded-lg"
+				aria-busy={snippetExpansion.pending}
+			>
+				<input
+					bind:this={imageInputRef}
+					type="file"
+					accept={CHAT_ATTACHMENT_ACCEPT}
+					multiple
+					class="hidden"
 					onchange={handleImageInputChange}
 				/>
 				<textarea
@@ -383,14 +575,20 @@
 					oninput={autoResizeTextarea}
 					onpaste={handleMessagePaste}
 					placeholder={form.placeholder}
+					readonly={snippetExpansion.pending}
+					aria-busy={snippetExpansion.pending}
 					class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
-					rows="2"
-				></textarea>
+					rows="2"></textarea>
 
 				<ComposerBottomBar
 					canAttachImages={modelCatalog.supportsImages(form.agentId, form.modelValue)}
+					{snippetInteractionKey}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
+					onInsertSnippet={insertSnippet}
+					onEditSnippets={editSnippets}
+					onRequestComposerFocus={() => void restoreTextareaFocus()}
+					isPromptTransformPending={snippetExpansion.pending}
 					{permissionOptions}
 					selectedPermission={form.permissionMode}
 					onPermissionSelect={(mode) => {
@@ -425,29 +623,32 @@
 				<div class="p-2 bg-muted/40 rounded-lg">
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
-								<div class="relative group">
-									<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
-										{#if isImageAttachment(file) && form.imageUrlFor(file, idx)}
-											<img
-												src={form.imageUrlFor(file, idx)}
-												alt={file.name}
-												class="w-full h-full object-cover"
-											/>
-										{:else}
-											<div
-												class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+							<div class="relative group">
+								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+									{#if isImageAttachment(file) && form.imageUrlFor(file, idx)}
+										<img
+											src={form.imageUrlFor(file, idx)}
+											alt={file.name}
+											class="w-full h-full object-cover"
+										/>
+									{:else}
+										<div
+											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+										>
+											<FileText class="h-5 w-5" aria-hidden="true" />
+											<span class="w-full truncate text-center text-[10px] leading-tight"
+												>{file.name}</span
 											>
-												<FileText class="h-5 w-5" aria-hidden="true" />
-												<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
-											</div>
-										{/if}
-									</div>
+										</div>
+									{/if}
+								</div>
 								<button
 									type="button"
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
 									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
 									onclick={() => form.removeImage(idx)}
+									disabled={snippetExpansion.pending}
 								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
@@ -474,6 +675,7 @@
 
 {#if form.worktreeModalOpen}
 	<GitWorktreePickerModal
+		repositoryRoot={form.trimmedPath}
 		worktrees={form.worktreeItems}
 		isLoading={form.isLoadingWorktrees}
 		isCreating={form.isCreatingWorktree}

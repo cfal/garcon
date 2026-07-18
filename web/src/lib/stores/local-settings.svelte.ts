@@ -74,6 +74,7 @@ export const HIDEABLE_TOOL_TYPE_VALUES: readonly HideableToolType[] = HIDEABLE_T
 export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
 	colorblindMode: boolean;
+	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
 	showThinking: boolean;
 	showQuickCommitTray: boolean;
@@ -102,6 +103,7 @@ export interface LocalSettingsSnapshot {
 
 type BooleanLocalSettingKey =
 	| 'colorblindMode'
+	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
 	| 'showThinking'
 	| 'showQuickCommitTray'
@@ -118,6 +120,7 @@ type BooleanLocalSettingKey =
 const DEFAULTS: LocalSettingsSnapshot = {
 	theme: 'system',
 	colorblindMode: false,
+	overlayBackdropEffects: true,
 	autoExpandTools: false,
 	showThinking: true,
 	showQuickCommitTray: true,
@@ -200,6 +203,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		theme: parseTheme(parsed.theme),
 		colorblindMode: parseBoolean(parsed.colorblindMode, DEFAULTS.colorblindMode),
+		overlayBackdropEffects: parseBoolean(
+			parsed.overlayBackdropEffects,
+			DEFAULTS.overlayBackdropEffects,
+		),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
@@ -277,6 +284,7 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 export class LocalSettingsStore {
 	theme = $state<ThemeMode>(DEFAULTS.theme);
 	colorblindMode = $state(DEFAULTS.colorblindMode);
+	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	showThinking = $state(DEFAULTS.showThinking);
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
@@ -348,6 +356,7 @@ export class LocalSettingsStore {
 		return {
 			theme: this.theme,
 			colorblindMode: this.colorblindMode,
+			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
 			showThinking: this.showThinking,
 			showQuickCommitTray: this.showQuickCommitTray,
@@ -378,6 +387,7 @@ export class LocalSettingsStore {
 	#apply(snap: LocalSettingsSnapshot): void {
 		this.theme = snap.theme;
 		this.colorblindMode = snap.colorblindMode;
+		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.showThinking = snap.showThinking;
 		this.showQuickCommitTray = snap.showQuickCommitTray;

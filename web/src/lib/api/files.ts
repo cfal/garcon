@@ -1,7 +1,22 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
-import { apiFetch, apiGet, apiPut, apiPostForm } from './client.js';
-import { parseFileIdentityResponse, type FileIdentityResponse } from '$shared/file-contracts';
+import { apiFetch, apiGet, apiPut, apiPostForm, parseApiResponse } from './client.js';
+import {
+	FILE_REVISION_HEADER,
+	isFileRevision,
+	parseFileIdentityResponse,
+	parseFileRevisionResponse,
+	parseFileTreeResponse,
+	parseReadTextResponse,
+	parseSaveTextResponse,
+	type FileRevision,
+	type FileRevisionResponse,
+	type FileSaveConflictResolution,
+	type FileIdentityResponse,
+	type FileTreeResponse,
+	type ReadTextResponse,
+	type SaveTextResponse,
+} from '$shared/file-contracts';
 
 export interface FilePathParams {
 	chatId?: string | null;
@@ -15,10 +30,8 @@ export interface FileIdentityParams {
 	relativePath: string;
 }
 
-export interface DirParams {
-	chatId?: string | null;
-	projectPath?: string | null;
-	dirPath?: string | null;
+export interface FileTreeParams {
+	directoryPath?: string | null;
 }
 
 export interface ProjectParams {
@@ -31,6 +44,8 @@ export interface SaveTextParams {
 	projectPath?: string | null;
 	filePath: string;
 	content: string;
+	expectedRevision: FileRevision;
+	conflictResolution: FileSaveConflictResolution;
 }
 
 export interface UploadImagesParams {
@@ -39,27 +54,11 @@ export interface UploadImagesParams {
 	formData: FormData;
 }
 
-export interface FileTreeNode {
-	name: string;
-	path: string;
-	relativePath: string;
-	type: 'file' | 'directory';
-	children?: FileTreeNode[];
-	size?: number;
-	modified?: string;
-	permissionsRwx?: string;
-}
-
 export interface FileEntry {
 	name: string;
 	path: string;
 	relativePath?: string;
 	type?: 'file' | 'directory';
-}
-
-export interface ReadTextResponse {
-	content?: string;
-	[key: string]: unknown;
 }
 
 export interface UploadImagesResponse {
@@ -84,19 +83,6 @@ function buildFileQuery(params: {
 	return query.toString();
 }
 
-/** Builds query string from chatId/projectPath/dirPath. */
-function buildDirQuery(params: {
-	chatId?: string | null;
-	projectPath?: string | null;
-	dirPath?: string | null;
-}): string {
-	const query = new URLSearchParams();
-	if (params.dirPath) query.append('path', params.dirPath);
-	if (params.chatId) query.append('chatId', params.chatId);
-	else if (params.projectPath) query.append('projectPath', params.projectPath);
-	return query.toString();
-}
-
 /** Builds query string from chatId/projectPath only. */
 function buildProjectQuery(params: {
 	chatId?: string | null;
@@ -114,7 +100,21 @@ export async function readText(
 	options?: RequestInit,
 ): Promise<ReadTextResponse> {
 	const qs = buildFileQuery(params);
-	return apiGet<ReadTextResponse>(`/api/v1/files/text?${qs}`, options);
+	const payload = await apiGet<unknown>(`/api/v1/files/text?${qs}`, options);
+	const parsed = parseReadTextResponse(payload);
+	if (!parsed) throw new Error('Invalid file text response');
+	return parsed;
+}
+
+export async function getFileRevision(
+	params: FilePathParams,
+	options?: RequestInit,
+): Promise<FileRevisionResponse> {
+	const qs = buildFileQuery(params);
+	const payload = await apiGet<unknown>(`/api/v1/files/revision?${qs}`, options);
+	const parsed = parseFileRevisionResponse(payload);
+	if (!parsed) throw new Error('Invalid file revision response');
+	return parsed;
 }
 
 export async function resolveFileIdentity(
@@ -133,20 +133,39 @@ export async function resolveFileIdentity(
 }
 
 /** Saves text content to a file. */
-export async function saveText(params: SaveTextParams): Promise<{ success: boolean }> {
-	const { content, ...rest } = params;
+export async function saveText(
+	params: SaveTextParams,
+	options?: RequestInit,
+): Promise<SaveTextResponse> {
+	const { content, expectedRevision, conflictResolution, ...rest } = params;
 	const qs = buildFileQuery(rest);
-	return apiPut<{ success: boolean }>(`/api/v1/files/text?${qs}`, { content });
+	const payload = await apiPut<unknown>(
+		`/api/v1/files/text?${qs}`,
+		{
+			content,
+			expectedRevision,
+			conflictResolution,
+		},
+		options,
+	);
+	const parsed = parseSaveTextResponse(payload);
+	if (!parsed) throw new Error('Invalid file save response');
+	return parsed;
 }
 
-/** Fetches the file tree for a project directory. */
+/** Fetches and validates one directory under the configured project base. */
 export async function getTree(
-	params: DirParams = {},
+	params: FileTreeParams = {},
 	options?: RequestInit,
-): Promise<FileTreeNode[]> {
-	const qs = buildDirQuery(params);
+): Promise<FileTreeResponse> {
+	const query = new URLSearchParams();
+	if (params.directoryPath) query.set('path', params.directoryPath);
+	const qs = query.toString();
 	const url = `/api/v1/files/tree${qs ? `?${qs}` : ''}`;
-	return apiGet<FileTreeNode[]>(url, options);
+	const payload = await apiGet<unknown>(url, options);
+	const response = parseFileTreeResponse(payload);
+	if (!response) throw new Error('Invalid file tree response');
+	return response;
 }
 
 /** Fetches a flat file list for a project. */
@@ -163,6 +182,17 @@ export async function getFileList(
 export function getContentUrl(params: FilePathParams): string {
 	const qs = buildFileQuery(params);
 	return `/api/v1/files/content?${qs}`;
+}
+
+export async function readContent(
+	params: FilePathParams,
+	options?: RequestInit,
+): Promise<{ blob: Blob; revision: FileRevision }> {
+	const response = await apiFetch(getContentUrl(params), options);
+	if (!response.ok) await parseApiResponse<never>(response);
+	const revision = response.headers.get(FILE_REVISION_HEADER);
+	if (!isFileRevision(revision)) throw new Error('Invalid file content revision');
+	return { blob: await response.blob(), revision };
 }
 
 /** Uploads images via FormData. */

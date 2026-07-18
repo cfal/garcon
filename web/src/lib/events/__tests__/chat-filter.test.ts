@@ -46,7 +46,7 @@ describe('filterByChat', () => {
 			{
 				type: 'queue-state-updated',
 				chatId: 'chat-b',
-				queue: { entries: [], paused: false },
+				queue: { entries: [], pause: null },
 			} as never,
 			ctx,
 		);

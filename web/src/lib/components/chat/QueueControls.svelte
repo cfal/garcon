@@ -1,109 +1,269 @@
 <script lang="ts">
-	import type { QueueState } from '$lib/types/chat';
+	import type { QueueEntry, QueueState } from '$lib/types/chat';
 	import * as m from '$lib/paraglide/messages.js';
-	import { SendHorizontal, Square, X } from '@lucide/svelte';
+	import {
+		ChevronLeft,
+		ChevronRight,
+		ListTodo,
+		Loader2,
+		Pause,
+		Pencil,
+		Play,
+		Square,
+		Trash2,
+	} from '@lucide/svelte';
+	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
 	import { cn } from '$lib/utils/cn';
 
 	interface Props {
+		chatId: string | null;
 		queue: QueueState | null;
 		canInterrupt?: boolean;
-		onInterrupt?: () => void;
-		onResume?: () => void;
-		onDequeue: (entryId: string) => void;
+		onInterrupt?: () => void | Promise<void>;
+		onPause: () => Promise<void>;
+		onResume: (pauseId: string) => Promise<void>;
+		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
+		onEdit: (entry: QueueEntry) => void;
+		onOpenManager: () => void;
+		onDelete: (entryId: string) => Promise<void>;
 	}
 
-	let { queue, canInterrupt = false, onInterrupt, onResume, onDequeue }: Props = $props();
+	let {
+		chatId,
+		queue,
+		canInterrupt = false,
+		onInterrupt,
+		onPause,
+		onResume,
+		onQueueControlError,
+		onEdit,
+		onOpenManager,
+		onDelete,
+	}: Props = $props();
 
-	const VISIBLE_ENTRY_LIMIT = 3;
-	const PREVIEW_CHAR_LIMIT = 180;
+	interface QueuePreviewSelection {
+		chatId: string;
+		entryId: string;
+	}
 
-	// Only queued entries belong in this panel. Once an entry is 'sending' it has
-	// been dispatched into the transcript as a pending user message, so showing it
-	// here too would duplicate it and leave a stale row while the badge reads zero.
-	const queuedEntries = $derived(
-		(queue?.entries ?? []).filter((entry) => entry.status === 'queued'),
+	let previewSelection = $state<QueuePreviewSelection | null>(null);
+	const entries = $derived(queue?.entries ?? []);
+	const queuedEntryCount = $derived(entries.length);
+	const previewIndex = $derived.by(() => {
+		if (entries.length === 0) return -1;
+		if (!chatId || previewSelection?.chatId !== chatId) return 0;
+
+		const retainedIndex = entries.findIndex((entry) => entry.id === previewSelection?.entryId);
+		return retainedIndex >= 0 ? retainedIndex : 0;
+	});
+	const previewEntry = $derived(entries[previewIndex] ?? null);
+	const canBrowsePrevious = $derived(previewIndex > 0);
+	const canBrowseNext = $derived(previewIndex >= 0 && previewIndex < queuedEntryCount - 1);
+	const showQueueManager = $derived(queuedEntryCount > 1);
+	const showInterruptAction = $derived(
+		previewIndex === 0 && !queue?.pause && canInterrupt && Boolean(onInterrupt),
 	);
-	const queuedEntryCount = $derived(queuedEntries.length);
-	const visibleEntries = $derived(queuedEntries.slice(0, VISIBLE_ENTRY_LIMIT));
-	const hiddenEntryCount = $derived(Math.max(0, queuedEntries.length - visibleEntries.length));
-	const hasEntries = $derived(queuedEntries.length > 0);
-	const visible = $derived(hasEntries);
+	let deletingEntryIds = $state<Set<string>>(new Set());
+	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting'>('idle');
 
-	function previewContent(content: string): string {
-		if (content.length <= PREVIEW_CHAR_LIMIT) return content;
-		return `${content.slice(0, PREVIEW_CHAR_LIMIT).trimEnd()}...`;
+	function selectPreview(index: number): void {
+		if (!chatId) return;
+		const entry = entries[index];
+		if (!entry) return;
+		previewSelection = { chatId, entryId: entry.id };
+	}
+
+	async function deleteEntry(entryId: string): Promise<void> {
+		if (deletingEntryIds.has(entryId)) return;
+		deletingEntryIds = new Set([...deletingEntryIds, entryId]);
+		try {
+			await onDelete(entryId);
+		} finally {
+			const nextDeletingEntryIds = new Set(deletingEntryIds);
+			nextDeletingEntryIds.delete(entryId);
+			deletingEntryIds = nextDeletingEntryIds;
+		}
+	}
+
+	async function mutateDispatch(
+		mutation: Exclude<typeof dispatchMutation, 'idle'>,
+		action: () => void | Promise<void>,
+	): Promise<void> {
+		if (dispatchMutation !== 'idle') return;
+		dispatchMutation = mutation;
+		try {
+			await action();
+		} catch (error) {
+			if (mutation === 'pausing' || mutation === 'resuming') {
+				onQueueControlError(mutation === 'pausing' ? 'pause' : 'resume', error);
+			}
+		} finally {
+			if (dispatchMutation === mutation) dispatchMutation = 'idle';
+		}
 	}
 </script>
 
-{#if visible}
-	<div class="border-b border-queue-border bg-queue-surface px-3 py-2">
-		<div class="mb-1.5 flex items-center justify-between gap-3 text-xs text-queue-foreground">
-			<div class="flex min-w-0 items-center gap-2">
-				<span class="font-medium">{m.chat_queue_pending_inputs()}</span>
-				<span class="rounded bg-queue-action-bg px-1.5 py-0.5 tabular-nums">
-					{m.chat_queue_pending_count({ count: queuedEntryCount })}
-				</span>
+{#if previewEntry}
+	<section
+		class={cn(CHAT_DOCK_SURFACE_CLASS, 'text-foreground')}
+		aria-label={m.chat_queue_dialog_title()}
+	>
+		<div class="flex items-start gap-2 px-4 py-3">
+			<div class="min-w-0 flex-1 border-l-2 border-queue-entry-border pl-3">
+				<p
+					data-queue-preview
+					class="line-clamp-2 h-10 whitespace-pre-wrap break-words text-sm leading-5"
+				>
+					{previewEntry.content}
+				</p>
 			</div>
-
-			{#if queue?.paused}
-				<span class="shrink-0 font-medium">{m.chat_queue_paused()}</span>
-			{/if}
+			<div class="flex shrink-0 items-center gap-0.5">
+				<button
+					type="button"
+					onclick={() => onEdit(previewEntry)}
+					disabled={deletingEntryIds.has(previewEntry.id)}
+					class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+					title={m.chat_queue_edit_message()}
+					aria-label={m.chat_queue_edit_message()}
+				>
+					<Pencil class="h-4 w-4" />
+				</button>
+				<button
+					type="button"
+					onclick={() => void deleteEntry(previewEntry.id)}
+					disabled={deletingEntryIds.has(previewEntry.id)}
+					class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+					title={m.chat_queue_remove_from_queue()}
+					aria-label={m.chat_queue_remove_from_queue()}
+				>
+					{#if deletingEntryIds.has(previewEntry.id)}
+						<Loader2 class="h-4 w-4 animate-spin" />
+					{:else}
+						<Trash2 class="h-4 w-4" />
+					{/if}
+				</button>
+			</div>
 		</div>
 
-		<div class="space-y-1">
-			{#each visibleEntries as entry (entry.id)}
-				<div class="flex items-start gap-2 border-l-2 border-queue-entry-border pl-2">
-					<div class="min-w-0 flex-1">
-						<span
-							class={cn(
-								'block text-sm leading-5 text-queue-foreground whitespace-pre-wrap break-words',
-								entry.content.length > PREVIEW_CHAR_LIMIT && 'max-h-[4.75rem] overflow-hidden',
-							)}
+		<footer
+			class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-3 py-2"
+		>
+			<div class="flex min-w-0 flex-wrap items-center gap-2">
+				{#if showQueueManager}
+					<div
+						role="group"
+						aria-label={m.chat_queue_browse_messages()}
+						class="flex shrink-0 items-center"
+					>
+						<button
+							type="button"
+							onclick={() => selectPreview(previewIndex - 1)}
+							disabled={!canBrowsePrevious || dispatchMutation === 'interrupting'}
+							class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+							title={m.chat_queue_previous_message()}
+							aria-label={m.chat_queue_previous_message()}
 						>
-							{previewContent(entry.content)}
+							<ChevronLeft class="h-4 w-4" />
+						</button>
+						<span
+							class="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground"
+							aria-live="polite"
+							aria-atomic="true"
+						>
+							{m.chat_queue_message_position({
+								current: previewIndex + 1,
+								total: queuedEntryCount,
+							})}
 						</span>
+						<button
+							type="button"
+							onclick={() => selectPreview(previewIndex + 1)}
+							disabled={!canBrowseNext || dispatchMutation === 'interrupting'}
+							class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+							title={m.chat_queue_next_message()}
+							aria-label={m.chat_queue_next_message()}
+						>
+							<ChevronRight class="h-4 w-4" />
+						</button>
 					</div>
+				{:else}
+					<span class="text-xs text-muted-foreground">{m.chat_queue_single_message()}</span>
+				{/if}
+
+				{#if queue?.pause}
+					{#if queue.pause.kind === 'manual'}
+						<span class="text-xs font-medium text-queue-foreground">
+							{m.chat_queue_paused()}
+						</span>
+					{:else}
+						<span class="text-xs font-medium text-status-warning-muted-foreground">
+							{m.chat_queue_needs_attention()}
+						</span>
+					{/if}
+				{/if}
+			</div>
+
+			<div class="ml-auto flex flex-wrap items-center justify-end gap-1">
+				{#if showInterruptAction && onInterrupt}
 					<button
 						type="button"
-						onclick={() => onDequeue(entry.id)}
-						class="shrink-0 rounded p-1 text-queue-foreground hover:bg-queue-action-hover-bg focus-visible:ring-2 focus-visible:ring-ring"
-						title={m.chat_queue_remove_from_queue()}
-						aria-label={m.chat_queue_remove_from_queue()}
+						onclick={() => void mutateDispatch('interrupting', onInterrupt)}
+						disabled={dispatchMutation !== 'idle'}
+						class="flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+						title={m.chat_queue_interrupt_and_send_queue()}
 					>
-						<X class="h-3.5 w-3.5" />
+						{#if dispatchMutation === 'interrupting'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Square class="h-4 w-4" />
+						{/if}
+						{m.chat_queue_interrupt_and_send()}
 					</button>
-				</div>
-			{/each}
-		</div>
+				{/if}
 
-		{#if hiddenEntryCount > 0}
-			<div class="mt-1 pl-3 text-xs text-queue-foreground/75">
-				{m.chat_queue_more_pending({ count: hiddenEntryCount })}
+				{#if showQueueManager}
+					<button
+						type="button"
+						onclick={onOpenManager}
+						class="flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					>
+						<ListTodo class="h-4 w-4" />
+						<span>{m.chat_queue_edit_queue()}</span>
+					</button>
+				{/if}
+
+				{#if queue?.pause}
+					<button
+						type="button"
+						onclick={() => void mutateDispatch('resuming', () => onResume(queue.pause!.id))}
+						disabled={dispatchMutation !== 'idle'}
+						class="flex min-h-8 items-center gap-2 rounded-lg bg-queue-action-bg px-2.5 text-sm font-medium text-queue-foreground transition-colors hover:bg-queue-action-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						title={m.chat_queue_resume_queue()}
+					>
+						{#if dispatchMutation === 'resuming'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Play class="h-4 w-4" />
+						{/if}
+						{m.chat_queue_resume()}
+					</button>
+				{:else}
+					<button
+						type="button"
+						onclick={() => void mutateDispatch('pausing', onPause)}
+						disabled={dispatchMutation !== 'idle'}
+						class="flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+						title={m.chat_queue_pause_queue()}
+					>
+						{#if dispatchMutation === 'pausing'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Pause class="h-4 w-4" />
+						{/if}
+						{m.chat_queue_pause()}
+					</button>
+				{/if}
 			</div>
-		{/if}
-
-		<div class="mt-2 flex items-center gap-2">
-			{#if queue?.paused && onResume}
-				<button
-					type="button"
-					onclick={onResume}
-					class="flex items-center gap-1.5 rounded bg-queue-action-bg px-2.5 py-1 text-sm font-medium text-queue-foreground hover:bg-queue-action-hover-bg focus-visible:ring-2 focus-visible:ring-ring"
-					title={m.chat_queue_send_now_queue()}
-				>
-					<SendHorizontal class="h-3.5 w-3.5" />
-					{m.chat_queue_send_now()}
-				</button>
-			{:else if canInterrupt && onInterrupt}
-				<button
-					type="button"
-					onclick={onInterrupt}
-					class="flex items-center gap-1.5 rounded bg-queue-action-bg px-2.5 py-1 text-sm font-medium text-queue-foreground hover:bg-queue-action-hover-bg focus-visible:ring-2 focus-visible:ring-ring"
-					title={m.chat_queue_interrupt_and_send_queue()}
-				>
-					<Square class="h-3.5 w-3.5" />
-					{m.chat_queue_interrupt_and_send()}
-				</button>
-			{/if}
-		</div>
-	</div>
+		</footer>
+	</section>
 {/if}

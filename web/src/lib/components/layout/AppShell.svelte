@@ -13,6 +13,7 @@
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
+	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	import {
 		getNavigation,
 		getChatSessions,
@@ -227,18 +228,6 @@
 	function quietRefresh() {
 		return sessions.quietRefreshChats();
 	}
-
-	// Fetches chat list + processing state whenever the WS connects
-	// (initial page load and reconnect).
-	$effect(() => {
-		if (!ws.isConnected) return;
-		sessions.refreshChatsAndReconcileProcessing().catch((error) => {
-			console.warn(
-				'app-shell: failed to reconcile running chats:',
-				error instanceof Error ? error.message : String(error),
-			);
-		});
-	});
 
 	$effect(() => {
 		const status = ws.connectionStatus;
@@ -482,7 +471,7 @@
 	{#if isMobile && appShell.sidebarOpen}
 		<div class="fixed inset-0 z-40">
 			<button
-				class="absolute inset-0 bg-foreground/40"
+				class="absolute inset-0 transient-backdrop"
 				onclick={closeMobileSidebar}
 				aria-label={m.layout_close_sidebar()}
 			></button>
@@ -574,5 +563,11 @@
 {#if appShell.showScheduledPrompts}
 	{#await lazyScheduledPrompts() then { default: ScheduledPromptsDialog }}
 		<ScheduledPromptsDialog />
+	{/await}
+{/if}
+
+{#if appShell.showSnippets}
+	{#await lazySnippets() then { default: SnippetsDialog }}
+		<SnippetsDialog />
 	{/await}
 {/if}

@@ -1,18 +1,23 @@
 import type { ChatGenerationResetReason, ChatViewMessage } from './chat-view';
 import { parseChatViewMessages } from './chat-view';
+import type { UserMessageDeliveryStatus } from './chat-types';
 import type {
   PendingUserInput,
   PendingUserInputClearReason,
 } from './pending-user-input';
 import { normalizePendingUserInput } from './pending-user-input';
 import type { QueueState } from './queue-state';
-import { normalizeQueueState } from './queue-state';
+import { parseQueueState } from './queue-state';
 import type { RemoteSettingsSnapshot } from './settings';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
   isScheduledPromptsInvalidationReason,
   type ScheduledPromptsInvalidationReason,
 } from './scheduled-prompts';
+import {
+  isSnippetsInvalidationReason,
+  type SnippetsInvalidationReason,
+} from './snippets';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -37,6 +42,7 @@ export class ChatSubscribedMessage {
     public mode: ChatSubscribeMode,
     public messages: ChatViewMessage[],
     public lastSeq: number,
+    public pendingUserInputs: PendingUserInput[],
   ) {}
 }
 
@@ -142,9 +148,36 @@ export class QueueDispatchingMessage {
   ) {}
 }
 
+export type ReconnectQueueResult =
+  | { chatId: string; outcome: 'snapshot'; queue: QueueState }
+  | { chatId: string; outcome: 'not-found' }
+  | { chatId: string; outcome: 'unavailable' };
+
+export type ReconnectProcessingResult =
+  | { outcome: 'snapshot'; runningChatIds: string[] }
+  | { outcome: 'unavailable' };
+
+export class ReconnectStateMessage {
+  readonly type = 'reconnect-state' as const;
+  constructor(
+    public processing: ReconnectProcessingResult,
+    public queueResults: ReconnectQueueResult[],
+    public clientRequestId?: string,
+  ) {}
+}
+
 export class PendingUserInputUpdatedMessage {
   readonly type = 'pending-user-input-updated' as const;
   constructor(public input: PendingUserInput) {}
+}
+
+export class PendingUserInputStatusUpdatedMessage {
+  readonly type = 'pending-user-input-status-updated' as const;
+  constructor(
+    public chatId: string,
+    public clientRequestId: string,
+    public deliveryStatus: UserMessageDeliveryStatus,
+  ) {}
 }
 
 export class PendingUserInputClearedMessage {
@@ -153,14 +186,6 @@ export class PendingUserInputClearedMessage {
     public chatId: string,
     public clientRequestId: string,
     public reason: PendingUserInputClearReason,
-  ) {}
-}
-
-export class ChatSessionsRunningMessage {
-  readonly type = 'chat-sessions-running' as const;
-  constructor(
-    public sessions: Record<string, Array<{ id: string }>>,
-    public clientRequestId?: string,
   ) {}
 }
 
@@ -237,6 +262,11 @@ export class ScheduledPromptsInvalidatedMessage {
   constructor(public reason: ScheduledPromptsInvalidationReason) {}
 }
 
+export class SnippetsInvalidatedMessage {
+  readonly type = 'snippets-invalidated' as const;
+  constructor(public reason: SnippetsInvalidationReason) {}
+}
+
 export type ClientRequestErrorCode =
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
@@ -246,6 +276,22 @@ export type ClientRequestErrorCode =
   | 'HISTORY_LOAD_FAILED'
   | 'REQUEST_TIMEOUT'
   | 'INTERNAL_ERROR';
+
+const CLIENT_REQUEST_ERROR_CODES: readonly ClientRequestErrorCode[] = [
+  'MISSING_CHAT_ID',
+  'REQUEST_VALIDATION_FAILED',
+  'SESSION_NOT_FOUND',
+  'CHAT_RUNNING',
+  'NATIVE_PATH_UNRESOLVED',
+  'HISTORY_LOAD_FAILED',
+  'REQUEST_TIMEOUT',
+  'INTERNAL_ERROR',
+];
+
+function isClientRequestErrorCode(value: unknown): value is ClientRequestErrorCode {
+  return typeof value === 'string'
+    && (CLIENT_REQUEST_ERROR_CODES as readonly string[]).includes(value);
+}
 
 export class ClientRequestErrorMessage {
   readonly type = 'client-request-error' as const;
@@ -272,9 +318,10 @@ export type ServerWsMessage =
   | ChatProcessingUpdatedMessage
   | QueueStateUpdatedMessage
   | QueueDispatchingMessage
+  | ReconnectStateMessage
   | PendingUserInputUpdatedMessage
+  | PendingUserInputStatusUpdatedMessage
   | PendingUserInputClearedMessage
-  | ChatSessionsRunningMessage
   | WsFaultMessage
   | WsPongMessage
   | ChatTitleUpdatedMessage
@@ -283,6 +330,7 @@ export type ServerWsMessage =
   | ChatListRefreshRequestedMessage
   | SettingsChangedMessage
   | ScheduledPromptsInvalidatedMessage
+  | SnippetsInvalidatedMessage
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
@@ -299,6 +347,51 @@ function requiredStr(v: unknown): string | null {
 
 function nonNegativeInt(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+}
+
+function reconnectQueueResults(value: unknown): ReconnectQueueResult[] | null {
+  if (!Array.isArray(value)) return null;
+  const results: ReconnectQueueResult[] = [];
+  const seen = new Set<string>();
+  for (const valueResult of value) {
+    if (!valueResult || typeof valueResult !== 'object') return null;
+    const result = valueResult as Record<string, unknown>;
+    const chatId = requiredStr(result.chatId);
+    if (!chatId || seen.has(chatId)) return null;
+    seen.add(chatId);
+    if (result.outcome === 'snapshot' && result.queue && typeof result.queue === 'object') {
+      const queue = parseQueueState(result.queue);
+      if (!queue) return null;
+      results.push({ chatId, outcome: 'snapshot', queue });
+      continue;
+    }
+    if (result.outcome === 'not-found' || result.outcome === 'unavailable') {
+      results.push({ chatId, outcome: result.outcome });
+      continue;
+    }
+    return null;
+  }
+  return results;
+}
+
+function reconnectProcessingResult(value: unknown): ReconnectProcessingResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const result = value as Record<string, unknown>;
+  if (result.outcome === 'unavailable') return { outcome: 'unavailable' };
+  if (result.outcome !== 'snapshot' || !Array.isArray(result.runningChatIds)) return null;
+
+  const runningChatIds: string[] = [];
+  const seen = new Set<string>();
+  for (const valueChatId of result.runningChatIds) {
+    const chatId = requiredStr(valueChatId);
+    if (!chatId) return null;
+    if (seen.has(chatId)) continue;
+    seen.add(chatId);
+    runningChatIds.push(chatId);
+  }
+
+  return { outcome: 'snapshot', runningChatIds };
 }
 
 function hasField(data: Record<string, unknown>, key: string): boolean {
@@ -321,6 +414,14 @@ function parseChatListInvalidationReason(
 
 function parseResetReason(value: unknown): ChatGenerationResetReason | null {
   return value === 'manual-reload' || value === 'process-error' ? value : null;
+}
+
+function parsePendingUserInputs(value: unknown): PendingUserInput[] | null {
+  if (!Array.isArray(value)) return null;
+  const inputs = value.map(normalizePendingUserInput);
+  return inputs.every((input): input is PendingUserInput => input !== null)
+    ? inputs
+    : null;
 }
 
 export function parseServerWsMessage(
@@ -365,7 +466,8 @@ export function parseServerWsMessage(
         return null;
       if (mode === 'delta' && generationId === null) return null;
       const messages = parseChatViewMessages(data.messages);
-      if (messages === null) return null;
+      const pendingUserInputs = parsePendingUserInputs(data.pendingUserInputs);
+      if (messages === null || pendingUserInputs === null) return null;
       return new ChatSubscribedMessage(
         clientRequestId,
         chatId,
@@ -373,6 +475,7 @@ export function parseServerWsMessage(
         mode,
         messages,
         lastSeq,
+        pendingUserInputs,
       );
     }
     case 'chat-generation-reset': {
@@ -416,10 +519,14 @@ export function parseServerWsMessage(
     }
     case 'agent-run-finished': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
+      const exitCode = data.exitCode;
+      if (
+        !chatId
+        || (exitCode !== undefined && (typeof exitCode !== 'number' || !Number.isInteger(exitCode)))
+      ) return null;
       return new AgentRunFinishedMessage(
         chatId,
-        data.exitCode as number | undefined,
+        exitCode,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
@@ -484,8 +591,9 @@ export function parseServerWsMessage(
     }
     case 'queue-state-updated': {
       const chatId = requiredStr(data.chatId);
-      return chatId
-        ? new QueueStateUpdatedMessage(chatId, normalizeQueueState(data.queue))
+      const queue = parseQueueState(data.queue);
+      return chatId && queue
+        ? new QueueStateUpdatedMessage(chatId, queue)
         : null;
     }
     case 'queue-dispatching': {
@@ -499,25 +607,44 @@ export function parseServerWsMessage(
           )
         : null;
     }
-    case 'pending-user-input-updated': {
-      const input = normalizePendingUserInput(data.input);
-      return input ? new PendingUserInputUpdatedMessage(input) : null;
-    }
-    case 'pending-user-input-cleared': {
-      const chatId = requiredStr(data.chatId);
-      const clientRequestId = requiredStr(data.clientRequestId);
-      const reason = data.reason === 'chat-removed' ? data.reason : null;
-      return chatId && clientRequestId && reason
-        ? new PendingUserInputClearedMessage(chatId, clientRequestId, reason)
-        : null;
-    }
-    case 'chat-sessions-running':
-      return new ChatSessionsRunningMessage(
-        data.sessions as ChatSessionsRunningMessage['sessions'],
+    case 'reconnect-state': {
+      const processing = reconnectProcessingResult(data.processing);
+      const queueResults = reconnectQueueResults(data.queueResults);
+      if (!processing || !queueResults) return null;
+      return new ReconnectStateMessage(
+        processing,
+        queueResults,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
           : undefined,
       );
+    }
+    case 'pending-user-input-updated': {
+      const input = normalizePendingUserInput(data.input);
+      return input ? new PendingUserInputUpdatedMessage(input) : null;
+    }
+    case 'pending-user-input-status-updated': {
+      const chatId = requiredStr(data.chatId);
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const deliveryStatus = data.deliveryStatus === 'submitting'
+        || data.deliveryStatus === 'accepted'
+        || data.deliveryStatus === 'failed'
+        ? data.deliveryStatus
+        : null;
+      return chatId && clientRequestId && deliveryStatus
+        ? new PendingUserInputStatusUpdatedMessage(chatId, clientRequestId, deliveryStatus)
+        : null;
+    }
+    case 'pending-user-input-cleared': {
+      const chatId = requiredStr(data.chatId);
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const reason = data.reason === 'chat-removed' || data.reason === 'persisted'
+        ? data.reason
+        : null;
+      return chatId && clientRequestId && reason
+        ? new PendingUserInputClearedMessage(chatId, clientRequestId, reason)
+        : null;
+    }
     case 'ws-fault':
       return new WsFaultMessage(str(data.error));
     case 'ws-pong': {
@@ -564,17 +691,33 @@ export function parseServerWsMessage(
         ? new ScheduledPromptsInvalidatedMessage(data.reason)
         : null;
     }
+    case 'snippets-invalidated': {
+      return isSnippetsInvalidationReason(data.reason)
+        ? new SnippetsInvalidatedMessage(data.reason)
+        : null;
+    }
     case 'client-request-error': {
       const clientRequestId = requiredStr(data.clientRequestId);
       const requestType = requiredStr(data.requestType);
-      if (!clientRequestId || !requestType) return null;
+      const code = data.code;
+      const message = data.message;
+      const retryable = data.retryable;
+      const chatId = data.chatId === undefined ? undefined : requiredStr(data.chatId);
+      if (
+        !clientRequestId
+        || !requestType
+        || !isClientRequestErrorCode(code)
+        || typeof message !== 'string'
+        || typeof retryable !== 'boolean'
+        || (data.chatId !== undefined && !chatId)
+      ) return null;
       return new ClientRequestErrorMessage(
         clientRequestId,
         requestType,
-        data.code as ClientRequestErrorCode,
-        str(data.message),
-        Boolean(data.retryable),
-        data.chatId as string | undefined,
+        code,
+        message,
+        retryable,
+        chatId ?? undefined,
       );
     }
     default:

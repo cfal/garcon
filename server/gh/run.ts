@@ -42,7 +42,7 @@ export async function runGh(
     ? AbortSignal.any([options.signal, timeoutSignal])
     : timeoutSignal;
 
-  let proc: ReturnType<typeof Bun.spawn>;
+  let proc: Bun.ReadableSubprocess;
   try {
     proc = Bun.spawn(['gh', ...args], {
       cwd,

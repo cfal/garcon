@@ -17,6 +17,7 @@ import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
 import { getClaudeSlashCommands } from './slash-command-discovery.js';
 import { createLogger } from '../../lib/log.js';
+import { rewriteClaudeForkTranscriptEntry } from './fork-transcript.js';
 
 const logger = createLogger('agents:claude');
 
@@ -114,6 +115,15 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
           return null;
         }
       },
+      async resolveSearchLoadPlan(session) {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
+        return { kind: 'detached', source: { kind: 'claude-jsonl', nativePath } };
+      },
+      rewriteForkTranscriptEntry: rewriteClaudeForkTranscriptEntry,
     },
     auth: {
       getAuthStatus: () => getClaudeAuthStatus(),

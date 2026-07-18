@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type {
+  AgentInterruptAndSendResponse,
   AgentStopResponse,
   CommandAcceptedResponse,
   CommandErrorCode,
@@ -9,16 +10,18 @@ import type {
   ForkRunCommandResponse,
   PermissionDecisionPayload,
   ProjectPathPatchResponse,
-  QueueEnqueueResponse,
+  ActiveInputCommandRequest,
+  ActiveInputCommandResponse,
+  QueueEntryCommandResponse,
+  QueueEntryCreateCommandRequest,
+  QueueEntryDeleteCommandRequest,
+  QueueEntryDeleteResponse,
+  QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
   StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
-import {
-  InvalidChatIdError,
-  parseChatId,
-  type ChatId,
-} from '../../common/chat-id.js';
+import { InvalidChatIdError, parseChatId, type ChatId } from '../../common/chat-id.js';
 import {
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
@@ -27,19 +30,28 @@ import {
   normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
-import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.js';
 import { normalizeTags } from '../../common/tags.ts';
-import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
-import type { ChatQueueService } from '../queue.js';
+import {
+  PRE_SCHEDULE_FAILURE_ERROR_CODE,
+  SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+  type CommandLedger,
+  type CommandLedgerRecord,
+} from './command-ledger.js';
+import {
+  QueueEntryMutationError,
+  type ChatQueueService,
+  type DirectTurnReservation,
+} from '../queue.js';
+import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ForkTranscriptEntryContext } from '../agents/types.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import { getNativeMessageSource } from '../agents/shared/native-message-source.js';
 import { createLogger } from '../lib/log.js';
@@ -55,12 +67,19 @@ type QueueDep = Pick<
   ChatQueueService,
   | 'registerPendingUserInput'
   | 'discardPendingUserInput'
-  | 'runAcceptedTurn'
-  | 'abort'
+  | 'reserveDirectTurn'
+  | 'releaseDirectTurn'
+  | 'runReservedTurn'
+  | 'stopActiveTurn'
+  | 'interruptActiveTurn'
+  | 'abortForChatDeletion'
   | 'triggerDrain'
+  | 'isChatExecutionReserved'
   | 'readChatQueue'
-  | 'enqueueChat'
-  | 'dequeueChat'
+  | 'createChatQueueEntry'
+  | 'replaceChatQueueEntry'
+  | 'deleteChatQueueEntry'
+  | 'deliverActiveInput'
   | 'clearChatQueue'
   | 'pauseChatQueue'
   | 'resumeChatQueue'
@@ -86,7 +105,10 @@ interface CarryOverDep {
   copy(sourceChatId: string, targetChatId: string): void;
 }
 
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat' | 'listForChat' | 'reconcile'>;
+type PendingInputsDep = Pick<
+  PendingUserInputServiceContract,
+  'clearChat' | 'listForChat' | 'markFailed' | 'reconcileRetainedHistory'
+>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
@@ -108,6 +130,7 @@ type AgentRegistryDep = Pick<
   | 'forkAgentSession'
   | 'compactSession'
   | 'resolveNativePath'
+  | 'rewriteForkTranscriptEntry'
   | 'prepareProjectPathUpdate'
 >;
 
@@ -133,6 +156,11 @@ type ForkChatFileCopyDep = (args: {
     targetChatId: string;
   }) => Promise<StartedAgentSession | null>;
   supportsFork?: (agentId: string) => boolean;
+  assertSourceSnapshotStable?: (sourceChanged: boolean) => void;
+  rewriteForkTranscriptEntry?: (
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ) => unknown;
 }) => Promise<ForkChatFileCopyResult>;
 
 interface ForkContext {
@@ -227,13 +255,6 @@ interface NormalizedChatStart {
   tags: string[];
 }
 
-interface QueueEnqueueInput {
-  chatId: string;
-  content: string;
-  clientRequestId: string;
-  delivery?: 'queue' | 'active';
-}
-
 export interface ScheduledExistingChatInput {
   chatId: string;
   command: string;
@@ -247,15 +268,10 @@ export type ScheduledExistingChatOutcome =
   | { type: 'queued'; chatId: string; entryId: string }
   | { type: 'skipped-busy'; chatId: string };
 
-interface QueueDirectEnqueueInput {
-  chatId: string;
-  content: string;
-}
-
 interface QueueMutationInput {
   chatId: string;
-  action: 'dequeue' | 'clear' | 'pause' | 'resume';
-  entryId?: string;
+  action: 'clear' | 'pause' | 'resume';
+  pauseId?: string;
 }
 
 interface PermissionDecisionInput extends PermissionDecisionPayload {
@@ -319,7 +335,8 @@ export function runOptionsFromCommandRequest(
   if (body.model !== undefined) options.model = body.model;
   if (body.permissionMode !== undefined) options.permissionMode = normalizePermissionMode(body.permissionMode);
   if (body.thinkingMode !== undefined) options.thinkingMode = normalizeThinkingMode(body.thinkingMode);
-  if (body.claudeThinkingMode !== undefined) options.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
+  if (body.claudeThinkingMode !== undefined)
+    options.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
   if (body.ampAgentMode !== undefined) options.ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
   if (body.apiProviderId !== undefined) options.apiProviderId = body.apiProviderId;
   if (body.modelEndpointId !== undefined) options.modelEndpointId = body.modelEndpointId;
@@ -349,25 +366,58 @@ interface ChatCommandServiceDeps {
 
 export class ChatCommandService {
   readonly #chatMutationLocks: KeyedPromiseLock;
+  readonly #backgroundTasks = new Set<Promise<void>>();
 
   constructor(private readonly deps: ChatCommandServiceDeps) {
     this.#chatMutationLocks = deps.chatMutationLock ?? new KeyedPromiseLock();
+  }
+
+  async waitForBackgroundTasks(): Promise<void> {
+    while (this.#backgroundTasks.size > 0) {
+      await Promise.all([...this.#backgroundTasks]);
+    }
+  }
+
+  #trackBackgroundTask(task: Promise<void>): void {
+    this.#backgroundTasks.add(task);
+    void task.finally(() => {
+      this.#backgroundTasks.delete(task);
+    });
   }
 
   #withChatMutationLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
     return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);
   }
 
+  #withChatMutationLocks<T>(chatIds: string[], fn: () => Promise<T>): Promise<T> {
+    const orderedChatIds = [...new Set(chatIds)].sort();
+    const acquire = (index: number): Promise<T> => {
+      const chatId = orderedChatIds[index];
+      return chatId === undefined
+        ? fn()
+        : this.#withChatMutationLock(chatId, () => acquire(index + 1));
+    };
+    return acquire(0);
+  }
+
   async submitStart(input: ChatStartInput): Promise<StartChatCommandResponse> {
-    return this.#submitNormalizedStart(await this.#normalizeStart(input));
+    const normalized = await this.#normalizeStart(input);
+    return this.#withChatMutationLock(
+      normalized.chatId,
+      () => this.#submitNormalizedStart(normalized),
+    );
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
-    return this.#submitNormalizedStart(await this.#normalizeStart({
+    const normalized = await this.#normalizeStart({
       ...input,
       chatId: this.deps.chatIds.allocate(),
       images: [],
-    }));
+    });
+    return this.#withChatMutationLock(
+      normalized.chatId,
+      () => this.#submitNormalizedStart(normalized),
+    );
   }
 
   async #normalizeStart(input: ChatStartInput): Promise<NormalizedChatStart> {
@@ -434,15 +484,9 @@ export class ChatCommandService {
       });
     } catch {}
     const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
-    const supportsImages = hasBackendSelection
-      ? modelSupportsImages
-      : this.deps.agents.supportsImages(input.agentId);
+    const supportsImages = hasBackendSelection ? modelSupportsImages : this.deps.agents.supportsImages(input.agentId);
     if (!supportsImages) {
-      throw new CommandValidationError(
-        'UNSUPPORTED_AGENT',
-        `Attachments unsupported for agent: ${input.agentId}`,
-        422,
-      );
+      throw new CommandValidationError('UNSUPPORTED_AGENT', `Attachments unsupported for agent: ${input.agentId}`, 422);
     }
   }
 
@@ -472,6 +516,7 @@ export class ChatCommandService {
       },
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+    if (ledger.kind === 'duplicate') this.#throwRecordedExecutionFailure(ledger.record);
     if (ledger.kind === 'duplicate') {
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
@@ -484,37 +529,45 @@ export class ChatCommandService {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${input.chatId}`, 409);
     }
 
-    this.deps.chats.addChat({
-      id: input.chatId,
-      agentId: input.agentId,
-      nativePath: null,
-      projectPath: input.projectPath,
-      tags: input.tags,
-      agentSessionId: null,
-      model: input.model,
-      apiProviderId: input.apiProviderId,
-      modelEndpointId: input.modelEndpointId,
-      modelProtocol: input.modelProtocol,
-      permissionMode: input.permissionMode,
-      thinkingMode: input.thinkingMode,
-      claudeThinkingMode: input.claudeThinkingMode,
-      ampAgentMode: input.ampAgentMode,
-    });
-    this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
-
-    await this.deps.settings.recordChatStartup({
-      agentId: input.agentId,
-      projectPath: input.projectPath,
-      model: input.model,
-      apiProviderId: input.apiProviderId,
-      modelEndpointId: input.modelEndpointId,
-      modelProtocol: input.modelProtocol,
-      permissionMode: input.permissionMode,
-      thinkingMode: input.thinkingMode,
-      claudeThinkingMode: input.claudeThinkingMode,
-      ampAgentMode: input.ampAgentMode,
-    });
+    let reservation: DirectTurnReservation;
     try {
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+    } catch (error) {
+      await this.#markPreScheduleFailure(ledger.record.key, error);
+      throw error;
+    }
+
+    try {
+      this.deps.chats.addChat({
+        id: input.chatId,
+        agentId: input.agentId,
+        nativePath: null,
+        projectPath: input.projectPath,
+        tags: input.tags,
+        agentSessionId: null,
+        model: input.model,
+        apiProviderId: input.apiProviderId,
+        modelEndpointId: input.modelEndpointId,
+        modelProtocol: input.modelProtocol,
+        permissionMode: input.permissionMode,
+        thinkingMode: input.thinkingMode,
+        claudeThinkingMode: input.claudeThinkingMode,
+        ampAgentMode: input.ampAgentMode,
+      });
+      this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
+
+      await this.deps.settings.recordChatStartup({
+        agentId: input.agentId,
+        projectPath: input.projectPath,
+        model: input.model,
+        apiProviderId: input.apiProviderId,
+        modelEndpointId: input.modelEndpointId,
+        modelProtocol: input.modelProtocol,
+        permissionMode: input.permissionMode,
+        thinkingMode: input.thinkingMode,
+        claudeThinkingMode: input.claudeThinkingMode,
+        ampAgentMode: input.ampAgentMode,
+      });
       await this.deps.settings.ensureInNormal(input.chatId);
       await this.deps.queue.registerPendingUserInput(input.chatId, input.command, {
         clientRequestId: input.clientRequestId,
@@ -523,7 +576,11 @@ export class ChatCommandService {
         images: input.images.length > 0 ? input.images : undefined,
         deliveryStatus: 'accepted',
       });
-      await this.deps.ledger.update(ledger.record.key, { status: 'scheduled', turnId });
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'scheduled',
+        turnId,
+        pendingInputRecovery: 'required',
+      });
       await this.deps.agents.startSession(input.chatId, input.command, {
         projectPath: input.projectPath,
         images: input.images.length > 0 ? input.images : undefined,
@@ -532,15 +589,45 @@ export class ChatCommandService {
         turnId,
       });
     } catch (error: unknown) {
-      await this.deps.ledger.update(ledger.record.key, { status: 'failed', error: (error as Error).message });
+      try {
+        await this.deps.ledger.update(ledger.record.key, {
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch (ledgerError: unknown) {
+        logger.warn(
+          `sessions: failed to record ${input.chatId} startup failure:`,
+          ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+        );
+      }
       this.deps.pendingInputs.clearChat(input.chatId, 'chat-removed');
       this.deps.chats.removeChat(input.chatId);
       try {
         await this.deps.settings.removeFromAllOrderLists(input.chatId);
       } catch (cleanupError: unknown) {
-        logger.warn(`sessions: failed to remove ${input.chatId} from order lists after startup failure:`, (cleanupError as Error).message);
+        logger.warn(
+          `sessions: failed to remove ${input.chatId} from order lists after startup failure:`,
+          (cleanupError as Error).message,
+        );
+      }
+      try {
+        await this.deps.queue.releaseDirectTurn(reservation);
+      } catch (releaseError: unknown) {
+        logger.warn(
+          `sessions: failed to release ${input.chatId} execution reservation:`,
+          releaseError instanceof Error ? releaseError.message : String(releaseError),
+        );
       }
       throw error;
+    }
+
+    try {
+      await this.deps.queue.releaseDirectTurn(reservation);
+    } catch (releaseError: unknown) {
+      logger.error(
+        `sessions: failed to release ${input.chatId} execution reservation:`,
+        releaseError instanceof Error ? releaseError.message : String(releaseError),
+      );
     }
 
     void maybeGenerateChatTitle({
@@ -550,7 +637,10 @@ export class ChatCommandService {
       agents: this.deps.agents,
       settings: this.deps.settings,
     });
-    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
+    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], {
+      status: 'running',
+      turnId,
+    });
     return {
       ...commandResultFromRecord(accepted ?? ledger.record),
       chat: await this.#projectCommandChat(input.chatId),
@@ -561,17 +651,26 @@ export class ChatCommandService {
     this.#requireChat(input.chatId);
     const images = this.#validateAttachments(input.images ?? input.options?.images);
     this.#assertContent(input.command, images);
-    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpRun({
-      ...input,
-      images,
-      options: this.#optionsWithoutAttachments(input.options),
-    }));
+    return this.#withChatMutationLock(input.chatId, () =>
+      this.#submitHttpRun({
+        ...input,
+        images,
+        options: this.#optionsWithoutAttachments(input.options),
+      }),
+    );
   }
 
   async forkChat(input: ForkChatInput): Promise<ForkChatResponse> {
-    const context = this.#validateFork(input);
-    await this.#forkChatFromContext(context);
-    return { success: true, chat: await this.#projectCommandChat(context.targetChatId) };
+    const normalized = {
+      ...input,
+      sourceChatId: this.#requireChatId(input.sourceChatId, 'sourceChatId'),
+      chatId: this.#requireChatId(input.chatId),
+    };
+    return this.#withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
+      const context = this.#validateFork(normalized);
+      await this.#forkChatFromContext(context);
+      return { success: true, chat: await this.#projectCommandChat(context.targetChatId) };
+    });
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
@@ -586,7 +685,7 @@ export class ChatCommandService {
     this.#requireChat(chatId);
 
     try {
-      await this.deps.queue.abort(chatId, { drainAfterAbort: false });
+      await this.deps.queue.abortForChatDeletion(chatId);
     } catch (error) {
       logger.warn(
         `sessions: abort before deleting ${chatId} failed:`,
@@ -613,83 +712,318 @@ export class ChatCommandService {
   async submitForkRun(input: SubmitForkRunInput): Promise<ForkRunCommandResponse> {
     const images = this.#validateAttachments(input.images ?? input.options?.images);
     this.#assertContent(input.command, images);
-    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpForkRun({
+    const normalized = {
       ...input,
+      sourceChatId: this.#requireChatId(input.sourceChatId, 'sourceChatId'),
+      chatId: this.#requireChatId(input.chatId),
       images,
       options: this.#optionsWithoutAttachments(input.options),
-    }));
+    };
+    return this.#withChatMutationLocks(
+      [normalized.sourceChatId, normalized.chatId],
+      () => this.#submitHttpForkRun(normalized),
+    );
   }
 
-  async submitQueueEnqueue(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
+  async submitQueueEntryCreate(input: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
     this.#requireChat(input.chatId);
-    return this.#withChatMutationLock(input.chatId, () => this.#submitQueueEnqueueLocked(
-      input,
-      input.delivery === 'active' ? 'allow-active-input' : 'queue-only',
-    ));
+    this.#assertContent(input.content);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitQueueEntryCreateLocked(input));
   }
 
-  async #submitQueueEnqueueLocked(
-    input: QueueEnqueueInput,
-    activeInputPolicy: 'allow-active-input' | 'queue-only' = 'queue-only',
-  ): Promise<QueueEnqueueResponse> {
-    const payload = input.delivery === 'active'
-      ? { chatId: input.chatId, content: input.content, delivery: 'active' as const }
-      : { chatId: input.chatId, content: input.content };
+  async #submitQueueEntryCreateLocked(input: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
+    const content = input.content;
+    const preparedEntryId = crypto.randomUUID();
     const ledger = await this.deps.ledger.accept({
-      commandType: 'queue-enqueue',
+      commandType: 'queue-entry-create',
       chatId: input.chatId,
       clientRequestId: this.#requireClientRequestId(input.clientRequestId),
-      payload,
+      payload: { chatId: input.chatId, content },
+      entryId: preparedEntryId,
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
-    if (ledger.kind === 'duplicate') {
-      const state = normalizeQueueState(await this.deps.queue.readChatQueue(input.chatId));
+    const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
+    if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+      this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+        logger.error('queue: duplicate create drain error:', err.message);
+      });
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
-        entryId: ledger.record.entryId ?? '',
-        merged: false,
-        queue: toClientQueueState(state),
+        entryId: ledger.record.entryId ?? preparedEntryId,
+        queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
       };
     }
 
-    const before = normalizeQueueState(await this.deps.queue.readChatQueue(input.chatId));
-    let result: Awaited<ReturnType<QueueDep['enqueueChat']>>;
+    let result: Awaited<ReturnType<QueueDep['createChatQueueEntry']>>;
     try {
-      result = await this.deps.queue.enqueueChat(input.chatId, input.content, {
-        clientRequestId: ledger.record.clientRequestId,
-        activeInputPolicy,
+      result = await this.deps.queue.createChatQueueEntry(input.chatId, content, {
+        key: ledger.record.key,
+        entryId: ledger.record.entryId ?? preparedEntryId,
       });
     } catch (error) {
-      const deliveryAccepted = error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
       await this.deps.ledger.update(ledger.record.key, {
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
-        errorCode: deliveryAccepted ? undefined : PRE_SCHEDULE_FAILURE_ERROR_CODE,
+        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
       });
       throw error;
     }
-    const state = normalizeQueueState(result.queue);
-    const merged = !result.handledActive && before.entries.some((entry) => entry.status === 'queued');
     const updated = await this.deps.ledger.update(ledger.record.key, {
-      status: result.handledActive ? 'finished' : 'scheduled',
-      entryId: result.entry.id,
+      status: 'scheduled',
+      entryId: result.entryId,
     });
-    if (!result.handledActive) {
-      this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-        logger.error('queue: enqueue drain error:', err.message);
-      });
-    }
+    this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+      logger.error('queue: create drain error:', err.message);
+    });
     return {
-      ...commandResultFromRecord(updated ?? ledger.record),
-      entryId: result.entry.id,
-      merged,
-      queue: toClientQueueState(state),
+      ...commandResultFromRecord(
+        updated ?? ledger.record,
+        recoveringAcceptedCommand || result.duplicate ? 'duplicate' : 'accepted',
+      ),
+      entryId: result.entryId,
+      queue: toClientQueueState(result.queue),
     };
   }
 
-  async submitScheduledExistingChat(
-    input: ScheduledExistingChatInput,
-  ): Promise<ScheduledExistingChatOutcome> {
+  async submitQueueEntryReplace(input: QueueEntryReplaceCommandRequest): Promise<QueueEntryCommandResponse> {
+    this.#requireChat(input.chatId);
+    this.#assertContent(input.content);
+    if (!input.entryId.trim()) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
+    }
+    if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'expectedRevision must be a positive integer');
+    }
+    return this.#withChatMutationLock(input.chatId, async () => {
+      const content = input.content;
+      const entryId = input.entryId.trim();
+      const ledger = await this.deps.ledger.accept({
+        commandType: 'queue-entry-replace',
+        chatId: input.chatId,
+        clientRequestId: this.#requireClientRequestId(input.clientRequestId),
+        payload: {
+          chatId: input.chatId,
+          entryId,
+          content,
+          expectedRevision: input.expectedRevision,
+        },
+        entryId,
+      });
+      this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+      const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
+      if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+        await this.#throwRecordedQueueMutationFailure(ledger.record);
+        return {
+          ...commandResultFromRecord(ledger.record, 'duplicate'),
+          entryId: ledger.record.entryId ?? entryId,
+          queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+        };
+      }
+
+      try {
+        const result = await this.deps.queue.replaceChatQueueEntry(
+          input.chatId,
+          entryId,
+          content,
+          input.expectedRevision,
+          { key: ledger.record.key, entryId },
+        );
+        const updated = await this.deps.ledger.update(ledger.record.key, {
+          status: 'finished',
+          entryId,
+        });
+        return {
+          ...commandResultFromRecord(
+            updated ?? ledger.record,
+            recoveringAcceptedCommand || result.duplicate ? 'duplicate' : 'accepted',
+          ),
+          entryId,
+          queue: toClientQueueState(result.queue),
+        };
+      } catch (error) {
+        const mutationError = error instanceof QueueEntryMutationError ? error : null;
+        await this.deps.ledger.update(ledger.record.key, {
+          status: mutationError ? 'rejected' : 'failed',
+          error: error instanceof Error ? error.message : String(error),
+          errorCode: mutationError ? mutationError.code : PRE_SCHEDULE_FAILURE_ERROR_CODE,
+        });
+        throw error;
+      }
+    });
+  }
+
+  async submitQueueEntryDelete(input: QueueEntryDeleteCommandRequest): Promise<QueueEntryDeleteResponse> {
+    this.#requireChat(input.chatId);
+    if (!input.entryId.trim()) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
+    }
+    return this.#withChatMutationLock(input.chatId, async () => {
+      const entryId = input.entryId.trim();
+      const ledger = await this.deps.ledger.accept({
+        commandType: 'queue-entry-delete',
+        chatId: input.chatId,
+        clientRequestId: this.#requireClientRequestId(input.clientRequestId),
+        payload: { chatId: input.chatId, entryId },
+        entryId,
+      });
+      this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+      const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
+      if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+        await this.#throwRecordedQueueMutationFailure(ledger.record);
+        return {
+          ...commandResultFromRecord(ledger.record, 'duplicate'),
+          entryId: ledger.record.entryId ?? entryId,
+          queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+        };
+      }
+
+      try {
+        const result = await this.deps.queue.deleteChatQueueEntry(input.chatId, entryId, {
+          key: ledger.record.key,
+          entryId,
+        });
+        const updated = await this.deps.ledger.update(ledger.record.key, {
+          status: 'finished',
+          entryId,
+        });
+        return {
+          ...commandResultFromRecord(
+            updated ?? ledger.record,
+            recoveringAcceptedCommand || result.duplicate ? 'duplicate' : 'accepted',
+          ),
+          entryId,
+          queue: toClientQueueState(result.queue),
+        };
+      } catch (error) {
+        const mutationError = error instanceof QueueEntryMutationError ? error : null;
+        await this.deps.ledger.update(ledger.record.key, {
+          status: mutationError ? 'rejected' : 'failed',
+          error: error instanceof Error ? error.message : String(error),
+          errorCode: mutationError ? mutationError.code : PRE_SCHEDULE_FAILURE_ERROR_CODE,
+        });
+        throw error;
+      }
+    });
+  }
+
+  async submitActiveInput(input: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse> {
+    this.#requireChat(input.chatId);
+    this.#assertContent(input.content);
+    return this.#withChatMutationLock(input.chatId, async () => {
+      const content = input.content;
+      const preparedEntryId = crypto.randomUUID();
+      const ledger = await this.deps.ledger.accept({
+        commandType: 'active-input',
+        chatId: input.chatId,
+        clientRequestId: this.#requireClientRequestId(input.clientRequestId),
+        payload: { chatId: input.chatId, content },
+        entryId: preparedEntryId,
+      });
+      this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+      if (ledger.kind === 'duplicate') {
+        if (ledger.record.status === 'failed') {
+          throw new CommandValidationError(
+            'INTERNAL_ERROR',
+            ledger.record.error ?? 'The previous active-input delivery failed after acceptance',
+            409,
+            false,
+          );
+        }
+        if (ledger.record.status === 'accepted') {
+          const queue = await this.deps.queue.readChatQueue(input.chatId);
+          const applied = queue.appliedCommands.find(
+            (command) => command.key === ledger.record.key && command.operation === 'create',
+          );
+          if (!applied) {
+            throw new CommandValidationError(
+              'INTERNAL_ERROR',
+              'The previous active-input delivery did not reach a durable outcome',
+              409,
+              false,
+            );
+          }
+          const updated = await this.deps.ledger.update(ledger.record.key, {
+            status: 'scheduled',
+            entryId: applied.entryId,
+          });
+          this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+            logger.error('queue: recovered active fallback drain error:', err.message);
+          });
+          return {
+            ...commandResultFromRecord(updated ?? ledger.record, 'duplicate'),
+            delivery: 'queued',
+            entryId: applied.entryId,
+            queue: toClientQueueState(queue),
+          };
+        }
+        if (ledger.record.entryId) {
+          this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+            logger.error('queue: duplicate active fallback drain error:', err.message);
+          });
+        }
+        return {
+          ...commandResultFromRecord(ledger.record, 'duplicate'),
+          delivery: ledger.record.entryId ? 'queued' : 'active',
+          ...(ledger.record.entryId ? { entryId: ledger.record.entryId } : {}),
+          queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+        };
+      }
+
+      let deliveryAccepted = false;
+      try {
+        const delivered = await this.deps.queue.deliverActiveInput(input.chatId, content, {
+          clientRequestId: ledger.record.clientRequestId,
+        }, async () => {
+          await this.deps.ledger.update(ledger.record.key, {
+            status: 'scheduled',
+            entryId: undefined,
+            pendingInputRecovery: 'required',
+          });
+        });
+        if (delivered) {
+          deliveryAccepted = true;
+          const updated = await this.deps.ledger.update(ledger.record.key, {
+            status: 'finished',
+            entryId: undefined,
+          });
+          return {
+            ...commandResultFromRecord(updated ?? ledger.record),
+            delivery: 'active',
+            queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+          };
+        }
+
+        const result = await this.deps.queue.createChatQueueEntry(input.chatId, content, {
+          key: ledger.record.key,
+          entryId: ledger.record.entryId ?? preparedEntryId,
+        });
+        const updated = await this.deps.ledger.update(ledger.record.key, {
+          status: 'scheduled',
+          entryId: result.entryId,
+        });
+        this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+          logger.error('queue: active fallback drain error:', err.message);
+        });
+        return {
+          ...commandResultFromRecord(updated ?? ledger.record),
+          delivery: 'queued',
+          entryId: result.entryId,
+          queue: toClientQueueState(result.queue),
+        };
+      } catch (error) {
+        deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
+        await this.deps.ledger.update(ledger.record.key, {
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+          errorCode: deliveryAccepted ? undefined : PRE_SCHEDULE_FAILURE_ERROR_CODE,
+          ...(deliveryAccepted ? { pendingInputRecovery: 'required' as const } : {}),
+        });
+        throw error;
+      }
+    });
+  }
+
+  async submitScheduledExistingChat(input: ScheduledExistingChatInput): Promise<ScheduledExistingChatOutcome> {
     const chatId = input.chatId.trim();
     const command = input.command.trim();
     this.#assertContent(command);
@@ -698,19 +1032,19 @@ export class ChatCommandService {
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
       }
-      const busy = this.deps.agents.isAgentSessionRunning(
-        session.agentId,
-        session.agentSessionId,
-      );
-      if (busy && input.busyBehavior === 'skip') {
+      const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
+        || this.deps.queue.isChatExecutionReserved(chatId);
+      const queue = await this.deps.queue.readChatQueue(chatId);
+      const hasQueueWork = queue.entries.length > 0;
+      if ((busy || hasQueueWork) && input.busyBehavior === 'skip') {
         return { type: 'skipped-busy', chatId };
       }
-      if (busy) {
-        const result = await this.#submitQueueEnqueueLocked({
+      if (busy || hasQueueWork) {
+        const result = await this.#submitQueueEntryCreateLocked({
           chatId,
           content: command,
           clientRequestId: input.clientRequestId,
-        }, 'queue-only');
+        });
         return { type: 'queued', chatId, entryId: result.entryId };
       }
       await this.#submitHttpRun({
@@ -724,47 +1058,31 @@ export class ChatCommandService {
     });
   }
 
-  async enqueueQueue(input: QueueDirectEnqueueInput): Promise<QueueMutationResponse & { entryId: string }> {
-    this.#requireChat(input.chatId);
-    return this.#withChatMutationLock(input.chatId, () => this.#enqueueQueueLocked(input));
-  }
-
-  async #enqueueQueueLocked(input: QueueDirectEnqueueInput): Promise<QueueMutationResponse & { entryId: string }> {
-    const result = await this.deps.queue.enqueueChat(input.chatId, input.content);
-    this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-      logger.error('queue: enqueue drain error:', err.message);
-    });
-    return {
-      success: true,
-      chatId: input.chatId,
-      entryId: result.entry.id,
-      queue: toClientQueueState(normalizeQueueState(result.queue)),
-    };
-  }
-
   async mutateQueue(input: QueueMutationInput): Promise<QueueMutationResponse> {
     this.#requireChat(input.chatId);
     return this.#withChatMutationLock(input.chatId, () => this.#mutateQueueLocked(input));
   }
 
   async #mutateQueueLocked(input: QueueMutationInput): Promise<QueueMutationResponse> {
-    let state: QueueState | unknown;
-    if (input.action === 'dequeue') {
-      if (!input.entryId?.trim()) {
-        throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
-      }
-      state = await this.deps.queue.dequeueChat(input.chatId, input.entryId.trim());
-    } else if (input.action === 'clear') {
-      state = await this.deps.queue.clearChatQueue(input.chatId);
+    let queue;
+    if (input.action === 'clear') {
+      queue = await this.deps.queue.clearChatQueue(input.chatId);
     } else if (input.action === 'pause') {
-      state = await this.deps.queue.pauseChatQueue(input.chatId);
+      queue = await this.deps.queue.pauseChatQueue(input.chatId);
     } else {
-      state = await this.deps.queue.resumeChatQueue(input.chatId);
+      if (!input.pauseId) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'pauseId is required', 400);
+      }
+      queue = await this.deps.queue.resumeChatQueue(input.chatId, input.pauseId);
       this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
         logger.error('queue: resume drain error:', err.message);
       });
     }
-    return { success: true, chatId: input.chatId, queue: toClientQueueState(normalizeQueueState(state)) };
+    return {
+      success: true,
+      chatId: input.chatId,
+      queue: toClientQueueState(queue),
+    };
   }
 
   async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
@@ -795,6 +1113,10 @@ export class ChatCommandService {
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {
     this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitStopLocked(input));
+  }
+
+  async #submitStopLocked(input: StopInput): Promise<AgentStopResponse> {
     const ledger = await this.deps.ledger.accept({
       commandType: 'agent-stop',
       chatId: input.chatId,
@@ -803,15 +1125,70 @@ export class ChatCommandService {
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
 
-    let stopped = false;
-    if (ledger.kind !== 'duplicate') {
-      stopped = await this.deps.queue.abort(input.chatId);
-      await this.deps.ledger.update(ledger.record.key, { status: stopped ? 'finished' : 'failed' });
+    if (ledger.kind === 'duplicate') {
+      return {
+        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        stopped: ledger.record.status === 'finished',
+        queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+      };
     }
-    return {
-      ...commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted'),
-      stopped: ledger.kind === 'duplicate' ? ledger.record.status === 'finished' : stopped,
-    };
+
+    try {
+      const result = await this.deps.queue.stopActiveTurn(input.chatId);
+      const updated = await this.deps.ledger.update(ledger.record.key, {
+        status: result.stopped ? 'finished' : 'failed',
+      });
+      return {
+        ...commandResultFromRecord(updated ?? ledger.record),
+        stopped: result.stopped,
+        queue: toClientQueueState(result.queue),
+      };
+    } catch (error) {
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  async submitInterruptAndSend(input: StopInput): Promise<AgentInterruptAndSendResponse> {
+    this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitInterruptAndSendLocked(input));
+  }
+
+  async #submitInterruptAndSendLocked(input: StopInput): Promise<AgentInterruptAndSendResponse> {
+    const ledger = await this.deps.ledger.accept({
+      commandType: 'agent-interrupt-and-send',
+      chatId: input.chatId,
+      clientRequestId: this.#requireClientRequestId(input.clientRequestId),
+      payload: { chatId: input.chatId, agentId: input.agentId },
+    });
+    this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+
+    if (ledger.kind === 'duplicate') {
+      return {
+        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        stopped: ledger.record.status === 'finished',
+      };
+    }
+
+    try {
+      const stopped = await this.deps.queue.interruptActiveTurn(input.chatId);
+      const updated = await this.deps.ledger.update(ledger.record.key, {
+        status: stopped ? 'finished' : 'failed',
+      });
+      return {
+        ...commandResultFromRecord(updated ?? ledger.record),
+        stopped,
+      };
+    } catch (error) {
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   async submitCompact(input: CompactInput): Promise<CommandAcceptedResponse> {
@@ -832,21 +1209,64 @@ export class ChatCommandService {
       commandType: 'agent-compact',
       chatId: input.chatId,
       clientRequestId,
-      payload: { chatId: input.chatId, instructions: input.instructions ?? null },
+      payload: {
+        chatId: input.chatId,
+        instructions: input.instructions ?? null,
+      },
       turnId,
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+    if (ledger.kind === 'duplicate') this.#throwRecordedExecutionFailure(ledger.record);
 
     if (ledger.kind !== 'duplicate') {
-      // Compaction runs as a background turn; lifecycle and the resulting
-      // CompactionMessage stream to the client over WebSocket.
-      void this.deps.agents
-        .compactSession(input.chatId, { instructions: input.instructions, clientRequestId, turnId })
-        .then(() => this.deps.ledger.update(ledger.record.key, { status: 'finished' }))
-        .catch((error: unknown) => {
-          logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
-          return this.deps.ledger.update(ledger.record.key, { status: 'failed' });
+      let reservation: DirectTurnReservation;
+      try {
+        reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+      } catch (error) {
+        await this.#markPreScheduleFailure(ledger.record.key, error);
+        throw error;
+      }
+      let scheduled: CommandLedgerRecord | null;
+      try {
+        scheduled = await this.deps.ledger.update(ledger.record.key, {
+          status: 'scheduled',
+          turnId,
         });
+      } catch (error) {
+        await this.deps.queue.releaseDirectTurn(reservation);
+        throw error;
+      }
+      const compactTask = (async () => {
+        try {
+          await this.deps.agents.compactSession(input.chatId, {
+            instructions: input.instructions,
+            clientRequestId,
+            turnId,
+          });
+          await this.deps.ledger.update(ledger.record.key, { status: 'finished' });
+        } catch (error: unknown) {
+          logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
+          try {
+            await this.deps.ledger.update(ledger.record.key, { status: 'failed' });
+          } catch (ledgerError: unknown) {
+            logger.error(
+              'compact: failed to record command failure:',
+              ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+            );
+          }
+        } finally {
+          try {
+            await this.deps.queue.releaseDirectTurn(reservation);
+          } catch (error: unknown) {
+            logger.error(
+              'compact: failed to release execution reservation:',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+      })();
+      this.#trackBackgroundTask(compactTask);
+      return commandResultFromRecord(scheduled ?? ledger.record);
     }
 
     return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
@@ -857,10 +1277,12 @@ export class ChatCommandService {
     if (!chatId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'chatId is required');
     }
-    return this.#withChatMutationLock(chatId, () => this.#updateProjectPathLocked({
-      chatId,
-      projectPath: input.projectPath,
-    }));
+    return this.#withChatMutationLock(chatId, () =>
+      this.#updateProjectPathLocked({
+        chatId,
+        projectPath: input.projectPath,
+      }),
+    );
   }
 
   async #updateProjectPathLocked(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
@@ -961,11 +1383,7 @@ export class ChatCommandService {
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ENOENT' || code === 'ENOTDIR') {
-        throw new CommandValidationError(
-          'PROJECT_PATH_NOT_FOUND',
-          `Project path not found: ${resolvedPath}`,
-          404,
-        );
+        throw new CommandValidationError('PROJECT_PATH_NOT_FOUND', `Project path not found: ${resolvedPath}`, 404);
       }
       throw error;
     }
@@ -1020,7 +1438,7 @@ export class ChatCommandService {
       );
     }
 
-    const queue = normalizeQueueState(await this.deps.queue.readChatQueue(chatId));
+    const queue = normalizeStoredQueueState(await this.deps.queue.readChatQueue(chatId));
     const sendingEntry = queue.entries.find((entry) => entry.status === 'sending');
     if (sendingEntry) {
       throw new CommandValidationError(
@@ -1040,7 +1458,7 @@ export class ChatCommandService {
       );
     }
 
-    await this.deps.pendingInputs.reconcile(chatId);
+    await this.deps.pendingInputs.reconcileRetainedHistory(chatId);
     if (this.deps.pendingInputs.listForChat(chatId).length > 0) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
@@ -1084,7 +1502,11 @@ export class ChatCommandService {
       payload: runPayload(input, clientMessageId),
       turnId,
     });
-    return this.#scheduleAcceptedHttpRun(ledger, input, { clientRequestId, clientMessageId, turnId });
+    return this.#scheduleAcceptedHttpRun(ledger, input, {
+      clientRequestId,
+      clientMessageId,
+      turnId,
+    });
   }
 
   async #submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<ForkRunCommandResponse> {
@@ -1100,9 +1522,14 @@ export class ChatCommandService {
     });
 
     if (ledger.kind === 'conflict') {
-      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', 'clientRequestId was reused with different payload', 409);
+      throw new CommandValidationError(
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId was reused with different payload',
+        409,
+      );
     }
     if (ledger.kind === 'duplicate') {
+      this.#throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         chat: await this.#projectCommandChat(ledger.record.chatId),
@@ -1119,11 +1546,11 @@ export class ChatCommandService {
       throw error;
     }
 
-    const result = await this.#scheduleAcceptedHttpRun(
-      ledger,
-      input,
-      { clientRequestId, clientMessageId, turnId },
-    );
+    const result = await this.#scheduleAcceptedHttpRun(ledger, input, {
+      clientRequestId,
+      clientMessageId,
+      turnId,
+    });
     return { ...result, chat: await this.#projectCommandChat(input.chatId) };
   }
 
@@ -1133,9 +1560,16 @@ export class ChatCommandService {
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
   ): Promise<CommandAcceptedResponse> {
     if (ledger.kind === 'conflict') {
-      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', 'clientRequestId was reused with different payload', 409);
+      throw new CommandValidationError(
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId was reused with different payload',
+        409,
+      );
     }
-    if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
+    if (ledger.kind === 'duplicate') {
+      this.#throwRecordedExecutionFailure(ledger.record);
+      return commandResultFromRecord(ledger.record, 'duplicate');
+    }
 
     const options = this.#withTurnIds(this.#optionsWithoutAttachments(input.options), {
       ...ids,
@@ -1143,45 +1577,93 @@ export class ChatCommandService {
     });
     if (input.images !== undefined) options.images = input.images;
 
+    let reservation: DirectTurnReservation;
     try {
-      await this.#registerPendingInput(input.chatId, input.command, options);
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
     } catch (error) {
-      try {
-        this.deps.queue.discardPendingUserInput(input.chatId, options.clientRequestId!);
-      } catch {}
-      await this.deps.ledger.update(ledger.record.key, {
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
-        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
-      });
+      await this.#markPreScheduleFailure(ledger.record.key, error);
       throw error;
     }
 
-    const scheduled = await this.deps.ledger.update(ledger.record.key, {
-      status: 'scheduled',
-      turnId: options.turnId,
-    });
+    try {
+      const queue = await this.deps.queue.readChatQueue(input.chatId);
+      if (queue.entries.length > 0) {
+        throw new CommandValidationError(
+          'SESSION_BUSY',
+          'Queued messages are pending and must be sent first',
+          409,
+          true,
+        );
+      }
+      await this.#registerPendingInput(input.chatId, input.command, options);
+      const scheduled = await this.deps.ledger.update(ledger.record.key, {
+        status: 'scheduled',
+        turnId: options.turnId,
+        pendingInputRecovery: 'required',
+      });
+      this.#runReservedTurn(ledger.record.key, reservation, input.command, options);
+      return commandResultFromRecord(scheduled ?? ledger.record);
+    } catch (error) {
+      const pendingRegistered = this.deps.pendingInputs.markFailed(
+        input.chatId,
+        options.clientRequestId!,
+      );
+      await this.deps.queue.releaseDirectTurn(reservation);
+      await this.#markPreScheduleFailure(ledger.record.key, error, pendingRegistered);
+      throw error;
+    }
+  }
 
-    this.#runAcceptedTurn(ledger.record.key, input.chatId, input.command, options);
-    return commandResultFromRecord(scheduled ?? ledger.record);
+  async #markPreScheduleFailure(
+    ledgerKey: string,
+    error: unknown,
+    pendingRegistered = false,
+  ): Promise<void> {
+    await this.deps.ledger.update(ledgerKey, {
+      status: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+      ...(pendingRegistered ? { pendingInputRecovery: 'required' as const } : {}),
+    });
   }
 
   async #registerPendingInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     await this.deps.queue.registerPendingUserInput(chatId, command, options);
   }
 
-  #runAcceptedTurn(ledgerKey: string, chatId: string, command: string, options: RunAgentTurnOptions): void {
-    void this.deps.queue.runAcceptedTurn(chatId, command, options)
-      .then(() => this.deps.ledger.update(ledgerKey, { status: 'finished' }))
-      .catch((error: Error) => {
-        logger.error('commands: run failed:', error.message);
-        this.deps.ledger.update(ledgerKey, { status: 'failed', error: error.message }).catch(() => {});
-      });
+  #runReservedTurn(
+    ledgerKey: string,
+    reservation: DirectTurnReservation,
+    command: string,
+    options: RunAgentTurnOptions,
+  ): void {
+    const runTask = (async () => {
+      try {
+        await this.deps.queue.runReservedTurn(reservation, command, options);
+        await this.deps.ledger.update(ledgerKey, { status: 'finished' });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('commands: run failed:', message);
+        try {
+          await this.deps.ledger.update(ledgerKey, { status: 'failed', error: message });
+        } catch (ledgerError: unknown) {
+          logger.error(
+            'commands: failed to record run failure:',
+            ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+          );
+        }
+      }
+    })();
+    this.#trackBackgroundTask(runTask);
   }
 
   #withTurnIds(
     options: RunAgentTurnOptions,
-    ids: { clientRequestId?: string; clientMessageId?: string; turnId?: string },
+    ids: {
+      clientRequestId?: string;
+      clientMessageId?: string;
+      turnId?: string;
+    },
   ): RunAgentTurnOptions {
     return {
       ...options,
@@ -1195,6 +1677,23 @@ export class ChatCommandService {
     if (!this.deps.chats.getChat(chatId)) {
       throw new CommandValidationError('SESSION_NOT_FOUND', message, 404);
     }
+  }
+
+  async #throwRecordedQueueMutationFailure(record: CommandLedgerRecord): Promise<void> {
+    if (record.status !== 'rejected') return;
+    if (
+      record.errorCode !== 'QUEUE_ENTRY_NOT_FOUND'
+      && record.errorCode !== 'QUEUE_ENTRY_ALREADY_SENT'
+      && record.errorCode !== 'QUEUE_ENTRY_REVISION_CONFLICT'
+    ) {
+      return;
+    }
+
+    throw new QueueEntryMutationError(
+      record.errorCode,
+      record.error ?? 'The queued message could not be changed',
+      await this.deps.queue.readChatQueue(record.chatId),
+    );
   }
 
   #validateFork(input: ForkChatInput): ForkContext {
@@ -1214,7 +1713,11 @@ export class ChatCommandService {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Source session not found', 404);
     }
     if (!this.deps.agents.supportsFork(sourceSession.agentId)) {
-      throw new CommandValidationError('UNSUPPORTED_AGENT', `Fork unsupported for agent: ${sourceSession.agentId}`, 422);
+      throw new CommandValidationError(
+        'UNSUPPORTED_AGENT',
+        `Fork unsupported for agent: ${sourceSession.agentId}`,
+        422,
+      );
     }
     if (upToSeq !== undefined && !this.deps.agents.supportsForkAtMessage(sourceSession.agentId)) {
       throw new CommandValidationError(
@@ -1224,8 +1727,8 @@ export class ChatCommandService {
       );
     }
     if (
-      this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
-      && !this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)
+      this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId) &&
+      !this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)
     ) {
       throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
     }
@@ -1233,7 +1736,12 @@ export class ChatCommandService {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);
     }
 
-    return { sourceChatId, targetChatId, sourceSession, ...(upToSeq ? { upToSeq } : {}) };
+    return {
+      sourceChatId,
+      targetChatId,
+      sourceSession,
+      ...(upToSeq ? { upToSeq } : {}),
+    };
   }
 
   async #forkChatFromContext(context: ForkContext): Promise<ForkChatFileCopyResult> {
@@ -1255,7 +1763,27 @@ export class ChatCommandService {
       carryOver: this.deps.carryOver,
       forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
       supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
+      assertSourceSnapshotStable: (sourceChanged) => {
+        this.#assertSourceSnapshotStable(context.sourceSession, sourceChanged);
+      },
+      rewriteForkTranscriptEntry: (entry, rewriteContext) => (
+        this.deps.agents.rewriteForkTranscriptEntry(
+          context.sourceSession.agentId,
+          entry,
+          rewriteContext,
+        )
+      ),
     });
+  }
+
+  #assertSourceSnapshotStable(sourceSession: ChatRegistryEntry, sourceChanged: boolean): void {
+    if (this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)) return;
+    if (
+      sourceChanged
+      || this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
+    ) {
+      throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
+    }
   }
 
   async #projectCommandChat(chatId: string): Promise<import('../../common/chat-list.js').ChatListEntry> {
@@ -1281,7 +1809,12 @@ export class ChatCommandService {
   async #resolveForkTruncatePoint(context: ForkContext): Promise<ForkTruncatePoint | undefined> {
     if (!context.upToSeq) return undefined;
     if (!this.deps.nativeMessages) {
-      throw new CommandValidationError('UNSUPPORTED_AGENT', 'Message-point forking is not configured on this server', 503, true);
+      throw new CommandValidationError(
+        'UNSUPPORTED_AGENT',
+        'Message-point forking is not configured on this server',
+        503,
+        true,
+      );
     }
 
     const messages = await this.deps.nativeMessages.loadNativeMessages(context.sourceChatId);
@@ -1294,7 +1827,10 @@ export class ChatCommandService {
     const lineNumber = source?.lineNumber;
     const entryId = typeof source?.entryId === 'string' && source.entryId.trim() ? source.entryId : undefined;
     if ((!lineNumber || !Number.isInteger(lineNumber) || lineNumber <= 0) && !entryId) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'Cannot fork from this message because its native source position is unavailable');
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        'Cannot fork from this message because its native source position is unavailable',
+      );
     }
     return {
       ...(entryId ? { entryId } : {}),
@@ -1344,13 +1880,21 @@ export class ChatCommandService {
     }
   }
 
-  #throwOnConflict(
-    ledger: Awaited<ReturnType<CommandLedger['accept']>>,
-    message: string,
-  ): void {
+  #throwOnConflict(ledger: Awaited<ReturnType<CommandLedger['accept']>>, message: string): void {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', message, 409);
     }
+  }
+
+  #throwRecordedExecutionFailure(record: CommandLedgerRecord): void {
+    if (record.status !== 'failed' && record.status !== 'rejected') return;
+    const restarted = record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE;
+    throw new CommandValidationError(
+      restarted ? 'SERVER_RESTART_INTERRUPTED' : 'INTERNAL_ERROR',
+      record.error ?? 'The previous execution did not complete',
+      409,
+      false,
+    );
   }
 }
 

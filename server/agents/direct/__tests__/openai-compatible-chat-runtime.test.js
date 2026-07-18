@@ -2,16 +2,21 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { OpenAiCompatibleChatRuntime } from '../openai-compatible-chat-runtime.ts';
+import {
+  OpenAiCompatibleChatRuntime,
+  runOpenAiCompatibleSingleQuery,
+} from '../openai-compatible-chat-runtime.ts';
 
 const createdDirs = [];
 const originalFetch = globalThis.fetch;
 
-function streamResponse(content) {
+function streamResponse(...contents) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+      for (const content of contents) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+      }
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       controller.close();
     },
@@ -38,6 +43,12 @@ function runtimeConfig(dir) {
     getSessionDir: () => dir,
     getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
   };
+}
+
+function waitForMessages(runtime) {
+  return new Promise((resolve) => {
+    runtime.onMessages((_chatId, messages) => resolve(messages));
+  });
 }
 
 describe('OpenAiCompatibleChatRuntime', () => {
@@ -72,11 +83,12 @@ describe('OpenAiCompatibleChatRuntime', () => {
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
-      thinkingMode: 'none',
+      thinkingMode: 'max',
       claudeThinkingMode: 'auto',
     });
 
     expect(requestBody.model).toBe('selected-model');
+    expect(requestBody.reasoning_effort).toBe('max');
     expect(requestBody.messages).toEqual([
       { role: 'user', content: 'first message' },
       { role: 'assistant', content: 'first response' },
@@ -114,5 +126,144 @@ describe('OpenAiCompatibleChatRuntime', () => {
     await finished;
 
     expect(runningWhenFinished).toBe(false);
+  });
+
+  it('forwards the current interactive effort and removes it for Default', async () => {
+    const dir = await tempDir();
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      return streamResponse('done');
+    });
+    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig(dir));
+    const firstMessages = waitForMessages(runtime);
+
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+      claudeThinkingMode: 'auto',
+    });
+    await firstMessages;
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'second',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'low',
+      claudeThinkingMode: 'auto',
+    });
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'third',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    expect(requestBodies[0].reasoning_effort).toBe('high');
+    expect(requestBodies[1].reasoning_effort).toBe('low');
+    expect(requestBodies[2]).not.toHaveProperty('reasoning_effort');
+    expect(requestBodies.every((body) => body.stream === true)).toBe(true);
+  });
+
+  it('forwards explicit one-shot effort and omits provider Default', async () => {
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      return streamResponse('OK');
+    });
+
+    await runOpenAiCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'test', {
+      model: 'glm-5.2',
+      thinkingMode: 'max',
+      timeoutMs: 110_000,
+    });
+    await runOpenAiCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'test', {
+      model: 'glm-5.2',
+      thinkingMode: 'none',
+    });
+
+    expect(requestBodies[0]).toEqual({
+      model: 'glm-5.2',
+      messages: [{ role: 'user', content: 'test' }],
+      stream: true,
+      reasoning_effort: 'max',
+    });
+    expect(requestBodies[1]).not.toHaveProperty('reasoning_effort');
+    expect(requestBodies[1].stream).toBe(true);
+  });
+
+  it('aggregates streamed one-shot response chunks before returning', async () => {
+    globalThis.fetch = mock(async () => streamResponse('generated', ' message'));
+
+    const result = await runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+      { model: 'reasoning-model' },
+    );
+
+    expect(result).toBe('generated message');
+  });
+
+  it('accepts a buffered JSON response from providers that ignore streaming', async () => {
+    globalThis.fetch = mock(async () => Response.json({
+      choices: [{ message: { content: 'generated message' } }],
+    }));
+
+    const result = await runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+      { model: 'reasoning-model' },
+    );
+
+    expect(result).toBe('generated message');
+  });
+
+  it('surfaces a provider error from an empty one-shot stream', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ error: { message: 'request rejected' } })}\n\n`,
+        ));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    })));
+
+    await expect(runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+    )).rejects.toThrow('Direct (Chat Completions) stream error: request rejected');
+  });
+
+  it('rejects partial one-shot output followed by a provider stream error', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial' } }] })}\n\n`,
+        ));
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ error: { message: 'generation failed' } })}\n\n`,
+        ));
+        controller.close();
+      },
+    })));
+
+    await expect(runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+    )).rejects.toThrow('Direct (Chat Completions) stream error: generation failed');
   });
 });

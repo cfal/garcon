@@ -5,6 +5,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Button } from '$lib/components/ui/button';
 	import CodeEditor from './CodeEditor.svelte';
 	import MarkdownViewer from './MarkdownViewer.svelte';
@@ -18,6 +19,10 @@
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
+	import CopyFilePathButton from './CopyFilePathButton.svelte';
+	import FileFreshnessBanner from './FileFreshnessBanner.svelte';
+	import { startVisibilityPolling } from '$lib/components/shared/visibility-polling.js';
+	import { FILE_FRESHNESS_POLL_MS } from '$lib/files/sessions/file-freshness.js';
 
 	let {
 		session,
@@ -29,15 +34,16 @@
 	const files = getFileSessions();
 	const compact = $derived(presentation === 'sidebar' || presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
-		const actions: ResponsiveSurfaceAction[] = [
-			{
+		const actions: ResponsiveSurfaceAction[] = [];
+		if (presentation !== 'mobile') {
+			actions.push({
 				id: 'open-files',
 				label: m.file_session_open_files(),
 				icon: FolderOpen,
 				onclick: () => files.showOpenFiles(),
 				priority: 3,
-			},
-		];
+			});
+		}
 		if (session.contentKind === 'markdown') {
 			const showingMarkdown = session.rendererMode === 'markdown';
 			actions.push({
@@ -56,13 +62,32 @@
 				icon: session.saving ? LoaderCircle : Save,
 				iconClass: session.saving ? 'animate-spin' : undefined,
 				onclick: () => void files.save(session.id),
-				disabled: session.saving || !session.dirty,
+				disabled: session.loading || session.saving || session.refreshing || !session.dirty,
 				priority: 0,
 				showLabel: true,
 				variant: 'primary',
 			});
 		}
+		actions.push({
+			id: 'refresh-file',
+			label: m.file_session_refresh(),
+			icon: RefreshCw,
+			onclick: () => void files.refresh(session.id),
+			disabled: session.loading || session.saving,
+			busy: session.refreshing,
+			priority: 2,
+			iconClass: session.refreshing ? 'animate-spin' : undefined,
+		});
 		return actions;
+	});
+
+	$effect(() => {
+		const sessionId = session.id;
+		return startVisibilityPolling({
+			intervalMs: FILE_FRESHNESS_POLL_MS,
+			pollImmediately: true,
+			poll: () => void files.checkFreshness(sessionId),
+		});
 	});
 
 	function showMarkdown(): void {
@@ -87,6 +112,7 @@
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<h2 class="truncate text-sm font-medium text-foreground">{session.fileName}</h2>
+				<CopyFilePathButton path={session.relativePath} />
 				{#if session.dirty}<span
 						class="text-status-warning-foreground"
 						aria-label={m.file_session_unsaved()}>*</span
@@ -112,6 +138,15 @@
 			{/snippet}
 		</ResponsiveSurfaceActions>
 	</header>
+
+	{#if session.isExternallyStale || session.refreshError}
+		<FileFreshnessBanner
+			changed={session.isExternallyStale}
+			isRefreshing={session.refreshing}
+			refreshError={session.refreshError}
+			onRefresh={() => files.refresh(session.id)}
+		/>
+	{/if}
 
 	{#if session.saveError}
 		<div

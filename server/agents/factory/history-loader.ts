@@ -86,14 +86,14 @@ interface FactoryStoredMessageEvent {
   visibility?: string;
 }
 
-type FactoryStoredEvent = FactorySessionStartEvent | FactoryStoredMessageEvent;
+export type FactoryStoredEvent = FactorySessionStartEvent | FactoryStoredMessageEvent;
 
-interface FactoryStoredEventWithSource {
+export interface FactoryStoredEventWithSource {
   event: FactoryStoredEvent;
   source?: NativeMessageSource;
 }
 
-type FactoryStoredEventInput = FactoryStoredEvent | FactoryStoredEventWithSource;
+export type FactoryStoredEventInput = FactoryStoredEvent | FactoryStoredEventWithSource;
 
 export interface FactoryPreview {
   createdAt: string | null;
@@ -236,7 +236,7 @@ function normalizeFactoryStoredEventInput(input: FactoryStoredEventInput): Facto
 function getVisibleUserTextParts(content: FactoryContentPart[]): string[] {
   return content
     .filter((part): part is FactoryTextPart & { text: string } =>
-      part.type === 'text' && typeof part.text === 'string')
+      part.type === 'text' && 'text' in part && typeof part.text === 'string')
     .map((part) => part.text.trim())
     .filter((text) => text.length > 0 && !isFactorySystemReminderText(text));
 }

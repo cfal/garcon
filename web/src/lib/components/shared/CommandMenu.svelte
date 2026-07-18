@@ -102,13 +102,17 @@
 						? workspace.focusMobileSingleton('files')
 						: workspace.openSingleton('files', 'sidebar')),
 			},
-			{
-				id: 'workspace-open-files',
-				label: m.file_session_open_files(),
-				description: m.file_session_open_files_description(),
-				category: categories.workspace,
-				action: () => files.showOpenFiles(),
-			},
+			...(!workspace.isMobile
+				? [
+						{
+							id: 'workspace-open-files',
+							label: m.file_session_open_files(),
+							description: m.file_session_open_files_description(),
+							category: categories.workspace,
+							action: () => files.showOpenFiles(),
+						},
+					]
+				: []),
 			{
 				id: 'workspace-terminal',
 				label: m.command_switch_to_terminal(),
@@ -125,9 +129,7 @@
 							description: m.command_new_terminal_description(),
 							category: categories.workspace,
 							action: () =>
-								reportTerminalAction(
-									workspace.createTerminal('main', 'command-menu:new-terminal'),
-								),
+								reportTerminalAction(workspace.createTerminal('main', 'command-menu:new-terminal')),
 						},
 					]
 				: []),
@@ -265,7 +267,7 @@
 </script>
 
 {#if isOpen}
-	<div class="fixed inset-0 z-50 bg-foreground/50 backdrop-blur-sm" role="presentation">
+	<div class="fixed inset-0 z-50 transient-backdrop" role="presentation">
 		<button
 			class="absolute inset-0 w-full h-full cursor-default"
 			onclick={handleBackdropClick}
@@ -300,7 +302,7 @@
 					value={query}
 					oninput={handleQueryInput}
 					placeholder={m.command_placeholder()}
-					class="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+					class="flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
 					type="text"
 				/>
 				<kbd

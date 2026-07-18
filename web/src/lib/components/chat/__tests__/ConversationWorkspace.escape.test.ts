@@ -6,18 +6,21 @@ import { getChatMessages, getChatQueue, stopChat } from '$lib/api/chats.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	compactChat: vi.fn(),
-	dequeueChatMessage: vi.fn(),
-	enqueueChatMessage: vi.fn(),
+	createQueuedInput: vi.fn(),
+	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
 	getChatMessages: vi.fn(),
-	getChatQueue: vi.fn(),
+		getChatQueue: vi.fn(),
+		interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
+	sendActiveInput: vi.fn(),
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
 	stopChat: vi.fn(),
+	replaceQueuedInput: vi.fn(),
 	updateChatModel: vi.fn(),
 	updateExecutionSettings: vi.fn(),
 }));
@@ -48,6 +51,10 @@ vi.mock('$lib/components/chat/QueueControls.svelte', async () => ({
 	default: (await import('./GenericStub.svelte')).default,
 }));
 
+vi.mock('$lib/components/chat/QueuedInputsDialog.svelte', async () => ({
+	default: (await import('./GenericStub.svelte')).default,
+}));
+
 vi.mock('$lib/components/chat/SubagentManagementBar.svelte', async () => ({
 	default: (await import('./GenericStub.svelte')).default,
 }));
@@ -73,7 +80,11 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			chatId: 'chat-1',
 			queue: {
 				entries: [],
-				paused: false,
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: null,
+				version: 0,
+				updatedAt: null,
 			},
 		});
 		mockStopChat.mockResolvedValue({
@@ -83,6 +94,14 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			clientRequestId: 'cmd-stop',
 			status: 'accepted',
 			acceptedAt: '2026-01-01T00:00:00.000Z',
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: null,
+				version: 0,
+				updatedAt: null,
+			},
 		});
 	});
 

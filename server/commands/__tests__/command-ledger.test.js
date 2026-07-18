@@ -4,7 +4,10 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 
-import { CommandLedger } from '../command-ledger.js';
+import {
+  CommandLedger,
+  SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+} from '../command-ledger.js';
 
 let workspaceDir;
 
@@ -85,6 +88,130 @@ describe('CommandLedger', () => {
 
     expect(duplicate.kind).toBe('duplicate');
     expect(duplicate.record.turnId).toBe('turn-original');
+  });
+
+  it('stores attachment digests instead of base64 while preserving idempotency', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const image = {
+      name: 'large.png',
+      mimeType: 'image/png',
+      data: `data:image/png;base64,${'a'.repeat(20_000)}`,
+    };
+
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-image',
+      payload: { command: 'inspect', images: [image] },
+    });
+    const duplicate = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-image',
+      payload: { command: 'inspect', images: [image] },
+    });
+
+    const raw = await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8');
+    expect(raw).not.toContain(image.data);
+    expect(duplicate.kind).toBe('duplicate');
+    expect(duplicate.record.payload.images[0]).toMatchObject({
+      name: 'large.png',
+      mimeType: 'image/png',
+      dataLength: image.data.length,
+      dataSha256: expect.any(String),
+    });
+  });
+
+  it('fails interrupted execution records when a new process loads the ledger', async () => {
+    const first = new CommandLedger(workspaceDir);
+    const accepted = await first.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-interrupted',
+      payload: { command: 'long turn' },
+    });
+    await first.update(accepted.record.key, { status: 'scheduled' });
+
+    const second = new CommandLedger(workspaceDir);
+    const duplicate = await second.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-interrupted',
+      payload: { command: 'long turn' },
+    });
+
+    expect(duplicate).toMatchObject({
+      kind: 'duplicate',
+      record: {
+        status: 'failed',
+        errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      },
+    });
+    expect(await second.listPendingInputRecoveries()).toEqual([
+      expect.objectContaining({
+        commandType: 'agent-run',
+        clientRequestId: 'req-interrupted',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+
+    await expect(
+      second.settlePendingInputRecovery('chat-1', 'req-interrupted'),
+    ).resolves.toBe(true);
+    const third = new CommandLedger(workspaceDir);
+    await expect(third.listPendingInputRecoveries()).resolves.toEqual([]);
+  });
+
+  it('does not trim unresolved restart recovery records', async () => {
+    const recoveryRecord = {
+      ...makeLedgerRecord(-1),
+      key: 'agent-run:chat-1:req-recovery',
+      clientRequestId: 'req-recovery',
+      status: 'failed',
+      errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      pendingInputRecovery: 'required',
+    };
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({
+        version: 1,
+        records: [recoveryRecord, ...Array.from({ length: 1000 }, (_, index) => makeLedgerRecord(index))],
+      }),
+      'utf8',
+    );
+
+    const ledger = new CommandLedger(workspaceDir);
+    const recovery = await ledger.listPendingInputRecoveries();
+
+    expect(recovery).toEqual([
+      expect.objectContaining({ clientRequestId: 'req-recovery', pendingInputRecovery: 'required' }),
+    ]);
+    const persisted = JSON.parse(await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8'));
+    expect(persisted.records).toHaveLength(1000);
+    expect(persisted.records.some((record) => record.clientRequestId === 'req-recovery')).toBe(true);
+  });
+
+  it('migrates legacy live-failed user inputs into durable recovery', async () => {
+    const failed = {
+      ...makeLedgerRecord(1),
+      status: 'failed',
+      error: 'provider failed before persistence',
+    };
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({ version: 1, records: [failed] }),
+      'utf8',
+    );
+
+    const recovery = await new CommandLedger(workspaceDir).listPendingInputRecoveries();
+
+    expect(recovery).toEqual([
+      expect.objectContaining({
+        clientRequestId: failed.clientRequestId,
+        status: 'failed',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
   });
 
   it('returns conflict when a clientRequestId is reused for different payload', async () => {

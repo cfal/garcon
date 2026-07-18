@@ -134,7 +134,15 @@ function baseRuntime(overrides = {}) {
   };
 }
 
-function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery, prepareEndpointRuntime) {
+function agentFromRuntime(
+  id,
+  label,
+  runtime,
+  capabilities,
+  runSingleQuery,
+  prepareEndpointRuntime,
+  transcript = {},
+) {
   return {
     id,
     label,
@@ -142,6 +150,7 @@ function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery, prep
     transcript: {
       async loadMessages() { return []; },
       async getPreview() { return null; },
+      ...transcript,
     },
     auth: {
       getAuthStatus: async () => ({
@@ -361,6 +370,38 @@ function makeRegistry(args = {}) {
     pi,
   };
 }
+
+describe('AgentRegistry fork transcript rewriting', () => {
+  it('delegates structured entries to the owning transcript source', () => {
+    const rewritten = { sessionId: 'target' };
+    const rewriteForkTranscriptEntry = mock(() => rewritten);
+    const owner = agentFromRuntime(
+      'fork-test',
+      'Fork Test',
+      baseRuntime(),
+      {
+        supportsFork: true,
+        supportsImages: false,
+        acceptsApiProviderEndpoints: false,
+        supportedProtocols: [],
+        authLoginSupported: false,
+      },
+      undefined,
+      undefined,
+      { rewriteForkTranscriptEntry },
+    );
+    const { registry } = makeRegistry({ agents: [owner] });
+    const entry = { sessionId: 'source' };
+    const context = {
+      sourceAgentSessionId: 'source',
+      targetAgentSessionId: 'target',
+    };
+
+    expect(registry.rewriteForkTranscriptEntry('fork-test', entry, context)).toBe(rewritten);
+    expect(rewriteForkTranscriptEntry).toHaveBeenCalledWith(entry, context);
+    expect(registry.rewriteForkTranscriptEntry('missing-agent', entry, context)).toBe(entry);
+  });
+});
 
 describe('AgentRegistry.runSingleQuery', () => {
   beforeEach(() => {
@@ -593,6 +634,66 @@ describe('AgentRegistry session option hydration', () => {
       images: undefined,
       chatId: '123',
     });
+  });
+
+  it('forwards current Direct effort through start, resume, overrides, and compact fallback', async () => {
+    let entry = {
+      agentId: 'direct-openai-compatible',
+      projectPath: '/proj',
+      model: 'reasoning-model',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    };
+    const getChat = mock(() => entry);
+    const updateChat = mock((_chatId, patch) => {
+      entry = { ...entry, ...patch };
+      return entry;
+    });
+    const directRuntime = baseRuntime({
+      startSession: mock(() => Promise.resolve({
+        agentSessionId: 'direct-session',
+        nativePath: '/tmp/direct-session.jsonl',
+      })),
+    });
+    const directAgent = agentFromRuntime(
+      'direct-openai-compatible',
+      'Direct (Chat Completions)',
+      directRuntime,
+      {
+        supportsFork: false,
+        supportsImages: true,
+        acceptsApiProviderEndpoints: true,
+        supportedProtocols: ['openai-compatible'],
+        authLoginSupported: false,
+      },
+    );
+    const { registry } = makeRegistry({
+      registry: { getChat, updateChat },
+      agents: [directAgent],
+    });
+
+    await registry.startSession('chat-1', 'first', {});
+    expect(directRuntime.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      thinkingMode: 'high',
+    }));
+
+    await registry.updateSessionSettings('chat-1', { thinkingMode: 'low' });
+    expect(updateChat).toHaveBeenCalledWith('chat-1', { thinkingMode: 'low' });
+
+    await registry.runAgentTurn('chat-1', 'second', {});
+    await registry.runAgentTurn('chat-1', 'third', { thinkingMode: 'medium' });
+    await registry.compactSession('chat-1');
+    await registry.runAgentTurn('chat-1', 'fourth', { thinkingMode: 'ultra' });
+
+    expect(directRuntime.runTurn.mock.calls.map((call) => ({
+      command: call[0].command,
+      thinkingMode: call[0].thinkingMode,
+    }))).toEqual([
+      { command: 'second', thinkingMode: 'low' },
+      { command: 'third', thinkingMode: 'medium' },
+      { command: '/compact', thinkingMode: 'low' },
+      { command: 'fourth', thinkingMode: 'none' },
+    ]);
   });
 
   it('stores API provider selection metadata after session startup', async () => {

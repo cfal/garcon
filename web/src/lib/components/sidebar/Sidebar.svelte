@@ -13,6 +13,7 @@
 		getReadReceiptOutbox,
 		getSidebarProjectCollapse,
 		getSidebarSearch,
+		getRemoteSettings,
 	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
@@ -21,6 +22,7 @@
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
+	import { transcriptSearchFacetSignature } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SavedChatSearch } from '$lib/api/settings';
@@ -86,6 +88,7 @@
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const projectCollapse = getSidebarProjectCollapse();
 	const sidebarSearch = getSidebarSearch();
+	const remoteSettings = getRemoteSettings();
 	const controller = new SidebarController({
 		get onQuietRefresh() {
 			return onQuietRefresh;
@@ -100,12 +103,20 @@
 	let isBulkOperating = $state(false);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
+	let transcriptSearchRetryVersion = $state(0);
 	let displayOptions = $derived<SidebarDisplayOptions>({
 		groupByProject: localSettings.sidebarGroupByProject,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		compactChatItems: localSettings.sidebarCompactChatItems,
 		sortMode: localSettings.sidebarSortMode,
 	});
+	let transcriptSearchTarget = $derived(
+		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
+	);
+	let transcriptSearchChatSignature = $derived(transcriptSearchFacetSignature(chats));
+	let transcriptSearchEnabled = $derived(
+		remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
+	);
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
@@ -156,6 +167,27 @@
 			clearTimeout(timeoutId);
 			if (intervalId) clearInterval(intervalId);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
+		};
+	});
+
+	$effect(() => {
+		const query = transcriptSearchTarget;
+		const enabled = transcriptSearchEnabled;
+		transcriptSearchChatSignature;
+		transcriptSearchRetryVersion;
+		if (!enabled || !query.trim()) {
+			sidebarSearch.clearTranscriptSearch();
+			return;
+		}
+
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => {
+			void sidebarSearch.refreshTranscriptSearch(query, { signal: controller.signal });
+		}, 150);
+
+		return () => {
+			clearTimeout(timeoutId);
+			controller.abort();
 		};
 	});
 
@@ -544,8 +576,14 @@
 <SidebarSearchDialog
 	open={sidebarSearch.searchDialogOpen}
 	query={sidebarSearch.draftQuery}
-	filteredChats={sidebarSearch.dialogFilteredChats}
+	filteredChats={sidebarSearch.dialogDisplayChats}
 	savedSearches={sidebarSearch.searchDialogSavedSearches}
+	transcriptMatchesByChatId={sidebarSearch.transcriptSearchResultsByChatId}
+	{transcriptSearchEnabled}
+	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
+	transcriptSearchIndexing={sidebarSearch.transcriptSearchIndexing}
+	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}
+	transcriptSearchError={sidebarSearch.transcriptSearchError}
 	{currentTime}
 	highlightedIndex={sidebarSearch.highlightedResultIndex}
 	onQueryChange={(q) => sidebarSearch.updateDraftQuery(q)}
@@ -555,6 +593,9 @@
 	onCreateSavedSearch={() => sidebarSearch.openEditorForCreateFromSearchDialog()}
 	onHighlightChange={(i) => {
 		sidebarSearch.highlightedResultIndex = i;
+	}}
+	onRetryTranscriptSearch={() => {
+		transcriptSearchRetryVersion += 1;
 	}}
 	onClose={() => sidebarSearch.closeSearchDialog()}
 />

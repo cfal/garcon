@@ -1,5 +1,5 @@
 import { getProjectBasePath } from '../config.js';
-import { resolveGenerationContext } from '../settings/generation-config-source.ts';
+import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { sortedPinnedProjectPaths } from '../settings/startup-recents.js';
@@ -13,8 +13,15 @@ import type { TelegramSettingsStore, TelegramPublicStatus } from '../notificatio
 import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
-import type { RemoteSettingsSnapshot, RemoteUiEffectiveSettings } from '../../common/settings.js';
+import {
+  DEFAULT_REMOTE_FEATURE_SETTINGS,
+  type RemoteSettingsSnapshot,
+  type RemoteUiEffectiveSettings,
+} from '../../common/settings.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
+import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
+import { isGenerationTestTarget } from '../../common/generation-test-contracts.js';
+import { testGenerationModel } from '../settings/generation-model-test.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -62,28 +69,32 @@ export async function buildRemoteSettingsSnapshot({
   telegramSettings?: TelegramSettingsStore | null;
 }): Promise<RemoteSettingsSnapshot> {
   const settingsSource = settings.getRemoteSettingsSnapshotSource();
-  const generationContext = await resolveGenerationContext(agents);
-
   const version = settingsSource.version;
+  const features = settingsSource.features ?? structuredClone(DEFAULT_REMOTE_FEATURE_SETTINGS);
   const ui = normalizeUiSettings(settingsSource.ui);
   const paths = settingsSource.paths;
   const pinnedChatIds = settingsSource.pinnedChatIds;
   const recentAgentSettings = settingsSource.recentAgentSettings;
   const executionDefaults = settingsSource.executionDefaults;
+  const [chatTitleContext, commitMessageContext] = await resolveGenerationContextsForSelections(
+    agents,
+    [ui?.chatTitle, ui?.commitMessage],
+  );
 
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
-      ...generationContext,
+      ...chatTitleContext,
     }),
     commitMessage: resolveCommitMessageUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
-      ...generationContext,
+      ...commitMessageContext,
     }),
   };
 
   return {
     version,
+    features,
     ui: asPlainObject(ui),
     uiEffective,
     paths: {
@@ -115,7 +126,25 @@ export default function createWorkspaceRoutes(
   telegramNotifier: TelegramNotifier,
   telegramSettings: TelegramSettingsStore,
   registry?: Pick<IChatRegistry, 'getChat'>,
+  transcriptSearchSettings?: {
+    setEnabled(enabled: boolean): Promise<void>;
+  },
 ): RouteMap {
+
+  function transcriptSearchEnabledPatch(input: Record<string, unknown>): boolean | undefined | null {
+    if (!('features' in input)) return undefined;
+    const features = input.features;
+    if (!features || typeof features !== 'object' || Array.isArray(features)) return null;
+    const featureRecord = features as Record<string, unknown>;
+    if (!('transcriptSearch' in featureRecord)) return undefined;
+    const transcriptSearch = featureRecord.transcriptSearch;
+    if (!transcriptSearch || typeof transcriptSearch !== 'object' || Array.isArray(transcriptSearch)) {
+      return null;
+    }
+    const transcriptRecord = transcriptSearch as Record<string, unknown>;
+    if (!('enabled' in transcriptRecord) || typeof transcriptRecord.enabled !== 'boolean') return null;
+    return transcriptRecord.enabled;
+  }
 
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -170,6 +199,22 @@ export default function createWorkspaceRoutes(
     try {
       const input = asJsonBody(body);
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
+      const transcriptSearchEnabled = transcriptSearchEnabledPatch(input);
+      if (transcriptSearchEnabled === null) {
+        return jsonError(
+          'features.transcriptSearch.enabled must be a boolean',
+          400,
+          'INVALID_REMOTE_SETTINGS',
+          false,
+        );
+      }
+      if (transcriptSearchEnabled !== undefined) {
+        if (transcriptSearchSettings) {
+          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled);
+        } else {
+          await settings.setTranscriptSearchEnabled(transcriptSearchEnabled);
+        }
+      }
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);
       }
@@ -181,6 +226,9 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
+      if (error instanceof TranscriptSearchSettingsError) {
+        return jsonError(error.message, 500, error.code, false);
+      }
       if (error instanceof AppTitleValidationError) {
         return Response.json({
           success: false,
@@ -189,6 +237,38 @@ export default function createWorkspaceRoutes(
         }, { status: error.status });
       }
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+    }
+  }
+
+  async function postGenerationModelTest(body: JsonBody, request: Request): Promise<Response> {
+    const input = asJsonBody(body);
+    if (!isGenerationTestTarget(input.target)) {
+      return jsonError(
+        'Invalid generation test target.',
+        400,
+        'GENERATION_TEST_INVALID_TARGET',
+        false,
+      );
+    }
+    if (typeof input.configurationKey !== 'string' || input.configurationKey.length > 2_048) {
+      return jsonError(
+        'Invalid generation test configuration.',
+        400,
+        'GENERATION_TEST_INVALID_CONFIGURATION',
+        false,
+      );
+    }
+
+    try {
+      return Response.json(await testGenerationModel({
+        target: input.target,
+        configurationKey: input.configurationKey,
+        settings,
+        agents,
+        signal: request.signal,
+      }));
+    } catch (error) {
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -526,6 +606,7 @@ export default function createWorkspaceRoutes(
   return {
     '/api/v1/app/session-name': { PUT: withJsonBody(putSessionNameHandler) },
     '/api/v1/app/settings': { GET: getAppSettings, PUT: withJsonBody(putAppSettings) },
+    '/api/v1/app/generation/test': { POST: withJsonBody(postGenerationModelTest) },
     '/api/v1/app/telegram/test': { POST: postTelegramTest },
     '/api/v1/app/telegram/token/test': { POST: withJsonBody(postTelegramTokenTest) },
     '/api/v1/app/telegram/token': { PUT: withJsonBody(putTelegramToken), DELETE: deleteTelegramToken },

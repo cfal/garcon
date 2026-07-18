@@ -99,6 +99,7 @@ export type ChatRegistryResolvedEntry = { id: string } & ChatRegistryEntry;
 export interface ChatRegistryUpdateOptions {
   flush?: boolean;
 }
+export type ChatAddedCallback = (chatId: string) => void;
 export type ChatRemovedCallback = (chatId: string) => void;
 export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
 export type ChatProjectPathUpdatedCallback = (payload: ChatProjectPathUpdatedPayload) => void;
@@ -126,6 +127,7 @@ export interface IChatRegistry {
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
   saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
   flush(): Promise<void>;
+  onChatAdded(cb: ChatAddedCallback): void;
   onChatRemoved(cb: ChatRemovedCallback): void;
   onChatReadUpdated(cb: ChatReadUpdatedCallback): void;
   onChatProjectPathUpdated(cb: ChatProjectPathUpdatedCallback): void;
@@ -253,6 +255,9 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     this.#workspaceDir = workspaceDir;
   }
 
+  #emitChatAdded(id: string): void { this.emit('chat-added', id); }
+  onChatAdded(cb: ChatAddedCallback): void { this.on('chat-added', cb); }
+
   #emitChatRemoved(id: string): void { this.emit('chat-removed', id); }
   onChatRemoved(cb: ChatRemovedCallback): void { this.on('chat-removed', cb); }
 
@@ -348,8 +353,8 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       try {
         resolvedPath = await resolveNativePath(session);
       } catch (error) {
-        logger.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
-        break;
+        logger.warn(`sessions: nativePath reconciliation failed for ${chatId}:`, (error as Error).message);
+        continue;
       }
       if (!resolvedPath) {
         logger.warn(`sessions: preserving chat ${chatId} with unresolved nativePath`);
@@ -423,6 +428,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       ...normalizedModes,
     };
     this.#setAgentSessionIdIndex(chatId, agentSessionId);
+    this.#emitChatAdded(chatId);
     this.#scheduleRegistrySave();
     return true;
   }

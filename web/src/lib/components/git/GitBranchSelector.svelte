@@ -140,12 +140,6 @@
 			menuClass,
 		),
 	);
-	const searchInputClass = $derived(
-		cn(
-			'w-full rounded border border-border bg-background py-1.5 pl-7 pr-2 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent',
-			isMobile ? 'text-[16px] leading-6' : 'text-xs',
-		),
-	);
 	const switchBranchTitle = $derived(
 		pendingSwitchRef
 			? `${pendingSwitchRef.kind === 'local-branch' ? m.git_branch_switch_title_before() : m.git_ref_checkout_title_before()}${pendingSwitchRef.name}${m.git_branch_switch_title_after()}`
@@ -292,7 +286,10 @@
 				scheduleRefSearch(searchQuery);
 			}}
 			placeholder={m.git_branch_selector_find_ref()}
-			class={searchInputClass}
+			class={cn(
+				'w-full rounded border border-border bg-background py-1.5 pl-7 pr-2 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent',
+				isMobile ? 'leading-6' : 'sm:pointer-fine:text-xs',
+			)}
 			aria-label={m.git_branch_selector_find_ref_label()}
 			role="combobox"
 			aria-controls={listboxId}

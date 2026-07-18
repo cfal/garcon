@@ -23,6 +23,7 @@ import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
 import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte';
+import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte';
 import type { WorkspaceLayoutReader } from '$lib/workspace/surface-types';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
@@ -53,6 +54,7 @@ export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 	createContext<SidebarProjectCollapseStore>();
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();
 export const [getScheduledPrompts, setScheduledPrompts] = createContext<ScheduledPromptsStore>();
+export const [getSnippets, setSnippets] = createContext<SnippetsStore>();
 export const [getWorkspaceLayout, setWorkspaceLayout] = createContext<WorkspaceLayoutReader>();
 export const [getWorkspaceContext, setWorkspaceContext] = createContext<WorkspaceContextStore>();
 export const [getTerminalRegistry, setTerminalRegistry] = createContext<TerminalRegistry>();

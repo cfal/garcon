@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import SidebarSearchResultRow from './SidebarSearchResultRow.svelte';
@@ -8,19 +9,24 @@
 		SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD,
 	} from './sidebar-search-results';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchResultsProps {
 		filteredChats: ChatSessionRecord[];
+		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
 		currentTime: Date;
 		highlightedIndex: number;
+		highlightRevealVersion?: number;
 		onSelectChat: (chatId: string) => void;
 		onHighlightChange: (index: number) => void;
 	}
 
 	let {
 		filteredChats,
+		transcriptMatchesByChatId = new Map(),
 		currentTime,
 		highlightedIndex,
+		highlightRevealVersion = 0,
 		onSelectChat,
 		onHighlightChange,
 	}: SidebarSearchResultsProps = $props();
@@ -48,21 +54,21 @@
 			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat)),
 	);
 
-	function scrollHighlightedIntoView(): void {
+	function scrollHighlightedIntoView(targetIndex: number, virtualResults: boolean): void {
 		if (filteredChats.length === 0) return;
 
-		if (!useVirtualResults) {
-			if (highlightedIndex <= 0 && viewportRef) {
+		if (!virtualResults) {
+			if (targetIndex <= 0 && viewportRef) {
 				viewportRef.scrollTop = 0;
 			}
 			const item = viewportRef?.querySelector<HTMLElement>(
-				`[data-search-index="${highlightedIndex}"]`,
+				`[data-search-index="${targetIndex}"]`,
 			);
 			item?.scrollIntoView({ block: 'nearest' });
 			return;
 		}
 
-		virtualWindow.scrollIndexIntoView(highlightedIndex);
+		virtualWindow.scrollIndexIntoView(targetIndex);
 	}
 
 	$effect(() => {
@@ -76,11 +82,18 @@
 
 	$effect(() => {
 		filteredChats;
-		highlightedIndex;
+		highlightRevealVersion;
+		const targetIndex = untrack(() => highlightedIndex);
+		const virtualResults = useVirtualResults;
+		let active = true;
 		const frame = requestAnimationFrame(() => {
-			scrollHighlightedIntoView();
+			if (!active) return;
+			scrollHighlightedIntoView(targetIndex, virtualResults);
 		});
-		return () => cancelAnimationFrame(frame);
+		return () => {
+			active = false;
+			cancelAnimationFrame(frame);
+		};
 	});
 </script>
 
@@ -110,6 +123,7 @@
 						<SidebarSearchResultRow
 							chat={entry.chat}
 							index={entry.index}
+							transcriptMatch={transcriptMatchesByChatId.get(entry.chat.id)}
 							{currentTime}
 							isHighlighted={entry.index === highlightedIndex}
 							{onSelectChat}
@@ -123,23 +137,29 @@
 							</div>
 						{/snippet}
 					</svelte:boundary>
+					<div
+						class="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border"
+						aria-hidden="true"
+						data-search-dialog-row-separator
+					></div>
 				</div>
 			{/each}
 		</div>
 	{:else}
-		<div role="listbox">
+		<div role="listbox" class="divide-y divide-border">
 			{#each filteredChats as chat, index (chat.id)}
 				<svelte:boundary>
 					<SidebarSearchResultRow
 						{chat}
 						{index}
+						transcriptMatch={transcriptMatchesByChatId.get(chat.id)}
 						{currentTime}
 						isHighlighted={index === highlightedIndex}
 						{onSelectChat}
 						{onHighlightChange}
 					/>
 					{#snippet failed()}
-						<div class="border-b border-border px-3 py-2.5 text-sm text-muted-foreground">
+						<div class="px-3 py-2.5 text-sm text-muted-foreground">
 							{chat.title || m.sidebar_chats_unnamed()}
 						</div>
 					{/snippet}

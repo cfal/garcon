@@ -39,6 +39,7 @@ import {
 } from '$lib/chat/project-paths/project-pinned-paths.js';
 import { savePinnedProjectPathsOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export class NewChatFormState {
@@ -57,6 +58,8 @@ export class NewChatFormState {
 	validationError = $state<string | null>(null);
 	#validationTimer: ReturnType<typeof setTimeout> | null = null;
 	#validationRequestVersion = 0;
+	#worktreeRequestVersion = 0;
+	#worktreeAbort: AbortController | null = null;
 
 	// Modes
 	permissionMode = $state<PermissionMode>('default');
@@ -260,25 +263,51 @@ export class NewChatFormState {
 	closeWorktreeModal(): void {
 		this.worktreeModalOpen = false;
 		this.worktreeError = null;
+		this.#cancelWorktreeLoad();
 	}
 
 	async loadWorktrees(): Promise<void> {
-		if (!this.trimmedPath) return;
+		const projectPath = this.trimmedPath;
+		if (!projectPath) return;
+
+		this.#worktreeAbort?.abort();
+		const abort = new AbortController();
+		this.#worktreeAbort = abort;
+		const requestVersion = ++this.#worktreeRequestVersion;
 		this.isLoadingWorktrees = true;
 		this.worktreeError = null;
 
 		try {
-			const result = await getGitWorktrees(this.trimmedPath);
+			const result = await getGitWorktrees(projectPath, { signal: abort.signal });
+			if (!this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) return;
 			this.worktreeItems = result.worktrees;
-		} catch {
+		} catch (error) {
+			if (isAbortError(error) || !this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) {
+				return;
+			}
 			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktreeItems = [];
 		} finally {
-			this.isLoadingWorktrees = false;
+			if (this.#isCurrentWorktreeLoad(requestVersion, abort.signal)) {
+				this.#worktreeAbort = null;
+				this.isLoadingWorktrees = false;
+			}
 		}
 	}
 
+	#cancelWorktreeLoad(): void {
+		this.#worktreeAbort?.abort();
+		this.#worktreeAbort = null;
+		this.#worktreeRequestVersion += 1;
+		this.isLoadingWorktrees = false;
+	}
+
+	#isCurrentWorktreeLoad(requestVersion: number, signal: AbortSignal): boolean {
+		return !signal.aborted && requestVersion === this.#worktreeRequestVersion;
+	}
+
 	selectWorktree(worktreePath: string): void {
+		this.#cancelWorktreeLoad();
 		this.projectPath = worktreePath;
 		this.worktreeModalOpen = false;
 		this.clearError();

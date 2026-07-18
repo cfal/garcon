@@ -390,6 +390,26 @@ describe('event router integration', () => {
 		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 	});
 
+	it('applies content-free pending input status updates', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'pending-user-input-status-updated',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					deliveryStatus: 'failed',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.updatePendingUserInputDeliveryStatus)
+			.toHaveBeenCalledWith('req-1', 'failed');
+		expect(stores.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+	});
+
 	it('flushes queued messages before handling selected generation reset', () => {
 		const calls: string[] = [];
 		const defaults = createStores();

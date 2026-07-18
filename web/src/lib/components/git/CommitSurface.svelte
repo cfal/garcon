@@ -277,9 +277,9 @@
 					}}
 					placeholder={m.git_commit_message_placeholder()}
 					rows={isMobile ? 3 : 5}
-					class="resize-none rounded-md border border-border bg-muted/30 p-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {isMobile
-						? 'h-20 min-h-20'
-						: 'min-h-20 flex-1'}"></textarea>
+					class="resize-none rounded-md border border-border bg-muted/30 p-3 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {isMobile
+						? 'h-20 min-h-20 text-base leading-6'
+						: 'min-h-20 flex-1 text-sm'}"></textarea>
 
 				<div class={actionBarClass}>
 					<button

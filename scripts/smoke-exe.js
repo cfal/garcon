@@ -1,10 +1,25 @@
 #!/usr/bin/env bun
 
 import path from 'node:path';
+import os from 'node:os';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
-const STARTUP_TIMEOUT_MS = 15000;
-const SHUTDOWN_TIMEOUT_MS = 5000;
+const STARTUP_TIMEOUT_MS = 45000;
+const SHUTDOWN_TIMEOUT_MS = 15000;
+const SMOKE_CHAT_ID = '1767225600000000';
+const SMOKE_ISOLATION_ENV_KEYS = new Set([
+  'GARCON_CONFIG_DIR',
+  'GARCON_WORKSPACE_DIR',
+  'GARCON_WORKSPACE',
+  'GARCON_PORT',
+  'GARCON_BIND_ADDRESS',
+  'GARCON_PROJECT_BASE_DIR',
+  'GARCON_DISABLE_AUTH',
+  'DISABLE_AUTH',
+  'PI_PACKAGE_DIR',
+  'GARCON_EMBEDDED_PI_PACKAGE_DIR',
+]);
 const executableNamesByHost = {
   'linux-x64': 'garcon-linux-x64',
   'darwin-arm64': 'garcon-darwin-arm64',
@@ -15,9 +30,16 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isolatedServerEnvironment() {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (SMOKE_ISOLATION_ENV_KEYS.has(key.toUpperCase())) delete environment[key];
+  }
+  return environment;
+}
+
 async function waitForServerUrl(processHandle) {
   let output = '';
-  const decoder = new TextDecoder();
   let resolveStarted;
   let rejectStarted;
   const startedPromise = new Promise((resolve, reject) => {
@@ -36,6 +58,7 @@ async function waitForServerUrl(processHandle) {
   const pump = async (stream) => {
     const reader = stream?.getReader();
     if (!reader) return;
+    const decoder = new TextDecoder();
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -65,7 +88,7 @@ async function waitForServerUrl(processHandle) {
   const url = await Promise.race([startedPromise, timeoutPromise, exitPromise]);
   await Promise.race([stdoutPump, delay(50)]);
   await Promise.race([stderrPump, delay(50)]);
-  return { url, output };
+  return { url, getOutput: () => output };
 }
 
 async function stopProcess(processHandle) {
@@ -77,6 +100,35 @@ async function stopProcess(processHandle) {
       return processHandle.exited;
     }),
   ]);
+}
+
+async function waitForTranscriptResult(url, token, chatId, getServerOutput) {
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  let lastStatus = 0;
+  let lastBody = '';
+  while (Date.now() < deadline) {
+    const response = await fetch(`${url}/api/v1/chats/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: token }),
+    });
+    lastStatus = response.status;
+    lastBody = await response.text();
+    if (response.ok) {
+      let body = null;
+      try {
+        body = JSON.parse(lastBody);
+      } catch {
+        // The final diagnostic retains a malformed response body.
+      }
+      if (body?.results?.some((result) => result.chatId === chatId)) return;
+    }
+    await delay(50);
+  }
+  throw new Error(
+    `Transcript search did not return ${chatId}; last status was ${lastStatus}; `
+      + `last body was ${lastBody || '<empty>'}. Captured output:\n${getServerOutput()}`,
+  );
 }
 
 function getHostTarget() {
@@ -115,14 +167,59 @@ async function run() {
     throw new Error(`Missing executable at ${executablePath}. Run "bun run build-exe:compile" first.`);
   }
 
-  const child = Bun.spawn({
-    cmd: [executablePath, '--port', '0', '--bind-address', '127.0.0.1'],
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-exe-smoke-'));
+  const spawnServer = () => Bun.spawn({
+    cmd: [
+      executablePath,
+      '--port',
+      '0',
+      '--bind-address',
+      '127.0.0.1',
+      '--disable-auth',
+      '--workspace-dir',
+      workspaceDir,
+      '--project-base-dir',
+      workspaceDir,
+    ],
+    env: isolatedServerEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });
 
-  let started;
+  let child = spawnServer();
   try {
+    let started = await waitForServerUrl(child);
+
+    if (await Bun.file(path.join(workspaceDir, 'chat-search-v3.sqlite')).exists()) {
+      throw new Error('Default-off executable unexpectedly created a transcript search database.');
+    }
+    await stopProcess(child);
+
+    await writeFile(
+      path.join(workspaceDir, 'project-settings.json'),
+      JSON.stringify({ features: { transcriptSearch: { enabled: true } } }),
+    );
+    const transcriptPath = path.join(workspaceDir, 'smoke-claude.jsonl');
+    await writeFile(transcriptPath, `${JSON.stringify({
+      sessionId: 'smoke-session',
+      uuid: 'smoke-user-message',
+      type: 'user',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      message: { role: 'user', content: 'embeddedworkertoken' },
+    })}\n`);
+    await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
+      version: 2,
+      sessions: {
+        [SMOKE_CHAT_ID]: {
+          agentId: 'claude',
+          agentSessionId: 'smoke-session',
+          nativePath: transcriptPath,
+          projectPath: workspaceDir,
+          model: 'fable',
+        },
+      },
+    }));
+    child = spawnServer();
     started = await waitForServerUrl(child);
 
     const rootResponse = await fetch(`${started.url}/`);
@@ -144,8 +241,30 @@ async function run() {
     if (!assetResponse.ok) {
       throw new Error(`Expected GET ${appAssetMatch[0]} to succeed, received ${assetResponse.status}`);
     }
+
+    if (!(await Bun.file(path.join(workspaceDir, 'chat-search-v3.sqlite')).exists())) {
+      throw new Error('Enabled executable did not start the embedded transcript search worker.');
+    }
+
+    await waitForTranscriptResult(
+      started.url,
+      'embeddedworkertoken',
+      SMOKE_CHAT_ID,
+      started.getOutput,
+    );
+    await stopProcess(child);
+
+    child = spawnServer();
+    started = await waitForServerUrl(child);
+    await waitForTranscriptResult(
+      started.url,
+      'embeddedworkertoken',
+      SMOKE_CHAT_ID,
+      started.getOutput,
+    );
   } finally {
     await stopProcess(child);
+    await rm(workspaceDir, { recursive: true, force: true });
   }
 
   console.log(`Smoke check passed for ${executablePath}`);

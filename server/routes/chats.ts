@@ -10,11 +10,11 @@ import {
   normalizePermissionMode,
   normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
-import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
-import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
+import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
+import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
-import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.ts';
+import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,
@@ -29,11 +29,8 @@ import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-error.js';
 import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
-import {
-  InMemoryLastSelectedChatState,
-  type LastSelectedChatState,
-} from '../chats/last-selected-chat-state.js';
-import type { ChatQueueService } from '../queue.js';
+import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
+import { QueueEntryMutationError, QueuePauseChangedError, type ChatQueueService } from '../queue.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
@@ -43,7 +40,13 @@ import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
 
 const logger = createLogger('routes:chats');
+const MAX_SEARCH_QUERY_CHARS = 4_096;
+const MAX_SEARCH_TEXT_TOKEN_CHARS = 1_024;
+const MAX_SEARCH_TEXT_CHARS = 8_192;
+const MAX_SEARCH_CHAT_IDS = 10_000;
+const MAX_SEARCH_CHAT_ID_CHARS = 512;
 import type {
+  AgentInterruptAndSendCommandRequest,
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   CompactCommandRequest,
@@ -53,14 +56,26 @@ import type {
   AgentModelPatchRequest,
   PermissionDecisionCommandRequest,
   ProjectPathPatchRequest,
-  QueueEnqueueCommandRequest,
+  ActiveInputCommandRequest,
+  QueueEntryCreateCommandRequest,
+  QueueEntryDeleteCommandRequest,
+  QueueEntryReplaceCommandRequest,
+  QueueCommandErrorResponse,
   QueueMutationRequest,
+  QueuePauseRequest,
+  QueueResumeRequest,
+  RunningChatsResponse,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
 import type {
   GenerateChatTitleRequest,
   GenerateChatTitleResponse,
 } from '../../common/chat-title-contracts.js';
+import type {
+  ChatSearchRequest,
+  ChatSearchResponse,
+} from '../../common/chat-search.js';
+import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
 import {
   generateChatTitleFromMessage,
   TitleGenerationError,
@@ -84,7 +99,9 @@ interface SettingsDep {
 }
 
 interface PathCacheDep {
-  resolveProjectPaths(projectPaths: readonly string[]): Promise<Map<string, import('../chats/path-cache.js').ProjectPathStatus>>;
+  resolveProjectPaths(
+    projectPaths: readonly string[],
+  ): Promise<Map<string, import('../chats/path-cache.js').ProjectPathStatus>>;
 }
 
 interface MetadataDep {
@@ -98,13 +115,21 @@ type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
 
+interface ChatSearchDep {
+  search(options: {
+    query: string;
+    textTokens?: string[];
+    allowedChatIds: string[];
+    limit?: number;
+  }): Promise<{
+    results: ChatSearchResponse['results'];
+    index: ChatSearchResponse['index'];
+  }>;
+}
+
 async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
-    const { stdout } = await runGit(
-      projectPath,
-      ['rev-parse', '--is-inside-work-tree'],
-      readOnlyGitOptions(),
-    );
+    const { stdout } = await runGit(projectPath, ['rev-parse', '--is-inside-work-tree'], readOnlyGitOptions());
     return stdout.trim() === 'true';
   } catch {
     return false;
@@ -119,14 +144,20 @@ function requireStringField(body: Record<string, unknown>, field: string): strin
   return value.trim();
 }
 
+function requireContentField(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ValidationDomainError(`${field} is required`);
+  }
+  return value;
+}
+
 function bodyRecord(body: unknown): Record<string, unknown> {
-  return body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  return body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
 }
 
 function optionalRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function chatIdFromBodyOrQuery(body: unknown, url: URL): string {
@@ -169,17 +200,115 @@ function chatSettingsPatchErrorResponse(error: unknown): Response {
 }
 
 function pathValidationError(error: string, errorCode: string, status = 200): Response {
-  return Response.json({
-    success: false,
-    valid: false,
-    error,
-    errorCode,
-    retryable: false,
-  }, { status });
+  return Response.json(
+    {
+      success: false,
+      valid: false,
+      error,
+      errorCode,
+      retryable: false,
+    },
+    { status },
+  );
 }
 
 function stringArrayOrNull(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
+}
+
+function optionalStringArrayField(body: Record<string, unknown>, field: string): string[] | undefined {
+  if (body[field] === undefined) return undefined;
+  const values = stringArrayOrNull(body[field]);
+  if (!values) throw new ValidationDomainError(`${field} must be an array of strings`);
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
+function optionalBoundedStringArrayField(
+  body: Record<string, unknown>,
+  field: string,
+  limits: { maxItems: number; maxItemChars: number; maxTotalChars: number },
+): string[] | undefined {
+  if (body[field] === undefined) return undefined;
+  const values = stringArrayOrNull(body[field]);
+  if (!values) throw new ValidationDomainError(`${field} must be an array of strings`);
+  if (values.length > limits.maxItems) {
+    throw new ValidationDomainError(`${field} must contain at most ${limits.maxItems} items`);
+  }
+  let totalChars = 0;
+  for (const value of values) {
+    if (value.length > limits.maxItemChars) {
+      throw new ValidationDomainError(`${field} entries must be at most ${limits.maxItemChars} characters`);
+    }
+    totalChars += value.length;
+    if (totalChars > limits.maxTotalChars) {
+      throw new ValidationDomainError(`${field} is too large`);
+    }
+  }
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
+function parseSearchRequest(body: unknown): ChatSearchRequest {
+  const input = bodyRecord(body);
+  const textTokens = optionalBoundedStringArrayField(input, 'textTokens', {
+    maxItems: CHAT_SEARCH_MAX_TERMS,
+    maxItemChars: MAX_SEARCH_TEXT_TOKEN_CHARS,
+    maxTotalChars: MAX_SEARCH_TEXT_CHARS,
+  });
+  const rawQuery = typeof input.query === 'string' ? input.query : '';
+  if (rawQuery.length > MAX_SEARCH_QUERY_CHARS) {
+    throw new ValidationDomainError(`query must be at most ${MAX_SEARCH_QUERY_CHARS} characters`);
+  }
+  const query = rawQuery.trim();
+  const effectiveTerms = textTokens?.length
+    ? textTokens
+    : [...query.matchAll(/"([^"]+)"|(\S+)/g)].map((match) => match[1] ?? match[2] ?? '');
+  if (effectiveTerms.length > CHAT_SEARCH_MAX_TERMS) {
+    throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_TERMS} terms`);
+  }
+  const wordCount = effectiveTerms.reduce(
+    (count, term) => count + (term.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0),
+    0,
+  );
+  if (wordCount > CHAT_SEARCH_MAX_WORDS) {
+    throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
+  }
+  const effectiveQuery = query || textTokens?.join(' ') || '';
+  if (!effectiveQuery) throw new ValidationDomainError('query is required');
+
+  return {
+    query: effectiveQuery,
+    textTokens,
+    chatIds: optionalBoundedStringArrayField(input, 'chatIds', {
+      maxItems: MAX_SEARCH_CHAT_IDS,
+      maxItemChars: MAX_SEARCH_CHAT_ID_CHARS,
+      maxTotalChars: MAX_SEARCH_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
+    }),
+    limit: optionalNonNegativeIntegerField(input, 'limit'),
+  };
+}
+
+async function searchableChatIds(
+  registry: IChatRegistry,
+  pathCache: PathCacheDep,
+  chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector,
+  requestedChatIds: string[] | undefined,
+): Promise<string[]> {
+  const sessions = registry.listAllChats();
+  const sessionEntries = Object.entries(sessions);
+  const statuses = await pathCache.resolveProjectPaths(
+    sessionEntries.map(([, session]) => session.projectPath),
+  );
+  const visibleEntries = await chatListProjector.buildMany(sessionEntries, statuses);
+  if (requestedChatIds !== undefined) {
+    return requestedChatIds.filter((chatId) => visibleEntries.has(chatId));
+  }
+  return [...visibleEntries.values()]
+    .sort((left, right) => {
+      const leftActivity = left.activity.lastActivityAt ?? left.activity.createdAt ?? '';
+      const rightActivity = right.activity.lastActivityAt ?? right.activity.createdAt ?? '';
+      return rightActivity.localeCompare(leftActivity) || left.id.localeCompare(right.id);
+    })
+    .map((entry) => entry.id);
 }
 
 interface ChatRouteDeps {
@@ -194,6 +323,7 @@ interface ChatRouteDeps {
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   agentSwitch: AgentSwitchService;
+  searchIndex?: ChatSearchDep;
   lastSelectedChat?: LastSelectedChatState;
 }
 
@@ -209,6 +339,7 @@ export default function createChatRoutes({
   commandService,
   chatListProjector,
   agentSwitch,
+  searchIndex,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
@@ -262,9 +393,7 @@ export default function createChatRoutes({
       const normalList = settings.getNormalChatIds();
       const archivedList = settings.getArchivedChatIds();
       const sessionEntries = Object.entries(sessions);
-      const statuses = await pathCache.resolveProjectPaths(
-        sessionEntries.map(([, session]) => session.projectPath),
-      );
+      const statuses = await pathCache.resolveProjectPaths(sessionEntries.map(([, session]) => session.projectPath));
       const entryMap = await chatListProjector.buildMany(sessionEntries, statuses);
       const orderedFrom = (ids: string[], group: ChatOrderGroup): ChatListEntry[] =>
         ids.flatMap((id) => {
@@ -273,9 +402,8 @@ export default function createChatRoutes({
         });
       const orphans = [...entryMap.values()]
         .filter((entry) => entry.orderGroup === 'orphan')
-        .sort((a, b) =>
-          (b.activity.createdAt || '').localeCompare(a.activity.createdAt || '') ||
-          a.id.localeCompare(b.id),
+        .sort(
+          (a, b) => (b.activity.createdAt || '').localeCompare(a.activity.createdAt || '') || a.id.localeCompare(b.id),
         );
       const all = [
         ...orderedFrom(pinnedList, 'pinned'),
@@ -288,10 +416,14 @@ export default function createChatRoutes({
         sessions,
         entryMap,
       );
-      const body: ChatListResponse = { sessions: all, total: all.length, lastSelectedChatId };
+      const body: ChatListResponse = {
+        sessions: all,
+        total: all.length,
+        lastSelectedChatId,
+      };
       return Response.json(body);
     } catch (error: unknown) {
-      logger.error('sessions: error listing sessions:', (error as Error));
+      logger.error('sessions: error listing sessions:', error as Error);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -311,7 +443,10 @@ export default function createChatRoutes({
         model: typeof body.model === 'string' ? body.model : '',
         apiProviderId: typeof body.apiProviderId === 'string' ? body.apiProviderId : null,
         modelEndpointId: typeof body.modelEndpointId === 'string' ? body.modelEndpointId : null,
-        modelProtocol: typeof body.modelProtocol === 'string' ? body.modelProtocol as StartChatCommandRequest['modelProtocol'] : null,
+        modelProtocol:
+          typeof body.modelProtocol === 'string'
+            ? (body.modelProtocol as StartChatCommandRequest['modelProtocol'])
+            : null,
         permissionMode: body.permissionMode,
         thinkingMode: body.thinkingMode,
         claudeThinkingMode: body.claudeThinkingMode,
@@ -352,7 +487,10 @@ export default function createChatRoutes({
     const rawChatId = input.chatId;
     if (rawChatId === null) {
       lastSelectedChat.setLastSelectedChatId(null);
-      return Response.json({ success: true, lastSelectedChatId: null } satisfies SetLastSelectedChatResponse);
+      return Response.json({
+        success: true,
+        lastSelectedChatId: null,
+      } satisfies SetLastSelectedChatResponse);
     }
 
     const chatId = typeof rawChatId === 'string' ? rawChatId.trim() : '';
@@ -364,7 +502,10 @@ export default function createChatRoutes({
     }
 
     lastSelectedChat.setLastSelectedChatId(chatId);
-    return Response.json({ success: true, lastSelectedChatId: chatId } satisfies SetLastSelectedChatResponse);
+    return Response.json({
+      success: true,
+      lastSelectedChatId: chatId,
+    } satisfies SetLastSelectedChatResponse);
   }
 
   async function getMessages(_request: Request, url: URL): Promise<Response> {
@@ -377,13 +518,15 @@ export default function createChatRoutes({
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
-      const { limit } = parsePagination(url.searchParams.get('limit'), null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
+      const { limit } = parsePagination(url.searchParams.get('limit'), null, {
+        maxLimit: CHAT_MESSAGES_MAX_LIMIT,
+      });
       const beforeSeqRaw = url.searchParams.get('beforeSeq');
       const beforeSeq = parseBeforeSeq(beforeSeqRaw);
       if (beforeSeq instanceof Response) return beforeSeq;
 
-      await pendingInputs.reconcile(chatId);
       const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
+      await pendingInputs.reconcileRetainedHistory(chatId);
       return Response.json({
         chatId,
         generationId: page.generationId,
@@ -392,10 +535,56 @@ export default function createChatRoutes({
         pageOldestSeq: page.pageOldestSeq,
         hasMore: page.hasMore,
         limit,
-        pendingUserInputs: pendingInputs.listForChat(chatId),
+        pendingUserInputs: pendingInputs.listForTransport(chatId),
       });
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function postSearchChats(body: unknown): Promise<Response> {
+    try {
+      if (!searchIndex) return jsonError('Chat search index is not available', 503, 'SEARCH_INDEX_UNAVAILABLE');
+      const search = parseSearchRequest(body);
+      const result = await searchIndex.search({
+        query: search.query,
+        textTokens: search.textTokens,
+        allowedChatIds: await searchableChatIds(
+          registry,
+          pathCache,
+          chatListProjector,
+          search.chatIds,
+        ),
+        limit: search.limit,
+      });
+      return Response.json({
+        query: search.query,
+        results: result.results,
+        total: result.results.length,
+        index: result.index,
+      } satisfies ChatSearchResponse);
+    } catch (error: unknown) {
+      if (
+        error
+        && typeof error === 'object'
+        && 'code' in error
+        && (error.code === 'TRANSCRIPT_SEARCH_DISABLED'
+          || error.code === 'SEARCH_INDEX_UNAVAILABLE'
+          || error.code === 'SEARCH_INDEX_BUSY')
+      ) {
+        const typed = error as { code: string; message?: string; retryable?: boolean };
+        const status = typed.code === 'TRANSCRIPT_SEARCH_DISABLED' ? 409 : 503;
+        return jsonError(
+          typed.message ?? 'Transcript search is unavailable',
+          status,
+          typed.code,
+          typed.retryable ?? status === 503,
+        );
+      }
+      if (error instanceof ValidationDomainError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -622,6 +811,7 @@ export default function createChatRoutes({
 
   async function postGenerateChatTitle(
     body: Partial<GenerateChatTitleRequest> & Record<string, unknown>,
+    request: Request,
   ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
@@ -637,6 +827,7 @@ export default function createChatRoutes({
         ...(messageSeq === undefined ? {} : { messageSeq }),
         agents,
         settings,
+        signal: request.signal,
       });
 
       const response: GenerateChatTitleResponse = {
@@ -682,27 +873,116 @@ export default function createChatRoutes({
   }
 
   async function getRunningChats(): Promise<Response> {
-    return Response.json({ sessions: agents.getRunningSessions() });
+    const response: RunningChatsResponse = {
+      sessions: agents.getRunningSessions(),
+    };
+    return Response.json(response);
   }
 
   async function getQueue(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
     if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-    const state = toClientQueueState(normalizeQueueState(await queue.readChatQueue(chatId)));
+    const state = toClientQueueState(normalizeStoredQueueState(await queue.readChatQueue(chatId)));
     return Response.json({ success: true, chatId, queue: state });
   }
 
-  async function postQueueEnqueue(body: Partial<QueueEnqueueCommandRequest> & Record<string, unknown>): Promise<Response> {
+  function queueEntryErrorResponse(error: QueueEntryMutationError | QueuePauseChangedError): Response {
+    const body: QueueCommandErrorResponse = {
+      success: false,
+      error: error.message,
+      errorCode: error.code,
+      retryable: error.retryable,
+      queue: toClientQueueState(error.queue),
+    };
+    return Response.json(body, { status: error.status });
+  }
+
+  async function postQueueEntryCreate(
+    body: Partial<QueueEntryCreateCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
-      const content = requireStringField(body, 'content');
-      const delivery = body.delivery ?? 'queue';
-      if (delivery !== 'queue' && delivery !== 'active') {
-        throw new CommandValidationError('VALIDATION_FAILED', 'delivery must be queue or active');
+      const content = requireContentField(body, 'content');
+      const result = await commands.submitQueueEntryCreate({
+        chatId,
+        content,
+        clientRequestId,
+      });
+      return Response.json(result, { status: 202 });
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      const result = await commands.submitQueueEnqueue({ chatId, content, clientRequestId, delivery });
+      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function putQueueEntry(
+    body: Partial<QueueEntryReplaceCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const entryId = requireStringField(body, 'entryId');
+      const content = requireContentField(body, 'content');
+      const expectedRevision = body.expectedRevision;
+      if (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision) || expectedRevision < 1) {
+        throw new ValidationDomainError('expectedRevision must be a positive integer');
+      }
+      const result = await commands.submitQueueEntryReplace({
+        clientRequestId,
+        chatId,
+        entryId,
+        content,
+        expectedRevision,
+      });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function deleteQueueEntry(
+    body: Partial<QueueEntryDeleteCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const entryId = requireStringField(body, 'entryId');
+      const result = await commands.submitQueueEntryDelete({
+        clientRequestId,
+        chatId,
+        entryId,
+      });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function postActiveInput(
+    body: Partial<ActiveInputCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const content = requireContentField(body, 'content');
+      const result = await commands.submitActiveInput({
+        clientRequestId,
+        chatId,
+        content,
+      });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -715,24 +995,27 @@ export default function createChatRoutes({
     }
   }
 
-  async function postQueueMutation(body: QueueMutationRequest & Record<string, unknown>, action: 'dequeue' | 'clear' | 'pause' | 'resume'): Promise<Response> {
+  async function postQueueMutation(
+    body: (QueueMutationRequest | QueueResumeRequest) & Record<string, unknown>,
+    action: 'clear' | 'pause' | 'resume',
+  ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
-      const result = await commands.mutateQueue({
-        chatId,
-        action,
-        entryId: typeof body.entryId === 'string' ? body.entryId : undefined,
-      });
+      const pauseId = action === 'resume' ? requireStringField(body, 'pauseId') : undefined;
+      const result = await commands.mutateQueue({ chatId, action, pauseId });
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
+      if (error instanceof QueuePauseChangedError) return queueEntryErrorResponse(error);
       return jsonErrorFromUnknown(error);
     }
   }
 
-  async function postPermissionDecision(body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postPermissionDecision(
+    body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
@@ -772,6 +1055,26 @@ export default function createChatRoutes({
     }
   }
 
+  async function postInterruptAndSend(
+    body: Partial<AgentInterruptAndSendCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const result = await commands.submitInterruptAndSend({
+        chatId,
+        clientRequestId,
+        agentId: body.agentId,
+      });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function postCompactChat(body: Partial<CompactCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
@@ -790,7 +1093,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchExecutionSettings(body: ExecutionSettingsPatchRequest & Record<string, unknown>): Promise<Response> {
+  async function patchExecutionSettings(
+    body: ExecutionSettingsPatchRequest & Record<string, unknown>,
+  ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
       const chat = registry.getChat(chatId);
@@ -826,7 +1131,8 @@ export default function createChatRoutes({
       const patch: AgentSessionSettingsPatch = { model };
       if (apiProviderId !== undefined) patch.apiProviderId = apiProviderId;
       if (modelEndpointId !== undefined) patch.modelEndpointId = modelEndpointId;
-      if (modelProtocol !== undefined) patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
+      if (modelProtocol !== undefined)
+        patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
       await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
@@ -892,26 +1198,47 @@ export default function createChatRoutes({
   }
 
   return {
-    '/api/v1/chats': { GET: getChats, DELETE: withJsonBody(deleteSessionHandler) },
+    '/api/v1/chats': {
+      GET: getChats,
+      DELETE: withJsonBody(deleteSessionHandler),
+    },
     '/api/v1/chats/last-selected': { PUT: withJsonBody(putLastSelectedChat) },
     '/api/v1/chats/start': { POST: withJsonBody(postStartSession) },
-    '/api/v1/chats/title/generate': { POST: withJsonBody(postGenerateChatTitle) },
+    '/api/v1/chats/title/generate': {
+      POST: withJsonBody(postGenerateChatTitle),
+    },
     '/api/v1/chats/run': { POST: withJsonBody(postRunChat) },
     '/api/v1/chats/validate-start': { GET: validateStartPath },
     '/api/v1/chats/fork': { POST: withJsonBody(postForkChat) },
     '/api/v1/chats/fork-run': { POST: withJsonBody(postForkRunChat) },
     '/api/v1/chats/compact': { POST: withJsonBody(postCompactChat) },
     '/api/v1/chats/messages': { GET: getMessages },
+    '/api/v1/chats/search': { POST: withJsonBody(postSearchChats) },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
-    '/api/v1/chats/queue/enqueue': { POST: withJsonBody(postQueueEnqueue) },
-    '/api/v1/chats/queue/dequeue': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'dequeue')) },
-    '/api/v1/chats/queue/clear': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')) },
-    '/api/v1/chats/queue/pause': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')) },
-    '/api/v1/chats/queue/resume': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')) },
-    '/api/v1/chats/permissions/decision': { POST: withJsonBody(postPermissionDecision) },
+    '/api/v1/chats/queue/entries': {
+      POST: withJsonBody(postQueueEntryCreate),
+      PUT: withJsonBody(putQueueEntry),
+      DELETE: withJsonBody(deleteQueueEntry),
+    },
+    '/api/v1/chats/active-input': { POST: withJsonBody(postActiveInput) },
+    '/api/v1/chats/queue/clear': {
+      POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')),
+    },
+    '/api/v1/chats/queue/pause': {
+      POST: withJsonBody((body: QueuePauseRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')),
+    },
+    '/api/v1/chats/queue/resume': {
+      POST: withJsonBody((body: QueueResumeRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')),
+    },
+    '/api/v1/chats/permissions/decision': {
+      POST: withJsonBody(postPermissionDecision),
+    },
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
-    '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },
+    '/api/v1/chats/interrupt-and-send': { POST: withJsonBody(postInterruptAndSend) },
+    '/api/v1/chats/execution-settings': {
+      PATCH: withJsonBody(patchExecutionSettings),
+    },
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
     '/api/v1/chats/agent-model': { PATCH: withJsonBody(patchAgentModel) },
     '/api/v1/chats/project-path': { PATCH: withJsonBody(patchProjectPath) },

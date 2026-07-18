@@ -90,6 +90,7 @@
 
 {#if dialog.worktreePickerOpen}
 	<GitWorktreePickerModal
+		repositoryRoot={dialog.trimmedPath}
 		worktrees={dialog.worktrees}
 		isLoading={dialog.isLoadingWorktrees}
 		isCreating={dialog.isCreatingWorktree}
@@ -158,7 +159,7 @@
 											}
 										}}
 										placeholder={projectBasePath}
-										class="w-full rounded-lg border border-border bg-background py-2 pl-3 pr-8 text-base text-foreground placeholder-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
+										class="w-full rounded-lg border border-border bg-background py-2 pl-3 pr-8 text-base text-foreground placeholder-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 									/>
 									<div class="absolute right-2 top-1/2 -translate-y-1/2">
 										{#if !dialog.trimmedPath}

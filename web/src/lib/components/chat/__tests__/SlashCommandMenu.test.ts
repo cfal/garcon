@@ -63,6 +63,48 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Rename the current chat')).toBeTruthy();
 	});
 
+	it('lists /snippet and its /s alias without advertising a plural command', () => {
+		const { unmount } = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 'snippet',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.getByText('/snippet')).toBeTruthy();
+		expect(screen.getByText('Expand a saved snippet into the composer')).toBeTruthy();
+		unmount();
+
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 's',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(screen.getByText('/s')).toBeTruthy();
+		expect(screen.getByText('Short alias for /snippet')).toBeTruthy();
+		expect(screen.queryByText('/snippets')).toBeNull();
+	});
+
+	it('ranks the exact /s alias ahead of longer Codex commands', () => {
+		const onSelect = vi.fn();
+		const { component } = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			agent: 'codex',
+			isVisible: true,
+			query: 's',
+			onSelect,
+			onClose: vi.fn(),
+		});
+
+		const handled = component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+		expect(handled).toBe(true);
+		expect(onSelect).toHaveBeenCalledWith('s');
+	});
+
 	it('lists the Codex goal command only for Codex', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
@@ -167,6 +209,24 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('Agent command')).toBeNull();
 	});
 
+	it('deduplicates an agent-discovered snippet command behind the built-in', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'snippet', source: 'command', description: 'Agent command' },
+		]);
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'snippet',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(await screen.findByText('/snippet')).toBeTruthy();
+		expect(screen.getAllByText('/snippet')).toHaveLength(1);
+		expect(screen.queryByText('Agent command')).toBeNull();
+	});
+
 	it('hides an agent-discovered in command for draft chats', async () => {
 		mockedGetSlashCommands.mockResolvedValue([
 			{ name: 'in', source: 'command', description: 'Agent command' },
@@ -226,7 +286,7 @@ describe('SlashCommandMenu', () => {
 			supportsFork: true,
 			canScheduleIn: true,
 			isVisible: true,
-			query: '',
+			query: 'skill',
 			onSelect: vi.fn(),
 			onClose: vi.fn(),
 		});
@@ -236,7 +296,7 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('/skill-100')).toBeNull();
 
 		const listbox = screen.getByRole('listbox');
-		listbox.scrollTop = 106 * 48;
+		listbox.scrollTop = 100 * 48;
 		await fireEvent.scroll(listbox);
 
 		expect(await screen.findByText('/skill-100')).toBeTruthy();

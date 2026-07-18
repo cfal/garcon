@@ -3,10 +3,12 @@ import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarSearchResults from '../SidebarSearchResults.svelte';
+import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSearchResult } from '$shared/chat-search';
 
 const currentTime = new Date('2025-01-01T03:00:00.000Z');
-const rowHeight = 88;
+const rowHeight = SEARCH_RESULT_ROW_HEIGHT;
 
 function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
@@ -55,7 +57,11 @@ describe('SidebarSearchResults', () => {
 
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.queryByText('Chat 499')).toBeNull();
-		expect(document.querySelectorAll('[data-search-dialog-virtual-row]').length).toBeLessThan(40);
+		const virtualRows = document.querySelectorAll('[data-search-dialog-virtual-row]');
+		expect(virtualRows.length).toBeLessThan(40);
+		expect(document.querySelectorAll('[data-search-dialog-row-separator]')).toHaveLength(
+			virtualRows.length,
+		);
 	});
 
 	it('updates visible dialog results when the results viewport scrolls', async () => {
@@ -122,6 +128,7 @@ describe('SidebarSearchResults', () => {
 			filteredChats: makeChats(500),
 			currentTime,
 			highlightedIndex: 0,
+			highlightRevealVersion: 1,
 			...handlers,
 		});
 
@@ -143,5 +150,38 @@ describe('SidebarSearchResults', () => {
 		expect(document.querySelector('[data-search-dialog-virtual-list]')).toBeNull();
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.getByText('Chat 19')).toBeTruthy();
+		const firstRow = screen.getAllByRole('option')[0];
+		expect(firstRow?.classList.contains('py-1.5')).toBe(true);
+		expect(firstRow?.style.minHeight).toBe(`${rowHeight}px`);
+		expect(firstRow?.parentElement?.classList.contains('divide-y')).toBe(true);
 	});
+
+	it('renders a transcript snippet for matching chats', () => {
+		const transcriptMatch: ChatSearchResult = {
+			chatId: 'chat-1',
+			score: 1,
+			matchedMessageCount: 1,
+			snippets: [
+				{
+					messageOrdinal: 3,
+					role: 'assistant',
+					timestamp: '2025-01-01T00:00:00.000Z',
+					text: 'Found the deployment token rotation detail',
+				},
+			],
+		};
+
+		render(SidebarSearchResults, {
+			filteredChats: [makeChat(1)],
+			transcriptMatchesByChatId: new Map([['chat-1', transcriptMatch]]),
+			currentTime,
+			highlightedIndex: 0,
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+		});
+
+		expect(screen.getByText('Assistant')).toBeTruthy();
+		expect(screen.getByText('Found the deployment token rotation detail')).toBeTruthy();
+	});
+
 });

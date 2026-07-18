@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TRANSCRIPT_SEARCH_WORKER_PATH_ENV } from '../server/chats/search/worker-runtime.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,15 +95,21 @@ async function assertPiPackageMetadataExists() {
  * Generates a bootstrap entrypoint instead of a static server import.
  * Pi's SDK reads package metadata at module evaluation in Bun compiled-binary mode.
  */
-function createVirtualMainEntrypoint(virtualAssetsEntrypoint, serverMainPath) {
+function createVirtualMainEntrypoint(
+  virtualAssetsEntrypoint,
+  serverMainPath,
+  transcriptSearchWorkerAssetPath,
+) {
   return [
     `import '${virtualAssetsEntrypoint}';`,
+    `import transcriptSearchWorkerPath from '${transcriptSearchWorkerAssetPath}' with { type: 'file' };`,
     "import { mkdir, writeFile } from 'node:fs/promises';",
     "import { tmpdir } from 'node:os';",
     "import { join } from 'node:path';",
     '',
     "const PI_PACKAGE_JSON_SUFFIX = 'server/node_modules/@earendil-works/pi-coding-agent/package.json';",
     "const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';",
+    `const TRANSCRIPT_SEARCH_WORKER_PATH_ENV = '${TRANSCRIPT_SEARCH_WORKER_PATH_ENV}';`,
     '',
     'function normalizeEmbeddedFileName(name) {',
     "  return name.replaceAll('\\\\', '/');",
@@ -125,12 +133,48 @@ function createVirtualMainEntrypoint(virtualAssetsEntrypoint, serverMainPath) {
     '}',
     '',
     'await prepareEmbeddedPiPackageDir();',
+    'process.env[TRANSCRIPT_SEARCH_WORKER_PATH_ENV] = transcriptSearchWorkerPath;',
     `await import('${serverMainPath}');`,
     '',
   ].join('\n');
 }
 
-async function buildExecutable(targetId, embeddedFiles) {
+async function bundleTranscriptSearchWorker() {
+  const workerSourcePath = path.join(repoRoot, 'server', 'chats', 'search', 'worker.ts');
+  const providerWorkerSources = [
+    'claude',
+    'codex',
+    'cursor',
+    'direct',
+    'factory',
+    'opencode',
+    'pi',
+  ].map((provider) => `server/agents/${provider}/search-transcript-source.ts`);
+  const result = await Bun.build({
+    entrypoints: [workerSourcePath],
+    target: 'bun',
+    format: 'esm',
+    minify: true,
+    metafile: true,
+  });
+  if (!result.success || result.outputs.length !== 1) {
+    for (const log of result.logs) console.error(log);
+    throw new Error('Transcript search worker bundle failed.');
+  }
+  const bundledInputs = Object.keys(result.metafile?.inputs ?? {})
+    .map((input) => input.replaceAll('\\', '/'));
+  const missingProviderSources = providerWorkerSources.filter((source) =>
+    !bundledInputs.some((input) => input.endsWith(source)));
+  if (missingProviderSources.length > 0) {
+    throw new Error(`Transcript search worker omitted provider sources: ${missingProviderSources.join(', ')}`);
+  }
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-transcript-search-worker-'));
+  const filePath = path.join(directory, 'worker.js');
+  await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
+  return { directory, filePath };
+}
+
+async function buildExecutable(targetId, embeddedFiles, transcriptSearchWorkerAssetPath) {
   const virtualAssetsEntrypoint = '__garcon_embed_static_assets__.js';
   const virtualMainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
@@ -155,7 +199,11 @@ async function buildExecutable(targetId, embeddedFiles) {
       },
       files: {
         [virtualAssetsEntrypoint]: assetsImports.join('\n'),
-        [virtualMainEntrypoint]: createVirtualMainEntrypoint(virtualAssetsEntrypoint, serverMainPath),
+        [virtualMainEntrypoint]: createVirtualMainEntrypoint(
+          virtualAssetsEntrypoint,
+          serverMainPath,
+          toPosixPath(transcriptSearchWorkerAssetPath),
+        ),
       },
     });
   } catch (error) {
@@ -175,8 +223,13 @@ async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
   await assertPiPackageMetadataExists();
   const embeddedFiles = await collectEmbeddedAssetInputs();
-  for (const targetId of targetIds) {
-    await buildExecutable(targetId, embeddedFiles);
+  const workerAsset = await bundleTranscriptSearchWorker();
+  try {
+    for (const targetId of targetIds) {
+      await buildExecutable(targetId, embeddedFiles, workerAsset.filePath);
+    }
+  } finally {
+    await fs.rm(workerAsset.directory, { recursive: true, force: true });
   }
 }
 

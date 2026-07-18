@@ -9,6 +9,7 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte.js';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -18,6 +19,7 @@
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
@@ -39,6 +41,7 @@
 		setAppTitle,
 		setGhCapability,
 		setScheduledPrompts,
+		setSnippets,
 		setWorkspaceLayout,
 		setWorkspaceContext,
 		setTerminalRegistry,
@@ -54,9 +57,11 @@
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
+	import { SnippetsRouter } from '$lib/events/snippets-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
+	import { searchChatTranscripts } from '$lib/api/chats';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		getLocalStorageItem,
@@ -80,6 +85,7 @@
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
+	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
 	const notifications = createNotificationsStore();
@@ -92,7 +98,6 @@
 	const modelCatalog = createModelCatalogStore();
 	const ghCapability = createGhCapabilityStore();
 	const workspaceServices = createWorkspaceServices({
-		auth,
 		appShell,
 		chatSessions,
 		ghCapability,
@@ -101,6 +106,7 @@
 		navigation,
 		notifications,
 		terminalIdentity,
+		ws,
 		getRouteIdentity: () => page.url.pathname,
 		onTerminalLauncherDismissed: () => {
 			if (!terminalIdentity.clientId) return;
@@ -134,7 +140,10 @@
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
+		getTranscriptSearchEnabled: () =>
+			remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
 		notifyError: (message) => notifications.error(message),
+		searchChatTranscripts,
 		logError: (message, error) => {
 			console.error(message, error);
 		},
@@ -143,6 +152,7 @@
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
 	setScheduledPrompts(scheduledPrompts);
+	setSnippets(snippets);
 	setAppTitle(appTitle);
 	setNavigation(navigation);
 	setChatSessions(chatSessions);
@@ -223,6 +233,14 @@
 		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
 	});
 
+	// Projects the browser-local backdrop preference to portal-rendered overlays.
+	$effect(() => {
+		return projectOverlayBackdropEffects(
+			document.documentElement,
+			localSettings.overlayBackdropEffects,
+		);
+	});
+
 	// Connects WebSocket after authentication.
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).
@@ -237,12 +255,10 @@
 	let terminalsInitialized = false;
 	$effect(() => {
 		const authenticated = auth.isAuthenticated;
-		const token = auth.token;
-		const authDisabled = auth.authDisabled;
 		untrack(() => {
 			void terminalIdentity.ready.then(async () => {
 				if (!authenticated) {
-					terminals.authChanged();
+					terminals.authChanged(false);
 					return;
 				}
 				if (!terminalsInitialized) {
@@ -250,9 +266,7 @@
 					await terminals.initialize();
 					return;
 				}
-				void token;
-				void authDisabled;
-				terminals.authChanged();
+				terminals.authChanged(true);
 			});
 		});
 	});
@@ -260,18 +274,22 @@
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
+	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	settingsRouter.start();
 	scheduledPromptsRouter.start();
+	snippetsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
 		scheduledPromptsRouter.tick();
+		snippetsRouter.tick();
 	});
 
 	$effect(() => {
 		const connectedAt = ws.connectionStatus.lastConnectedAt;
 		if (!connectedAt) return;
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
+		untrack(() => void snippets.refreshIfLoaded());
 	});
 
 	onMount(() => {
@@ -335,6 +353,7 @@
 		window.removeEventListener('pagehide', handlePageHide);
 		settingsRouter.destroy();
 		scheduledPromptsRouter.destroy();
+		snippetsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();

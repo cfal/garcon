@@ -19,6 +19,10 @@ import type {
   AgentAuthLoginLaunchResult,
   AgentAuthLoginStatus,
 } from '../../common/agent-auth.js';
+import type {
+  SearchTranscriptLoadContext,
+  SearchTranscriptLoadPlan,
+} from '../chats/search/source-types.js';
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
@@ -56,6 +60,19 @@ export interface AgentTranscriptSource {
   ): Promise<AgentTranscriptPage | null>;
   getPreview?(session: AgentChatEntry): Promise<unknown>;
   resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
+  resolveSearchLoadPlan(
+    session: AgentChatEntry,
+    context: SearchTranscriptLoadContext,
+  ): Promise<SearchTranscriptLoadPlan>;
+  rewriteForkTranscriptEntry?(
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ): unknown;
+}
+
+export interface ForkTranscriptEntryContext {
+  sourceAgentSessionId: string;
+  targetAgentSessionId: string;
 }
 
 export interface AgentTranscriptPage {
@@ -64,6 +81,7 @@ export interface AgentTranscriptPage {
   hasMore: boolean;
   offset: number;
   limit: number;
+  revision?: string;
 }
 
 export interface AgentAuth {

@@ -11,11 +11,16 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import {
   ChatNameStore,
   ChatOrderStore,
+  FeatureSettingsStore,
   FolderStore,
   SavedSearchStore,
   StartupDefaultsStore,
   UiSettingsStore,
 } from './domain-stores.js';
+import {
+  DEFAULT_REMOTE_FEATURE_SETTINGS,
+  normalizeRemoteFeatureSettings,
+} from '../../common/settings.js';
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
@@ -82,6 +87,7 @@ function stringRecord(raw: Record<string, unknown>): Record<string, string> {
 
 function createEmpty(): ProjectSettings {
   return {
+    features: structuredClone(DEFAULT_REMOTE_FEATURE_SETTINGS),
     ui: {},
     paths: {},
     chatNames: {},
@@ -149,6 +155,12 @@ function sanitizeSavedSearch(raw: unknown): SavedChatSearch | null {
 function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
   const raw = isRecord(parsed) ? parsed : {};
   let migrated = !isRecord(parsed);
+  const rawFeatures = isRecord(raw.features) ? raw.features : null;
+  const rawTranscriptSearch = isRecord(rawFeatures?.transcriptSearch)
+    ? rawFeatures.transcriptSearch
+    : null;
+  if (typeof rawTranscriptSearch?.enabled !== 'boolean') migrated = true;
+  const features = normalizeRemoteFeatureSettings(raw.features);
   const chatFolders = Array.isArray(raw.chatFolders)
     ? raw.chatFolders.map(sanitizeFolder).filter((folder): folder is ChatFolder => Boolean(folder))
     : [];
@@ -196,6 +208,7 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
 
   return {
     settings: {
+    features,
     ui: normalizeUiSettings(raw.ui),
     paths: pathResult.paths,
     chatNames: isRecord(raw.chatNames) ? stringRecord(raw.chatNames) : {},
@@ -219,6 +232,7 @@ export class SettingsStore extends EventEmitter {
   #writeLock = new KeyedPromiseLock();
   #chatNames: ChatNameStore;
   #uiSettings: UiSettingsStore;
+  #featureSettings: FeatureSettingsStore;
   #startupDefaults: StartupDefaultsStore;
   #chatOrder: ChatOrderStore;
   #savedSearches: SavedSearchStore;
@@ -239,6 +253,7 @@ export class SettingsStore extends EventEmitter {
     };
     this.#chatNames = new ChatNameStore(context);
     this.#uiSettings = new UiSettingsStore(context);
+    this.#featureSettings = new FeatureSettingsStore(context);
     this.#startupDefaults = new StartupDefaultsStore(context);
     this.#chatOrder = new ChatOrderStore(context);
     this.#savedSearches = new SavedSearchStore(context);
@@ -351,6 +366,14 @@ export class SettingsStore extends EventEmitter {
     return this.#uiSettings.getUiSettings();
   }
 
+  getFeatureSettings(): ProjectSettings['features'] {
+    return this.#featureSettings.getFeatureSettings();
+  }
+
+  async setTranscriptSearchEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
+    return this.#featureSettings.setTranscriptSearchEnabled(enabled);
+  }
+
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
     return this.#uiSettings.setUiSettings(patch);
   }
@@ -373,13 +396,17 @@ export class SettingsStore extends EventEmitter {
 
   getRemoteSettingsSnapshotSource(): {
     version: number;
+    features: ProjectSettings['features'];
     ui: ProjectSettings['ui'];
     paths: ProjectSettings['paths'];
     pinnedChatIds: string[];
     recentAgentSettings: ProjectSettings['recentAgentSettings'];
     executionDefaults: ProjectSettings['executionDefaults'];
   } {
-    return this.#uiSettings.getRemoteSettingsSnapshotSource();
+    return {
+      ...this.#uiSettings.getRemoteSettingsSnapshotSource(),
+      features: this.#featureSettings.getFeatureSettings(),
+    };
   }
 
   getArchivedChatIds(): string[] {

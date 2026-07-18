@@ -6,13 +6,15 @@ import type {
 	TerminalRuntimeOptions,
 } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
 import type {
-	TerminalTransport,
 	TerminalTransportOptions,
+	TerminalTransportStatus,
 } from '$lib/ws/terminal-transport.svelte';
+import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte';
 import {
 	TERMINAL_CREATE_RETRY_WINDOW_MS,
 	TerminalRegistry,
 	type TerminalRegistryDeps,
+	type TerminalTransportPort,
 } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 
 function metadata(
@@ -41,17 +43,19 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-class FakeTransport {
-	status: TerminalTransport['status'] = 'idle';
+class FakeTransport implements TerminalTransportPort {
+	status: TerminalTransportStatus = 'idle';
 	error: string | null = null;
 	sent: TerminalStreamClientMessage[] = [];
 	connectCount = 0;
+	suspendCount = 0;
 	destroyCount = 0;
 
 	constructor(readonly options: TerminalTransportOptions) {}
 
 	connect(): void {
 		this.connectCount += 1;
+		this.status = 'connecting';
 	}
 
 	async open(): Promise<void> {
@@ -67,8 +71,10 @@ class FakeTransport {
 		return true;
 	}
 
-	retryNow(): void {}
-	authChanged(): void {}
+	suspend(): void {
+		this.suspendCount += 1;
+		this.status = 'idle';
+	}
 	destroy(): void {
 		this.destroyCount += 1;
 		this.status = 'closed';
@@ -133,9 +139,14 @@ describe('TerminalRegistry', () => {
 	});
 
 	function createRegistry(): TerminalRegistry {
+		const connection = {
+			isConnected: false,
+			sendMessage: () => false,
+			addMessageConsumer: () => () => undefined,
+			onConnectionChange: () => () => undefined,
+		} satisfies PrimaryWsConnectionPort;
 		return new TerminalRegistry({
-			getToken: () => 'token',
-			getAuthDisabled: () => false,
+			connection,
 			getClientId: () => 'client-1',
 			now: () => now,
 			listTerminals,
@@ -145,7 +156,7 @@ describe('TerminalRegistry', () => {
 			>,
 			createTransport: (options) => {
 				transport = new FakeTransport(options);
-				return transport as unknown as TerminalTransport;
+				return transport;
 			},
 			createRuntime: (options) => {
 				const runtime = new FakeRuntime(options);
@@ -217,6 +228,49 @@ describe('TerminalRegistry', () => {
 				intent: 'restore',
 			},
 		]);
+	});
+
+	it('does not open a terminal stream when no terminal sessions exist', async () => {
+		const registry = createRegistry();
+
+		await registry.initialize();
+
+		expect(listTerminals).toHaveBeenCalledOnce();
+		expect(transport.connectCount).toBe(0);
+		expect(transport.status).toBe('idle');
+	});
+
+	it('suspends on logout and reconnects existing sessions after login', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+		await registry.initialize();
+		expect(transport.connectCount).toBe(1);
+
+		registry.authChanged(false);
+		expect(transport.suspendCount).toBe(1);
+		expect(transport.status).toBe('idle');
+
+		registry.authChanged(true);
+		expect(transport.connectCount).toBe(2);
+		expect(transport.status).toBe('connecting');
+	});
+
+	it('does not override waiting-auth while the primary socket is being replaced', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+		await registry.initialize();
+		transport.status = 'waiting-auth';
+
+		registry.authChanged(true);
+
+		expect(transport.connectCount).toBe(1);
+		expect(transport.status).toBe('waiting-auth');
 	});
 
 	it('preserves stream upserts that arrive after a List snapshot starts', async () => {
@@ -293,6 +347,8 @@ describe('TerminalRegistry', () => {
 		expect(registry.sessions['terminal-1']).toBeUndefined();
 		expect(runtime.disposeCount).toBe(1);
 		expect(onSessionTerminated).toHaveBeenCalledWith('terminal-1');
+		expect(transport.suspendCount).toBe(1);
+		expect(transport.status).toBe('idle');
 	});
 
 	it('lets the server arbitrate restore for a session that was already attached', async () => {
@@ -325,9 +381,11 @@ describe('TerminalRegistry', () => {
 
 	it('creates with the caller request ID and attaches without creating a second PTY', async () => {
 		const terminal = metadata('terminal-1', 1);
+		listTerminals
+			.mockResolvedValueOnce({ success: true, terminals: [] })
+			.mockResolvedValue({ success: true, terminals: [terminal] });
 		createTerminal.mockResolvedValue({ success: true, terminal });
 		const registry = createRegistry();
-		transport.status = 'connected';
 
 		await expect(registry.create('/workspace', 'request-1')).resolves.toBe('terminal-1');
 		expect(createTerminal).toHaveBeenCalledWith({
@@ -335,11 +393,26 @@ describe('TerminalRegistry', () => {
 			requestedInitialWorkingDirectory: '/workspace',
 		});
 		expect(registry.pendingCreates).toEqual({});
+		expect(transport.sent).toEqual([]);
+
+		await transport.open();
 		expect(transport.sent[0]).toMatchObject({
 			type: 'terminal-attach',
 			terminalId: 'terminal-1',
 			intent: 'restore',
 		});
+	});
+
+	it('opens the terminal stream after creating the first session', async () => {
+		const terminal = metadata('terminal-1', 1);
+		createTerminal.mockResolvedValue({ success: true, terminal });
+		const registry = createRegistry();
+
+		await registry.create('/workspace', 'request-1');
+
+		expect(transport.connectCount).toBe(1);
+		expect(transport.status).toBe('connecting');
+		expect(registry.sessions['terminal-1'].attachmentState).toBe('detached');
 	});
 
 	it('retains indeterminate creates until the retry window forces List', async () => {

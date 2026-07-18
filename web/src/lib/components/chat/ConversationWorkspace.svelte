@@ -7,6 +7,7 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
+	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import QueueControls from './QueueControls.svelte';
 	import SubagentManagementBar from './SubagentManagementBar.svelte';
@@ -30,8 +31,16 @@
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+	import { scheduleInitialTranscriptReveal } from '$lib/chat/transcript/initial-transcript-reveal.js';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
+	import type { QueueEntry } from '$lib/types/chat';
+	import {
+		CHAT_DOCK_SHELL_BASE_CLASS,
+		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
+		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
+	} from '$lib/chat/conversation/chat-max-width.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
 	import {
@@ -121,6 +130,14 @@
 	const agentState = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const conversationUi = new ConversationUiState();
+	let queuedInputsDialogOpen = $state(false);
+	let queuedInputsDialogChatId = $state<string | null>(null);
+	const dialogQueue = $derived(conversationUi.getQueue(queuedInputsDialogChatId));
+	const queuedInputEditor = new QueuedInputEditorState({
+		get queue() {
+			return dialogQueue;
+		},
+	});
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
 	const startupCoordinator = new StartupCoordinator();
@@ -128,7 +145,6 @@
 		ws,
 		chatState,
 		conversationUi,
-		getSelectedChat: () => sessions.selectedChat,
 		getSelectedChatId: () => sessions.selectedChatId,
 		getQueue: getChatQueue,
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
@@ -199,6 +215,17 @@
 	// Reserve its space on the queue panel when inputs are queued, otherwise on
 	// the feed, so the queue's dispatch controls stay clickable behind the cap.
 	const composerCapSpace = $derived(composerCapReservation(reserveComposerTraySpace, queueVisible));
+	const queueShellClass = $derived.by(() => {
+		if (!queueVisible) return '';
+		return cn(
+			CHAT_DOCK_SHELL_BASE_CLASS,
+			CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth],
+			composerCapSpace.queue ? 'pb-14' : 'pb-2',
+		);
+	});
+	const queueFrameClass = $derived(
+		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[localSettings.chatMaxWidth]),
+	);
 	const subagentModel = $derived(
 		buildSubagentManagementModel(chatState.displayMessages, {
 			rootTitle: sessions.selectedChat?.title || 'Root',
@@ -319,7 +346,22 @@
 		const chatId = sessions.selectedChatId;
 		// The selected record may hydrate after the route-selected ID.
 		const _selectedChat = sessions.selectedChat;
+		if (queuedInputsDialogOpen && queuedInputsDialogChatId !== chatId) {
+			closeQueuedInputsDialog();
+		}
 		controller.handleChatSwitchIfChanged(chatId);
+	});
+
+	$effect(() => {
+		const chatId = chatState.activeChatId;
+		const shouldReveal = chatState.hasInitialMessagesToReveal;
+		if (!chatId || !shouldReveal) return;
+
+		return scheduleInitialTranscriptReveal(() => {
+			if (chatState.activeChatId !== chatId) return false;
+			untrack(() => chatState.revealInitialMessages());
+			return chatState.hasInitialMessagesToReveal;
+		});
 	});
 
 	const isPreparingInitialScroll = $derived(
@@ -447,6 +489,28 @@
 		void controller.submitForChat(chatId, text, images);
 	}
 
+	function openQueuedInputsManager(): void {
+		const chatId = sessions.selectedChatId;
+		if (!chatId) return;
+		queuedInputEditor.close();
+		queuedInputsDialogChatId = chatId;
+		queuedInputsDialogOpen = true;
+	}
+
+	function editQueuedInput(entry: QueueEntry): void {
+		const chatId = sessions.selectedChatId;
+		if (!chatId) return;
+		queuedInputsDialogChatId = chatId;
+		queuedInputEditor.begin(entry);
+		queuedInputsDialogOpen = true;
+	}
+
+	function closeQueuedInputsDialog(): void {
+		queuedInputsDialogOpen = false;
+		queuedInputsDialogChatId = null;
+		queuedInputEditor.close();
+	}
+
 	function jumpToToolInput(anchorId: string): void {
 		document.getElementById(anchorId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 	}
@@ -561,14 +625,22 @@
 		{/if}
 	</div>
 
-	<div bind:this={queueControlsContainer} class={cn(composerCapSpace.queue && 'pb-14')}>
-		<QueueControls
-			queue={activeQueue}
-			canInterrupt={canInterruptSelectedChat}
-			onInterrupt={() => controller.handleAbort()}
-			onResume={() => controller.handleQueueResume()}
-			onDequeue={(id) => controller.handleDequeue(id)}
-		/>
+	<div bind:this={queueControlsContainer} class={queueShellClass}>
+		<div class={queueFrameClass}>
+			<QueueControls
+				chatId={sessions.selectedChatId}
+				queue={activeQueue}
+				canInterrupt={canInterruptSelectedChat}
+				onInterrupt={() => controller.handleInterruptAndSend()}
+				onPause={() => controller.handleQueuePause()}
+				onResume={(pauseId) => controller.handleQueueResume(pauseId)}
+				onQueueControlError={(action, error) =>
+					controller.handleQueueControlError(action, error)}
+				onEdit={editQueuedInput}
+				onOpenManager={openQueuedInputsManager}
+				onDelete={(id) => controller.handleDeleteQueuedInput(id)}
+			/>
+		</div>
 	</div>
 
 	<PromptComposer
@@ -585,4 +657,38 @@
 		quickCommitBranchSelector={quickGitBranchSelectorControls}
 		onQuickCommit={openCommit}
 	/>
+
+	{#if queuedInputsDialogOpen}
+		<QueuedInputsDialog
+			open={true}
+			queue={dialogQueue}
+			editor={queuedInputEditor}
+			onClose={closeQueuedInputsDialog}
+			onCreate={async (content) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.createQueueEntryForChat(queuedInputsDialogChatId, content);
+			}}
+			onReplace={async (entryId, content, expectedRevision) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.replaceQueueEntryForChat(
+					queuedInputsDialogChatId,
+					entryId,
+					content,
+					expectedRevision,
+				);
+			}}
+			onDelete={async (entryId) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.deleteQueueEntryForChat(queuedInputsDialogChatId, entryId);
+			}}
+			onPause={async () => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.pauseQueueForChat(queuedInputsDialogChatId);
+			}}
+			onResume={async (pauseId) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.resumeQueueForChat(queuedInputsDialogChatId, pauseId);
+			}}
+		/>
+	{/if}
 </div>

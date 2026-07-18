@@ -153,6 +153,7 @@ describe('API client helpers', () => {
 					errorCode: 'commit_message_timeout',
 					retryable: true,
 					details: 'upstream timeout',
+					queue: { version: 7 },
 				},
 				504,
 			),
@@ -168,6 +169,7 @@ describe('API client helpers', () => {
 			expect(apiErr.errorCode).toBe('commit_message_timeout');
 			expect(apiErr.details).toBe('upstream timeout');
 			expect(apiErr.retryable).toBe(true);
+			expect(apiErr.payload).toMatchObject({ queue: { version: 7 } });
 		}
 	});
 

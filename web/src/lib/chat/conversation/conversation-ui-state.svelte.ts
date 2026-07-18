@@ -61,6 +61,13 @@ export class ConversationUiState {
 		this.queueByChatId = { ...this.queueByChatId, [chatId]: queue };
 	}
 
+	removeMessageQueue(chatId: string): void {
+		if (!(chatId in this.queueByChatId)) return;
+		const nextQueueByChatId = { ...this.queueByChatId };
+		delete nextQueueByChatId[chatId];
+		this.queueByChatId = nextQueueByChatId;
+	}
+
 	pruneQueues(activeChatIds: Set<string>): void {
 		const staleIds = Object.keys(this.queueByChatId).filter((chatId) => !activeChatIds.has(chatId));
 		if (staleIds.length === 0) return;

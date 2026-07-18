@@ -6,6 +6,7 @@ import {
 	parseCompactCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
+	parseSnippetCommand,
 	parseSteerCommand,
 } from '$lib/chat/composer/slash-commands.js';
 
@@ -62,6 +63,8 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
 		const steer = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'steer');
 		const rename = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'rename');
+		const snippet = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'snippet');
+		const snippetShort = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 's');
 		expect(compact).toBeDefined();
 		expect(compact?.source).toBe('command');
 		expect(compact?.description).toBeTruthy();
@@ -75,6 +78,64 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(steer?.description).toBeTruthy();
 		expect(rename?.source).toBe('command');
 		expect(rename?.description).toBeTruthy();
+		expect(snippet?.source).toBe('command');
+		expect(snippet?.description).toBeTruthy();
+		expect(snippetShort?.source).toBe('command');
+		expect(snippetShort?.description).toBeTruthy();
+		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name === 'snippets')).toBe(false);
+	});
+});
+
+describe('parseSnippetCommand', () => {
+	it('parses every supported spelling with a short name', () => {
+		for (const command of ['/snippet', '/s']) {
+			expect(parseSnippetCommand(`${command} review`)).toEqual({
+				kind: 'valid',
+				shortName: 'review',
+				arguments: '',
+			});
+		}
+	});
+
+	it('preserves raw arguments', () => {
+		expect(parseSnippetCommand('/snippet review API  boundaries\nthen concurrency')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: 'API  boundaries\nthen concurrency',
+		});
+		expect(parseSnippetCommand('/s review first\r\nsecond')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: 'first\r\nsecond',
+		});
+		expect(parseSnippetCommand('/snippet review   indented\n')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: '  indented\n',
+		});
+	});
+
+	it('rejects missing and invalid short names without normalizing them', () => {
+		expect(parseSnippetCommand('/s')).toEqual({
+			kind: 'invalid',
+			error: 'short-name-required',
+		});
+		expect(parseSnippetCommand('/snippet Review')).toEqual({
+			kind: 'invalid',
+			error: 'invalid-short-name',
+		});
+		expect(parseSnippetCommand('/snippet review.name')).toEqual({
+			kind: 'invalid',
+			error: 'invalid-short-name',
+		});
+	});
+
+	it('does not claim similar or non-leading commands', () => {
+		expect(parseSnippetCommand('/snippets review')).toEqual({ kind: 'not-command' });
+		expect(parseSnippetCommand('/snippeting review')).toEqual({ kind: 'not-command' });
+		expect(parseSnippetCommand('/ss review')).toEqual({ kind: 'not-command' });
+		expect(parseSnippetCommand('please /snippet review')).toEqual({ kind: 'not-command' });
+		expect(parseSnippetCommand(' /snippet review')).toEqual({ kind: 'not-command' });
 	});
 });
 

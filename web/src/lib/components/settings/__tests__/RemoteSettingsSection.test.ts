@@ -7,13 +7,15 @@ import {
 	resolveTelegramRecipientLink,
 	saveTelegramBotToken,
 	sendTelegramTest,
+	testGenerationModel,
 	updateRemoteSettings,
 } from '$lib/api/settings.js';
-	import { ApiError } from '$lib/api/client.js';
-	import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
-	import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
-	import { setTestRemoteSettingsStore } from './remote-settings-test-context';
+import { ApiError } from '$lib/api/client.js';
+import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
+import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
+import { setTestRemoteSettingsStore } from './remote-settings-test-context';
+import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -24,6 +26,7 @@ vi.mock('$lib/api/settings.js', () => ({
 	saveTelegramBotToken: vi.fn(),
 	sendTelegramTest: vi.fn(),
 	testTelegramBotToken: vi.fn(),
+	testGenerationModel: vi.fn(),
 	updateRemoteSettings: vi.fn(),
 }));
 
@@ -38,6 +41,7 @@ type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executi
 function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
 	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
@@ -102,12 +106,20 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 		const nextUiEffective = {
 			...current.uiEffective,
 		};
+		const nextFeatures = {
+			...current.features,
+			transcriptSearch: {
+				...current.features.transcriptSearch,
+				...(patch.features?.transcriptSearch ?? {}),
+			},
+		};
 		if (patch.ui?.chatTitle) {
 			nextUiEffective.chatTitle = {
 				...(current.uiEffective.chatTitle ?? {
 					enabled: true,
 					agentId: 'claude',
 					model: 'opus',
+					thinkingMode: 'none',
 				}),
 				...patch.ui.chatTitle,
 			};
@@ -117,6 +129,7 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 				...(current.uiEffective.commitMessage ?? {
 					agentId: 'claude',
 					model: 'opus',
+					thinkingMode: 'none',
 				}),
 				...patch.ui.commitMessage,
 			};
@@ -128,6 +141,7 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 				version: current.version + 1,
 				ui: nextUi,
 				uiEffective: nextUiEffective,
+				features: nextFeatures,
 			}),
 		};
 	});
@@ -137,6 +151,25 @@ describe('RemoteSettingsSection', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		setTestGhCapability(makeTestGhCapability());
+	});
+
+	it('enables transcript search through the remote feature patch', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+
+		const toggle = screen.getByRole('switch', { name: 'Transcript search' });
+		expect(toggle.getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(toggle);
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				features: { transcriptSearch: { enabled: true } },
+			});
+			expect(store.snapshot?.features.transcriptSearch.enabled).toBe(true);
+		});
 	});
 
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {
@@ -232,10 +265,11 @@ describe('RemoteSettingsSection', () => {
 		store.applySnapshot(
 			makeSnapshot({
 				uiEffective: {
-					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
 						agentId: 'codex',
 						model: 'gpt-5.4',
+						thinkingMode: 'none',
 						useCommonDirPrefix: true,
 					},
 				},
@@ -253,6 +287,165 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.queryByText('Generate commit messages')).toBeNull();
 		expect(screen.getByText('Add common directory prefix')).toBeTruthy();
 		expect(screen.getByText('Generation prompt')).toBeTruthy();
+		expect(screen.getAllByRole('button', { name: 'Test model' })).toHaveLength(2);
+	});
+
+	it('tests title and commit generation models independently', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				uiEffective: {
+					chatTitle: {
+						enabled: true,
+						agentId: 'claude',
+						model: 'opus',
+						thinkingMode: 'high',
+					},
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						thinkingMode: 'max',
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		vi.mocked(testGenerationModel)
+			.mockResolvedValueOnce({ success: true, target: 'chatTitle', durationMs: 8_432 })
+			.mockRejectedValueOnce(
+				new ApiError(422, 'unsupported', 'GENERATION_TEST_UNSUPPORTED_EFFORT'),
+			);
+
+		render(RemoteSettingsSectionTestHost);
+
+		const [titleTestButton, commitTestButton] = screen.getAllByRole('button', {
+			name: 'Test model',
+		});
+		const [titleTestStatus] = screen.getAllByRole('status');
+		expect(titleTestStatus.textContent).toBe('');
+		await fireEvent.click(titleTestButton);
+		await screen.findByText('Model responded in 8.4 s.');
+		expect(titleTestStatus.textContent).toBe('Model responded in 8.4 s.');
+		expect(testGenerationModel).toHaveBeenNthCalledWith(1, 'chatTitle', expect.any(String));
+
+		await fireEvent.click(commitTestButton);
+		await screen.findByText('This agent cannot use the selected effort for one-shot generation.');
+		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage', expect.any(String));
+	});
+
+	it('tests an out-of-catalog Direct selection with its displayed endpoint metadata', async () => {
+		const store = new RemoteSettingsStore();
+		const chatTitle = {
+			enabled: true,
+			agentId: 'direct-openai-compatible',
+			model: 'removed-from-catalog',
+			apiProviderId: 'custom-provider',
+			modelEndpointId: 'custom-endpoint',
+			modelProtocol: 'openai-compatible' as const,
+			thinkingMode: 'max' as const,
+		};
+		store.applySnapshot(
+			makeSnapshot({
+				ui: { chatTitle },
+				uiEffective: { chatTitle },
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		vi.mocked(testGenerationModel).mockResolvedValueOnce({
+			success: true,
+			target: 'chatTitle',
+			durationMs: 12,
+		});
+
+		render(RemoteSettingsSectionTestHost);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Test model' })[0]);
+
+		await waitFor(() => {
+			expect(testGenerationModel).toHaveBeenCalledWith(
+				'chatTitle',
+				generationModelTestConfigurationKey(chatTitle),
+			);
+		});
+	});
+
+	it('keeps the Test model button name while a request is running', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				uiEffective: {
+					chatTitle: {
+						enabled: true,
+						agentId: 'claude',
+						model: 'opus',
+						thinkingMode: 'none',
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		let resolveTest!: (value: {
+			success: true;
+			target: 'chatTitle';
+			durationMs: number;
+		}) => void;
+		vi.mocked(testGenerationModel).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveTest = resolve;
+				}),
+		);
+
+		render(RemoteSettingsSectionTestHost);
+		const testButton = screen.getAllByRole('button', { name: 'Test model' })[0];
+		await fireEvent.click(testButton);
+
+		await waitFor(() => expect(testButton.getAttribute('aria-busy')).toBe('true'));
+		expect(screen.getAllByRole('button', { name: 'Test model' })[0]).toBe(testButton);
+
+		resolveTest({ success: true, target: 'chatTitle', durationMs: 10 });
+		await screen.findByText('Model responded in 10 ms.');
+	});
+
+	it('persists title and commit effort as independent generation settings', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				ui: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
+					commitMessage: { agentId: 'codex', model: 'gpt-5.4', thinkingMode: 'low' },
+				},
+				uiEffective: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
+					commitMessage: { agentId: 'codex', model: 'gpt-5.4', thinkingMode: 'low' },
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus .* Default/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: {
+					chatTitle: expect.objectContaining({ thinkingMode: 'high' }),
+				},
+			});
+		});
+
+		vi.mocked(updateRemoteSettings).mockClear();
+		await fireEvent.click(screen.getByRole('button', { name: /Codex .* GPT-5.4 .* Low/ }));
+		await fireEvent.click(
+			await screen.findByRole('button', { name: /Ultra Highest available reasoning effort/ }),
+		);
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: {
+					commitMessage: expect.objectContaining({ thinkingMode: 'ultra' }),
+				},
+			});
+		});
 	});
 
 	it('renders custom app title below Telegram notifications', async () => {
@@ -412,10 +605,11 @@ describe('RemoteSettingsSection', () => {
 					},
 				},
 				uiEffective: {
-					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
 						agentId: 'codex',
 						model: 'gpt-5.4',
+						thinkingMode: 'none',
 						useCommonDirPrefix: true,
 					},
 				},
@@ -457,10 +651,11 @@ describe('RemoteSettingsSection', () => {
 					},
 				},
 				uiEffective: {
-					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
 						agentId: 'codex',
 						model: 'gpt-5.4',
+						thinkingMode: 'none',
 						customPrompt: '',
 					},
 				},

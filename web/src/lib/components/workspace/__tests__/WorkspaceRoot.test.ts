@@ -179,6 +179,19 @@ function minimalGitSnapshot(): WorkspaceLayoutSnapshot {
 	};
 }
 
+function mobileFileSnapshot(): WorkspaceLayoutSnapshot {
+	const base = canonicalWorkspaceSnapshot();
+	return {
+		...base,
+		surfaces: {
+			...base.surfaces,
+			'file:one': { id: 'file:one', type: 'file', fileSessionId: 'one' },
+		},
+		mobileActiveSurfaceId: 'file:one',
+		mobileOnlySurfaceIds: ['file:one'],
+	};
+}
+
 function createWorkspace(initial: WorkspaceLayoutSnapshot) {
 	const layout = new WorkspaceLayoutStore(initial);
 	const commit = (mutations: readonly WorkspaceLayoutMutation[]): void => {
@@ -364,6 +377,21 @@ describe('PortableSurfaceContent', () => {
 });
 
 describe('WorkspaceRoot', () => {
+	it('offers destructive Close without non-destructive Back for a mobile file', async () => {
+		const { workspace } = installContext(mobileFileSnapshot());
+		workspace.closeSurface.mockResolvedValueOnce(true);
+		render(WorkspaceRoot, {
+			isMobile: true,
+			chatActions,
+		});
+
+		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
+		await fireEvent.click(await screen.findByRole('button', { name: 'Close file' }));
+
+		expect(workspace.closeSurface).toHaveBeenCalledWith('file:one');
+		expect(workspace.mobileBack).not.toHaveBeenCalled();
+	});
+
 	it('reserves chat content space only while the desktop taskbar is rendered', async () => {
 		installContext(canonicalWorkspaceSnapshot());
 		const rendered = render(WorkspaceRoot, {
@@ -457,6 +485,7 @@ describe('WorkspaceRoot', () => {
 			'[data-workspace-sidebar-backdrop]',
 		)!;
 		expect(backdrop).toBeTruthy();
+		expect(backdrop.classList.contains('transient-backdrop')).toBe(true);
 		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(true));
 		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
 			chatNode,

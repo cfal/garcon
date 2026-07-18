@@ -21,6 +21,7 @@ vi.mock('$lib/api/settings', () => ({
 function makeSnapshot(): RemoteSettingsSnapshot {
 	return {
 		version: 1,
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: {

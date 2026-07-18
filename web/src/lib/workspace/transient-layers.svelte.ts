@@ -5,6 +5,7 @@ export type TransientLayerKind =
 	| 'menu'
 	| 'popover'
 	| 'confirmation'
+	| 'prompt-transform'
 	| 'application-dialog'
 	| 'file-dialog'
 	| 'sidebar-overlay'
@@ -34,6 +35,7 @@ const PRIORITY: Record<TransientLayerKind, number> = {
 	menu: 5,
 	popover: 5,
 	confirmation: 4,
+	'prompt-transform': 3,
 	'application-dialog': 3,
 	'file-dialog': 3,
 	'sidebar-overlay': 2,
@@ -102,7 +104,7 @@ export class TransientLayerRegistry {
 	}
 
 	handleEscape(event: KeyboardEvent): boolean {
-		if (event.key !== 'Escape') return false;
+		if (event.key !== 'Escape' || event.isComposing) return false;
 		const layer = this.#topVisibleLayer();
 		if (!layer || !layer.onEscape()) return false;
 		event.preventDefault();
@@ -119,10 +121,14 @@ export class TransientLayerRegistry {
 	#topVisibleLayer(modality?: TransientLayerModality): RegisteredLayer | null {
 		return (
 			this.#layers
-				.filter((layer) => {
+					.filter((layer) => {
 					if (modality && layer.modality !== modality) return false;
 					const element = layer.element();
-					return Boolean(element?.isConnected && !element.hidden);
+						return Boolean(
+							element?.isConnected &&
+							!element.hidden &&
+							element.dataset.state !== 'closed',
+						);
 				})
 				.sort((left, right) => {
 					const priority = PRIORITY[right.kind] - PRIORITY[left.kind];

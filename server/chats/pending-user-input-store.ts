@@ -1,10 +1,27 @@
 import { EventEmitter } from 'events';
-import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
+import type { UserMessageDeliveryStatus } from '../../common/chat-types.js';
+import type {
+  PendingUserInput,
+  PendingUserInputAttachment,
+  PendingUserInputClearReason,
+} from '../../common/pending-user-input.js';
 
-export type PendingUserInputRecord = PendingUserInput;
-export type PendingUserInputStoreClearReason = PendingUserInputClearReason | 'persisted';
+export interface PendingUserInputImageEvidence extends PendingUserInputAttachment {
+  dataSha256: string;
+  dataLength: number;
+}
+
+export interface PendingUserInputRecord extends PendingUserInput {
+  imageEvidence?: PendingUserInputImageEvidence[];
+}
+export type PendingUserInputStoreClearReason = PendingUserInputClearReason;
 
 type UpdatedCallback = (input: PendingUserInput) => void;
+type StatusUpdatedCallback = (
+  chatId: string,
+  clientRequestId: string,
+  deliveryStatus: UserMessageDeliveryStatus,
+) => void;
 type ClearedCallback = (chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason) => void;
 
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
@@ -21,6 +38,7 @@ function clonePendingInput(record: PendingUserInputRecord): PendingUserInput {
     ...(record.clientMessageId ? { clientMessageId: record.clientMessageId } : {}),
     ...(record.turnId ? { turnId: record.turnId } : {}),
     ...(record.images ? { images: record.images } : {}),
+    ...(record.attachments ? { attachments: record.attachments } : {}),
   };
 }
 
@@ -42,7 +60,7 @@ export class PendingUserInputStore extends EventEmitter {
     return (this.#recordsByChatId.get(chatId)?.length ?? 0) > 0;
   }
 
-  upsert(input: PendingUserInput): PendingUserInput {
+  upsert(input: PendingUserInputRecord): PendingUserInput {
     const records = this.#recordsByChatId.get(input.chatId) ?? [];
     const index = records.findIndex((record) => record.clientRequestId === input.clientRequestId);
     const next: PendingUserInputRecord = { ...input };
@@ -60,6 +78,20 @@ export class PendingUserInputStore extends EventEmitter {
     const normalized = clonePendingInput(stored);
     this.emit('updated', normalized);
     return normalized;
+  }
+
+  updateDeliveryStatus(
+    chatId: string,
+    clientRequestId: string,
+    deliveryStatus: UserMessageDeliveryStatus,
+  ): boolean {
+    const records = this.#recordsByChatId.get(chatId);
+    const record = records?.find((candidate) => candidate.clientRequestId === clientRequestId);
+    if (!record) return false;
+    if (record.deliveryStatus === deliveryStatus) return true;
+    record.deliveryStatus = deliveryStatus;
+    this.emit('status-updated', chatId, clientRequestId, deliveryStatus);
+    return true;
   }
 
   clear(chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason): boolean {
@@ -107,6 +139,10 @@ export class PendingUserInputStore extends EventEmitter {
 
   onUpdated(callback: UpdatedCallback): void {
     this.on('updated', callback);
+  }
+
+  onStatusUpdated(callback: StatusUpdatedCallback): void {
+    this.on('status-updated', callback);
   }
 
   onCleared(callback: ClearedCallback): void {

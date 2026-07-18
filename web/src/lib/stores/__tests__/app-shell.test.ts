@@ -182,4 +182,37 @@ describe('AppShellStore', () => {
 			expect(store.settingsTab).toBe('remote');
 		});
 	});
+
+	describe('snippets dialog', () => {
+		it('opens exclusively and returns focus after a user close', async () => {
+			const store = new AppShellStore();
+			const returnFocus = vi.fn();
+			store.openSettings('remote');
+
+			store.openSnippets(returnFocus);
+
+			expect(store.showSnippets).toBe(true);
+			expect(store.showSettings).toBe(false);
+			expect(store.showScheduledPrompts).toBe(false);
+
+			store.closeSnippets();
+			expect(store.showSnippets).toBe(false);
+			expect(returnFocus).not.toHaveBeenCalled();
+			await Promise.resolve();
+			expect(returnFocus).toHaveBeenCalledTimes(1);
+		});
+
+		it('dismisses without restoring focus when another shell dialog opens', async () => {
+			const store = new AppShellStore();
+			const returnFocus = vi.fn();
+			store.openSnippets(returnFocus);
+
+			store.openScheduledPrompts();
+			await Promise.resolve();
+
+			expect(store.showSnippets).toBe(false);
+			expect(store.showScheduledPrompts).toBe(true);
+			expect(returnFocus).not.toHaveBeenCalled();
+		});
+	});
 });

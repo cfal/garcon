@@ -14,7 +14,7 @@ const logger = createLogger('agents:auth-login');
 
 type LoginCommand = [string, ...string[]];
 
-type SpawnedLoginProcess = ReturnType<typeof Bun.spawn>;
+type SpawnedLoginProcess = Bun.PipedSubprocess;
 type LoginProcessSpawner = (command: LoginCommand, agentId: string) => SpawnedLoginProcess;
 
 interface AuthLoginSession {
@@ -245,19 +245,14 @@ export class AgentAuthLoginManager {
       throw new Error('code is required');
     }
 
-    const stdin = proc.stdin;
-    if (!stdin || typeof stdin !== 'object' || !('write' in stdin)) {
+    const sink = proc.stdin;
+    if (!sink || typeof sink.write !== 'function') {
       throw new Error(`Pending auth login for ${agentId} cannot accept a code`);
     }
 
-    const sink = stdin as {
-      write(data: string): number | Promise<number>;
-      flush?(): number | Promise<number>;
-      end?(): number | Promise<number>;
-    };
     await sink.write(`${code.trim()}\n`);
-    await sink.flush?.();
-    await sink.end?.();
+    await sink.flush();
+    await sink.end();
 
     return { completed: true, sessionId };
   }

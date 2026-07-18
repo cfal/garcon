@@ -8,6 +8,12 @@ import {
   parseTerminalTerminateRequest,
   parseTerminalTerminateResponse,
 } from '../../../common/terminal.ts';
+import {
+  isTerminalStreamClientMessageType,
+  parsePrimaryWsClientMessage,
+  parsePrimaryWsServerMessage,
+  TERMINAL_STREAM_CLIENT_MESSAGE_TYPES,
+} from '../../../common/ws-protocol.ts';
 
 const metadata = {
   terminalId: 'terminal-1',
@@ -82,6 +88,32 @@ describe('terminal contracts', () => {
     }
   });
 
+  it('routes every terminal request type through the primary contract', () => {
+    expect(TERMINAL_STREAM_CLIENT_MESSAGE_TYPES).toEqual([
+      'terminal-attach',
+      'terminal-input',
+      'terminal-resize',
+    ]);
+    for (const type of TERMINAL_STREAM_CLIENT_MESSAGE_TYPES) {
+      expect(isTerminalStreamClientMessageType(type)).toBe(true);
+    }
+    expect(isTerminalStreamClientMessageType('chat-subscribe')).toBe(false);
+    expect(
+      parsePrimaryWsClientMessage({
+        type: 'terminal-input',
+        terminalId: 'terminal-1',
+        data: 'pwd\n',
+      }),
+    ).toEqual({
+      type: 'terminal-input',
+      terminalId: 'terminal-1',
+      data: 'pwd\n',
+    });
+    expect(
+      parsePrimaryWsClientMessage({ type: 'ws-ping', sentAt: 42 }),
+    ).toMatchObject({ type: 'ws-ping', sentAt: 42 });
+  });
+
   it('round-trips every server stream message', () => {
     const messages = [
       {
@@ -132,6 +164,28 @@ describe('terminal contracts', () => {
         parseTerminalStreamServerMessage(JSON.parse(JSON.stringify(message))),
       ).toEqual(message);
     }
+  });
+
+  it('parses chat and terminal messages through the primary server contract', () => {
+    expect(
+      parsePrimaryWsServerMessage({
+        type: 'terminal-error',
+        code: 'terminal-auth-expired',
+        message: 'Terminal authorization expired.',
+      }),
+    ).toEqual({
+      type: 'terminal-error',
+      code: 'terminal-auth-expired',
+      message: 'Terminal authorization expired.',
+    });
+    expect(
+      parsePrimaryWsServerMessage({
+        type: 'ws-pong',
+        clientRequestId: 'request-1',
+        sentAt: 42,
+        serverTime: '2026-07-16T00:00:00.000Z',
+      }),
+    ).toMatchObject({ type: 'ws-pong', clientRequestId: 'request-1' });
   });
 
   it('rejects malformed and oversized messages', () => {

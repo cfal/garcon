@@ -68,7 +68,7 @@ export type {
 	PermissionCancelledMessage,
 	ChatMessage,
 } from '$shared/chat-types';
-export type { QueueEntry, QueueState } from '$shared/queue-state';
+export type { QueueEntry, QueuePause, QueueState } from '$shared/queue-state';
 
 export type PendingViewChat = {
 	chatId: string | null;

@@ -42,6 +42,7 @@
 			case 'interrupted':
 				return 'text-status-warning-muted-foreground';
 			case 'closed':
+			case 'completed':
 			case 'idle':
 			case 'observing':
 				return 'text-muted-foreground';

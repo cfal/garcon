@@ -10,7 +10,7 @@ import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import { isTestEnvironment } from '../../config.js';
-import type { PermissionMode } from "../../../common/chat-modes.js";
+import { normalizeThinkingMode, type PermissionMode } from "../../../common/chat-modes.js";
 import type { AgentSessionSettingsPatch, StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 import { createLogger } from '../../lib/log.js';
 import {
@@ -20,6 +20,7 @@ import {
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
 } from './sdk-result.js';
+import { UnsupportedSingleQueryEffortError } from '../single-query-errors.js';
 
 const logger = createLogger('agents:opencode:opencode');
 
@@ -204,6 +205,7 @@ interface NormalizedOpenCodeRuntimeOptions {
 
 interface OpenCodeInstance {
   client: any;
+  baseUrl?: string;
   server?: {
     close?: () => void;
   };
@@ -398,6 +400,7 @@ async function createOpenCodeInstance(input: {
   const close = () => stopOpenCodeProcess(proc);
   return {
     client: createOpencodeClient({ baseUrl: url }),
+    baseUrl: url,
     server: { close },
   };
 }
@@ -415,6 +418,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
   #unavailableUntil = 0;
   #unavailableReason = '';
+  #searchLeaseCount = 0;
   #idlePurger = new IdleSessionPurger<OpenCodeSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.status === 'running',
@@ -513,7 +517,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   #closeInstanceIfIdle(): void {
-    if (!this.#hasRunningSessions()) this.#closeInstance();
+    if (!this.#hasRunningSessions() && this.#searchLeaseCount === 0) this.#closeInstance();
   }
 
   #closeInstance(): void {
@@ -839,6 +843,25 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#assertCanUseOpenCode();
     const instance = await this.#ensureOpenCodeServer();
     return instance.client;
+  }
+
+  async acquireSearchServerLease(): Promise<{ baseUrl: string; release: () => void }> {
+    this.#assertCanUseOpenCode();
+    const instance = await this.#ensureOpenCodeServer();
+    if (!instance.baseUrl) {
+      throw new Error('OpenCode server URL is unavailable for transcript search');
+    }
+    this.#searchLeaseCount += 1;
+    let released = false;
+    return {
+      baseUrl: instance.baseUrl,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.#searchLeaseCount = Math.max(0, this.#searchLeaseCount - 1);
+        this.#closeInstanceIfIdle();
+      },
+    };
   }
 
   getClientIfInitialized(): any | null {
@@ -1180,6 +1203,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
+    const thinkingMode = normalizeThinkingMode(options.thinkingMode);
+    if (thinkingMode !== 'none') {
+      throw new UnsupportedSingleQueryEffortError('opencode', thinkingMode);
+    }
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
     const scope = createOpenCodeRequestScope(projectPath || cwd);
     const client = await this.getClient();

@@ -37,6 +37,7 @@ export interface GenerationUiSettings {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+  thinkingMode?: ThinkingMode;
   customPrompt?: string;
   useCommonDirPrefix?: boolean;
 }
@@ -81,9 +82,9 @@ type EffectiveGenerationExtras = {
 };
 
 export interface RemoteUiEffectiveSettings {
-  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> &
+  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveGenerationExtras;
-  commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model'>> &
+  commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveGenerationExtras;
 }
 
@@ -92,6 +93,18 @@ export interface RemotePathSettings {
   browseStartPath: string;
   recentProjectPaths: string[];
 }
+
+export interface TranscriptSearchFeatureSettings {
+  enabled: boolean;
+}
+
+export interface RemoteFeatureSettings {
+  transcriptSearch: TranscriptSearchFeatureSettings;
+}
+
+export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
+  transcriptSearch: { enabled: false },
+};
 
 export interface RecentAgentSetting {
   agentId: AgentId;
@@ -115,6 +128,7 @@ export interface RemoteExecutionDefaults {
 
 export interface RemoteSettingsSnapshot {
   version: number;
+  features: RemoteFeatureSettings;
   ui: RemoteUiSettings;
   uiEffective: RemoteUiEffectiveSettings;
   paths: RemotePathSettings;
@@ -126,6 +140,9 @@ export interface RemoteSettingsSnapshot {
 }
 
 export interface UpdateRemoteSettingsInput {
+  features?: {
+    transcriptSearch?: Partial<TranscriptSearchFeatureSettings>;
+  };
   ui?: Partial<RemoteUiSettings>;
   paths?: Partial<RemotePathSettings>;
 }
@@ -172,6 +189,8 @@ function normalizeGenerationUiSettings(
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
+  const thinkingMode = coerceThinkingMode(raw.thinkingMode);
+  if (thinkingMode) normalized.thinkingMode = thinkingMode;
   if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
@@ -214,6 +233,7 @@ function normalizeChatTitleUiEffectiveSettings(
     enabled: raw.enabled,
     agentId: raw.agentId,
     model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
   normalizeEffectiveGenerationExtras(raw, normalized);
   return normalized;
@@ -230,6 +250,7 @@ function normalizeCommitMessageUiEffectiveSettings(
   const normalized: NonNullable<RemoteUiEffectiveSettings['commitMessage']> = {
     agentId: raw.agentId,
     model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
   normalizeEffectiveGenerationExtras(raw, normalized);
   return normalized;
@@ -292,6 +313,18 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
   const recentProjectPaths = asStringArray(raw.recentProjectPaths);
   if (!pinnedProjectPaths || browseStartPath === null || !recentProjectPaths) return null;
   return { pinnedProjectPaths, browseStartPath, recentProjectPaths };
+}
+
+export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSettings {
+  const raw = asRecord(value);
+  const transcriptSearch = asRecord(raw?.transcriptSearch);
+  return {
+    transcriptSearch: {
+      enabled: typeof transcriptSearch?.enabled === 'boolean'
+        ? transcriptSearch.enabled
+        : false,
+    },
+  };
 }
 
 function normalizeRemoteSettingsVersion(value: unknown): number | null {
@@ -432,6 +465,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
   if (!raw) return null;
 
   const version = normalizeRemoteSettingsVersion(raw.version);
+  const features = normalizeRemoteFeatureSettings(raw.features);
   const ui = normalizeRemoteUiSettings(raw.ui);
   const uiEffective = normalizeRemoteUiEffectiveSettings(raw.uiEffective);
   const paths = normalizeRemotePathSettings(raw.paths);
@@ -448,6 +482,7 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
 
   return {
     version,
+    features,
     ui,
     uiEffective,
     paths,
