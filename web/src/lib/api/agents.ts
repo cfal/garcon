@@ -61,6 +61,12 @@ export async function completeAgentAuthLogin(
 	});
 }
 
-export async function getAgentAuthLoginStatus(agent: AgentName): Promise<AgentAuthLoginStatus> {
-	return apiGet<AgentAuthLoginStatus>(`/api/v1/agents/auth/login?agent=${encodeURIComponent(agent)}`);
+export async function getAgentAuthLoginStatus(
+	agent: AgentName,
+	expectedSessionId?: string,
+): Promise<AgentAuthLoginStatus> {
+	const sessionQuery = expectedSessionId ? `&session=${encodeURIComponent(expectedSessionId)}` : '';
+	return apiGet<AgentAuthLoginStatus>(
+		`/api/v1/agents/auth/login?agent=${encodeURIComponent(agent)}${sessionQuery}`,
+	);
 }

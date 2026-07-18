@@ -129,7 +129,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
       getAuthStatus: () => getClaudeAuthStatus(),
       launchLogin: () => launchAgentAuthLogin('claude'),
       completeLogin: (sessionId, code) => completeAgentAuthLogin('claude', sessionId, code),
-      loginStatus: () => getAgentAuthLoginStatus('claude'),
+      loginStatus: (expectedSessionId) => getAgentAuthLoginStatus('claude', expectedSessionId),
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,

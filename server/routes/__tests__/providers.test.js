@@ -29,8 +29,9 @@ describe('agent auth login routes', () => {
       alreadyRunning: false,
       sessionId: 'session-a',
     })),
-    completeAgentAuthLogin: mock(() => Promise.resolve({ completed: true, sessionId: 'session-a' })),
+    completeAgentAuthLogin: mock(() => Promise.resolve({ submitted: true, sessionId: 'session-a' })),
     getAgentAuthLoginStatus: mock(() => Promise.resolve({
+      state: 'running',
       running: true,
       sessionId: 'session-a',
       deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
@@ -82,24 +83,25 @@ describe('agent auth login routes', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ completed: true, sessionId: 'session-a' });
+    expect(body).toEqual({ submitted: true, sessionId: 'session-a' });
     expect(agents.completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'session-a', 'test-code');
   });
 
   it('returns the typed active login session contract', async () => {
     const handler = routes['/api/v1/agents/auth/login'].GET;
-    const request = new Request('http://localhost/api/v1/agents/auth/login?agent=codex');
+    const request = new Request('http://localhost/api/v1/agents/auth/login?agent=codex&session=session-a');
 
     const response = await handler(request, new URL(request.url));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
+      state: 'running',
       running: true,
       sessionId: 'session-a',
       deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
     });
-    expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex');
+    expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', 'session-a');
   });
 
   it('validates the missing agent query for login status', async () => {

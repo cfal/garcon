@@ -88,13 +88,14 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
 
   async function getAgentAuthLoginStatus(_request: Request, url: URL): Promise<Response> {
     const agentId = url.searchParams.get('agent');
+    const expectedSessionId = url.searchParams.get('session') ?? undefined;
     if (!agentId) {
       return Response.json({ error: 'agent is required' }, { status: 400 });
     }
     const invalidAgent = validateAuthLoginAgent(agentId);
     if (invalidAgent) return invalidAgent;
     try {
-      return Response.json(await agents.getAgentAuthLoginStatus(agentId));
+      return Response.json(await agents.getAgentAuthLoginStatus(agentId, expectedSessionId));
     } catch (error) {
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }

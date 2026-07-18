@@ -28,24 +28,25 @@ describe('agent login API contract', () => {
 
 	it('gets the active login session with an encoded agent query', async () => {
 		const payload = {
+			state: 'running',
 			running: true,
 			sessionId: 'session-a',
 			deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		await expect(getAgentAuthLoginStatus('codex')).resolves.toEqual(payload);
+		await expect(getAgentAuthLoginStatus('codex', 'session-a')).resolves.toEqual(payload);
 
 		const [url, options] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/agents/auth/login?agent=codex');
+		expect(url).toBe('/api/v1/agents/auth/login?agent=codex&session=session-a');
 		expect(options.method ?? 'GET').toBe('GET');
 	});
 
 	it('submits completion with explicit login-session ownership', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ completed: true, sessionId: 'session-a' }));
+		fetchMock.mockResolvedValue(jsonResponse({ submitted: true, sessionId: 'session-a' }));
 
 		await expect(completeAgentAuthLogin('claude', 'session-a', 'auth-code')).resolves.toEqual({
-			completed: true,
+			submitted: true,
 			sessionId: 'session-a',
 		});
 

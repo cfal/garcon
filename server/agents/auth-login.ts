@@ -6,7 +6,7 @@ import type {
   AgentAuthLoginStatus,
   AgentDeviceAuthInfo,
 } from '../../common/agent-auth.js';
-import { getClaudeBinary, getCursorBinary } from "../config.js";
+import { getClaudeBinary, getCursorBinary } from '../config.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 
@@ -19,9 +19,14 @@ type LoginProcessSpawner = (command: LoginCommand, agentId: string) => SpawnedLo
 
 interface AuthLoginSession {
   id: string;
+  phase: 'running' | 'completing';
+  process?: { kill(): void };
   browserProcess?: SpawnedLoginProcess;
   deviceAuth?: AgentDeviceAuthInfo;
+  watchdog?: ReturnType<typeof setTimeout>;
 }
+
+type TerminalAuthLoginStatus = Extract<AgentAuthLoginStatus, { state: 'succeeded' | 'failed' }>;
 
 const CLAUDE_LOGIN_WRAPPER = `
 delete process.env.CLAUDECODE;
@@ -57,6 +62,10 @@ function getLoginCommand(agentId: string): LoginCommand | null {
 const DEVICE_AUTH_AGENTS = new Set(['codex']);
 
 const DEVICE_AUTH_TIMEOUT_MS = 10_000;
+const LOGIN_SESSION_TIMEOUT_MS = 15 * 60_000;
+const SESSION_EXPIRED_ERROR = 'Sign-in timed out. Start a new sign-in attempt.';
+const SESSION_UNAVAILABLE_ERROR = 'This sign-in session is no longer available.';
+const SESSION_FAILED_ERROR = 'Sign-in failed. Start a new sign-in attempt.';
 
 // Strip ANSI escape sequences so the regex can match clean text.
 function stripAnsi(str: string): string {
@@ -82,17 +91,32 @@ export function parseBrowserAuth(raw: string): AgentDeviceAuthInfo | null {
 }
 
 // Reads PTY output via onData until device auth info is found or timeout.
-function readDeviceAuthFromPty(proc: IPty): Promise<AgentDeviceAuthInfo | null> {
+function readDeviceAuthFromPty(
+  proc: IPty,
+  onDeviceAuth: (deviceAuth: AgentDeviceAuthInfo) => void,
+  initialResponseTimeoutMs: number,
+): Promise<AgentDeviceAuthInfo | null> {
   return new Promise((resolve) => {
     let output = '';
-    const timeout = setTimeout(() => resolve(null), DEVICE_AUTH_TIMEOUT_MS);
+    let initialResponseSettled = false;
+    let parsedDeviceAuth = false;
+    const timeout = setTimeout(() => {
+      initialResponseSettled = true;
+      resolve(null);
+    }, initialResponseTimeoutMs);
 
     proc.onData((chunk) => {
+      if (parsedDeviceAuth) return;
       output += chunk;
       const parsed = parseDeviceAuth(output);
       if (parsed) {
+        parsedDeviceAuth = true;
+        onDeviceAuth(parsed);
         clearTimeout(timeout);
-        resolve(parsed);
+        if (!initialResponseSettled) {
+          initialResponseSettled = true;
+          resolve(parsed);
+        }
       }
     });
   });
@@ -127,21 +151,27 @@ function readBrowserAuthFromProcess(proc: SpawnedLoginProcess): Promise<AgentDev
           }
         }
       } catch (error) {
-        logger.debug(`agents: auth login output read failed: ${error instanceof Error ? error.message : String(error)}`);
+        logger.debug(
+          `agents: auth login output read failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
     void read(proc.stdout as ReadableStream<Uint8Array> | null);
     void read(proc.stderr as ReadableStream<Uint8Array> | null);
-    void proc.exited.then((exitCode) => {
-      if (exitCode !== 0) {
-        logger.warn(`agents: browser auth login exited before auth URL with code ${exitCode}`);
-      }
-      finish(null);
-    }).catch((error) => {
-      logger.warn(`agents: browser auth login failed before auth URL: ${error instanceof Error ? error.message : String(error)}`);
-      finish(null);
-    });
+    void proc.exited
+      .then((exitCode) => {
+        if (exitCode !== 0) {
+          logger.warn(`agents: browser auth login exited before auth URL with code ${exitCode}`);
+        }
+        finish(null);
+      })
+      .catch((error) => {
+        logger.warn(
+          `agents: browser auth login failed before auth URL: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        finish(null);
+      });
   });
 }
 
@@ -178,10 +208,21 @@ function defaultProcessSpawner(command: LoginCommand, agentId: string): SpawnedL
 
 export class AgentAuthLoginManager {
   #sessions = new Map<string, AuthLoginSession>();
+  #terminalSessions = new Map<string, TerminalAuthLoginStatus>();
   #spawnProcess: LoginProcessSpawner;
+  #sessionTimeoutMs: number;
+  #deviceAuthTimeoutMs: number;
 
-  constructor(options: { spawnProcess?: LoginProcessSpawner } = {}) {
+  constructor(
+    options: {
+      spawnProcess?: LoginProcessSpawner;
+      sessionTimeoutMs?: number;
+      deviceAuthTimeoutMs?: number;
+    } = {},
+  ) {
     this.#spawnProcess = options.spawnProcess ?? defaultProcessSpawner;
+    this.#sessionTimeoutMs = options.sessionTimeoutMs ?? LOGIN_SESSION_TIMEOUT_MS;
+    this.#deviceAuthTimeoutMs = options.deviceAuthTimeoutMs ?? DEVICE_AUTH_TIMEOUT_MS;
   }
 
   async launch(agentId: string): Promise<AgentAuthLoginLaunchResult> {
@@ -201,23 +242,42 @@ export class AgentAuthLoginManager {
     }
 
     // Claims the agent before loading bun-pty so concurrent requests cannot both spawn a login.
-    const session: AuthLoginSession = { id: crypto.randomUUID() };
+    const session: AuthLoginSession = {
+      id: crypto.randomUUID(),
+      phase: 'running',
+    };
+    this.#terminalSessions.delete(agentId);
     this.#sessions.set(agentId, session);
+    this.#startWatchdog(agentId, session);
 
     try {
       const proc = await this.#spawnPty(agentId, command, session);
       const useDeviceAuth = DEVICE_AUTH_AGENTS.has(agentId);
-      const deviceAuth = useDeviceAuth ? (await readDeviceAuthFromPty(proc)) ?? undefined : undefined;
-      if (deviceAuth && this.#sessions.get(agentId) === session) {
-        session.deviceAuth = deviceAuth;
-      }
-      return { launched: true, alreadyRunning: false, sessionId: session.id, deviceAuth };
+      const deviceAuth = useDeviceAuth
+        ? ((await readDeviceAuthFromPty(
+            proc,
+            (parsed) => this.#cacheDeviceAuth(agentId, session, parsed),
+            this.#deviceAuthTimeoutMs,
+          )) ?? undefined)
+        : undefined;
+      return {
+        launched: true,
+        alreadyRunning: false,
+        sessionId: session.id,
+        deviceAuth,
+      };
     } catch (error) {
+      if (this.#sessions.get(agentId) !== session) throw error;
       if (agentId !== 'claude') {
-        this.#releaseSession(agentId, session);
+        this.#finishSession(agentId, session, {
+          state: 'failed',
+          error: SESSION_FAILED_ERROR,
+        });
         throw error;
       }
-      logger.warn(`agents: Claude PTY login failed, falling back to browser-code flow: ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn(
+        `agents: Claude PTY login failed, falling back to browser-code flow: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return this.#launchClaudeBrowserCodeLogin(agentId, session);
     }
   }
@@ -226,12 +286,26 @@ export class AgentAuthLoginManager {
   // device auth details visible until the session actually ends. Auth status
   // is not a usable completion signal because agents with stale credentials
   // report authenticated throughout a re-login.
-  status(agentId: string): AgentAuthLoginStatus {
+  status(agentId: string, expectedSessionId?: string): AgentAuthLoginStatus {
     const session = this.#sessions.get(agentId);
-    if (session) {
-      return { running: true, sessionId: session.id, deviceAuth: session.deviceAuth };
+    if (session && (!expectedSessionId || session.id === expectedSessionId)) {
+      return {
+        state: 'running',
+        running: true,
+        sessionId: session.id,
+        deviceAuth: session.deviceAuth,
+      };
     }
-    return { running: false };
+    if (!expectedSessionId) return { state: 'idle', running: false };
+
+    const terminal = this.#terminalSessions.get(agentId);
+    if (terminal?.sessionId === expectedSessionId) return terminal;
+    return {
+      state: 'failed',
+      running: false,
+      sessionId: expectedSessionId,
+      error: SESSION_UNAVAILABLE_ERROR,
+    };
   }
 
   async complete(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult> {
@@ -250,11 +324,21 @@ export class AgentAuthLoginManager {
       throw new Error(`Pending auth login for ${agentId} cannot accept a code`);
     }
 
-    await sink.write(`${code.trim()}\n`);
-    await sink.flush();
-    await sink.end();
+    if (session.phase !== 'running') {
+      throw new AgentAuthLoginSessionError(`Auth login completion is already pending for agent: ${agentId}`);
+    }
+    // Claims completion before the first asynchronous sink operation.
+    session.phase = 'completing';
+    try {
+      await sink.write(`${code.trim()}\n`);
+      await sink.flush();
+      await sink.end();
+    } catch (error) {
+      if (this.#sessions.get(agentId) === session) session.phase = 'running';
+      throw error;
+    }
 
-    return { completed: true, sessionId };
+    return { submitted: true, sessionId };
   }
 
   async #launchClaudeBrowserCodeLogin(agentId: string, session: AuthLoginSession): Promise<AgentAuthLoginLaunchResult> {
@@ -262,28 +346,52 @@ export class AgentAuthLoginManager {
     try {
       proc = this.#spawnProcess(getClaudePipeLoginCommand(), agentId);
     } catch (error) {
-      this.#releaseSession(agentId, session);
+      this.#finishSession(agentId, session, {
+        state: 'failed',
+        error: SESSION_FAILED_ERROR,
+      });
       throw error;
     }
     session.browserProcess = proc;
-    void proc.exited.finally(() => {
-      this.#releaseSession(agentId, session);
-    });
+    session.process = proc;
 
     const deviceAuth = await readBrowserAuthFromProcess(proc);
     if (!deviceAuth) {
-      this.#releaseSession(agentId, session);
+      this.#finishSession(agentId, session, {
+        state: 'failed',
+        error: SESSION_FAILED_ERROR,
+      });
       proc.kill();
       throw new Error('Claude auth login did not print a sign-in URL');
     }
+    void proc.exited.then(
+      (exitCode) => this.#finishFromExit(agentId, session, exitCode),
+      (error) => {
+        logger.warn(
+          `agents: Claude auth login process failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        this.#finishSession(agentId, session, {
+          state: 'failed',
+          error: SESSION_FAILED_ERROR,
+        });
+      },
+    );
     if (this.#sessions.get(agentId) === session) {
       session.deviceAuth = deviceAuth;
     }
-    return { launched: true, alreadyRunning: false, sessionId: session.id, deviceAuth };
+    return {
+      launched: true,
+      alreadyRunning: false,
+      sessionId: session.id,
+      deviceAuth,
+    };
   }
 
   async #spawnPty(agentId: string, command: LoginCommand, session: AuthLoginSession): Promise<IPty> {
     const { spawn: ptySpawn } = await import('bun-pty');
+    if (this.#sessions.get(agentId) !== session) {
+      throw new Error(SESSION_EXPIRED_ERROR);
+    }
     const [binary, ...args] = command;
     const proc = ptySpawn(binary, args, {
       name: 'xterm-256color',
@@ -292,21 +400,62 @@ export class AgentAuthLoginManager {
       cwd: os.homedir(),
       env: buildLoginEnv(agentId),
     });
+    session.process = proc;
 
     proc.onExit((exit: IExitEvent) => {
-      this.#releaseSession(agentId, session);
+      this.#finishFromExit(agentId, session, exit.exitCode);
       if (exit.exitCode !== 0) {
-        logger.warn(`agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
+        logger.warn(
+          `agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`,
+        );
       }
     });
 
     return proc;
   }
 
-  #releaseSession(agentId: string, session: AuthLoginSession): void {
-    if (this.#sessions.get(agentId) === session) {
-      this.#sessions.delete(agentId);
-    }
+  #cacheDeviceAuth(agentId: string, session: AuthLoginSession, deviceAuth: AgentDeviceAuthInfo): void {
+    if (this.#sessions.get(agentId) === session) session.deviceAuth = deviceAuth;
+  }
+
+  #startWatchdog(agentId: string, session: AuthLoginSession): void {
+    session.watchdog = setTimeout(() => {
+      if (this.#sessions.get(agentId) !== session) return;
+      this.#finishSession(agentId, session, {
+        state: 'failed',
+        error: SESSION_EXPIRED_ERROR,
+      });
+      try {
+        session.process?.kill();
+      } catch (error) {
+        logger.debug(
+          `agents: expired auth login termination failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }, this.#sessionTimeoutMs);
+  }
+
+  #finishFromExit(agentId: string, session: AuthLoginSession, exitCode: number): void {
+    this.#finishSession(
+      agentId,
+      session,
+      exitCode === 0 ? { state: 'succeeded' } : { state: 'failed', error: SESSION_FAILED_ERROR },
+    );
+  }
+
+  #finishSession(
+    agentId: string,
+    session: AuthLoginSession,
+    outcome: { state: 'succeeded' } | { state: 'failed'; error: string },
+  ): void {
+    if (this.#sessions.get(agentId) !== session) return;
+    this.#sessions.delete(agentId);
+    if (session.watchdog) clearTimeout(session.watchdog);
+    this.#terminalSessions.set(agentId, {
+      ...outcome,
+      running: false,
+      sessionId: session.id,
+    });
   }
 }
 
@@ -331,6 +480,6 @@ export function completeAgentAuthLogin(
   return agentAuthLogin.complete(agentId, sessionId, code);
 }
 
-export function getAgentAuthLoginStatus(agentId: string): AgentAuthLoginStatus {
-  return agentAuthLogin.status(agentId);
+export function getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): AgentAuthLoginStatus {
+  return agentAuthLogin.status(agentId, expectedSessionId);
 }

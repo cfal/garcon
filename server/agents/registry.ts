@@ -85,7 +85,7 @@ export interface AgentRegistryServiceContract {
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult>;
   completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
-  getAgentAuthLoginStatus(agentId: string): Promise<AgentAuthLoginStatus>;
+  getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus>;
   modelSupportsImages(input: {
     agentId: string;
     model: string;
@@ -361,11 +361,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return agent.auth.completeLogin(sessionId, code);
   }
 
-  async getAgentAuthLoginStatus(agentId: string): Promise<AgentAuthLoginStatus> {
+  async getAgentAuthLoginStatus(
+    agentId: string,
+    expectedSessionId?: string,
+  ): Promise<AgentAuthLoginStatus> {
     const agent = this.#directory.get(agentId);
     if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
-    if (!agent.auth.loginStatus) return { running: false };
-    return agent.auth.loginStatus();
+    if (!agent.auth.loginStatus) return { state: 'idle', running: false };
+    return agent.auth.loginStatus(expectedSessionId);
   }
 
   async getAgentAuthStatus(agentId: string): Promise<unknown | null> {

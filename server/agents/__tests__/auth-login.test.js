@@ -13,6 +13,7 @@ function createFakePty() {
   let exitHandler = null;
   let dataHandler = null;
   return {
+    kill: mock(),
     onExit(handler) {
       exitHandler = handler;
     },
@@ -180,6 +181,7 @@ describe('AgentAuthLoginManager', () => {
       deviceAuth: undefined,
     });
     expect(runningStatus).toEqual({
+      state: 'running',
       running: true,
       sessionId: concurrentLaunch.sessionId,
       deviceAuth: undefined,
@@ -242,7 +244,7 @@ describe('AgentAuthLoginManager', () => {
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
-    expect(manager.status('codex')).toEqual({ running: false });
+    expect(manager.status('codex')).toEqual({ state: 'idle', running: false });
 
     const resultPromise = manager.launch('codex');
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -250,6 +252,7 @@ describe('AgentAuthLoginManager', () => {
     await resultPromise;
 
     expect(manager.status('codex')).toEqual({
+      state: 'running',
       running: true,
       sessionId: expect.any(String),
       deviceAuth: {
@@ -259,7 +262,7 @@ describe('AgentAuthLoginManager', () => {
     });
 
     pty.emitExit({ exitCode: 0, signal: null });
-    expect(manager.status('codex')).toEqual({ running: false });
+    expect(manager.status('codex')).toEqual({ state: 'idle', running: false });
   });
 
   it('does not restore stale device auth when output is immediately followed by exit', async () => {
@@ -323,5 +326,92 @@ describe('AgentAuthLoginManager', () => {
 
     await manager.complete('claude', second.sessionId, 'current-code');
     expect(secondBrowser.write).toHaveBeenCalledWith('current-code\n');
+  });
+
+  it('keeps terminal success and failure scoped to the expected session', async () => {
+    const manager = new AgentAuthLoginManager();
+    const pty = createFakePty();
+    spawn.mockImplementation(() => pty);
+
+    const launch = await manager.launch('claude');
+    pty.emitExit({ exitCode: 7, signal: null });
+
+    expect(manager.status('claude')).toEqual({ state: 'idle', running: false });
+    expect(manager.status('claude', launch.sessionId)).toEqual({
+      state: 'failed',
+      running: false,
+      sessionId: launch.sessionId,
+      error: 'Sign-in failed. Start a new sign-in attempt.',
+    });
+  });
+
+  it('caches Codex device output that arrives after the initial response timeout', async () => {
+    const manager = new AgentAuthLoginManager({ deviceAuthTimeoutMs: 1 });
+    const pty = createFakePty();
+    spawn.mockImplementation(() => pty);
+
+    const launch = await manager.launch('codex');
+    expect(launch.deviceAuth).toBeUndefined();
+
+    pty.emitData(DEVICE_AUTH_OUTPUT);
+    expect(manager.status('codex', launch.sessionId)).toEqual({
+      state: 'running',
+      running: true,
+      sessionId: launch.sessionId,
+      deviceAuth: {
+        url: 'https://auth.openai.com/codex/device',
+        code: 'AB12-CD34',
+      },
+    });
+  });
+
+  it('expires and terminates a hung login session', async () => {
+    const manager = new AgentAuthLoginManager({ sessionTimeoutMs: 5 });
+    const pty = createFakePty();
+    spawn.mockImplementation(() => pty);
+
+    const launch = await manager.launch('claude');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(pty.kill).toHaveBeenCalledTimes(1);
+    expect(manager.status('claude', launch.sessionId)).toEqual({
+      state: 'failed',
+      running: false,
+      sessionId: launch.sessionId,
+      error: 'Sign-in timed out. Start a new sign-in attempt.',
+    });
+  });
+
+  it('claims Claude completion before writing and permits retry after a write failure', async () => {
+    spawn.mockImplementation(() => {
+      throw new Error('PTY unavailable');
+    });
+    let rejectWrite;
+    const write = mock(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectWrite = reject;
+        }),
+    );
+    const browser = createFakeBrowserProcess();
+    browser.process.stdin.write = write;
+    const manager = new AgentAuthLoginManager({
+      spawnProcess: () => browser.process,
+    });
+    const launch = await manager.launch('claude');
+
+    const first = manager.complete('claude', launch.sessionId, 'first-code');
+    await Promise.resolve();
+    await expect(manager.complete('claude', launch.sessionId, 'duplicate')).rejects.toThrow(
+      'Auth login completion is already pending',
+    );
+    const failedWrite = new Error('write failed');
+    rejectWrite(failedWrite);
+    await expect(first).rejects.toThrow('write failed');
+    browser.process.stdin.write = mock(() => 1);
+    await expect(manager.complete('claude', launch.sessionId, 'final')).resolves.toEqual({
+      submitted: true,
+      sessionId: launch.sessionId,
+    });
   });
 });

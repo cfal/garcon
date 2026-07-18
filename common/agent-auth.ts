@@ -12,14 +12,26 @@ export interface AgentAuthLoginLaunchResult {
 }
 
 export type AgentAuthLoginStatus =
-  | { running: false }
+  | { state: 'idle'; running: false }
   | {
-    running: true;
-    sessionId: string;
-    deviceAuth?: AgentDeviceAuthInfo;
-  };
+      state: 'running';
+      running: true;
+      sessionId: string;
+      deviceAuth?: AgentDeviceAuthInfo;
+    }
+  | {
+      state: 'succeeded';
+      running: false;
+      sessionId: string;
+    }
+  | {
+      state: 'failed';
+      running: false;
+      sessionId: string;
+      error: string;
+    };
 
 export interface AgentAuthLoginCompleteResult {
-  completed: true;
+  submitted: true;
   sessionId: string;
 }

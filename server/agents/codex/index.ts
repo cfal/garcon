@@ -37,7 +37,7 @@ export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
     auth: {
       getAuthStatus: () => getCodexAuthStatus(),
       launchLogin: () => launchAgentAuthLogin('codex'),
-      loginStatus: () => getAgentAuthLoginStatus('codex'),
+      loginStatus: (expectedSessionId) => getAgentAuthLoginStatus('codex', expectedSessionId),
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,

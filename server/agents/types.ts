@@ -88,7 +88,7 @@ export interface AgentAuth {
   getAuthStatus(): Promise<unknown>;
   launchLogin?(): Promise<AgentAuthLoginLaunchResult>;
   completeLogin?(sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
-  loginStatus?(): AgentAuthLoginStatus;
+  loginStatus?(expectedSessionId?: string): AgentAuthLoginStatus;
 }
 
 export interface AgentModelQuery {

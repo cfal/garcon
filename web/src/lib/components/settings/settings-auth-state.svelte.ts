@@ -21,8 +21,6 @@ export type SettingsAgentId = string;
 
 const AUTH_POLL_INTERVAL_MS = 1500;
 const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
-// Device codes stay valid for 15 minutes, so the session poll must outlive them.
-const LOGIN_SESSION_POLL_TIMEOUT_MS = 15 * 60_000;
 const DEFAULT_AUTH: AuthStatus = {
 	authenticated: false,
 	canReauth: true,
@@ -38,6 +36,7 @@ export class SettingsAuthState {
 	#authPollStartedAt: Partial<Record<SettingsAgentId, number>> = {};
 	#loginSessionIds: Partial<Record<SettingsAgentId, string>> = {};
 	#loginOperationGenerations: Partial<Record<SettingsAgentId, number>> = {};
+	#authRequestGenerations: Partial<Record<SettingsAgentId, number>> = {};
 	#nextAuthPollRunId = 0;
 	#lifecycleId = 0;
 	#active = true;
@@ -76,6 +75,7 @@ export class SettingsAuthState {
 		}
 		this.#loginSessionIds = {};
 		this.#loginOperationGenerations = {};
+		this.#authRequestGenerations = {};
 		this.deviceAuthInfo = {};
 		this.loginPending = {};
 	}
@@ -114,12 +114,7 @@ export class SettingsAuthState {
 				}
 			}
 			this.loginPending = { ...this.loginPending, [agentId]: false };
-			this.#startLoginSessionPolling(
-				agentId,
-				result.sessionId,
-				operationGeneration,
-				lifecycleId,
-			);
+			this.#startLoginSessionPolling(agentId, result.sessionId, operationGeneration, lifecycleId);
 		} catch (err) {
 			if (!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) return;
 			this.#stopAuthPolling(agentId);
@@ -148,20 +143,16 @@ export class SettingsAuthState {
 		try {
 			await completeAgentAuthLogin(agentId, sessionId, code);
 			if (!this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) return;
-			this.#clearLoginState(agentId);
-			await this.#checkAuth(agentId, lifecycleId, operationGeneration);
-			if (!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) return;
-			if (!this.authFor(agentId).authenticated) {
-				this.#startAuthPolling(agentId, operationGeneration, lifecycleId);
-			}
+			this.loginPending = { ...this.loginPending, [agentId]: false };
+			this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
 		} catch (err) {
 			if (!this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) return;
-			this.#clearLoginState(agentId);
 			this.#setAuth(agentId, {
 				...this.authFor(agentId),
 				loading: false,
 				error: err instanceof Error ? err.message : String(err),
 			});
+			this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
 		} finally {
 			if (this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) {
 				this.loginPending = { ...this.loginPending, [agentId]: false };
@@ -177,10 +168,14 @@ export class SettingsAuthState {
 		agentId: SettingsAgentId,
 		lifecycleId = this.#lifecycleId,
 		operationGeneration?: number,
-	): Promise<void> {
+	): Promise<boolean | undefined> {
+		const authRequestGeneration = this.#beginAuthRequest(agentId);
 		try {
 			const data = await getAgentAuthStatus(agentId);
-			if (!this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration)) return;
+			if (
+				!this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration, authRequestGeneration)
+			)
+				return undefined;
 			this.#setAuth(agentId, {
 				authenticated: data.authenticated,
 				canReauth: data.canReauth,
@@ -188,8 +183,12 @@ export class SettingsAuthState {
 				loading: false,
 				error: null,
 			});
+			return data.authenticated;
 		} catch (err) {
-			if (!this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration)) return;
+			if (
+				!this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration, authRequestGeneration)
+			)
+				return undefined;
 			this.#setAuth(agentId, {
 				authenticated: false,
 				canReauth: true,
@@ -197,6 +196,7 @@ export class SettingsAuthState {
 				loading: false,
 				error: err instanceof Error ? err.message : String(err),
 			});
+			return false;
 		}
 	}
 
@@ -242,12 +242,7 @@ export class SettingsAuthState {
 		}
 
 		this.#authPollTimers[agentId] = setTimeout(() => {
-			void this.#pollAuthUntilAuthenticated(
-				agentId,
-				pollRunId,
-				operationGeneration,
-				lifecycleId,
-			);
+			void this.#pollAuthUntilAuthenticated(agentId, pollRunId, operationGeneration, lifecycleId);
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 
@@ -261,12 +256,7 @@ export class SettingsAuthState {
 		this.#authPollRunIds[agentId] = pollRunId;
 		this.#authPollStartedAt[agentId] = Date.now();
 		this.#authPollTimers[agentId] = setTimeout(() => {
-			void this.#pollAuthUntilAuthenticated(
-				agentId,
-				pollRunId,
-				operationGeneration,
-				lifecycleId,
-			);
+			void this.#pollAuthUntilAuthenticated(agentId, pollRunId, operationGeneration, lifecycleId);
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 
@@ -285,28 +275,35 @@ export class SettingsAuthState {
 
 		let status: Awaited<ReturnType<typeof getAgentAuthLoginStatus>> | undefined;
 		try {
-			status = await getAgentAuthLoginStatus(agentId);
+			status = await getAgentAuthLoginStatus(agentId, sessionId);
 		} catch {
-			// Treats transient status failures as still running; the timeout bounds the loop.
+			// The server watchdog owns expiry, so transient request failures retain session ownership.
 		}
 		if (!this.#isCurrentPoll(agentId, pollRunId, operationGeneration, lifecycleId)) return;
 
-		let ownsRunningSession = false;
-		if (status?.running === true && status.sessionId === sessionId) {
-			ownsRunningSession = true;
+		if (status?.state === 'running' && status.sessionId === sessionId) {
 			if (status.deviceAuth) {
 				this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: status.deviceAuth };
 			}
-		}
-
-		const startedAt = this.#authPollStartedAt[agentId];
-		const expired =
-			startedAt === undefined || Date.now() - startedAt >= LOGIN_SESSION_POLL_TIMEOUT_MS;
-
-		if ((status !== undefined && !ownsRunningSession) || expired) {
+		} else if (status?.state === 'succeeded' && status.sessionId === sessionId) {
 			this.#stopAuthPolling(agentId);
 			this.#clearLoginState(agentId);
-			await this.#checkAuth(agentId, lifecycleId, operationGeneration);
+			const authenticated = await this.#checkAuth(agentId, lifecycleId, operationGeneration);
+			if (
+				authenticated === false &&
+				this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)
+			) {
+				this.#startAuthPolling(agentId, operationGeneration, lifecycleId);
+			}
+			return;
+		} else if (status?.state === 'failed' && status.sessionId === sessionId) {
+			this.#stopAuthPolling(agentId);
+			this.#clearLoginState(agentId);
+			this.#setAuth(agentId, {
+				...this.authFor(agentId),
+				loading: false,
+				error: status.error,
+			});
 			return;
 		}
 
@@ -341,12 +338,12 @@ export class SettingsAuthState {
 	}
 
 	async #restoreLoginSession(agentId: SettingsAgentId, lifecycleId: number): Promise<void> {
-		const operationGeneration = this.#beginLoginOperation(agentId);
+		const operationGeneration = this.#beginLoginOperation(agentId, false);
 		try {
 			const status = await getAgentAuthLoginStatus(agentId);
 			if (
 				!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId) ||
-				!status.running
+				status.state !== 'running'
 			) {
 				return;
 			}
@@ -354,12 +351,7 @@ export class SettingsAuthState {
 			if (status.deviceAuth) {
 				this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: status.deviceAuth };
 			}
-			this.#startLoginSessionPolling(
-				agentId,
-				status.sessionId,
-				operationGeneration,
-				lifecycleId,
-			);
+			this.#startLoginSessionPolling(agentId, status.sessionId, operationGeneration, lifecycleId);
 		} catch {
 			// Auth status remains usable when login-session restoration is temporarily unavailable.
 		}
@@ -375,8 +367,9 @@ export class SettingsAuthState {
 		return this.#active && this.#lifecycleId === lifecycleId;
 	}
 
-	#beginLoginOperation(agentId: SettingsAgentId): number {
+	#beginLoginOperation(agentId: SettingsAgentId, invalidateAuthRequest = true): number {
 		this.#stopAuthPolling(agentId);
+		if (invalidateAuthRequest) this.#beginAuthRequest(agentId);
 		const generation = (this.#loginOperationGenerations[agentId] ?? 0) + 1;
 		this.#loginOperationGenerations[agentId] = generation;
 		return generation;
@@ -386,12 +379,21 @@ export class SettingsAuthState {
 		agentId: SettingsAgentId,
 		lifecycleId: number,
 		operationGeneration?: number,
+		authRequestGeneration?: number,
 	): boolean {
 		return (
 			this.#isActive(lifecycleId) &&
 			(operationGeneration === undefined ||
-				this.#loginOperationGenerations[agentId] === operationGeneration)
+				this.#loginOperationGenerations[agentId] === operationGeneration) &&
+			(authRequestGeneration === undefined ||
+				this.#authRequestGenerations[agentId] === authRequestGeneration)
 		);
+	}
+
+	#beginAuthRequest(agentId: SettingsAgentId): number {
+		const generation = (this.#authRequestGenerations[agentId] ?? 0) + 1;
+		this.#authRequestGenerations[agentId] = generation;
+		return generation;
 	}
 
 	#isCurrentLoginOperation(
