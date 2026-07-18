@@ -18,6 +18,7 @@ import {
 	type ChatFilterSpec,
 } from '$lib/sidebar/search/sidebar-search.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import type {
 	ChatSearchIndexStatus,
@@ -539,10 +540,6 @@ function waitForTranscriptIndexRetry(delayMs: number, signal?: AbortSignal): Pro
 		}, delayMs);
 		signal?.addEventListener('abort', handleAbort, { once: true });
 	});
-}
-
-function isAbortError(error: unknown): boolean {
-	return error instanceof Error && error.name === 'AbortError';
 }
 
 export function createSidebarSearchStore(deps: SidebarSearchStoreDeps): SidebarSearchStore {

@@ -10,6 +10,9 @@ export default defineConfig({
 	test: {
 		environment: 'happy-dom',
 		globals: true,
+		// Reuses worker threads while retaining an isolated VM context for each test file.
+		// Cross-realm boundary values must use shape checks rather than constructor identity.
+		pool: 'vmThreads',
 		setupFiles: ['./src/test/vitest-setup.ts'],
 		include: ['src/**/*.test.ts'],
 		server: {

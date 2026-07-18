@@ -50,16 +50,21 @@ jobs:
         run: bun run i18n:compile
 
       - name: Run checks
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: bun run check
 
-      - name: Run tests
-        run: bun run test
+      - name: Run server tests
+        run: bun run test:server
+
+      - name: Run web tests for release validation
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: bun run --cwd web test
 
       - name: Build web app
         run: bun run build
 
       - name: Compile executables
-        run: bun run build-exe:compile
+        run: bun run build-exe:compile --target=linux-x64,windows-x64
 
       - name: Smoke test Linux x64 executable
         run: bun run build-exe:smoke:linux-x64

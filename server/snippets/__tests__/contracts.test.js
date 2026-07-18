@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { runInNewContext } from 'node:vm';
 import {
   SNIPPET_ARGUMENTS_MAX_LENGTH,
   SNIPPET_EXPANDED_MAX_LENGTH,
@@ -65,6 +66,24 @@ describe('snippet contracts', () => {
         snippets: [snippet(), snippet({ shortName: 'other' })],
       }),
     ).toBeNull();
+  });
+
+  it('accepts plain records from another JavaScript realm', () => {
+    const snapshot = runInNewContext(`({
+      revision: 1,
+      snippets: [{
+        id: 'snippet-a',
+        shortName: 'review_api',
+        template: 'Review {{arguments}}',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z'
+      }]
+    })`);
+
+    expect(normalizeSnippetsSnapshot(snapshot)).toEqual({
+      revision: 1,
+      snippets: [snippet({ template: 'Review {{arguments}}' })],
+    });
   });
 
   it('preserves raw arguments and accepts only explicit expansion contexts', () => {
