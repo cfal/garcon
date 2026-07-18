@@ -4,8 +4,15 @@
   "description": "A cross-platform agentic coding UI for Claude Code, Codex, and Opencode",
   "type": "module",
   "main": "server/main.ts",
+  "workspaces": [
+    "common",
+    "server",
+    "web",
+    "server-agents/*"
+  ],
   "files": [
     "server/",
+    "server-agents/",
     "common/",
     "scripts/",
     "web/build/",
@@ -31,13 +38,13 @@
     "start": "bun scripts/start.js",
     "bench:search": "bun scripts/benchmark-chat-search.js",
     "test": "bun run test:server && bun run --cwd web test",
-    "test:server": "bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && for f in server/**/__tests__/*.test.js; do bun test \"$f\" || exit 1; done",
+    "test:server": "bun test server-agents/interface/src/testing/__tests__/*.test.ts && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && for f in server/**/__tests__/*.test.js; do bun test \"$f\" || exit 1; done",
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",
     "lint": "bun run --cwd web lint",
     "check": "bun run lint && bun run --cwd web check",
-    "typecheck": "bun run --cwd server typecheck && bun run --cwd web check && bun run --cwd integration-tests typecheck",
+    "typecheck": "bun run --cwd server-agents/interface typecheck && bun run --cwd server typecheck && bun run --cwd web check && bun run --cwd integration-tests typecheck",
     "help": "bun run server --help"
   },
   "keywords": [

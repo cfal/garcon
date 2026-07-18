@@ -1,5 +1,5 @@
 {
-  "name": "garcon-server",
+  "name": "@garcon/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,6 +8,8 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@garcon/common": "workspace:*",
+    "@garcon/server-agent-interface": "workspace:*",
     "@earendil-works/pi-coding-agent": "0.80.2",
     "@openai/codex": "0.142.2",
     "@opencode-ai/sdk": "1.17.11",
