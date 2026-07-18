@@ -304,10 +304,12 @@ describe('SettingsAuthState login lifecycle', () => {
 		await settingsAuth.completeLogin('claude', 'auth-code');
 
 		expect(settingsAuth.deviceAuthFor('claude')).toEqual(CLAUDE_AUTH);
+		expect(settingsAuth.isLoginPending('claude')).toBe(true);
 		expect(getAgentAuthStatus).not.toHaveBeenCalled();
 
 		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
 		expect(settingsAuth.deviceAuthFor('claude')).toBeUndefined();
+		expect(settingsAuth.isLoginPending('claude')).toBe(false);
 		expect(getAgentAuthStatus).toHaveBeenCalledWith('claude');
 	});
 

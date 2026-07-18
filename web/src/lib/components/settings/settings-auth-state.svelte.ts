@@ -143,20 +143,16 @@ export class SettingsAuthState {
 		try {
 			await completeAgentAuthLogin(agentId, sessionId, code);
 			if (!this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) return;
-			this.loginPending = { ...this.loginPending, [agentId]: false };
 			this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
 		} catch (err) {
 			if (!this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) return;
+			this.loginPending = { ...this.loginPending, [agentId]: false };
 			this.#setAuth(agentId, {
 				...this.authFor(agentId),
 				loading: false,
 				error: err instanceof Error ? err.message : String(err),
 			});
 			this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
-		} finally {
-			if (this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) {
-				this.loginPending = { ...this.loginPending, [agentId]: false };
-			}
 		}
 	}
 

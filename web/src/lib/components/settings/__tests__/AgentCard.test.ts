@@ -144,8 +144,31 @@ describe('AgentCard', () => {
 		await fireEvent.input(input, { target: { value: 'auth-code' } });
 		await fireEvent.keyDown(input, { key: 'Enter' });
 
+		expect(input.hasAttribute('disabled')).toBe(true);
 		expect(screen.getByRole('button', { name: 'Submit code' }).hasAttribute('disabled')).toBe(true);
 		expect(onCompleteLogin).not.toHaveBeenCalled();
+	});
+
+	it('clears the browser auth code after device auth is released', async () => {
+		const auth = { authenticated: false, canReauth: true, label: '', loading: false, error: null };
+		const deviceAuth = { url: 'https://example.test/login', needsCode: true };
+		const { rerender } = render(AgentCard, {
+			agentId: 'claude',
+			agentName: 'Claude',
+			open: true,
+			auth,
+			deviceAuth,
+		});
+
+		await fireEvent.input(screen.getByPlaceholderText('Paste authorization code'), {
+			target: { value: 'stale-code' },
+		});
+		await rerender({ deviceAuth: undefined });
+		await rerender({ deviceAuth });
+
+		expect(
+			(screen.getByPlaceholderText('Paste authorization code') as HTMLInputElement).value,
+		).toBe('');
 	});
 
 	it('shows sign-in retry after a failed code flow releases device auth', () => {

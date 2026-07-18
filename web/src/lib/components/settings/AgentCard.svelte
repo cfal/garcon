@@ -60,6 +60,7 @@
 	$effect(() => {
 		const hasDeviceAuth = deviceAuth !== undefined;
 		if (hasDeviceAuth && !hadDeviceAuth) onOpenChange?.(true);
+		if (!hasDeviceAuth && hadDeviceAuth) authCode = '';
 		hadDeviceAuth = hasDeviceAuth;
 	});
 
@@ -217,6 +218,7 @@
 										placeholder={m.settings_agents_browser_auth_code_placeholder()}
 										bind:value={authCode}
 										onkeydown={handleAuthCodeKeydown}
+										disabled={pending}
 									/>
 									<Button size="sm" onclick={submitAuthCode} disabled={pending || !authCode.trim()}>
 										{#if pending}
