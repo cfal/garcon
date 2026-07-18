@@ -13,15 +13,29 @@ mock.module('../../lib/http-request.js', () => ({
 import createAgentRoutes from '../agents.js';
 import createApiProviderRoutes from '../api-providers.js';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
+import { AgentAuthLoginSessionError } from '../../agents/auth-login.js';
 
 describe('agent auth login routes', () => {
   const agents = {
+    hasAgent: mock(() => true),
+    supportsAuthLogin: mock(() => true),
+    supportsAuthLoginCompletion: mock(() => true),
     getAgentAuthStatus: mock(() => Promise.resolve(null)),
     getAgentAuthStatusMap: mock(() => Promise.resolve({})),
     getAgentReadinessMap: mock(() => Promise.resolve({})),
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
-    launchAgentAuthLogin: mock(() => Promise.resolve({ launched: true, alreadyRunning: false })),
-    completeAgentAuthLogin: mock(() => Promise.resolve({ completed: true })),
+    launchAgentAuthLogin: mock(() => Promise.resolve({
+      launched: true,
+      alreadyRunning: false,
+      sessionId: 'session-a',
+    })),
+    completeAgentAuthLogin: mock(() => Promise.resolve({ submitted: true, sessionId: 'session-a' })),
+    getAgentAuthLoginStatus: mock(() => Promise.resolve({
+      state: 'running',
+      running: true,
+      sessionId: 'session-a',
+      deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
+    })),
   };
   const apiProviders = {
     getCatalog: mock(() => []),
@@ -53,20 +67,114 @@ describe('agent auth login routes', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ launched: true, alreadyRunning: false });
+    expect(body).toEqual({ launched: true, alreadyRunning: false, sessionId: 'session-a' });
     expect(agents.launchAgentAuthLogin).toHaveBeenCalledWith('claude');
   });
 
   it('completes Claude browser-code login via the agent auth route', async () => {
-    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', code: 'test-code' });
+    parseJsonBody.mockResolvedValueOnce({
+      agentId: 'claude',
+      sessionId: 'session-a',
+      code: 'test-code',
+    });
     const handler = routes['/api/v1/agents/auth/login/complete'].POST;
 
     const response = await handler(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ completed: true });
-    expect(agents.completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'test-code');
+    expect(body).toEqual({ submitted: true, sessionId: 'session-a' });
+    expect(agents.completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'session-a', 'test-code');
+  });
+
+  it('returns the typed active login session contract', async () => {
+    const handler = routes['/api/v1/agents/auth/login'].GET;
+    const request = new Request('http://localhost/api/v1/agents/auth/login?agent=codex&session=session-a');
+
+    const response = await handler(request, new URL(request.url));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      state: 'running',
+      running: true,
+      sessionId: 'session-a',
+      deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
+    });
+    expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', 'session-a');
+  });
+
+  it('validates the missing agent query for login status', async () => {
+    const handler = routes['/api/v1/agents/auth/login'].GET;
+    const request = new Request('http://localhost/api/v1/agents/auth/login');
+
+    const response = await handler(request, new URL(request.url));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('agent is required');
+    expect(agents.getAgentAuthLoginStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns a client error for unknown login-status agents', async () => {
+    agents.hasAgent.mockImplementationOnce(() => false);
+    const handler = routes['/api/v1/agents/auth/login'].GET;
+    const request = new Request('http://localhost/api/v1/agents/auth/login?agent=unknown');
+
+    const response = await handler(request, new URL(request.url));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Unknown agent: unknown');
+    expect(agents.getAgentAuthLoginStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns a client error for agents without UI login support', async () => {
+    agents.supportsAuthLogin.mockImplementationOnce(() => false);
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'amp' });
+    const handler = routes['/api/v1/agents/auth/login'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Auth login is not supported for agent: amp');
+    expect(agents.launchAgentAuthLogin).not.toHaveBeenCalled();
+  });
+
+  it('returns conflict when completion no longer owns the login session', async () => {
+    agents.completeAgentAuthLogin.mockImplementationOnce(() => {
+      throw new AgentAuthLoginSessionError('No matching pending auth login for agent: claude');
+    });
+    parseJsonBody.mockResolvedValueOnce({
+      agentId: 'claude',
+      sessionId: 'stale-session',
+      code: 'test-code',
+    });
+    const handler = routes['/api/v1/agents/auth/login/complete'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toBe('No matching pending auth login for agent: claude');
+  });
+
+  it('returns a client error when the agent does not support auth completion', async () => {
+    agents.supportsAuthLoginCompletion.mockImplementationOnce(() => false);
+    parseJsonBody.mockResolvedValueOnce({
+      agentId: 'codex',
+      sessionId: 'session-a',
+      code: 'test-code',
+    });
+    const handler = routes['/api/v1/agents/auth/login/complete'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Auth login completion is not supported for agent: codex');
+    expect(agents.completeAgentAuthLogin).not.toHaveBeenCalled();
   });
 
   it('validates missing code for auth completion', async () => {
@@ -78,6 +186,18 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('code is required');
+    expect(agents.completeAgentAuthLogin).not.toHaveBeenCalled();
+  });
+
+  it('validates missing session ownership for auth completion', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', code: 'test-code' });
+    const handler = routes['/api/v1/agents/auth/login/complete'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('sessionId is required');
     expect(agents.completeAgentAuthLogin).not.toHaveBeenCalled();
   });
 
