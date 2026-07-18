@@ -119,9 +119,13 @@ async function readOpenAiCompatibleTextStream(
 
   let accumulated = '';
   let lastStreamError = '';
+  let sawDone = false;
 
   await readSseDataEvents(response.body, (data) => {
-    if (data === '[DONE]') return;
+    if (data === '[DONE]') {
+      sawDone = true;
+      return;
+    }
 
     try {
       const parsed = JSON.parse(data) as {
@@ -140,6 +144,9 @@ async function readOpenAiCompatibleTextStream(
 
   if (lastStreamError) {
     throw new Error(`${runtimeLabel} stream error: ${lastStreamError}`);
+  }
+  if (!sawDone) {
+    throw new Error(`${runtimeLabel} stream ended before [DONE]`);
   }
 
   return accumulated;

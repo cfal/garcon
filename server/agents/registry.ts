@@ -14,6 +14,8 @@ import type {
 } from "../../common/chat-modes.js";
 import type {
   AgentChatEntry,
+  AgentExecutionCommandType,
+  AgentExecutionAdmission,
   AgentSessionSettingsPatch,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
@@ -71,13 +73,20 @@ export interface AgentRegistryServiceContract {
     clientRequestId?: string;
     clientMessageId?: string;
     turnId?: string;
+    commandType?: AgentExecutionCommandType;
+    executionAdmission?: AgentExecutionAdmission;
   }): Promise<void>;
   forkAgentSession?(args: {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
   }): Promise<StartedAgentSession | null>;
-  compactSession(chatId: string, opts?: { instructions?: string; clientRequestId?: string; turnId?: string }): Promise<void>;
+  compactSession(chatId: string, opts?: {
+    instructions?: string;
+    clientRequestId?: string;
+    turnId?: string;
+    executionAdmission?: AgentExecutionAdmission;
+  }): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
     getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
@@ -207,7 +216,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     ampAgentMode?: AmpAgentMode;
     projectPath?: string;
     clientRequestId?: string;
+    clientMessageId?: string;
     turnId?: string;
+    executionAdmission?: AgentExecutionAdmission;
   } = {}): Promise<void> {
     return this.#runtime.startSession(chatId, command, opts);
   }
@@ -229,7 +240,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.abortSession(chatId);
   }
 
-  async compactSession(chatId: string, opts: { instructions?: string; clientRequestId?: string; turnId?: string } = {}): Promise<void> {
+  async compactSession(chatId: string, opts: {
+    instructions?: string;
+    clientRequestId?: string;
+    turnId?: string;
+    executionAdmission?: AgentExecutionAdmission;
+  } = {}): Promise<void> {
     return this.#runtime.compactSession(chatId, opts);
   }
 

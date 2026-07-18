@@ -81,4 +81,54 @@ describe('createClaudeAgent', () => {
 
     await fs.rm(projectPath, { recursive: true, force: true });
   });
+
+  it('emits an exact terminal when startup admission is aborted after detachment', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-abort-'));
+    try {
+      let rejectStart;
+      const claude = createClaudeStub(new Error('unused'));
+      claude.startClaudeCliSession = mock(() => new Promise((_resolve, reject) => {
+        rejectStart = reject;
+      }));
+      const agent = createClaudeAgent(claude);
+      const controller = new AbortController();
+      const failed = new Promise((resolve) => {
+        agent.runtime.onFailed((chatId, errorMessage, metadata) => resolve({
+          chatId,
+          errorMessage,
+          metadata,
+        }));
+      });
+
+      await agent.runtime.startSession({
+        chatId: 'chat-1',
+        command: 'hello',
+        projectPath,
+        model: 'sonnet',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        clientRequestId: 'req-abort',
+        turnId: 'turn-abort',
+        executionAdmission: {
+          signal: controller.signal,
+          markStarted: mock(() => undefined),
+        },
+      });
+      const reason = new Error('server is shutting down');
+      controller.abort(reason);
+      rejectStart(reason);
+
+      await expect(failed).resolves.toEqual({
+        chatId: 'chat-1',
+        errorMessage: 'server is shutting down',
+        metadata: {
+          clientRequestId: 'req-abort',
+          commandType: 'chat-start',
+          turnId: 'turn-abort',
+        },
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });

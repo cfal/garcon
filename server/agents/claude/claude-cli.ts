@@ -16,6 +16,7 @@ import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { normalizeThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../common/chat-modes.js";
 import {
+  assertExecutionAdmissionOpen,
   executionEventMetadata,
   type AgentEventMetadata,
   type ClaudeStartSessionRequest,
@@ -1023,21 +1024,25 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     return proc;
   }
 
-  async startClaudeCliSession({
-    command,
-    agentSessionId,
-    chatId,
-    images,
-    model,
-    permissionMode,
-    projectPath,
-    thinkingMode,
-    claudeThinkingMode,
-    envOverrides,
-    onAbortable,
-    clientRequestId,
-    turnId,
-  }: ClaudeStartSessionRequest): Promise<string> {
+  async startClaudeCliSession(request: ClaudeStartSessionRequest): Promise<string> {
+    assertExecutionAdmissionOpen(request);
+    const {
+      command,
+      agentSessionId,
+      chatId,
+      images,
+      model,
+      permissionMode,
+      projectPath,
+      thinkingMode,
+      claudeThinkingMode,
+      envOverrides,
+      onAbortable,
+      clientRequestId,
+      turnId,
+      executionAdmission,
+    } = request;
+    const requestAdmission = { executionAdmission };
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
     if (!agentSessionId) throw new Error('agentSessionId is required when starting a Claude session');
 
@@ -1099,15 +1104,21 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     // Another start may supersede this one while the version probe is pending.
     if (this.#runningSessions.get(agentSessionId) !== session) return agentSessionId;
 
+    let processingEmitted = false;
     try {
-      this.emitProcessing(chatId, true);
+      assertExecutionAdmissionOpen(requestAdmission);
       this.emitSessionCreated(chatId);
       this.#spawnCLI(session, allOpts, false, supportsLegacyThinkingFlag);
-      onAbortable?.();
+      assertExecutionAdmissionOpen(requestAdmission);
       this.#sendUserMessage(session, command, images);
+      executionAdmission?.markStarted();
+      processingEmitted = true;
+      this.emitProcessing(chatId, true);
+      onAbortable?.();
       await this.#waitForTurnComplete(session);
     } catch (error) {
       if (this.#runningSessions.get(agentSessionId) === session) {
+        if (!processingEmitted) session.isRunning = false;
         this.#retireSession(session);
         this.#runningSessions.delete(agentSessionId);
       }
@@ -1118,21 +1129,25 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     return agentSessionId;
   }
 
-  async runClaudeTurn({
-    command,
-    agentSessionId,
-    chatId,
-    images,
-    model,
-    permissionMode,
-    projectPath,
-    thinkingMode,
-    claudeThinkingMode,
-    envOverrides,
-    onAbortable,
-    clientRequestId,
-    turnId,
-  }: ResumeTurnRequest): Promise<void> {
+  async runClaudeTurn(request: ResumeTurnRequest): Promise<void> {
+    assertExecutionAdmissionOpen(request);
+    const {
+      command,
+      agentSessionId,
+      chatId,
+      images,
+      model,
+      permissionMode,
+      projectPath,
+      thinkingMode,
+      claudeThinkingMode,
+      envOverrides,
+      onAbortable,
+      clientRequestId,
+      turnId,
+      executionAdmission,
+    } = request;
+    const requestAdmission = { executionAdmission };
     if (!agentSessionId) {
       throw new Error('Cannot resume without session ID');
     }
@@ -1143,6 +1158,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     // Resolved before any session-state checks so the spawn path below stays
     // free of interleaving awaits.
     const supportsLegacyThinkingFlag = await claudeCliSupportsLegacyThinkingFlag(getClaudeBinary());
+    assertExecutionAdmissionOpen(requestAdmission);
     if (this.#shuttingDown) throw new Error('Claude runtime is shutting down');
 
     const allOpts: ClaudeSessionOptions = {
@@ -1203,6 +1219,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       this.#releaseTurn(candidate);
     }
 
+    let processingEmitted = false;
     try {
       if (chatId !== session.chatId) {
         throw new Error('Chat ID mismatch');
@@ -1215,8 +1232,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.isRunning = true;
     session.lastActivityAt = Date.now();
     session.eventMetadata = executionEventMetadata({ clientRequestId, turnId });
-    this.emitProcessing(effectiveChatId, true);
-
     const desiredThinkingMode = session.options.thinkingMode || 'none';
     const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(session.options.claudeThinkingMode);
     const desiredModel = session.options.model || '';
@@ -1255,10 +1270,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       // Always resume: the session file preserves conversation context.
       // Cross-boundary local/cloud switches are blocked by
       // AgentRegistry.runAgentTurn before reaching here.
+      assertExecutionAdmissionOpen(requestAdmission);
       this.#spawnCLI(session, spawnOpts, true, supportsLegacyThinkingFlag);
     }
-
-    onAbortable?.();
 
     const newMode = desiredPermissionMode;
     if (session.currentPermissionMode && newMode !== session.currentPermissionMode) {
@@ -1269,10 +1283,18 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     // A new turn supersedes any prior abort, so cancel its force-kill fallback
     // before it can fire against the process now serving this turn.
     this.#clearAbortTimer(session);
+    assertExecutionAdmissionOpen(requestAdmission);
     this.#sendUserMessage(session, command, images);
+    executionAdmission?.markStarted();
+    processingEmitted = true;
+    this.emitProcessing(effectiveChatId, true);
+    onAbortable?.();
       await this.#waitForTurnComplete(session);
     } catch (error) {
-      if (session.isRunning) this.#retireSession(session);
+      if (session.isRunning) {
+        if (!processingEmitted) session.isRunning = false;
+        this.#retireSession(session);
+      }
       throw error;
     } finally {
       this.#releaseTurn(session);

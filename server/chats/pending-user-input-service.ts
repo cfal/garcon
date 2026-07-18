@@ -22,7 +22,6 @@ function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }):
   return left.createdAt.localeCompare(right.createdAt);
 }
 
-const PENDING_ECHO_MAX_BEFORE_MS = 30 * 1000;
 const PENDING_ECHO_MAX_AFTER_MS = 5 * 60 * 1000;
 
 function imageEvidence(images: ChatImage[] | undefined): PendingUserInputImageEvidence[] {
@@ -61,7 +60,7 @@ function isUnidentifiedPendingEcho(record: PendingUserInputRecord, message: User
   const messageAt = Date.parse(message.timestamp);
   return Number.isFinite(pendingAt)
     && Number.isFinite(messageAt)
-    && messageAt >= pendingAt - PENDING_ECHO_MAX_BEFORE_MS
+    && messageAt >= pendingAt
     && messageAt <= pendingAt + PENDING_ECHO_MAX_AFTER_MS;
 }
 
@@ -207,9 +206,30 @@ interface NativeReconcileRun {
   promise: Promise<void>;
 }
 
+function isInFlightDeliveryStatus(status: UserMessageDeliveryStatus): boolean {
+  switch (status) {
+    case 'submitting':
+    case 'accepted':
+      return true;
+    case 'unconfirmed':
+    case 'failed':
+      return false;
+    default: {
+      const exhaustiveStatus: never = status;
+      throw new Error(`Unhandled pending input delivery status: ${exhaustiveStatus}`);
+    }
+  }
+}
+
+export interface RestoredHistoryReconciliation {
+  clearedRequestIds: readonly string[];
+  nativeMessages?: readonly ChatMessage[];
+}
+
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
   listForTransport(chatId: string): PendingUserInput[];
+  hasInFlightForChat(chatId: string): boolean;
   clearChat(chatId: string, reason?: PendingUserInputClearReason): void;
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
@@ -217,6 +237,10 @@ export interface PendingUserInputServiceContract {
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
   captureCohort(chatId: string): PendingUserInputCohort;
   reconcileRetainedHistory(chatId: string): Promise<void>;
+  reconcileRestoredHistory(
+    chatId: string,
+    onNativeSnapshot?: (messages: readonly ChatMessage[]) => Promise<void>,
+  ): Promise<RestoredHistoryReconciliation>;
   reconcileNativeHistory(chatId: string): Promise<void>;
   settleNativeCohort(cohort: PendingUserInputCohort): Promise<void>;
   settleRetainedCohort(cohort: PendingUserInputCohort): void;
@@ -228,6 +252,8 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   #nativeEvidenceLock = new KeyedPromiseLock();
   #nativeReconcileByChatId = new Map<string, NativeReconcileRun>();
   #claimedIdentitylessEvidenceByChatId = new Map<string, Map<string, IdentitylessEvidenceClaim>>();
+  #restoredRequestIdsByChatId = new Map<string, Set<string>>();
+  #restoredReconcileByChatId = new Map<string, Promise<RestoredHistoryReconciliation>>();
 
   constructor(messages: PendingInputHistoryReader) {
     this.#messages = messages;
@@ -253,19 +279,29 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     }));
   }
 
+  hasInFlightForChat(chatId: string): boolean {
+    return this.store
+      .listRecordsForChat(chatId)
+      .some((record) => isInFlightDeliveryStatus(record.deliveryStatus));
+  }
+
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {
     this.store.clearChat(chatId, reason);
     this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
+    this.#restoredRequestIdsByChatId.delete(chatId);
   }
 
   discardChat(chatId: string): number {
     const discarded = this.store.discardChat(chatId);
     this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
+    this.#restoredRequestIdsByChatId.delete(chatId);
     return discarded;
   }
 
   discard(chatId: string, clientRequestId: string): boolean {
-    return this.store.discard(chatId, clientRequestId);
+    const discarded = this.store.discard(chatId, clientRequestId);
+    if (discarded) this.#removeRestoredRequestId(chatId, clientRequestId);
+    return discarded;
   }
 
   markFailed(chatId: string, clientRequestId: string): boolean {
@@ -301,7 +337,11 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       ...(input.imageEvidence?.length ? { imageEvidence: input.imageEvidence } : {}),
     };
-    return this.store.upsert(record);
+    const restored = this.store.upsert(record);
+    const requestIds = this.#restoredRequestIdsByChatId.get(input.chatId) ?? new Set<string>();
+    requestIds.add(input.clientRequestId);
+    this.#restoredRequestIdsByChatId.set(input.chatId, requestIds);
+    return restored;
   }
 
   captureCohort(chatId: string): PendingUserInputCohort {
@@ -319,6 +359,46 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       records,
       userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
     );
+  }
+
+  async reconcileRestoredHistory(
+    chatId: string,
+    onNativeSnapshot?: (messages: readonly ChatMessage[]) => Promise<void>,
+  ): Promise<RestoredHistoryReconciliation> {
+    const existing = this.#restoredReconcileByChatId.get(chatId);
+    if (existing) return existing;
+    const requestIds = this.#restoredRequestIdsByChatId.get(chatId);
+    if (!requestIds || requestIds.size === 0) return { clearedRequestIds: [] };
+
+    const restoredRequestIds = new Set(requestIds);
+    const promise = (async () => {
+      await this.reconcileRetainedHistory(chatId);
+      const cohort = this.#captureRequestCohort(chatId, restoredRequestIds);
+      let nativeMessages: readonly ChatMessage[] | undefined;
+      if (cohort.records.length > 0 && !this.#messages.hasCompleteHistory?.(chatId)) {
+        nativeMessages = await this.#reconcileNativeCohortStrictOnce(cohort, onNativeSnapshot);
+      }
+      const unresolvedRequestIds = new Set(
+        this.store.listRecordsForChat(chatId).map((record) => record.clientRequestId),
+      );
+      const clearedRequestIds = [...restoredRequestIds]
+        .filter((clientRequestId) => !unresolvedRequestIds.has(clientRequestId));
+      for (const clientRequestId of restoredRequestIds) {
+        this.#removeRestoredRequestId(chatId, clientRequestId);
+      }
+      return {
+        clearedRequestIds,
+        ...(nativeMessages ? { nativeMessages } : {}),
+      };
+    })();
+    this.#restoredReconcileByChatId.set(chatId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.#restoredReconcileByChatId.get(chatId) === promise) {
+        this.#restoredReconcileByChatId.delete(chatId);
+      }
+    }
   }
 
   async reconcileNativeHistory(chatId: string): Promise<void> {
@@ -353,21 +433,43 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   }
 
   async #reconcileNativeHistoryOnce(chatId: string): Promise<void> {
+    try {
+      await this.#reconcileNativeHistoryStrictOnce(chatId);
+    } catch {
+      const cohort = this.captureCohort(chatId);
+      this.#clearMatches(
+        chatId,
+        this.#currentCohortRecords(cohort),
+        userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
+      );
+    }
+  }
+
+  async #reconcileNativeHistoryStrictOnce(chatId: string): Promise<void> {
     await this.#nativeEvidenceLock.runExclusive(chatId, async () => {
       const cohort = this.captureCohort(chatId);
       const records = this.#currentCohortRecords(cohort);
       if (records.length === 0) return;
+      const nativeMessages = await this.#messages.loadNativeMessages(chatId);
+      this.#clearMatches(chatId, this.#currentCohortRecords(cohort), userMessages(nativeMessages));
+    });
+  }
 
-      try {
-        const nativeMessages = await this.#messages.loadNativeMessages(chatId);
-        this.#clearMatches(chatId, this.#currentCohortRecords(cohort), userMessages(nativeMessages));
-      } catch {
-        this.#clearMatches(
-          chatId,
-          this.#currentCohortRecords(cohort),
-          userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
-        );
-      }
+  async #reconcileNativeCohortStrictOnce(
+    cohort: PendingUserInputCohort,
+    onNativeSnapshot?: (messages: readonly ChatMessage[]) => Promise<void>,
+  ): Promise<readonly ChatMessage[] | undefined> {
+    return this.#nativeEvidenceLock.runExclusive(cohort.chatId, async () => {
+      const records = this.#currentCohortRecords(cohort);
+      if (records.length === 0) return undefined;
+      const nativeMessages = await this.#messages.loadNativeMessages(cohort.chatId);
+      await onNativeSnapshot?.(nativeMessages);
+      this.#clearMatches(
+        cohort.chatId,
+        this.#currentCohortRecords(cohort),
+        userMessages(nativeMessages),
+      );
+      return nativeMessages;
     });
   }
 
@@ -399,6 +501,19 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     return this.store
       .listRecordsForChat(chatId)
       .sort(byCreatedAt);
+  }
+
+  #captureRequestCohort(
+    chatId: string,
+    clientRequestIds: ReadonlySet<string>,
+  ): PendingUserInputCohort {
+    return Object.freeze({
+      chatId,
+      records: Object.freeze(
+        this.#reconcilableRecords(chatId)
+          .filter((record) => clientRequestIds.has(record.clientRequestId)),
+      ),
+    });
   }
 
   #currentCohortRecords(cohort: PendingUserInputCohort): PendingUserInputRecord[] {
@@ -450,10 +565,17 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       .filter(Number.isFinite)
       .reduce((earliest, createdAt) => Math.min(earliest, createdAt), Number.POSITIVE_INFINITY);
     if (!Number.isFinite(earliestPendingAt)) return;
-    const oldestRelevantEvidenceAt = earliestPendingAt - PENDING_ECHO_MAX_BEFORE_MS;
+    const oldestRelevantEvidenceAt = earliestPendingAt;
     for (const [key, claim] of claims) {
       if (claim.messageAt < oldestRelevantEvidenceAt) claims.delete(key);
     }
     if (claims.size === 0) this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
+  }
+
+  #removeRestoredRequestId(chatId: string, clientRequestId: string): void {
+    const requestIds = this.#restoredRequestIdsByChatId.get(chatId);
+    if (!requestIds) return;
+    requestIds.delete(clientRequestId);
+    if (requestIds.size === 0) this.#restoredRequestIdsByChatId.delete(chatId);
   }
 }

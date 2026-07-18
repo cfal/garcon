@@ -83,7 +83,7 @@ function makeRouter(overrides = {}) {
   };
 
   const router = new AgentRuntimeRouter({ registry, directory, endpointResolver, events });
-  return { router, registry, startSession, runTurn, submitActiveInput, sessions };
+  return { router, registry, startSession, runTurn, submitActiveInput, sessions, events };
 }
 
 describe('AgentRuntimeRouter seed branch', () => {
@@ -140,6 +140,32 @@ describe('AgentRuntimeRouter seed branch', () => {
     const request = startSession.mock.calls[0][0];
     expect(request.command).toBe('ship direct work');
     expect(request.codexGoalCommand).toEqual({ kind: 'set', objective: 'ship direct work' });
+  });
+
+  it('does not invoke a new runtime after execution admission closes', async () => {
+    const admission = new AbortController();
+    admission.abort(new Error('Turn interrupted because the server is shutting down'));
+    const { router, startSession } = makeRouter();
+
+    await expect(router.startSession('1', 'do not start', {
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    })).rejects.toThrow('server is shutting down');
+
+    expect(startSession).not.toHaveBeenCalled();
+  });
+
+  it('does not invoke a resumed runtime after execution admission closes', async () => {
+    const admission = new AbortController();
+    admission.abort(new Error('Turn interrupted because the server is shutting down'));
+    const { router, runTurn } = makeRouter({
+      entry: { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' },
+    });
+
+    await expect(router.runAgentTurn('1', 'do not resume', {
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    })).rejects.toThrow('server is shutting down');
+
+    expect(runTurn).not.toHaveBeenCalled();
   });
 
   it('resolves file mentions in a new goal objective before session start', async () => {
@@ -218,5 +244,23 @@ describe('AgentRuntimeRouter seed branch', () => {
 
     expect(seen).toHaveLength(1);
     expect(seen[0].skipFileMentions).toBe(true);
+  });
+
+  it('preserves the accepted command type through a seeded fresh session', async () => {
+    const { router, events } = makeRouter({
+      carryOverContext: `${SEED_CONTEXT_OPEN}\nUser: prior\n</carried-context>`,
+    });
+
+    await router.runAgentTurn('1', 'continue', {
+      clientRequestId: 'req-run',
+      commandType: 'fork-run',
+      turnId: 'turn-run',
+    });
+
+    expect(events.trackTurn).toHaveBeenCalledWith('1', expect.objectContaining({
+      clientRequestId: 'req-run',
+      commandType: 'fork-run',
+      turnId: 'turn-run',
+    }));
   });
 });

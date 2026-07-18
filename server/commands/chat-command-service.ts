@@ -33,7 +33,11 @@ import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common
 import { normalizeTags } from '../../common/tags.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
+import type {
+  AgentExecutionCommandType,
+  RunAgentTurnOptions,
+  StartedAgentSession,
+} from '../agents/session-types.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -66,7 +70,6 @@ const logger = createLogger('commands:chat-command-service');
 type QueueDep = Pick<
   ChatQueueService,
   | 'registerPendingUserInput'
-  | 'discardPendingUserInput'
   | 'reserveDirectTurn'
   | 'releaseDirectTurn'
   | 'completeDirectTurn'
@@ -77,6 +80,7 @@ type QueueDep = Pick<
   | 'abortForChatDeletion'
   | 'triggerDrain'
   | 'isChatExecutionReserved'
+  | 'hasChatExecutionOwner'
   | 'readChatQueue'
   | 'createChatQueueEntry'
   | 'replaceChatQueueEntry'
@@ -109,7 +113,7 @@ interface CarryOverDep {
 
 type PendingInputsDep = Pick<
   PendingUserInputServiceContract,
-  'clearChat' | 'listForChat' | 'markFailed' | 'reconcileRetainedHistory'
+  'clearChat' | 'hasInFlightForChat' | 'markFailed' | 'reconcileRetainedHistory'
 >;
 
 type AgentRegistryDep = Pick<
@@ -544,6 +548,7 @@ export class ChatCommandService {
 
     let runtimeDispatched = false;
     try {
+      reservation.executionAdmission.signal.throwIfAborted();
       this.deps.chats.addChat({
         id: input.chatId,
         agentId: input.agentId,
@@ -575,6 +580,7 @@ export class ChatCommandService {
         ampAgentMode: input.ampAgentMode,
       });
       await this.deps.settings.ensureInNormal(input.chatId);
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.deps.queue.registerPendingUserInput(input.chatId, input.command, {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
@@ -587,6 +593,7 @@ export class ChatCommandService {
         turnId,
         pendingInputRecovery: 'required',
       });
+      reservation.executionAdmission.signal.throwIfAborted();
       runtimeDispatched = true;
       await this.deps.agents.startSession(input.chatId, input.command, {
         projectPath: input.projectPath,
@@ -594,6 +601,7 @@ export class ChatCommandService {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         turnId,
+        executionAdmission: reservation.executionAdmission,
       });
     } catch (error: unknown) {
       try {
@@ -645,7 +653,7 @@ export class ChatCommandService {
       agents: this.deps.agents,
       settings: this.deps.settings,
     });
-    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], {
+    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed', 'finished'], {
       status: 'running',
       turnId,
     });
@@ -1265,18 +1273,20 @@ export class ChatCommandService {
         let runtimeDispatched = false;
         let runtimeCompleted = false;
         try {
+          reservation.executionAdmission.signal.throwIfAborted();
           runtimeDispatched = true;
           await this.deps.agents.compactSession(input.chatId, {
             instructions: input.instructions,
             clientRequestId,
             turnId,
+            executionAdmission: reservation.executionAdmission,
           });
           runtimeCompleted = true;
-          await this.deps.ledger.update(ledger.record.key, { status: 'finished' });
         } catch (error: unknown) {
-          logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error('compact: failed to compact chat:', message);
           try {
-            await this.deps.ledger.update(ledger.record.key, { status: 'failed' });
+            await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', { error: message });
           } catch (ledgerError: unknown) {
             logger.error(
               'compact: failed to record command failure:',
@@ -1489,8 +1499,17 @@ export class ChatCommandService {
       );
     }
 
+    if (this.deps.queue.hasChatExecutionOwner(chatId)) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        'Cannot update project path while a turn is being prepared or finalized',
+        409,
+        true,
+      );
+    }
+
     await this.deps.pendingInputs.reconcileRetainedHistory(chatId);
-    if (this.deps.pendingInputs.listForChat(chatId).length > 0) {
+    if (this.deps.pendingInputs.hasInFlightForChat(chatId)) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
         'Cannot update project path while a submitted message is still pending',
@@ -1537,7 +1556,7 @@ export class ChatCommandService {
       clientRequestId,
       clientMessageId,
       turnId,
-    });
+    }, 'agent-run');
   }
 
   async #submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<ForkRunCommandResponse> {
@@ -1581,7 +1600,7 @@ export class ChatCommandService {
       clientRequestId,
       clientMessageId,
       turnId,
-    });
+    }, 'fork-run');
     return { ...result, chat: await this.#projectCommandChat(input.chatId) };
   }
 
@@ -1589,6 +1608,7 @@ export class ChatCommandService {
     ledger: Awaited<ReturnType<CommandLedger['accept']>>,
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
+    commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
   ): Promise<CommandAcceptedResponse> {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError(
@@ -1606,6 +1626,7 @@ export class ChatCommandService {
       ...ids,
       turnId: ledger.record.turnId ?? ids.turnId,
     });
+    options.commandType = commandType;
     if (input.images !== undefined) options.images = input.images;
 
     let reservation: DirectTurnReservation;
@@ -1617,14 +1638,17 @@ export class ChatCommandService {
     }
 
     try {
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.#assertDirectExecutionQueueAvailable(input.chatId);
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.#registerPendingInput(input.chatId, input.command, options);
+      reservation.executionAdmission.signal.throwIfAborted();
       const scheduled = await this.deps.ledger.update(ledger.record.key, {
         status: 'scheduled',
         turnId: options.turnId,
         pendingInputRecovery: 'required',
       });
-      this.#runReservedTurn(ledger.record.key, reservation, input.command, options);
+      this.#runReservedTurn(reservation, input.command, options);
       return commandResultFromRecord(scheduled ?? ledger.record);
     } catch (error) {
       const pendingRegistered = this.deps.pendingInputs.markFailed(
@@ -1668,7 +1692,6 @@ export class ChatCommandService {
   }
 
   #runReservedTurn(
-    ledgerKey: string,
     reservation: DirectTurnReservation,
     command: string,
     options: RunAgentTurnOptions,
@@ -1676,18 +1699,9 @@ export class ChatCommandService {
     const runTask = (async () => {
       try {
         await this.deps.queue.runReservedTurn(reservation, command, options);
-        await this.deps.ledger.update(ledgerKey, { status: 'finished' });
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error('commands: run failed:', message);
-        try {
-          await this.deps.ledger.update(ledgerKey, { status: 'failed', error: message });
-        } catch (ledgerError: unknown) {
-          logger.error(
-            'commands: failed to record run failure:',
-            ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
-          );
-        }
       }
     })();
     this.#trackBackgroundTask(runTask);

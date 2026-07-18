@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { runSingleQuery as runSingleQueryClaude, type ClaudeCliRuntime } from './claude-cli.js';
 import { createClaudeNativePath, resolveClaudeNativePath } from './native-path.js';
 import {
+  assertExecutionAdmissionOpen,
   executionEventMetadata,
   type AgentSessionSettingsPatch,
   type ClaudeStartSessionRequest,
@@ -29,10 +30,12 @@ interface ClaudeAgentRuntime extends AgentRuntime {
 function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
   return {
     async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+      assertExecutionAdmissionOpen(request);
       const agentSessionId = crypto.randomUUID();
       const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
         configHomeDir: request.envOverrides?.CLAUDE_CONFIG_DIR,
       });
+      assertExecutionAdmissionOpen(request);
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
         logger.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);

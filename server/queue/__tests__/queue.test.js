@@ -561,6 +561,44 @@ describe('queue invariants', () => {
     expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
   });
 
+  it('restores a pre-existing manual pause after recovered input review', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    const queuePath = path.join(queuesDir, 'layered-pause.queue.json');
+    const manualPause = {
+      id: 'manual-pause',
+      kind: 'manual',
+      pausedAt: '2026-07-16T00:01:00.000Z',
+    };
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      queuePath,
+      JSON.stringify(storedQueueFixture({
+        entries: [queueEntryFixture('entry-successor', 'remain manually paused')],
+        pause: manualPause,
+        version: 1,
+      })),
+      'utf8',
+    );
+
+    await queue.recoverStaleChatQueues(new Set(['layered-pause']));
+    const recovered = await queue.readChatQueue('layered-pause');
+    expect(recovered.pause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+    expect(recovered.resumePauses).toEqual([manualPause]);
+
+    await queue.recoverStaleChatQueues(new Set(['layered-pause']));
+    const recoveredAgain = await queue.readChatQueue('layered-pause');
+    expect(recoveredAgain.pause.id).toBe(recovered.pause.id);
+    expect(recoveredAgain.resumePauses).toEqual([manualPause]);
+
+    const reviewed = await queue.resumeChatQueue('layered-pause', recovered.pause.id);
+    expect(reviewed.pause).toEqual(manualPause);
+    expect(await queue.popNextChat('layered-pause')).toBeNull();
+
+    await queue.resumeChatQueue('layered-pause', manualPause.id);
+    const popped = await queue.popNextChat('layered-pause');
+    expect(popped.entry.id).toBe('entry-successor');
+  });
+
   it('persists restart uncertainty without a queue file and gates later entries', async () => {
     const turnRunner = {
       runAgentTurn: mock(() => Promise.resolve()),
@@ -653,9 +691,13 @@ describe('queue invariants', () => {
 
     await expect(
       recoveringQueue.recoverStaleChatQueues(new Set(['uncertain-corrupt'])),
-    ).rejects.toBeInstanceOf(SyntaxError);
-    await expect(recoveringQueue.readChatQueue('uncertain-corrupt')).rejects.toBeInstanceOf(SyntaxError);
-    expect(() => recoveringQueue.reserveDirectTurn('uncertain-corrupt')).toThrow(SyntaxError);
+    ).rejects.toThrow('Could not recover chat queue uncertain-corrupt');
+    await expect(recoveringQueue.readChatQueue('uncertain-corrupt')).rejects.toThrow(
+      'Could not recover chat queue uncertain-corrupt',
+    );
+    expect(() => recoveringQueue.reserveDirectTurn('uncertain-corrupt')).toThrow(
+      'Could not recover chat queue uncertain-corrupt',
+    );
     await expect(fs.readFile(queuePath, 'utf8')).resolves.toBe('{corrupt queue state');
   });
 
@@ -839,6 +881,74 @@ describe('orchestration', () => {
   });
 
   describe('submit', () => {
+    it('rejects direct execution after shutdown admission closes', async () => {
+      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-direct' });
+      expect(orchQueue.beginShutdown()).toContain('c1');
+
+      await expect(orchQueue.runReservedTurn(
+        reservation,
+        'must not run',
+        { turnId: 'turn-direct' },
+      )).rejects.toThrow('server is shutting down');
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      await expect(orchQueue.waitForExecutionOwners()).resolves.toBeUndefined();
+    });
+
+    it('returns a queued entry unsent when shutdown wins during provider preparation', async () => {
+      const preparationStarted = deferred();
+      const continuePreparation = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, _command, options) => {
+        preparationStarted.resolve(options);
+        await continuePreparation.promise;
+        options.executionAdmission.signal.throwIfAborted();
+      });
+      const created = await orchQueue.createChatQueueEntry('c1', 'prepared input');
+      const drain = orchQueue.triggerDrain('c1');
+      const options = await preparationStarted.promise;
+
+      expect(orchQueue.beginShutdown()).toContain('c1');
+      continuePreparation.resolve();
+      await drain;
+      await orchQueue.waitForExecutionOwners();
+
+      expect(options.executionAdmission.signal.aborted).toBe(true);
+      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', options.clientRequestId);
+      expect(await orchQueue.readChatQueue('c1')).toMatchObject({
+        entries: [expect.objectContaining({ id: created.entry.id, status: 'queued' })],
+        pause: null,
+      });
+    });
+
+    it('preserves a started queued entry as completion-uncertain during shutdown', async () => {
+      const executionStarted = deferred();
+      const finishExecution = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, _command, options) => {
+        options.executionAdmission.markStarted();
+        executionStarted.resolve(options);
+        await finishExecution.promise;
+      });
+      const created = await orchQueue.createChatQueueEntry('c1', 'started input');
+      const drain = orchQueue.triggerDrain('c1');
+      const options = await executionStarted.promise;
+
+      expect(orchQueue.beginShutdown()).toContain('c1');
+      await expect(orchQueue.abortForShutdown('c1')).resolves.toBe(true);
+      finishExecution.resolve();
+      await drain;
+      await orchQueue.waitForExecutionOwners();
+
+      const persisted = await orchQueue.readChatQueue('c1');
+      expect(options.executionAdmission.signal.aborted).toBe(true);
+      expect(persisted.entries).toEqual([
+        expect.objectContaining({ id: created.entry.id, status: 'queued' }),
+      ]);
+      expect(persisted.pause).toMatchObject({
+        kind: 'completion-uncertain',
+        entryId: created.entry.id,
+      });
+    });
+
     it('rejects a second direct reservation before either turn prepares transcript state', async () => {
       const first = orchQueue.reserveDirectTurn('c1');
 
@@ -968,16 +1078,35 @@ describe('orchestration', () => {
       await orchQueue.completeDirectTurn(reservation);
 
       expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
       expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(/owns execution/);
       expect(settled).toEqual([]);
 
       running = false;
       orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-start' });
 
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
       expect(settled).toEqual([{
         clientRequestId: 'req-start',
         turnId: 'turn-start',
       }]);
+    });
+
+    it('keeps nonblocking direct admission abortable until exact terminal settlement', async () => {
+      let running = false;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-starting' });
+
+      running = true;
+      await orchQueue.completeDirectTurn(reservation);
+      expect(reservation.executionAdmission.signal.aborted).toBe(false);
+
+      expect(orchQueue.beginShutdown()).toContain('c1');
+      expect(reservation.executionAdmission.signal.aborted).toBe(true);
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-starting' });
+      await orchQueue.waitForExecutionOwners();
     });
 
     it('honors an interrupt drain request after an aborted direct turn releases execution', async () => {
@@ -1131,6 +1260,22 @@ describe('orchestration', () => {
       expect(batches[0].messages[0].message.content).toBe('hello');
     });
 
+    it('does not emit an empty chat message batch for an idempotent append', async () => {
+      mockChatMessages.appendMessages.mockResolvedValueOnce({
+        generationId: 'generation-1',
+        messages: [],
+      });
+      const emitted = mock();
+      orchQueue.onChatMessages(emitted);
+
+      await orchQueue.registerPendingUserInput('c1', 'already durable', {
+        clientRequestId: 'request-durable',
+        turnId: 'turn-durable',
+      });
+
+      expect(emitted).not.toHaveBeenCalled();
+    });
+
     it('registers provided metadata for accepted REST turns', async () => {
       await orchQueue.registerPendingUserInput('c1', 'hello', {
         clientRequestId: 'req-1',
@@ -1150,11 +1295,6 @@ describe('orchestration', () => {
     it('does not register pending input when command is empty', async () => {
       await orchQueue.submit('c1', '', {});
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
-    });
-
-    it('silently discards pending input through the pending service', () => {
-      expect(orchQueue.discardPendingUserInput('c1', 'req-1')).toBe(true);
-      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', 'req-1');
     });
 
     it('drains queued entries after agent turn', async () => {

@@ -12,7 +12,9 @@ import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import {
+  assertExecutionAdmissionOpen,
   executionEventMetadata,
+  markExecutionStarted,
   type AgentCommandImage,
   type AgentEventMetadata,
   type PermissionMode,
@@ -600,6 +602,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+    assertExecutionAdmissionOpen(request);
     const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
     const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
     const supportsImages = modelMetadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
@@ -624,8 +627,9 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       turnGeneration: 0,
     };
 
-    this.emitProcessing(request.chatId, true);
     try {
+      markExecutionStarted(request);
+      this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: false }));
       request.onAbortable?.();
       return await startedSession.promise;
@@ -637,6 +641,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
+    assertExecutionAdmissionOpen(request);
     const existingSession = this.#runningSessions.get(request.agentSessionId);
     if (existingSession?.isRunning) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
@@ -677,8 +682,9 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     session.eventMetadata = executionEventMetadata(request);
     this.#runningSessions.set(session.id, session);
 
-    this.emitProcessing(request.chatId, true);
     try {
+      markExecutionStarted(request);
+      this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: true }));
       request.onAbortable?.();
       await this.#waitForTurnComplete(session);

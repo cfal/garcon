@@ -10,8 +10,15 @@ import {
 
 export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../common/queue-state.ts';
 
+export interface StoredQueueDeliveryIdentity {
+  clientRequestId: string;
+  clientMessageId: string;
+  turnId: string;
+}
+
 export interface StoredQueueEntry extends QueueEntry {
   status: 'queued' | 'sending';
+  delivery?: StoredQueueDeliveryIdentity;
 }
 
 export type StoredQueueCommandOperation = 'create' | 'replace' | 'delete';
@@ -28,11 +35,13 @@ export interface StoredQueueState {
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   appliedCommands: StoredAppliedQueueCommand[];
   pause: QueuePause | null;
+  resumePauses?: QueuePause[];
   version: number;
   updatedAt: string | null;
 }
 
 export const MAX_STORED_APPLIED_QUEUE_COMMANDS = 1000;
+const MAX_STORED_RESUME_PAUSES = 8;
 
 export function emptyStoredQueue(): StoredQueueState {
   return {
@@ -46,15 +55,24 @@ export function emptyStoredQueue(): StoredQueueState {
 }
 
 export function cloneStoredQueue(queue: StoredQueueState): StoredQueueState {
-  return {
+  const clone = {
     ...queue,
-    entries: queue.entries.map((entry) => ({ ...entry })),
+    entries: queue.entries.map((entry) => ({
+      ...entry,
+      ...(entry.delivery ? { delivery: { ...entry.delivery } } : {}),
+    })),
     recentlyDispatched: queue.recentlyDispatched.map((entry) => ({ ...entry })),
     appliedCommands: (queue.appliedCommands ?? []).map((command) => ({
       ...command,
     })),
     pause: queue.pause ? { ...queue.pause } : null,
   };
+  if (queue.resumePauses?.length) {
+    clone.resumePauses = queue.resumePauses.map((pause) => ({ ...pause }));
+  } else {
+    delete clone.resumePauses;
+  }
+  return clone;
 }
 
 export function bumpStoredQueue(queue: StoredQueueState): StoredQueueState {
@@ -74,6 +92,23 @@ function normalizeStoredQueueEntry(value: unknown): StoredQueueEntry | null {
   const status = item.status === 'queued' || item.status === 'sending' ? item.status : null;
   if (!id || content === null || !createdAt || !status) return null;
 
+  const rawDelivery = item.delivery && typeof item.delivery === 'object'
+    ? item.delivery as Record<string, unknown>
+    : null;
+  const delivery = rawDelivery
+    && typeof rawDelivery.clientRequestId === 'string'
+    && rawDelivery.clientRequestId.length > 0
+    && typeof rawDelivery.clientMessageId === 'string'
+    && rawDelivery.clientMessageId.length > 0
+    && typeof rawDelivery.turnId === 'string'
+    && rawDelivery.turnId.length > 0
+    ? {
+        clientRequestId: rawDelivery.clientRequestId,
+        clientMessageId: rawDelivery.clientMessageId,
+        turnId: rawDelivery.turnId,
+      }
+    : undefined;
+
   return {
     id,
     content,
@@ -82,6 +117,7 @@ function normalizeStoredQueueEntry(value: unknown): StoredQueueEntry | null {
       typeof item.revision === 'number' && Number.isInteger(item.revision) && item.revision > 0 ? item.revision : 1,
     createdAt,
     updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : createdAt,
+    ...(delivery ? { delivery } : {}),
   };
 }
 
@@ -152,16 +188,25 @@ function normalizeStoredPause(
   version: number,
   updatedAt: string | null,
 ): QueuePause | null {
-  const hasQueuedEntry = entries.some((entry) => entry.status === 'queued');
+  const hasQueuedEntries = entries.some((entry) => entry.status === 'queued');
   if (Object.hasOwn(raw, 'pause')) {
     const pause = parseQueuePause(raw.pause);
     if (pause?.kind === 'recovered-unconfirmed-input') return pause;
-    if (!hasQueuedEntry) return null;
+    if (!hasQueuedEntries) return null;
     if (pause !== undefined) return pause;
     return migratedPause(raw, entries, version, updatedAt);
   }
-  if (!hasQueuedEntry) return null;
+  if (!hasQueuedEntries) return null;
   return raw.paused === true ? migratedPause(raw, entries, version, updatedAt) : null;
+}
+
+function normalizeResumePauses(value: unknown, hasQueuedEntry: boolean): QueuePause[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const pause = parseQueuePause(candidate);
+    if (!pause || (!hasQueuedEntry && pause.kind !== 'recovered-unconfirmed-input')) return [];
+    return [pause];
+  }).slice(0, MAX_STORED_RESUME_PAUSES);
 }
 
 export function normalizeStoredQueueState(value: unknown): StoredQueueState {
@@ -184,22 +229,70 @@ export function normalizeStoredQueueState(value: unknown): StoredQueueState {
     : [];
   const version = typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0;
   const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
+  const pause = normalizeStoredPause(raw, entries, version, updatedAt);
+  const resumePauses = pause
+    ? normalizeResumePauses(raw.resumePauses, entries.some((entry) => entry.status === 'queued'))
+    : [];
 
   return {
     entries,
     recentlyDispatched,
     appliedCommands,
-    pause: normalizeStoredPause(raw, entries, version, updatedAt),
+    pause,
+    ...(resumePauses.length ? { resumePauses } : {}),
     version,
     updatedAt,
   };
+}
+
+/** Parses durable queue state without discarding entries or idempotency evidence. */
+export function parseStoredQueueState(value: unknown): StoredQueueState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Queue state must be an object');
+  }
+
+  const raw = value as Record<string, unknown>;
+  const arrays = [
+    ['entries', normalizeStoredQueueEntry],
+    ['recentlyDispatched', normalizeRecentlyDispatched],
+    ['appliedCommands', normalizeAppliedCommand],
+  ] as const;
+  for (const [field, normalize] of arrays) {
+    const stored = raw[field];
+    if (stored === undefined) continue;
+    if (!Array.isArray(stored)) {
+      throw new Error(`Queue state ${field} must be an array`);
+    }
+    if (stored.some((entry) => normalize(entry) === null)) {
+      throw new Error(`Queue state ${field} contains an invalid record`);
+    }
+    if (field === 'entries' && stored.some((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+      const record = entry as Record<string, unknown>;
+      return Object.hasOwn(record, 'delivery')
+        && record.delivery !== undefined
+        && normalizeStoredQueueEntry(record)?.delivery === undefined;
+    })) {
+      throw new Error('Queue state entries contain invalid delivery identity');
+    }
+  }
+
+  const normalized = normalizeStoredQueueState(raw);
+  const entryIds = new Set<string>();
+  for (const entry of normalized.entries) {
+    if (entryIds.has(entry.id)) {
+      throw new Error(`Queue state contains duplicate entry ID: ${entry.id}`);
+    }
+    entryIds.add(entry.id);
+  }
+  return normalized;
 }
 
 export function toClientQueueState(queue: StoredQueueState): QueueState {
   return {
     entries: queue.entries
       .filter((entry) => entry.status === 'queued')
-      .map(({ status: _status, ...entry }) => ({ ...entry })),
+      .map(({ status: _status, delivery: _delivery, ...entry }) => ({ ...entry })),
     dispatchingEntryId: queue.entries.find((entry) => entry.status === 'sending')?.id ?? null,
     recentlyDispatched: queue.recentlyDispatched
       .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)

@@ -147,8 +147,14 @@ function createRouteAgent(sessionOverrides = {}) {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
-    discardPendingUserInput: mock(() => true),
-    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
+    reserveDirectTurn: mock((chatId) => ({
+      chatId,
+      reservationId: 'reservation-1',
+      executionAdmission: {
+        signal: new AbortController().signal,
+        markStarted() {},
+      },
+    })),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
@@ -160,6 +166,8 @@ function createRouteAgent(sessionOverrides = {}) {
     interruptActiveTurn: mock(() => Promise.resolve(true)),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
+    isChatExecutionReserved: mock(() => false),
+    hasChatExecutionOwner: mock(() => false),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({

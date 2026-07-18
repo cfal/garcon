@@ -11,7 +11,9 @@ import { createArtificialNativePath } from '../../chats/artificial-native-path.j
 import { AgentEventEmitterRuntime } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
 import {
+  assertExecutionAdmissionOpen,
   executionEventMetadata,
+  markExecutionStarted,
   type PermissionMode,
   type AgentEventMetadata,
   type AgentSessionSettingsPatch,
@@ -194,13 +196,21 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+    assertExecutionAdmissionOpen(request);
     const client = await this.#connectClient(request);
-    const model = this.#newSessionModelForRequest(request);
-    const created = await client.newSession({
-      cwd: request.projectPath,
-      mcpServers: this.#policy.mcpServers,
-      ...(model ? { model } : {}),
-    });
+    let created: Awaited<ReturnType<AcpClient['newSession']>>;
+    try {
+      assertExecutionAdmissionOpen(request);
+      const model = this.#newSessionModelForRequest(request);
+      created = await client.newSession({
+        cwd: request.projectPath,
+        mcpServers: this.#policy.mcpServers,
+        ...(model ? { model } : {}),
+      });
+    } catch (error) {
+      client.close();
+      throw error;
+    }
 
     const sessionId = created.sessionId;
     const now = new Date().toISOString();
@@ -228,7 +238,31 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#sessions.set(sessionId, session);
     this.#bindClientEvents(session);
     this.emitSessionCreated(request.chatId);
-    void this.#runPrompt(session, request).catch(() => {});
+    let resolveStarted!: () => void;
+    let rejectStarted!: (error: unknown) => void;
+    let executionStarted = false;
+    const started = new Promise<void>((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    const promptTask = this.#runPrompt(session, request, () => {
+      if (executionStarted) return;
+      executionStarted = true;
+      resolveStarted();
+    });
+    void promptTask.then(() => {
+      if (!executionStarted) rejectStarted(new Error('ACP session ended before execution started'));
+    }, (error) => {
+      if (!executionStarted) rejectStarted(error);
+    });
+    try {
+      await started;
+    } catch (error) {
+      if (this.#sessions.get(sessionId) === session) this.#sessions.delete(sessionId);
+      session.retired = true;
+      client.close();
+      throw error;
+    }
 
     return {
       agentSessionId: sessionId,
@@ -237,6 +271,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
+    assertExecutionAdmissionOpen(request);
     const session = await this.#sessionForTurn(request);
     if (session.running) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
@@ -446,11 +481,16 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     return false;
   }
 
-  async #runPrompt(session: AcpAgentRuntimeSession, request: StartSessionRequest | ResumeTurnRequest): Promise<void> {
+  async #runPrompt(
+    session: AcpAgentRuntimeSession,
+    request: StartSessionRequest | ResumeTurnRequest,
+    onExecutionStarted?: () => void,
+  ): Promise<void> {
+    assertExecutionAdmissionOpen(request);
     const turnGeneration = ++session.turnGeneration;
     session.retired = false;
-    session.running = true;
-    session.state = 'running';
+    session.running = false;
+    session.state = 'idle';
     session.aborted = false;
     session.permissionMode = request.permissionMode;
     session.chatId = request.chatId;
@@ -463,16 +503,23 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       'agentSessionId' in request ? undefined : 'chat-start',
     );
     this.#converter.beginTurn?.(session.id);
-    this.emitProcessing(session.chatId, true);
 
     let success = false;
     let shouldThrow = false;
     let failureMessage = '';
+    let executionStarted = false;
+    let admissionClosed = false;
 
     try {
       await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
+      markExecutionStarted(request);
+      executionStarted = true;
+      session.running = true;
+      session.state = 'running';
+      this.emitProcessing(session.chatId, true);
+      onExecutionStarted?.();
       const promptRequest = session.client.promptSession({
         sessionId: session.remoteSessionId,
         prompt,
@@ -486,6 +533,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       await this.#waitForUpdateQuietPeriod(session);
       success = !session.aborted;
     } catch (error) {
+      admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (session.aborted) {
         success = false;
       } else {
@@ -497,10 +545,16 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
         return;
       }
 
-      this.#emitFlushedMessages(session);
-      this.emitProcessing(session.chatId, false);
+      if (executionStarted) {
+        this.#emitFlushedMessages(session);
+        this.emitProcessing(session.chatId, false);
+      }
       session.running = false;
-      session.state = session.aborted ? 'aborted' : (failureMessage ? 'failed' : 'idle');
+      session.state = session.aborted
+        ? 'aborted'
+        : admissionClosed
+          ? 'idle'
+          : (failureMessage ? 'failed' : 'idle');
       session.lastActivityAt = Date.now();
 
       if (success) {
@@ -509,7 +563,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
           ...(session.upstreamRequestId ? { upstreamRequestId: session.upstreamRequestId } : {}),
         } satisfies AgentEventMetadata;
         this.emitFinished(session.chatId, 0, metadata);
-      } else if (!session.aborted && failureMessage) {
+      } else if (!session.aborted && !admissionClosed && failureMessage) {
         this.emitMessages(session.chatId, [
           new ErrorMessage(new Date().toISOString(), failureMessage),
         ], session.eventMetadata);

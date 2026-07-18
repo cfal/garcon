@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
   normalizeStoredQueueState,
+  parseStoredQueueState,
   toClientQueueState,
 } from '../../queue-state.js';
 
@@ -30,12 +31,28 @@ function storedQueue(entries, overrides = {}) {
 
 describe('stored queue projection', () => {
   it('projects only editable entries and reports the dispatching ID', () => {
-    const result = toClientQueueState(storedQueue([entry('s1', 'sending'), entry('q1', 'queued', 3)]));
+    const queued = {
+      ...entry('q1', 'queued', 3),
+      delivery: {
+        clientRequestId: 'request-1',
+        clientMessageId: 'message-1',
+        turnId: 'turn-1',
+      },
+    };
+    const result = toClientQueueState(storedQueue([entry('s1', 'sending'), queued]));
 
     expect(result.entries).toEqual([expect.objectContaining({ id: 'q1', revision: 3 })]);
     expect(result.entries[0]).not.toHaveProperty('status');
+    expect(result.entries[0]).not.toHaveProperty('delivery');
     expect(result.dispatchingEntryId).toBe('s1');
     expect(result.version).toBe(4);
+  });
+
+  it('rejects persisted entries with a malformed delivery identity', () => {
+    expect(() => parseStoredQueueState(storedQueue([{
+      ...entry('q1', 'queued'),
+      delivery: { clientRequestId: 'request-1' },
+    }]))).toThrow('invalid delivery identity');
   });
 
   it('retains bounded recently-dispatched markers after the sending entry leaves', () => {
@@ -101,5 +118,25 @@ describe('stored queue projection', () => {
     );
 
     expect(result).not.toHaveProperty('appliedCommands');
+  });
+
+  it('keeps superseded pause history server-only', () => {
+    const result = toClientQueueState(
+      storedQueue([entry('q1', 'queued')], {
+        pause: {
+          id: 'recovery-pause',
+          kind: 'recovered-unconfirmed-input',
+          pausedAt: '2026-02-27T00:00:01.000Z',
+        },
+        resumePauses: [{
+          id: 'manual-pause',
+          kind: 'manual',
+          pausedAt: '2026-02-27T00:00:00.000Z',
+        }],
+      }),
+    );
+
+    expect(result.pause).toMatchObject({ id: 'recovery-pause' });
+    expect(result).not.toHaveProperty('resumePauses');
   });
 });

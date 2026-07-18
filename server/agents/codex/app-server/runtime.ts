@@ -3,7 +3,9 @@ import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
 import {
+  assertExecutionAdmissionOpen,
   executionEventMetadata,
+  markExecutionStarted,
   type AgentChatEntry,
   type AgentEventMetadata,
   type AgentSessionSettingsPatch,
@@ -529,11 +531,13 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+    assertExecutionAdmissionOpen(request);
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
 
     try {
       const initialized = await client.connect();
+      assertExecutionAdmissionOpen(request);
       const started = await client.startThread(buildThreadStartParams(request));
       const threadId = started.thread.id;
       const session = this.#activateSession({
@@ -549,8 +553,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       session.onAbortable = request.onAbortable;
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
-      this.emitProcessing(request.chatId, true);
       this.emitSessionCreated(request.chatId);
+      markExecutionStarted(request);
+      this.emitProcessing(request.chatId, true);
       await this.#startRequestedTurn(client, session, request);
 
       const nativePath = await waitForMaterializedThread(started.thread, {
@@ -561,24 +566,29 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return { agentSessionId: threadId, nativePath };
     } catch (error) {
       const message = humanizeCodexAppServerError(error);
+      const admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (activeSession) {
-        this.#finishSession(activeSession, { failedMessage: message });
+        this.#finishSession(activeSession, admissionClosed ? { aborted: true } : { failedMessage: message });
       } else {
         this.#discardBufferedClientEvents(client);
         client.shutdown();
-        this.emitProcessing(request.chatId, false);
-        this.emitFailed(request.chatId, message, executionEventMetadata(request, 'chat-start'));
+        if (!admissionClosed) {
+          this.emitProcessing(request.chatId, false);
+          this.emitFailed(request.chatId, message, executionEventMetadata(request, 'chat-start'));
+        }
       }
       throw error;
     }
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
+    assertExecutionAdmissionOpen(request);
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
 
     try {
       const initialized = await client.connect();
+      assertExecutionAdmissionOpen(request);
       const resumed = await client.resumeThread(buildThreadResumeParams(request));
       const session = this.#activateSession({
         chatId: request.chatId,
@@ -601,6 +611,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
             throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
           }
+          markExecutionStarted(request);
           this.emitProcessing(request.chatId, true);
           if (!request.codexGoalCommand) {
             if (session.managesGoalLifecycle) {
@@ -635,14 +646,17 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       }
     } catch (error) {
       const message = humanizeCodexAppServerError(error);
+      const admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (activeSession) {
         this.#discardBufferedClientEvents(client);
-        this.#finishSession(activeSession, { failedMessage: message });
+        this.#finishSession(activeSession, admissionClosed ? { aborted: true } : { failedMessage: message });
       } else {
         this.#discardBufferedClientEvents(client);
         client.shutdown();
-        this.emitProcessing(request.chatId, false);
-        this.emitFailed(request.chatId, message, executionEventMetadata(request));
+        if (!admissionClosed) {
+          this.emitProcessing(request.chatId, false);
+          this.emitFailed(request.chatId, message, executionEventMetadata(request));
+        }
       }
       throw error;
     }
@@ -652,6 +666,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   // starts the turn via thread/compact/start; the resulting contextCompaction
   // item and turn lifecycle arrive through the shared notification handlers.
   async compact(request: ResumeTurnRequest): Promise<void> {
+    assertExecutionAdmissionOpen(request);
     // A live session means a turn is already active for this thread; starting a
     // second one would overwrite the session map and leak the existing client.
     if (this.#sessions.has(request.agentSessionId)) {
@@ -663,6 +678,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
     try {
       const initialized = await client.connect();
+      assertExecutionAdmissionOpen(request);
       const resumed = await client.resumeThread(buildThreadResumeParams(request));
       const session = this.#activateSession({
         chatId: request.chatId,
@@ -677,17 +693,21 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeSession = session;
       session.onAbortable = request.onAbortable;
       this.#releaseBufferedClientEvents(client);
+      markExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       await client.compactThread(resumed.thread.id);
     } catch (error) {
       const message = humanizeCodexAppServerError(error);
+      const admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (activeSession) {
-        this.#finishSession(activeSession, { failedMessage: message });
+        this.#finishSession(activeSession, admissionClosed ? { aborted: true } : { failedMessage: message });
       } else {
         this.#discardBufferedClientEvents(client);
         client.shutdown();
-        this.emitProcessing(request.chatId, false);
-        this.emitFailed(request.chatId, message, executionEventMetadata(request));
+        if (!admissionClosed) {
+          this.emitProcessing(request.chatId, false);
+          this.emitFailed(request.chatId, message, executionEventMetadata(request));
+        }
       }
       throw error;
     }

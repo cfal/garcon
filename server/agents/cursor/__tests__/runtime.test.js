@@ -13,6 +13,14 @@ import { CursorAcpEventConverter } from '../cursor-acp-event-converter.js';
 import { createCursorAcpPolicy } from '../cursor-acp-policy.js';
 import { runSingleQuery } from '../run-single-query.js';
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function option(id, currentValue, values, extra = {}) {
   return {
     id,
@@ -374,13 +382,47 @@ describe('Cursor ACP runtime', () => {
       configMismatch: { configId: 'reasoning', currentValue: 'medium' },
     });
     const onAbortable = mock(() => undefined);
-    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable }));
+    await expect(runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable })))
+      .rejects.toThrow('Cursor did not apply requested model gpt-5.5-extra-high');
 
     const error = await waitForMessage((message) => message instanceof ErrorMessage);
     expect(error.content).toContain('Cursor did not apply requested model gpt-5.5-extra-high');
     expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
     expect(onAbortable).not.toHaveBeenCalled();
 
+    runtime.shutdown();
+  });
+
+  it('rejects a start cancelled during configuration without sending a prompt', async () => {
+    const acp = createAcpHarness();
+    const configurationStarted = deferred();
+    const continueConfiguration = deferred();
+    const policy = {
+      ...createCursorAcpPolicy(),
+      async configureSession() {
+        configurationStarted.resolve();
+        await continueConfiguration.promise;
+        return [];
+      },
+    };
+    const runtime = new AcpAgentRuntime(policy, {
+      converter: new CursorAcpEventConverter(),
+      createTransport: acp.createTransport,
+    });
+    const admission = new AbortController();
+    const start = runtime.startSession(startRequest({
+      executionAdmission: {
+        signal: admission.signal,
+        markStarted: mock(),
+      },
+    }));
+    await configurationStarted.promise;
+
+    admission.abort(new Error('server shutting down'));
+    continueConfiguration.resolve();
+
+    await expect(start).rejects.toThrow('server shutting down');
+    expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
     runtime.shutdown();
   });
 

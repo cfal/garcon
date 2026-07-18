@@ -16,12 +16,15 @@ import type {
 import { normalizeThinkingModeForAgent } from '../../common/chat-modes.js';
 import type {
   AgentChatEntry,
+  AgentExecutionCommandType,
+  AgentExecutionAdmission,
   PrepareProjectPathUpdateRequest,
   ResumeTurnRequest,
   RunAgentTurnOptions,
   StartSessionRequest,
   StartedAgentSession,
 } from './session-types.js';
+import { assertExecutionAdmissionOpen } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus } from './event-bus.js';
 import { createLogger } from '../lib/log.js';
@@ -101,12 +104,15 @@ export class AgentRuntimeRouter {
     clientRequestId?: string;
     clientMessageId?: string;
     turnId?: string;
+    commandType?: AgentExecutionCommandType;
+    executionAdmission?: AgentExecutionAdmission;
     codexGoalCommand?: CodexGoalCommand;
     codexSeedContext?: string;
     // Skips @-mention resolution when the command is already resolved (e.g. a
     // seeded cross-agent continuation, whose historical text must stay opaque).
     skipFileMentions?: boolean;
   } = {}): Promise<void> {
+    assertExecutionAdmissionOpen(opts);
     const rawEntry = this.#registry.getChat(chatId);
 
     const maxSessions = getMaxSessions();
@@ -134,10 +140,12 @@ export class AgentRuntimeRouter {
     const resolvedCommand = opts.skipFileMentions
       ? prepared.command
       : await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
+    assertExecutionAdmissionOpen(opts);
     let started: StartedAgentSession | null = null;
     let registryBound = false;
     let runtimeAbortable = false;
     let abortabilityPublished = false;
+    const commandType = opts.commandType ?? 'chat-start';
     const publishAbortability = () => {
       if (
         abortabilityPublished
@@ -151,7 +159,7 @@ export class AgentRuntimeRouter {
       abortabilityPublished = true;
       this.#events.markTurnAbortable(chatId, {
         clientRequestId: opts.clientRequestId,
-        commandType: 'chat-start',
+        commandType,
         turnId: opts.turnId,
       });
     };
@@ -169,6 +177,7 @@ export class AgentRuntimeRouter {
       clientRequestId: opts.clientRequestId,
       clientMessageId: opts.clientMessageId,
       turnId: opts.turnId,
+      executionAdmission: opts.executionAdmission,
       images: opts.images,
       onAbortable: () => {
         runtimeAbortable = true;
@@ -178,9 +187,10 @@ export class AgentRuntimeRouter {
       ...selectionRequestFields(selection),
     };
 
-    this.#events.trackTurn(chatId, { ...opts, commandType: 'chat-start' });
+    this.#events.trackTurn(chatId, { ...opts, commandType });
     try {
       started = await agent.runtime.startSession(request);
+      assertExecutionAdmissionOpen(opts);
       const updated = await this.#registry.updateChat(chatId, {
         agentSessionId: started.agentSessionId,
         nativePath: started.nativePath,
@@ -210,6 +220,7 @@ export class AgentRuntimeRouter {
   }
 
   async runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
+    assertExecutionAdmissionOpen(opts);
     const rawEntry = this.#registry.getChat(chatId);
     if (!rawEntry) {
       throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
@@ -240,6 +251,8 @@ export class AgentRuntimeRouter {
           clientRequestId: opts.clientRequestId,
           clientMessageId: opts.clientMessageId,
           turnId: opts.turnId,
+          commandType: opts.commandType,
+          executionAdmission: opts.executionAdmission,
           codexGoalCommand,
           codexSeedContext: injectCodexSeed ? rawEntry.carryOverContext : undefined,
           skipFileMentions: true,
@@ -275,6 +288,7 @@ export class AgentRuntimeRouter {
     const runtimeConfig = this.#getEndpointRuntimeConfig(agentId, selection);
     const prepared = prepareAgentCommand(agentId, command);
     const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
+    assertExecutionAdmissionOpen(opts);
     this.#events.trackTurn(chatId, opts);
     try {
       await agent.runtime.runTurn({
@@ -290,6 +304,7 @@ export class AgentRuntimeRouter {
         clientRequestId: opts.clientRequestId,
         clientMessageId: opts.clientMessageId,
         turnId: opts.turnId,
+        executionAdmission: opts.executionAdmission,
         images: opts.images,
         nativePath: rawEntry.nativePath,
         onAbortable: () => this.#events.markTurnAbortable(chatId, {
@@ -338,7 +353,13 @@ export class AgentRuntimeRouter {
 
   // Triggers context compaction for a chat. Agents with a dedicated mechanism
   // implement runtime.compact(); the rest fall back to running a `/compact` turn.
-  async compactSession(chatId: string, opts: { instructions?: string; clientRequestId?: string; turnId?: string } = {}): Promise<void> {
+  async compactSession(chatId: string, opts: {
+    instructions?: string;
+    clientRequestId?: string;
+    turnId?: string;
+    executionAdmission?: AgentExecutionAdmission;
+  } = {}): Promise<void> {
+    assertExecutionAdmissionOpen(opts);
     const rawEntry = this.#registry.getChat(chatId);
     if (!rawEntry) {
       throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
@@ -371,6 +392,7 @@ export class AgentRuntimeRouter {
       claudeThinkingMode: entry.claudeThinkingMode,
       clientRequestId: opts.clientRequestId,
       turnId: opts.turnId,
+      executionAdmission: opts.executionAdmission,
       nativePath: rawEntry.nativePath,
       onAbortable: () => this.#events.markTurnAbortable(chatId, {
         clientRequestId: opts.clientRequestId,
@@ -380,7 +402,11 @@ export class AgentRuntimeRouter {
       ...selectionRequestFields(selection),
     };
 
-    this.#events.trackTurn(chatId, { clientRequestId: opts.clientRequestId, turnId: opts.turnId });
+    this.#events.trackTurn(chatId, {
+      clientRequestId: opts.clientRequestId,
+      commandType: 'agent-compact',
+      turnId: opts.turnId,
+    });
     logger.info(`compact: dispatching chat=${chatId} agent=${agentId} native=${typeof agent.runtime.compact === 'function' ? 'compact()' : 'runTurn(/compact)'}`);
     try {
       if (agent.runtime.compact) {

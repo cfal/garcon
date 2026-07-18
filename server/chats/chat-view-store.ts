@@ -9,6 +9,7 @@ import {
   transcriptRevision,
   transcriptRevisions,
 } from '../lib/transcript-revision.js';
+import { ChatRunningError } from './errors.js';
 
 const logger = createLogger('chat-view');
 
@@ -138,6 +139,13 @@ export class ChatViewStore {
     });
   }
 
+  async reconcileNativeSnapshot(chatId: string, nativeMessages: readonly ChatMessage[]): Promise<void> {
+    await this.#withChat(chatId, async () => {
+      if (this.#isChatActive(chatId)) throw new ChatRunningError(chatId);
+      this.#reconcileFullView(chatId, [...nativeMessages]);
+    });
+  }
+
   async getOrCreatePage(
     chatId: string,
     loader: ChatViewLoader,
@@ -258,7 +266,7 @@ export class ChatViewStore {
       if (options.fence !== undefined && options.fence !== view.streamFence) {
         return { generationId: view.generationId, messages: [], lastSeq: view.lastSeq, skipped: true };
       }
-      const appended = this.#appendToView(view, messages);
+      const appended = this.#appendLiveToView(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -273,7 +281,7 @@ export class ChatViewStore {
         view = this.#createGeneration(chatId, []);
         this.#views.set(chatId, view);
       }
-      const appended = this.#appendToView(view, messages);
+      const appended = this.#appendLiveToView(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -291,7 +299,7 @@ export class ChatViewStore {
         view.nativeRevision = undefined;
         this.#views.set(chatId, view);
       }
-      const appended = this.#appendToView(view, messages);
+      const appended = this.#appendLiveToView(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -494,8 +502,8 @@ export class ChatViewStore {
       : [];
     let fullMessages = reconciledNativeMessages;
     if (unpersistedLiveMessages.length > 0) {
-      this.#appendToView(view, unpersistedLiveMessages);
-      fullMessages = [...reconciledNativeMessages, ...unpersistedLiveMessages];
+      const appended = this.#appendLiveToView(view, unpersistedLiveMessages, 'native-wins');
+      fullMessages = [...reconciledNativeMessages, ...appended.map((entry) => entry.message)];
     }
     this.#views.set(chatId, view);
     return { view, messages: fullMessages };
@@ -567,6 +575,42 @@ export class ChatViewStore {
     this.#enforceViewMessageLimit(view);
     view.lastAccessAt = this.#now();
     return appended;
+  }
+
+  #appendLiveToView(
+    view: ChatView,
+    messages: ChatMessage[],
+    conflictPolicy: 'reject' | 'native-wins' = 'reject',
+  ): ChatViewMessage[] {
+    const existingByRequestId = new Map<string, UserMessage>();
+    for (const entry of view.messages) {
+      if (entry.message instanceof UserMessage && entry.message.metadata?.clientRequestId) {
+        existingByRequestId.set(entry.message.metadata.clientRequestId, entry.message);
+      }
+    }
+
+    const unique: ChatMessage[] = [];
+    for (const message of messages) {
+      if (!(message instanceof UserMessage) || !message.metadata?.clientRequestId) {
+        unique.push(message);
+        continue;
+      }
+      const requestId = message.metadata.clientRequestId;
+      const existing = existingByRequestId.get(requestId);
+      if (existing) {
+        if (!userEchoesAreCompatible(existing, message)) {
+          if (conflictPolicy === 'native-wins') {
+            logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${requestId}`);
+            continue;
+          }
+          throw new Error(`Conflicting user message identity: ${requestId}`);
+        }
+        continue;
+      }
+      existingByRequestId.set(requestId, message);
+      unique.push(message);
+    }
+    return this.#appendToView(view, unique);
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {

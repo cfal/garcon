@@ -66,6 +66,7 @@ function createFixture() {
     reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
     reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
     listForChat: mock(() => []),
+    hasInFlightForChat: mock(() => false),
     clearChat: mock(() => undefined),
   };
   const lastSelectedChat = new InMemoryLastSelectedChatState();

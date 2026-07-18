@@ -14,7 +14,9 @@ import {
   ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
   ActiveInputDeliveryError,
 } from '../../lib/domain-error.js';
-import { QueueEntryMutationError } from '../../queue.js';
+import { QueueEntryMutationError, QueueManager } from '../../queue.js';
+import { ChatViewStore } from '../../chats/chat-view-store.js';
+import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 
 let workspaceDir;
 let projectBaseDir;
@@ -30,6 +32,32 @@ function deferred() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+async function waitForCheckpoint(checkpoint, operation, operationName) {
+  await Promise.race([
+    checkpoint,
+    operation.then(
+      () => {
+        throw new Error(`${operationName} completed before reaching the checkpoint`);
+      },
+      (error) => {
+        throw new Error(`${operationName} failed before reaching the checkpoint`, { cause: error });
+      },
+    ),
+  ]);
+}
+
+function directReservation(chatId) {
+  const controller = new AbortController();
+  return {
+    chatId,
+    reservationId: randomUUID(),
+    executionAdmission: {
+      signal: controller.signal,
+      markStarted: mock(() => undefined),
+    },
+  };
 }
 
 function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
@@ -120,10 +148,9 @@ function makeService(overrides = {}) {
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
   };
-  const queue = {
+  const queue = overrides.queueService ?? {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
-    discardPendingUserInput: mock(() => true),
-    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: randomUUID() })),
+    reserveDirectTurn: mock((chatId) => directReservation(chatId)),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
@@ -134,6 +161,7 @@ function makeService(overrides = {}) {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     isChatExecutionReserved: mock(() => false),
+    hasChatExecutionOwner: mock(() => false),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -200,13 +228,13 @@ function makeService(overrides = {}) {
     runSingleQuery: mock(() => Promise.resolve('')),
     ...overrides.agents,
   };
-  const pendingInputs = {
+  const pendingInputs = overrides.pendingInputsService ?? {
     register: mock(() => Promise.resolve(undefined)),
     clearChat: mock(() => undefined),
     reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
     reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
     markFailed: mock(() => false),
-    listForChat: mock(() => []),
+    hasInFlightForChat: mock(() => false),
     ...overrides.pendingInputs,
   };
   const forkChatFileCopy = overrides.forkChatFileCopy ?? mock(() => Promise.resolve({
@@ -260,6 +288,23 @@ function makeService(overrides = {}) {
     chatListProjector,
     pathCache,
   };
+}
+
+function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
+  return new QueueManager(
+    workspaceDir,
+    {
+      runAgentTurn: mock(async () => undefined),
+      abortSession: mock(async () => false),
+      isChatRunning: mock(() => false),
+      waitUntilTurnAbortable: mock(async () => false),
+      ...turnRunnerOverrides,
+    },
+    pendingInputsService,
+    { appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })) },
+    () => ({}),
+    () => true,
+  );
 }
 
 async function readLedgerRecords() {
@@ -664,6 +709,10 @@ describe('ChatCommandService', () => {
     expect(second.status).toBe('duplicate');
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn.mock.calls[0][2]).toMatchObject({
+      clientRequestId: 'req-1',
+      commandType: 'agent-run',
+    });
   });
 
   it('reports a restart-interrupted duplicate instead of false acceptance', async () => {
@@ -722,7 +771,7 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         commandType: 'agent-run',
         clientRequestId: 'req-live-failure',
-        status: 'failed',
+        status: 'scheduled',
         pendingInputRecovery: 'required',
       }),
     ]);
@@ -754,7 +803,7 @@ describe('ChatCommandService', () => {
           retryable: true,
         });
       }
-      activeReservation = { chatId, reservationId: randomUUID() };
+      activeReservation = directReservation(chatId);
       return activeReservation;
     });
     const releaseDirectTurn = mock(async (reservation) => {
@@ -930,7 +979,6 @@ describe('ChatCommandService', () => {
       'req-ledger-failed',
     );
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
-    expect(queue.discardPendingUserInput).not.toHaveBeenCalled();
   });
 
   it('does not return duplicate accepted after a failed pre-schedule append', async () => {
@@ -1978,10 +2026,28 @@ describe('ChatCommandService', () => {
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects project path updates with pending submitted input after reconcile', async () => {
+  it('rejects project path updates while a queued turn is waiting', async () => {
+    const { service, queue, agents } = makeService();
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    queue.readChatQueue.mockResolvedValueOnce(storedQueue([
+      queueEntry('queued-1', 'continue', 'queued'),
+    ]));
+
+    await expect(
+      service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      }),
+    ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects project path updates with in-flight submitted input after reconcile', async () => {
     const { service, agents } = makeService({
       pendingInputs: {
-        listForChat: mock(() => [{ chatId: SOURCE_CHAT_ID, clientRequestId: 'req-1' }]),
+        hasInFlightForChat: mock(() => true),
       },
     });
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
@@ -1995,6 +2061,313 @@ describe('ChatCommandService', () => {
     ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
 
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps terminal delivery evidence without treating it as active work', async () => {
+    const views = new ChatViewStore(() => false);
+    const loadNativeMessages = mock(async () => {
+      throw new Error('project path update must not load native history');
+    });
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages,
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+    });
+    await pendingInputsService.register(SOURCE_CHAT_ID, 'interrupted input', {
+      clientRequestId: 'req-unconfirmed',
+      turnId: 'turn-unconfirmed',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    await pendingInputsService.register(SOURCE_CHAT_ID, 'failed input', {
+      clientRequestId: 'req-failed',
+      turnId: 'turn-failed',
+      createdAt: '2026-06-01T00:00:01.000Z',
+      deliveryStatus: 'failed',
+    });
+    await views.appendAfterEnsuringGeneration(
+      SOURCE_CHAT_ID,
+      async () => [],
+      [new UserMessage(
+        '2026-06-01T00:00:00.000Z',
+        'interrupted input',
+        undefined,
+        {
+          clientRequestId: 'req-unconfirmed',
+          turnId: 'turn-unconfirmed',
+          deliveryStatus: 'accepted',
+        },
+      )],
+    );
+    await pendingInputsService.reconcileRetainedHistory(SOURCE_CHAT_ID);
+    expect(pendingInputsService.hasInFlightForChat(SOURCE_CHAT_ID)).toBe(true);
+    pendingInputsService.settleRetainedCohort(
+      pendingInputsService.captureCohort(SOURCE_CHAT_ID),
+    );
+
+    const { service, chats, agents } = makeService({
+      pendingInputsService,
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
+          pause: {
+            id: 'pause-recovery',
+            kind: 'recovered-unconfirmed-input',
+            pausedAt: '2026-07-18T00:00:00.000Z',
+          },
+        }))),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    const realNextPath = await fs.realpath(nextPath);
+
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ projectPath: realNextPath });
+
+    expect(pendingInputsService.listForChat(SOURCE_CHAT_ID)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        clientRequestId: 'req-unconfirmed',
+        deliveryStatus: 'unconfirmed',
+      }),
+      expect.objectContaining({
+        clientRequestId: 'req-failed',
+        deliveryStatus: 'failed',
+      }),
+    ]));
+    expect(pendingInputsService.hasInFlightForChat(SOURCE_CHAT_ID)).toBe(false);
+    expect(loadNativeMessages).not.toHaveBeenCalled();
+    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
+    expect(chats.updateProjectPath).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects project path updates during a real execution reservation', async () => {
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const queueService = makeRealQueue(pendingInputsService);
+    const reservation = queueService.reserveDirectTurn(SOURCE_CHAT_ID, {
+      clientRequestId: 'req-preparing',
+      turnId: 'turn-preparing',
+    });
+    const { service, agents } = makeService({
+      queueService,
+      pendingInputsService,
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    try {
+      await expect(service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      })).rejects.toMatchObject({
+        code: 'CHAT_NOT_IDLE',
+        status: 409,
+        message: 'Cannot update project path while a turn is being prepared or finalized',
+      });
+      expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    } finally {
+      await queueService.releaseDirectTurn(reservation);
+    }
+
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
+  });
+
+  it('rejects project path updates while a real drain finalizes an empty queue', async () => {
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const queueService = makeRealQueue(pendingInputsService);
+    const entryRemoved = deferred();
+    const releaseFinalization = deferred();
+    const removeSentChat = queueService.removeSentChat.bind(queueService);
+    queueService.removeSentChat = mock(async (...args) => {
+      const queue = await removeSentChat(...args);
+      entryRemoved.resolve();
+      await releaseFinalization.promise;
+      return queue;
+    });
+    const { service, agents } = makeService({
+      queueService,
+      pendingInputsService,
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    await queueService.createChatQueueEntry(SOURCE_CHAT_ID, 'queued work');
+    const drain = queueService.triggerDrain(SOURCE_CHAT_ID);
+
+    try {
+      await waitForCheckpoint(entryRemoved.promise, drain, 'queue drain');
+      expect((await queueService.readChatQueue(SOURCE_CHAT_ID)).entries).toEqual([]);
+      expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(true);
+
+      await expect(service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      })).rejects.toMatchObject({
+        code: 'CHAT_NOT_IDLE',
+        status: 409,
+        message: 'Cannot update project path while a turn is being prepared or finalized',
+      });
+      expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    } finally {
+      releaseFinalization.resolve();
+      await drain;
+    }
+  });
+
+  it('rejects a path update crossing the reservation-to-runtime compaction handoff', async () => {
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    let runtimeRunning = false;
+    let compactTurn;
+    const compactStarted = deferred();
+    const releaseCompact = deferred();
+    const queueReadStarted = deferred();
+    const releaseQueueRead = deferred();
+    const queueService = makeRealQueue(pendingInputsService, {
+      isChatRunning: mock(() => runtimeRunning),
+    });
+    const readChatQueue = queueService.readChatQueue.bind(queueService);
+    let holdNextQueueRead = false;
+    queueService.readChatQueue = mock(async (...args) => {
+      const queue = await readChatQueue(...args);
+      if (holdNextQueueRead) {
+        holdNextQueueRead = false;
+        queueReadStarted.resolve();
+        await releaseQueueRead.promise;
+      }
+      return queue;
+    });
+    const { service, agents } = makeService({
+      queueService,
+      pendingInputsService,
+      agents: {
+        isAgentSessionRunning: mock(() => runtimeRunning),
+        compactSession: mock(async (_chatId, options) => {
+          compactTurn = {
+            clientRequestId: options.clientRequestId,
+            turnId: options.turnId,
+          };
+          compactStarted.resolve();
+          await releaseCompact.promise;
+          runtimeRunning = true;
+        }),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    let pathUpdate;
+
+    try {
+      await service.submitCompact({
+        chatId: SOURCE_CHAT_ID,
+        clientRequestId: 'req-compact-path-guard',
+      });
+      await compactStarted.promise;
+      expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(true);
+      expect(queueService.hasChatExecutionOwner(SOURCE_CHAT_ID)).toBe(true);
+
+      holdNextQueueRead = true;
+      pathUpdate = service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      });
+      await waitForCheckpoint(queueReadStarted.promise, pathUpdate, 'project path update');
+
+      releaseCompact.resolve();
+      await service.waitForBackgroundTasks();
+      expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(false);
+      expect(queueService.hasChatExecutionOwner(SOURCE_CHAT_ID)).toBe(true);
+
+      releaseQueueRead.resolve();
+      await expect(pathUpdate).rejects.toMatchObject({
+        code: 'CHAT_NOT_IDLE',
+        message: 'Cannot update project path while a turn is being prepared or finalized',
+      });
+      expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+
+      runtimeRunning = false;
+      queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
+      expect(queueService.hasChatExecutionOwner(SOURCE_CHAT_ID)).toBe(false);
+      await expect(service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      })).resolves.toMatchObject({ success: true });
+    } finally {
+      releaseCompact.resolve();
+      releaseQueueRead.resolve();
+      await service.waitForBackgroundTasks();
+      runtimeRunning = false;
+      if (compactTurn) queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
+      await pathUpdate?.catch(() => undefined);
+    }
+  });
+
+  it('does not persist a project path when provider preparation fails', async () => {
+    const { service, chats } = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(async () => {
+          throw new Error('provider is not idle');
+        }),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toMatchObject({
+      code: 'CHAT_NOT_IDLE',
+      status: 409,
+      message: 'provider is not idle',
+    });
+    expect(chats.updateProjectPath).not.toHaveBeenCalled();
+  });
+
+  it('serializes new direct admission behind project path preparation', async () => {
+    const preparationStarted = deferred();
+    const releasePreparation = deferred();
+    const { service, queue, agents } = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(async () => {
+          preparationStarted.resolve();
+          await releasePreparation.promise;
+        }),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    const pathUpdate = service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    });
+    await preparationStarted.promise;
+    const submission = service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'after path update',
+      clientRequestId: 'req-after-path',
+      clientMessageId: 'msg-after-path',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const reservationsDuringPreparation = queue.reserveDirectTurn.mock.calls.length;
+    releasePreparation.resolve();
+    expect(reservationsDuringPreparation).toBe(0);
+    await expect(pathUpdate).resolves.toMatchObject({ success: true });
+    await expect(submission).resolves.toMatchObject({ status: 'accepted' });
+    expect(queue.reserveDirectTurn).toHaveBeenCalledTimes(1);
+    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('resolves an artificial native path before changing directories', async () => {

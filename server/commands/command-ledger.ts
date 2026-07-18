@@ -44,6 +44,12 @@ export type LedgerAcceptResult =
   | { kind: 'duplicate'; record: CommandLedgerRecord }
   | { kind: 'conflict'; record: CommandLedgerRecord };
 
+export type CommandTerminalStatus = 'finished' | 'failed';
+export type CommandTerminalResult =
+  | { kind: 'applied'; record: CommandLedgerRecord }
+  | { kind: 'duplicate'; record: CommandLedgerRecord }
+  | { kind: 'conflict'; record: CommandLedgerRecord };
+
 interface LedgerFile {
   version: 1;
   records: CommandLedgerRecord[];
@@ -51,6 +57,7 @@ interface LedgerFile {
 
 const LEDGER_RECORD_LIMIT = 1000;
 const LEDGER_PERSIST_LOCK_KEY = 'ledger';
+const LEDGER_MUTATION_LOCK_KEY = 'ledger-mutation';
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
 export const SERVER_RESTART_INTERRUPTED_ERROR_CODE = 'SERVER_RESTART_INTERRUPTED';
 
@@ -69,11 +76,105 @@ const USER_INPUT_EXECUTION_COMMANDS = new Set([
   'active-input',
 ]);
 
+const TERMINAL_COMMAND_STATUSES = new Set<CommandLedgerStatus>([
+  'finished',
+  'failed',
+  'rejected',
+]);
+
+const COMMAND_LEDGER_STATUSES = new Set<CommandLedgerStatus>([
+  'accepted',
+  'scheduled',
+  'running',
+  'finished',
+  'failed',
+  'rejected',
+]);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Invalid command ledger ${field}`);
+  }
+  return value;
+}
+
+function optionalNonEmptyString(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  return requireNonEmptyString(value, field);
+}
+
+function parseLedgerRecord(value: unknown, index: number): CommandLedgerRecord {
+  if (!isPlainRecord(value)) {
+    throw new Error(`Invalid command ledger record at index ${index}`);
+  }
+  const commandType = requireNonEmptyString(value.commandType, `records[${index}].commandType`);
+  const chatId = requireNonEmptyString(value.chatId, `records[${index}].chatId`);
+  const clientRequestId = requireNonEmptyString(
+    value.clientRequestId,
+    `records[${index}].clientRequestId`,
+  );
+  const key = requireNonEmptyString(value.key, `records[${index}].key`);
+  if (key !== commandLedgerKey(commandType, chatId, clientRequestId)) {
+    throw new Error(`Invalid command ledger key at index ${index}`);
+  }
+  if (!isPlainRecord(value.payload)) {
+    throw new Error(`Invalid command ledger records[${index}].payload`);
+  }
+  if (!COMMAND_LEDGER_STATUSES.has(value.status as CommandLedgerStatus)) {
+    throw new Error(`Invalid command ledger records[${index}].status`);
+  }
+  if (
+    value.pendingInputRecovery !== undefined
+    && value.pendingInputRecovery !== 'required'
+    && value.pendingInputRecovery !== 'settled'
+  ) {
+    throw new Error(`Invalid command ledger records[${index}].pendingInputRecovery`);
+  }
+  return {
+    key,
+    commandType,
+    chatId,
+    clientRequestId,
+    payloadHash: requireNonEmptyString(value.payloadHash, `records[${index}].payloadHash`),
+    payload: value.payload,
+    status: value.status as CommandLedgerStatus,
+    acceptedAt: requireNonEmptyString(value.acceptedAt, `records[${index}].acceptedAt`),
+    updatedAt: requireNonEmptyString(value.updatedAt, `records[${index}].updatedAt`),
+    ...(optionalNonEmptyString(value.turnId, `records[${index}].turnId`) !== undefined
+      ? { turnId: value.turnId as string }
+      : {}),
+    ...(optionalNonEmptyString(value.entryId, `records[${index}].entryId`) !== undefined
+      ? { entryId: value.entryId as string }
+      : {}),
+    ...(optionalNonEmptyString(value.error, `records[${index}].error`) !== undefined
+      ? { error: value.error as string }
+      : {}),
+    ...(optionalNonEmptyString(value.errorCode, `records[${index}].errorCode`) !== undefined
+      ? { errorCode: value.errorCode as string }
+      : {}),
+    ...(value.pendingInputRecovery !== undefined
+      ? { pendingInputRecovery: value.pendingInputRecovery as PendingInputRecoveryStatus }
+      : {}),
+  };
+}
+
 function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(
+      JSON.stringify(entry) === undefined ? null : entry,
+    )).join(',')}]`;
+  }
   const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(',')}}`;
+  return `{${Object.keys(obj)
+    .filter((key) => JSON.stringify(obj[key]) !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
+    .join(',')}}`;
 }
 
 function compactAttachment(value: unknown): unknown {
@@ -119,23 +220,24 @@ export function commandLedgerKey(commandType: string, chatId: string, clientRequ
 }
 
 function normalizeLedgerFile(value: unknown): LedgerFile {
-  const parsed = value as Partial<LedgerFile> | null;
-  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.records)) {
-    return { version: 1, records: [] };
+  if (!isPlainRecord(value) || value.version !== 1 || !Array.isArray(value.records)) {
+    throw new Error('Invalid command ledger file');
   }
-  return {
-    version: 1,
-    records: parsed.records.filter((record): record is CommandLedgerRecord => {
-      return Boolean(
-        record
-        && typeof record.key === 'string'
-        && typeof record.commandType === 'string'
-        && typeof record.chatId === 'string'
-        && typeof record.clientRequestId === 'string'
-        && typeof record.payloadHash === 'string',
-      );
-    }),
-  };
+  const records = value.records.map(parseLedgerRecord);
+  const keys = new Set<string>();
+  const requestIdentities = new Set<string>();
+  for (const [index, record] of records.entries()) {
+    if (keys.has(record.key)) {
+      throw new Error(`Duplicate command ledger key at index ${index}`);
+    }
+    keys.add(record.key);
+    const requestIdentity = JSON.stringify([record.chatId, record.clientRequestId]);
+    if (requestIdentities.has(requestIdentity)) {
+      throw new Error(`Duplicate command ledger request identity at index ${index}`);
+    }
+    requestIdentities.add(requestIdentity);
+  }
+  return { version: 1, records };
 }
 
 export class CommandLedger {
@@ -155,7 +257,7 @@ export class CommandLedger {
 
   async accept(input: LedgerAcceptInput): Promise<LedgerAcceptResult> {
     const key = commandLedgerKey(input.commandType, input.chatId, input.clientRequestId);
-    return this.#withLock(key, async () => {
+    return this.#withMutationLock(async () => {
       await this.#load();
       const payloadHash = commandPayloadHash(input.payload);
       const existing = this.#records.get(key);
@@ -174,12 +276,18 @@ export class CommandLedger {
             error: undefined,
             errorCode: undefined,
           };
-          this.#records.set(key, record);
-          await this.#persist();
+          const nextRecords = new Map(this.#records);
+          nextRecords.set(key, record);
+          await this.#commit(nextRecords);
           return { kind: 'accepted', record };
         }
         return { kind: 'duplicate', record: existing };
       }
+      const conflictingIdentity = [...this.#records.values()].find((record) => (
+        record.chatId === input.chatId
+        && record.clientRequestId === input.clientRequestId
+      ));
+      if (conflictingIdentity) return { kind: 'conflict', record: conflictingIdentity };
 
       const now = new Date().toISOString();
       const record: CommandLedgerRecord = {
@@ -195,15 +303,16 @@ export class CommandLedger {
         turnId: input.turnId,
         entryId: input.entryId,
       };
-      this.#records.set(key, record);
-      this.#trimRecords();
-      await this.#persist();
+      const nextRecords = new Map(this.#records);
+      nextRecords.set(key, record);
+      this.#trimRecords(nextRecords);
+      await this.#commit(nextRecords);
       return { kind: 'accepted', record };
     });
   }
 
   async update(key: string, patch: Partial<Omit<CommandLedgerRecord, 'key'>>): Promise<CommandLedgerRecord | null> {
-    return this.#withLock(key, async () => {
+    return this.#withMutationLock(async () => {
       await this.#load();
       const existing = this.#records.get(key);
       if (!existing) return null;
@@ -212,9 +321,10 @@ export class CommandLedger {
         ...patch,
         updatedAt: new Date().toISOString(),
       };
-      this.#records.set(key, next);
-      this.#trimRecords();
-      await this.#persist();
+      const nextRecords = new Map(this.#records);
+      nextRecords.set(key, next);
+      this.#trimRecords(nextRecords);
+      await this.#commit(nextRecords);
       return next;
     });
   }
@@ -233,7 +343,7 @@ export class CommandLedger {
     blockedStatuses: CommandLedgerStatus[],
     patch: Partial<Omit<CommandLedgerRecord, 'key'>>,
   ): Promise<CommandLedgerRecord | null> {
-    return this.#withLock(key, async () => {
+    return this.#withMutationLock(async () => {
       await this.#load();
       const existing = this.#records.get(key);
       if (!existing) return null;
@@ -243,10 +353,40 @@ export class CommandLedger {
         ...patch,
         updatedAt: new Date().toISOString(),
       };
-      this.#records.set(key, next);
-      this.#trimRecords();
-      await this.#persist();
+      const nextRecords = new Map(this.#records);
+      nextRecords.set(key, next);
+      this.#trimRecords(nextRecords);
+      await this.#commit(nextRecords);
       return next;
+    });
+  }
+
+  async settleTerminal(
+    key: string,
+    status: CommandTerminalStatus,
+    patch: Partial<Omit<CommandLedgerRecord, 'key' | 'status'>> = {},
+  ): Promise<CommandTerminalResult | null> {
+    return this.#withMutationLock(async () => {
+      await this.#load();
+      const existing = this.#records.get(key);
+      if (!existing) return null;
+      if (TERMINAL_COMMAND_STATUSES.has(existing.status)) {
+        return {
+          kind: existing.status === status ? 'duplicate' : 'conflict',
+          record: existing,
+        };
+      }
+      const record: CommandLedgerRecord = {
+        ...existing,
+        ...patch,
+        status,
+        updatedAt: new Date().toISOString(),
+      };
+      const nextRecords = new Map(this.#records);
+      nextRecords.set(key, record);
+      this.#trimRecords(nextRecords);
+      await this.#commit(nextRecords);
+      return { kind: 'applied', record };
     });
   }
 
@@ -261,9 +401,10 @@ export class CommandLedger {
   }
 
   async settlePendingInputRecovery(chatId: string, clientRequestId: string): Promise<boolean> {
-    return this.#withLock(`pending-input-recovery:${chatId}:${clientRequestId}`, async () => {
+    return this.#withMutationLock(async () => {
       await this.#load();
       let changed = false;
+      const nextRecords = new Map(this.#records);
       for (const [key, record] of this.#records) {
         if (
           record.chatId !== chatId
@@ -272,7 +413,7 @@ export class CommandLedger {
         ) {
           continue;
         }
-        this.#records.set(key, {
+        nextRecords.set(key, {
           ...record,
           pendingInputRecovery: 'settled',
           updatedAt: new Date().toISOString(),
@@ -280,8 +421,8 @@ export class CommandLedger {
         changed = true;
       }
       if (!changed) return false;
-      this.#trimRecords();
-      await this.#persist();
+      this.#trimRecords(nextRecords);
+      await this.#commit(nextRecords);
       return true;
     });
   }
@@ -309,11 +450,10 @@ export class CommandLedger {
           && record.status === 'failed'
           && record.errorCode !== PRE_SCHEDULE_FAILURE_ERROR_CODE
           && priorRecovery !== 'settled';
-        const pendingInputRecovery = interrupted && recoversUserInput
-          ? 'required' as const
-          : legacyUnsettledFailure
+        const pendingInputRecovery = priorRecovery
+          ?? ((interrupted && recoversUserInput) || legacyUnsettledFailure
             ? 'required' as const
-            : priorRecovery;
+            : undefined);
         if (
           stableStringify(payload) !== stableStringify(storedPayload)
           || payloadHash !== record.payloadHash
@@ -337,35 +477,64 @@ export class CommandLedger {
             : {}),
         };
       });
-      this.#records = new Map(records.map((record) => [record.key, record]));
-      this.#trimRecords();
-      this.#loaded = true;
+      const nextRecords = new Map(records.map((record) => [record.key, record]));
+      const untrimmedSize = nextRecords.size;
+      this.#trimRecords(nextRecords);
+      if (nextRecords.size !== untrimmedSize) changed = true;
       if (changed) {
-        await this.#store.write({ version: 1, records: [...this.#records.values()] });
+        await this.#writeRecords(nextRecords);
       }
+      this.#records = nextRecords;
+      this.#loaded = true;
     });
   }
 
-  async #persist(): Promise<void> {
+  async #commit(nextRecords: Map<string, CommandLedgerRecord>): Promise<void> {
+    await this.#persist(nextRecords);
+    this.#records = nextRecords;
+  }
+
+  async #persist(records: Map<string, CommandLedgerRecord>): Promise<void> {
     await this.#locks.runExclusive(LEDGER_PERSIST_LOCK_KEY, async () => {
-      const payload: LedgerFile = {
-        version: 1,
-        records: [...this.#records.values()],
-      };
-      await this.#store.write(payload);
+      await this.#writeRecords(records);
     });
   }
 
-  async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    return this.#locks.runExclusive(key, fn);
+  async #writeRecords(records: Map<string, CommandLedgerRecord>): Promise<void> {
+    const payload: LedgerFile = {
+      version: 1,
+      records: [...records.values()],
+    };
+    try {
+      await this.#store.write(payload);
+    } catch (error) {
+      // Atomic rename can succeed before a directory sync reports failure.
+      try {
+        const persisted = await this.#store.read();
+        if (stableStringify(persisted) === stableStringify(payload)) return;
+      } catch {
+        // Preserves the original write error.
+      }
+      throw error;
+    }
   }
 
-  #trimRecords(): void {
-    while (this.#records.size > LEDGER_RECORD_LIMIT) {
-      const oldest = [...this.#records]
-        .find(([, record]) => record.pendingInputRecovery !== 'required')?.[0];
+  async #withMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+    return this.#locks.runExclusive(LEDGER_MUTATION_LOCK_KEY, fn);
+  }
+
+  #trimRecords(records: Map<string, CommandLedgerRecord>): void {
+    while (records.size > LEDGER_RECORD_LIMIT) {
+      const oldest = [...records]
+        .find(([, record]) => {
+          const interruptedExecution = INTERRUPTIBLE_EXECUTION_COMMANDS.has(record.commandType)
+            && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE;
+          return TERMINAL_COMMAND_STATUSES.has(record.status)
+            && record.pendingInputRecovery !== 'required'
+            && !interruptedExecution;
+        })?.[0];
       if (!oldest) return;
-      this.#records.delete(oldest);
+      records.delete(oldest);
     }
   }
 }

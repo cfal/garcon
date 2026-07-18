@@ -18,6 +18,7 @@ export function createRoutePendingInputs() {
     reconcileRetainedHistory: () => Promise.resolve(undefined),
     reconcileNativeHistory: () => Promise.resolve(undefined),
     listForChat: () => [],
+    hasInFlightForChat: () => false,
     clearChat: () => undefined,
     discardChat: () => 0,
     discard: () => false,

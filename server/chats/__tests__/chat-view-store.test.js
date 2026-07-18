@@ -101,6 +101,59 @@ describe('ChatViewStore', () => {
     expect(loadNative).toHaveBeenCalledTimes(1);
   });
 
+  it('does not append an optimistic retry over the same durable user identity', async () => {
+    const store = new ChatViewStore(() => false);
+    const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };
+    const appended = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => [user('retry me', identity)],
+      [user('retry me', { ...identity, deliveryStatus: 'accepted' })],
+    );
+
+    expect(appended.messages).toEqual([]);
+    expect(contents(store.readPage('chat-1', 20))).toEqual(['retry me']);
+  });
+
+  it('rejects conflicting content for one user delivery identity', async () => {
+    const store = new ChatViewStore(() => false);
+    const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };
+
+    await expect(store.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => [user('original', identity)],
+      [user('conflict', identity)],
+    )).rejects.toThrow('Conflicting user message identity: request-1');
+  });
+
+  it('lets an authoritative full native snapshot replace a conflicting retained row', async () => {
+    const store = new ChatViewStore(() => false);
+    const identity = { clientRequestId: 'request-1', turnId: 'turn-1' };
+    await store.appendToCurrentOrProvisional('chat-1', [
+      assistant('provisional'),
+      user('optimistic content', identity),
+    ]);
+
+    const messages = await store.getOrCreateMessages(
+      'chat-1',
+      async () => [user('provider content', identity)],
+    );
+
+    expect(messages.map((message) => message.content)).toEqual(['provider content']);
+    expect(contents(store.readPage('chat-1', 20))).toEqual(['provider content']);
+  });
+
+  it('rejects a restored native snapshot after execution becomes active', async () => {
+    let active = false;
+    const store = new ChatViewStore(() => active);
+    await store.appendToCurrentOrProvisional('chat-1', [assistant('live output')]);
+    active = true;
+
+    await expect(store.reconcileNativeSnapshot('chat-1', [assistant('stale native output')]))
+      .rejects.toMatchObject({ code: 'CHAT_RUNNING' });
+
+    expect(contents(store.readPage('chat-1', 20))).toEqual(['live output']);
+  });
+
   it('does not replace an existing generation during a later get-or-create read', async () => {
     const store = new ChatViewStore(() => false);
     const appended = await store.appendAfterEnsuringGeneration(

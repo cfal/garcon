@@ -6,9 +6,11 @@ import { stripResolvedFileMentionContext } from '../shared/file-mention-context.
 import { attachNativeMessageSource } from '../shared/native-message-source.js';
 
 interface StoredMessage {
+  clientRequestId?: string;
   content?: string;
   role?: string;
   timestamp?: string;
+  turnId?: string;
 }
 
 interface LoaderConfig {
@@ -40,7 +42,17 @@ export async function loadDirectCompatibleChatMessages(
       const lineNumber = index + 1;
       if (entry.role === 'user' && content) {
         messages.push(attachNativeMessageSource(
-          new UserMessage(timestamp, stripResolvedFileMentionContext(content)),
+          new UserMessage(
+            timestamp,
+            stripResolvedFileMentionContext(content),
+            undefined,
+            entry.clientRequestId || entry.turnId
+              ? {
+                  ...(entry.clientRequestId ? { clientRequestId: entry.clientRequestId } : {}),
+                  ...(entry.turnId ? { turnId: entry.turnId } : {}),
+                }
+              : undefined,
+          ),
           { lineNumber },
         ));
       } else if (entry.role === 'assistant' && content) {

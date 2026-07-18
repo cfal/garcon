@@ -16,6 +16,7 @@ import {
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireServerEvents } from './server-event-wiring.js';
+import { startExecutionControlPlane } from './execution-control-plane.js';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -58,7 +59,7 @@ import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
-  waitForShutdownTaskWithTimeout,
+  waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
@@ -277,6 +278,9 @@ export async function startServer(): Promise<void> {
       getRetainedHistoryMessages(chatId: string) {
         return chatViews.getRetainedHistoryMessages(chatId);
       },
+      hasCompleteHistory(chatId: string) {
+        return chatViews.getLoadedMessages(chatId) !== null;
+      },
     };
     const chatViewPages = {
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
@@ -289,6 +293,12 @@ export async function startServer(): Promise<void> {
           limit,
           beforeSeq,
         );
+      },
+      async reconcileNativeSnapshot(
+        chatId: string,
+        messages: Parameters<ChatViewStore['reconcileNativeSnapshot']>[1],
+      ) {
+        await chatViews.reconcileNativeSnapshot(chatId, messages);
       },
     };
     const chatMessageAppender = {
@@ -322,6 +332,7 @@ export async function startServer(): Promise<void> {
       {
         ledger: commandLedger,
         pendingInputs,
+        nativeSnapshots: chatViewPages,
         chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
       },
       (error) => {
@@ -398,13 +409,39 @@ export async function startServer(): Promise<void> {
       telegramSettings,
     );
 
+    let webSocketPublisher: { publish(topic: string, payload: string): unknown } | null = null;
     // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
-
-    // Recover stale chat queues from previous server runs.
-    await queue.recoverStaleChatQueues(new Set(pendingRecoveryResult.restoredChatIds));
-
-    await scheduledPrompts.start();
+    const eventWiring = await startExecutionControlPlane({
+      wireEvents: () => wireServerEvents({
+        server: {
+          publish(topic, payload) {
+            return webSocketPublisher?.publish(topic, payload);
+          },
+        },
+        agentRegistry,
+        chatRegistry,
+        settings,
+        queue,
+        metadata,
+        chatViews,
+        chatNativeReloader: indexedNativeReloader,
+        pendingInputs,
+        pendingRecovery,
+        commandLedger,
+        shareStore,
+        telegramNotifier,
+        telegramSettings,
+        scheduledPrompts,
+        snippets,
+        loadNativeMessages,
+        searchIndex: chatSearch,
+      }),
+      recoverQueues: () => queue.recoverStaleChatQueues(
+        new Set(pendingRecoveryResult.restoredChatIds),
+      ),
+      startScheduledPrompts: () => scheduledPrompts.start(),
+    });
 
     // Build route and WS handler tables
     const routes = createAllRoutes({
@@ -416,6 +453,7 @@ export async function startServer(): Promise<void> {
       chatViews: chatViewPages,
       agents: agentRegistry,
       pendingInputs,
+      pendingInputRecovery: pendingRecovery,
       telegramNotifier,
       telegramSettings,
       shareStore,
@@ -568,26 +606,7 @@ export async function startServer(): Promise<void> {
     } satisfies ServeOptionsWithConnectionLimit;
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
-
-    wireServerEvents({
-      server,
-      agentRegistry,
-      chatRegistry,
-      settings,
-      queue,
-      metadata,
-      chatViews,
-      chatNativeReloader: indexedNativeReloader,
-      pendingInputs,
-      commandLedger,
-      shareStore,
-      telegramNotifier,
-      telegramSettings,
-      scheduledPrompts,
-      snippets,
-      loadNativeMessages,
-      searchIndex: chatSearch,
-    });
+    webSocketPublisher = server;
 
     // Graceful shutdown: flush pending writes and clean up timers.
     let shuttingDown = false;
@@ -595,15 +614,18 @@ export async function startServer(): Promise<void> {
       if (shuttingDown) return;
       shuttingDown = true;
       logger.info('server: shutting down...');
+      const reservedChatIds = queue.beginShutdown();
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
+        pendingRecovery.beginShutdown();
         await server.stop(true);
         clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
-          abortSession: (chatId) => agentRegistry.abortSession(chatId),
+          additionalChatIds: reservedChatIds,
+          abortSession: (chatId) => queue.abortForShutdown(chatId),
           onAbortError: (chatId, abortError) => {
             logger.warn(
               `server: abort during shutdown failed for ${chatId}:`,
@@ -617,12 +639,19 @@ export async function startServer(): Promise<void> {
             `server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`,
           );
         }
-        const backgroundTasksCompleted = await waitForShutdownTaskWithTimeout(
-          chatCommands.waitForBackgroundTasks(),
-        );
-        if (!backgroundTasksCompleted) {
+        const backgroundTasks = await waitForShutdownPhasesWithTimeout([
+          () => chatCommands.waitForBackgroundTasks(),
+          () => queue.waitForExecutionOwners(),
+          () => eventWiring.waitForIdle(),
+          () => pendingRecovery.waitForBackgroundTasks(),
+        ]);
+        if (!backgroundTasks.completed) {
           cleanupFailed = true;
-          logger.warn('server: shutdown command-task wait timed out');
+          logger.warn('server: shutdown background phases timed out');
+        }
+        for (const backgroundError of backgroundTasks.errors) {
+          cleanupFailed = true;
+          logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
         agentRegistry.shutdown();
         terminalManager.shutdown();

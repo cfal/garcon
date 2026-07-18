@@ -55,8 +55,14 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     deleteChatQueueFile: mock(async () => undefined),
     submit: mock(async () => undefined),
     registerPendingUserInput: mock(async () => undefined),
-    discardPendingUserInput: mock(() => true),
-    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
+    reserveDirectTurn: mock((chatId) => ({
+      chatId,
+      reservationId: 'reservation-1',
+      executionAdmission: {
+        signal: new AbortController().signal,
+        markStarted() {},
+      },
+    })),
     releaseDirectTurn: mock(async () => undefined),
     completeDirectTurn: mock(async () => undefined),
     failDirectTurn: mock(async () => undefined),
@@ -110,6 +116,7 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     reconcileRetainedHistory: mock(async () => undefined),
     reconcileNativeHistory: mock(async () => undefined),
     listForChat: mock(() => []),
+    hasInFlightForChat: mock(() => false),
     clearChat: mock(() => undefined),
   };
   const searchIndex = {
