@@ -206,6 +206,21 @@ interface NativeReconcileRun {
   promise: Promise<void>;
 }
 
+function isInFlightDeliveryStatus(status: UserMessageDeliveryStatus): boolean {
+  switch (status) {
+    case 'submitting':
+    case 'accepted':
+      return true;
+    case 'unconfirmed':
+    case 'failed':
+      return false;
+    default: {
+      const exhaustiveStatus: never = status;
+      throw new Error(`Unhandled pending input delivery status: ${exhaustiveStatus}`);
+    }
+  }
+}
+
 export interface RestoredHistoryReconciliation {
   clearedRequestIds: readonly string[];
   nativeMessages?: readonly ChatMessage[];
@@ -214,6 +229,7 @@ export interface RestoredHistoryReconciliation {
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
   listForTransport(chatId: string): PendingUserInput[];
+  hasInFlightForChat(chatId: string): boolean;
   clearChat(chatId: string, reason?: PendingUserInputClearReason): void;
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
@@ -261,6 +277,12 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
           }
           : {}),
     }));
+  }
+
+  hasInFlightForChat(chatId: string): boolean {
+    return this.store
+      .listRecordsForChat(chatId)
+      .some((record) => isInFlightDeliveryStatus(record.deliveryStatus));
   }
 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {

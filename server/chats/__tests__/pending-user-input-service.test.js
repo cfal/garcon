@@ -23,6 +23,42 @@ function deferred() {
 }
 
 describe('PendingUserInputService', () => {
+  it('classifies pending delivery lifecycle for chat idleness', async () => {
+    const service = new PendingUserInputService(createReader());
+
+    expect(service.hasInFlightForChat('missing-chat')).toBe(false);
+
+    for (const [deliveryStatus, expected] of [
+      ['submitting', true],
+      ['accepted', true],
+      ['unconfirmed', false],
+      ['failed', false],
+    ]) {
+      const chatId = `chat-${deliveryStatus}`;
+      await service.register(chatId, deliveryStatus, {
+        clientRequestId: `req-${deliveryStatus}`,
+        deliveryStatus,
+      });
+      expect(service.hasInFlightForChat(chatId)).toBe(expected);
+    }
+
+    await service.register('chat-terminal', 'unconfirmed', {
+      clientRequestId: 'req-unconfirmed',
+      deliveryStatus: 'unconfirmed',
+    });
+    await service.register('chat-terminal', 'failed', {
+      clientRequestId: 'req-failed',
+      deliveryStatus: 'failed',
+    });
+    expect(service.hasInFlightForChat('chat-terminal')).toBe(false);
+
+    await service.register('chat-terminal', 'accepted', {
+      clientRequestId: 'req-accepted',
+      deliveryStatus: 'accepted',
+    });
+    expect(service.hasInFlightForChat('chat-terminal')).toBe(true);
+  });
+
   it('discards a chat without emitting clear events', async () => {
     const service = new PendingUserInputService(createReader());
     const cleared = [];

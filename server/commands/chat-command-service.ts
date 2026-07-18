@@ -112,7 +112,7 @@ interface CarryOverDep {
 
 type PendingInputsDep = Pick<
   PendingUserInputServiceContract,
-  'clearChat' | 'listForChat' | 'markFailed' | 'reconcileRetainedHistory'
+  'clearChat' | 'hasInFlightForChat' | 'markFailed' | 'reconcileRetainedHistory'
 >;
 
 type AgentRegistryDep = Pick<
@@ -1498,8 +1498,17 @@ export class ChatCommandService {
       );
     }
 
+    if (this.deps.queue.isChatExecutionReserved(chatId)) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        'Cannot update project path while a turn is being prepared or finalized',
+        409,
+        true,
+      );
+    }
+
     await this.deps.pendingInputs.reconcileRetainedHistory(chatId);
-    if (this.deps.pendingInputs.listForChat(chatId).length > 0) {
+    if (this.deps.pendingInputs.hasInFlightForChat(chatId)) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
         'Cannot update project path while a submitted message is still pending',

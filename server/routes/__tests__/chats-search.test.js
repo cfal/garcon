@@ -116,6 +116,7 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     reconcileRetainedHistory: mock(async () => undefined),
     reconcileNativeHistory: mock(async () => undefined),
     listForChat: mock(() => []),
+    hasInFlightForChat: mock(() => false),
     clearChat: mock(() => undefined),
   };
   const searchIndex = {

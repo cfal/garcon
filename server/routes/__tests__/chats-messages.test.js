@@ -114,6 +114,7 @@ function createRoutesFixture(overrides = {}) {
     reconcileNativeHistory: mock(async () => undefined),
     listForChat: mock(() => []),
     listForTransport: mock(() => []),
+    hasInFlightForChat: mock(() => false),
     clearChat: mock(() => undefined),
   };
   const pendingInputRecovery = overrides.pendingInputRecovery ?? {

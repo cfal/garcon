@@ -166,6 +166,7 @@ function createRouteAgent(sessionOverrides = {}) {
     interruptActiveTurn: mock(() => Promise.resolve(true)),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
+    isChatExecutionReserved: mock(() => false),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
