@@ -34,6 +34,7 @@ import { QueueEntryMutationError, QueuePauseChangedError, type ChatQueueService 
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { PendingUserInputRecoveryCoordinator } from '../chats/pending-user-input-recovery.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
@@ -114,6 +115,7 @@ type QueueDep = ChatQueueService;
 type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
+type PendingInputRecoveryDep = Pick<PendingUserInputRecoveryCoordinator, 'reconcileChat'>;
 
 interface ChatSearchDep {
   search(options: {
@@ -320,6 +322,7 @@ interface ChatRouteDeps {
   chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
+  pendingInputRecovery: PendingInputRecoveryDep;
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   agentSwitch: AgentSwitchService;
@@ -336,6 +339,7 @@ export default function createChatRoutes({
   chatViews,
   agents,
   pendingInputs,
+  pendingInputRecovery,
   commandService,
   chatListProjector,
   agentSwitch,
@@ -527,6 +531,7 @@ export default function createChatRoutes({
 
       const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
       await pendingInputs.reconcileRetainedHistory(chatId);
+      await pendingInputRecovery.reconcileChat(chatId);
       return Response.json({
         chatId,
         generationId: page.generationId,

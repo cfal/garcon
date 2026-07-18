@@ -6,7 +6,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
-import type { AutomaticQueuePauseKind, QueueEntry } from '../common/queue-state.ts';
+import type { AutomaticQueuePauseKind, QueueEntry, QueuePause } from '../common/queue-state.ts';
 import {
   UserMessage,
   type ChatImage,
@@ -90,6 +90,15 @@ export class QueuePauseChangedError extends DomainError {
 function queueEntry(entry: StoredQueueEntry): QueueEntry {
   const { status: _status, ...clientEntry } = entry;
   return { ...clientEntry };
+}
+
+function installRecoveryPause(queue: StoredQueueState, pause: QueuePause): boolean {
+  if (queue.pause?.kind === pause.kind) return false;
+  if (queue.pause) {
+    queue.resumePauses = [queue.pause, ...(queue.resumePauses ?? [])];
+  }
+  queue.pause = pause;
+  return true;
 }
 
 function missingQueueEntryError(queue: StoredQueueState, entryId: string): QueueEntryMutationError {
@@ -617,7 +626,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       if (
         !queue.entries.some((entry) => entry.status === 'queued')
         && queue.pause?.kind !== 'recovered-unconfirmed-input'
-      ) queue.pause = null;
+      ) {
+        queue.pause = null;
+        delete queue.resumePauses;
+      } else if (!queue.entries.some((entry) => entry.status === 'queued')) {
+        delete queue.resumePauses;
+      }
       if (command) recordAppliedQueueCommand(queue, command, 'delete');
       const result = await this.#commitAndPublish(chatId, bumpStoredQueue(queue));
       this.#logMutation('delete', chatId, entryId, result);
@@ -668,6 +682,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.#pendingDrainRequests.delete(chatId);
       queue.entries = queue.entries.filter((entry) => entry.status === 'sending');
       queue.pause = null;
+      delete queue.resumePauses;
       return this.#commitAndPublish(chatId, bumpStoredQueue(queue));
     });
   }
@@ -693,7 +708,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       const queue = cloneStoredQueue(await this.#loadChatQueue(chatId));
       if (!queue.pause) return queue;
       if (queue.pause.id !== pauseId) throw new QueuePauseChangedError(queue);
-      queue.pause = null;
+      const [resumePause, ...remainingPauses] = queue.resumePauses ?? [];
+      queue.pause = resumePause ?? null;
+      if (remainingPauses.length > 0) queue.resumePauses = remainingPauses;
+      else delete queue.resumePauses;
       this.#removeDrainSuppression(chatId, 'abort');
       const result = await this.#commitAndPublish(chatId, bumpStoredQueue(queue));
       this.#logPauseMutation('resume', chatId, result);
@@ -1360,20 +1378,20 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
         if (recoveredIds.size > 0) {
           data.recentlyDispatched = data.recentlyDispatched.filter((entry) => !recoveredIds.has(entry.entryId));
-          data.pause = {
+          installRecoveryPause(data, {
             id: crypto.randomUUID(),
             kind: 'recovered-inflight',
             entryId: data.entries.find((entry) => recoveredIds.has(entry.id))!.id,
             pausedAt: new Date().toISOString(),
-          };
+          });
         }
         if (chatsWithUnconfirmedRecoveredInput.has(chatId)) {
-          data.pause = {
+          const installed = installRecoveryPause(data, {
             id: crypto.randomUUID(),
             kind: 'recovered-unconfirmed-input',
             pausedAt: new Date().toISOString(),
-          };
-          modified = true;
+          });
+          modified ||= installed;
         }
         if (modified) {
           const normalized = normalizeStoredQueueState(bumpStoredQueue(data));

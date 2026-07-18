@@ -191,6 +191,76 @@ describe('CommandLedger', () => {
     expect(persisted.records.some((record) => record.clientRequestId === 'req-recovery')).toBe(true);
   });
 
+  it('does not trim a newly accepted execution behind a full recovery backlog', async () => {
+    const recoveries = Array.from({ length: 1000 }, (_, index) => ({
+      ...makeLedgerRecord(index),
+      status: 'failed',
+      errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      pendingInputRecovery: 'required',
+    }));
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({ version: 1, records: recoveries }),
+      'utf8',
+    );
+    const ledger = new CommandLedger(workspaceDir);
+
+    const accepted = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-new',
+      clientRequestId: 'req-new',
+      payload: { command: 'must survive trimming' },
+    });
+
+    expect(accepted.kind).toBe('accepted');
+    const restarted = new CommandLedger(workspaceDir);
+    await expect(restarted.listPendingInputRecoveries()).resolves.toContainEqual(
+      expect.objectContaining({
+        chatId: 'chat-new',
+        clientRequestId: 'req-new',
+        pendingInputRecovery: 'required',
+      }),
+    );
+  });
+
+  it('does not trim a restart-interrupted execution tombstone behind a full recovery backlog', async () => {
+    const recoveries = Array.from({ length: 1000 }, (_, index) => ({
+      ...makeLedgerRecord(index),
+      status: 'failed',
+      errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      pendingInputRecovery: 'required',
+    }));
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({ version: 1, records: recoveries }),
+      'utf8',
+    );
+    const first = new CommandLedger(workspaceDir);
+    const accepted = await first.accept({
+      commandType: 'agent-compact',
+      chatId: 'chat-new',
+      clientRequestId: 'req-compact',
+      payload: { chatId: 'chat-new' },
+    });
+    expect(accepted.kind).toBe('accepted');
+
+    const restarted = new CommandLedger(workspaceDir);
+    const duplicate = await restarted.accept({
+      commandType: 'agent-compact',
+      chatId: 'chat-new',
+      clientRequestId: 'req-compact',
+      payload: { chatId: 'chat-new' },
+    });
+
+    expect(duplicate).toMatchObject({
+      kind: 'duplicate',
+      record: {
+        status: 'failed',
+        errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      },
+    });
+  });
+
   it('migrates legacy live-failed user inputs into durable recovery', async () => {
     const failed = {
       ...makeLedgerRecord(1),

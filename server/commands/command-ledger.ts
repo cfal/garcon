@@ -363,7 +363,15 @@ export class CommandLedger {
   #trimRecords(): void {
     while (this.#records.size > LEDGER_RECORD_LIMIT) {
       const oldest = [...this.#records]
-        .find(([, record]) => record.pendingInputRecovery !== 'required')?.[0];
+        .find(([, record]) => {
+          const executionInProgress = INTERRUPTIBLE_EXECUTION_COMMANDS.has(record.commandType)
+            && (record.status === 'accepted' || record.status === 'scheduled' || record.status === 'running');
+          const interruptedExecution = INTERRUPTIBLE_EXECUTION_COMMANDS.has(record.commandType)
+            && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE;
+          return record.pendingInputRecovery !== 'required'
+            && !executionInProgress
+            && !interruptedExecution;
+        })?.[0];
       if (!oldest) return;
       this.#records.delete(oldest);
     }

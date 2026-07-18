@@ -109,6 +109,9 @@ function createRoutesFixture(overrides = {}) {
     listForTransport: mock(() => []),
     clearChat: mock(() => undefined),
   };
+  const pendingInputRecovery = overrides.pendingInputRecovery ?? {
+    reconcileChat: mock(async () => undefined),
+  };
   const commandLedger = createRouteCommandLedger('chats-messages');
   const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
   const routes = createChatRoutes({
@@ -120,6 +123,7 @@ function createRoutesFixture(overrides = {}) {
     chatViews,
     agents,
     pendingInputs,
+    pendingInputRecovery,
     chatListProjector,
     commandService: createRouteCommandService({
       registry,
@@ -134,7 +138,7 @@ function createRoutesFixture(overrides = {}) {
     }),
   });
 
-  return { chatViews, pendingInputs, routes };
+  return { chatViews, pendingInputRecovery, pendingInputs, routes };
 }
 
 async function createInterruptedLedger(workspaceDir, {
@@ -232,6 +236,7 @@ describe('GET /api/v1/chats/messages', () => {
     const pendingInputs = new PendingUserInputService({
       loadNativeMessages: loadAll,
       getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+      hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
     });
     await pendingInputs.register('123', 'pending', {
       clientRequestId: 'req-live',
@@ -291,6 +296,7 @@ describe('GET /api/v1/chats/messages', () => {
     const pendingInputs = new PendingUserInputService({
       loadNativeMessages: loadAll,
       getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+      hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
     });
     await pendingInputs.register('123', 'persisted before failure', {
       clientRequestId: 'req-persisted',
@@ -373,6 +379,7 @@ describe('GET /api/v1/chats/messages', () => {
       const pendingInputs = new PendingUserInputService({
         loadNativeMessages: loadAll,
         getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+        hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
       });
       const restartedLedger = new CommandLedger(workspaceDir);
       const restored = await restorePendingInputRecoveries(restartedLedger, pendingInputs);
@@ -389,7 +396,11 @@ describe('GET /api/v1/chats/messages', () => {
           beforeSeq,
         ),
       };
-      const { routes } = createRoutesFixture({ chatViews, pendingInputs });
+      const { routes } = createRoutesFixture({
+        chatViews,
+        pendingInputs,
+        pendingInputRecovery: restored.coordinator,
+      });
       const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=20');
 
       const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
@@ -432,6 +443,7 @@ describe('GET /api/v1/chats/messages', () => {
       const pendingInputs = new PendingUserInputService({
         loadNativeMessages: loadAll,
         getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+        hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
       });
       const restartedLedger = new CommandLedger(workspaceDir);
       const recovery = await restorePendingInputRecoveries(restartedLedger, pendingInputs);
@@ -443,17 +455,96 @@ describe('GET /api/v1/chats/messages', () => {
           beforeSeq,
         ),
       };
-      const { routes } = createRoutesFixture({ chatViews, pendingInputs });
+      const { routes } = createRoutesFixture({
+        chatViews,
+        pendingInputs,
+        pendingInputRecovery: recovery.coordinator,
+      });
       const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=20');
 
       const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
       const payload = await response.json();
-      await recovery.coordinator.waitForSettlements();
-
       expect(response.status).toBe(200);
       expect(payload.messages).toHaveLength(1);
       expect(payload.messages[0].message.content).toBe('already persisted');
       expect(payload.pendingUserInputs).toEqual([]);
+      expect(loadAll).toHaveBeenCalledTimes(1);
+      await expect(
+        new CommandLedger(workspaceDir).listPendingInputRecoveries(),
+      ).resolves.toEqual([]);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('performs one full recovery read when exact evidence predates the retained page', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pending-restart-paged-native-'));
+    try {
+      await createInterruptedLedger(workspaceDir, {
+        clientRequestId: 'req-persisted',
+        payload: {
+          chatId: '123',
+          clientMessageId: 'message-persisted',
+          command: 'persisted on an older page',
+          images: [],
+        },
+      });
+      const nativeMessages = [
+        new UserMessage(
+          '2026-06-01T00:00:00.100Z',
+          'persisted on an older page',
+          undefined,
+          { clientRequestId: 'req-persisted' },
+        ),
+        new AssistantMessage('2026-06-01T00:00:01.000Z', 'newer-1'),
+        new AssistantMessage('2026-06-01T00:00:02.000Z', 'newer-2'),
+      ];
+      const loadAll = mock(async () => nativeMessages);
+      const loadPage = mock(async (limit, offset) => {
+        const end = nativeMessages.length - offset;
+        const start = Math.max(0, end - limit);
+        return {
+          messages: nativeMessages.slice(start, end),
+          total: nativeMessages.length,
+          hasMore: start > 0,
+          offset,
+          limit,
+          revision: transcriptRevision(nativeMessages),
+        };
+      });
+      const views = new ChatViewStore(() => false, { messageLimit: 2 });
+      const pendingInputs = new PendingUserInputService({
+        loadNativeMessages: loadAll,
+        getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+        hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
+      });
+      const restartedLedger = new CommandLedger(workspaceDir);
+      const recovery = await restorePendingInputRecoveries(restartedLedger, pendingInputs);
+      const chatViews = {
+        getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
+          chatId,
+          { loadAll, loadPage },
+          limit,
+          beforeSeq,
+        ),
+      };
+      const { routes } = createRoutesFixture({
+        chatViews,
+        pendingInputs,
+        pendingInputRecovery: recovery.coordinator,
+      });
+      const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=2');
+
+      const firstResponse = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      const firstPayload = await firstResponse.json();
+      const secondResponse = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      const secondPayload = await secondResponse.json();
+
+      expect(firstResponse.status).toBe(200);
+      expect(secondResponse.status).toBe(200);
+      expect(firstPayload.pendingUserInputs).toEqual([]);
+      expect(secondPayload.pendingUserInputs).toEqual([]);
+      expect(loadPage).toHaveBeenCalledTimes(1);
       expect(loadAll).toHaveBeenCalledTimes(1);
       await expect(
         new CommandLedger(workspaceDir).listPendingInputRecoveries(),
@@ -486,6 +577,7 @@ describe('GET /api/v1/chats/messages', () => {
       const pendingInputs = new PendingUserInputService({
         loadNativeMessages: loadAll,
         getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+        hasCompleteHistory: (chatId) => views.getLoadedMessages(chatId) !== null,
       });
       await restorePendingInputRecoveries(new CommandLedger(workspaceDir), pendingInputs);
       const chatViews = {

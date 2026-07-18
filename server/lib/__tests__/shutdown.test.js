@@ -2,8 +2,17 @@ import { describe, expect, it, mock } from 'bun:test';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
+  waitForShutdownPhasesWithTimeout,
   waitForShutdownTaskWithTimeout,
 } from '../shutdown.js';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 describe('abortRunningSessionsWithTimeout', () => {
   it('awaits all running session aborts before completing', async () => {
@@ -76,5 +85,60 @@ describe('waitForShutdownTaskWithTimeout', () => {
   it('reports whether command background work settled before shutdown', async () => {
     expect(await waitForShutdownTaskWithTimeout(Promise.resolve(), 50)).toBe(true);
     expect(await waitForShutdownTaskWithTimeout(new Promise(() => {}), 5)).toBe(false);
+  });
+});
+
+describe('waitForShutdownPhasesWithTimeout', () => {
+  it('starts recovery draining only after command producers settle', async () => {
+    const commands = deferred();
+    let recoveryStarted = false;
+    const wait = waitForShutdownPhasesWithTimeout([
+      () => commands.promise,
+      async () => {
+        recoveryStarted = true;
+      },
+    ], 50);
+
+    await Promise.resolve();
+    expect(recoveryStarted).toBe(false);
+    commands.resolve();
+
+    await expect(wait).resolves.toEqual({ completed: true, errors: [] });
+    expect(recoveryStarted).toBe(true);
+  });
+
+  it('returns earlier failures after running later drain phases', async () => {
+    let recoveryDrained = false;
+    const wait = waitForShutdownPhasesWithTimeout([
+      async () => {
+        throw new Error('command task failed');
+      },
+      async () => {
+        recoveryDrained = true;
+      },
+    ], 50);
+
+    const result = await wait;
+
+    expect(result.completed).toBe(true);
+    expect(result.errors).toEqual([expect.objectContaining({ message: 'command task failed' })]);
+    expect(recoveryDrained).toBe(true);
+  });
+
+  it('does not start a later phase after the shared deadline expires', async () => {
+    const commands = deferred();
+    let recoveryStarted = false;
+    const wait = waitForShutdownPhasesWithTimeout([
+      () => commands.promise,
+      async () => {
+        recoveryStarted = true;
+      },
+    ], 5);
+
+    await expect(wait).resolves.toEqual({ completed: false, errors: [] });
+    expect(recoveryStarted).toBe(false);
+    commands.resolve();
+    await Promise.resolve();
+    expect(recoveryStarted).toBe(false);
   });
 });

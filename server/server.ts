@@ -58,7 +58,7 @@ import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
-  waitForShutdownTaskWithTimeout,
+  waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
@@ -277,6 +277,9 @@ export async function startServer(): Promise<void> {
       getRetainedHistoryMessages(chatId: string) {
         return chatViews.getRetainedHistoryMessages(chatId);
       },
+      hasCompleteHistory(chatId: string) {
+        return chatViews.getLoadedMessages(chatId) !== null;
+      },
     };
     const chatViewPages = {
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
@@ -416,6 +419,7 @@ export async function startServer(): Promise<void> {
       chatViews: chatViewPages,
       agents: agentRegistry,
       pendingInputs,
+      pendingInputRecovery: pendingRecovery,
       telegramNotifier,
       telegramSettings,
       shareStore,
@@ -598,6 +602,7 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
+        pendingRecovery.beginShutdown();
         await server.stop(true);
         clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
@@ -617,12 +622,17 @@ export async function startServer(): Promise<void> {
             `server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`,
           );
         }
-        const backgroundTasksCompleted = await waitForShutdownTaskWithTimeout(
-          chatCommands.waitForBackgroundTasks(),
-        );
-        if (!backgroundTasksCompleted) {
+        const backgroundTasks = await waitForShutdownPhasesWithTimeout([
+          () => chatCommands.waitForBackgroundTasks(),
+          () => pendingRecovery.waitForBackgroundTasks(),
+        ]);
+        if (!backgroundTasks.completed) {
           cleanupFailed = true;
           logger.warn('server: shutdown command-task wait timed out');
+        }
+        for (const backgroundError of backgroundTasks.errors) {
+          cleanupFailed = true;
+          logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
         agentRegistry.shutdown();
         terminalManager.shutdown();

@@ -36,6 +36,27 @@ export async function waitForShutdownTaskWithTimeout(
   return completed;
 }
 
+export async function waitForShutdownPhasesWithTimeout(
+  phases: readonly (() => Promise<unknown>)[],
+  timeoutMs = DEFAULT_ABORT_TIMEOUT_MS,
+): Promise<{ completed: boolean; errors: unknown[] }> {
+  const errors: unknown[] = [];
+  let stopAfterCurrentPhase = false;
+  const task = (async () => {
+    for (const phase of phases) {
+      if (stopAfterCurrentPhase) break;
+      try {
+        await phase();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+  })();
+  const completed = await waitForShutdownTaskWithTimeout(task, timeoutMs);
+  if (!completed) stopAfterCurrentPhase = true;
+  return { completed, errors: [...errors] };
+}
+
 export function shutdownExitCode(options: { abortTimedOut: boolean; cleanupFailed: boolean }): number {
   return options.abortTimedOut || options.cleanupFailed ? 1 : 0;
 }

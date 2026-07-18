@@ -8,7 +8,10 @@ interface PendingUserInputRecoveryDeps {
     CommandLedger,
     'listPendingInputRecoveries' | 'settlePendingInputRecovery'
   >;
-  pendingInputs: Pick<PendingUserInputService, 'restoreUnconfirmed' | 'store'>;
+  pendingInputs: Pick<
+    PendingUserInputService,
+    'reconcileRestoredHistory' | 'restoreUnconfirmed' | 'store'
+  >;
   chatExists(chatId: string): boolean;
 }
 
@@ -16,6 +19,16 @@ export interface PendingUserInputRecoveryResult {
   restored: number;
   discardedMissingChat: number;
   restoredChatIds: string[];
+}
+
+function throwCollectedErrors(errors: unknown[], message: string): void {
+  if (errors.length === 0) return;
+  if (errors.length === 1) throw errors[0];
+  throw new AggregateError(errors, message);
+}
+
+function settlementRequestKey(chatId: string, clientRequestId: string): string {
+  return JSON.stringify([chatId, clientRequestId]);
 }
 
 function attachmentPlaceholder(value: unknown): PendingUserInputAttachment | null {
@@ -71,7 +84,11 @@ export class PendingUserInputRecoveryCoordinator {
   #deps: PendingUserInputRecoveryDeps;
   #onSettlementError: (error: unknown) => void;
   #started = false;
-  #settlementTasks = new Set<Promise<unknown>>();
+  #settlementTasksByRequestKey = new Map<string, Promise<void>>();
+  #unsettledRequestIdsByChatId = new Map<string, Set<string>>();
+  #restoredSettlementRequestIdsByChatId = new Map<string, Set<string>>();
+  #reconciliationByChatId = new Map<string, Promise<void>>();
+  #acceptingReconciliations = true;
 
   constructor(
     deps: PendingUserInputRecoveryDeps,
@@ -85,15 +102,58 @@ export class PendingUserInputRecoveryCoordinator {
     if (this.#started) return;
     this.#started = true;
     this.#deps.pendingInputs.store.onCleared((chatId, clientRequestId) => {
-      const task = this.#deps.ledger.settlePendingInputRecovery(chatId, clientRequestId)
-        .catch(this.#onSettlementError)
-        .finally(() => this.#settlementTasks.delete(task));
-      this.#settlementTasks.add(task);
+      const requestIds = this.#unsettledRequestIdsByChatId.get(chatId) ?? new Set<string>();
+      requestIds.add(clientRequestId);
+      this.#unsettledRequestIdsByChatId.set(chatId, requestIds);
+      const task = this.#startSettlement(chatId, clientRequestId);
+      void task.catch((error) => this.#reportSettlementError(error));
     });
   }
 
-  async waitForSettlements(): Promise<void> {
-    await Promise.all([...this.#settlementTasks]);
+  async reconcileChat(chatId: string): Promise<void> {
+    const existing = this.#reconciliationByChatId.get(chatId);
+    if (existing) return existing;
+    if (!this.#acceptingReconciliations) {
+      throw new Error('Pending-input recovery is shutting down');
+    }
+    const task = (async () => {
+      const clearedRequestIds = await this.#deps.pendingInputs.reconcileRestoredHistory(chatId);
+      const restoredSettlementIds = this.#trackRestoredSettlements(chatId, clearedRequestIds);
+      await this.#waitForRequestSettlements(chatId, restoredSettlementIds);
+    })();
+    this.#reconciliationByChatId.set(chatId, task);
+    try {
+      await task;
+    } finally {
+      if (this.#reconciliationByChatId.get(chatId) === task) {
+        this.#reconciliationByChatId.delete(chatId);
+      }
+    }
+  }
+
+  beginShutdown(): void {
+    this.#acceptingReconciliations = false;
+  }
+
+  async waitForBackgroundTasks(): Promise<void> {
+    this.beginShutdown();
+    const errors: unknown[] = [];
+    const attemptedSettlementKeys = new Set<string>();
+    while (true) {
+      const reconciliations = [...new Set(this.#reconciliationByChatId.values())];
+      const settlementRequests = this.#unattemptedSettlementRequests(attemptedSettlementKeys);
+      if (reconciliations.length === 0 && settlementRequests.length === 0) break;
+      const results = await Promise.allSettled([
+        ...reconciliations,
+        ...settlementRequests.map(({ chatId, clientRequestId }) => (
+          this.#startSettlement(chatId, clientRequestId)
+        )),
+      ]);
+      errors.push(...results.flatMap((result) => (
+        result.status === 'rejected' ? [result.reason] : []
+      )));
+    }
+    throwCollectedErrors(errors, 'Pending-input recovery background work failed');
   }
 
   async restore(): Promise<PendingUserInputRecoveryResult> {
@@ -132,5 +192,78 @@ export class PendingUserInputRecoveryCoordinator {
       discardedMissingChat,
       restoredChatIds: [...restoredChatIds].sort(),
     };
+  }
+
+  async #waitForRequestSettlements(
+    chatId: string,
+    clientRequestIds: readonly string[],
+  ): Promise<void> {
+    const unsettledRequestIds = this.#unsettledRequestIdsByChatId.get(chatId);
+    if (!unsettledRequestIds) return;
+    const results = await Promise.allSettled(clientRequestIds
+      .filter((clientRequestId) => unsettledRequestIds.has(clientRequestId))
+      .map((clientRequestId) => this.#startSettlement(chatId, clientRequestId)));
+    throwCollectedErrors(
+      results.flatMap((result) => result.status === 'rejected' ? [result.reason] : []),
+      `Pending-input recovery settlement failed for ${chatId}`,
+    );
+  }
+
+  #trackRestoredSettlements(chatId: string, clearedRequestIds: readonly string[]): string[] {
+    const unsettledRequestIds = this.#unsettledRequestIdsByChatId.get(chatId);
+    const restoredRequestIds = this.#restoredSettlementRequestIdsByChatId.get(chatId)
+      ?? new Set<string>();
+    for (const clientRequestId of clearedRequestIds) {
+      if (unsettledRequestIds?.has(clientRequestId)) restoredRequestIds.add(clientRequestId);
+    }
+    if (restoredRequestIds.size > 0) {
+      this.#restoredSettlementRequestIdsByChatId.set(chatId, restoredRequestIds);
+    }
+    return [...restoredRequestIds];
+  }
+
+  #unattemptedSettlementRequests(
+    attemptedRequestKeys: Set<string>,
+  ): Array<{ chatId: string; clientRequestId: string }> {
+    const requests = [...this.#unsettledRequestIdsByChatId]
+      .flatMap(([chatId, requestIds]) => [...requestIds]
+        .map((clientRequestId) => ({ chatId, clientRequestId })))
+      .filter(({ chatId, clientRequestId }) => (
+        !attemptedRequestKeys.has(settlementRequestKey(chatId, clientRequestId))
+      ));
+    for (const { chatId, clientRequestId } of requests) {
+      attemptedRequestKeys.add(settlementRequestKey(chatId, clientRequestId));
+    }
+    return requests;
+  }
+
+  #startSettlement(chatId: string, clientRequestId: string): Promise<void> {
+    const key = settlementRequestKey(chatId, clientRequestId);
+    const existing = this.#settlementTasksByRequestKey.get(key);
+    if (existing) return existing;
+    const task = this.#deps.ledger.settlePendingInputRecovery(chatId, clientRequestId)
+      .then(() => {
+        const requestIds = this.#unsettledRequestIdsByChatId.get(chatId);
+        requestIds?.delete(clientRequestId);
+        if (requestIds?.size === 0) this.#unsettledRequestIdsByChatId.delete(chatId);
+        const restoredRequestIds = this.#restoredSettlementRequestIdsByChatId.get(chatId);
+        restoredRequestIds?.delete(clientRequestId);
+        if (restoredRequestIds?.size === 0) {
+          this.#restoredSettlementRequestIdsByChatId.delete(chatId);
+        }
+      })
+      .finally(() => {
+        this.#settlementTasksByRequestKey.delete(key);
+      });
+    this.#settlementTasksByRequestKey.set(key, task);
+    return task;
+  }
+
+  #reportSettlementError(error: unknown): void {
+    try {
+      this.#onSettlementError(error);
+    } catch {
+      // Settlement remains retryable even when diagnostic reporting fails.
+    }
   }
 }

@@ -160,6 +160,35 @@ describe('chat WebSocket handler', () => {
     });
   });
 
+  it('omits the server-only pause stack from reconnect queue snapshots', async () => {
+    mockQueue.readChatQueue.mockResolvedValue({
+      ...storedQueue(),
+      pause: {
+        kind: 'recovered-unconfirmed-input',
+        id: 'pause-recovery',
+        pausedAt: '2024-01-01T00:00:00.000Z',
+      },
+      resumePauses: [{
+        kind: 'manual',
+        id: 'pause-manual',
+        pausedAt: '2023-12-31T23:59:00.000Z',
+      }],
+    });
+
+    await chatHandler.message(ws, {
+      type: 'reconnect-state-query',
+      clientRequestId: 'req-reconnect-hidden-pauses',
+      queueChatIds: ['chat-1'],
+    });
+
+    const queue = lastSentPayload().queueResults[0].queue;
+    expect(queue.pause).toMatchObject({
+      kind: 'recovered-unconfirmed-input',
+      id: 'pause-recovery',
+    });
+    expect(queue).not.toHaveProperty('resumePauses');
+  });
+
   it('returns an authoritative empty processing snapshot', async () => {
     mockAgents.getRunningChatIdsSnapshot.mockReturnValue([]);
 

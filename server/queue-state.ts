@@ -28,11 +28,13 @@ export interface StoredQueueState {
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   appliedCommands: StoredAppliedQueueCommand[];
   pause: QueuePause | null;
+  resumePauses?: QueuePause[];
   version: number;
   updatedAt: string | null;
 }
 
 export const MAX_STORED_APPLIED_QUEUE_COMMANDS = 1000;
+const MAX_STORED_RESUME_PAUSES = 8;
 
 export function emptyStoredQueue(): StoredQueueState {
   return {
@@ -46,7 +48,7 @@ export function emptyStoredQueue(): StoredQueueState {
 }
 
 export function cloneStoredQueue(queue: StoredQueueState): StoredQueueState {
-  return {
+  const clone = {
     ...queue,
     entries: queue.entries.map((entry) => ({ ...entry })),
     recentlyDispatched: queue.recentlyDispatched.map((entry) => ({ ...entry })),
@@ -55,6 +57,12 @@ export function cloneStoredQueue(queue: StoredQueueState): StoredQueueState {
     })),
     pause: queue.pause ? { ...queue.pause } : null,
   };
+  if (queue.resumePauses?.length) {
+    clone.resumePauses = queue.resumePauses.map((pause) => ({ ...pause }));
+  } else {
+    delete clone.resumePauses;
+  }
+  return clone;
 }
 
 export function bumpStoredQueue(queue: StoredQueueState): StoredQueueState {
@@ -164,6 +172,15 @@ function normalizeStoredPause(
   return raw.paused === true ? migratedPause(raw, entries, version, updatedAt) : null;
 }
 
+function normalizeResumePauses(value: unknown, hasQueuedEntry: boolean): QueuePause[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const pause = parseQueuePause(candidate);
+    if (!pause || (!hasQueuedEntry && pause.kind !== 'recovered-unconfirmed-input')) return [];
+    return [pause];
+  }).slice(0, MAX_STORED_RESUME_PAUSES);
+}
+
 export function normalizeStoredQueueState(value: unknown): StoredQueueState {
   if (!value || typeof value !== 'object') return emptyStoredQueue();
   const raw = value as Record<string, unknown>;
@@ -184,12 +201,17 @@ export function normalizeStoredQueueState(value: unknown): StoredQueueState {
     : [];
   const version = typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0;
   const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
+  const pause = normalizeStoredPause(raw, entries, version, updatedAt);
+  const resumePauses = pause
+    ? normalizeResumePauses(raw.resumePauses, entries.some((entry) => entry.status === 'queued'))
+    : [];
 
   return {
     entries,
     recentlyDispatched,
     appliedCommands,
-    pause: normalizeStoredPause(raw, entries, version, updatedAt),
+    pause,
+    ...(resumePauses.length ? { resumePauses } : {}),
     version,
     updatedAt,
   };

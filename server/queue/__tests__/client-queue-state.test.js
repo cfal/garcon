@@ -102,4 +102,24 @@ describe('stored queue projection', () => {
 
     expect(result).not.toHaveProperty('appliedCommands');
   });
+
+  it('keeps superseded pause history server-only', () => {
+    const result = toClientQueueState(
+      storedQueue([entry('q1', 'queued')], {
+        pause: {
+          id: 'recovery-pause',
+          kind: 'recovered-unconfirmed-input',
+          pausedAt: '2026-02-27T00:00:01.000Z',
+        },
+        resumePauses: [{
+          id: 'manual-pause',
+          kind: 'manual',
+          pausedAt: '2026-02-27T00:00:00.000Z',
+        }],
+      }),
+    );
+
+    expect(result.pause).toMatchObject({ id: 'recovery-pause' });
+    expect(result).not.toHaveProperty('resumePauses');
+  });
 });

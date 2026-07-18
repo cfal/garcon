@@ -561,6 +561,44 @@ describe('queue invariants', () => {
     expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
   });
 
+  it('restores a pre-existing manual pause after recovered input review', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    const queuePath = path.join(queuesDir, 'layered-pause.queue.json');
+    const manualPause = {
+      id: 'manual-pause',
+      kind: 'manual',
+      pausedAt: '2026-07-16T00:01:00.000Z',
+    };
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      queuePath,
+      JSON.stringify(storedQueueFixture({
+        entries: [queueEntryFixture('entry-successor', 'remain manually paused')],
+        pause: manualPause,
+        version: 1,
+      })),
+      'utf8',
+    );
+
+    await queue.recoverStaleChatQueues(new Set(['layered-pause']));
+    const recovered = await queue.readChatQueue('layered-pause');
+    expect(recovered.pause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+    expect(recovered.resumePauses).toEqual([manualPause]);
+
+    await queue.recoverStaleChatQueues(new Set(['layered-pause']));
+    const recoveredAgain = await queue.readChatQueue('layered-pause');
+    expect(recoveredAgain.pause.id).toBe(recovered.pause.id);
+    expect(recoveredAgain.resumePauses).toEqual([manualPause]);
+
+    const reviewed = await queue.resumeChatQueue('layered-pause', recovered.pause.id);
+    expect(reviewed.pause).toEqual(manualPause);
+    expect(await queue.popNextChat('layered-pause')).toBeNull();
+
+    await queue.resumeChatQueue('layered-pause', manualPause.id);
+    const popped = await queue.popNextChat('layered-pause');
+    expect(popped.entry.id).toBe('entry-successor');
+  });
+
   it('persists restart uncertainty without a queue file and gates later entries', async () => {
     const turnRunner = {
       runAgentTurn: mock(() => Promise.resolve()),
