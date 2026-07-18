@@ -136,7 +136,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null
+  const isPlainObject =
+    prototype === null ||
+    prototype === Object.prototype ||
+    (Object.getPrototypeOf(prototype) === null &&
+      typeof prototype.constructor === 'function' &&
+      prototype.constructor.name === 'Object');
+  return isPlainObject
     ? (value as Record<string, unknown>)
     : null;
 }
