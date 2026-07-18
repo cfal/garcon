@@ -128,7 +128,9 @@ export class AttentionTracker {
     this.#agents.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
     this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
-    this.#queue.onSessionStopped((chatId) => this.#handleSessionStopped(chatId));
+    this.#queue.onSessionStopped((chatId, success) => {
+      if (success) this.#handleSessionStopped(chatId);
+    });
     this.#registry.onChatRemoved?.((chatId) => this.#cleanupChat(chatId));
   }
 

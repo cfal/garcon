@@ -86,11 +86,11 @@ describe('queue and transcript stability', () => {
         () => ({}),
         () => true,
       );
-      queue.onSessionStopRequested((requestedChatId) => {
-        coordinator.onStopRequested(requestedChatId, activeTurn);
+      queue.onSessionStopRequested((requestedChatId, stopId) => {
+        coordinator.onStopRequested(requestedChatId, stopId, activeTurn);
       });
-      queue.onSessionStopped((requestedChatId, success) => {
-        coordinator.onSessionStopped(requestedChatId, success);
+      queue.onSessionStopped((requestedChatId, success, _intent, stopId) => {
+        coordinator.onSessionStopped(requestedChatId, stopId, success);
       });
 
       await queue.createChatQueueEntry(chatId, 'interrupted');

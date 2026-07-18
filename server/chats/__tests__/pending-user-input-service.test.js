@@ -311,6 +311,83 @@ describe('PendingUserInputService', () => {
     ]);
   });
 
+  it('does not assign an identical successor echo to the interrupted cohort', async () => {
+    const now = Date.now();
+    const interruptedAt = new Date(now - 1_000).toISOString();
+    const successorAt = new Date(now + 1_000).toISOString();
+    const nativeMessages = [new UserMessage(successorAt, 'repeat this')];
+    const service = new PendingUserInputService({
+      loadNativeMessages: mock(async () => nativeMessages),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    await service.register('chat-1', 'repeat this', {
+      clientRequestId: 'req-a',
+      createdAt: interruptedAt,
+    });
+    const interruptedCohort = service.captureCohort('chat-1');
+    await service.register('chat-1', 'repeat this', {
+      clientRequestId: 'req-b',
+      createdAt: successorAt,
+    });
+
+    await service.settleNativeCohort(interruptedCohort);
+
+    expect(service.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'req-a', deliveryStatus: 'unconfirmed' },
+      { clientRequestId: 'req-b', deliveryStatus: 'accepted' },
+    ]);
+
+    await service.reconcileNativeHistory('chat-1');
+    expect(service.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'req-a', deliveryStatus: 'unconfirmed' },
+    ]);
+  });
+
+  it('requires request identity when settling a terminal cohort', async () => {
+    const timestamp = '2026-06-01T00:00:00.000Z';
+    const nativeMessages = [new UserMessage(timestamp, 'same content')];
+    const service = new PendingUserInputService({
+      loadNativeMessages: mock(async () => nativeMessages),
+      getRetainedHistoryMessages: mock(() => nativeMessages),
+    });
+    await service.register('chat-1', 'same content', {
+      clientRequestId: 'req-a',
+      createdAt: timestamp,
+    });
+    const cohort = service.captureCohort('chat-1');
+
+    await service.settleNativeCohort(cohort);
+
+    expect(service.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'req-a', deliveryStatus: 'unconfirmed' },
+    ]);
+    await service.reconcileNativeHistory('chat-1');
+    expect(service.listForChat('chat-1')).toEqual([]);
+  });
+
+  it('coalesces repeated native reconciliation into one dirty rerun', async () => {
+    const firstLoad = deferred();
+    const loadNativeMessages = mock()
+      .mockImplementationOnce(() => firstLoad.promise)
+      .mockImplementation(async () => []);
+    const service = new PendingUserInputService({
+      loadNativeMessages,
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    await service.register('chat-1', 'pending', { clientRequestId: 'req-a' });
+
+    const first = service.reconcileNativeHistory('chat-1');
+    await Promise.resolve();
+    const duplicates = Array.from(
+      { length: 20 },
+      () => service.reconcileNativeHistory('chat-1'),
+    );
+    firstLoad.resolve([]);
+    await Promise.all([first, ...duplicates]);
+
+    expect(loadNativeMessages).toHaveBeenCalledTimes(2);
+  });
+
   it('starts a fresh native read for settlement queued behind reconciliation', async () => {
     const firstLoad = deferred();
     const loadNativeMessages = mock()

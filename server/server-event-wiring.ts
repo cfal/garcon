@@ -197,6 +197,12 @@ export function wireServerEvents({
     );
   }
 
+  function reconcilePendingAfterTerminal(chatId: string, context: string): void {
+    pendingInputs.reconcileNativeHistory(chatId).catch((err) => {
+      logger.warn(`pending-inputs: reconcile after ${context} failed:`, errorMessage(err));
+    });
+  }
+
   async function reloadAfterProcessError(
     chatId: string,
     message: string,
@@ -312,12 +318,7 @@ export function wireServerEvents({
         turnMetadata?.upstreamRequestId,
       ),
     );
-    pendingInputs.reconcileNativeHistory(chatId).catch((err) => {
-      logger.warn(
-        'pending-inputs: reconcile after finish failed:',
-        errorMessage(err),
-      );
-    });
+    reconcilePendingAfterTerminal(chatId, 'finish');
     queue.checkChatIdle(chatId).catch((err) => {
       logger.warn('queue: checkChatIdle error:', errorMessage(err));
     });
@@ -325,7 +326,9 @@ export function wireServerEvents({
   agentRegistry.onFailed((chatId, agentErrorMessage, turnMetadata) => {
     if (!chatExists(chatId)) return;
     stopSettlement.onTurnTerminal(chatId, turnMetadata);
-    if (expectedUserAborts.consume(chatId, turnMetadata)) {
+    const expectedAbort = expectedUserAborts.consume(chatId, turnMetadata);
+    if (expectedAbort) {
+      if (expectedAbort === 'first') reconcilePendingAfterTerminal(chatId, 'expected abort');
       queue.checkChatIdle(chatId).catch((err) => {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
@@ -424,10 +427,10 @@ export function wireServerEvents({
       new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)),
     );
   });
-  queue.onSessionStopRequested((chatId) => {
-    const turn = agentRegistry.getActiveTurn(chatId);
-    expectedUserAborts.mark(chatId, turn);
-    stopSettlement.onStopRequested(chatId, turn);
+  queue.onSessionStopRequested((chatId, stopId, preparingTurn) => {
+    const turn = preparingTurn ?? agentRegistry.getActiveTurn(chatId);
+    expectedUserAborts.mark(chatId, turn, stopId);
+    stopSettlement.onStopRequested(chatId, stopId, turn);
   });
   queue.onDispatching((chatId, entryId, content) => {
     broadcast(new QueueDispatchingMessage(chatId, entryId, content));
@@ -457,15 +460,19 @@ export function wireServerEvents({
       new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
     );
   });
-  queue.onSessionStopped((chatId, success, intent) => {
-    if (!success) expectedUserAborts.clear(chatId);
-    stopSettlement.onSessionStopped(chatId, success);
+  queue.onSessionStopped((chatId, success, intent, stopId) => {
+    if (!success) expectedUserAborts.clear(chatId, stopId);
+    stopSettlement.onSessionStopped(chatId, stopId, success);
     broadcast(new ChatSessionStoppedMessage(chatId, success, intent));
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
     stopSettlement.onTurnTerminal(chatId, options);
     if (consumeProcessFailure(chatId, options)) return;
-    if (expectedUserAborts.consume(chatId, options)) return;
+    const expectedAbort = expectedUserAborts.consume(chatId, options);
+    if (expectedAbort) {
+      if (expectedAbort === 'first') reconcilePendingAfterTerminal(chatId, 'expected queue abort');
+      return;
+    }
     if (options.clientRequestId) {
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }

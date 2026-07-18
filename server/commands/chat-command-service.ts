@@ -531,7 +531,10 @@ export class ChatCommandService {
 
     let reservation: DirectTurnReservation;
     try {
-      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId, {
+        clientRequestId: input.clientRequestId,
+        turnId,
+      });
     } catch (error) {
       await this.#markPreScheduleFailure(ledger.record.key, error);
       throw error;
@@ -1221,7 +1224,7 @@ export class ChatCommandService {
     if (ledger.kind !== 'duplicate') {
       let reservation: DirectTurnReservation;
       try {
-        reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+        reservation = this.deps.queue.reserveDirectTurn(input.chatId, { clientRequestId, turnId });
       } catch (error) {
         await this.#markPreScheduleFailure(ledger.record.key, error);
         throw error;
@@ -1579,7 +1582,7 @@ export class ChatCommandService {
 
     let reservation: DirectTurnReservation;
     try {
-      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId, options);
     } catch (error) {
       await this.#markPreScheduleFailure(ledger.record.key, error);
       throw error;

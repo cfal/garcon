@@ -21,6 +21,7 @@ import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
 import { createLogger } from './lib/log.js';
 import { ActiveInputDeliveryError, DomainError } from './lib/domain-error.js';
+import type { TurnIdentity } from './lib/turn-identity.js';
 import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
   MAX_STORED_APPLIED_QUEUE_COMMANDS,
@@ -118,6 +119,14 @@ export interface DirectTurnReservation {
   readonly reservationId: string;
 }
 
+function executionTurnIdentity(turn: TurnIdentity): TurnIdentity | undefined {
+  if (!turn.turnId && !turn.clientRequestId) return undefined;
+  return {
+    ...(turn.turnId ? { turnId: turn.turnId } : {}),
+    ...(turn.clientRequestId ? { clientRequestId: turn.clientRequestId } : {}),
+  };
+}
+
 function appliedQueueCommand(queue: StoredQueueState, command: QueueCommandIdentity): StoredAppliedQueueCommand | null {
   return queue.appliedCommands.find((candidate) => candidate.key === command.key) ?? null;
 }
@@ -190,11 +199,16 @@ interface ChatMessagesDep {
 
 type QueueUpdatedCallback = (chatId: string, queue: StoredQueueState) => void;
 type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
-type SessionStopRequestedCallback = (chatId: string) => void;
+type SessionStopRequestedCallback = (
+  chatId: string,
+  stopId: string,
+  turn: TurnIdentity | undefined,
+) => void;
 type SessionStoppedCallback = (
   chatId: string,
   success: boolean,
   intent: ChatStopIntent,
+  stopId: string,
 ) => void;
 type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
@@ -207,6 +221,12 @@ type ChatMessagesCallback = (
 type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
 type ChatExistsResolver = (chatId: string) => boolean;
 
+interface SessionStopInFlight {
+  intent: ChatStopIntent;
+  stopId: string;
+  promise: Promise<boolean>;
+}
+
 export interface ChatQueueService {
   deleteChatQueueFile(chatId: string): Promise<void>;
   submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
@@ -216,7 +236,7 @@ export interface ChatQueueService {
     options: PendingUserInputRegistrationOptions,
   ): Promise<void>;
   discardPendingUserInput(chatId: string, clientRequestId: string): boolean;
-  reserveDirectTurn(chatId: string): DirectTurnReservation;
+  reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
   releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;
   runReservedTurn(
     reservation: DirectTurnReservation,
@@ -269,9 +289,11 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #directTurns = new Map<string, string>();
   #drainRequestedAfterDirectTurn = new Set<string>();
   #abortDrainSuppressed = new Set<string>();
+  #manualStopDrainSuppressed = new Set<string>();
+  #executionTurnByChatId = new Map<string, TurnIdentity>();
   #activeDrainEntries = new Map<string, string>();
   #expectedDrainAborts = new Map<string, string>();
-  #sessionStopByChatId = new Map<string, Promise<boolean>>();
+  #sessionStopByChatId = new Map<string, SessionStopInFlight>();
   #queuesByChatId = new Map<string, StoredQueueState>();
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
@@ -708,7 +730,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   // history, runs the agent turn, then drains any queued entries.
   async submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     const turnOptions = ensureTurnIdentifiers(options);
-    const reservation = this.reserveDirectTurn(chatId);
+    const reservation = this.reserveDirectTurn(chatId, turnOptions);
     try {
       await this.registerPendingUserInput(chatId, command, turnOptions);
     } catch (error) {
@@ -768,7 +790,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     return this.#pendingInputs.discard(chatId, clientRequestId);
   }
 
-  reserveDirectTurn(chatId: string): DirectTurnReservation {
+  reserveDirectTurn(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {
     if (
       this.#directTurns.has(chatId)
       || this.#draining.has(chatId)
@@ -781,6 +803,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       reservationId: crypto.randomUUID(),
     });
     this.#directTurns.set(chatId, reservation.reservationId);
+    const identity = executionTurnIdentity(turn);
+    if (identity) this.#executionTurnByChatId.set(chatId, identity);
     return reservation;
   }
 
@@ -794,6 +818,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     options: RunAgentTurnOptions,
   ): Promise<void> {
     this.#assertDirectTurnReservation(reservation);
+    const identity = executionTurnIdentity(options);
+    if (identity) this.#executionTurnByChatId.set(reservation.chatId, identity);
     let completed = false;
     try {
       await this.#turnRunner.runAgentTurn(reservation.chatId, command, options);
@@ -822,6 +848,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       throw new Error('Direct turn reservation is no longer active');
     }
     this.#directTurns.delete(reservation.chatId);
+    this.#executionTurnByChatId.delete(reservation.chatId);
     const drainRequested = this.#drainRequestedAfterDirectTurn.delete(reservation.chatId);
     if (!this.#chatExists(reservation.chatId)) return;
     if (completed || drainRequested) await this.#drain(reservation.chatId);
@@ -829,49 +856,65 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async #abortSession(chatId: string, intent: ChatStopIntent): Promise<boolean> {
     const inFlight = this.#sessionStopByChatId.get(chatId);
-    if (inFlight) return inFlight;
+    if (inFlight) return inFlight.promise;
 
-    const stop = this.#performAbortSession(chatId, intent);
-    this.#sessionStopByChatId.set(chatId, stop);
+    const stopId = crypto.randomUUID();
+    let resolveStop!: (success: boolean) => void;
+    let rejectStop!: (error: unknown) => void;
+    const stop = new Promise<boolean>((resolve, reject) => {
+      resolveStop = resolve;
+      rejectStop = reject;
+    });
+    const operation = { intent, stopId, promise: stop };
+    this.#sessionStopByChatId.set(chatId, operation);
+    this.#performAbortSession(chatId, intent, stopId).then(resolveStop, rejectStop);
     try {
       return await stop;
     } finally {
-      if (this.#sessionStopByChatId.get(chatId) === stop) {
+      if (this.#sessionStopByChatId.get(chatId) === operation) {
         this.#sessionStopByChatId.delete(chatId);
       }
     }
   }
 
   async #waitForSessionStop(chatId: string): Promise<void> {
-    await this.#sessionStopByChatId.get(chatId)?.catch(() => undefined);
+    await this.#sessionStopByChatId.get(chatId)?.promise.catch(() => undefined);
   }
 
-  async #performAbortSession(chatId: string, intent: ChatStopIntent): Promise<boolean> {
+  async #performAbortSession(
+    chatId: string,
+    intent: ChatStopIntent,
+    stopId: string,
+  ): Promise<boolean> {
     const activeDrainEntryId = this.#activeDrainEntries.get(chatId);
     if (activeDrainEntryId) this.#expectedDrainAborts.set(chatId, activeDrainEntryId);
-    this.emit('session-stop-requested', chatId);
+    const turn = this.#executionTurnByChatId.get(chatId);
+    this.emit('session-stop-requested', chatId, stopId, turn ? { ...turn } : undefined);
     try {
       const success = await this.#turnRunner.abortSession(chatId);
       if (!success && this.#expectedDrainAborts.get(chatId) === activeDrainEntryId) {
         this.#expectedDrainAborts.delete(chatId);
       }
-      this.emit('session-stopped', chatId, success, intent);
+      this.emit('session-stopped', chatId, success, intent, stopId);
       return success;
     } catch (error) {
       if (this.#expectedDrainAborts.get(chatId) === activeDrainEntryId) {
         this.#expectedDrainAborts.delete(chatId);
       }
-      this.emit('session-stopped', chatId, false, intent);
+      this.emit('session-stopped', chatId, false, intent, stopId);
       throw error;
     }
   }
 
   async stopActiveTurn(chatId: string): Promise<StopActiveTurnResult> {
+    const drainWasActive = this.#draining.has(chatId);
     this.#abortDrainSuppressed.add(chatId);
+    this.#manualStopDrainSuppressed.add(chatId);
     try {
       await this.pauseChatQueue(chatId);
     } catch (error) {
       this.#abortDrainSuppressed.delete(chatId);
+      this.#manualStopDrainSuppressed.delete(chatId);
       throw error;
     }
 
@@ -882,6 +925,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       // A durable pause now owns queued-work blocking. Clearing this temporary
       // gate also lets a later fresh queue entry run when Stop found no queue.
       this.#abortDrainSuppressed.delete(chatId);
+      if (!drainWasActive) this.#manualStopDrainSuppressed.delete(chatId);
     }
     return { stopped, queue: await this.readChatQueue(chatId) };
   }
@@ -942,7 +986,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       while (true) {
         if (
           this.#abortDrainSuppressed.has(chatId)
+          || this.#manualStopDrainSuppressed.has(chatId)
           || this.#directTurns.has(chatId)
+          || this.#sessionStopByChatId.has(chatId)
           || this.#turnRunner.isChatRunning(chatId)
         ) break;
 
@@ -955,11 +1001,24 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
 
         const { entry } = result;
+        if (this.#manualStopDrainSuppressed.has(chatId)) {
+          await this.#restorePoppedEntryAfterStop(chatId, entry.id);
+          break;
+        }
+        const inFlightStop = this.#sessionStopByChatId.get(chatId);
+        if (inFlightStop?.intent === 'interrupt-and-send') {
+          await inFlightStop.promise.catch(() => undefined);
+          if (this.#manualStopDrainSuppressed.has(chatId)) {
+            await this.#restorePoppedEntryAfterStop(chatId, entry.id);
+            break;
+          }
+        }
         let queuedTurnOptions: RunAgentTurnOptions = {};
         let stage: 'preparing' | 'running' | 'finalizing' = 'preparing';
 
         try {
           queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId));
+          this.#executionTurnByChatId.set(chatId, executionTurnIdentity(queuedTurnOptions)!);
           await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
           this.emit('dispatching', chatId, entry.id, entry.content);
           stage = 'running';
@@ -1030,13 +1089,45 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
             });
           }
           break;
+        } finally {
+          if (
+            queuedTurnOptions.turnId
+            && this.#executionTurnByChatId.get(chatId)?.turnId === queuedTurnOptions.turnId
+          ) {
+            this.#executionTurnByChatId.delete(chatId);
+          }
         }
       }
     } finally {
       this.#draining.delete(chatId);
+      this.#manualStopDrainSuppressed.delete(chatId);
+      this.#executionTurnByChatId.delete(chatId);
       this.#activeDrainEntries.delete(chatId);
       this.#expectedDrainAborts.delete(chatId);
     }
+  }
+
+  async #restorePoppedEntryAfterStop(chatId: string, entryId: string): Promise<void> {
+    await this.#withLock(`chat:${chatId}`, async () => {
+      const queue = cloneStoredQueue(await this.#loadChatQueue(chatId));
+      const entry = queue.entries.find((candidate) => candidate.id === entryId);
+      if (!entry || entry.status !== 'sending') return;
+
+      entry.status = 'queued';
+      queue.recentlyDispatched = queue.recentlyDispatched.filter(
+        (dispatched) => dispatched.entryId !== entryId,
+      );
+      if (!queue.pause) {
+        queue.pause = {
+          id: crypto.randomUUID(),
+          kind: 'manual',
+          pausedAt: new Date().toISOString(),
+        };
+      }
+      const result = await this.#commitAndPublish(chatId, bumpStoredQueue(queue));
+      this.#logMutation('requeue', chatId, entryId, result, entry.revision);
+      this.#logPauseMutation('pause', chatId, result, entryId);
+    });
   }
 
   async deleteChatQueueFile(chatId: string): Promise<void> {
@@ -1046,6 +1137,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.#expectedDrainAborts.delete(chatId);
       this.#drainRequestedAfterDirectTurn.delete(chatId);
       this.#directTurns.delete(chatId);
+      this.#manualStopDrainSuppressed.delete(chatId);
+      this.#executionTurnByChatId.delete(chatId);
       this.#queuesByChatId.delete(chatId);
       try {
         await fs.unlink(this.#chatQueueFilePath(chatId));

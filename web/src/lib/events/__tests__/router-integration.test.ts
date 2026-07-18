@@ -571,4 +571,22 @@ describe('event router integration', () => {
 
 		expect(stores.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
+
+	it('leaves failed-stop feedback to the initiating request', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-session-stopped',
+					chatId: 'chat-a',
+					success: false,
+					intent: 'interrupt-and-send',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
 });
