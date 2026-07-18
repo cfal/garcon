@@ -4,7 +4,14 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
-import { parseFileTreeResponse } from '../../../common/file-contracts.ts';
+import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
+import {
+  FILE_REVISION_HEADER,
+  isFileRevision,
+  parseFileTreeResponse,
+  parseReadTextResponse,
+  parseSaveTextResponse,
+} from '../../../common/file-contracts.ts';
 
 let projectPath;
 let outsidePath;
@@ -435,6 +442,44 @@ describe('files route', () => {
     expect(body.error).toBe('Path must be under project root');
   });
 
+  it('rejects binary content reads through an escaping file symlink', async () => {
+    const outsideBytes = 'outside-image-bytes';
+    const secretPath = path.join(outsidePath, 'secret.png');
+    await fs.writeFile(secretPath, outsideBytes);
+    await fs.symlink(secretPath, path.join(projectPath, 'secret-link.png'));
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/content?projectPath=${encodeURIComponent(projectPath)}&path=secret-link.png`,
+    );
+    const response = await routes['/api/v1/files/content'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(body).not.toContain(outsideBytes);
+  });
+
+  it('returns in-root image content with its MIME type', async () => {
+    const imageBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    await fs.writeFile(path.join(projectPath, 'image.png'), imageBytes);
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/content?projectPath=${encodeURIComponent(projectPath)}&path=image.png`,
+    );
+    const response = await routes['/api/v1/files/content'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('image/png');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(imageBytes);
+  });
+
   it('rejects writes through project symlink directories that resolve outside the project root', async () => {
     await fs.symlink(outsidePath, path.join(projectPath, 'outside-dir'), 'dir');
 
@@ -446,7 +491,11 @@ describe('files route', () => {
       new Request(url, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content: 'escape' }),
+        body: JSON.stringify({
+          content: 'escape',
+          expectedRevision: 'v1:outside',
+          conflictResolution: 'overwrite',
+        }),
       }),
       url,
     );
@@ -457,6 +506,297 @@ describe('files route', () => {
     await expect(
       fs.readFile(path.join(outsidePath, 'new.txt'), 'utf8'),
     ).rejects.toThrow();
+  });
+
+  it('returns anchored revisions for text and raw content reads', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const textUrl = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const textResponse = await routes['/api/v1/files/text'].GET(
+      new Request(textUrl),
+      textUrl,
+    );
+    const textBody = await textResponse.json();
+    const parsedText = parseReadTextResponse(textBody);
+
+    expect(textResponse.status).toBe(200);
+    expect(parsedText).not.toBeNull();
+    expect(parsedText.content).toBe('hello\n');
+
+    const contentUrl = new URL(
+      `http://localhost/api/v1/files/content?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const contentResponse = await routes['/api/v1/files/content'].GET(
+      new Request(contentUrl),
+      contentUrl,
+    );
+
+    expect(contentResponse.status).toBe(200);
+    expect(await contentResponse.text()).toBe('hello\n');
+    expect(contentResponse.headers.get(FILE_REVISION_HEADER)).toBe(
+      parsedText.revision,
+    );
+  });
+
+  it('reports ready and missing file revisions', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const readyUrl = new URL(
+      `http://localhost/api/v1/files/revision?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const readyResponse = await routes['/api/v1/files/revision'].GET(
+      new Request(readyUrl),
+      readyUrl,
+    );
+    const ready = await readyResponse.json();
+
+    expect(readyResponse.status).toBe(200);
+    expect(ready.status).toBe('ready');
+    expect(isFileRevision(ready.revision)).toBe(true);
+
+    await fs.rm(path.join(projectPath, 'src/main.ts'));
+    const missingResponse = await routes['/api/v1/files/revision'].GET(
+      new Request(readyUrl),
+      readyUrl,
+    );
+    expect(await missingResponse.json()).toEqual({ status: 'missing' });
+  });
+
+  it('rejects a revision check for a directory', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/revision?projectPath=${encodeURIComponent(projectPath)}&path=src`,
+    );
+    const response = await routes['/api/v1/files/revision'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).errorCode).toBe(
+      'FILE_PATH_MUST_IDENTIFY_FILE',
+    );
+  });
+
+  it('saves from a matching revision and returns the new revision', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const readResponse = await routes['/api/v1/files/text'].GET(
+      new Request(url),
+      url,
+    );
+    const baseline = parseReadTextResponse(await readResponse.json());
+    const response = await routes['/api/v1/files/text'].PUT(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          content: 'local\n',
+          expectedRevision: baseline.revision,
+          conflictResolution: 'reject',
+        }),
+      }),
+      url,
+    );
+    const result = parseSaveTextResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(result).not.toBeNull();
+    expect(result.revision).not.toBe(baseline.revision);
+    expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe(
+      'local\n',
+    );
+  });
+
+  it('rejects a stale save without changing the external content', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const readResponse = await routes['/api/v1/files/text'].GET(
+      new Request(url),
+      url,
+    );
+    const baseline = parseReadTextResponse(await readResponse.json());
+    await fs.writeFile(path.join(projectPath, 'src/main.ts'), 'external\n');
+
+    const response = await routes['/api/v1/files/text'].PUT(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          content: 'local\n',
+          expectedRevision: baseline.revision,
+          conflictResolution: 'reject',
+        }),
+      }),
+      url,
+    );
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).errorCode).toBe('FILE_REVISION_CONFLICT');
+    expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe(
+      'external\n',
+    );
+  });
+
+  it('overwrites changed or deleted files only with explicit overwrite intent', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const readResponse = await routes['/api/v1/files/text'].GET(
+      new Request(url),
+      url,
+    );
+    const baseline = parseReadTextResponse(await readResponse.json());
+    await fs.rm(path.join(projectPath, 'src/main.ts'));
+
+    const response = await routes['/api/v1/files/text'].PUT(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          content: 'recreated\n',
+          expectedRevision: baseline.revision,
+          conflictResolution: 'overwrite',
+        }),
+      }),
+      url,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe(
+      'recreated\n',
+    );
+  });
+
+  it('revalidates containment under the save lock', async () => {
+    const outsideFile = path.join(outsidePath, 'outside.ts');
+    await fs.writeFile(outsideFile, 'outside\n', 'utf8');
+    let resolveCalls = 0;
+    const routes = createFilesRoutes(
+      { getChat: () => null },
+      {
+        async resolveSaveTarget(rootPath, inputPath) {
+          resolveCalls += 1;
+          const result = await resolveRealWithinBase(rootPath, inputPath);
+          if (resolveCalls === 1) {
+            await fs.rm(result);
+            await fs.symlink(outsideFile, result);
+          }
+          return result;
+        },
+      },
+    );
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+
+    const response = await routes['/api/v1/files/text'].PUT(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          content: 'escaped\n',
+          expectedRevision: 'v1:loaded',
+          conflictResolution: 'overwrite',
+        }),
+      }),
+      url,
+    );
+
+    expect(response.status).toBe(403);
+    expect(resolveCalls).toBe(2);
+    expect(await fs.readFile(outsideFile, 'utf8')).toBe('outside\n');
+  });
+
+  it('serializes checked saves through hard-link aliases', async () => {
+    const aliasPath = path.join(projectPath, 'src/alias.ts');
+    await fs.link(path.join(projectPath, 'src/main.ts'), aliasPath);
+    const routes = createFilesRoutes({ getChat: () => null });
+    const mainUrl = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const aliasUrl = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/alias.ts`,
+    );
+    const baselineResponse = await routes['/api/v1/files/text'].GET(
+      new Request(mainUrl),
+      mainUrl,
+    );
+    const baseline = parseReadTextResponse(await baselineResponse.json());
+    const save = (url, content) =>
+      routes['/api/v1/files/text'].PUT(
+        new Request(url, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            content,
+            expectedRevision: baseline.revision,
+            conflictResolution: 'reject',
+          }),
+        }),
+        url,
+      );
+
+    const responses = await Promise.all([
+      save(mainUrl, 'first\n'),
+      save(aliasUrl, 'second\n'),
+    ]);
+
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+  });
+
+  it('serializes checked saves so only one request can use a revision', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const readResponse = await routes['/api/v1/files/text'].GET(
+      new Request(url),
+      url,
+    );
+    const baseline = parseReadTextResponse(await readResponse.json());
+    const save = (content) =>
+      routes['/api/v1/files/text'].PUT(
+        new Request(url, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            content,
+            expectedRevision: baseline.revision,
+            conflictResolution: 'reject',
+          }),
+        }),
+        url,
+      );
+
+    const responses = await Promise.all([save('first\n'), save('second\n')]);
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+  });
+
+  it('requires a complete typed save request', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const response = await routes['/api/v1/files/text'].PUT(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: 'unsafe\n' }),
+      }),
+      url,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).errorCode).toBe('VALIDATION_FAILED');
+    expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe(
+      'hello\n',
+    );
   });
 
   it('uploads images without requiring chat or project context', async () => {

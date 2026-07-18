@@ -199,6 +199,7 @@
 			fileRootPath: activeProjectPath,
 			relativePath,
 			mode: 'code',
+			origin: presentation,
 			reason: 'user-open',
 			line,
 		});

@@ -1,5 +1,11 @@
-import { apiFetch } from '$lib/api/client.js';
-import { getContentUrl, readText, resolveFileIdentity, saveText } from '$lib/api/files.js';
+import { ApiError } from '$lib/api/client.js';
+import {
+	getFileRevision,
+	readContent,
+	readText,
+	resolveFileIdentity,
+	saveText,
+} from '$lib/api/files.js';
 import {
 	CodeEditorController,
 	type EditorPresentationSettings,
@@ -8,9 +14,17 @@ import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-ses
 import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
-import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
-import type { CanonicalFileIdentity, FileIdentityResponse } from '$shared/file-contracts';
-import * as m from '$lib/paraglide/messages.js';
+import type {
+	DesktopPlacement,
+	PresentationHostId,
+} from '$lib/workspace/surface-types.js';
+import type {
+	CanonicalFileIdentity,
+	FileIdentityResponse,
+	FileRevision,
+	FileRevisionResponse,
+	FileSaveConflictResolution,
+} from '$shared/file-contracts';
 
 export type FileOpenMode = 'auto' | 'code' | 'markdown' | 'image';
 export type FilePlacementResult = 'placed' | 'cancelled';
@@ -19,6 +33,7 @@ export interface FileOpenRequest {
 	fileRootPath: string;
 	relativePath: string;
 	mode: FileOpenMode;
+	origin: PresentationHostId;
 	target?: DesktopPlacement;
 	reason: 'user-open' | 'responsive-restore';
 	line?: number;
@@ -37,7 +52,12 @@ export interface FilePlacementPort {
 export interface FileGuardRequest {
 	sessionId: string;
 	fileName: string;
-	reason: 'close' | 'replace-dialog';
+	reason: 'close' | 'replace-dialog' | 'refresh';
+}
+
+export interface FileOverwriteRequest {
+	sessionId: string;
+	fileName: string;
 }
 
 export type FileThresholdChoice = 'open' | 'review' | 'cancel';
@@ -50,18 +70,23 @@ export interface FileThresholdRequest {
 export interface FileSessionsDeps {
 	getIsMobile(): boolean;
 	getEditorSettings(): Omit<EditorPresentationSettings, 'isDark'>;
-	getDefaultPlacement(mode: FileRendererMode): DesktopPlacement;
+	getDefaultPlacement(mode: FileRendererMode, origin: PresentationHostId): DesktopPlacement;
 	getPlacement(): FilePlacementPort;
 	onOpenError?(request: FileOpenRequest, error: unknown): void;
 	resolveFileIdentity?: typeof resolveFileIdentity;
+	getFileRevision?: typeof getFileRevision;
 	readText?: typeof readText;
+	readContent?: typeof readContent;
 	saveText?: typeof saveText;
-	fetchContent?: typeof apiFetch;
 	openMainInert?<T>(commitOpen: () => T): T;
 }
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown']);
 export const FILE_SESSION_SOFT_LIMIT = 32;
+
+type LoadedFileContent =
+	| { kind: 'text'; content: string; revision: FileRevision }
+	| { kind: 'image'; blob: Blob; revision: FileRevision };
 
 export function fileIdentityKey(root: string, relativePath: string): string {
 	return JSON.stringify([root, relativePath]);
@@ -78,14 +103,16 @@ function rendererMode(path: string, requested: FileOpenMode): FileRendererMode {
 export class FileSessionRegistry {
 	sessions = $state.raw<Readonly<Record<string, FileSession>>>({});
 	guardRequest = $state<FileGuardRequest | null>(null);
+	overwriteRequest = $state<FileOverwriteRequest | null>(null);
 	thresholdRequest = $state<FileThresholdRequest | null>(null);
 	openFilesVisible = $state(false);
 
 	#sessionIdByIdentity = new Map<string, string>();
 	#pendingByIdentity = new Map<string, Promise<FileSession | null>>();
 	#guardResolve: ((choice: 'save' | 'discard' | 'cancel') => void) | null = null;
+	#overwriteResolve: ((choice: 'overwrite' | 'cancel') => void) | null = null;
 	#creationQueue = new SerialQueue();
-	#guardQueue = new SerialQueue();
+	#decisionQueue = new SerialQueue();
 	#isDark = false;
 
 	constructor(private readonly deps: FileSessionsDeps) {}
@@ -157,61 +184,191 @@ export class FileSessionRegistry {
 
 	async save(sessionId: string): Promise<boolean> {
 		const session = this.get(sessionId);
-		if (!session || session.rendererMode === 'image' || session.saving) return false;
+		if (
+			!session ||
+			session.rendererMode === 'image' ||
+			session.loading ||
+			session.saving ||
+			session.refreshing ||
+			session.pendingMutationCount > 0 ||
+			!session.loadedRevision
+		) {
+			return false;
+		}
 		const submittedContent = session.editor?.currentContent() ?? session.content;
+		const controller = new AbortController();
+		session.saveController = controller;
 		session.saving = true;
 		session.saveError = null;
 		session.pendingMutationCount += 1;
+		this.#invalidateFreshness(session);
 		try {
-			await (this.deps.saveText ?? saveText)({
-				projectPath: session.canonicalFileRootPath,
-				filePath: session.relativePath,
-				content: submittedContent,
-			});
-			if (session.editor) session.editor.acceptBaseline(submittedContent);
-			else {
-				session.baseline = submittedContent;
-				session.dirty = session.content !== submittedContent;
+			if (session.isExternallyStale) {
+				if (!(await this.#confirmOverwrite(session))) return false;
+				return await this.#writeSubmittedContent(
+					session,
+					submittedContent,
+					'overwrite',
+					controller.signal,
+				);
 			}
-			return true;
+
+			try {
+				return await this.#writeSubmittedContent(
+					session,
+					submittedContent,
+					'reject',
+					controller.signal,
+				);
+			} catch (error) {
+				if (!this.#isFileRevisionConflict(error)) throw error;
+				session.isExternallyStale = true;
+				if (!(await this.#confirmOverwrite(session))) return false;
+				return await this.#writeSubmittedContent(
+					session,
+					submittedContent,
+					'overwrite',
+					controller.signal,
+				);
+			}
 		} catch (error) {
+			if (isAbortError(error) || this.get(session.id) !== session) return false;
 			session.saveError = error instanceof Error ? error.message : String(error);
 			return false;
 		} finally {
+			if (session.saveController === controller) session.saveController = null;
 			session.saving = false;
 			session.pendingMutationCount -= 1;
 		}
 	}
 
-	async reload(sessionId: string): Promise<void> {
+	async refresh(sessionId: string): Promise<void> {
 		const session = this.get(sessionId);
-		if (!session || session.dirty || session.pendingMutationCount > 0) return;
-		await this.#load(session);
+		if (
+			!session ||
+			session.loading ||
+			session.refreshing ||
+			session.saving ||
+			session.pendingMutationCount > 0
+		) {
+			return;
+		}
+		if (!session.loadedRevision) {
+			await this.#loadInitial(session);
+			return;
+		}
+		if (session.dirty && !(await this.confirmDestructive(sessionId, 'refresh'))) return;
+		if (!this.#canRefresh(session)) return;
+
+		this.#invalidateFreshness(session);
+		const generation = ++session.refreshGeneration;
+		session.refreshController?.abort();
+		const controller = new AbortController();
+		session.refreshController = controller;
+		const contentAtStart =
+			session.contentKind === 'image'
+				? null
+				: (session.editor?.currentContent() ?? session.content);
+		this.#setRefreshing(session, true);
+		session.refreshError = null;
+		try {
+			const loaded = await this.#readLatest(session, controller.signal);
+			if (!this.#isCurrentRefresh(session, controller, generation)) return;
+			if (
+				loaded.kind === 'text' &&
+				(session.editor?.currentContent() ?? session.content) !== contentAtStart
+			) {
+				session.isExternallyStale = true;
+				return;
+			}
+			this.#commitLoadedContent(session, loaded);
+		} catch (error) {
+			if (
+				isAbortError(error) ||
+				!this.#isCurrentRefresh(session, controller, generation)
+			) {
+				return;
+			}
+			session.refreshError = error instanceof Error ? error.message : String(error);
+		} finally {
+			if (session.refreshController === controller) {
+				session.refreshController = null;
+				this.#setRefreshing(session, false);
+			}
+		}
+	}
+
+	async reload(sessionId: string): Promise<void> {
+		await this.refresh(sessionId);
+	}
+
+	async checkFreshness(sessionId: string): Promise<void> {
+		const session = this.get(sessionId);
+		if (
+			!session?.loadedRevision ||
+			session.loading ||
+			session.refreshing ||
+			session.saving ||
+			session.pendingMutationCount > 0 ||
+			session.isCheckingFreshness ||
+			session.isExternallyStale
+		) {
+			return;
+		}
+
+		const generation = ++session.freshnessGeneration;
+		session.freshnessController?.abort();
+		const controller = new AbortController();
+		session.freshnessController = controller;
+		session.isCheckingFreshness = true;
+		try {
+			const result = await (this.deps.getFileRevision ?? getFileRevision)(
+				{
+					projectPath: session.canonicalFileRootPath,
+					filePath: session.relativePath,
+				},
+				{ signal: controller.signal },
+			);
+			if (!this.#isCurrentFreshness(session, controller, generation)) return;
+			session.freshnessError = null;
+			session.isExternallyStale = this.#revisionIsStale(session.loadedRevision, result);
+		} catch (error) {
+			if (
+				isAbortError(error) ||
+				!this.#isCurrentFreshness(session, controller, generation)
+			) {
+				return;
+			}
+			session.freshnessError = error instanceof Error ? error.message : String(error);
+		} finally {
+			if (session.freshnessController === controller) {
+				session.freshnessController = null;
+				session.isCheckingFreshness = false;
+			}
+		}
 	}
 
 	async confirmDestructive(
 		sessionId: string,
 		reason: FileGuardRequest['reason'],
 	): Promise<boolean> {
-		return this.#guardQueue.enqueue(async () => {
-			while (true) {
+		while (true) {
+			const choice = await this.#decisionQueue.enqueue(async () => {
 				const session = this.get(sessionId);
-				if (!session) return true;
-				if (session.pendingMutationCount > 0) return false;
-				if (!session.dirty) return true;
-				const choice = await new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
+				if (!session || !session.dirty) return 'not-needed' as const;
+				if (session.pendingMutationCount > 0) return 'blocked' as const;
+				return new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
 					this.#openMainInert(() => {
 						this.#guardResolve = resolve;
 						this.guardRequest = { sessionId, fileName: session.fileName, reason };
 					});
 				});
-				if (choice === 'cancel') return false;
-				if (choice === 'discard') return true;
-				if (!(await this.save(sessionId))) return false;
-				// A user can keep editing while Save is in flight. Re-prompt instead of
-				// allowing the caller to destroy a newly dirty revision.
-			}
-		});
+			});
+			if (choice === 'not-needed' || choice === 'discard') return true;
+			if (choice === 'blocked' || choice === 'cancel' || reason === 'refresh') return false;
+			if (!(await this.save(sessionId))) return false;
+			// The guard re-prompts if edits arrive while Save is in flight.
+		}
 	}
 
 	resolveGuard(choice: 'save' | 'discard' | 'cancel'): void {
@@ -221,9 +378,18 @@ export class FileSessionRegistry {
 		resolve?.(choice);
 	}
 
+	resolveOverwrite(choice: 'overwrite' | 'cancel'): void {
+		const resolve = this.#overwriteResolve;
+		this.#overwriteResolve = null;
+		this.overwriteRequest = null;
+		resolve?.(choice);
+	}
+
 	destroy(sessionId: string): void {
 		const session = this.get(sessionId);
 		if (!session) return;
+		if (this.guardRequest?.sessionId === sessionId) this.resolveGuard('cancel');
+		if (this.overwriteRequest?.sessionId === sessionId) this.resolveOverwrite('cancel');
 		session.dispose();
 		this.#sessionIdByIdentity.delete(session.identityKey);
 		const next = { ...this.sessions };
@@ -299,7 +465,8 @@ export class FileSessionRegistry {
 		try {
 			const target = this.deps.getIsMobile()
 				? undefined
-				: (request.target ?? this.deps.getDefaultPlacement(session.rendererMode));
+				: (request.target ??
+					this.deps.getDefaultPlacement(session.rendererMode, request.origin));
 			placementResult = await this.deps.getPlacement().placeFileSession(session.id, target, {
 				publish,
 				rollback,
@@ -314,53 +481,20 @@ export class FileSessionRegistry {
 			session.dispose();
 			return null;
 		}
-		void this.#load(session);
+		void this.#loadInitial(session);
 		return session;
 	}
 
-	async #load(session: FileSession): Promise<void> {
+	async #loadInitial(session: FileSession): Promise<void> {
 		session.loadController?.abort();
 		const controller = new AbortController();
 		session.loadController = controller;
 		session.loading = true;
 		session.loadError = null;
 		try {
-			if (session.rendererMode === 'image') {
-				const response = await (this.deps.fetchContent ?? apiFetch)(
-					getContentUrl({
-						projectPath: session.canonicalFileRootPath,
-						filePath: session.relativePath,
-					}),
-					{ signal: controller.signal },
-				);
-				if (!response.ok) {
-					throw new Error(m.file_session_content_request_failed({ status: response.status }));
-				}
-				const objectUrl = URL.createObjectURL(await response.blob());
-				if (controller.signal.aborted) {
-					URL.revokeObjectURL(objectUrl);
-					return;
-				}
-				if (session.imageObjectUrl) URL.revokeObjectURL(session.imageObjectUrl);
-				session.imageObjectUrl = objectUrl;
-				return;
-			}
-			const data = await (this.deps.readText ?? readText)(
-				{
-					projectPath: session.canonicalFileRootPath,
-					filePath: session.relativePath,
-				},
-				{ signal: controller.signal },
-			);
+			const loaded = await this.#readLatest(session, controller.signal);
 			if (controller.signal.aborted) return;
-			const content = data.content ?? '';
-			if (session.editor) session.editor.resetContent(content);
-			else {
-				session.baseline = content;
-				session.content = content;
-				session.editorState = null;
-				session.dirty = false;
-			}
+			this.#commitLoadedContent(session, loaded);
 		} catch (error) {
 			if (isAbortError(error)) return;
 			session.loadError = error instanceof Error ? error.message : String(error);
@@ -370,6 +504,142 @@ export class FileSessionRegistry {
 				session.loading = false;
 			}
 		}
+	}
+
+	async #readLatest(session: FileSession, signal: AbortSignal): Promise<LoadedFileContent> {
+		const params = {
+			projectPath: session.canonicalFileRootPath,
+			filePath: session.relativePath,
+		};
+		if (session.contentKind === 'image') {
+			const result = await (this.deps.readContent ?? readContent)(params, { signal });
+			return { kind: 'image', ...result };
+		}
+		const result = await (this.deps.readText ?? readText)(params, { signal });
+		return { kind: 'text', content: result.content, revision: result.revision };
+	}
+
+	#commitLoadedContent(session: FileSession, loaded: LoadedFileContent): void {
+		if (loaded.kind === 'image') {
+			const objectUrl = URL.createObjectURL(loaded.blob);
+			if (session.imageObjectUrl) URL.revokeObjectURL(session.imageObjectUrl);
+			session.imageObjectUrl = objectUrl;
+		} else if (session.editor) {
+			session.editor.replaceContentFromDisk(loaded.content);
+		} else {
+			session.baseline = loaded.content;
+			session.content = loaded.content;
+			session.editorState = null;
+			session.dirty = false;
+		}
+		session.loadedRevision = loaded.revision;
+		session.isExternallyStale = false;
+		session.refreshError = null;
+		session.freshnessError = null;
+		session.saveError = null;
+	}
+
+	async #writeSubmittedContent(
+		session: FileSession,
+		submittedContent: string,
+		conflictResolution: FileSaveConflictResolution,
+		signal: AbortSignal,
+	): Promise<boolean> {
+		const expectedRevision = session.loadedRevision;
+		if (!expectedRevision) return false;
+		const result = await (this.deps.saveText ?? saveText)(
+			{
+				projectPath: session.canonicalFileRootPath,
+				filePath: session.relativePath,
+				content: submittedContent,
+				expectedRevision,
+				conflictResolution,
+			},
+			{ signal },
+		);
+		if (signal.aborted || this.get(session.id) !== session) return false;
+		if (session.editor) session.editor.acceptBaseline(submittedContent);
+		else {
+			session.baseline = submittedContent;
+			session.dirty = session.content !== submittedContent;
+		}
+		session.loadedRevision = result.revision;
+		session.isExternallyStale = false;
+		session.refreshError = null;
+		session.freshnessError = null;
+		return true;
+	}
+
+	#confirmOverwrite(session: FileSession): Promise<boolean> {
+		return this.#decisionQueue.enqueue(async () => {
+			if (this.get(session.id) !== session) return false;
+			const choice = await new Promise<'overwrite' | 'cancel'>((resolve) => {
+				this.#openMainInert(() => {
+					this.#overwriteResolve = resolve;
+					this.overwriteRequest = { sessionId: session.id, fileName: session.fileName };
+				});
+			});
+			return choice === 'overwrite' && this.get(session.id) === session;
+		});
+	}
+
+	#isFileRevisionConflict(error: unknown): boolean {
+		return error instanceof ApiError && error.errorCode === 'FILE_REVISION_CONFLICT';
+	}
+
+	#revisionIsStale(
+		loadedRevision: FileRevision,
+		result: FileRevisionResponse,
+	): boolean {
+		return result.status === 'missing' || result.revision !== loadedRevision;
+	}
+
+	#invalidateFreshness(session: FileSession): void {
+		session.freshnessGeneration += 1;
+		session.freshnessController?.abort();
+		session.freshnessController = null;
+		session.isCheckingFreshness = false;
+	}
+
+	#canRefresh(session: FileSession): boolean {
+		return (
+			this.get(session.id) === session &&
+			!session.loading &&
+			!session.refreshing &&
+			!session.saving &&
+			session.pendingMutationCount === 0
+		);
+	}
+
+	#setRefreshing(session: FileSession, refreshing: boolean): void {
+		session.refreshing = refreshing;
+		session.editor?.reconfigure();
+	}
+
+	#isCurrentFreshness(
+		session: FileSession,
+		controller: AbortController,
+		generation: number,
+	): boolean {
+		return (
+			this.get(session.id) === session &&
+			!controller.signal.aborted &&
+			session.freshnessController === controller &&
+			session.freshnessGeneration === generation
+		);
+	}
+
+	#isCurrentRefresh(
+		session: FileSession,
+		controller: AbortController,
+		generation: number,
+	): boolean {
+		return (
+			this.get(session.id) === session &&
+			!controller.signal.aborted &&
+			session.refreshController === controller &&
+			session.refreshGeneration === generation
+		);
 	}
 
 	#openMainInert<T>(commitOpen: () => T): T {

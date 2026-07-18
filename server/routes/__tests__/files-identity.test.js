@@ -43,6 +43,19 @@ function identityUrl(params) {
 }
 
 describe('file identity route', () => {
+  it('rejects a direct project selector outside the configured base', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = identityUrl({ projectPath: outsidePath, path: 'secret.ts' });
+    const response = await routes['/api/v1/files/identity'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
+  });
+
   it('canonicalizes project and file aliases into one identity', async () => {
     const projectAlias = path.join(projectBase, 'project-alias');
     await fs.symlink(projectPath, projectAlias, 'dir');
@@ -105,6 +118,25 @@ describe('file identity route', () => {
     });
   });
 
+  it('canonicalizes an in-root symlink to an in-root file', async () => {
+    await fs.symlink(
+      path.join(projectPath, 'src/file.ts'),
+      path.join(projectPath, 'src/in-root-alias.ts'),
+    );
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = identityUrl({ projectPath, path: 'src/in-root-alias.ts' });
+    const response = await routes['/api/v1/files/identity'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).identity).toEqual({
+      canonicalFileRootPath: projectPath,
+      normalizedRelativePath: 'src/file.ts',
+    });
+  });
+
   it('gives chat identity precedence over a direct project selector', async () => {
     const routes = createFilesRoutes({ getChat: () => ({ projectPath }) });
     const url = identityUrl({
@@ -123,48 +155,53 @@ describe('file identity route', () => {
     );
   });
 
-  it('rejects invalid, absolute, directory, and missing file paths', async () => {
+  it('rejects an encoded parent traversal path', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
-    const invalidUrl = identityUrl({ projectPath, path: '../outside.txt' });
+    const url = new URL(
+      `http://localhost/api/v1/files/identity?projectPath=${encodeURIComponent(projectPath)}&path=..%2Foutside.txt`,
+    );
+    const response = await routes['/api/v1/files/identity'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects an absolute file path', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
     const absoluteUrl = identityUrl({
       projectPath,
       path: path.join(projectPath, 'src/file.ts'),
     });
-    const directoryUrl = identityUrl({ projectPath, path: 'src' });
-    const missingUrl = identityUrl({ projectPath, path: 'src/missing.ts' });
+    const response = await routes['/api/v1/files/identity'].GET(
+      new Request(absoluteUrl),
+      absoluteUrl,
+    );
 
-    expect(
-      (
-        await routes['/api/v1/files/identity'].GET(
-          new Request(invalidUrl),
-          invalidUrl,
-        )
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await routes['/api/v1/files/identity'].GET(
-          new Request(absoluteUrl),
-          absoluteUrl,
-        )
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await routes['/api/v1/files/identity'].GET(
-          new Request(directoryUrl),
-          directoryUrl,
-        )
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await routes['/api/v1/files/identity'].GET(
-          new Request(missingUrl),
-          missingUrl,
-        )
-      ).status,
-    ).toBe(404);
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects a directory target', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = identityUrl({ projectPath, path: 'src' });
+    const response = await routes['/api/v1/files/identity'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it('returns not found for a missing target', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = identityUrl({ projectPath, path: 'src/missing.ts' });
+    const response = await routes['/api/v1/files/identity'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(404);
   });
 
   it('rejects a file alias that escapes the canonical project root', async () => {
@@ -179,5 +216,6 @@ describe('file identity route', () => {
     );
 
     expect(response.status).toBe(403);
+    expect(await response.json()).not.toHaveProperty('identity');
   });
 });

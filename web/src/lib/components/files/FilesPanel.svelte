@@ -16,6 +16,7 @@
 			fileRootPath,
 			relativePath: node.relativePath,
 			mode: 'auto',
+			origin: presentation,
 			reason: 'user-open',
 		});
 	}

@@ -279,7 +279,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 	});
 
-	it('serializes dialog collisions and revalidates the occupant after each guard', async () => {
+	it('serializes dialog replacements without stacking and revalidates each occupant', async () => {
 		const firstConfirmation = deferred<boolean>();
 		const secondConfirmation = deferred<boolean>();
 		const confirmations = [firstConfirmation, secondConfirmation];

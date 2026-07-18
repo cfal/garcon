@@ -1,9 +1,13 @@
 <script lang="ts">
-	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import Markdown, { type MarkdownLinkNavigateEvent } from '$lib/components/chat/Markdown.svelte';
+	import { resolveFileLinkFromFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
-	import { getLocalSettings } from '$lib/context';
+	import { getFileSessions, getLocalSettings } from '$lib/context';
+	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 
-	let { session }: { session: FileSession } = $props();
+	let { session, presentation }: { session: FileSession; presentation: PresentationHostId } =
+		$props();
+	const files = getFileSessions();
 	const localSettings = getLocalSettings();
 	let contentElement: HTMLDivElement;
 	const markdownFontSize = $derived(
@@ -20,6 +24,22 @@
 			session.markdownScrollTop = element.scrollTop;
 		};
 	});
+
+	function navigateFileLink(link: MarkdownLinkNavigateEvent): boolean {
+		if (link.kind !== 'file') return false;
+		const target = resolveFileLinkFromFile(link.rawHref, {
+			fileRootPath: session.canonicalFileRootPath,
+			sourceFilePath: session.relativePath,
+		});
+		if (!target) return false;
+		void files.open({
+			...target,
+			mode: 'auto',
+			origin: presentation,
+			reason: 'user-open',
+		});
+		return true;
+	}
 </script>
 
 <div
@@ -31,7 +51,12 @@
 	class="markdown-viewer-content h-full overflow-auto bg-background p-4 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-6"
 	style={`--markdown-viewer-font-size: ${markdownFontSize}px;`}
 >
-	<Markdown source={session.content} variant="assistant" />
+	<Markdown
+		source={session.content}
+		variant="assistant"
+		fileLinkBasePath={session.canonicalFileRootPath}
+		onLinkNavigate={navigateFileLink}
+	/>
 </div>
 
 <style>

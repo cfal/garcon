@@ -114,6 +114,14 @@ describe('parseFileLink', () => {
 			expect(result.kind).toBe('file');
 			expect(result.relativePath).toBe('src/utils.ts');
 		});
+
+		it('relativizes Windows paths under a Windows base path', () => {
+			const result = parseFileLink('C:\\workspace\\docs\\guide.md', {
+				projectBasePath: 'C:/workspace',
+			});
+			expect(result.kind).toBe('file');
+			expect(result.relativePath).toBe('docs/guide.md');
+		});
 	});
 
 	describe('ignores URLs with schemes', () => {
@@ -139,6 +147,11 @@ describe('parseFileLink', () => {
 
 		it('custom scheme', () => {
 			const result = parseFileLink('vscode://file/path');
+			expect(result.kind).toBe('ignored');
+		});
+
+		it('URI-encoded scheme', () => {
+			const result = parseFileLink('https%3A%2F%2Fexample.com%2Ffile.md');
 			expect(result.kind).toBe('ignored');
 		});
 	});

@@ -26,7 +26,7 @@
 		readiness={settingsAuth.readinessFor('codex')}
 		deviceAuth={settingsAuth.deviceAuthFor('codex')}
 		pending={settingsAuth.isLoginPending('codex')}
-		onLogin={() => void settingsAuth.handleLogin('codex')}
+		onLogin={() => settingsAuth.handleLogin('codex')}
 		onCompleteLogin={completeCodexLogin}
 	/>
 
@@ -40,7 +40,7 @@
 		readiness={settingsAuth.readinessFor('claude')}
 		deviceAuth={settingsAuth.deviceAuthFor('claude')}
 		pending={settingsAuth.isLoginPending('claude')}
-		onLogin={() => void settingsAuth.handleLogin('claude')}
+		onLogin={() => settingsAuth.handleLogin('claude')}
 		onCompleteLogin={completeClaudeLogin}
 	/>
 </section>

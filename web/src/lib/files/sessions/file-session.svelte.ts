@@ -1,5 +1,5 @@
 import type { EditorState } from '@codemirror/state';
-import type { CanonicalFileIdentity } from '$shared/file-contracts';
+import type { CanonicalFileIdentity, FileRevision } from '$shared/file-contracts';
 import type { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 
@@ -42,6 +42,11 @@ export class FileSession {
 	loadError = $state<string | null>(null);
 	saving = $state(false);
 	saveError = $state<string | null>(null);
+	isExternallyStale = $state(false);
+	isCheckingFreshness = $state(false);
+	refreshing = $state(false);
+	refreshError = $state<string | null>(null);
+	freshnessError = $state<string | null>(null);
 	requestedLine = $state<number | null>(null);
 	requestedColumn = $state<number | null>(null);
 	readOnly = $state(false);
@@ -51,11 +56,17 @@ export class FileSession {
 	imageObjectUrl = $state<string | null>(null);
 	pendingMutationCount = $state(0);
 
+	loadedRevision: FileRevision | null = null;
 	editorState: EditorState | null = null;
 	textScrollTop = 0;
 	markdownScrollTop = 0;
 	editor: CodeEditorController | null = null;
 	loadController: AbortController | null = null;
+	saveController: AbortController | null = null;
+	freshnessController: AbortController | null = null;
+	refreshController: AbortController | null = null;
+	freshnessGeneration = 0;
+	refreshGeneration = 0;
 
 	constructor(identity: CanonicalFileIdentity, identityKey: string) {
 		this.identityKey = identityKey;
@@ -75,6 +86,11 @@ export class FileSession {
 
 	dispose(): void {
 		this.loadController?.abort();
+		this.saveController?.abort();
+		this.freshnessGeneration += 1;
+		this.freshnessController?.abort();
+		this.refreshGeneration += 1;
+		this.refreshController?.abort();
 		this.editor?.dispose();
 		if (this.imageObjectUrl) URL.revokeObjectURL(this.imageObjectUrl);
 		this.imageObjectUrl = null;

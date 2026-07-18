@@ -9,8 +9,8 @@ import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import {
-	configuredFilePlacement,
 	createWorkspaceServices,
+	resolveConfiguredFilePlacement,
 	type WorkspaceServices,
 } from '../workspace-services.js';
 
@@ -22,21 +22,46 @@ describe('createWorkspaceServices', () => {
 		services = null;
 	});
 
-	it('reads renderer placement from the current local settings', () => {
+	it.each([
+		['code', 'main', 'main'],
+		['code', 'sidebar', 'sidebar'],
+		['code', 'dialog', 'dialog'],
+		['image', 'main', 'main'],
+		['image', 'sidebar', 'sidebar'],
+		['image', 'dialog', 'dialog'],
+		['markdown', 'main', 'main'],
+		['markdown', 'sidebar', 'sidebar'],
+		['markdown', 'dialog', 'dialog'],
+	] as const)('resolves source %s from %s to %s', (mode, origin, expected) => {
 		localStorage.clear();
 		const localSettings = createLocalSettingsStore();
 
-		expect(configuredFilePlacement(localSettings, 'code')).toBe('sidebar');
-		expect(configuredFilePlacement(localSettings, 'image')).toBe('sidebar');
-		expect(configuredFilePlacement(localSettings, 'markdown')).toBe('sidebar');
+		expect(resolveConfiguredFilePlacement(localSettings, mode, origin)).toBe(expected);
+		localSettings.destroy();
+	});
+
+	it('keeps fixed placements independent of origin and observes setting changes', () => {
+		localStorage.clear();
+		const localSettings = createLocalSettingsStore();
 
 		localSettings.set('textEditorOpenPlacement', 'main');
 		localSettings.set('imageViewerOpenPlacement', 'sidebar');
-		localSettings.set('markdownViewerOpenPlacement', 'main');
+		localSettings.set('markdownViewerOpenPlacement', 'dialog');
 
-		expect(configuredFilePlacement(localSettings, 'code')).toBe('main');
-		expect(configuredFilePlacement(localSettings, 'image')).toBe('sidebar');
-		expect(configuredFilePlacement(localSettings, 'markdown')).toBe('main');
+		expect(resolveConfiguredFilePlacement(localSettings, 'code', 'dialog')).toBe('main');
+		expect(resolveConfiguredFilePlacement(localSettings, 'image', 'main')).toBe('sidebar');
+		expect(resolveConfiguredFilePlacement(localSettings, 'markdown', 'sidebar')).toBe('dialog');
+
+		localSettings.set('textEditorOpenPlacement', 'source');
+		expect(resolveConfiguredFilePlacement(localSettings, 'code', 'sidebar')).toBe('sidebar');
+		localSettings.destroy();
+	});
+
+	it('uses main as the desktop fallback for a mobile source origin', () => {
+		localStorage.clear();
+		const localSettings = createLocalSettingsStore();
+
+		expect(resolveConfiguredFilePlacement(localSettings, 'markdown', 'mobile')).toBe('main');
 		localSettings.destroy();
 	});
 

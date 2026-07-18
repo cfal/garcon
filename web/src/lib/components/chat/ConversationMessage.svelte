@@ -358,14 +358,15 @@
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
-			projectBasePath,
-			chatProjectPath: chat.projectPath,
+			fileRootPath: projectBasePath,
+			sourceDirectoryPath: chat.projectPath,
 		});
 		if (!resolved) return;
 		void fileSessions.open({
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
+			origin: appShell.isMobile ? 'mobile' : 'main',
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
@@ -378,14 +379,15 @@
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileOpenTarget(filePath, {
-			projectBasePath,
-			chatProjectPath: chat.projectPath,
+			fileRootPath: projectBasePath,
+			sourceDirectoryPath: chat.projectPath,
 		});
 		if (!resolved) return;
 		void fileSessions.open({
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
+			origin: appShell.isMobile ? 'mobile' : 'main',
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,

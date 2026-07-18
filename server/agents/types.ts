@@ -15,6 +15,11 @@ import type {
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { StoredApiProvider, StoredApiProviderEndpoint } from '../api-providers/store.js';
 import type {
+  AgentAuthLoginCompleteResult,
+  AgentAuthLoginLaunchResult,
+  AgentAuthLoginStatus,
+} from '../../common/agent-auth.js';
+import type {
   SearchTranscriptLoadContext,
   SearchTranscriptLoadPlan,
 } from '../chats/search/source-types.js';
@@ -81,12 +86,9 @@ export interface AgentTranscriptPage {
 
 export interface AgentAuth {
   getAuthStatus(): Promise<unknown>;
-  launchLogin?(): Promise<{
-    launched: boolean;
-    alreadyRunning: boolean;
-    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
-  }>;
-  completeLogin?(code: string): Promise<{ completed: boolean }>;
+  launchLogin?(): Promise<AgentAuthLoginLaunchResult>;
+  completeLogin?(sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
+  loginStatus?(expectedSessionId?: string): AgentAuthLoginStatus;
 }
 
 export interface AgentModelQuery {
