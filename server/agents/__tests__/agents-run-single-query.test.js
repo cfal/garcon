@@ -10,7 +10,6 @@ const originalFetch = globalThis.fetch;
 
 mock.module('../claude/claude-cli.js', () => ({
   runSingleQuery: claudeQuery,
-  createClaudeNativePath: mock(() => Promise.resolve('/tmp/claude-session.jsonl')),
 }));
 
 mock.module('../codex/app-server/run-single-query.js', () => ({

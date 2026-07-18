@@ -3,9 +3,6 @@
 // flows through typed events wired in the composition root.
 
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { getClaudeBinary } from "../../config.js";
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from "../../../common/chat-types.js";
@@ -283,21 +280,6 @@ function buildClaudePermissionApprovalResponse(
     }];
   }
   return response;
-}
-
-// Builds the Claude session file path from the canonicalized project path.
-async function createClaudeNativePath(projectPath: string, agentSessionId: string): Promise<string | null> {
-  if (!projectPath || !agentSessionId) return null;
-  const canonicalProjectPath = await fs.realpath(projectPath);
-  const projectName = canonicalProjectPath.replace(/[\\/:\s~_]/g, '-');
-  if (!projectName) return null;
-  return path.join(
-    os.homedir(),
-    '.claude',
-    'projects',
-    projectName,
-    `${agentSessionId}.jsonl`,
-  );
 }
 
 // Converts a finalized CLI assistant message to ChatMessage objects.
@@ -1384,4 +1366,4 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 }
 
-export { ClaudeCliRuntime, buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath, runSingleQuery };
+export { ClaudeCliRuntime, buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, runSingleQuery };

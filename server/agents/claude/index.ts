@@ -1,6 +1,6 @@
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
-import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeCliRuntime } from './claude-cli.js';
+import { runSingleQuery as runSingleQueryClaude, type ClaudeCliRuntime } from './claude-cli.js';
+import { createClaudeNativePath, resolveClaudeNativePath } from './native-path.js';
 import {
   executionEventMetadata,
   type AgentSessionSettingsPatch,
@@ -30,7 +30,9 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
   return {
     async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
       const agentSessionId = crypto.randomUUID();
-      const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId);
+      const nativePath = await createClaudeNativePath(request.projectPath, agentSessionId, {
+        configHomeDir: request.envOverrides?.CLAUDE_CONFIG_DIR,
+      });
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
         logger.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
@@ -111,15 +113,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
         return getClaudePreviewFromNativePath(nativePath);
       },
       async resolveNativePath(session) {
-        if (!session.agentSessionId) return null;
-        const candidate = await createClaudeNativePath(session.projectPath, session.agentSessionId);
-        if (!candidate) return null;
-        try {
-          await fs.access(candidate);
-          return candidate;
-        } catch {
-          return null;
-        }
+        return resolveClaudeNativePath(session);
       },
       async resolveSearchLoadPlan(session) {
         const nativePath = session.nativePath
