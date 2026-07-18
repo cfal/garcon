@@ -9,4 +9,5 @@ export interface PendingInputHistoryReader {
 
 export interface ChatViewPageReader {
   getOrCreatePage(chatId: string, limit: number, beforeSeq?: number): Promise<ChatViewPage>;
+  reconcileNativeSnapshot(chatId: string, messages: readonly ChatMessage[]): Promise<void>;
 }

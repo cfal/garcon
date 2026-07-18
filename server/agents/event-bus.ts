@@ -1,4 +1,4 @@
-import type { AgentEventMetadata } from './session-types.js';
+import type { AgentEventMetadata, AgentExecutionCommandType } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import { createLogger } from '../lib/log.js';
 import { matchesTurnIdentity } from '../lib/turn-identity.js';
@@ -7,7 +7,7 @@ const logger = createLogger('agents:event-bus');
 
 export interface TurnEventMetadata {
   clientRequestId?: string;
-  commandType?: 'chat-start';
+  commandType?: AgentExecutionCommandType;
   upstreamRequestId?: string;
   turnId?: string;
 }
@@ -16,7 +16,11 @@ function mergeTurnEventMetadata(
   base: TurnEventMetadata | undefined,
   event: AgentEventMetadata | undefined,
 ): TurnEventMetadata | undefined {
-  const metadata = { ...(base ?? {}), ...(event ?? {}) };
+  const metadata = {
+    ...(base ?? {}),
+    ...(event ?? {}),
+    ...(base?.commandType ? { commandType: base.commandType } : {}),
+  };
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
@@ -37,7 +41,7 @@ export class AgentEventBus {
     this.#directory = directory;
   }
 
-  trackTurn(chatId: string, opts: { clientRequestId?: string; commandType?: 'chat-start'; turnId?: string }): void {
+  trackTurn(chatId: string, opts: TurnEventMetadata): void {
     if (opts.clientRequestId || opts.commandType || opts.turnId) {
       if (this.#turnMetadataByChatId.has(chatId)) {
         logger.warn('agents: overwriting in-flight turn metadata for chat', chatId);

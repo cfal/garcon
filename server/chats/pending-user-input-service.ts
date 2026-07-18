@@ -206,6 +206,11 @@ interface NativeReconcileRun {
   promise: Promise<void>;
 }
 
+export interface RestoredHistoryReconciliation {
+  clearedRequestIds: readonly string[];
+  nativeMessages?: readonly ChatMessage[];
+}
+
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
   listForTransport(chatId: string): PendingUserInput[];
@@ -216,7 +221,10 @@ export interface PendingUserInputServiceContract {
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
   captureCohort(chatId: string): PendingUserInputCohort;
   reconcileRetainedHistory(chatId: string): Promise<void>;
-  reconcileRestoredHistory(chatId: string): Promise<readonly string[]>;
+  reconcileRestoredHistory(
+    chatId: string,
+    onNativeSnapshot?: (messages: readonly ChatMessage[]) => Promise<void>,
+  ): Promise<RestoredHistoryReconciliation>;
   reconcileNativeHistory(chatId: string): Promise<void>;
   settleNativeCohort(cohort: PendingUserInputCohort): Promise<void>;
   settleRetainedCohort(cohort: PendingUserInputCohort): void;
@@ -229,7 +237,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   #nativeReconcileByChatId = new Map<string, NativeReconcileRun>();
   #claimedIdentitylessEvidenceByChatId = new Map<string, Map<string, IdentitylessEvidenceClaim>>();
   #restoredRequestIdsByChatId = new Map<string, Set<string>>();
-  #restoredReconcileByChatId = new Map<string, Promise<readonly string[]>>();
+  #restoredReconcileByChatId = new Map<string, Promise<RestoredHistoryReconciliation>>();
 
   constructor(messages: PendingInputHistoryReader) {
     this.#messages = messages;
@@ -331,18 +339,22 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     );
   }
 
-  async reconcileRestoredHistory(chatId: string): Promise<readonly string[]> {
+  async reconcileRestoredHistory(
+    chatId: string,
+    onNativeSnapshot?: (messages: readonly ChatMessage[]) => Promise<void>,
+  ): Promise<RestoredHistoryReconciliation> {
     const existing = this.#restoredReconcileByChatId.get(chatId);
     if (existing) return existing;
     const requestIds = this.#restoredRequestIdsByChatId.get(chatId);
-    if (!requestIds || requestIds.size === 0) return [];
+    if (!requestIds || requestIds.size === 0) return { clearedRequestIds: [] };
 
     const restoredRequestIds = new Set(requestIds);
     const promise = (async () => {
       await this.reconcileRetainedHistory(chatId);
       const cohort = this.#captureRequestCohort(chatId, restoredRequestIds);
+      let nativeMessages: readonly ChatMessage[] | undefined;
       if (cohort.records.length > 0 && !this.#messages.hasCompleteHistory?.(chatId)) {
-        await this.#reconcileNativeCohortStrictOnce(cohort);
+        nativeMessages = await this.#reconcileNativeCohortStrictOnce(cohort, onNativeSnapshot);
       }
       const unresolvedRequestIds = new Set(
         this.store.listRecordsForChat(chatId).map((record) => record.clientRequestId),
@@ -352,7 +364,10 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       for (const clientRequestId of restoredRequestIds) {
         this.#removeRestoredRequestId(chatId, clientRequestId);
       }
-      return clearedRequestIds;
+      return {
+        clearedRequestIds,
+        ...(nativeMessages ? { nativeMessages } : {}),
+      };
     })();
     this.#restoredReconcileByChatId.set(chatId, promise);
     try {
@@ -418,16 +433,21 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     });
   }
 
-  async #reconcileNativeCohortStrictOnce(cohort: PendingUserInputCohort): Promise<void> {
-    await this.#nativeEvidenceLock.runExclusive(cohort.chatId, async () => {
+  async #reconcileNativeCohortStrictOnce(
+    cohort: PendingUserInputCohort,
+    onNativeSnapshot?: (messages: readonly ChatMessage[]) => Promise<void>,
+  ): Promise<readonly ChatMessage[] | undefined> {
+    return this.#nativeEvidenceLock.runExclusive(cohort.chatId, async () => {
       const records = this.#currentCohortRecords(cohort);
-      if (records.length === 0) return;
+      if (records.length === 0) return undefined;
       const nativeMessages = await this.#messages.loadNativeMessages(cohort.chatId);
+      await onNativeSnapshot?.(nativeMessages);
       this.#clearMatches(
         cohort.chatId,
         this.#currentCohortRecords(cohort),
         userMessages(nativeMessages),
       );
+      return nativeMessages;
     });
   }
 

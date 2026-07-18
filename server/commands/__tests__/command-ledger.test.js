@@ -332,6 +332,79 @@ describe('CommandLedger', () => {
     expect(conflict.record.payload.command).toBe('first');
   });
 
+  it('returns conflict when a request identity is reused across command types', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-shared',
+      payload: { command: 'first' },
+    });
+
+    const conflict = await ledger.accept({
+      commandType: 'fork-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-shared',
+      payload: { command: 'second' },
+    });
+
+    expect(conflict).toMatchObject({
+      kind: 'conflict',
+      record: { commandType: 'agent-run' },
+    });
+  });
+
+  it('fails closed when the persisted ledger shape is malformed', async () => {
+    const malformedFiles = [
+      null,
+      { version: 2, records: [] },
+      { version: 1, records: {} },
+      { version: 1, records: [{ ...makeLedgerRecord(1), status: 'mystery' }] },
+      { version: 1, records: [{ ...makeLedgerRecord(1), payload: null }] },
+      { version: 1, records: [{ ...makeLedgerRecord(1), key: 'wrong-key' }] },
+    ];
+
+    for (const [index, value] of malformedFiles.entries()) {
+      const caseDir = path.join(workspaceDir, `malformed-${index}`);
+      await fs.mkdir(caseDir, { recursive: true });
+      await fs.writeFile(
+        path.join(caseDir, 'command-ledger.json'),
+        JSON.stringify(value),
+        'utf8',
+      );
+      await expect(new CommandLedger(caseDir).listPendingInputRecoveries()).rejects.toThrow(
+        /Invalid command ledger/,
+      );
+    }
+  });
+
+  it('fails closed on duplicate persisted keys or request identities', async () => {
+    const duplicateKey = makeLedgerRecord(1);
+    const duplicateIdentity = {
+      ...makeLedgerRecord(2),
+      key: 'fork-run:chat-1:req-1',
+      commandType: 'fork-run',
+      clientRequestId: 'req-1',
+    };
+    const cases = [
+      [duplicateKey, { ...duplicateKey }],
+      [duplicateKey, duplicateIdentity],
+    ];
+
+    for (const [index, records] of cases.entries()) {
+      const caseDir = path.join(workspaceDir, `duplicate-${index}`);
+      await fs.mkdir(caseDir, { recursive: true });
+      await fs.writeFile(
+        path.join(caseDir, 'command-ledger.json'),
+        JSON.stringify({ version: 1, records }),
+        'utf8',
+      );
+      await expect(new CommandLedger(caseDir).listPendingInputRecoveries()).rejects.toThrow(
+        /Duplicate command ledger/,
+      );
+    }
+  });
+
   it('loads persisted records before duplicate detection', async () => {
     const first = new CommandLedger(workspaceDir);
     await first.accept({

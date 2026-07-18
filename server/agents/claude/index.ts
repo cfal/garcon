@@ -38,7 +38,6 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
       assertExecutionAdmissionOpen(request);
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
-        if (request.executionAdmission?.signal.aborted) return;
         logger.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
         claude.failClaudeInternalSession(
           agentSessionId,

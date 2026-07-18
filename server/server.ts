@@ -16,6 +16,7 @@ import {
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireServerEvents } from './server-event-wiring.js';
+import { startExecutionControlPlane } from './execution-control-plane.js';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -293,6 +294,12 @@ export async function startServer(): Promise<void> {
           beforeSeq,
         );
       },
+      async reconcileNativeSnapshot(
+        chatId: string,
+        messages: Parameters<ChatViewStore['reconcileNativeSnapshot']>[1],
+      ) {
+        await chatViews.reconcileNativeSnapshot(chatId, messages);
+      },
     };
     const chatMessageAppender = {
       async appendMessages(
@@ -325,6 +332,7 @@ export async function startServer(): Promise<void> {
       {
         ledger: commandLedger,
         pendingInputs,
+        nativeSnapshots: chatViewPages,
         chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
       },
       (error) => {
@@ -401,13 +409,39 @@ export async function startServer(): Promise<void> {
       telegramSettings,
     );
 
+    let webSocketPublisher: { publish(topic: string, payload: string): unknown } | null = null;
     // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
-
-    // Recover stale chat queues from previous server runs.
-    await queue.recoverStaleChatQueues(new Set(pendingRecoveryResult.restoredChatIds));
-
-    await scheduledPrompts.start();
+    const eventWiring = await startExecutionControlPlane({
+      wireEvents: () => wireServerEvents({
+        server: {
+          publish(topic, payload) {
+            return webSocketPublisher?.publish(topic, payload);
+          },
+        },
+        agentRegistry,
+        chatRegistry,
+        settings,
+        queue,
+        metadata,
+        chatViews,
+        chatNativeReloader: indexedNativeReloader,
+        pendingInputs,
+        pendingRecovery,
+        commandLedger,
+        shareStore,
+        telegramNotifier,
+        telegramSettings,
+        scheduledPrompts,
+        snippets,
+        loadNativeMessages,
+        searchIndex: chatSearch,
+      }),
+      recoverQueues: () => queue.recoverStaleChatQueues(
+        new Set(pendingRecoveryResult.restoredChatIds),
+      ),
+      startScheduledPrompts: () => scheduledPrompts.start(),
+    });
 
     // Build route and WS handler tables
     const routes = createAllRoutes({
@@ -572,27 +606,7 @@ export async function startServer(): Promise<void> {
     } satisfies ServeOptionsWithConnectionLimit;
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
-
-    const eventWiring = wireServerEvents({
-      server,
-      agentRegistry,
-      chatRegistry,
-      settings,
-      queue,
-      metadata,
-      chatViews,
-      chatNativeReloader: indexedNativeReloader,
-      pendingInputs,
-      pendingRecovery,
-      commandLedger,
-      shareStore,
-      telegramNotifier,
-      telegramSettings,
-      scheduledPrompts,
-      snippets,
-      loadNativeMessages,
-      searchIndex: chatSearch,
-    });
+    webSocketPublisher = server;
 
     // Graceful shutdown: flush pending writes and clean up timers.
     let shuttingDown = false;

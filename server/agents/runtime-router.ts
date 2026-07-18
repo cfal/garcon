@@ -16,6 +16,7 @@ import type {
 import { normalizeThinkingModeForAgent } from '../../common/chat-modes.js';
 import type {
   AgentChatEntry,
+  AgentExecutionCommandType,
   AgentExecutionAdmission,
   PrepareProjectPathUpdateRequest,
   ResumeTurnRequest,
@@ -103,6 +104,7 @@ export class AgentRuntimeRouter {
     clientRequestId?: string;
     clientMessageId?: string;
     turnId?: string;
+    commandType?: AgentExecutionCommandType;
     executionAdmission?: AgentExecutionAdmission;
     codexGoalCommand?: CodexGoalCommand;
     codexSeedContext?: string;
@@ -143,6 +145,7 @@ export class AgentRuntimeRouter {
     let registryBound = false;
     let runtimeAbortable = false;
     let abortabilityPublished = false;
+    const commandType = opts.commandType ?? 'chat-start';
     const publishAbortability = () => {
       if (
         abortabilityPublished
@@ -156,7 +159,7 @@ export class AgentRuntimeRouter {
       abortabilityPublished = true;
       this.#events.markTurnAbortable(chatId, {
         clientRequestId: opts.clientRequestId,
-        commandType: 'chat-start',
+        commandType,
         turnId: opts.turnId,
       });
     };
@@ -184,7 +187,7 @@ export class AgentRuntimeRouter {
       ...selectionRequestFields(selection),
     };
 
-    this.#events.trackTurn(chatId, { ...opts, commandType: 'chat-start' });
+    this.#events.trackTurn(chatId, { ...opts, commandType });
     try {
       started = await agent.runtime.startSession(request);
       assertExecutionAdmissionOpen(opts);
@@ -248,6 +251,7 @@ export class AgentRuntimeRouter {
           clientRequestId: opts.clientRequestId,
           clientMessageId: opts.clientMessageId,
           turnId: opts.turnId,
+          commandType: opts.commandType,
           executionAdmission: opts.executionAdmission,
           codexGoalCommand,
           codexSeedContext: injectCodexSeed ? rawEntry.carryOverContext : undefined,
@@ -398,7 +402,11 @@ export class AgentRuntimeRouter {
       ...selectionRequestFields(selection),
     };
 
-    this.#events.trackTurn(chatId, { clientRequestId: opts.clientRequestId, turnId: opts.turnId });
+    this.#events.trackTurn(chatId, {
+      clientRequestId: opts.clientRequestId,
+      commandType: 'agent-compact',
+      turnId: opts.turnId,
+    });
     logger.info(`compact: dispatching chat=${chatId} agent=${agentId} native=${typeof agent.runtime.compact === 'function' ? 'compact()' : 'runTurn(/compact)'}`);
     try {
       if (agent.runtime.compact) {

@@ -108,6 +108,8 @@ export function wireServerEvents({
   const recentProcessFailures = new Map<string, number>();
   const chatTaskTails = new Map<string, Promise<void>>();
   const activeChatTasks = new Set<Promise<void>>();
+  let firstChatTaskError: unknown;
+  let hasChatTaskError = false;
   type DeferredTerminalFailure =
     | {
         source: 'agent';
@@ -142,6 +144,10 @@ export function wireServerEvents({
     const previous = chatTaskTails.get(chatId) ?? Promise.resolve();
     const current = previous.then(task).catch((error) => {
       logger.warn(`${label}:`, errorMessage(error));
+      if (!hasChatTaskError) {
+        hasChatTaskError = true;
+        firstChatTaskError = error;
+      }
     });
     chatTaskTails.set(chatId, current);
     activeChatTasks.add(current);
@@ -154,6 +160,12 @@ export function wireServerEvents({
   async function waitForIdle(): Promise<void> {
     while (activeChatTasks.size > 0) {
       await Promise.all([...activeChatTasks]);
+    }
+    if (hasChatTaskError) {
+      const error = firstChatTaskError;
+      firstChatTaskError = undefined;
+      hasChatTaskError = false;
+      throw error;
     }
   }
 
@@ -259,6 +271,20 @@ export function wireServerEvents({
     );
   }
 
+  async function settleExecutionCommand(
+    chatId: string,
+    turnMetadata: TurnEventMetadata | undefined,
+    status: 'finished' | 'failed',
+    error?: string,
+  ): Promise<void> {
+    if (!turnMetadata?.commandType || !turnMetadata.clientRequestId) return;
+    await commandLedger.settleTerminal(
+      commandLedgerKey(turnMetadata.commandType, chatId, turnMetadata.clientRequestId),
+      status,
+      error ? { error } : {},
+    );
+  }
+
   function reconcilePendingAfterTerminal(chatId: string, context: string): void {
     pendingInputs.reconcileNativeHistory(chatId).catch((err) => {
       logger.warn(`pending-inputs: reconcile after ${context} failed:`, errorMessage(err));
@@ -322,16 +348,7 @@ export function wireServerEvents({
     agentErrorMessage: string,
     turnMetadata?: TurnEventMetadata,
   ): Promise<void> {
-    if (
-      turnMetadata?.commandType === 'chat-start'
-      && turnMetadata.clientRequestId
-    ) {
-      await commandLedger.settleTerminal(
-        commandLedgerKey('chat-start', chatId, turnMetadata.clientRequestId),
-        'failed',
-        { error: agentErrorMessage },
-      );
-    }
+    await settleExecutionCommand(chatId, turnMetadata, 'failed', agentErrorMessage);
     await reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
     await pendingRecovery.waitForSettlements(chatId);
     broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
@@ -343,6 +360,7 @@ export function wireServerEvents({
     options: TurnEventMetadata,
   ): Promise<void> {
     if (consumeProcessFailure(chatId, options)) return;
+    await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
     if (options.clientRequestId) {
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }
@@ -378,9 +396,10 @@ export function wireServerEvents({
           { fence },
         );
         if (appended.skipped) return;
-        if (parsed.length > 0) {
-          metadata.updateFromAppendedMessages(chatId, parsed);
-          appendSearchMessages(chatId, parsed);
+        const committedMessages = appended.messages.map((entry) => entry.message);
+        if (committedMessages.length > 0) {
+          metadata.updateFromAppendedMessages(chatId, committedMessages);
+          appendSearchMessages(chatId, committedMessages);
         }
         if (appended.messages.length > 0) {
           broadcast(
@@ -421,15 +440,7 @@ export function wireServerEvents({
     scheduleChatTask(chatId, 'server-events: turn completion failed', async () => {
       if (!chatExists(chatId)) return;
       if (queuedFinalization && await queuedFinalization !== 'committed') return;
-      if (
-        turnMetadata?.commandType === 'chat-start'
-        && turnMetadata.clientRequestId
-      ) {
-        await commandLedger.settleTerminal(
-          commandLedgerKey('chat-start', chatId, turnMetadata.clientRequestId),
-          'finished',
-        );
-      }
+      await settleExecutionCommand(chatId, turnMetadata, 'finished');
       if (!expectedAbort) await pendingInputs.reconcileNativeHistory(chatId);
       await pendingRecovery.waitForSettlements(chatId);
       if (!chatExists(chatId)) return;
@@ -465,6 +476,8 @@ export function wireServerEvents({
       return;
     }
     if (expectedAbort) {
+      scheduleChatTask(chatId, 'server-events: interrupted command settlement failed', () =>
+        settleExecutionCommand(chatId, turnMetadata, 'finished'));
       queue.checkChatIdle(chatId).catch((err) => {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
@@ -591,7 +604,11 @@ export function wireServerEvents({
   queue.onSessionStopped((chatId, success, intent, stopId) => {
     const acknowledgement = userAbortLifecycle.onSessionStopped(chatId, stopId, success);
     if (acknowledgement.terminalDisposition === 'suppress') {
-      takeDeferredTerminalFailure(chatId, acknowledgement.turn);
+      const failure = takeDeferredTerminalFailure(chatId, acknowledgement.turn);
+      if (failure) {
+        scheduleChatTask(chatId, 'server-events: interrupted command settlement failed', () =>
+          settleExecutionCommand(chatId, failure.turnMetadata, 'finished'));
+      }
     } else if (acknowledgement.terminalDisposition === 'release') {
       const failure = takeDeferredTerminalFailure(chatId, acknowledgement.turn);
       if (failure) releaseDeferredTerminalFailure(failure);

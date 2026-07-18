@@ -19,6 +19,11 @@ import type { CodexGoalCommand } from './codex/goal-command.js';
 
 export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
 export type AgentName = AgentId;
+export type AgentExecutionCommandType =
+  | 'chat-start'
+  | 'agent-run'
+  | 'fork-run'
+  | 'agent-compact';
 
 export type CodexConfigValue = string | number | boolean | CodexConfigValue[] | { [key: string]: CodexConfigValue };
 export type CodexConfigObject = { [key: string]: CodexConfigValue };
@@ -74,14 +79,14 @@ export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
 
 export interface AgentEventMetadata {
   clientRequestId?: string;
-  commandType?: 'chat-start';
+  commandType?: AgentExecutionCommandType;
   turnId?: string;
   upstreamRequestId?: string;
 }
 
 export function executionEventMetadata(
   request: Pick<AgentExecutionConfig, 'clientRequestId' | 'turnId'>,
-  commandType?: 'chat-start',
+  commandType?: AgentExecutionCommandType,
 ): AgentEventMetadata {
   return Object.freeze({
     ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
@@ -248,5 +253,6 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   clientRequestId?: string;
   clientMessageId?: string;
   turnId?: string;
+  commandType?: AgentExecutionCommandType;
   executionAdmission?: AgentExecutionAdmission;
 };

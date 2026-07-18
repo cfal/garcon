@@ -1090,6 +1090,23 @@ describe('orchestration', () => {
       }]);
     });
 
+    it('keeps nonblocking direct admission abortable until exact terminal settlement', async () => {
+      let running = false;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-starting' });
+
+      running = true;
+      await orchQueue.completeDirectTurn(reservation);
+      expect(reservation.executionAdmission.signal.aborted).toBe(false);
+
+      expect(orchQueue.beginShutdown()).toContain('c1');
+      expect(reservation.executionAdmission.signal.aborted).toBe(true);
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-starting' });
+      await orchQueue.waitForExecutionOwners();
+    });
+
     it('honors an interrupt drain request after an aborted direct turn releases execution', async () => {
       const directStarted = deferred();
       const finishDirect = deferred();

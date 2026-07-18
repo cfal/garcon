@@ -13,7 +13,163 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function createWiringFixture(overrides = {}) {
+  const agentListeners = {};
+  const queueListeners = {};
+  const noOpSubscription = mock(() => undefined);
+  const pendingInputs = overrides.pendingInputs ?? new PendingUserInputService({
+    loadNativeMessages: mock(async () => []),
+    getRetainedHistoryMessages: mock(() => []),
+  });
+  const agentRegistry = {
+    onMessages: mock((callback) => { agentListeners.messages = callback; }),
+    onProcessing: noOpSubscription,
+    onSessionCreated: noOpSubscription,
+    onFinished: mock((callback) => { agentListeners.finished = callback; }),
+    onFailed: mock((callback) => { agentListeners.failed = callback; }),
+    discardTurn: mock(() => undefined),
+    settleTurn: mock(() => undefined),
+  };
+  const queue = {
+    onQueueUpdated: noOpSubscription,
+    onSessionStopRequested: noOpSubscription,
+    onDispatching: noOpSubscription,
+    onChatMessages: noOpSubscription,
+    onSessionStopped: noOpSubscription,
+    onTurnFailed: mock((callback) => { queueListeners.failed = callback; }),
+    onTurnSettled: noOpSubscription,
+    getQueuedTurnFinalization: mock(() => null),
+    onAgentTurnTerminal: mock(() => undefined),
+    checkChatIdle: mock(async () => undefined),
+  };
+  const metadata = {
+    updateFromAppendedMessages: mock(() => undefined),
+  };
+  const chatViews = {
+    captureFence: mock(() => 0),
+    appendAfterEnsuringGeneration: mock(async () => ({
+      generationId: 'generation-1',
+      messages: [],
+      lastSeq: 0,
+    })),
+    ...overrides.chatViews,
+  };
+  const commandLedger = {
+    settleTerminal: mock(async () => undefined),
+    ...overrides.commandLedger,
+  };
+  const searchIndex = {
+    appendMessages: mock(() => undefined),
+    markDirty: mock(() => undefined),
+    deleteChat: mock(() => undefined),
+  };
+  const wiring = wireServerEvents({
+    server: { publish: mock(() => undefined) },
+    agentRegistry,
+    chatRegistry: {
+      getChat: mock(() => ({})),
+      onChatAdded: noOpSubscription,
+      onChatRemoved: noOpSubscription,
+      onChatReadUpdated: noOpSubscription,
+      onChatProjectPathUpdated: noOpSubscription,
+    },
+    settings: {
+      onSessionNameChanged: noOpSubscription,
+      onListChanged: noOpSubscription,
+      onRemoteSettingsChanged: noOpSubscription,
+    },
+    queue,
+    metadata,
+    chatViews,
+    chatNativeReloader: {
+      reloadFromNative: mock(async () => ({
+        generationId: 'generation-2',
+        messages: [],
+        lastSeq: 0,
+      })),
+    },
+    pendingInputs,
+    pendingRecovery: { waitForSettlements: mock(async () => undefined) },
+    commandLedger,
+    shareStore: { revokeShareByChatId: mock(async () => undefined) },
+    telegramNotifier: {},
+    telegramSettings: { onChanged: noOpSubscription },
+    scheduledPrompts: { onInvalidated: noOpSubscription },
+    snippets: { onInvalidated: noOpSubscription },
+    loadNativeMessages: mock(async () => []),
+    searchIndex,
+  });
+  return {
+    agentListeners,
+    queueListeners,
+    wiring,
+    metadata,
+    chatViews,
+    commandLedger,
+    searchIndex,
+  };
+}
+
 describe('server event wiring', () => {
+  it('settles every direct execution command only at its exact terminal event', async () => {
+    const fixture = createWiringFixture();
+
+    fixture.agentListeners.finished('chat-1', 0, {
+      clientRequestId: 'req-run',
+      commandType: 'agent-run',
+      turnId: 'turn-run',
+    });
+    fixture.agentListeners.finished('chat-2', 0, {
+      clientRequestId: 'req-compact',
+      commandType: 'agent-compact',
+      turnId: 'turn-compact',
+    });
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
+      'agent-run:chat-1:req-run',
+      'finished',
+      {},
+    );
+    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
+      'agent-compact:chat-2:req-compact',
+      'finished',
+      {},
+    );
+  });
+
+  it('indexes only messages committed by transcript deduplication', async () => {
+    const fixture = createWiringFixture();
+
+    fixture.agentListeners.messages('chat-1', [new UserMessage(
+      '2026-06-01T00:00:00.000Z',
+      'duplicate',
+      undefined,
+      { clientRequestId: 'req-duplicate' },
+    )]);
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
+    expect(fixture.searchIndex.appendMessages).not.toHaveBeenCalled();
+  });
+
+  it('reports terminal settlement failures to the shutdown drain', async () => {
+    const settlementError = new Error('ledger unavailable');
+    const fixture = createWiringFixture({
+      commandLedger: {
+        settleTerminal: mock(async () => { throw settlementError; }),
+      },
+    });
+
+    fixture.agentListeners.finished('chat-1', 0, {
+      clientRequestId: 'req-run',
+      commandType: 'agent-run',
+      turnId: 'turn-run',
+    });
+
+    await expect(fixture.wiring.waitForIdle()).rejects.toBe(settlementError);
+  });
+
   it('classifies an expected terminal before queue settlement can retire its identity', async () => {
     const chatId = 'chat-1';
     const turn = { clientRequestId: 'req-a', turnId: 'turn-a' };

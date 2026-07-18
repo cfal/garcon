@@ -1029,7 +1029,6 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       throw new Error('Direct turn reservation is no longer active');
     }
     this.#directTurns.delete(reservation.chatId);
-    this.#directTurnAdmissionControllers.delete(reservation.chatId);
     const attempt = this.#executionAttempts.get(reservation.chatId);
     if (attempt) {
       attempt.markRunSettled();
@@ -1050,6 +1049,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     if (this.#executionAttempts.get(chatId) !== attempt) return;
     attempt.markSettled();
     this.#executionAttempts.delete(chatId);
+    this.#directTurnAdmissionControllers.delete(chatId);
     this.emit('turn-settled', chatId, attempt.identity());
     this.#notifyExecutionOwnersChanged();
   }

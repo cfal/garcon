@@ -14,6 +14,7 @@ import type {
 } from "../../common/chat-modes.js";
 import type {
   AgentChatEntry,
+  AgentExecutionCommandType,
   AgentExecutionAdmission,
   AgentSessionSettingsPatch,
   PrepareProjectPathUpdateRequest,
@@ -72,6 +73,7 @@ export interface AgentRegistryServiceContract {
     clientRequestId?: string;
     clientMessageId?: string;
     turnId?: string;
+    commandType?: AgentExecutionCommandType;
     executionAdmission?: AgentExecutionAdmission;
   }): Promise<void>;
   forkAgentSession?(args: {

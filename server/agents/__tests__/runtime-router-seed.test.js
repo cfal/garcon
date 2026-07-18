@@ -83,7 +83,7 @@ function makeRouter(overrides = {}) {
   };
 
   const router = new AgentRuntimeRouter({ registry, directory, endpointResolver, events });
-  return { router, registry, startSession, runTurn, submitActiveInput, sessions };
+  return { router, registry, startSession, runTurn, submitActiveInput, sessions, events };
 }
 
 describe('AgentRuntimeRouter seed branch', () => {
@@ -244,5 +244,23 @@ describe('AgentRuntimeRouter seed branch', () => {
 
     expect(seen).toHaveLength(1);
     expect(seen[0].skipFileMentions).toBe(true);
+  });
+
+  it('preserves the accepted command type through a seeded fresh session', async () => {
+    const { router, events } = makeRouter({
+      carryOverContext: `${SEED_CONTEXT_OPEN}\nUser: prior\n</carried-context>`,
+    });
+
+    await router.runAgentTurn('1', 'continue', {
+      clientRequestId: 'req-run',
+      commandType: 'fork-run',
+      turnId: 'turn-run',
+    });
+
+    expect(events.trackTurn).toHaveBeenCalledWith('1', expect.objectContaining({
+      clientRequestId: 'req-run',
+      commandType: 'fork-run',
+      turnId: 'turn-run',
+    }));
   });
 });

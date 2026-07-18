@@ -2,6 +2,7 @@ import type { PendingUserInputAttachment } from '../../common/pending-user-input
 import type { CommandLedger, CommandLedgerRecord } from '../commands/command-ledger.js';
 import type { PendingUserInputService } from './pending-user-input-service.js';
 import type { PendingUserInputImageEvidence } from './pending-user-input-store.js';
+import type { ChatMessage } from '../../common/chat-types.js';
 
 interface PendingUserInputRecoveryDeps {
   ledger: Pick<
@@ -12,6 +13,9 @@ interface PendingUserInputRecoveryDeps {
     PendingUserInputService,
     'reconcileRestoredHistory' | 'restoreUnconfirmed' | 'store'
   >;
+  nativeSnapshots?: {
+    reconcileNativeSnapshot(chatId: string, messages: readonly ChatMessage[]): Promise<void>;
+  };
   chatExists(chatId: string): boolean;
 }
 
@@ -19,6 +23,10 @@ export interface PendingUserInputRecoveryResult {
   restored: number;
   discardedMissingChat: number;
   restoredChatIds: string[];
+}
+
+export interface PendingUserInputRecoveryReconciliation {
+  nativeSnapshotApplied: boolean;
 }
 
 function throwCollectedErrors(errors: unknown[], message: string): void {
@@ -87,7 +95,7 @@ export class PendingUserInputRecoveryCoordinator {
   #settlementTasksByRequestKey = new Map<string, Promise<void>>();
   #unsettledRequestIdsByChatId = new Map<string, Set<string>>();
   #restoredSettlementRequestIdsByChatId = new Map<string, Set<string>>();
-  #reconciliationByChatId = new Map<string, Promise<void>>();
+  #reconciliationByChatId = new Map<string, Promise<PendingUserInputRecoveryReconciliation>>();
   #acceptingReconciliations = true;
 
   constructor(
@@ -110,20 +118,34 @@ export class PendingUserInputRecoveryCoordinator {
     });
   }
 
-  async reconcileChat(chatId: string): Promise<void> {
+  async reconcileChat(chatId: string): Promise<PendingUserInputRecoveryReconciliation> {
     const existing = this.#reconciliationByChatId.get(chatId);
     if (existing) return existing;
     if (!this.#acceptingReconciliations) {
       throw new Error('Pending-input recovery is shutting down');
     }
     const task = (async () => {
-      const clearedRequestIds = await this.#deps.pendingInputs.reconcileRestoredHistory(chatId);
-      const restoredSettlementIds = this.#trackRestoredSettlements(chatId, clearedRequestIds);
+      let nativeSnapshotApplied = false;
+      const nativeSnapshots = this.#deps.nativeSnapshots;
+      const reconciliation = await this.#deps.pendingInputs.reconcileRestoredHistory(
+        chatId,
+        nativeSnapshots
+          ? async (messages) => {
+            await nativeSnapshots.reconcileNativeSnapshot(chatId, messages);
+            nativeSnapshotApplied = true;
+          }
+          : undefined,
+      );
+      const restoredSettlementIds = this.#trackRestoredSettlements(
+        chatId,
+        reconciliation.clearedRequestIds,
+      );
       await this.#waitForRequestSettlements(chatId, restoredSettlementIds);
+      return { nativeSnapshotApplied };
     })();
     this.#reconciliationByChatId.set(chatId, task);
     try {
-      await task;
+      return await task;
     } finally {
       if (this.#reconciliationByChatId.get(chatId) === task) {
         this.#reconciliationByChatId.delete(chatId);

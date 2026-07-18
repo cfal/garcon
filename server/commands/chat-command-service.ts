@@ -33,7 +33,11 @@ import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common
 import { normalizeTags } from '../../common/tags.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
-import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
+import type {
+  AgentExecutionCommandType,
+  RunAgentTurnOptions,
+  StartedAgentSession,
+} from '../agents/session-types.js';
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -1277,11 +1281,11 @@ export class ChatCommandService {
             executionAdmission: reservation.executionAdmission,
           });
           runtimeCompleted = true;
-          await this.deps.ledger.update(ledger.record.key, { status: 'finished' });
         } catch (error: unknown) {
-          logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
+          const message = error instanceof Error ? error.message : String(error);
+          logger.error('compact: failed to compact chat:', message);
           try {
-            await this.deps.ledger.update(ledger.record.key, { status: 'failed' });
+            await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', { error: message });
           } catch (ledgerError: unknown) {
             logger.error(
               'compact: failed to record command failure:',
@@ -1542,7 +1546,7 @@ export class ChatCommandService {
       clientRequestId,
       clientMessageId,
       turnId,
-    });
+    }, 'agent-run');
   }
 
   async #submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<ForkRunCommandResponse> {
@@ -1586,7 +1590,7 @@ export class ChatCommandService {
       clientRequestId,
       clientMessageId,
       turnId,
-    });
+    }, 'fork-run');
     return { ...result, chat: await this.#projectCommandChat(input.chatId) };
   }
 
@@ -1594,6 +1598,7 @@ export class ChatCommandService {
     ledger: Awaited<ReturnType<CommandLedger['accept']>>,
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
+    commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
   ): Promise<CommandAcceptedResponse> {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError(
@@ -1611,6 +1616,7 @@ export class ChatCommandService {
       ...ids,
       turnId: ledger.record.turnId ?? ids.turnId,
     });
+    options.commandType = commandType;
     if (input.images !== undefined) options.images = input.images;
 
     let reservation: DirectTurnReservation;
@@ -1632,7 +1638,7 @@ export class ChatCommandService {
         turnId: options.turnId,
         pendingInputRecovery: 'required',
       });
-      this.#runReservedTurn(ledger.record.key, reservation, input.command, options);
+      this.#runReservedTurn(reservation, input.command, options);
       return commandResultFromRecord(scheduled ?? ledger.record);
     } catch (error) {
       const pendingRegistered = this.deps.pendingInputs.markFailed(
@@ -1676,7 +1682,6 @@ export class ChatCommandService {
   }
 
   #runReservedTurn(
-    ledgerKey: string,
     reservation: DirectTurnReservation,
     command: string,
     options: RunAgentTurnOptions,
@@ -1684,18 +1689,9 @@ export class ChatCommandService {
     const runTask = (async () => {
       try {
         await this.deps.queue.runReservedTurn(reservation, command, options);
-        await this.deps.ledger.settleTerminal(ledgerKey, 'finished');
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error('commands: run failed:', message);
-        try {
-          await this.deps.ledger.settleTerminal(ledgerKey, 'failed', { error: message });
-        } catch (ledgerError: unknown) {
-          logger.error(
-            'commands: failed to record run failure:',
-            ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
-          );
-        }
       }
     })();
     this.#trackBackgroundTask(runTask);

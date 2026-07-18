@@ -9,6 +9,7 @@ import {
   transcriptRevision,
   transcriptRevisions,
 } from '../lib/transcript-revision.js';
+import { ChatRunningError } from './errors.js';
 
 const logger = createLogger('chat-view');
 
@@ -135,6 +136,13 @@ export class ChatViewStore {
     return this.#withChat(chatId, async () => {
       const loaded = await this.#loadFullView(chatId, loadNativeMessages);
       return loaded.messages;
+    });
+  }
+
+  async reconcileNativeSnapshot(chatId: string, nativeMessages: readonly ChatMessage[]): Promise<void> {
+    await this.#withChat(chatId, async () => {
+      if (this.#isChatActive(chatId)) throw new ChatRunningError(chatId);
+      this.#reconcileFullView(chatId, [...nativeMessages]);
     });
   }
 
@@ -494,8 +502,8 @@ export class ChatViewStore {
       : [];
     let fullMessages = reconciledNativeMessages;
     if (unpersistedLiveMessages.length > 0) {
-      this.#appendLiveToView(view, unpersistedLiveMessages);
-      fullMessages = [...reconciledNativeMessages, ...unpersistedLiveMessages];
+      const appended = this.#appendLiveToView(view, unpersistedLiveMessages, 'native-wins');
+      fullMessages = [...reconciledNativeMessages, ...appended.map((entry) => entry.message)];
     }
     this.#views.set(chatId, view);
     return { view, messages: fullMessages };
@@ -569,7 +577,11 @@ export class ChatViewStore {
     return appended;
   }
 
-  #appendLiveToView(view: ChatView, messages: ChatMessage[]): ChatViewMessage[] {
+  #appendLiveToView(
+    view: ChatView,
+    messages: ChatMessage[],
+    conflictPolicy: 'reject' | 'native-wins' = 'reject',
+  ): ChatViewMessage[] {
     const existingByRequestId = new Map<string, UserMessage>();
     for (const entry of view.messages) {
       if (entry.message instanceof UserMessage && entry.message.metadata?.clientRequestId) {
@@ -587,6 +599,10 @@ export class ChatViewStore {
       const existing = existingByRequestId.get(requestId);
       if (existing) {
         if (!userEchoesAreCompatible(existing, message)) {
+          if (conflictPolicy === 'native-wins') {
+            logger.warn(`dropped conflicting retained user message during native reconciliation requestId=${requestId}`);
+            continue;
+          }
           throw new Error(`Conflicting user message identity: ${requestId}`);
         }
         continue;

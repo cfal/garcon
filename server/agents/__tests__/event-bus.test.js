@@ -218,6 +218,36 @@ describe('AgentEventBus', () => {
     }]);
   });
 
+  it('keeps the queue-owned command type when a runtime reports its fallback type', () => {
+    let emitFinished;
+    const bus = new AgentEventBus({
+      list: () => [{
+        runtime: {
+          onFinished: (cb) => { emitFinished = cb; },
+        },
+      }],
+    });
+    const terminals = [];
+    bus.onFinished((_chatId, _exitCode, turn) => terminals.push(turn));
+    bus.trackTurn('chat-1', {
+      clientRequestId: 'req-run',
+      commandType: 'agent-run',
+      turnId: 'turn-run',
+    });
+
+    emitFinished('chat-1', 0, {
+      clientRequestId: 'req-run',
+      commandType: 'chat-start',
+      turnId: 'turn-run',
+    });
+
+    expect(terminals).toEqual([{
+      clientRequestId: 'req-run',
+      commandType: 'agent-run',
+      turnId: 'turn-run',
+    }]);
+  });
+
   it('discards retained identity and abortability when a chat is removed', async () => {
     const bus = new AgentEventBus({ list: () => [] });
     bus.trackTurn('chat-1', { clientRequestId: 'req-a', turnId: 'turn-a' });

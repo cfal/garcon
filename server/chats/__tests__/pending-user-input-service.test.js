@@ -284,12 +284,12 @@ describe('PendingUserInputService', () => {
     });
 
     firstNativeLoad.resolve([]);
-    const [, clearedRequestIds] = await Promise.all([
+    const [, reconciliation] = await Promise.all([
       blockerReconciliation,
       restoredReconciliation,
     ]);
 
-    expect(clearedRequestIds).toEqual(['req-restored']);
+    expect(reconciliation.clearedRequestIds).toEqual(['req-restored']);
     expect(service.listForChat('chat-1')).toEqual(expect.arrayContaining([
       expect.objectContaining({ clientRequestId: 'req-blocker' }),
       expect.objectContaining({ clientRequestId: 'req-successor' }),

@@ -675,6 +675,10 @@ describe('ChatCommandService', () => {
     expect(second.status).toBe('duplicate');
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn.mock.calls[0][2]).toMatchObject({
+      clientRequestId: 'req-1',
+      commandType: 'agent-run',
+    });
   });
 
   it('reports a restart-interrupted duplicate instead of false acceptance', async () => {
@@ -733,7 +737,7 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         commandType: 'agent-run',
         clientRequestId: 'req-live-failure',
-        status: 'failed',
+        status: 'scheduled',
         pendingInputRecovery: 'required',
       }),
     ]);

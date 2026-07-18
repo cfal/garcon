@@ -82,6 +82,86 @@ const TERMINAL_COMMAND_STATUSES = new Set<CommandLedgerStatus>([
   'rejected',
 ]);
 
+const COMMAND_LEDGER_STATUSES = new Set<CommandLedgerStatus>([
+  'accepted',
+  'scheduled',
+  'running',
+  'finished',
+  'failed',
+  'rejected',
+]);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Invalid command ledger ${field}`);
+  }
+  return value;
+}
+
+function optionalNonEmptyString(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  return requireNonEmptyString(value, field);
+}
+
+function parseLedgerRecord(value: unknown, index: number): CommandLedgerRecord {
+  if (!isPlainRecord(value)) {
+    throw new Error(`Invalid command ledger record at index ${index}`);
+  }
+  const commandType = requireNonEmptyString(value.commandType, `records[${index}].commandType`);
+  const chatId = requireNonEmptyString(value.chatId, `records[${index}].chatId`);
+  const clientRequestId = requireNonEmptyString(
+    value.clientRequestId,
+    `records[${index}].clientRequestId`,
+  );
+  const key = requireNonEmptyString(value.key, `records[${index}].key`);
+  if (key !== commandLedgerKey(commandType, chatId, clientRequestId)) {
+    throw new Error(`Invalid command ledger key at index ${index}`);
+  }
+  if (!isPlainRecord(value.payload)) {
+    throw new Error(`Invalid command ledger records[${index}].payload`);
+  }
+  if (!COMMAND_LEDGER_STATUSES.has(value.status as CommandLedgerStatus)) {
+    throw new Error(`Invalid command ledger records[${index}].status`);
+  }
+  if (
+    value.pendingInputRecovery !== undefined
+    && value.pendingInputRecovery !== 'required'
+    && value.pendingInputRecovery !== 'settled'
+  ) {
+    throw new Error(`Invalid command ledger records[${index}].pendingInputRecovery`);
+  }
+  return {
+    key,
+    commandType,
+    chatId,
+    clientRequestId,
+    payloadHash: requireNonEmptyString(value.payloadHash, `records[${index}].payloadHash`),
+    payload: value.payload,
+    status: value.status as CommandLedgerStatus,
+    acceptedAt: requireNonEmptyString(value.acceptedAt, `records[${index}].acceptedAt`),
+    updatedAt: requireNonEmptyString(value.updatedAt, `records[${index}].updatedAt`),
+    ...(optionalNonEmptyString(value.turnId, `records[${index}].turnId`) !== undefined
+      ? { turnId: value.turnId as string }
+      : {}),
+    ...(optionalNonEmptyString(value.entryId, `records[${index}].entryId`) !== undefined
+      ? { entryId: value.entryId as string }
+      : {}),
+    ...(optionalNonEmptyString(value.error, `records[${index}].error`) !== undefined
+      ? { error: value.error as string }
+      : {}),
+    ...(optionalNonEmptyString(value.errorCode, `records[${index}].errorCode`) !== undefined
+      ? { errorCode: value.errorCode as string }
+      : {}),
+    ...(value.pendingInputRecovery !== undefined
+      ? { pendingInputRecovery: value.pendingInputRecovery as PendingInputRecoveryStatus }
+      : {}),
+  };
+}
+
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
   if (Array.isArray(value)) {
@@ -140,23 +220,24 @@ export function commandLedgerKey(commandType: string, chatId: string, clientRequ
 }
 
 function normalizeLedgerFile(value: unknown): LedgerFile {
-  const parsed = value as Partial<LedgerFile> | null;
-  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.records)) {
-    return { version: 1, records: [] };
+  if (!isPlainRecord(value) || value.version !== 1 || !Array.isArray(value.records)) {
+    throw new Error('Invalid command ledger file');
   }
-  return {
-    version: 1,
-    records: parsed.records.filter((record): record is CommandLedgerRecord => {
-      return Boolean(
-        record
-        && typeof record.key === 'string'
-        && typeof record.commandType === 'string'
-        && typeof record.chatId === 'string'
-        && typeof record.clientRequestId === 'string'
-        && typeof record.payloadHash === 'string',
-      );
-    }),
-  };
+  const records = value.records.map(parseLedgerRecord);
+  const keys = new Set<string>();
+  const requestIdentities = new Set<string>();
+  for (const [index, record] of records.entries()) {
+    if (keys.has(record.key)) {
+      throw new Error(`Duplicate command ledger key at index ${index}`);
+    }
+    keys.add(record.key);
+    const requestIdentity = JSON.stringify([record.chatId, record.clientRequestId]);
+    if (requestIdentities.has(requestIdentity)) {
+      throw new Error(`Duplicate command ledger request identity at index ${index}`);
+    }
+    requestIdentities.add(requestIdentity);
+  }
+  return { version: 1, records };
 }
 
 export class CommandLedger {
@@ -202,6 +283,11 @@ export class CommandLedger {
         }
         return { kind: 'duplicate', record: existing };
       }
+      const conflictingIdentity = [...this.#records.values()].find((record) => (
+        record.chatId === input.chatId
+        && record.clientRequestId === input.clientRequestId
+      ));
+      if (conflictingIdentity) return { kind: 'conflict', record: conflictingIdentity };
 
       const now = new Date().toISOString();
       const record: CommandLedgerRecord = {

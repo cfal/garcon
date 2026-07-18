@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { UserMessage } from '../../../common/chat-types.js';
+import { ChatViewStore } from '../chat-view-store.js';
 import { PendingUserInputRecoveryCoordinator } from '../pending-user-input-recovery.js';
 import { PendingUserInputService } from '../pending-user-input-service.js';
 
@@ -118,6 +119,115 @@ describe('PendingUserInputRecoveryCoordinator', () => {
     await expect(coordinator.waitForBackgroundTasks()).resolves.toBeUndefined();
   });
 
+  it('installs a strict native snapshot before clearing restored delivery state', async () => {
+    const record = {
+      key: 'agent-run:chat-1:req-1',
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      payloadHash: 'hash',
+      payload: { command: 'persisted before restart' },
+      status: 'failed',
+      acceptedAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:01.000Z',
+      pendingInputRecovery: 'required',
+    };
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => [record]),
+      settlePendingInputRecovery: mock(async () => true),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => [new UserMessage(
+        '2026-06-01T00:00:00.100Z',
+        'persisted before restart',
+        undefined,
+        { clientRequestId: 'req-1' },
+      )]),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const installSnapshot = mock()
+      .mockRejectedValueOnce(new Error('view unavailable'))
+      .mockResolvedValueOnce(undefined);
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      nativeSnapshots: { reconcileNativeSnapshot: installSnapshot },
+      chatExists: () => true,
+    });
+    coordinator.start();
+    await coordinator.restore();
+
+    await expect(coordinator.reconcileChat('chat-1')).rejects.toThrow('view unavailable');
+    expect(pendingInputs.listForChat('chat-1')).toHaveLength(1);
+    expect(ledger.settlePendingInputRecovery).not.toHaveBeenCalled();
+
+    await expect(coordinator.reconcileChat('chat-1')).resolves.toEqual({
+      nativeSnapshotApplied: true,
+    });
+    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
+    expect(ledger.settlePendingInputRecovery).toHaveBeenCalledWith('chat-1', 'req-1');
+  });
+
+  it('keeps restored delivery state when execution starts during the native read', async () => {
+    const nativeLoad = deferred();
+    const nativeMessage = new UserMessage(
+      '2026-06-01T00:00:00.100Z',
+      'persisted before restart',
+      undefined,
+      { clientRequestId: 'req-1' },
+    );
+    const loadNativeMessages = mock()
+      .mockImplementationOnce(() => nativeLoad.promise)
+      .mockResolvedValueOnce([nativeMessage]);
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => [{
+        key: 'agent-run:chat-1:req-1',
+        commandType: 'agent-run',
+        chatId: 'chat-1',
+        clientRequestId: 'req-1',
+        payloadHash: 'hash',
+        payload: { command: 'persisted before restart' },
+        status: 'failed',
+        acceptedAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:01.000Z',
+        pendingInputRecovery: 'required',
+      }]),
+      settlePendingInputRecovery: mock(async () => true),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages,
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    let active = false;
+    const chatViews = new ChatViewStore(() => active);
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      nativeSnapshots: chatViews,
+      chatExists: () => true,
+    });
+    coordinator.start();
+    await coordinator.restore();
+
+    const reconciliation = coordinator.reconcileChat('chat-1');
+    while (loadNativeMessages.mock.calls.length === 0) await Promise.resolve();
+    active = true;
+    nativeLoad.resolve([nativeMessage]);
+
+    await expect(reconciliation).rejects.toMatchObject({ code: 'CHAT_RUNNING' });
+    expect(pendingInputs.listForChat('chat-1')).toHaveLength(1);
+    expect(ledger.settlePendingInputRecovery).not.toHaveBeenCalled();
+    expect(chatViews.readPage('chat-1', 20)).toBeNull();
+
+    active = false;
+    await expect(coordinator.reconcileChat('chat-1')).resolves.toEqual({
+      nativeSnapshotApplied: true,
+    });
+    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
+    expect(chatViews.readPage('chat-1', 20)?.messages.map((entry) => entry.message.content))
+      .toEqual(['persisted before restart']);
+  });
+
   it('does not make restored reconciliation wait for an unrelated live settlement', async () => {
     const liveSettlement = deferred();
     const ledger = {
@@ -157,7 +267,9 @@ describe('PendingUserInputRecoveryCoordinator', () => {
     await pendingInputs.register('chat-1', 'live input', { clientRequestId: 'req-live' });
     pendingInputs.store.clear('chat-1', 'req-live', 'persisted');
 
-    await expect(coordinator.reconcileChat('chat-1')).resolves.toBeUndefined();
+    await expect(coordinator.reconcileChat('chat-1')).resolves.toEqual({
+      nativeSnapshotApplied: false,
+    });
     let backgroundFinished = false;
     const backgroundWait = coordinator.waitForBackgroundTasks().then(() => {
       backgroundFinished = true;
