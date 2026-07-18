@@ -23,7 +23,9 @@ describe('MermaidBlock', () => {
 		await waitFor(() => expect((fullscreenButton as HTMLButtonElement).disabled).toBe(false));
 		await fireEvent.click(fullscreenButton);
 
-		expect(screen.getByRole('dialog')).toBeTruthy();
+		const dialog = screen.getByRole('dialog');
+		expect(dialog).toBeTruthy();
+		expect(dialog.className).toContain('sm:max-w-none');
 		expect(screen.getByText('100%')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Zoom in (+)' }));
