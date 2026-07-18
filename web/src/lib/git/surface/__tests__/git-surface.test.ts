@@ -71,6 +71,7 @@ describe('GitSurfaceController project snapshots', () => {
 		vi.spyOn(git, 'applyActiveTarget').mockResolvedValue();
 		git.setContext('/projects/alpha', 'alpha');
 		git.setPresentationVisible(true);
+		git.history.screen = 'commit';
 		ensureTargets.mockClear();
 
 		git.setProjectState({
@@ -83,6 +84,7 @@ describe('GitSurfaceController project snapshots', () => {
 		expect(git.baseProjectPath).toBe('/projects/alpha');
 		expect(git.effectiveProjectKey).toBe('alpha');
 		expect(git.projectIdentityPending).toBe(true);
+		expect(git.history.screen).toBe('commit');
 		expect(ensureTargets).not.toHaveBeenCalled();
 
 		git.setProjectState({
@@ -94,6 +96,7 @@ describe('GitSurfaceController project snapshots', () => {
 			},
 		});
 		expect(git.projectIdentityPending).toBe(false);
+		expect(git.history.screen).toBe('commit');
 		expect(ensureTargets).toHaveBeenCalledOnce();
 	});
 
@@ -125,7 +128,7 @@ describe('GitSurfaceController project snapshots', () => {
 		await loading;
 	});
 
-	it('restores project-local target and presentation state', () => {
+	it('restores project-local presentation state without an unrestorable commit screen', () => {
 		vi.stubGlobal('localStorage', {
 			getItem: () => null,
 			setItem: () => undefined,
@@ -141,19 +144,21 @@ describe('GitSurfaceController project snapshots', () => {
 			source: 'worktree',
 		};
 		git.repository.activeView = 'history';
-		git.historyScreen = 'commit';
+		git.history.screen = 'commit';
 		git.workbench.files.activeTab = 'staged';
 		git.workbench.files.selectedFile = 'src/alpha.ts';
+		git.setContext('/projects/alpha', 'alpha');
+		expect(git.history.screen).toBe('commit');
 
 		git.setContext('/projects/beta', 'beta');
 		expect(git.repository.activeView).toBe('changes');
-		expect(git.historyScreen).toBe('list');
+		expect(git.history.screen).toBe('list');
 
 		git.setContext('/projects/alpha', 'alpha');
 
 		expect(git.activeTarget?.worktreePath).toBe('/projects/alpha/worktree');
 		expect(git.repository.activeView).toBe('history');
-		expect(git.historyScreen).toBe('commit');
+		expect(git.history.screen).toBe('list');
 		expect(git.workbench.files.activeTab).toBe('staged');
 	});
 

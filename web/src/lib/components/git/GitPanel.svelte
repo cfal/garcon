@@ -54,6 +54,7 @@
 	const gitSurface = getSingletonSurfaces().git();
 	const repository = gitSurface.repository;
 	const wb = gitSurface.workbench;
+	const history = gitSurface.history;
 	let presentationVisible = $derived(
 		isVisible && gitSurface.presentationVisible && !gitSurface.projectIdentityPending,
 	);
@@ -77,19 +78,12 @@
 			(!repository.remoteStatus.hasUpstream || repository.remoteStatus.ahead > 0),
 	);
 	let showTopToolbar = $derived(
-		!(repository.activeView === 'history' && gitSurface.historyScreen === 'commit'),
+		!(repository.activeView === 'history' && history.screen === 'commit'),
 	);
 
 	$effect(() => {
 		untrack(() => {
 			void remoteSettings.ensureLoadedInBackground();
-		});
-	});
-
-	$effect(() => {
-		const activeView = repository.activeView;
-		untrack(() => {
-			if (activeView !== 'history') gitSurface.historyScreen = 'list';
 		});
 	});
 
@@ -158,6 +152,15 @@
 			return;
 		}
 		void workspace.openSingleton('commit', 'sidebar');
+	}
+
+	function handleViewCommits(): void {
+		repository.activeView = 'history';
+	}
+
+	function handleViewChanges(): void {
+		history.backToList();
+		repository.activeView = 'changes';
 	}
 
 	async function handleRevert(): Promise<void> {
@@ -275,8 +278,8 @@
 						gitSurface.showTargetDialog = true;
 					});
 				}}
-				onViewCommits={() => (repository.activeView = 'history')}
-				onViewChanges={() => (repository.activeView = 'changes')}
+				onViewCommits={handleViewCommits}
+				onViewChanges={handleViewChanges}
 				onOpenReview={() => {
 					transientLayers.open('main-inert', () => {
 						drafts.reviewModalOpen = true;
@@ -330,15 +333,14 @@
 
 		{#if repository.activeView === 'history'}
 			<GitHistoryView
+				{history}
 				projectPath={activeProjectPath}
+				{effectiveProjectKey}
 				{isMobile}
 				diffMode={review.diffMode}
 				contextLines={review.contextLines}
 				diffFontSize={gitDiffFontSize}
 				refreshToken={gitSurface.historyRefreshToken}
-				onScreenChange={(screen) => {
-					gitSurface.historyScreen = screen;
-				}}
 				onRevertCommit={requestRevertCommit}
 				onOpenInEditor={handleOpenInEditor}
 			/>
