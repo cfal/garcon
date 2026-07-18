@@ -32,6 +32,18 @@ function deferred() {
   return { promise, resolve };
 }
 
+function directReservation(chatId) {
+  const controller = new AbortController();
+  return {
+    chatId,
+    reservationId: randomUUID(),
+    executionAdmission: {
+      signal: controller.signal,
+      markStarted: mock(() => undefined),
+    },
+  };
+}
+
 function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
   return {
     id,
@@ -123,7 +135,7 @@ function makeService(overrides = {}) {
   const queue = {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
-    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: randomUUID() })),
+    reserveDirectTurn: mock((chatId) => directReservation(chatId)),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
@@ -754,7 +766,7 @@ describe('ChatCommandService', () => {
           retryable: true,
         });
       }
-      activeReservation = { chatId, reservationId: randomUUID() };
+      activeReservation = directReservation(chatId);
       return activeReservation;
     });
     const releaseDirectTurn = mock(async (reservation) => {

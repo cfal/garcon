@@ -15,7 +15,11 @@ import {
   type UserMessageDeliveryStatus,
 } from '../common/chat-types.ts';
 import type { ChatViewMessage } from '../common/chat-view.ts';
-import { requireChatExecutionConfig, type RunAgentTurnOptions } from './agents/session-types.js';
+import {
+  requireChatExecutionConfig,
+  type AgentExecutionAdmission,
+  type RunAgentTurnOptions,
+} from './agents/session-types.js';
 import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
@@ -24,12 +28,18 @@ import { ActiveInputDeliveryError, DomainError } from './lib/domain-error.js';
 import type { TurnIdentity } from './lib/turn-identity.js';
 import { QueueExecutionAttempt } from './queue/execution-attempt.js';
 import {
+  QueuedTurnFinalizationTracker,
+  type QueuedTurnFinalizationHandle,
+  type QueuedTurnFinalizationOutcome,
+} from './queue/turn-finalization-tracker.js';
+import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
   MAX_STORED_APPLIED_QUEUE_COMMANDS,
   bumpStoredQueue,
   cloneStoredQueue,
   emptyStoredQueue,
   normalizeStoredQueueState,
+  parseStoredQueueState,
   storedQueueNeedsCanonicalization,
   type StoredAppliedQueueCommand,
   type StoredQueueEntry,
@@ -38,12 +48,18 @@ import {
 
 const logger = createLogger('queue');
 
-function optionsForQueuedTurn(options: RunAgentTurnOptions): RunAgentTurnOptions {
-  return {
-    ...options,
+function optionsForQueuedTurn(
+  options: RunAgentTurnOptions,
+  entry: StoredQueueEntry,
+): RunAgentTurnOptions {
+  const delivery = entry.delivery ?? {
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),
     turnId: crypto.randomUUID(),
+  };
+  return {
+    ...options,
+    ...delivery,
   };
 }
 
@@ -88,7 +104,7 @@ export class QueuePauseChangedError extends DomainError {
 }
 
 function queueEntry(entry: StoredQueueEntry): QueueEntry {
-  const { status: _status, ...clientEntry } = entry;
+  const { status: _status, delivery: _delivery, ...clientEntry } = entry;
   return { ...clientEntry };
 }
 
@@ -127,6 +143,7 @@ export interface StopActiveTurnResult {
 export interface DirectTurnReservation {
   readonly chatId: string;
   readonly reservationId: string;
+  readonly executionAdmission: AgentExecutionAdmission;
 }
 
 function executionTurnIdentity(turn: TurnIdentity): TurnIdentity | undefined {
@@ -266,6 +283,13 @@ export interface ChatQueueService {
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<boolean>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
+  beginShutdown(): string[];
+  abortForShutdown(chatId: string): Promise<boolean>;
+  waitForExecutionOwners(): Promise<void>;
+  getQueuedTurnFinalization(
+    chatId: string,
+    turnId: string | undefined,
+  ): Promise<QueuedTurnFinalizationOutcome> | null;
   isChatDraining(chatId: string): boolean;
   isChatExecutionReserved(chatId: string): boolean;
   triggerDrain(chatId: string): Promise<void>;
@@ -305,11 +329,18 @@ export interface ChatQueueService {
 
 export class QueueManager extends EventEmitter implements ChatQueueService {
   #locks = new KeyedPromiseLock();
+  #shuttingDown = false;
   #draining = new Set<string>();
   #directTurns = new Map<string, string>();
+  #directTurnAdmissionControllers = new Map<string, AbortController>();
+  #drainAdmissionControllers = new Map<string, AbortController>();
+  #activeDrainEntries = new Map<string, string>();
+  #shutdownDrainAborts = new Map<string, string>();
+  #executionOwnerWaiters = new Set<() => void>();
   #pendingDrainRequests = new Set<string>();
   #drainSuppressions = new Map<string, Set<DrainSuppressionReason>>();
   #executionAttempts = new Map<string, QueueExecutionAttempt>();
+  #turnFinalizations = new QueuedTurnFinalizationTracker();
   #sessionStopByChatId = new Map<string, SessionStopInFlight>();
   #queuesByChatId = new Map<string, StoredQueueState>();
   #recoveryFailure: unknown = undefined;
@@ -367,11 +398,75 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     this.on('turn-settled', cb);
   }
 
+  beginShutdown(): string[] {
+    this.#shuttingDown = true;
+    const reason = new Error('Turn interrupted because the server is shutting down');
+    for (const controller of this.#directTurnAdmissionControllers.values()) {
+      controller.abort(reason);
+    }
+    for (const [chatId, entryId] of this.#activeDrainEntries) {
+      this.#shutdownDrainAborts.set(chatId, entryId);
+    }
+    for (const controller of this.#drainAdmissionControllers.values()) {
+      controller.abort(reason);
+    }
+    return [...new Set([
+      ...this.#directTurns.keys(),
+      ...this.#draining,
+      ...this.#executionAttempts.keys(),
+    ])];
+  }
+
+  async abortForShutdown(chatId: string): Promise<boolean> {
+    const entryId = this.#activeDrainEntries.get(chatId);
+    if (entryId) this.#shutdownDrainAborts.set(chatId, entryId);
+    this.#directTurnAdmissionControllers.get(chatId)?.abort(
+      new Error('Turn interrupted because the server is shutting down'),
+    );
+    this.#drainAdmissionControllers.get(chatId)?.abort(
+      new Error('Turn interrupted because the server is shutting down'),
+    );
+    if (!this.#executionAttempts.has(chatId) && !this.#turnRunner.isChatRunning(chatId)) {
+      return true;
+    }
+    return this.#abortSession(chatId, 'stop');
+  }
+
+  async waitForExecutionOwners(): Promise<void> {
+    while (this.#hasExecutionOwner()) {
+      await new Promise<void>((resolve) => {
+        this.#executionOwnerWaiters.add(resolve);
+        if (!this.#hasExecutionOwner()) {
+          this.#executionOwnerWaiters.delete(resolve);
+          resolve();
+        }
+      });
+    }
+  }
+
   onAgentTurnTerminal(chatId: string, turn: TurnIdentity | undefined): void {
     const attempt = this.#executionAttempts.get(chatId);
     if (!attempt?.matches(turn)) return;
     attempt.markTerminalObserved();
     this.#settleExecutionAttempt(chatId, attempt);
+  }
+
+  #hasExecutionOwner(): boolean {
+    return this.#draining.size > 0
+      || this.#directTurns.size > 0
+      || this.#executionAttempts.size > 0;
+  }
+
+  #notifyExecutionOwnersChanged(): void {
+    for (const resolve of this.#executionOwnerWaiters) resolve();
+    this.#executionOwnerWaiters.clear();
+  }
+
+  getQueuedTurnFinalization(
+    chatId: string,
+    turnId: string | undefined,
+  ): Promise<QueuedTurnFinalizationOutcome> | null {
+    return this.#turnFinalizations.get(chatId, turnId);
   }
   onChatMessages(cb: ChatMessagesCallback): void {
     this.on('chat-messages', cb);
@@ -419,6 +514,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   // without a manual pause/resume; otherwise emits chat-idle when nothing is
   // pending. Skips when a drain loop is already active to avoid duplicate work.
   async checkChatIdle(chatId: string): Promise<void> {
+    if (this.#shuttingDown) return;
     if (this.#draining.has(chatId)) return;
     if (this.#turnRunner.isChatRunning(chatId)) return;
     const queue = await this.readChatQueue(chatId);
@@ -453,7 +549,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async #readChatQueueFromDisk(chatId: string): Promise<StoredQueueState> {
     try {
       const data = await fs.readFile(this.#chatQueueFilePath(chatId), 'utf8');
-      return normalizeStoredQueueState(JSON.parse(data));
+      return parseStoredQueueState(JSON.parse(data));
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyStoredQueue();
       throw error;
@@ -580,6 +676,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       entry.content = content;
       entry.revision += 1;
       entry.updatedAt = new Date().toISOString();
+      delete entry.delivery;
       if (command) recordAppliedQueueCommand(queue, command, 'replace');
       const result = await this.#commitAndPublish(chatId, bumpStoredQueue(queue));
       const updated = result.entries.find((candidate) => candidate.id === entryId)!;
@@ -727,6 +824,11 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       const next = queue.entries.find((e) => e.status === 'queued');
       if (!next) return null;
       next.status = 'sending';
+      next.delivery ??= {
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        turnId: crypto.randomUUID(),
+      };
       queue.recentlyDispatched = [
         ...queue.recentlyDispatched.filter((entry) => entry.entryId !== next.id),
         { entryId: next.id, dispatchedAt: new Date().toISOString() },
@@ -783,7 +885,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     const turnOptions = ensureTurnIdentifiers(options);
     const reservation = this.reserveDirectTurn(chatId, turnOptions);
     try {
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.registerPendingUserInput(chatId, command, turnOptions);
+      reservation.executionAdmission.signal.throwIfAborted();
     } catch (error) {
       await this.releaseDirectTurn(reservation);
       throw error;
@@ -827,13 +931,15 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       }
       throw error;
     }
-    try {
-      this.emit('chat-messages', chatId, appended.generationId, appended.messages, {
-        clientRequestId: registeredClientRequestId,
-        turnId: options.turnId,
-      });
-    } catch (error) {
-      logger.warn('queue: chat-messages listener failed after durable append:', (error as Error).message);
+    if (appended.messages.length > 0) {
+      try {
+        this.emit('chat-messages', chatId, appended.generationId, appended.messages, {
+          clientRequestId: registeredClientRequestId,
+          turnId: options.turnId,
+        });
+      } catch (error) {
+        logger.warn('queue: chat-messages listener failed after durable append:', (error as Error).message);
+      }
     }
   }
 
@@ -843,6 +949,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   reserveDirectTurn(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {
     this.#assertRecoveryReady();
+    if (this.#shuttingDown) {
+      throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
+    }
     if (
       this.#directTurns.has(chatId)
       || this.#draining.has(chatId)
@@ -851,11 +960,17 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     ) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
+    const admissionController = new AbortController();
     const reservation = Object.freeze({
       chatId,
       reservationId: crypto.randomUUID(),
+      executionAdmission: Object.freeze({
+        signal: admissionController.signal,
+        markStarted: () => undefined,
+      }),
     });
     this.#directTurns.set(chatId, reservation.reservationId);
+    this.#directTurnAdmissionControllers.set(chatId, admissionController);
     const identity = executionTurnIdentity(turn) ?? { turnId: crypto.randomUUID() };
     this.#executionAttempts.set(chatId, new QueueExecutionAttempt(identity));
     return reservation;
@@ -887,11 +1002,17 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     attempt.markLaunching();
     let outcome: 'completed' | 'failed' = 'failed';
     try {
-      await this.#turnRunner.runAgentTurn(reservation.chatId, command, options);
+      reservation.executionAdmission.signal.throwIfAborted();
+      await this.#turnRunner.runAgentTurn(reservation.chatId, command, {
+        ...options,
+        executionAdmission: reservation.executionAdmission,
+      });
       outcome = 'completed';
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.emit('turn-failed', reservation.chatId, message, options);
+      if (!reservation.executionAdmission.signal.aborted) {
+        this.emit('turn-failed', reservation.chatId, message, options);
+      }
       throw error;
     } finally {
       await this.#finishDirectTurn(reservation, outcome);
@@ -913,6 +1034,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       throw new Error('Direct turn reservation is no longer active');
     }
     this.#directTurns.delete(reservation.chatId);
+    this.#directTurnAdmissionControllers.delete(reservation.chatId);
     const attempt = this.#executionAttempts.get(reservation.chatId);
     if (attempt) {
       attempt.markRunSettled();
@@ -922,7 +1044,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.#settleExecutionAttempt(reservation.chatId, attempt);
     }
     const drainRequested = this.#pendingDrainRequests.has(reservation.chatId);
+    this.#notifyExecutionOwnersChanged();
     if (!this.#chatExists(reservation.chatId)) return;
+    if (this.#shuttingDown) return;
     if (outcome === 'completed' || drainRequested) await this.triggerDrain(reservation.chatId);
   }
 
@@ -932,6 +1056,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     attempt.markSettled();
     this.#executionAttempts.delete(chatId);
     this.emit('turn-settled', chatId, attempt.identity());
+    this.#notifyExecutionOwnersChanged();
   }
 
   #isExecutionAttemptRetired(
@@ -1118,6 +1243,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   // Triggers drain if the agent is not currently running.
   async triggerDrain(chatId: string): Promise<void> {
+    if (this.#shuttingDown) return;
     if (this.#directTurns.has(chatId) || this.#draining.has(chatId)) {
       this.#pendingDrainRequests.add(chatId);
       return;
@@ -1136,7 +1262,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   // checkChatIdle) are coalesced: a second drain while one is active is a no-op.
   async #drain(chatId: string): Promise<void> {
     if (
-      this.#draining.has(chatId)
+      this.#shuttingDown
+      || this.#draining.has(chatId)
       || this.#directTurns.has(chatId)
       || this.#isDrainSuppressed(chatId)
       || this.#sessionStopByChatId.has(chatId)
@@ -1145,7 +1272,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     try {
       while (true) {
         if (
-          this.#isDrainSuppressed(chatId)
+          this.#shuttingDown
+          || this.#isDrainSuppressed(chatId)
           || this.#hasDrainSuppression(chatId, 'manual-stop')
           || this.#directTurns.has(chatId)
           || this.#sessionStopByChatId.has(chatId)
@@ -1162,6 +1290,11 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
 
         const { entry } = result;
+        this.#activeDrainEntries.set(chatId, entry.id);
+        if (this.#shuttingDown) {
+          await this.#returnUnsentEntry(chatId, entry.id);
+          break;
+        }
         if (this.#hasDrainSuppression(chatId, 'manual-stop')) {
           await this.#restorePoppedEntryAfterStop(chatId, entry.id);
           break;
@@ -1177,10 +1310,22 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         let queuedTurnOptions: RunAgentTurnOptions = {};
         let stage: 'preparing' | 'running' | 'finalizing' = 'preparing';
         let attempt: QueueExecutionAttempt | undefined;
+        let finalization: QueuedTurnFinalizationHandle | undefined;
+        let executionStarted = false;
+        const admissionController = new AbortController();
+        this.#drainAdmissionControllers.set(chatId, admissionController);
 
         try {
-          queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId));
+          queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId), entry);
+          queuedTurnOptions.executionAdmission = Object.freeze({
+            signal: admissionController.signal,
+            markStarted: () => { executionStarted = true; },
+          });
+          if (this.#shuttingDown) {
+            admissionController.abort(new Error('Turn interrupted because the server is shutting down'));
+          }
           const turn = executionTurnIdentity(queuedTurnOptions)!;
+          finalization = this.#turnFinalizations.begin(chatId, turn.turnId!);
           attempt = new QueueExecutionAttempt(turn, entry.id);
           if (this.#executionAttempts.has(chatId)) {
             throw new Error('Another chat turn already owns execution');
@@ -1227,13 +1372,50 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
               this.#settleExecutionAttempt(chatId, attempt);
             }
           }
+          if (this.#shutdownDrainAborts.get(chatId) === entry.id) {
+            if (executionStarted) {
+              await this.requeueAndPauseChat(chatId, entry.id, 'completion-uncertain');
+            } else {
+              if (queuedTurnOptions.clientRequestId) {
+                this.#pendingInputs.discard(chatId, queuedTurnOptions.clientRequestId);
+              }
+              await this.#returnUnsentEntry(chatId, entry.id);
+            }
+            finalization.settle('not-committed');
+            break;
+          }
           stage = 'finalizing';
           await this.removeSentChat(chatId, entry.id);
+          finalization.settle('committed');
         } catch (error: unknown) {
+          if (this.#shutdownDrainAborts.get(chatId) === entry.id) {
+            attempt?.clearExpectedAbort();
+            try {
+              if (executionStarted) {
+                await this.requeueAndPauseChat(chatId, entry.id, 'completion-uncertain');
+              } else {
+                if (queuedTurnOptions.clientRequestId) {
+                  this.#pendingInputs.discard(chatId, queuedTurnOptions.clientRequestId);
+                }
+                await this.#returnUnsentEntry(chatId, entry.id);
+              }
+            } catch (compensationError: unknown) {
+              logger.error('queue: failed to preserve shutdown-aborted entry:', {
+                chatId,
+                entryId: entry.id,
+                message: compensationError instanceof Error
+                  ? compensationError.message
+                  : String(compensationError),
+              });
+            }
+            finalization?.settle('not-committed');
+            break;
+          }
           if (stage === 'running' && attempt?.isExpectedAbort === true) {
             attempt.clearExpectedAbort();
             try {
               await this.removeSentChat(chatId, entry.id);
+              finalization?.settle('committed');
               await this.#waitForSessionStop(chatId);
               continue;
             } catch (finalizeError: unknown) {
@@ -1243,7 +1425,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
                 message: finalizeError instanceof Error
                   ? finalizeError.message
                   : String(finalizeError),
-              });
+            });
               try {
                 await this.requeueAndPauseChat(chatId, entry.id, 'completion-uncertain');
               } catch (compensationError: unknown) {
@@ -1264,12 +1446,13 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
             : 'queued-turn-failed';
           if (kind === 'queued-turn-failed') {
             logger.error('queue: queued turn failed:', { chatId, entryId: entry.id, stage, message });
-            this.emit('turn-failed', chatId, message, queuedTurnOptions);
           } else {
             logger.error('queue: sent-entry finalization failed:', { chatId, entryId: entry.id, stage });
           }
+          let compensated = false;
           try {
             await this.requeueAndPauseChat(chatId, entry.id, kind);
+            compensated = true;
           } catch (compensationError: unknown) {
             logger.error('queue: failed to record automatic pause:', {
               chatId,
@@ -1278,10 +1461,15 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
               message: compensationError instanceof Error
                 ? compensationError.message
                 : String(compensationError),
-            });
+              });
+          }
+          finalization?.settle('not-committed');
+          if (kind === 'queued-turn-failed' && compensated) {
+            this.emit('turn-failed', chatId, message, queuedTurnOptions);
           }
           break;
         } finally {
+          finalization?.settle('not-committed');
           if (attempt && !attempt.isRunSettled) {
             attempt.markRunSettled();
             if (!this.#turnRunner.isChatRunning(chatId)) attempt.markTerminalObserved();
@@ -1291,9 +1479,27 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       }
     } finally {
       this.#draining.delete(chatId);
+      this.#drainAdmissionControllers.delete(chatId);
+      this.#activeDrainEntries.delete(chatId);
+      this.#shutdownDrainAborts.delete(chatId);
       this.#removeDrainSuppression(chatId, 'manual-stop');
+      this.#notifyExecutionOwnersChanged();
     }
-    if (this.#pendingDrainRequests.has(chatId)) await this.triggerDrain(chatId);
+    if (!this.#shuttingDown && this.#pendingDrainRequests.has(chatId)) await this.triggerDrain(chatId);
+  }
+
+  async #returnUnsentEntry(chatId: string, entryId: string): Promise<void> {
+    await this.#withLock(`chat:${chatId}`, async () => {
+      const queue = cloneStoredQueue(await this.#loadChatQueue(chatId));
+      const entry = queue.entries.find((candidate) => candidate.id === entryId);
+      if (!entry || entry.status !== 'sending') return;
+      entry.status = 'queued';
+      queue.recentlyDispatched = queue.recentlyDispatched.filter(
+        (candidate) => candidate.entryId !== entryId,
+      );
+      const result = await this.#commitAndPublish(chatId, bumpStoredQueue(queue));
+      this.#logMutation('requeue', chatId, entryId, result, entry.revision);
+    });
   }
 
   async #restorePoppedEntryAfterStop(chatId: string, entryId: string): Promise<void> {
@@ -1324,8 +1530,20 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.#drainSuppressions.delete(chatId);
       this.#pendingDrainRequests.delete(chatId);
       this.#directTurns.delete(chatId);
+      this.#directTurnAdmissionControllers.get(chatId)?.abort(
+        new Error('Turn interrupted because the chat was deleted'),
+      );
+      this.#directTurnAdmissionControllers.delete(chatId);
+      this.#drainAdmissionControllers.get(chatId)?.abort(
+        new Error('Turn interrupted because the chat was deleted'),
+      );
+      this.#drainAdmissionControllers.delete(chatId);
+      this.#activeDrainEntries.delete(chatId);
+      this.#shutdownDrainAborts.delete(chatId);
+      this.#turnFinalizations.clearChat(chatId);
       this.#executionAttempts.get(chatId)?.markSettled();
       this.#executionAttempts.delete(chatId);
+      this.#notifyExecutionOwnersChanged();
       this.#queuesByChatId.delete(chatId);
       try {
         await fs.unlink(this.#chatQueueFilePath(chatId));
@@ -1366,7 +1584,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           continue;
         }
         const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
-        const data = normalizeStoredQueueState(raw);
+        const data = parseStoredQueueState(raw);
         let modified = storedQueueNeedsCanonicalization(raw, data);
         const recoveredIds = new Set<string>();
         for (const entry of data.entries) {
@@ -1420,14 +1638,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
       } catch (error: unknown) {
         logger.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
-        if (
-          chatsWithUnconfirmedRecoveredInput.has(chatId)
-          && this.#chatExists(chatId)
-          && !this.#queuesByChatId.has(chatId)
-        ) {
-          this.#recoveryFailure = error;
-          throw error;
-        }
+        const recoveryError = new Error(
+          `Could not recover chat queue ${chatId}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+        this.#recoveryFailure = recoveryError;
+        throw recoveryError;
       }
     }
 

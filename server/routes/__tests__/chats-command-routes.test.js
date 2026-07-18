@@ -148,7 +148,14 @@ function createRouteAgent(sessionOverrides = {}) {
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
-    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
+    reserveDirectTurn: mock((chatId) => ({
+      chatId,
+      reservationId: 'reservation-1',
+      executionAdmission: {
+        signal: new AbortController().signal,
+        markStarted() {},
+      },
+    })),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),

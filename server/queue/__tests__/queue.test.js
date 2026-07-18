@@ -691,9 +691,13 @@ describe('queue invariants', () => {
 
     await expect(
       recoveringQueue.recoverStaleChatQueues(new Set(['uncertain-corrupt'])),
-    ).rejects.toBeInstanceOf(SyntaxError);
-    await expect(recoveringQueue.readChatQueue('uncertain-corrupt')).rejects.toBeInstanceOf(SyntaxError);
-    expect(() => recoveringQueue.reserveDirectTurn('uncertain-corrupt')).toThrow(SyntaxError);
+    ).rejects.toThrow('Could not recover chat queue uncertain-corrupt');
+    await expect(recoveringQueue.readChatQueue('uncertain-corrupt')).rejects.toThrow(
+      'Could not recover chat queue uncertain-corrupt',
+    );
+    expect(() => recoveringQueue.reserveDirectTurn('uncertain-corrupt')).toThrow(
+      'Could not recover chat queue uncertain-corrupt',
+    );
     await expect(fs.readFile(queuePath, 'utf8')).resolves.toBe('{corrupt queue state');
   });
 
@@ -877,6 +881,74 @@ describe('orchestration', () => {
   });
 
   describe('submit', () => {
+    it('rejects direct execution after shutdown admission closes', async () => {
+      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-direct' });
+      expect(orchQueue.beginShutdown()).toContain('c1');
+
+      await expect(orchQueue.runReservedTurn(
+        reservation,
+        'must not run',
+        { turnId: 'turn-direct' },
+      )).rejects.toThrow('server is shutting down');
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      await expect(orchQueue.waitForExecutionOwners()).resolves.toBeUndefined();
+    });
+
+    it('returns a queued entry unsent when shutdown wins during provider preparation', async () => {
+      const preparationStarted = deferred();
+      const continuePreparation = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, _command, options) => {
+        preparationStarted.resolve(options);
+        await continuePreparation.promise;
+        options.executionAdmission.signal.throwIfAborted();
+      });
+      const created = await orchQueue.createChatQueueEntry('c1', 'prepared input');
+      const drain = orchQueue.triggerDrain('c1');
+      const options = await preparationStarted.promise;
+
+      expect(orchQueue.beginShutdown()).toContain('c1');
+      continuePreparation.resolve();
+      await drain;
+      await orchQueue.waitForExecutionOwners();
+
+      expect(options.executionAdmission.signal.aborted).toBe(true);
+      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', options.clientRequestId);
+      expect(await orchQueue.readChatQueue('c1')).toMatchObject({
+        entries: [expect.objectContaining({ id: created.entry.id, status: 'queued' })],
+        pause: null,
+      });
+    });
+
+    it('preserves a started queued entry as completion-uncertain during shutdown', async () => {
+      const executionStarted = deferred();
+      const finishExecution = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, _command, options) => {
+        options.executionAdmission.markStarted();
+        executionStarted.resolve(options);
+        await finishExecution.promise;
+      });
+      const created = await orchQueue.createChatQueueEntry('c1', 'started input');
+      const drain = orchQueue.triggerDrain('c1');
+      const options = await executionStarted.promise;
+
+      expect(orchQueue.beginShutdown()).toContain('c1');
+      await expect(orchQueue.abortForShutdown('c1')).resolves.toBe(true);
+      finishExecution.resolve();
+      await drain;
+      await orchQueue.waitForExecutionOwners();
+
+      const persisted = await orchQueue.readChatQueue('c1');
+      expect(options.executionAdmission.signal.aborted).toBe(true);
+      expect(persisted.entries).toEqual([
+        expect.objectContaining({ id: created.entry.id, status: 'queued' }),
+      ]);
+      expect(persisted.pause).toMatchObject({
+        kind: 'completion-uncertain',
+        entryId: created.entry.id,
+      });
+    });
+
     it('rejects a second direct reservation before either turn prepares transcript state', async () => {
       const first = orchQueue.reserveDirectTurn('c1');
 
@@ -1167,6 +1239,22 @@ describe('orchestration', () => {
         metadata: { clientRequestId: 'req-1', turnId: 'turn-1' },
       });
       expect(batches[0].messages[0].message.content).toBe('hello');
+    });
+
+    it('does not emit an empty chat message batch for an idempotent append', async () => {
+      mockChatMessages.appendMessages.mockResolvedValueOnce({
+        generationId: 'generation-1',
+        messages: [],
+      });
+      const emitted = mock();
+      orchQueue.onChatMessages(emitted);
+
+      await orchQueue.registerPendingUserInput('c1', 'already durable', {
+        clientRequestId: 'request-durable',
+        turnId: 'turn-durable',
+      });
+
+      expect(emitted).not.toHaveBeenCalled();
     });
 
     it('registers provided metadata for accepted REST turns', async () => {

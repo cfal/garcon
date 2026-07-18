@@ -544,6 +544,7 @@ export class ChatCommandService {
 
     let runtimeDispatched = false;
     try {
+      reservation.executionAdmission.signal.throwIfAborted();
       this.deps.chats.addChat({
         id: input.chatId,
         agentId: input.agentId,
@@ -575,6 +576,7 @@ export class ChatCommandService {
         ampAgentMode: input.ampAgentMode,
       });
       await this.deps.settings.ensureInNormal(input.chatId);
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.deps.queue.registerPendingUserInput(input.chatId, input.command, {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
@@ -587,6 +589,7 @@ export class ChatCommandService {
         turnId,
         pendingInputRecovery: 'required',
       });
+      reservation.executionAdmission.signal.throwIfAborted();
       runtimeDispatched = true;
       await this.deps.agents.startSession(input.chatId, input.command, {
         projectPath: input.projectPath,
@@ -594,6 +597,7 @@ export class ChatCommandService {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         turnId,
+        executionAdmission: reservation.executionAdmission,
       });
     } catch (error: unknown) {
       try {
@@ -645,7 +649,7 @@ export class ChatCommandService {
       agents: this.deps.agents,
       settings: this.deps.settings,
     });
-    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], {
+    const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed', 'finished'], {
       status: 'running',
       turnId,
     });
@@ -1265,11 +1269,13 @@ export class ChatCommandService {
         let runtimeDispatched = false;
         let runtimeCompleted = false;
         try {
+          reservation.executionAdmission.signal.throwIfAborted();
           runtimeDispatched = true;
           await this.deps.agents.compactSession(input.chatId, {
             instructions: input.instructions,
             clientRequestId,
             turnId,
+            executionAdmission: reservation.executionAdmission,
           });
           runtimeCompleted = true;
           await this.deps.ledger.update(ledger.record.key, { status: 'finished' });
@@ -1617,8 +1623,11 @@ export class ChatCommandService {
     }
 
     try {
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.#assertDirectExecutionQueueAvailable(input.chatId);
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.#registerPendingInput(input.chatId, input.command, options);
+      reservation.executionAdmission.signal.throwIfAborted();
       const scheduled = await this.deps.ledger.update(ledger.record.key, {
         status: 'scheduled',
         turnId: options.turnId,
@@ -1676,12 +1685,12 @@ export class ChatCommandService {
     const runTask = (async () => {
       try {
         await this.deps.queue.runReservedTurn(reservation, command, options);
-        await this.deps.ledger.update(ledgerKey, { status: 'finished' });
+        await this.deps.ledger.settleTerminal(ledgerKey, 'finished');
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error('commands: run failed:', message);
         try {
-          await this.deps.ledger.update(ledgerKey, { status: 'failed', error: message });
+          await this.deps.ledger.settleTerminal(ledgerKey, 'failed', { error: message });
         } catch (ledgerError: unknown) {
           logger.error(
             'commands: failed to record run failure:',

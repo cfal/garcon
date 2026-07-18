@@ -573,7 +573,7 @@ export async function startServer(): Promise<void> {
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
 
-    wireServerEvents({
+    const eventWiring = wireServerEvents({
       server,
       agentRegistry,
       chatRegistry,
@@ -583,6 +583,7 @@ export async function startServer(): Promise<void> {
       chatViews,
       chatNativeReloader: indexedNativeReloader,
       pendingInputs,
+      pendingRecovery,
       commandLedger,
       shareStore,
       telegramNotifier,
@@ -599,6 +600,7 @@ export async function startServer(): Promise<void> {
       if (shuttingDown) return;
       shuttingDown = true;
       logger.info('server: shutting down...');
+      const reservedChatIds = queue.beginShutdown();
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
@@ -608,7 +610,8 @@ export async function startServer(): Promise<void> {
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
-          abortSession: (chatId) => agentRegistry.abortSession(chatId),
+          additionalChatIds: reservedChatIds,
+          abortSession: (chatId) => queue.abortForShutdown(chatId),
           onAbortError: (chatId, abortError) => {
             logger.warn(
               `server: abort during shutdown failed for ${chatId}:`,
@@ -624,11 +627,13 @@ export async function startServer(): Promise<void> {
         }
         const backgroundTasks = await waitForShutdownPhasesWithTimeout([
           () => chatCommands.waitForBackgroundTasks(),
+          () => queue.waitForExecutionOwners(),
+          () => eventWiring.waitForIdle(),
           () => pendingRecovery.waitForBackgroundTasks(),
         ]);
         if (!backgroundTasks.completed) {
           cleanupFailed = true;
-          logger.warn('server: shutdown command-task wait timed out');
+          logger.warn('server: shutdown background phases timed out');
         }
         for (const backgroundError of backgroundTasks.errors) {
           cleanupFailed = true;

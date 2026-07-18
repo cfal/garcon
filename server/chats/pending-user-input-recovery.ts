@@ -156,6 +156,13 @@ export class PendingUserInputRecoveryCoordinator {
     throwCollectedErrors(errors, 'Pending-input recovery background work failed');
   }
 
+  async waitForSettlements(chatId: string): Promise<void> {
+    await this.#waitForRequestSettlements(
+      chatId,
+      [...(this.#unsettledRequestIdsByChatId.get(chatId) ?? [])],
+    );
+  }
+
   async restore(): Promise<PendingUserInputRecoveryResult> {
     const records = await this.#deps.ledger.listPendingInputRecoveries();
     let restored = 0;

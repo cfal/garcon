@@ -14,7 +14,9 @@ import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AmpThreadExport } from "./history-loader.js";
 import {
+  assertExecutionAdmissionOpen,
   executionEventMetadata,
+  markExecutionStarted,
   type AgentEventMetadata,
   type StartSessionRequest,
   type ResumeTurnRequest,
@@ -513,9 +515,12 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  async startSession({ command, chatId, projectPath, model, onAbortable, clientRequestId, turnId }: StartSessionRequest): Promise<StartedAgentSession> {
+  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+    assertExecutionAdmissionOpen(request);
+    const { command, chatId, projectPath, model, onAbortable, clientRequestId, turnId } = request;
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
     const threadId = await createThread({ cwd: projectPath });
+    assertExecutionAdmissionOpen(request);
 
     const session = createSession(
       threadId,
@@ -523,17 +528,20 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       executionEventMetadata({ clientRequestId, turnId }, 'chat-start'),
     );
     this.#runningSessions.set(threadId, session);
-    this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
 
     const args = buildContinueArgs(threadId, model);
 
     try {
+      markExecutionStarted(request);
+      this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
       onAbortable?.();
     } catch (err) {
       this.#rollbackTurnLaunch(session, true);
-      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`, session.eventMetadata);
+      if (!request.executionAdmission?.signal.aborted) {
+        this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`, session.eventMetadata);
+      }
       throw err;
     }
 
@@ -543,7 +551,9 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     };
   }
 
-  async runTurn({ command, agentSessionId: threadId, chatId, projectPath, model, onAbortable, clientRequestId, turnId }: ResumeTurnRequest): Promise<void> {
+  async runTurn(request: ResumeTurnRequest): Promise<void> {
+    assertExecutionAdmissionOpen(request);
+    const { command, agentSessionId: threadId, chatId, projectPath, model, onAbortable, clientRequestId, turnId } = request;
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
 
@@ -571,16 +581,18 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       session.eventMetadata = executionEventMetadata({ clientRequestId, turnId });
     }
 
-    this.emitProcessing(chatId, true);
-
     const args = buildContinueArgs(threadId, model);
 
     try {
+      markExecutionStarted(request);
+      this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
       onAbortable?.();
     } catch (err) {
       this.#rollbackTurnLaunch(session, false);
-      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`, session.eventMetadata);
+      if (!request.executionAdmission?.signal.aborted) {
+        this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`, session.eventMetadata);
+      }
       throw err;
     }
 

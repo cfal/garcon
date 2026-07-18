@@ -10,8 +10,15 @@ import {
 
 export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../common/queue-state.ts';
 
+export interface StoredQueueDeliveryIdentity {
+  clientRequestId: string;
+  clientMessageId: string;
+  turnId: string;
+}
+
 export interface StoredQueueEntry extends QueueEntry {
   status: 'queued' | 'sending';
+  delivery?: StoredQueueDeliveryIdentity;
 }
 
 export type StoredQueueCommandOperation = 'create' | 'replace' | 'delete';
@@ -50,7 +57,10 @@ export function emptyStoredQueue(): StoredQueueState {
 export function cloneStoredQueue(queue: StoredQueueState): StoredQueueState {
   const clone = {
     ...queue,
-    entries: queue.entries.map((entry) => ({ ...entry })),
+    entries: queue.entries.map((entry) => ({
+      ...entry,
+      ...(entry.delivery ? { delivery: { ...entry.delivery } } : {}),
+    })),
     recentlyDispatched: queue.recentlyDispatched.map((entry) => ({ ...entry })),
     appliedCommands: (queue.appliedCommands ?? []).map((command) => ({
       ...command,
@@ -82,6 +92,23 @@ function normalizeStoredQueueEntry(value: unknown): StoredQueueEntry | null {
   const status = item.status === 'queued' || item.status === 'sending' ? item.status : null;
   if (!id || content === null || !createdAt || !status) return null;
 
+  const rawDelivery = item.delivery && typeof item.delivery === 'object'
+    ? item.delivery as Record<string, unknown>
+    : null;
+  const delivery = rawDelivery
+    && typeof rawDelivery.clientRequestId === 'string'
+    && rawDelivery.clientRequestId.length > 0
+    && typeof rawDelivery.clientMessageId === 'string'
+    && rawDelivery.clientMessageId.length > 0
+    && typeof rawDelivery.turnId === 'string'
+    && rawDelivery.turnId.length > 0
+    ? {
+        clientRequestId: rawDelivery.clientRequestId,
+        clientMessageId: rawDelivery.clientMessageId,
+        turnId: rawDelivery.turnId,
+      }
+    : undefined;
+
   return {
     id,
     content,
@@ -90,6 +117,7 @@ function normalizeStoredQueueEntry(value: unknown): StoredQueueEntry | null {
       typeof item.revision === 'number' && Number.isInteger(item.revision) && item.revision > 0 ? item.revision : 1,
     createdAt,
     updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : createdAt,
+    ...(delivery ? { delivery } : {}),
   };
 }
 
@@ -160,15 +188,15 @@ function normalizeStoredPause(
   version: number,
   updatedAt: string | null,
 ): QueuePause | null {
-  const hasQueuedEntry = entries.some((entry) => entry.status === 'queued');
+  const hasQueuedEntries = entries.some((entry) => entry.status === 'queued');
   if (Object.hasOwn(raw, 'pause')) {
     const pause = parseQueuePause(raw.pause);
     if (pause?.kind === 'recovered-unconfirmed-input') return pause;
-    if (!hasQueuedEntry) return null;
+    if (!hasQueuedEntries) return null;
     if (pause !== undefined) return pause;
     return migratedPause(raw, entries, version, updatedAt);
   }
-  if (!hasQueuedEntry) return null;
+  if (!hasQueuedEntries) return null;
   return raw.paused === true ? migratedPause(raw, entries, version, updatedAt) : null;
 }
 
@@ -217,11 +245,54 @@ export function normalizeStoredQueueState(value: unknown): StoredQueueState {
   };
 }
 
+/** Parses durable queue state without discarding entries or idempotency evidence. */
+export function parseStoredQueueState(value: unknown): StoredQueueState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Queue state must be an object');
+  }
+
+  const raw = value as Record<string, unknown>;
+  const arrays = [
+    ['entries', normalizeStoredQueueEntry],
+    ['recentlyDispatched', normalizeRecentlyDispatched],
+    ['appliedCommands', normalizeAppliedCommand],
+  ] as const;
+  for (const [field, normalize] of arrays) {
+    const stored = raw[field];
+    if (stored === undefined) continue;
+    if (!Array.isArray(stored)) {
+      throw new Error(`Queue state ${field} must be an array`);
+    }
+    if (stored.some((entry) => normalize(entry) === null)) {
+      throw new Error(`Queue state ${field} contains an invalid record`);
+    }
+    if (field === 'entries' && stored.some((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+      const record = entry as Record<string, unknown>;
+      return Object.hasOwn(record, 'delivery')
+        && record.delivery !== undefined
+        && normalizeStoredQueueEntry(record)?.delivery === undefined;
+    })) {
+      throw new Error('Queue state entries contain invalid delivery identity');
+    }
+  }
+
+  const normalized = normalizeStoredQueueState(raw);
+  const entryIds = new Set<string>();
+  for (const entry of normalized.entries) {
+    if (entryIds.has(entry.id)) {
+      throw new Error(`Queue state contains duplicate entry ID: ${entry.id}`);
+    }
+    entryIds.add(entry.id);
+  }
+  return normalized;
+}
+
 export function toClientQueueState(queue: StoredQueueState): QueueState {
   return {
     entries: queue.entries
       .filter((entry) => entry.status === 'queued')
-      .map(({ status: _status, ...entry }) => ({ ...entry })),
+      .map(({ status: _status, delivery: _delivery, ...entry }) => ({ ...entry })),
     dispatchingEntryId: queue.entries.find((entry) => entry.status === 'sending')?.id ?? null,
     recentlyDispatched: queue.recentlyDispatched
       .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)

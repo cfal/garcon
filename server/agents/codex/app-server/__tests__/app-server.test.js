@@ -1201,6 +1201,33 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
   });
 
+  it('does not create a thread when admission closes during client startup', async () => {
+    const connected = createDeferred();
+    const connectStarted = createDeferred();
+    const fake = new FakeClient({
+      connect: async () => {
+        connectStarted.resolve();
+        await connected.promise;
+        return { userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const admission = new AbortController();
+    const markStarted = mock();
+    const start = provider.startSession(makeRequest({
+      executionAdmission: { signal: admission.signal, markStarted },
+    }));
+    await connectStarted.promise;
+
+    admission.abort(new Error('server is shutting down'));
+    connected.resolve();
+
+    await expect(start).rejects.toThrow('server is shutting down');
+    expect(fake.startThread).not.toHaveBeenCalled();
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
   it('reports abortability only after the provider turn id is available', async () => {
     let resolveTurn;
     const turn = new Promise((resolve) => { resolveTurn = resolve; });

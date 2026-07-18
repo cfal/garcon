@@ -24,7 +24,9 @@ import { normalizeThinkingMode } from '../../../common/chat-modes.js';
 
 const logger = createLogger('agents:pi:pi-cli');
 import {
+  assertExecutionAdmissionOpen,
   executionEventMetadata,
+  markExecutionStarted,
   type AgentCommandImage,
   type AgentEventMetadata,
   type PermissionMode,
@@ -595,6 +597,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+    assertExecutionAdmissionOpen(request);
     const startedSession = createStartTracker();
     const session = createSession(
       request.chatId,
@@ -602,10 +605,11 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       executionEventMetadata(request, 'chat-start'),
     );
     this.#runningSessions.set(session.id, session);
-    this.emitProcessing(request.chatId, true);
 
     try {
       const run = await buildPiRun(request);
+      markExecutionStarted(request);
+      this.emitProcessing(request.chatId, true);
       this.#spawnPi(session, request, run);
       request.onAbortable?.();
       return await startedSession.promise;
@@ -616,6 +620,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
+    assertExecutionAdmissionOpen(request);
     const existingSession = this.#runningSessions.get(request.agentSessionId);
     if (existingSession?.isRunning) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
@@ -634,10 +639,10 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     session.sessionCreatedEmitted = true;
     this.#runningSessions.set(session.id, session);
 
-    this.emitProcessing(request.chatId, true);
-
     try {
       const run = await buildPiRun(request);
+      markExecutionStarted(request);
+      this.emitProcessing(request.chatId, true);
       this.#spawnPi(session, request, run);
       request.onAbortable?.();
       await this.#waitForTurnComplete(session);

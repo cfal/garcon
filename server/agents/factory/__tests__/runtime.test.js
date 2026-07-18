@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
+const getFactoryModelMetadata = mock(async () => ({
+  supportsImages: false,
+  reasoningEfforts: ['low', 'medium', 'high'],
+}));
+
 mock.module('../factory-models.js', () => ({
-  getFactoryModelMetadata: mock(async () => ({
-    supportsImages: false,
-    reasoningEfforts: ['low', 'medium', 'high'],
-  })),
+  getFactoryModelMetadata,
   getFactoryModels: mock(async () => []),
 }));
 
@@ -89,12 +91,54 @@ describe('FactoryCliRuntime lifecycle', () => {
     originalSpawn = Bun.spawn;
     spawnMock = mock();
     Bun.spawn = spawnMock;
+    getFactoryModelMetadata.mockReset();
+    getFactoryModelMetadata.mockImplementation(async () => ({
+      supportsImages: false,
+      reasoningEfforts: ['low', 'medium', 'high'],
+    }));
     findFactorySessionFileBySessionId.mockReset();
     findFactorySessionFileBySessionId.mockImplementation(async (sessionId) => `/tmp/factory/${sessionId}.jsonl`);
   });
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
+  });
+
+  it('does not spawn after admission closes during asynchronous setup', async () => {
+    let releaseMetadata;
+    let metadataStarted;
+    const metadataEntered = new Promise((resolve) => {
+      metadataStarted = resolve;
+    });
+    const metadataGate = new Promise((resolve) => {
+      releaseMetadata = resolve;
+    });
+    getFactoryModelMetadata.mockImplementationOnce(async () => {
+      metadataStarted();
+      await metadataGate;
+      return { supportsImages: false, reasoningEfforts: ['low'] };
+    });
+    const admission = new AbortController();
+    const markStarted = mock();
+    const provider = new FactoryCliRuntime();
+
+    const turn = provider.runTurn({
+      command: 'continue',
+      agentSessionId: 'factory-session-preparing',
+      chatId: 'chat-preparing',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      executionAdmission: { signal: admission.signal, markStarted },
+    });
+    await metadataEntered;
+    admission.abort(new Error('server is shutting down'));
+    releaseMetadata();
+
+    await expect(turn).rejects.toThrow('server is shutting down');
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('resolves startSession on system init before the turn finishes', async () => {

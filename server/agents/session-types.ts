@@ -38,6 +38,24 @@ export interface PersistedChatExecutionConfig {
   ampAgentMode?: AmpAgentMode;
 }
 
+export interface AgentExecutionAdmission {
+  readonly signal: AbortSignal;
+  markStarted(): void;
+}
+
+export function assertExecutionAdmissionOpen(
+  request: { executionAdmission?: AgentExecutionAdmission },
+): void {
+  request.executionAdmission?.signal.throwIfAborted();
+}
+
+export function markExecutionStarted(
+  request: { executionAdmission?: AgentExecutionAdmission },
+): void {
+  assertExecutionAdmissionOpen(request);
+  request.executionAdmission?.markStarted();
+}
+
 // Core execution context shared by all session operations.
 export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
   chatId: string;
@@ -51,6 +69,7 @@ export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
   clientRequestId?: string;
   clientMessageId?: string;
   turnId?: string;
+  executionAdmission?: AgentExecutionAdmission;
 }
 
 export interface AgentEventMetadata {
@@ -229,4 +248,5 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   clientRequestId?: string;
   clientMessageId?: string;
   turnId?: string;
+  executionAdmission?: AgentExecutionAdmission;
 };

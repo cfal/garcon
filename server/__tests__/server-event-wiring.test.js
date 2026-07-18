@@ -52,6 +52,7 @@ describe('server event wiring', () => {
       onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
       onTurnFailed: mock(() => undefined),
       onTurnSettled: mock((callback) => { queueListeners.turnSettled = callback; }),
+      getQueuedTurnFinalization: mock(() => null),
       onAgentTurnTerminal: mock((terminalChatId, terminalTurn) => {
         pendingInputs.store.upsert({
           chatId: terminalChatId,
@@ -87,6 +88,7 @@ describe('server event wiring', () => {
       chatViews: {},
       chatNativeReloader: {},
       pendingInputs,
+      pendingRecovery: { waitForSettlements: mock(async () => undefined) },
       commandLedger: {},
       shareStore: {},
       telegramNotifier: {},
@@ -151,6 +153,7 @@ describe('server event wiring', () => {
       onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
       onTurnFailed: mock(() => undefined),
       onTurnSettled: mock((callback) => { queueListeners.turnSettled = callback; }),
+      getQueuedTurnFinalization: mock(() => null),
       onAgentTurnTerminal: mock((terminalChatId, terminalTurn) => {
         queueListeners.turnSettled(terminalChatId, terminalTurn);
       }),
@@ -182,6 +185,7 @@ describe('server event wiring', () => {
       chatViews: { appendToCurrentOrProvisional: mock(async () => ({ messages: [] })) },
       chatNativeReloader: { reloadFromNative },
       pendingInputs,
+      pendingRecovery: { waitForSettlements: mock(async () => undefined) },
       commandLedger: {},
       shareStore: {},
       telegramNotifier: {},

@@ -142,6 +142,32 @@ describe('AgentRuntimeRouter seed branch', () => {
     expect(request.codexGoalCommand).toEqual({ kind: 'set', objective: 'ship direct work' });
   });
 
+  it('does not invoke a new runtime after execution admission closes', async () => {
+    const admission = new AbortController();
+    admission.abort(new Error('Turn interrupted because the server is shutting down'));
+    const { router, startSession } = makeRouter();
+
+    await expect(router.startSession('1', 'do not start', {
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    })).rejects.toThrow('server is shutting down');
+
+    expect(startSession).not.toHaveBeenCalled();
+  });
+
+  it('does not invoke a resumed runtime after execution admission closes', async () => {
+    const admission = new AbortController();
+    admission.abort(new Error('Turn interrupted because the server is shutting down'));
+    const { router, runTurn } = makeRouter({
+      entry: { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' },
+    });
+
+    await expect(router.runAgentTurn('1', 'do not resume', {
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    })).rejects.toThrow('server is shutting down');
+
+    expect(runTurn).not.toHaveBeenCalled();
+  });
+
   it('resolves file mentions in a new goal objective before session start', async () => {
     const { router, startSession } = makeRouter();
 

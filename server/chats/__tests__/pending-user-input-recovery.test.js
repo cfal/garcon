@@ -169,6 +169,77 @@ describe('PendingUserInputRecoveryCoordinator', () => {
     await backgroundWait;
   });
 
+  it('waits for one chat settlement without blocking on another chat', async () => {
+    const firstSettlement = deferred();
+    const secondSettlement = deferred();
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => []),
+      settlePendingInputRecovery: mock((_chatId, clientRequestId) => (
+        clientRequestId === 'req-first' ? firstSettlement.promise : secondSettlement.promise
+      )),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      chatExists: () => true,
+    });
+    coordinator.start();
+    await pendingInputs.register('chat-1', 'first', { clientRequestId: 'req-first' });
+    await pendingInputs.register('chat-2', 'second', { clientRequestId: 'req-second' });
+    pendingInputs.store.clear('chat-1', 'req-first', 'persisted');
+    pendingInputs.store.clear('chat-2', 'req-second', 'persisted');
+
+    let firstFinished = false;
+    const firstWait = coordinator.waitForSettlements('chat-1').then(() => {
+      firstFinished = true;
+    });
+    await Promise.resolve();
+    expect(firstFinished).toBe(false);
+
+    firstSettlement.resolve(true);
+    await firstWait;
+    expect(firstFinished).toBe(true);
+
+    let secondFinished = false;
+    const secondWait = coordinator.waitForSettlements('chat-2').then(() => {
+      secondFinished = true;
+    });
+    await Promise.resolve();
+    expect(secondFinished).toBe(false);
+    secondSettlement.resolve(true);
+    await secondWait;
+  });
+
+  it('keeps a terminal settlement retryable after a transient failure', async () => {
+    const settlementError = new Error('ledger unavailable');
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => []),
+      settlePendingInputRecovery: mock()
+        .mockRejectedValueOnce(settlementError)
+        .mockResolvedValueOnce(true),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      chatExists: () => true,
+    });
+    coordinator.start();
+    await pendingInputs.register('chat-1', 'retry', { clientRequestId: 'req-retry' });
+    pendingInputs.store.clear('chat-1', 'req-retry', 'persisted');
+
+    await expect(coordinator.waitForSettlements('chat-1')).rejects.toBe(settlementError);
+    await expect(coordinator.waitForSettlements('chat-1')).resolves.toBeUndefined();
+    expect(ledger.settlePendingInputRecovery).toHaveBeenCalledTimes(2);
+  });
+
   it('waits for every settlement before reporting a settlement failure', async () => {
     const heldSettlement = deferred();
     const ledger = {

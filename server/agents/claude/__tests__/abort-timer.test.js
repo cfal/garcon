@@ -118,14 +118,14 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     await expect(runtime.runClaudeTurn(startOptions())).rejects.toThrow('spawn failed');
     expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(false);
-    expect(processing).toEqual([true, false]);
+    expect(processing).toEqual([]);
 
     const retry = runtime.runClaudeTurn(startOptions({ command: 'retry' }));
     await flush();
     ctrl.push(INIT);
     ctrl.push(RESULT);
     await retry;
-    expect(processing).toEqual([true, false, true, false]);
+    expect(processing).toEqual([true, false]);
     runtime.shutdown();
   });
 
@@ -136,10 +136,17 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
       throw new Error('stdin failed');
     };
     spawnMock.mockReturnValueOnce(ctrl.proc);
+    const markStarted = mock();
 
-    await expect(runtime.runClaudeTurn(startOptions())).rejects.toThrow('stdin failed');
+    await expect(runtime.runClaudeTurn(startOptions({
+      executionAdmission: {
+        signal: new AbortController().signal,
+        markStarted,
+      },
+    }))).rejects.toThrow('stdin failed');
 
     expect(ctrl.proc.killed).toBe(true);
+    expect(markStarted).not.toHaveBeenCalled();
     expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(false);
     runtime.shutdown();
   });

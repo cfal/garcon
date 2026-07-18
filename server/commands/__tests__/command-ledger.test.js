@@ -261,6 +261,34 @@ describe('CommandLedger', () => {
     });
   });
 
+  it('does not evict an in-flight command under capacity pressure', async () => {
+    const active = {
+      ...makeLedgerRecord(-1),
+      key: 'agent-stop:chat-1:req-active',
+      commandType: 'agent-stop',
+      clientRequestId: 'req-active',
+      status: 'accepted',
+    };
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({
+        version: 1,
+        records: [active, ...Array.from({ length: 1000 }, (_, index) => makeLedgerRecord(index))],
+      }),
+      'utf8',
+    );
+    const ledger = new CommandLedger(workspaceDir);
+
+    await ledger.update(active.key, { status: 'scheduled' });
+
+    const persisted = JSON.parse(await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8'));
+    expect(persisted.records).toHaveLength(1000);
+    expect(persisted.records).toContainEqual(expect.objectContaining({
+      clientRequestId: 'req-active',
+      status: 'scheduled',
+    }));
+  });
+
   it('migrates legacy live-failed user inputs into durable recovery', async () => {
     const failed = {
       ...makeLedgerRecord(1),
@@ -366,6 +394,63 @@ describe('CommandLedger', () => {
     );
   });
 
+  it('serializes terminal state with pending-input settlement', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const accepted = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-race',
+      payload: { command: 'race' },
+    });
+    await ledger.update(accepted.record.key, {
+      status: 'scheduled',
+      pendingInputRecovery: 'required',
+    });
+
+    await Promise.all([
+      ledger.settleTerminal(accepted.record.key, 'failed', { error: 'interrupted' }),
+      ledger.settlePendingInputRecovery('chat-1', 'req-race'),
+    ]);
+
+    expect(await ledger.listPendingInputRecoveries()).toEqual([]);
+    const persisted = JSON.parse(await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8'));
+    expect(persisted.records).toEqual([
+      expect.objectContaining({ status: 'failed', pendingInputRecovery: 'settled' }),
+    ]);
+  });
+
+  it('does not retain a command in memory after its durable write fails', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    await ledger.accept({
+      commandType: 'agent-stop',
+      chatId: 'chat-1',
+      clientRequestId: 'req-seed',
+      payload: { chatId: 'chat-1' },
+    });
+    const ledgerPath = path.join(workspaceDir, 'command-ledger.json');
+    const beforeFailure = await fs.readFile(ledgerPath, 'utf8');
+    await fs.rm(workspaceDir, { recursive: true, force: true });
+    await fs.writeFile(workspaceDir, 'not a directory', 'utf8');
+    const retryInput = {
+      commandType: 'agent-stop',
+      chatId: 'chat-1',
+      clientRequestId: 'req-retry',
+      payload: { chatId: 'chat-1' },
+    };
+
+    await expect(ledger.accept(retryInput)).rejects.toThrow();
+    await fs.rm(workspaceDir, { force: true });
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(ledgerPath, beforeFailure, 'utf8');
+
+    await expect(ledger.accept(retryInput)).resolves.toMatchObject({ kind: 'accepted' });
+    const persisted = JSON.parse(await fs.readFile(ledgerPath, 'utf8'));
+    expect(persisted.records.map((record) => record.clientRequestId)).toEqual([
+      'req-seed',
+      'req-retry',
+    ]);
+  });
+
   it('trims loaded records in memory before duplicate detection', async () => {
     await fs.writeFile(
       path.join(workspaceDir, 'command-ledger.json'),
@@ -454,5 +539,25 @@ describe('CommandLedger', () => {
       status: 'failed',
       error: 'startup failed',
     });
+  });
+
+  it('makes the first terminal result durable and immutable', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const accepted = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-terminal',
+      payload: { command: 'run' },
+    });
+
+    const applied = await ledger.settleTerminal(accepted.record.key, 'finished');
+    const duplicate = await ledger.settleTerminal(accepted.record.key, 'finished');
+    const conflict = await ledger.settleTerminal(accepted.record.key, 'failed', {
+      error: 'late failure',
+    });
+
+    expect(applied).toMatchObject({ kind: 'applied', record: { status: 'finished' } });
+    expect(duplicate).toMatchObject({ kind: 'duplicate', record: { status: 'finished' } });
+    expect(conflict).toMatchObject({ kind: 'conflict', record: { status: 'finished' } });
   });
 });

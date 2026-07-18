@@ -6,6 +6,7 @@ export type RunningSessionsByAgent = Record<string, RunningSessionRef[]>;
 
 export interface AbortRunningSessionsOptions {
   runningSessions: RunningSessionsByAgent;
+  additionalChatIds?: readonly string[];
   abortSession(chatId: string): Promise<unknown>;
   timeoutMs?: number;
   onAbortError?(chatId: string, error: unknown): void;
@@ -29,7 +30,7 @@ export async function waitForShutdownTaskWithTimeout(
     timeout.unref?.();
   });
   const completed = await Promise.race([
-    task.then(() => true),
+    task.then(() => true, () => false),
     timeoutReached,
   ]);
   if (timeout) clearTimeout(timeout);
@@ -61,23 +62,27 @@ export function shutdownExitCode(options: { abortTimedOut: boolean; cleanupFaile
   return options.abortTimedOut || options.cleanupFailed ? 1 : 0;
 }
 
-function runningChatIds(runningSessions: RunningSessionsByAgent): string[] {
-  const ids: string[] = [];
+function runningChatIds(
+  runningSessions: RunningSessionsByAgent,
+  additionalChatIds: readonly string[] = [],
+): string[] {
+  const ids = new Set(additionalChatIds.filter(Boolean));
   for (const sessions of Object.values(runningSessions)) {
     for (const session of sessions) {
-      if (typeof session.id === 'string' && session.id) ids.push(session.id);
+      if (typeof session.id === 'string' && session.id) ids.add(session.id);
     }
   }
-  return ids;
+  return [...ids];
 }
 
 export async function abortRunningSessionsWithTimeout({
   runningSessions,
+  additionalChatIds,
   abortSession,
   timeoutMs = DEFAULT_ABORT_TIMEOUT_MS,
   onAbortError,
 }: AbortRunningSessionsOptions): Promise<AbortRunningSessionsResult> {
-  const chatIds = runningChatIds(runningSessions);
+  const chatIds = runningChatIds(runningSessions, additionalChatIds);
   if (chatIds.length === 0) {
     return { attempted: 0, completed: true, timedOut: false };
   }

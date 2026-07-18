@@ -11,7 +11,7 @@ import type { PendingUserInputService } from './chats/pending-user-input-service
 import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { QueueManager } from './queue.js';
-import type { CommandLedger } from './commands/command-ledger.js';
+import { commandLedgerKey, type CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
@@ -21,6 +21,7 @@ import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ChatProcessErrorRecovery } from './chats/chat-process-error-recovery.js';
 import { UserAbortLifecycleCoordinator } from './chats/user-abort-lifecycle-coordinator.js';
+import type { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
@@ -67,6 +68,7 @@ export interface ServerEventWiringDeps {
   chatViews: ChatViewStore;
   chatNativeReloader: NativeReloaderDep;
   pendingInputs: PendingUserInputService;
+  pendingRecovery: Pick<PendingUserInputRecoveryCoordinator, 'waitForSettlements'>;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
   telegramNotifier: TelegramNotifier;
@@ -75,6 +77,10 @@ export interface ServerEventWiringDeps {
   snippets: SnippetService;
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
   searchIndex?: ChatSearchEventIndex;
+}
+
+export interface ServerEventWiring {
+  waitForIdle(): Promise<void>;
 }
 
 export function wireServerEvents({
@@ -87,6 +93,7 @@ export function wireServerEvents({
   chatViews,
   chatNativeReloader,
   pendingInputs,
+  pendingRecovery,
   commandLedger,
   shareStore,
   telegramNotifier,
@@ -95,10 +102,12 @@ export function wireServerEvents({
   snippets,
   loadNativeMessages,
   searchIndex,
-}: ServerEventWiringDeps): void {
+}: ServerEventWiringDeps): ServerEventWiring {
   const broadcast = (payload: unknown) =>
     server.publish('chat', JSON.stringify(payload));
   const recentProcessFailures = new Map<string, number>();
+  const chatTaskTails = new Map<string, Promise<void>>();
+  const activeChatTasks = new Set<Promise<void>>();
   type DeferredTerminalFailure =
     | {
         source: 'agent';
@@ -124,6 +133,29 @@ export function wireServerEvents({
       logger.warn('pending-inputs: reconcile after stop failed:', errorMessage(err));
     },
   });
+
+  function scheduleChatTask(
+    chatId: string,
+    label: string,
+    task: () => Promise<void> | void,
+  ): void {
+    const previous = chatTaskTails.get(chatId) ?? Promise.resolve();
+    const current = previous.then(task).catch((error) => {
+      logger.warn(`${label}:`, errorMessage(error));
+    });
+    chatTaskTails.set(chatId, current);
+    activeChatTasks.add(current);
+    void current.then(() => {
+      activeChatTasks.delete(current);
+      if (chatTaskTails.get(chatId) === current) chatTaskTails.delete(chatId);
+    });
+  }
+
+  async function waitForIdle(): Promise<void> {
+    while (activeChatTasks.size > 0) {
+      await Promise.all([...activeChatTasks]);
+    }
+  }
 
   scheduledPrompts.onInvalidated((reason) => {
     broadcast(new ScheduledPromptsInvalidatedMessage(reason));
@@ -283,42 +315,39 @@ export function wireServerEvents({
         errorMessage(recovery.fallbackError),
       );
     }
-    broadcastAgentFailure(chatId, message, turnMetadata);
   }
 
-  function handleAgentFailure(
+  async function handleAgentFailure(
     chatId: string,
     agentErrorMessage: string,
     turnMetadata?: TurnEventMetadata,
-  ): void {
+  ): Promise<void> {
     if (
       turnMetadata?.commandType === 'chat-start'
       && turnMetadata.clientRequestId
     ) {
-      commandLedger
-        .updateCommand('chat-start', chatId, turnMetadata.clientRequestId, {
-          status: 'failed',
-          error: agentErrorMessage,
-        })
-        .catch((err) => {
-          logger.warn(
-            'commands: failed to mark chat-start command failed:',
-            errorMessage(err),
-          );
-        });
+      await commandLedger.settleTerminal(
+        commandLedgerKey('chat-start', chatId, turnMetadata.clientRequestId),
+        'failed',
+        { error: agentErrorMessage },
+      );
     }
-    void reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
+    await reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
+    await pendingRecovery.waitForSettlements(chatId);
+    broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
   }
 
-  function handleQueueFailure(
+  async function handleQueueFailure(
     chatId: string,
     queueErrorMessage: string,
     options: TurnEventMetadata,
-  ): void {
+  ): Promise<void> {
     if (consumeProcessFailure(chatId, options)) return;
     if (options.clientRequestId) {
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }
+    await pendingInputs.reconcileNativeHistory(chatId);
+    await pendingRecovery.waitForSettlements(chatId);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
   }
 
@@ -326,17 +355,20 @@ export function wireServerEvents({
     failure: DeferredTerminalFailure,
   ): void {
     if (failure.source === 'agent') {
-      handleAgentFailure(failure.chatId, failure.message, failure.turnMetadata);
+      scheduleChatTask(failure.chatId, 'server-events: deferred agent failure failed', () =>
+        handleAgentFailure(failure.chatId, failure.message, failure.turnMetadata));
       return;
     }
-    handleQueueFailure(failure.chatId, failure.message, failure.turnMetadata);
+    scheduleChatTask(failure.chatId, 'server-events: deferred queue failure failed', () =>
+      handleQueueFailure(failure.chatId, failure.message, failure.turnMetadata));
   }
 
   const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
   agentRegistry.onMessages((chatId, messages, turnMetadata) => {
     if (!chatExists(chatId)) return;
     const fence = chatViews.captureFence(chatId);
-    void (async () => {
+    scheduleChatTask(chatId, 'chat-view: message ingestion failed', async () => {
+      if (!chatExists(chatId)) return;
       try {
         const parsed = parseChatMessages(messages);
         const appended = await chatViews.appendAfterEnsuringGeneration(
@@ -370,7 +402,7 @@ export function wireServerEvents({
         );
         await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
       }
-    })();
+    });
   });
 
   agentRegistry.onProcessing((chatId, isProcessing) => {
@@ -383,24 +415,41 @@ export function wireServerEvents({
   });
   agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
     if (!chatExists(chatId)) return;
+    const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
     const expectedAbort = userAbortLifecycle.onTurnTerminal(chatId, turnMetadata);
     queue.onAgentTurnTerminal(chatId, turnMetadata);
-    broadcast(
-      new AgentRunFinishedMessage(
-        chatId,
-        exitCode,
-        turnMetadata?.turnId,
-        turnMetadata?.clientRequestId,
-        turnMetadata?.upstreamRequestId,
-      ),
-    );
-    if (!expectedAbort) reconcilePendingAfterTerminal(chatId, 'finish');
-    queue.checkChatIdle(chatId).catch((err) => {
-      logger.warn('queue: checkChatIdle error:', errorMessage(err));
+    scheduleChatTask(chatId, 'server-events: turn completion failed', async () => {
+      if (!chatExists(chatId)) return;
+      if (queuedFinalization && await queuedFinalization !== 'committed') return;
+      if (
+        turnMetadata?.commandType === 'chat-start'
+        && turnMetadata.clientRequestId
+      ) {
+        await commandLedger.settleTerminal(
+          commandLedgerKey('chat-start', chatId, turnMetadata.clientRequestId),
+          'finished',
+        );
+      }
+      if (!expectedAbort) await pendingInputs.reconcileNativeHistory(chatId);
+      await pendingRecovery.waitForSettlements(chatId);
+      if (!chatExists(chatId)) return;
+      broadcast(
+        new AgentRunFinishedMessage(
+          chatId,
+          exitCode,
+          turnMetadata?.turnId,
+          turnMetadata?.clientRequestId,
+          turnMetadata?.upstreamRequestId,
+        ),
+      );
+      void queue.checkChatIdle(chatId).catch((err) => {
+        logger.warn('queue: checkChatIdle error:', errorMessage(err));
+      });
     });
   });
   agentRegistry.onFailed((chatId, agentErrorMessage, turnMetadata) => {
     if (!chatExists(chatId)) return;
+    const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
     const expectedAbort = userAbortLifecycle.onTurnTerminal(chatId, turnMetadata);
     queue.onAgentTurnTerminal(chatId, turnMetadata);
     if (expectedAbort === 'deferred') {
@@ -421,9 +470,13 @@ export function wireServerEvents({
       });
       return;
     }
-    handleAgentFailure(chatId, agentErrorMessage, turnMetadata);
-    queue.checkChatIdle(chatId).catch((err) => {
-      logger.warn('queue: checkChatIdle error:', errorMessage(err));
+    scheduleChatTask(chatId, 'server-events: turn failure handling failed', async () => {
+      if (!chatExists(chatId)) return;
+      if (queuedFinalization && await queuedFinalization !== 'committed') return;
+      await handleAgentFailure(chatId, agentErrorMessage, turnMetadata);
+      void queue.checkChatIdle(chatId).catch((err) => {
+        logger.warn('queue: checkChatIdle error:', errorMessage(err));
+      });
     });
   });
 
@@ -508,18 +561,21 @@ export function wireServerEvents({
     broadcast(new QueueDispatchingMessage(chatId, entryId, content));
   });
   queue.onChatMessages((chatId, generationId, messages, eventMetadata = {}) => {
-    const parsedMessages = messages.map((entry) => entry.message);
-    metadata.updateFromAppendedMessages(chatId, parsedMessages);
-    appendSearchMessages(chatId, parsedMessages);
-    broadcast(
-      new ChatMessagesMessage(
-        chatId,
-        generationId,
-        messages,
-        eventMetadata.turnId,
-        eventMetadata.clientRequestId,
-      ),
-    );
+    scheduleChatTask(chatId, 'server-events: queued chat message update failed', () => {
+      if (!chatExists(chatId)) return;
+      const parsedMessages = messages.map((entry) => entry.message);
+      metadata.updateFromAppendedMessages(chatId, parsedMessages);
+      appendSearchMessages(chatId, parsedMessages);
+      broadcast(
+        new ChatMessagesMessage(
+          chatId,
+          generationId,
+          messages,
+          eventMetadata.turnId,
+          eventMetadata.clientRequestId,
+        ),
+      );
+    });
   });
   pendingInputs.store.onUpdated((input) => {
     broadcast(new PendingUserInputUpdatedMessage(input));
@@ -555,10 +611,13 @@ export function wireServerEvents({
       return;
     }
     if (expectedAbort) return;
-    handleQueueFailure(chatId, queueErrorMessage, options);
+    scheduleChatTask(chatId, 'server-events: queued turn failure handling failed', () =>
+      handleQueueFailure(chatId, queueErrorMessage, options));
   });
   queue.onTurnSettled((chatId, turn) => {
     userAbortLifecycle.onTurnSettled(chatId, turn);
     if (turn) agentRegistry.settleTurn(chatId, turn);
   });
+
+  return { waitForIdle };
 }
