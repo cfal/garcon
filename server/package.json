@@ -10,7 +10,10 @@
   "dependencies": {
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
+    "@earendil-works/pi-agent-core": "0.80.2",
+    "@earendil-works/pi-ai": "0.80.2",
     "@earendil-works/pi-coding-agent": "0.80.2",
+    "@earendil-works/pi-tui": "0.80.2",
     "@openai/codex": "0.142.2",
     "@opencode-ai/sdk": "1.17.11",
     "bun-pty": "^0.4.10",

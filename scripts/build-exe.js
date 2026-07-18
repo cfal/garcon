@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TRANSCRIPT_SEARCH_WORKER_PATH_ENV } from '../server/chats/search/worker-runtime.ts';
+import { collectAgentBuildContributions } from './agent-build-metadata.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,15 +100,17 @@ function createVirtualMainEntrypoint(
   virtualAssetsEntrypoint,
   serverMainPath,
   transcriptSearchWorkerAssetPath,
+  preMainModules,
 ) {
   return [
     `import '${virtualAssetsEntrypoint}';`,
+    ...preMainModules.map((modulePath) => `import '${toPosixPath(modulePath)}';`),
     `import transcriptSearchWorkerPath from '${transcriptSearchWorkerAssetPath}' with { type: 'file' };`,
     "import { mkdir, writeFile } from 'node:fs/promises';",
     "import { tmpdir } from 'node:os';",
     "import { join } from 'node:path';",
     '',
-    "const PI_PACKAGE_JSON_SUFFIX = 'server/node_modules/@earendil-works/pi-coding-agent/package.json';",
+    "const PI_PACKAGE_JSON_SUFFIX = 'node_modules/@earendil-works/pi-coding-agent/package.json';",
     "const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';",
     `const TRANSCRIPT_SEARCH_WORKER_PATH_ENV = '${TRANSCRIPT_SEARCH_WORKER_PATH_ENV}';`,
     '',
@@ -137,6 +140,37 @@ function createVirtualMainEntrypoint(
     `await import('${serverMainPath}');`,
     '',
   ].join('\n');
+}
+
+async function bundleAgentStandaloneEntrypoints(contributions) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-agent-entrypoints-'));
+  const files = [];
+  try {
+    for (const contribution of contributions) {
+      for (const [index, entrypoint] of contribution.standaloneEntrypoints.entries()) {
+        const result = await Bun.build({
+          entrypoints: [entrypoint],
+          target: 'bun',
+          format: 'esm',
+          minify: true,
+        });
+        if (!result.success || result.outputs.length !== 1) {
+          for (const log of result.logs) console.error(log);
+          throw new Error(`Agent standalone entrypoint bundle failed: ${entrypoint}`);
+        }
+        const filePath = path.join(
+          directory,
+          `${contribution.integrationId}-${index}-${path.basename(entrypoint, path.extname(entrypoint))}.js`,
+        );
+        await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
+        files.push(filePath);
+      }
+    }
+    return { directory, files };
+  } catch (error) {
+    await fs.rm(directory, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function bundleTranscriptSearchWorker() {
@@ -174,11 +208,20 @@ async function bundleTranscriptSearchWorker() {
   return { directory, filePath };
 }
 
-async function buildExecutable(targetId, embeddedFiles, transcriptSearchWorkerAssetPath) {
+async function buildExecutable(
+  targetId,
+  embeddedFiles,
+  transcriptSearchWorkerAssetPath,
+  contributions,
+) {
   const virtualAssetsEntrypoint = '__garcon_embed_static_assets__.js';
   const virtualMainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
-  const filesToEmbed = [...embeddedFiles, piPackageJsonPath];
+  const filesToEmbed = [
+    ...embeddedFiles,
+    piPackageJsonPath,
+    ...contributions.flatMap((contribution) => contribution.embeddedDependencyMetadata),
+  ];
   const assetsImports = filesToEmbed.map((filePath) => {
     return `import '${toPosixPath(filePath)}' with { type: 'file' };`;
   });
@@ -203,6 +246,7 @@ async function buildExecutable(targetId, embeddedFiles, transcriptSearchWorkerAs
           virtualAssetsEntrypoint,
           serverMainPath,
           toPosixPath(transcriptSearchWorkerAssetPath),
+          contributions.flatMap((contribution) => contribution.preMainModules),
         ),
       },
     });
@@ -223,13 +267,22 @@ async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
   await assertPiPackageMetadataExists();
   const embeddedFiles = await collectEmbeddedAssetInputs();
+  const contributions = await collectAgentBuildContributions({ repoRoot });
   const workerAsset = await bundleTranscriptSearchWorker();
+  const agentAssets = await bundleAgentStandaloneEntrypoints(contributions);
   try {
+    const allEmbeddedFiles = [...embeddedFiles, ...agentAssets.files];
     for (const targetId of targetIds) {
-      await buildExecutable(targetId, embeddedFiles, workerAsset.filePath);
+      await buildExecutable(
+        targetId,
+        allEmbeddedFiles,
+        workerAsset.filePath,
+        contributions,
+      );
     }
   } finally {
     await fs.rm(workerAsset.directory, { recursive: true, force: true });
+    await fs.rm(agentAssets.directory, { recursive: true, force: true });
   }
 }
 
