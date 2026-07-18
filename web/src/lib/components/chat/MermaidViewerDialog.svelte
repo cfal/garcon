@@ -2,7 +2,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
-	import Maximize from '@lucide/svelte/icons/maximize';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import X from '@lucide/svelte/icons/x';
 	import ZoomIn from '@lucide/svelte/icons/zoom-in';
 	import ZoomOut from '@lucide/svelte/icons/zoom-out';
@@ -26,6 +26,7 @@
 	let dragOriginY = 0;
 	let scrollOriginLeft = 0;
 	let scrollOriginTop = 0;
+	let activePointerId: number | null = null;
 
 	const zoomPercent = $derived(Math.round(zoom * 100));
 
@@ -41,15 +42,15 @@
 		setZoom(zoom - ZOOM_STEP);
 	}
 
-	function fitToWindow() {
+	function resetView() {
 		zoom = 1;
 		viewportElement?.scrollTo({ left: 0, top: 0 });
 	}
 
 	function handleOpenChange(nextOpen: boolean) {
 		if (!nextOpen) {
-			fitToWindow();
-			dragging = false;
+			resetView();
+			finishDragging();
 		}
 		onOpenChange(nextOpen);
 	}
@@ -63,7 +64,7 @@
 			zoomOut();
 		} else if (event.key === '0') {
 			event.preventDefault();
-			fitToWindow();
+			resetView();
 		}
 	}
 
@@ -75,7 +76,15 @@
 	}
 
 	function handlePointerDown(event: PointerEvent) {
-		if (event.button !== 0 || !viewportElement) return;
+		if (
+			event.button !== 0 ||
+			event.isPrimary === false ||
+			activePointerId !== null ||
+			!viewportElement
+		) {
+			return;
+		}
+		activePointerId = event.pointerId;
 		dragging = true;
 		dragOriginX = event.clientX;
 		dragOriginY = event.clientY;
@@ -85,17 +94,27 @@
 	}
 
 	function handlePointerMove(event: PointerEvent) {
-		if (!dragging || !viewportElement) return;
+		if (activePointerId !== event.pointerId || !viewportElement) return;
 		viewportElement.scrollLeft = scrollOriginLeft - (event.clientX - dragOriginX);
 		viewportElement.scrollTop = scrollOriginTop - (event.clientY - dragOriginY);
 	}
 
-	function stopDragging(event: PointerEvent) {
-		if (!dragging || !viewportElement) return;
+	function finishDragging(pointerId: number | null = activePointerId, releaseCapture = true) {
+		if (activePointerId === null || pointerId !== activePointerId) return;
+		const ownedPointerId = activePointerId;
+		activePointerId = null;
 		dragging = false;
-		if (viewportElement.hasPointerCapture(event.pointerId)) {
-			viewportElement.releasePointerCapture(event.pointerId);
+		if (releaseCapture && viewportElement?.hasPointerCapture(ownedPointerId)) {
+			viewportElement.releasePointerCapture(ownedPointerId);
 		}
+	}
+
+	function stopDragging(event: PointerEvent) {
+		finishDragging(event.pointerId);
+	}
+
+	function handleLostPointerCapture(event: PointerEvent) {
+		finishDragging(event.pointerId, false);
 	}
 </script>
 
@@ -105,12 +124,16 @@
 		showCloseButton={false}
 		onkeydown={handleKeydown}
 	>
-		<header class="flex min-h-12 shrink-0 items-center gap-3 border-b border-border px-3 sm:px-4">
-			<Dialog.Title class="mr-auto truncate text-base">Mermaid diagram</Dialog.Title>
+		<header
+			class="flex min-h-12 min-w-0 shrink-0 items-center gap-1 border-b border-border px-2 sm:gap-3 sm:px-4"
+		>
+			<Dialog.Title class="min-w-0 flex-1 truncate text-base">
+				{m.chat_mermaid_viewer_title()}
+			</Dialog.Title>
 			<Dialog.Description class="sr-only">
-				Expanded Mermaid diagram with zoom and pan controls
+				{m.chat_mermaid_viewer_description()}
 			</Dialog.Description>
-			<div class="flex items-center gap-1">
+			<div class="flex shrink-0 items-center gap-0 sm:gap-1">
 				<Button
 					variant="ghost"
 					size="icon-sm"
@@ -140,11 +163,11 @@
 				<Button
 					variant="ghost"
 					size="icon-sm"
-					onclick={fitToWindow}
-					title={m.image_fit_to_window()}
-					aria-label={m.image_fit_to_window()}
+					onclick={resetView}
+					title={m.chat_mermaid_viewer_reset()}
+					aria-label={m.chat_mermaid_viewer_reset()}
 				>
-					<Maximize />
+					<RotateCcw />
 				</Button>
 				<Button
 					variant="ghost"
@@ -158,18 +181,21 @@
 			</div>
 		</header>
 
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- overflow-auto makes this region keyboard-scrollable; follow-up: sveltejs/svelte#11885 -->
 		<div
 			bind:this={viewportElement}
 			class:cursor-grabbing={dragging}
 			class:cursor-grab={!dragging}
-			class="mermaid-viewport min-h-0 flex-1 touch-none select-none overflow-auto bg-muted/30 p-4 sm:p-6"
+			class="mermaid-viewport min-h-0 flex-1 touch-none select-none overflow-auto bg-muted/30 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-6"
 			role="region"
-			aria-label="Mermaid diagram viewport; drag to pan"
+			aria-label={m.chat_mermaid_viewer_viewport()}
+			tabindex="0"
 			onwheel={handleWheel}
 			onpointerdown={handlePointerDown}
 			onpointermove={handlePointerMove}
 			onpointerup={stopDragging}
 			onpointercancel={stopDragging}
+			onlostpointercapture={handleLostPointerCapture}
 		>
 			<div class="mermaid-zoom-stage mx-auto" style:width={`${zoomPercent}%`}>
 				{@html svg}
