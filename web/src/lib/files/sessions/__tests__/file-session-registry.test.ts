@@ -134,8 +134,8 @@ describe('FileSessionRegistry', () => {
 	it('canonicalizes a resolved chat link with its authoritative file root', async () => {
 		const harness = createHarness();
 		const resolved = resolveFileLinkTarget('src/file.ts', {
-			projectBasePath: '/workspace',
-			chatProjectPath: '/workspace/current',
+			fileRootPath: '/workspace',
+			sourceDirectoryPath: '/workspace/current',
 		});
 		if (!resolved) throw new Error('Expected a resolved file link');
 
@@ -290,11 +290,17 @@ describe('FileSessionRegistry', () => {
 
 	it('focuses an existing identity without moving or duplicating it', async () => {
 		const harness = createHarness();
-		const opened = await harness.registry.open({ ...request('src/file.ts'), target: 'main' });
-		await harness.registry.open({ ...request('src/file.ts'), target: 'sidebar', line: 12 });
+		const opened = await harness.registry.open(request('src/file.ts', 'main'));
+		await harness.registry.open({
+			...request('src/file.ts', 'sidebar'),
+			target: 'sidebar',
+			line: 12,
+		});
 
 		expect(harness.registry.sessionCount).toBe(1);
 		expect(harness.placementCalls).toHaveLength(1);
+		expect(harness.getDefaultPlacement).toHaveBeenCalledOnce();
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'main');
 		expect(harness.focusCalls).toEqual([opened?.id]);
 		expect(opened?.requestedLine).toBe(12);
 	});

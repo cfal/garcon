@@ -358,8 +358,8 @@
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
-			projectBasePath,
-			chatProjectPath: chat.projectPath,
+			fileRootPath: projectBasePath,
+			sourceDirectoryPath: chat.projectPath,
 		});
 		if (!resolved) return;
 		void fileSessions.open({
@@ -379,8 +379,8 @@
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileOpenTarget(filePath, {
-			projectBasePath,
-			chatProjectPath: chat.projectPath,
+			fileRootPath: projectBasePath,
+			sourceDirectoryPath: chat.projectPath,
 		});
 		if (!resolved) return;
 		void fileSessions.open({

@@ -1,9 +1,14 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { setFileSessions, setLocalSettings } from '$lib/context';
 	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
-	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+	import {
+		FileSessionRegistry,
+		type FileOpenRequest,
+	} from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
+	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 	import FileSurface from '../FileSurface.svelte';
 
@@ -15,35 +20,42 @@
 		refreshing = false,
 		dirty = false,
 		refreshError = null,
+		content = '# Heading',
 		onRefresh = () => undefined,
 		onCheckFreshness = () => undefined,
+		onOpen = () => {},
 	}: {
-		presentation: 'main' | 'mobile';
+		presentation: PresentationHostId;
 		rendererMode?: 'code' | 'markdown' | 'image';
 		loading?: boolean;
 		stale?: boolean;
 		refreshing?: boolean;
 		dirty?: boolean;
 		refreshError?: string | null;
+		content?: string;
 		onRefresh?: (sessionId: string) => void;
 		onCheckFreshness?: (sessionId: string) => void;
+		onOpen?: (request: FileOpenRequest) => void;
 	} = $props();
-	const initial = untrack(() => ({ rendererMode, loading, stale, refreshing, dirty, refreshError }));
+	const initial = untrack(() => ({
+		rendererMode,
+		loading,
+		stale,
+		refreshing,
+		dirty,
+		refreshError,
+		content,
+	}));
 	const frameBridge = new SurfaceFrameBridge();
+	const localSettings = createLocalSettingsStore();
 
 	const fileSessions = new FileSessionRegistry({
 		getIsMobile: () => presentation === 'mobile',
 		getDefaultPlacement: () => 'dialog',
 		getEditorSettings: () => ({
-			get wordWrap() {
-				return false;
-			},
-			get showLineNumbers() {
-				return true;
-			},
-			get fontSize() {
-				return 12;
-			},
+			wordWrap: false,
+			showLineNumbers: true,
+			fontSize: 12,
 		}),
 		getPlacement: () => ({
 			async placeFileSession(_sessionId, _target, publication) {
@@ -70,13 +82,16 @@
 	});
 	fileSessions.refresh = async (sessionId: string) => onRefresh(sessionId);
 	fileSessions.checkFreshness = async (sessionId: string) => onCheckFreshness(sessionId);
-	setLocalSettings({
-		codeEditorWordWrap: false,
-		codeEditorLineNumbers: true,
-		codeEditorFontSize: '12',
-		codeEditorTheme: 'default',
-		markdownViewerFontSize: '14',
-	} as never);
+	fileSessions.open = async (request) => {
+		onOpen(request);
+		return null;
+	};
+
+	localSettings.codeEditorWordWrap = false;
+	localSettings.codeEditorLineNumbers = true;
+	localSettings.codeEditorFontSize = '12';
+	localSettings.markdownViewerFontSize = '14';
+
 	const session = new FileSession(
 		{
 			canonicalFileRootPath: '/workspace',
@@ -84,7 +99,7 @@
 				initial.rendererMode === 'image'
 					? 'assets/image.png'
 					: initial.rendererMode === 'markdown'
-						? 'README.md'
+						? 'docs/current.md'
 						: 'src/file.ts',
 		},
 		'file-surface-test',
@@ -102,7 +117,7 @@
 	session.refreshing = initial.refreshing;
 	session.dirty = initial.dirty;
 	session.refreshError = initial.refreshError;
-	session.content = '# Heading';
+	session.content = initial.content;
 	session.baseline = session.content;
 	if (session.rendererMode !== 'image') {
 		session.editor = new CodeEditorController(session, {
@@ -115,6 +130,8 @@
 
 	setSurfaceFrameBridge(() => frameBridge);
 	setFileSessions(fileSessions);
+	setLocalSettings(localSettings);
+	onDestroy(() => localSettings.destroy());
 </script>
 
 <FileSurface {session} {presentation} />

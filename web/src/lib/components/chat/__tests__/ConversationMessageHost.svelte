@@ -2,7 +2,14 @@
 	import ConversationMessage from '../ConversationMessage.svelte';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
 	import type { ChatMessage } from '$shared/chat-types';
-	import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
+	import {
+		FileSessionRegistry,
+		type FileOpenRequest,
+	} from '$lib/files/sessions/file-session-registry.svelte.js';
+	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
+	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { onDestroy, untrack } from 'svelte';
 
 	type OpenAutoInput = FileOpenRequest;
 
@@ -31,31 +38,52 @@
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
 	}: Props = $props();
+	const initialHost = untrack(() => ({ projectBasePath, chatProjectPath, isMobile }));
 
-	setChatSessions({
-		get selectedChat() {
-			return { id: 'chat-1', projectPath: chatProjectPath };
+	const chatSessions = createChatSessionsStore();
+	chatSessions.createDraft({
+		id: 'chat-1',
+		projectPath: initialHost.chatProjectPath,
+		startup: {
+			agentId: 'claude',
+			model: 'opus',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			claudeThinkingMode: 'auto',
+			ampAgentMode: 'smart',
+			firstMessage: '',
 		},
-	} as never);
-	setFileSessions({
-		open: async (input: OpenAutoInput) => {
-			openAuto(input);
-			return null;
-		},
-	} as never);
-	setAppShell({
-		get projectBasePath() {
-			return projectBasePath;
-		},
-		get isMobile() {
-			return isMobile;
-		},
-		openNewChatDialog: (opts: { prefill: string }) => openNewChatDialog(opts),
-	} as never);
-	setLocalSettings({
-		autoExpandTools: false,
-		showQuickCommitTray: true,
-	} as never);
+	});
+	setChatSessions(chatSessions);
+
+	const fileSessions = new FileSessionRegistry({
+		getIsMobile: () => isMobile,
+		getDefaultPlacement: () => 'main',
+		getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
+		getPlacement: () => ({
+			async placeFileSession() {
+				return 'cancelled';
+			},
+			async focusFileSession() {},
+		}),
+	});
+	fileSessions.open = async (input: OpenAutoInput) => {
+		openAuto(input);
+		return null;
+	};
+	setFileSessions(fileSessions);
+
+	const appShell = createAppShellStore();
+	appShell.projectBasePath = initialHost.projectBasePath;
+	appShell.isMobile = initialHost.isMobile;
+	appShell.openNewChatDialog = (seed) => openNewChatDialog({ prefill: seed?.prefill ?? '' });
+	setAppShell(appShell);
+
+	const localSettings = createLocalSettingsStore();
+	localSettings.autoExpandTools = false;
+	localSettings.showQuickCommitTray = true;
+	setLocalSettings(localSettings);
+	onDestroy(() => localSettings.destroy());
 </script>
 
 <ConversationMessage

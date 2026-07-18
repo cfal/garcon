@@ -13,6 +13,7 @@
 	import EditorSettingsMenu from './EditorSettingsMenu.svelte';
 	import MarkdownViewerSettingsMenu from './MarkdownViewerSettingsMenu.svelte';
 	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import { getFileSessions } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';
@@ -29,7 +30,7 @@
 		presentation,
 	}: {
 		session: FileSession;
-		presentation: 'main' | 'sidebar' | 'mobile' | 'dialog';
+		presentation: PresentationHostId;
 	} = $props();
 	const files = getFileSessions();
 	const compact = $derived(presentation === 'sidebar' || presentation === 'mobile');
@@ -179,7 +180,7 @@
 		{:else if session.rendererMode === 'image'}
 			<ImageViewer {session} />
 		{:else if session.rendererMode === 'markdown'}
-			<MarkdownViewer {session} />
+			<MarkdownViewer {session} {presentation} />
 		{:else}
 			<CodeEditor {session} />
 		{/if}
