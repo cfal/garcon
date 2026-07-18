@@ -134,6 +134,27 @@ export class AgentRuntimeRouter {
     const resolvedCommand = opts.skipFileMentions
       ? prepared.command
       : await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
+    let started: StartedAgentSession | null = null;
+    let registryBound = false;
+    let runtimeAbortable = false;
+    let abortabilityPublished = false;
+    const publishAbortability = () => {
+      if (
+        abortabilityPublished
+        || !runtimeAbortable
+        || !registryBound
+        || !started
+        || !agent.runtime.isRunning(started.agentSessionId)
+      ) {
+        return;
+      }
+      abortabilityPublished = true;
+      this.#events.markTurnAbortable(chatId, {
+        clientRequestId: opts.clientRequestId,
+        commandType: 'chat-start',
+        turnId: opts.turnId,
+      });
+    };
     const request: StartSessionRequest = {
       chatId,
       command: resolvedCommand,
@@ -149,12 +170,15 @@ export class AgentRuntimeRouter {
       clientMessageId: opts.clientMessageId,
       turnId: opts.turnId,
       images: opts.images,
+      onAbortable: () => {
+        runtimeAbortable = true;
+        publishAbortability();
+      },
       ...runtimeConfig,
       ...selectionRequestFields(selection),
     };
 
     this.#events.trackTurn(chatId, { ...opts, commandType: 'chat-start' });
-    let started: StartedAgentSession | null = null;
     try {
       started = await agent.runtime.startSession(request);
       const updated = await this.#registry.updateChat(chatId, {
@@ -167,6 +191,8 @@ export class AgentRuntimeRouter {
       if (!updated) {
         throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
       }
+      registryBound = true;
+      publishAbortability();
     } catch (error) {
       this.#events.clearTurn(chatId);
       if (started) {
@@ -266,6 +292,10 @@ export class AgentRuntimeRouter {
         turnId: opts.turnId,
         images: opts.images,
         nativePath: rawEntry.nativePath,
+        onAbortable: () => this.#events.markTurnAbortable(chatId, {
+          clientRequestId: opts.clientRequestId,
+          turnId: opts.turnId,
+        }),
         ...runtimeConfig,
         ...selectionRequestFields(selection),
       });
@@ -342,6 +372,10 @@ export class AgentRuntimeRouter {
       clientRequestId: opts.clientRequestId,
       turnId: opts.turnId,
       nativePath: rawEntry.nativePath,
+      onAbortable: () => this.#events.markTurnAbortable(chatId, {
+        clientRequestId: opts.clientRequestId,
+        turnId: opts.turnId,
+      }),
       ...runtimeConfig,
       ...selectionRequestFields(selection),
     };

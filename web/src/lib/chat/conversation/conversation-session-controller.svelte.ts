@@ -568,7 +568,10 @@ export class ConversationSessionController {
 		}
 		const currentQueue = deps.conversationUi.getQueue(chatId);
 		const shouldQueueInput =
-			activeTurn || (currentQueue?.entries.length ?? 0) > 0 || currentQueue?.dispatchingEntryId != null;
+			activeTurn ||
+			(currentQueue?.entries.length ?? 0) > 0 ||
+			currentQueue?.dispatchingEntryId != null ||
+			currentQueue?.pause != null;
 		if (shouldQueueInput && submissionImages.length > 0) {
 			deps.chatState.appendLocalNotice(
 				'error',
@@ -600,10 +603,15 @@ export class ConversationSessionController {
 			}
 		}
 
-		if (shouldQueueInput) {
-			const activeDelivery =
-				activeTurn &&
-				(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
+			if (shouldQueueInput) {
+				const queueAllowsActiveDelivery =
+					(currentQueue?.entries.length ?? 0) === 0 &&
+					currentQueue?.dispatchingEntryId == null &&
+					currentQueue?.pause == null;
+				const activeDelivery =
+					activeTurn &&
+					queueAllowsActiveDelivery &&
+					(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
 			const submissionSequence = this.#beginQueueSubmission(chatId);
 			// Clear optimistically before awaiting the network, matching the

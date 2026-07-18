@@ -122,7 +122,7 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime implements AgentRunt
       runtime.onFinished((chatId, exitCode, metadata) =>
         this.emitFinished(chatId, exitCode, metadata),
       );
-      runtime.onFailed((chatId, message) => this.emitFailed(chatId, message));
+      runtime.onFailed((chatId, message, metadata) => this.emitFailed(chatId, message, metadata));
       if (this.#purgeTimerRequested) runtime.startPurgeTimer();
       if (this.#shutdownRequested) runtime.shutdown();
       return runtime;

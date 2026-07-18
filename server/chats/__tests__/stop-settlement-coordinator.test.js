@@ -58,7 +58,22 @@ describe('StopSettlementCoordinator', () => {
     expect(pendingInputs.settleNativeCohort).not.toHaveBeenCalled();
   });
 
-  it('settles after a bounded timeout when the runtime emits no terminal event', async () => {
+  it('settles an identityless stop after a bounded timeout when the runtime emits no terminal event', async () => {
+    const cohort = Object.freeze({ chatId: 'chat-1', records: Object.freeze([]) });
+    const pendingInputs = {
+      captureCohort: mock(() => cohort),
+      settleNativeCohort: mock(async () => undefined),
+    };
+    const coordinator = new StopSettlementCoordinator(pendingInputs, { terminalTimeoutMs: 0 });
+    coordinator.onStopRequested('chat-1', 'stop-a', undefined);
+
+    coordinator.onSessionStopped('chat-1', 'stop-a', true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pendingInputs.settleNativeCohort).toHaveBeenCalledWith(cohort);
+  });
+
+  it('retains an identified stop past the fallback timeout until its exact boundary', async () => {
     const cohort = Object.freeze({ chatId: 'chat-1', records: Object.freeze([]) });
     const pendingInputs = {
       captureCohort: mock(() => cohort),
@@ -66,10 +81,13 @@ describe('StopSettlementCoordinator', () => {
     };
     const coordinator = new StopSettlementCoordinator(pendingInputs, { terminalTimeoutMs: 0 });
     coordinator.onStopRequested('chat-1', 'stop-a', { turnId: 'turn-a' });
-
     coordinator.onSessionStopped('chat-1', 'stop-a', true);
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pendingInputs.settleNativeCohort).not.toHaveBeenCalled();
+
+    coordinator.onTurnTerminal('chat-1', { turnId: 'turn-a' });
+    await Promise.resolve();
     expect(pendingInputs.settleNativeCohort).toHaveBeenCalledWith(cohort);
   });
 

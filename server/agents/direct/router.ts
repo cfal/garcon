@@ -27,7 +27,7 @@ type DirectEventCallbacks = {
   processing: Set<(chatId: string, isProcessing: boolean) => void>;
   sessionCreated: Set<(chatId: string) => void>;
   finished: Set<(chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void>;
-  failed: Set<(chatId: string, errorMessage: string) => void>;
+  failed: Set<(chatId: string, errorMessage: string, metadata?: AgentEventMetadata) => void>;
 };
 
 export type DirectCompatibleRuntime = {
@@ -43,7 +43,7 @@ export type DirectCompatibleRuntime = {
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
   onFinished(cb: (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void): void;
-  onFailed(cb: (chatId: string, errorMessage: string) => void): void;
+  onFailed(cb: (chatId: string, errorMessage: string, metadata?: AgentEventMetadata) => void): void;
 };
 
 interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRuntime> {
@@ -171,7 +171,7 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
     this.#callbacks.finished.add(cb);
   }
 
-  onFailed(cb: (chatId: string, errorMessage: string) => void): void {
+  onFailed(cb: (chatId: string, errorMessage: string, metadata?: AgentEventMetadata) => void): void {
     this.#callbacks.failed.add(cb);
   }
 
@@ -214,8 +214,8 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
     runtime.onFinished((chatId, exitCode, metadata) => {
       for (const cb of this.#callbacks.finished) cb(chatId, exitCode, metadata);
     });
-    runtime.onFailed((chatId, errorMessage) => {
-      for (const cb of this.#callbacks.failed) cb(chatId, errorMessage);
+    runtime.onFailed((chatId, errorMessage, metadata) => {
+      for (const cb of this.#callbacks.failed) cb(chatId, errorMessage, metadata);
     });
   }
 

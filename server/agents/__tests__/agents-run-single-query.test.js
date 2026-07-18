@@ -67,6 +67,16 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function makeEndpointResolver(endpointOptions = {}) {
   return {
     getModelOptions: mock((agentId) => endpointOptions[agentId] ?? []),
@@ -624,7 +634,7 @@ describe('AgentRegistry session option hydration', () => {
 
     await registry.startSession('123', 'hello', {});
 
-    expect(opencode.startSession).toHaveBeenCalledWith({
+    expect(opencode.startSession).toHaveBeenCalledWith(expect.objectContaining({
       command: 'hello',
       projectPath: '/proj',
       model: 'openai/gpt-5',
@@ -633,7 +643,72 @@ describe('AgentRegistry session option hydration', () => {
       claudeThinkingMode: 'auto',
       images: undefined,
       chatId: '123',
+      onAbortable: expect.any(Function),
+    }));
+  });
+
+  it('publishes new-session abortability only after the session abort route is durable', async () => {
+    const providerReady = deferred();
+    const releaseStartup = deferred();
+    let entry = {
+      agentId: 'abortable-start',
+      projectPath: '/proj',
+      model: 'test-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    };
+    const runtime = baseRuntime({
+      startSession: mock(async (request) => {
+        request.onAbortable();
+        providerReady.resolve();
+        await releaseStartup.promise;
+        return { agentSessionId: 'started-session', nativePath: null };
+      }),
+      isRunning: mock((agentSessionId) => agentSessionId === 'started-session'),
+      abort: mock(() => true),
     });
+    const owner = agentFromRuntime(
+      'abortable-start',
+      'Abortable Start',
+      runtime,
+      {
+        supportsFork: false,
+        supportsImages: false,
+        acceptsApiProviderEndpoints: false,
+        supportedProtocols: [],
+        authLoginSupported: false,
+      },
+    );
+    const { registry } = makeRegistry({
+      registry: {
+        getChat: mock(() => entry),
+        updateChat: mock(async (_chatId, patch) => {
+          entry = { ...entry, ...patch };
+          return entry;
+        }),
+      },
+      agents: [owner],
+    });
+    const turn = { clientRequestId: 'req-start', turnId: 'turn-start' };
+
+    const startup = registry.startSession('chat-start', 'hello', turn);
+    await providerReady.promise;
+    let abortabilityPublished = false;
+    const abortable = registry.waitUntilTurnAbortable('chat-start', turn).then((value) => {
+      abortabilityPublished = true;
+      return value;
+    });
+    await Promise.resolve();
+
+    expect(abortabilityPublished).toBe(false);
+    await expect(registry.abortSession('chat-start')).resolves.toBe(false);
+
+    releaseStartup.resolve();
+    await startup;
+
+    await expect(abortable).resolves.toBe(true);
+    await expect(registry.abortSession('chat-start')).resolves.toBe(true);
+    expect(runtime.abort).toHaveBeenCalledWith('started-session');
   });
 
   it('forwards current Direct effort through start, resume, overrides, and compact fallback', async () => {

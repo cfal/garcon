@@ -152,12 +152,15 @@ function normalizeStoredPause(
   version: number,
   updatedAt: string | null,
 ): QueuePause | null {
-  if (!entries.some((entry) => entry.status === 'queued')) return null;
+  const hasQueuedEntry = entries.some((entry) => entry.status === 'queued');
   if (Object.hasOwn(raw, 'pause')) {
     const pause = parseQueuePause(raw.pause);
+    if (pause?.kind === 'recovered-unconfirmed-input') return pause;
+    if (!hasQueuedEntry) return null;
     if (pause !== undefined) return pause;
     return migratedPause(raw, entries, version, updatedAt);
   }
+  if (!hasQueuedEntry) return null;
   return raw.paused === true ? migratedPause(raw, entries, version, updatedAt) : null;
 }
 

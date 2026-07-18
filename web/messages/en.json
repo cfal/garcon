@@ -236,6 +236,7 @@
 	"chat_queue_needs_attention": "Queue needs attention",
 	"chat_queue_pause_failed_detail": "A queued message failed. Review it before resuming.",
 	"chat_queue_pause_recovered_detail": "A queued message was interrupted and may already have run. Resuming may send it again.",
+	"chat_queue_pause_recovered_input_detail": "A message accepted before restart could not be confirmed. Review the conversation before resuming the queue.",
 	"chat_queue_pause_completion_uncertain_detail": "The agent turn completed, but completion was not recorded. Resuming may send it again.",
 	"chat_queue_pause_unknown_detail": "The queue was paused by an earlier version or malformed state. Review it before resuming.",
 	"chat_queue_pause_affected_removed": "The affected queued message has been removed. The remaining queue is still paused.",

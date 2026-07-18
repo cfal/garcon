@@ -1336,6 +1336,44 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('queues text behind restart uncertainty even when the visible queue is empty', async () => {
+		const chat = createRunningChat({ isProcessing: false, status: 'running' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = 'wait for explicit review';
+		const recoveryQueue: QueueState = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: {
+				id: 'pause-recovery',
+				kind: 'recovered-unconfirmed-input',
+				pausedAt: '2026-07-18T00:00:00.000Z',
+			},
+			version: 1,
+			updatedAt: '2026-07-18T00:00:00.000Z',
+		};
+		deps.conversationUi.getQueue.mockReturnValue(recoveryQueue);
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-recovery-queue',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-18T00:00:01.000Z',
+			entryId: 'entry-recovery',
+			queue: recoveryQueue,
+		});
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(expect.objectContaining({
+			chatId: 'chat-1',
+			content: 'wait for explicit review',
+		}));
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(deps.chatState.pendingUserInputs).toEqual([]);
+	});
+
 	it('creates a distinct entry when an idle chat already has queued input', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
@@ -1814,6 +1852,47 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			content: 'Focus on the failing contract test',
 		});
+	});
+
+	it('queues Codex steer behind an empty recovered-input pause', async () => {
+		const chat = createRunningChat({
+			agentId: 'codex',
+			model: 'gpt-5.5',
+			isProcessing: true,
+		});
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/steer Wait behind the uncertain input';
+		const recoveryQueue: QueueState = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: {
+				id: 'pause-recovery',
+				kind: 'recovered-unconfirmed-input',
+				pausedAt: '2026-07-18T00:00:00.000Z',
+			},
+			version: 1,
+			updatedAt: '2026-07-18T00:00:00.000Z',
+		};
+		deps.conversationUi.getQueue.mockReturnValue(recoveryQueue);
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-steer-queued',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-18T00:00:01.000Z',
+			entryId: 'entry-steer',
+			queue: recoveryQueue,
+		});
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(expect.objectContaining({
+			chatId: 'chat-1',
+			content: 'Wait behind the uncertain input',
+		}));
+		expect(mockSendActiveInput).not.toHaveBeenCalled();
 	});
 
 	it('rejects steer without guidance or an active Codex turn', async () => {

@@ -23,13 +23,15 @@ import { createLogger } from '../../lib/log.js';
 import { normalizeThinkingMode } from '../../../common/chat-modes.js';
 
 const logger = createLogger('agents:pi:pi-cli');
-import type {
-  AgentCommandImage,
-  PermissionMode,
-  ResumeTurnRequest,
-  StartSessionRequest,
-  StartedAgentSession,
-  ThinkingMode,
+import {
+  executionEventMetadata,
+  type AgentCommandImage,
+  type AgentEventMetadata,
+  type PermissionMode,
+  type ResumeTurnRequest,
+  type StartSessionRequest,
+  type StartedAgentSession,
+  type ThinkingMode,
 } from "../session-types.js";
 
 interface PiSessionHeader {
@@ -62,6 +64,7 @@ interface PiSession {
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
+  eventMetadata: AgentEventMetadata;
 }
 
 interface BuildPiPromptResult {
@@ -266,7 +269,11 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
   return (await runPiCommand(args, { cwd, input: prompt })).trim();
 }
 
-function createSession(chatId: string, startedSession: PiSession['startedSession'] = null): PiSession {
+function createSession(
+  chatId: string,
+  startedSession: PiSession['startedSession'] = null,
+  eventMetadata: AgentEventMetadata = {},
+): PiSession {
   const now = Date.now();
   return {
     aborted: false,
@@ -282,6 +289,7 @@ function createSession(chatId: string, startedSession: PiSession['startedSession
     lastActivityAt: now,
     startedSession,
     turnResolve: null,
+    eventMetadata,
   };
 }
 
@@ -351,6 +359,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #routeEvent(session: PiSession, event: PiCliEvent): void {
+    if (session.finalized) return;
     const timestamp = new Date().toISOString();
 
     if (event.type === 'session' && typeof event.id === 'string') {
@@ -365,7 +374,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
         includeToolResults: false,
         includeUser: false,
       });
-      if (messages.length > 0) this.emitMessages(session.chatId, messages);
+      if (messages.length > 0) this.emitMessages(session.chatId, messages, session.eventMetadata);
 
       const stopReason = message && typeof message === 'object'
         ? (message as Record<string, unknown>).stopReason
@@ -376,7 +385,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
           : null;
         this.emitMessages(session.chatId, [
           new ErrorMessage(timestamp, typeof errorMessage === 'string' ? errorMessage : 'Pi turn failed.'),
-        ]);
+        ], session.eventMetadata);
       }
       return;
     }
@@ -389,7 +398,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
           typeof event.toolName === 'string' ? event.toolName : 'Unknown',
           event.args,
         ),
-      ]);
+      ], session.eventMetadata);
       return;
     }
 
@@ -408,7 +417,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
           ),
           Boolean(event.isError),
         ),
-      ]);
+      ], session.eventMetadata);
       return;
     }
 
@@ -418,7 +427,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
         session.isRunning = false;
         this.emitProcessing(session.chatId, false);
       }
-      this.emitFinished(session.chatId, 0);
+      this.emitFinished(session.chatId, 0, session.eventMetadata);
       this.#finalizeTurn(session, 0);
     }
   }
@@ -498,6 +507,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       this.emitFailed(
         session.chatId,
         `Pi process exited before completion${exitCode != null ? ` (code ${exitCode})` : ''}`,
+        session.eventMetadata,
       );
     }
 
@@ -529,17 +539,37 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     };
 
     const proc = Bun.spawn([getPiBinary(), ...run.args], spawnOptions);
+    session.process = proc;
+    session.cleanup = run.cleanup;
+    session.configuredSessionDir = run.configuredSessionDir;
     const stdin = proc.stdin as unknown as { end(): void; write(chunk: string): void };
     stdin.write(run.prompt);
     stdin.end();
 
-    session.process = proc;
-    session.cleanup = run.cleanup;
-    session.configuredSessionDir = run.configuredSessionDir;
     void this.#readStdout(session, proc);
     void this.#pipeStderr(session, proc);
 
     return proc;
+  }
+
+  async #rollbackTurnLaunch(session: PiSession): Promise<void> {
+    const wasRunning = session.isRunning;
+    session.aborted = true;
+    session.finalized = true;
+    session.isRunning = false;
+    session.lastActivityAt = Date.now();
+    const proc = session.process;
+    session.process = null;
+    if (proc && !proc.killed) proc.kill();
+    session.turnResolve = null;
+    if (this.#runningSessions.get(session.id) === session) {
+      this.#runningSessions.delete(session.id);
+    }
+    if (wasRunning) this.emitProcessing(session.chatId, false);
+    if (session.cleanup) {
+      await session.cleanup().catch(() => { });
+      session.cleanup = undefined;
+    }
   }
 
   #waitForTurnComplete(session: PiSession): Promise<void> {
@@ -566,24 +596,21 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const startedSession = createStartTracker();
-    const session = createSession(request.chatId, startedSession);
+    const session = createSession(
+      request.chatId,
+      startedSession,
+      executionEventMetadata(request, 'chat-start'),
+    );
     this.#runningSessions.set(session.id, session);
     this.emitProcessing(request.chatId, true);
 
     try {
       const run = await buildPiRun(request);
       this.#spawnPi(session, request, run);
+      request.onAbortable?.();
       return await startedSession.promise;
     } catch (error) {
-      this.#runningSessions.delete(session.id);
-      if (session.isRunning) {
-        session.isRunning = false;
-        this.emitProcessing(request.chatId, false);
-      }
-      if (session.cleanup) {
-        await session.cleanup().catch(() => { });
-        session.cleanup = undefined;
-      }
+      await this.#rollbackTurnLaunch(session);
       throw error;
     }
   }
@@ -601,6 +628,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       sessionCreatedEmitted: true,
     };
     this.#resetSessionForTurn(session, request.chatId);
+    session.eventMetadata = executionEventMetadata(request);
     session.id = request.agentSessionId;
     session.nativePath = request.nativePath ?? session.nativePath;
     session.sessionCreatedEmitted = true;
@@ -611,17 +639,10 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     try {
       const run = await buildPiRun(request);
       this.#spawnPi(session, request, run);
+      request.onAbortable?.();
       await this.#waitForTurnComplete(session);
     } catch (error) {
-      if (session.isRunning) {
-        session.isRunning = false;
-        this.emitProcessing(request.chatId, false);
-      }
-      if (session.cleanup) {
-        await session.cleanup().catch(() => { });
-        session.cleanup = undefined;
-      }
-      this.#runningSessions.delete(session.id);
+      await this.#rollbackTurnLaunch(session);
       throw error;
     }
   }

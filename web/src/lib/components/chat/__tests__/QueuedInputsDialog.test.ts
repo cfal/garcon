@@ -301,11 +301,14 @@ describe('QueuedInputsDialog', () => {
 	it.each([
 		['queued-turn-failed', m.chat_queue_pause_failed_detail()],
 		['recovered-inflight', m.chat_queue_pause_recovered_detail()],
+		['recovered-unconfirmed-input', m.chat_queue_pause_recovered_input_detail()],
 		['completion-uncertain', m.chat_queue_pause_completion_uncertain_detail()],
 		['unknown', m.chat_queue_pause_unknown_detail()],
 	] as const)('renders the %s automatic pause reason', (kind, detail) => {
 		const pause: QueuePause = kind === 'unknown'
 			? { id: 'pause-1', kind, entryId: 'entry-0', pausedAt: null }
+			: kind === 'recovered-unconfirmed-input'
+				? { id: 'pause-1', kind, pausedAt: '2026-07-16T00:00:00.000Z' }
 			: {
 					id: 'pause-1',
 					kind,

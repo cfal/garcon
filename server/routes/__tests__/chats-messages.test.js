@@ -59,6 +59,8 @@ function createRoutesFixture(overrides = {}) {
     discardPendingUserInput: mock(() => true),
     reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
     releaseDirectTurn: mock(async () => undefined),
+    completeDirectTurn: mock(async () => undefined),
+    failDirectTurn: mock(async () => undefined),
     runReservedTurn: mock(async () => undefined),
     abortForChatDeletion: mock(async () => true),
     triggerDrain: mock(async () => undefined),
@@ -374,7 +376,11 @@ describe('GET /api/v1/chats/messages', () => {
       });
       const restartedLedger = new CommandLedger(workspaceDir);
       const restored = await restorePendingInputRecoveries(restartedLedger, pendingInputs);
-      expect(restored.result).toEqual({ restored: 1, discardedMissingChat: 0 });
+      expect(restored.result).toEqual({
+        restored: 1,
+        discardedMissingChat: 0,
+        restoredChatIds: ['123'],
+      });
       const chatViews = {
         getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
           chatId,

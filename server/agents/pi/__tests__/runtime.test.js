@@ -217,10 +217,90 @@ describe('PiCliRuntime lifecycle', () => {
     expect(args[args.indexOf('--session') + 1]).toBe(nativePath);
     expect(messages).toHaveBeenCalledWith('chat-2', [
       expect.objectContaining({ type: 'assistant-message', content: 'Pi reply' }),
-    ]);
+    ], expect.any(Object));
     expect(finished).toHaveBeenCalledWith('chat-2', 0);
     expect(runningWhenFinished).toBe(false);
     expect(provider.isRunning('pi-session-2')).toBe(false);
+  });
+
+  it('kills and rolls back a process whose prompt write fails synchronously', async () => {
+    const provider = new PiCliRuntime();
+    const proc = createFakeProc();
+    proc.stdin.write = () => {
+      throw new Error('stdin failed');
+    };
+    const processing = [];
+    provider.onProcessing((_chatId, running) => processing.push(running));
+    spawnMock.mockReturnValueOnce(proc);
+
+    await expect(provider.runTurn(baseResumeRequest({
+      agentSessionId: 'pi-session-write-failure',
+      clientRequestId: 'req-write-failure',
+      turnId: 'turn-write-failure',
+    }))).rejects.toThrow('stdin failed');
+
+    expect(proc.killed).toBe(true);
+    expect(provider.isRunning('pi-session-write-failure')).toBe(false);
+    expect(processing).toEqual([true, false]);
+  });
+
+  it('ignores trailing output from a completed process after its successor starts', async () => {
+    const nativePath = path.join(tempRoot, 'pi-session-reused.jsonl');
+    await fs.writeFile(nativePath, '{}\n', 'utf8');
+    const provider = new PiCliRuntime();
+    const messages = [];
+    const terminals = [];
+    provider.onMessages((_chatId, batch, metadata) => messages.push({ batch, metadata }));
+    provider.onFinished((_chatId, _exitCode, metadata) => terminals.push(metadata));
+    const firstProc = createFakeProc();
+    const secondProc = createFakeProc();
+    spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
+
+    const firstTurn = provider.runTurn(baseResumeRequest({
+      agentSessionId: 'pi-session-reused',
+      nativePath,
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+    }));
+    firstProc.pushJson({ type: 'agent_end' });
+    await firstTurn;
+
+    const secondTurn = provider.runTurn(baseResumeRequest({
+      agentSessionId: 'pi-session-reused',
+      nativePath,
+      clientRequestId: 'req-b',
+      turnId: 'turn-b',
+    }));
+    firstProc.pushJson({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'stale reply' }],
+      },
+    });
+    await Promise.resolve();
+    expect(messages).toEqual([]);
+
+    secondProc.pushJson({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'current reply' }],
+      },
+    });
+    secondProc.pushJson({ type: 'agent_end' });
+    secondProc.close(0);
+    await secondTurn;
+    firstProc.close(0);
+
+    expect(messages).toEqual([{
+      batch: [expect.objectContaining({ content: 'current reply' })],
+      metadata: { clientRequestId: 'req-b', turnId: 'turn-b' },
+    }]);
+    expect(terminals).toEqual([
+      { clientRequestId: 'req-a', turnId: 'turn-a' },
+      { clientRequestId: 'req-b', turnId: 'turn-b' },
+    ]);
   });
 
   it('emits tool-use and tool-result events from Pi JSON stream events', async () => {

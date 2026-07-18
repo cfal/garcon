@@ -17,9 +17,9 @@ function createClaudeStub(startError) {
   claude.setInternalPermissionMode = mock(() => undefined);
   claude.setInternalThinkingMode = mock(() => undefined);
   claude.setInternalClaudeThinkingMode = mock(() => undefined);
-  claude.failClaudeInternalSession = mock((agentSessionId, chatId, errorMessage) => {
+  claude.failClaudeInternalSession = mock((agentSessionId, chatId, errorMessage, metadata) => {
     claude.emitProcessing(chatId, false);
-    claude.emitFailed(chatId, errorMessage);
+    claude.emitFailed(chatId, errorMessage, metadata);
   });
   return claude;
 }
@@ -32,7 +32,11 @@ describe('createClaudeAgent', () => {
     const agent = createClaudeAgent(claude);
     const processingEvents = [];
     const failed = new Promise((resolve) => {
-      agent.runtime.onFailed((chatId, errorMessage) => resolve({ chatId, errorMessage }));
+      agent.runtime.onFailed((chatId, errorMessage, metadata) => resolve({
+        chatId,
+        errorMessage,
+        metadata,
+      }));
     });
     agent.runtime.onProcessing((chatId, isProcessing) => {
       processingEvents.push({ chatId, isProcessing });
@@ -45,6 +49,8 @@ describe('createClaudeAgent', () => {
       model: 'sonnet',
       permissionMode: 'default',
       thinkingMode: 'none',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
     });
     const failure = await failed;
 
@@ -56,8 +62,21 @@ describe('createClaudeAgent', () => {
       started.agentSessionId,
       'chat-1',
       'missing claude binary',
+      {
+        clientRequestId: 'req-1',
+        commandType: 'chat-start',
+        turnId: 'turn-1',
+      },
     );
-    expect(failure).toEqual({ chatId: 'chat-1', errorMessage: 'missing claude binary' });
+    expect(failure).toEqual({
+      chatId: 'chat-1',
+      errorMessage: 'missing claude binary',
+      metadata: {
+        clientRequestId: 'req-1',
+        commandType: 'chat-start',
+        turnId: 'turn-1',
+      },
+    });
     expect(processingEvents).toContainEqual({ chatId: 'chat-1', isProcessing: false });
 
     await fs.rm(projectPath, { recursive: true, force: true });

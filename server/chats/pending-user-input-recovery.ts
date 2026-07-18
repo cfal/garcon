@@ -15,6 +15,7 @@ interface PendingUserInputRecoveryDeps {
 export interface PendingUserInputRecoveryResult {
   restored: number;
   discardedMissingChat: number;
+  restoredChatIds: string[];
 }
 
 function attachmentPlaceholder(value: unknown): PendingUserInputAttachment | null {
@@ -99,6 +100,7 @@ export class PendingUserInputRecoveryCoordinator {
     const records = await this.#deps.ledger.listPendingInputRecoveries();
     let restored = 0;
     let discardedMissingChat = 0;
+    const restoredChatIds = new Set<string>();
 
     for (const record of records) {
       if (!this.#deps.chatExists(record.chatId)) {
@@ -122,8 +124,13 @@ export class PendingUserInputRecoveryCoordinator {
         ...recoveryAttachments(record),
       });
       restored += 1;
+      restoredChatIds.add(record.chatId);
     }
 
-    return { restored, discardedMissingChat };
+    return {
+      restored,
+      discardedMissingChat,
+      restoredChatIds: [...restoredChatIds].sort(),
+    };
   }
 }

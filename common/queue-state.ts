@@ -15,12 +15,13 @@ export type QueuePause =
   | { id: string; kind: 'manual'; pausedAt: string }
   | { id: string; kind: 'queued-turn-failed'; entryId: string; pausedAt: string }
   | { id: string; kind: 'recovered-inflight'; entryId: string; pausedAt: string }
+  | { id: string; kind: 'recovered-unconfirmed-input'; pausedAt: string }
   | { id: string; kind: 'completion-uncertain'; entryId: string; pausedAt: string }
   | { id: string; kind: 'unknown'; entryId?: string; pausedAt: string | null };
 
 export type AutomaticQueuePauseKind = Exclude<
-  QueuePause['kind'],
-  'manual' | 'unknown'
+  Extract<QueuePause, { entryId: string }>['kind'],
+  'unknown'
 >;
 
 export interface QueueState {
@@ -97,6 +98,9 @@ export function parseQueuePause(value: unknown): QueuePause | null | undefined {
   }
   if (!isIsoTimestamp(raw.pausedAt)) return undefined;
   if (raw.kind === 'manual') return { id, kind: 'manual', pausedAt: raw.pausedAt };
+  if (raw.kind === 'recovered-unconfirmed-input') {
+    return { id, kind: raw.kind, pausedAt: raw.pausedAt };
+  }
   if (
     raw.kind === 'queued-turn-failed' ||
     raw.kind === 'recovered-inflight' ||
@@ -131,7 +135,7 @@ export function parseQueueState(value: unknown): QueueState | null {
     dispatchingEntryId:
       typeof raw.dispatchingEntryId === 'string' && raw.dispatchingEntryId ? raw.dispatchingEntryId : null,
     recentlyDispatched,
-    pause: entries.length > 0 ? pause : null,
+    pause: entries.length > 0 || pause?.kind === 'recovered-unconfirmed-input' ? pause : null,
     version: typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null,
   };

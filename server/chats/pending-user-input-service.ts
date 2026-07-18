@@ -150,7 +150,7 @@ function matchingRequestIds(
   });
   candidates.sort((left, right) =>
     left.distanceMs - right.distanceMs
-    || right.recordIndex - left.recordIndex
+    || left.recordIndex - right.recordIndex
     || left.messageIndex - right.messageIndex,
   );
 

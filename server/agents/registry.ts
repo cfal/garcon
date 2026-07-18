@@ -237,6 +237,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.isChatRunning(chatId);
   }
 
+  waitUntilTurnAbortable(
+    chatId: string,
+    turn: { clientRequestId?: string; turnId?: string },
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    return this.#events.waitUntilTurnAbortable(chatId, turn, signal);
+  }
+
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
     return this.#runtime.isAgentSessionRunning(agentId, agentSessionId);
   }
@@ -443,6 +451,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
     this.#events.onFailed(cb);
+  }
+
+  settleTurn(chatId: string, turn: TurnEventMetadata): void {
+    this.#events.settleTurn(chatId, turn);
+  }
+
+  discardTurn(chatId: string): void {
+    this.#events.clearTurn(chatId);
   }
 
   getActiveTurn(chatId: string): TurnEventMetadata | undefined {

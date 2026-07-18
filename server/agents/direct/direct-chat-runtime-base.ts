@@ -5,11 +5,13 @@ import {
 } from '../../../common/chat-modes.js';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type { SharedModelOption } from '../../../common/models.js';
-import type {
-  AgentCommandImage,
-  ResumeTurnRequest,
-  StartSessionRequest,
-  StartedAgentSession,
+import {
+  executionEventMetadata,
+  type AgentCommandImage,
+  type AgentEventMetadata,
+  type ResumeTurnRequest,
+  type StartSessionRequest,
+  type StartedAgentSession,
 } from '../session-types.js';
 import { AgentEventEmitterRuntime } from '../shared/event-emitter-runtime.js';
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
@@ -31,6 +33,7 @@ export interface DirectRuntimeSession<TMessage> {
   thinkingMode: ThinkingMode;
   startTime: number;
   lastActivityAt: number;
+  eventMetadata: AgentEventMetadata;
 }
 
 export interface DirectUserTurn<TMessage> {
@@ -98,12 +101,14 @@ export abstract class DirectChatRuntimeBase<
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
       lastActivityAt: now,
+      eventMetadata: executionEventMetadata(request, 'chat-start'),
     };
 
     await this.#sessionStore.append(sessionId, 'user', userTurn.persistedContent);
     this.#sessions.set(sessionId, session);
     this.emitSessionCreated(request.chatId);
     void this.#runTurnInternal(session);
+    request.onAbortable?.();
 
     return {
       agentSessionId: sessionId,
@@ -122,9 +127,11 @@ export abstract class DirectChatRuntimeBase<
       session.model = request.model;
     }
     session.thinkingMode = normalizeThinkingMode(request.thinkingMode);
+    session.eventMetadata = executionEventMetadata(request);
 
     const userTurn = this.buildUserTurn(request.command, request.images);
     this.#markSessionRunning(session);
+    request.onAbortable?.();
     try {
       await this.#sessionStore.append(session.id, 'user', userTurn.persistedContent);
       if (session.messages.length >= this.#maxMessagesPerSession) {
@@ -202,6 +209,7 @@ export abstract class DirectChatRuntimeBase<
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
       lastActivityAt: now,
+      eventMetadata: executionEventMetadata(request),
     };
     this.#sessions.set(sessionId, session);
     return session;
@@ -223,19 +231,27 @@ export abstract class DirectChatRuntimeBase<
   }
 
   async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
+    const eventMetadata = session.eventMetadata;
     this.#markSessionRunning(session);
     if (session.aborted) {
-      this.#markSessionIdle(session);
+      this.#finishAbortedTurn(session, eventMetadata);
       return;
     }
 
     try {
       const response = await this.streamSession(session);
-      if (session.aborted) return;
+      if (session.aborted) {
+        this.#finishAbortedTurn(session, eventMetadata);
+        return;
+      }
 
       if (!response.trim()) {
         this.#markSessionIdle(session);
-        this.emitFailed(session.chatId, `Empty response from ${this.config.runtimeLabel}`);
+        this.emitFailed(
+          session.chatId,
+          `Empty response from ${this.config.runtimeLabel}`,
+          eventMetadata,
+        );
         return;
       }
 
@@ -243,15 +259,30 @@ export abstract class DirectChatRuntimeBase<
       session.messages.push(this.buildAssistantMessage(response));
       this.emitMessages(session.chatId, [
         new AssistantMessage(new Date().toISOString(), response),
-      ]);
+      ], eventMetadata);
       this.#markSessionIdle(session);
-      this.emitFinished(session.chatId, 0);
+      this.emitFinished(session.chatId, 0, eventMetadata);
     } catch (error: unknown) {
-      if (session.aborted) return;
+      if (session.aborted) {
+        this.#finishAbortedTurn(session, eventMetadata);
+        return;
+      }
       this.#markSessionIdle(session);
-      this.emitFailed(session.chatId, error instanceof Error ? error.message : String(error));
+      this.emitFailed(
+        session.chatId,
+        error instanceof Error ? error.message : String(error),
+        eventMetadata,
+      );
     } finally {
       this.#markSessionIdle(session);
     }
+  }
+
+  #finishAbortedTurn(
+    session: DirectRuntimeSession<TMessage>,
+    eventMetadata: AgentEventMetadata,
+  ): void {
+    this.#markSessionIdle(session);
+    this.emitFinished(session.chatId, 0, eventMetadata);
   }
 }

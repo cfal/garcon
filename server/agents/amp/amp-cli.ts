@@ -13,7 +13,13 @@ import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AmpThreadExport } from "./history-loader.js";
-import type { StartSessionRequest, ResumeTurnRequest, StartedAgentSession } from "../session-types.js";
+import {
+  executionEventMetadata,
+  type AgentEventMetadata,
+  type StartSessionRequest,
+  type ResumeTurnRequest,
+  type StartedAgentSession,
+} from "../session-types.js";
 import { createLogger } from '../../lib/log.js';
 import { normalizeThinkingMode } from '../../../common/chat-modes.js';
 import { UnsupportedSingleQueryEffortError } from '../single-query-errors.js';
@@ -33,6 +39,12 @@ interface AmpSession {
   lastActivityAt: number;
   process: ReturnType<typeof Bun.spawn> | null;
   turnGeneration: number;
+  eventMetadata: AgentEventMetadata;
+}
+
+interface AmpTurnContext {
+  eventMetadata: AgentEventMetadata;
+  generation: number;
 }
 
 // Represents a JSONL message emitted by the Amp CLI on stdout.
@@ -265,7 +277,11 @@ async function runSingleQuery(
   return textParts.join('\n');
 }
 
-function createSession(threadId: string, chatId: string): AmpSession {
+function createSession(
+  threadId: string,
+  chatId: string,
+  eventMetadata: AgentEventMetadata,
+): AmpSession {
   const now = Date.now();
   return {
     id: threadId,
@@ -280,6 +296,7 @@ function createSession(threadId: string, chatId: string): AmpSession {
     lastActivityAt: now,
     process: null,
     turnGeneration: 0,
+    eventMetadata,
   };
 }
 
@@ -313,7 +330,8 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     super();
   }
 
-  #routeMessage(session: AmpSession, msg: AmpCliMessage): void {
+  #routeMessage(session: AmpSession, turn: AmpTurnContext, msg: AmpCliMessage): void {
+    if (session.turnGeneration !== turn.generation || session.finalized) return;
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'init') {
@@ -328,7 +346,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       case 'assistant': {
         const chatMessages = convertAmpMessageToChatMessages(msg);
         if (chatMessages.length > 0) {
-          this.emitMessages(session.chatId, chatMessages);
+          this.emitMessages(session.chatId, chatMessages, turn.eventMetadata);
         }
         break;
       }
@@ -339,8 +357,8 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
           session.isRunning = false;
           this.emitProcessing(session.chatId, false);
         }
-        this.emitFinished(session.chatId, msg.is_error ? 1 : 0);
-        this.#finalizeTurn(session);
+        this.emitFinished(session.chatId, msg.is_error ? 1 : 0, turn.eventMetadata);
+        this.#finalizeTurn(session, turn);
         break;
 
       case 'user':
@@ -353,13 +371,15 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async #readStdout(session: AmpSession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+  async #readStdout(
+    session: AmpSession,
+    proc: ReturnType<typeof Bun.spawn>,
+    turn: AmpTurnContext,
+  ): Promise<void> {
     if (!proc.stdout) return;
     const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    const generation = session.turnGeneration;
-
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -378,7 +398,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
             logger.warn(`amp(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
             continue;
           }
-          this.#routeMessage(session, msg);
+          this.#routeMessage(session, turn, msg);
         }
       }
     } catch (err) {
@@ -387,15 +407,14 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       }
     } finally {
       const exitCode = await proc.exited;
-      if (session.turnGeneration === generation) {
-        this.#finalizeTurn(session, exitCode);
-      }
+      this.#finalizeTurn(session, turn, exitCode);
     }
   }
 
   // Idempotent turn finalizer. Safe to call from both the result message
   // handler and the stdout-closed / process-exit paths.
-  #finalizeTurn(session: AmpSession, exitCode?: number): void {
+  #finalizeTurn(session: AmpSession, turn: AmpTurnContext, exitCode?: number): void {
+    if (session.turnGeneration !== turn.generation) return;
     if (session.finalized) return;
     session.finalized = true;
     session.lastActivityAt = Date.now();
@@ -405,7 +424,11 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     if (wasRunning) this.emitProcessing(session.chatId, false);
 
     if (!session.resultSeen && !session.aborted) {
-      this.emitFailed(session.chatId, `Amp process exited before result${exitCode != null ? ` (code ${exitCode})` : ''}`);
+      this.emitFailed(
+        session.chatId,
+        `Amp process exited before result${exitCode != null ? ` (code ${exitCode})` : ''}`,
+        turn.eventMetadata,
+      );
     }
 
     const resolve = session.turnResolve;
@@ -442,14 +465,18 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       stdout: 'pipe',
       stderr: 'pipe',
     });
+    const turn = Object.freeze({
+      eventMetadata: session.eventMetadata,
+      generation: session.turnGeneration,
+    });
+    session.process = proc;
 
     if (prompt) {
       (proc as { stdin: { write(s: string): void; end(): void } }).stdin.write(prompt);
       (proc as { stdin: { write(s: string): void; end(): void } }).stdin.end();
     }
 
-    session.process = proc;
-    this.#readStdout(session, proc);
+    this.#readStdout(session, proc, turn);
     this.#pipeStderr(session.id, proc);
 
     proc.exited.then(exitCode => {
@@ -462,6 +489,22 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     return proc;
   }
 
+  #rollbackTurnLaunch(session: AmpSession, removeSession: boolean): void {
+    const wasRunning = session.isRunning;
+    session.aborted = true;
+    session.finalized = true;
+    session.isRunning = false;
+    session.lastActivityAt = Date.now();
+    const proc = session.process;
+    session.process = null;
+    if (proc && !proc.killed) proc.kill();
+    session.turnResolve = null;
+    if (removeSession && this.#runningSessions.get(session.id) === session) {
+      this.#runningSessions.delete(session.id);
+    }
+    if (wasRunning) this.emitProcessing(session.chatId, false);
+  }
+
   #waitForTurnComplete(session: AmpSession): Promise<void> {
     if (!session.isRunning) return Promise.resolve();
 
@@ -470,11 +513,15 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  async startSession({ command, chatId, projectPath, model }: StartSessionRequest): Promise<StartedAgentSession> {
+  async startSession({ command, chatId, projectPath, model, onAbortable, clientRequestId, turnId }: StartSessionRequest): Promise<StartedAgentSession> {
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
     const threadId = await createThread({ cwd: projectPath });
 
-    const session = createSession(threadId, chatId);
+    const session = createSession(
+      threadId,
+      chatId,
+      executionEventMetadata({ clientRequestId, turnId }, 'chat-start'),
+    );
     this.#runningSessions.set(threadId, session);
     this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
@@ -483,10 +530,10 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
     try {
       this.#spawnAmp(session, projectPath, args, command);
+      onAbortable?.();
     } catch (err) {
-      this.#runningSessions.delete(threadId);
-      this.emitProcessing(chatId, false);
-      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`);
+      this.#rollbackTurnLaunch(session, true);
+      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`, session.eventMetadata);
       throw err;
     }
 
@@ -496,13 +543,17 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     };
   }
 
-  async runTurn({ command, agentSessionId: threadId, chatId, projectPath, model }: ResumeTurnRequest): Promise<void> {
+  async runTurn({ command, agentSessionId: threadId, chatId, projectPath, model, onAbortable, clientRequestId, turnId }: ResumeTurnRequest): Promise<void> {
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
 
     let session = this.#runningSessions.get(threadId);
     if (!session) {
-      session = createSession(threadId, chatId);
+      session = createSession(
+        threadId,
+        chatId,
+        executionEventMetadata({ clientRequestId, turnId }),
+      );
       this.#runningSessions.set(threadId, session);
     } else {
       if (session.isRunning) {
@@ -517,6 +568,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       session.resultSeen = false;
       session.finalized = false;
       session.aborted = false;
+      session.eventMetadata = executionEventMetadata({ clientRequestId, turnId });
     }
 
     this.emitProcessing(chatId, true);
@@ -525,10 +577,10 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
     try {
       this.#spawnAmp(session, projectPath, args, command);
+      onAbortable?.();
     } catch (err) {
-      session.isRunning = false;
-      this.emitProcessing(chatId, false);
-      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`);
+      this.#rollbackTurnLaunch(session, false);
+      this.emitFailed(chatId, `Amp spawn failed: ${(err as Error).message}`, session.eventMetadata);
       throw err;
     }
 
@@ -545,7 +597,10 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
 
     session.aborted = true;
     session.process.kill();
-    this.#finalizeTurn(session);
+    this.#finalizeTurn(session, {
+      eventMetadata: session.eventMetadata,
+      generation: session.turnGeneration,
+    });
     return true;
   }
 
@@ -575,7 +630,10 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       if (session.process && !session.process.killed) {
         session.process.kill();
       }
-      this.#finalizeTurn(session, 143);
+      this.#finalizeTurn(session, {
+        eventMetadata: session.eventMetadata,
+        generation: session.turnGeneration,
+      }, 143);
     }
     this.#runningSessions.clear();
   }

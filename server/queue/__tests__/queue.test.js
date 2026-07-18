@@ -15,6 +15,7 @@ function createStateOnlyAgents() {
     runAgentTurn: mock(() => Promise.reject(new Error('state-only queue cannot run turns'))),
     abortSession: mock(() => Promise.resolve(false)),
     isChatRunning: mock(() => false),
+    waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
   };
 }
 
@@ -526,6 +527,138 @@ describe('queue invariants', () => {
     expect(recovered.version).toBe(6);
   });
 
+  it('holds queued successors when an earlier accepted input is unconfirmed after restart', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      path.join(queuesDir, 'uncertain.queue.json'),
+      JSON.stringify(
+        storedQueueFixture({
+          entries: [queueEntryFixture('entry-successor', 'wait for prior input')],
+          version: 1,
+        }),
+      ),
+      'utf8',
+    );
+    const turnRunner = createStateOnlyAgents();
+    const recoveringQueue = new QueueManager(
+      workspaceDir,
+      turnRunner,
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+      () => true,
+    );
+
+    await recoveringQueue.recoverStaleChatQueues(new Set(['uncertain']));
+    const recovered = await recoveringQueue.readChatQueue('uncertain');
+
+    expect(recovered.entries).toEqual([
+      expect.objectContaining({ id: 'entry-successor', content: 'wait for prior input' }),
+    ]);
+    expect(recovered.pause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+    expect(recovered.pause).not.toHaveProperty('entryId');
+    expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it('persists restart uncertainty without a queue file and gates later entries', async () => {
+    const turnRunner = {
+      runAgentTurn: mock(() => Promise.resolve()),
+      abortSession: mock(() => Promise.resolve(false)),
+      isChatRunning: mock(() => false),
+      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
+    };
+    const recoveringQueue = new QueueManager(
+      workspaceDir,
+      turnRunner,
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+      () => true,
+    );
+
+    await recoveringQueue.recoverStaleChatQueues(new Set(['uncertain-empty']));
+    const recovered = await recoveringQueue.readChatQueue('uncertain-empty');
+    expect(recovered.entries).toEqual([]);
+    expect(recovered.pause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+
+    const created = await recoveringQueue.createChatQueueEntry(
+      'uncertain-empty',
+      'wait for explicit review',
+    );
+    await recoveringQueue.triggerDrain('uncertain-empty');
+    expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
+
+    await recoveringQueue.deleteChatQueueEntry('uncertain-empty', created.entryId);
+    const emptyAgain = await recoveringQueue.readChatQueue('uncertain-empty');
+    expect(emptyAgain.entries).toEqual([]);
+    expect(emptyAgain.pause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+
+    await recoveringQueue.createChatQueueEntry('uncertain-empty', 'send after review');
+    await recoveringQueue.resumeChatQueue('uncertain-empty', emptyAgain.pause.id);
+    await recoveringQueue.triggerDrain('uncertain-empty');
+    expect(turnRunner.runAgentTurn).toHaveBeenCalledWith(
+      'uncertain-empty',
+      'send after review',
+      expect.any(Object),
+    );
+  });
+
+  it('keeps an empty recovered-input pause in memory when persistence fails', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.chmod(queuesDir, 0o500);
+    const turnRunner = {
+      runAgentTurn: mock(() => Promise.resolve()),
+      abortSession: mock(() => Promise.resolve(false)),
+      isChatRunning: mock(() => false),
+      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
+    };
+    const recoveringQueue = new QueueManager(
+      workspaceDir,
+      turnRunner,
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+      () => true,
+    );
+
+    try {
+      await recoveringQueue.recoverStaleChatQueues(new Set(['uncertain-write-failure']));
+      const recovered = await recoveringQueue.readChatQueue('uncertain-write-failure');
+      expect(recovered.entries).toEqual([]);
+      expect(recovered.pause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+    } finally {
+      await fs.chmod(queuesDir, 0o700);
+    }
+
+    await recoveringQueue.createChatQueueEntry('uncertain-write-failure', 'later input');
+    await recoveringQueue.triggerDrain('uncertain-write-failure');
+    expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it('fails recovery instead of replacing unreadable queue state with an empty pause', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    await fs.mkdir(queuesDir, { recursive: true });
+    const queuePath = path.join(queuesDir, 'uncertain-corrupt.queue.json');
+    await fs.writeFile(queuePath, '{corrupt queue state', 'utf8');
+    const recoveringQueue = new QueueManager(
+      workspaceDir,
+      createStateOnlyAgents(),
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+      () => true,
+    );
+
+    await expect(
+      recoveringQueue.recoverStaleChatQueues(new Set(['uncertain-corrupt'])),
+    ).rejects.toBeInstanceOf(SyntaxError);
+    await expect(recoveringQueue.readChatQueue('uncertain-corrupt')).rejects.toBeInstanceOf(SyntaxError);
+    expect(() => recoveringQueue.reserveDirectTurn('uncertain-corrupt')).toThrow(SyntaxError);
+    await expect(fs.readFile(queuePath, 'utf8')).resolves.toBe('{corrupt queue state');
+  });
+
   it('resumes unpaused persisted queue work after restart', async () => {
     const queuesDir = path.join(workspaceDir, 'queues');
     await fs.mkdir(queuesDir, { recursive: true });
@@ -552,6 +685,7 @@ describe('queue invariants', () => {
       runAgentTurn: mock(() => Promise.resolve()),
       abortSession: mock(() => Promise.resolve(false)),
       isChatRunning: mock(() => false),
+      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
     };
     const recoveredQueue = new QueueManager(
       workspaceDir,
@@ -679,6 +813,7 @@ describe('orchestration', () => {
       runAgentTurn: mock(() => Promise.resolve()),
       abortSession: mock(() => Promise.resolve(true)),
       isChatRunning: mock(() => false),
+      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
     };
     mockPendingInputs = {
       register: mock(() => Promise.resolve()),
@@ -730,6 +865,7 @@ describe('orchestration', () => {
           }),
           abortSession: mock(async () => true),
           isChatRunning: mock(() => false),
+          waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         createPendingInputs(),
         createChatMessages(),
@@ -751,15 +887,18 @@ describe('orchestration', () => {
     it('reserves execution until a direct turn hands off to queued work', async () => {
       const directStarted = deferred();
       const finishDirect = deferred();
+      const lifecycle = [];
       mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        lifecycle.push(`run:${command}`);
         if (command === 'direct') {
           directStarted.resolve();
           await finishDirect.promise;
         }
       });
+      orchQueue.onTurnSettled((_chatId, turn) => lifecycle.push(`settled:${turn?.turnId}`));
 
-      const reservation = orchQueue.reserveDirectTurn('c1');
-      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
+      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-direct' });
+      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', { turnId: 'turn-direct' });
       await directStarted.promise;
       expect(orchQueue.isChatExecutionReserved('c1')).toBe(true);
 
@@ -771,8 +910,74 @@ describe('orchestration', () => {
       await directTurn;
 
       expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
+      expect(lifecycle.slice(0, 3)).toEqual([
+        'run:direct',
+        'settled:turn-direct',
+        'run:queued',
+      ]);
       expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
       expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
+    });
+
+    it('settles a released reservation that never reaches the runtime', async () => {
+      const settled = [];
+      orchQueue.onTurnSettled((chatId, turn) => settled.push({ chatId, turn }));
+      const reservation = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'req-prepared',
+        turnId: 'turn-prepared',
+      });
+
+      await orchQueue.releaseDirectTurn(reservation);
+
+      expect(settled).toEqual([{
+        chatId: 'c1',
+        turn: { clientRequestId: 'req-prepared', turnId: 'turn-prepared' },
+      }]);
+    });
+
+    it('keeps a nonblocking runtime attempt until its exact terminal event', async () => {
+      let running = false;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      const settled = [];
+      orchQueue.onTurnSettled((_chatId, turn) => settled.push(turn));
+      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-a' });
+
+      running = true;
+      await orchQueue.runReservedTurn(reservation, 'accepted by runtime', { turnId: 'turn-a' });
+      expect(settled).toEqual([]);
+
+      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-b' });
+      expect(settled).toEqual([]);
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-a' });
+
+      expect(settled).toEqual([{ turnId: 'turn-a' }]);
+    });
+
+    it('retains a completed chat-start reservation until its nonblocking terminal event', async () => {
+      let running = false;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      const settled = [];
+      orchQueue.onTurnSettled((_chatId, turn) => settled.push(turn));
+      const reservation = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'req-start',
+        turnId: 'turn-start',
+      });
+
+      running = true;
+      await orchQueue.completeDirectTurn(reservation);
+
+      expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
+      expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(/owns execution/);
+      expect(settled).toEqual([]);
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-start' });
+
+      expect(settled).toEqual([{
+        clientRequestId: 'req-start',
+        turnId: 'turn-start',
+      }]);
     });
 
     it('honors an interrupt drain request after an aborted direct turn releases execution', async () => {
@@ -800,6 +1005,71 @@ describe('orchestration', () => {
       await idle;
 
       expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
+    });
+
+    it('retries an interrupt drain when the active turn finishes before abort is acknowledged', async () => {
+      const directStarted = deferred();
+      const finishDirect = deferred();
+      const queuedRan = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        if (command === 'direct') {
+          directStarted.resolve();
+          await finishDirect.promise;
+        } else if (command === 'queued') {
+          queuedRan.resolve();
+        }
+      });
+
+      const reservation = orchQueue.reserveDirectTurn('c1');
+      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
+      await directStarted.promise;
+      await orchQueue.createChatQueueEntry('c1', 'queued');
+      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
+      mockAgents.abortSession.mockImplementation(async () => {
+        finishDirect.resolve();
+        await directTurn;
+        return false;
+      });
+
+      expect(await orchQueue.interruptActiveTurn('c1')).toBe(false);
+      await queuedRan.promise;
+      await idle;
+
+      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
+    });
+
+    it('retries an interrupt drain when abort throws after the active turn finishes', async () => {
+      const directStarted = deferred();
+      const finishDirect = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        if (command === 'direct') {
+          directStarted.resolve();
+          await finishDirect.promise;
+        }
+      });
+
+      const reservation = orchQueue.reserveDirectTurn('c1');
+      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
+      await directStarted.promise;
+      await orchQueue.createChatQueueEntry('c1', 'queued after interrupt error');
+      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
+      mockAgents.abortSession.mockImplementation(async () => {
+        finishDirect.resolve();
+        await directTurn;
+        throw new Error('abort transport failed');
+      });
+
+      await expect(orchQueue.interruptActiveTurn('c1')).rejects.toThrow('abort transport failed');
+      await idle;
+
+      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(
+        2,
+        'c1',
+        'queued after interrupt error',
+        expect.any(Object),
+      );
       expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
     });
 
@@ -1071,6 +1341,21 @@ describe('orchestration', () => {
       ]);
     });
 
+    it('does not deliver active input across an empty recovered-input pause', async () => {
+      await orchQueue.recoverStaleChatQueues(new Set(['c1']));
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async () => true);
+
+      const delivered = await orchQueue.deliverActiveInput('c1', 'newer active input');
+
+      expect(delivered).toBe(false);
+      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(await orchQueue.readChatQueue('c1')).toMatchObject({
+        entries: [],
+        pause: { kind: 'recovered-unconfirmed-input' },
+      });
+    });
+
     it('serializes concurrent creates into distinct FIFO entries', async () => {
       await Promise.all([
         orchQueue.createChatQueueEntry('c1', 'older input'),
@@ -1328,6 +1613,169 @@ describe('orchestration', () => {
       expect(result.pause).toMatchObject({ kind: 'manual' });
     });
 
+    it('waits for a registered queued turn to become abortable when Stop begins during registration', async () => {
+      const registrationStarted = deferred();
+      const releaseRegistration = deferred();
+      const stopRequested = deferred();
+      const stopPauseCommitted = deferred();
+      const turnStarted = deferred();
+      const runtimeAbortable = deferred();
+      const turnResult = deferred();
+      let didRequestStop = false;
+      mockPendingInputs.register.mockImplementation(async () => {
+        registrationStarted.resolve();
+        await releaseRegistration.promise;
+      });
+      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
+      mockAgents.runAgentTurn.mockImplementation(async () => {
+        turnStarted.resolve();
+        await turnResult.promise;
+      });
+      mockAgents.abortSession.mockImplementation(async () => {
+        turnResult.reject(new Error('runtime rejects aborted turns'));
+        return true;
+      });
+      orchQueue.onSessionStopRequested(() => {
+        didRequestStop = true;
+        stopRequested.resolve();
+      });
+      orchQueue.onQueueUpdated((_chatId, updatedQueue) => {
+        if (updatedQueue.pause?.kind === 'manual') stopPauseCommitted.resolve();
+      });
+      await orchQueue.createChatQueueEntry('c1', 'preparing');
+      await orchQueue.createChatQueueEntry('c1', 'tail');
+      const drain = orchQueue.triggerDrain('c1');
+      await registrationStarted.promise;
+
+      const stop = orchQueue.stopActiveTurn('c1');
+      await stopPauseCommitted.promise;
+      await Promise.resolve();
+      expect(didRequestStop).toBe(false);
+      expect(mockAgents.abortSession).not.toHaveBeenCalled();
+
+      releaseRegistration.resolve();
+      await turnStarted.promise;
+      expect(didRequestStop).toBe(true);
+      expect(mockAgents.abortSession).not.toHaveBeenCalled();
+      runtimeAbortable.resolve(true);
+      await stopRequested.promise;
+      await expect(stop).resolves.toMatchObject({ stopped: true });
+      await drain;
+
+      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+      expect(await orchQueue.readChatQueue('c1')).toMatchObject({
+        entries: [{ content: 'tail', status: 'queued' }],
+        pause: { kind: 'manual' },
+      });
+    });
+
+    it('reports a genuine preparation failure before Stop can abort the runtime', async () => {
+      const registrationStarted = deferred();
+      const releaseRegistration = deferred();
+      const runtimeAbortable = deferred();
+      const failures = [];
+      mockPendingInputs.register.mockImplementation(async () => {
+        registrationStarted.resolve();
+        await releaseRegistration.promise;
+      });
+      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
+      mockAgents.runAgentTurn.mockRejectedValue(new Error('provider preparation failed'));
+      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
+      await orchQueue.createChatQueueEntry('c1', 'preparing');
+      const drain = orchQueue.triggerDrain('c1');
+      await registrationStarted.promise;
+
+      const stop = orchQueue.stopActiveTurn('c1');
+      releaseRegistration.resolve();
+      await expect(stop).resolves.toMatchObject({ stopped: false });
+      await drain;
+
+      expect(mockAgents.abortSession).not.toHaveBeenCalled();
+      expect(failures).toEqual(['provider preparation failed']);
+      expect(await orchQueue.readChatQueue('c1')).toMatchObject({
+        entries: [{ content: 'preparing', status: 'queued' }],
+        pause: { kind: 'queued-turn-failed' },
+      });
+    });
+
+    it('waits for an abortable runtime when Stop joins an interrupt during registration', async () => {
+      const registrationStarted = deferred();
+      const releaseRegistration = deferred();
+      const runtimeAbortable = deferred();
+      const turnResult = deferred();
+      const stopPauseCommitted = deferred();
+      mockPendingInputs.register.mockImplementation(async () => {
+        registrationStarted.resolve();
+        await releaseRegistration.promise;
+      });
+      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
+      mockAgents.runAgentTurn.mockImplementation(async () => {
+        await turnResult.promise;
+      });
+      mockAgents.abortSession.mockImplementation(async () => {
+        turnResult.reject(new Error('runtime rejects aborted turns'));
+        return true;
+      });
+      orchQueue.onQueueUpdated((_chatId, updatedQueue) => {
+        if (updatedQueue.pause?.kind === 'manual') stopPauseCommitted.resolve();
+      });
+      await orchQueue.createChatQueueEntry('c1', 'preparing');
+      await orchQueue.createChatQueueEntry('c1', 'tail');
+      const drain = orchQueue.triggerDrain('c1');
+      await registrationStarted.promise;
+
+      const interrupt = orchQueue.interruptActiveTurn('c1');
+      const stop = orchQueue.stopActiveTurn('c1');
+      releaseRegistration.resolve();
+      await stopPauseCommitted.promise;
+      runtimeAbortable.resolve(true);
+      await expect(Promise.all([interrupt, stop])).resolves.toMatchObject([
+        true,
+        { stopped: true },
+      ]);
+      await drain;
+
+      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+      expect(await orchQueue.readChatQueue('c1')).toMatchObject({
+        entries: [{ content: 'tail', status: 'queued' }],
+        pause: { kind: 'manual' },
+      });
+    });
+
+    it('waits for an abortable runtime when deletion joins an interrupt during registration', async () => {
+      const registrationStarted = deferred();
+      const releaseRegistration = deferred();
+      const runtimeAbortable = deferred();
+      const turnResult = deferred();
+      mockPendingInputs.register.mockImplementation(async () => {
+        registrationStarted.resolve();
+        await releaseRegistration.promise;
+      });
+      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
+      mockAgents.runAgentTurn.mockImplementation(async () => {
+        await turnResult.promise;
+      });
+      mockAgents.abortSession.mockImplementation(async () => {
+        turnResult.reject(new Error('runtime rejects aborted turns'));
+        return true;
+      });
+      await orchQueue.createChatQueueEntry('c1', 'preparing');
+      const drain = orchQueue.triggerDrain('c1');
+      await registrationStarted.promise;
+
+      const interrupt = orchQueue.interruptActiveTurn('c1');
+      const deletion = orchQueue.abortForChatDeletion('c1');
+      releaseRegistration.resolve();
+      runtimeAbortable.resolve(true);
+      await expect(Promise.all([interrupt, deletion])).resolves.toEqual([true, true]);
+      await drain;
+
+      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+    });
+
     it('treats a draining turn rejection caused by Stop as an expected abort', async () => {
       const turnStarted = deferred();
       const turnResult = deferred();
@@ -1415,6 +1863,7 @@ describe('orchestration', () => {
       });
       await orchQueue.createChatQueueEntry('c1', 'completed');
       await orchQueue.createChatQueueEntry('c1', 'successor');
+      await orchQueue.createChatQueueEntry('c1', 'tail');
 
       const drain = orchQueue.triggerDrain('c1');
       await abortStarted.promise;
@@ -1463,6 +1912,7 @@ describe('orchestration', () => {
     it('honors Stop that joins an interrupt during the post-pop handoff', async () => {
       const abortStarted = deferred();
       const abortAcknowledged = deferred();
+      const stopPauseCommitted = deferred();
       let interrupt;
       mockAgents.abortSession.mockImplementation(async () => {
         abortStarted.resolve();
@@ -1474,13 +1924,18 @@ describe('orchestration', () => {
         if (chatId === 'c1' && successor?.status === 'sending' && !interrupt) {
           interrupt = orchQueue.interruptActiveTurn('c1');
         }
+        if (chatId === 'c1' && queue.pause?.kind === 'manual') {
+          stopPauseCommitted.resolve();
+        }
       });
       await orchQueue.createChatQueueEntry('c1', 'completed');
       await orchQueue.createChatQueueEntry('c1', 'successor');
+      await orchQueue.createChatQueueEntry('c1', 'tail');
 
       const drain = orchQueue.triggerDrain('c1');
       await abortStarted.promise;
       const stop = orchQueue.stopActiveTurn('c1');
+      await stopPauseCommitted.promise;
       await Promise.resolve();
       abortAcknowledged.resolve();
       await Promise.all([interrupt, stop, drain]);
@@ -1488,7 +1943,10 @@ describe('orchestration', () => {
       expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
       expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
       expect(await orchQueue.readChatQueue('c1')).toMatchObject({
-        entries: [{ content: 'successor', status: 'queued' }],
+        entries: [
+          { content: 'successor', status: 'queued' },
+          { content: 'tail', status: 'queued' },
+        ],
         pause: { kind: 'manual' },
       });
     });
@@ -1530,6 +1988,136 @@ describe('orchestration', () => {
       });
     });
 
+    it('keeps deletion suppression when deletion joins an interrupt', async () => {
+      const abortStarted = deferred();
+      const abortAcknowledged = deferred();
+      mockAgents.abortSession.mockImplementation(async () => {
+        abortStarted.resolve();
+        await abortAcknowledged.promise;
+        return true;
+      });
+      await orchQueue.createChatQueueEntry('c1', 'must not dispatch');
+
+      const interrupt = orchQueue.interruptActiveTurn('c1');
+      await abortStarted.promise;
+      const deletion = orchQueue.abortForChatDeletion('c1');
+      abortAcknowledged.resolve();
+      await Promise.all([interrupt, deletion]);
+      await Promise.resolve();
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      expect((await orchQueue.readChatQueue('c1')).entries).toMatchObject([{
+        content: 'must not dispatch',
+        status: 'queued',
+      }]);
+    });
+
+    it('keeps deletion suppression when an interrupt joins deletion', async () => {
+      const abortStarted = deferred();
+      const abortAcknowledged = deferred();
+      let running = true;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      mockAgents.abortSession.mockImplementation(async () => {
+        abortStarted.resolve();
+        await abortAcknowledged.promise;
+        running = false;
+        return true;
+      });
+      await orchQueue.createChatQueueEntry('c1', 'must not dispatch');
+
+      const deletion = orchQueue.abortForChatDeletion('c1');
+      await abortStarted.promise;
+      const interrupt = orchQueue.interruptActiveTurn('c1');
+      abortAcknowledged.resolve();
+      await Promise.all([deletion, interrupt]);
+      await Promise.resolve();
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      expect((await orchQueue.readChatQueue('c1')).entries).toMatchObject([{
+        content: 'must not dispatch',
+        status: 'queued',
+      }]);
+    });
+
+    it('waits for the exact execution attempt to retire before confirming deletion', async () => {
+      const turnStarted = deferred();
+      const releaseTurn = deferred();
+      let running = false;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      mockAgents.runAgentTurn.mockImplementation(async () => {
+        running = true;
+        turnStarted.resolve();
+        await releaseTurn.promise;
+        running = false;
+      });
+      mockAgents.abortSession.mockResolvedValue(true);
+      await orchQueue.createChatQueueEntry('c1', 'active turn');
+      const drain = orchQueue.triggerDrain('c1');
+      await turnStarted.promise;
+
+      let deletionSettled = false;
+      const deletion = orchQueue.abortForChatDeletion('c1').then((result) => {
+        deletionSettled = true;
+        return result;
+      });
+      await Promise.resolve();
+      expect(deletionSettled).toBe(false);
+
+      releaseTurn.resolve();
+      await expect(deletion).resolves.toBe(true);
+      await drain;
+      expect(mockAgents.isChatRunning('c1')).toBe(false);
+    });
+
+    it('releases deletion suppression when runtime retirement is rejected', async () => {
+      let running = true;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      mockAgents.abortSession.mockResolvedValue(false);
+
+      await expect(orchQueue.abortForChatDeletion('c1')).resolves.toBe(false);
+      running = false;
+      await orchQueue.createChatQueueEntry('c1', 'continue after failed deletion');
+      await orchQueue.triggerDrain('c1');
+
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
+        'c1',
+        'continue after failed deletion',
+        expect.any(Object),
+      );
+    });
+
+    it('retries queued work after deletion abort throws across terminal settlement', async () => {
+      const directStarted = deferred();
+      const finishDirect = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        if (command === 'direct') {
+          directStarted.resolve();
+          await finishDirect.promise;
+        }
+      });
+
+      const reservation = orchQueue.reserveDirectTurn('c1');
+      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
+      await directStarted.promise;
+      await orchQueue.createChatQueueEntry('c1', 'continue after deletion error');
+      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
+      mockAgents.abortSession.mockImplementation(async () => {
+        finishDirect.resolve();
+        await directTurn;
+        throw new Error('abort transport failed');
+      });
+
+      await expect(orchQueue.abortForChatDeletion('c1')).rejects.toThrow('abort transport failed');
+      await idle;
+
+      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(
+        2,
+        'c1',
+        'continue after deletion error',
+        expect.any(Object),
+      );
+    });
+
     it('clears deletion suppression when a queue file is deleted', async () => {
       const stopped = [];
       orchQueue.onSessionStopped((chatId, success, intent) => stopped.push({ chatId, success, intent }));
@@ -1543,7 +2131,7 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'new pending', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(0);
-      expect(stopped).toEqual([{ chatId: 'c1', success: true, intent: 'chat-deletion' }]);
+      expect(stopped).toEqual([]);
     });
   });
 
@@ -1559,6 +2147,7 @@ describe('orchestration', () => {
         }),
         abortSession: mock(() => Promise.resolve(true)),
         isChatRunning: mock(() => false),
+        waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
       };
       const deletingQueue = new QueueManager(
         workspaceDir,

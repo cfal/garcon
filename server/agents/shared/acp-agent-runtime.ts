@@ -10,7 +10,16 @@ import type { PermissionDecisionPayload } from '../../../common/chat-command-con
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import { AgentEventEmitterRuntime } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
-import type { PermissionMode, AgentEventMetadata, AgentSessionSettingsPatch, PrepareProjectPathUpdateRequest, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
+import {
+  executionEventMetadata,
+  type PermissionMode,
+  type AgentEventMetadata,
+  type AgentSessionSettingsPatch,
+  type PrepareProjectPathUpdateRequest,
+  type ResumeTurnRequest,
+  type StartSessionRequest,
+  type StartedAgentSession,
+} from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
@@ -57,6 +66,7 @@ interface AcpAgentRuntimeSession {
   lastActivityAt: number;
   lastUpdateAt: number;
   upstreamRequestId?: string;
+  eventMetadata: AgentEventMetadata;
 }
 
 export type AcpAbortStrategy = 'cancel' | 'process-restart';
@@ -213,6 +223,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       startedAt: now,
       lastActivityAt: Date.now(),
       lastUpdateAt: 0,
+      eventMetadata: executionEventMetadata(request, 'chat-start'),
     };
     this.#sessions.set(sessionId, session);
     this.#bindClientEvents(session);
@@ -300,7 +311,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     );
     this.emitMessages(session.chatId, [
       new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow)),
-    ]);
+    ], session.eventMetadata);
   }
 
   updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
@@ -370,6 +381,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
       lastUpdateAt: 0,
+      eventMetadata: executionEventMetadata(request),
     };
     this.#sessions.set(request.agentSessionId, baseSession);
     this.#bindClientEvents(baseSession);
@@ -446,6 +458,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     session.lastActivityAt = Date.now();
     session.lastUpdateAt = Date.now();
     session.upstreamRequestId = undefined;
+    session.eventMetadata = executionEventMetadata(
+      request,
+      'agentSessionId' in request ? undefined : 'chat-start',
+    );
     this.#converter.beginTurn?.(session.id);
     this.emitProcessing(session.chatId, true);
 
@@ -457,11 +473,13 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
-      const result = await session.client.promptSession({
+      const promptRequest = session.client.promptSession({
         sessionId: session.remoteSessionId,
         prompt,
         ...(promptConfig ? { config: promptConfig } : {}),
       });
+      request.onAbortable?.();
+      const result = await promptRequest;
       if (typeof result.requestId === 'string' && result.requestId) {
         session.upstreamRequestId = result.requestId;
       }
@@ -486,15 +504,16 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       session.lastActivityAt = Date.now();
 
       if (success) {
-        const metadata = session.upstreamRequestId
-          ? { upstreamRequestId: session.upstreamRequestId } satisfies AgentEventMetadata
-          : undefined;
+        const metadata = {
+          ...session.eventMetadata,
+          ...(session.upstreamRequestId ? { upstreamRequestId: session.upstreamRequestId } : {}),
+        } satisfies AgentEventMetadata;
         this.emitFinished(session.chatId, 0, metadata);
       } else if (!session.aborted && failureMessage) {
         this.emitMessages(session.chatId, [
           new ErrorMessage(new Date().toISOString(), failureMessage),
-        ]);
-        this.emitFailed(session.chatId, failureMessage);
+        ], session.eventMetadata);
+        this.emitFailed(session.chatId, failureMessage, session.eventMetadata);
       }
 
       this.#cancelPermissionsForSession(session, session.aborted ? 'aborted' : 'session-complete');
@@ -524,13 +543,13 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   #emitFlushedMessages(session: AcpAgentRuntimeSession): void {
     const context = this.#sessionUpdateContext(session);
     const messages = this.#converter.endTurn?.(session.id, context) ?? [];
-    this.emitMessages(session.chatId, messages);
+    this.emitMessages(session.chatId, messages, session.eventMetadata);
   }
 
   #bindClientEvents(session: AcpAgentRuntimeSession): void {
     session.client.onRpcMessage((message) => {
       if (message.method === 'session/update') {
-        this.#onSessionUpdate(message.params);
+        this.#onSessionUpdate(session, message.params);
         return;
       }
       if (message.method === 'session/request_permission' && isJsonRpcId(message.id)) {
@@ -545,31 +564,43 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     });
 
     session.client.onExit((exitCode) => {
-      if (!session.running) return;
+      if (!this.#isCurrentSession(session) || !session.running) return;
       if (session.aborted) return;
       const message = `${this.#policy.agentId} ACP process exited with code ${exitCode}`;
-      this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), message)]);
+      this.emitMessages(
+        session.chatId,
+        [new ErrorMessage(new Date().toISOString(), message)],
+        session.eventMetadata,
+      );
       this.emitProcessing(session.chatId, false);
       session.running = false;
       session.state = 'failed';
       session.lastActivityAt = Date.now();
-      this.emitFailed(session.chatId, message);
+      this.emitFailed(session.chatId, message, session.eventMetadata);
       this.#cancelPermissionsForSession(session, 'cancelled');
     });
 
     session.client.onStderr((line) => {
-      if (!session.running) return;
+      if (!this.#isCurrentSession(session) || !session.running) return;
       if (!line.trim()) return;
-      this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), line)]);
+      this.emitMessages(
+        session.chatId,
+        [new ErrorMessage(new Date().toISOString(), line)],
+        session.eventMetadata,
+      );
     });
   }
 
-  #onSessionUpdate(rawParams: unknown): void {
+  #onSessionUpdate(boundSession: AcpAgentRuntimeSession, rawParams: unknown): void {
     const params = asObject(rawParams) as AcpSessionUpdateNotification;
     const remoteSessionId = asString(params.sessionId);
-    if (!remoteSessionId) return;
-    const session = this.#sessionByRemoteId(remoteSessionId);
-    if (!session || !session.running) return;
+    if (
+      !remoteSessionId
+      || remoteSessionId !== boundSession.remoteSessionId
+      || !this.#isCurrentSession(boundSession)
+      || !boundSession.running
+    ) return;
+    const session = boundSession;
 
     session.lastUpdateAt = Date.now();
     session.lastActivityAt = Date.now();
@@ -579,15 +610,22 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     }
     const context = this.#sessionUpdateContext(session);
     const converted = this.#converter.fromSessionUpdate(params, context);
-    const metadata = upstreamRequestId ? { upstreamRequestId } satisfies AgentEventMetadata : undefined;
+    const metadata = {
+      ...session.eventMetadata,
+      ...(upstreamRequestId ? { upstreamRequestId } : {}),
+    } satisfies AgentEventMetadata;
     this.emitMessages(session.chatId, converted, metadata);
   }
 
   #onPermissionRequest(boundSession: AcpAgentRuntimeSession, requestId: AcpJsonRpcId, rawParams: unknown): void {
     const params = asObject(rawParams) as AcpSessionRequestPermission;
     const remoteSessionId = asString(params.sessionId);
-    const session = remoteSessionId ? this.#sessionByRemoteId(remoteSessionId) : boundSession;
-    if (!session || !session.running) return;
+    if (
+      (remoteSessionId && remoteSessionId !== boundSession.remoteSessionId)
+      || !this.#isCurrentSession(boundSession)
+      || !boundSession.running
+    ) return;
+    const session = boundSession;
 
     const options = (Array.isArray(params.options) ? params.options : [])
       .map((option) => asObject(option));
@@ -641,7 +679,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     });
     this.emitMessages(session.chatId, [
       new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, requestedTool),
-    ]);
+    ], session.eventMetadata);
   }
 
   #onCustomBlockingRequest(
@@ -650,7 +688,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     method: string,
     params: unknown,
   ): boolean {
-    if (!session.running) return false;
+    if (!this.#isCurrentSession(session) || !session.running) return false;
     const context = this.#sessionUpdateContext(session);
     const converted = this.#converter.customRequestToolUse?.({
       method,
@@ -663,7 +701,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#registerBlockingRequest(session, permissionRequestId, requestId, converted);
     this.emitMessages(session.chatId, [
       new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, converted.tool),
-    ]);
+    ], session.eventMetadata);
     return true;
   }
 
@@ -693,7 +731,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       } catch {}
       this.emitMessages(session.chatId, [
         new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason),
-      ]);
+      ], session.eventMetadata);
     }
     session.pendingPermissionIds.clear();
   }
@@ -766,11 +804,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     return createArtificialNativePath(this.#policy.agentId, sessionId);
   }
 
-  #sessionByRemoteId(remoteSessionId: string): AcpAgentRuntimeSession | null {
-    for (const session of this.#sessions.values()) {
-      if (session.remoteSessionId === remoteSessionId) return session;
-    }
-    return null;
+  #isCurrentSession(session: AcpAgentRuntimeSession): boolean {
+    return this.#sessions.get(session.id) === session;
   }
 
   #sessionUpdateContext(session: AcpAgentRuntimeSession): AcpSessionUpdateContext {

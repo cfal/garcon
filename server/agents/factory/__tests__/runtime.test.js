@@ -323,6 +323,111 @@ describe('FactoryCliRuntime lifecycle', () => {
     expect(spawnMock.mock.calls[0][1].env.FACTORY_AIRGAP_ENABLED).toBeUndefined();
   });
 
+  it('does not let a prior process close settle or relabel its successor turn', async () => {
+    const provider = new FactoryCliRuntime();
+    const firstProc = createFakeProc();
+    const secondProc = createFakeProc();
+    spawnMock.mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc);
+    const terminals = [];
+    provider.onFinished((_chatId, _exitCode, metadata) => terminals.push(metadata));
+
+    const firstTurn = provider.runTurn({
+      command: 'first',
+      agentSessionId: 'factory-session-reused',
+      chatId: 'chat-reused',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+    });
+    firstProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
+    await firstTurn;
+
+    let secondSettled = false;
+    const secondTurn = provider.runTurn({
+      command: 'second',
+      agentSessionId: 'factory-session-reused',
+      chatId: 'chat-reused',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      clientRequestId: 'req-b',
+      turnId: 'turn-b',
+    }).then(() => { secondSettled = true; });
+
+    firstProc.close(0);
+    await firstProc.exited;
+    await Promise.resolve();
+
+    expect(secondSettled).toBe(false);
+    expect(provider.isRunning('factory-session-reused')).toBe(true);
+    expect(terminals).toEqual([{ clientRequestId: 'req-a', turnId: 'turn-a' }]);
+
+    secondProc.pushJson({ type: 'completion', session_id: 'factory-session-reused' });
+    secondProc.close(0);
+    await secondTurn;
+
+    expect(terminals).toEqual([
+      { clientRequestId: 'req-a', turnId: 'turn-a' },
+      { clientRequestId: 'req-b', turnId: 'turn-b' },
+    ]);
+  });
+
+  it('rolls back a synchronous resume spawn failure so the session can retry', async () => {
+    const provider = new FactoryCliRuntime();
+    const processing = [];
+    const retryProc = createFakeProc();
+    provider.onProcessing((_chatId, running) => processing.push(running));
+    spawnMock
+      .mockImplementationOnce(() => {
+        throw new Error('spawn failed');
+      })
+      .mockReturnValueOnce(retryProc);
+    const request = {
+      command: 'continue',
+      agentSessionId: 'factory-session-spawn-retry',
+      chatId: 'chat-spawn-retry',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    };
+
+    await expect(provider.runTurn(request)).rejects.toThrow('spawn failed');
+    expect(provider.isRunning(request.agentSessionId)).toBe(false);
+    expect(processing).toEqual([true, false]);
+
+    const retry = provider.runTurn({ ...request, command: 'retry' });
+    retryProc.pushJson({ type: 'completion', session_id: request.agentSessionId });
+    retryProc.close(0);
+    await retry;
+  });
+
+  it('kills and rolls back a process whose prompt write fails synchronously', async () => {
+    const provider = new FactoryCliRuntime();
+    const proc = createFakeProc();
+    proc.stdin.write = () => {
+      throw new Error('stdin failed');
+    };
+    spawnMock.mockReturnValueOnce(proc);
+
+    await expect(provider.runTurn({
+      command: 'continue',
+      agentSessionId: 'factory-session-stdin-failure',
+      chatId: 'chat-stdin-failure',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    })).rejects.toThrow('stdin failed');
+
+    expect(proc.killed).toBe(true);
+    expect(provider.isRunning('factory-session-stdin-failure')).toBe(false);
+  });
+
   it('keeps custom model resume online while preserving the model argument', async () => {
     const provider = new FactoryCliRuntime();
     const proc = createFakeProc();

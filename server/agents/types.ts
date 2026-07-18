@@ -27,6 +27,9 @@ import type {
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
 export interface AgentRuntime {
+  // Blocking methods deliver a terminal callback before resolving. A method
+  // that resolves after dispatch must keep isRunning true until its later
+  // terminal callback so callers retain exact turn ownership.
   startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
   submitActiveInput?(
@@ -48,7 +51,7 @@ export interface AgentRuntime {
   onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
   onSessionCreated(cb: (chatId: string) => void): void;
   onFinished(cb: (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void): void;
-  onFailed(cb: (chatId: string, errorMessage: string) => void): void;
+  onFailed(cb: (chatId: string, errorMessage: string, metadata?: AgentEventMetadata) => void): void;
 }
 
 export interface AgentTranscriptSource {

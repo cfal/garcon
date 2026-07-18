@@ -11,7 +11,16 @@ import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { IdleSessionPurger } from "../shared/idle-session-purger.js";
-import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
+import {
+  executionEventMetadata,
+  type AgentCommandImage,
+  type AgentEventMetadata,
+  type PermissionMode,
+  type ResumeTurnRequest,
+  type StartSessionRequest,
+  type StartedAgentSession,
+  type ThinkingMode,
+} from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
 import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory-model-id.js';
 import { buildFactoryCliEnv } from './factory-env.js';
@@ -41,6 +50,13 @@ interface FactorySession {
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
+  eventMetadata: AgentEventMetadata;
+  turnGeneration: number;
+}
+
+interface FactoryTurnContext {
+  eventMetadata: AgentEventMetadata;
+  generation: number;
 }
 
 interface FactorySystemInitEvent {
@@ -340,7 +356,12 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     return getFactoryModels();
   }
 
-  #finalizeTurn(session: FactorySession, exitCode?: number): void {
+  #finalizeTurn(
+    session: FactorySession,
+    turn: FactoryTurnContext,
+    exitCode?: number,
+  ): void {
+    if (session.turnGeneration !== turn.generation) return;
     if (session.finalized) return;
     session.finalized = true;
     session.lastActivityAt = Date.now();
@@ -352,7 +373,11 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       session.startedSession.resolved = true;
       session.startedSession.reject(new Error(`Factory process exited before session init${exitCode != null ? ` (code ${exitCode})` : ''}`));
     } else if (!session.resultSeen && !session.aborted) {
-      this.emitFailed(session.chatId, `Factory process exited before completion${exitCode != null ? ` (code ${exitCode})` : ''}`);
+      this.emitFailed(
+        session.chatId,
+        `Factory process exited before completion${exitCode != null ? ` (code ${exitCode})` : ''}`,
+        turn.eventMetadata,
+      );
     }
 
     const resolve = session.turnResolve;
@@ -384,7 +409,12 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  #routeEvent(session: FactorySession, event: FactoryCliEvent): void {
+  #routeEvent(
+    session: FactorySession,
+    turn: FactoryTurnContext,
+    event: FactoryCliEvent,
+  ): void {
+    if (session.turnGeneration !== turn.generation || session.finalized) return;
     const type = typeof event.type === 'string' ? event.type : '';
     switch (type) {
       case 'system': {
@@ -428,7 +458,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       case 'message': {
         const chatMessages = convertFactoryMessageEvent(event as FactoryMessageEvent);
         if (chatMessages.length > 0) {
-          this.emitMessages(session.chatId, chatMessages);
+          this.emitMessages(session.chatId, chatMessages, turn.eventMetadata);
         }
         break;
       }
@@ -441,7 +471,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
             toolId: (event as FactoryToolCallEvent).toolId,
             toolName: (event as FactoryToolCallEvent).toolName,
           }),
-        ]);
+        ], turn.eventMetadata);
         break;
 
       case 'tool_result': {
@@ -453,7 +483,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
             normalizeToolResultContent(resultEvent.value),
             Boolean(resultEvent.isError),
           ),
-        ]);
+        ], turn.eventMetadata);
         break;
       }
 
@@ -464,8 +494,8 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           session.isRunning = false;
           this.emitProcessing(session.chatId, false);
         }
-        this.emitFinished(session.chatId, 0);
-        this.#finalizeTurn(session, 0);
+        this.emitFinished(session.chatId, 0, turn.eventMetadata);
+        this.#finalizeTurn(session, turn, 0);
         break;
 
       default:
@@ -473,7 +503,11 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async #readStdout(session: FactorySession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+  async #readStdout(
+    session: FactorySession,
+    proc: ReturnType<typeof Bun.spawn>,
+    turn: FactoryTurnContext,
+  ): Promise<void> {
     if (!proc.stdout) return;
     const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
@@ -491,7 +525,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            this.#routeEvent(session, JSON.parse(line) as FactoryCliEvent);
+            this.#routeEvent(session, turn, JSON.parse(line) as FactoryCliEvent);
           } catch {
             logger.warn(`factory(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
           }
@@ -502,7 +536,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       if (session.process === proc) {
         session.process = null;
       }
-      this.#finalizeTurn(session, exitCode);
+      this.#finalizeTurn(session, turn, exitCode);
     }
   }
 
@@ -521,13 +555,17 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       stdout: 'pipe',
       stderr: 'pipe',
     });
+    const turn = Object.freeze({
+      eventMetadata: session.eventMetadata,
+      generation: session.turnGeneration,
+    });
+    session.process = proc;
 
     const stdin = proc.stdin as unknown as { end(): void; write(chunk: string): void };
     stdin.write(prompt);
     stdin.end();
 
-    session.process = proc;
-    void this.#readStdout(session, proc);
+    void this.#readStdout(session, proc, turn);
     void this.#pipeStderr(session.id || 'pending', proc);
 
     return proc;
@@ -582,14 +620,17 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       lastActivityAt: Date.now(),
       startedSession,
       turnResolve: null,
+      eventMetadata: executionEventMetadata(request, 'chat-start'),
+      turnGeneration: 0,
     };
 
     this.emitProcessing(request.chatId, true);
     try {
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: false }));
+      request.onAbortable?.();
       return await startedSession.promise;
     } catch (error) {
-      this.emitProcessing(request.chatId, false);
+      this.#rollbackTurnLaunch(session, true);
       if (cleanup) await cleanup();
       throw error;
     }
@@ -619,7 +660,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       lastActivityAt: Date.now(),
       startedSession: null,
       turnResolve: null,
+      eventMetadata: executionEventMetadata(request),
+      turnGeneration: 0,
     };
+    if (existingSession) session.turnGeneration += 1;
     session.aborted = false;
     session.chatId = request.chatId;
     session.cleanup = cleanup;
@@ -630,16 +674,36 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     session.resultSeen = false;
     session.startTime = Date.now();
     session.lastActivityAt = Date.now();
+    session.eventMetadata = executionEventMetadata(request);
     this.#runningSessions.set(session.id, session);
 
     this.emitProcessing(request.chatId, true);
     try {
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: true }));
+      request.onAbortable?.();
       await this.#waitForTurnComplete(session);
     } catch (error) {
+      this.#rollbackTurnLaunch(session, false);
       if (cleanup) await cleanup();
       throw error;
     }
+  }
+
+  #rollbackTurnLaunch(session: FactorySession, removeSession: boolean): void {
+    const wasRunning = session.isRunning;
+    session.aborted = true;
+    session.finalized = true;
+    session.isRunning = false;
+    session.lastActivityAt = Date.now();
+    const proc = session.process;
+    session.process = null;
+    if (proc && !proc.killed) proc.kill();
+    session.cleanup = undefined;
+    session.turnResolve = null;
+    if (removeSession && this.#runningSessions.get(session.id) === session) {
+      this.#runningSessions.delete(session.id);
+    }
+    if (wasRunning) this.emitProcessing(session.chatId, false);
   }
 
   abort(agentSessionId: string): boolean {
@@ -647,7 +711,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     if (!session?.process) return false;
     session.aborted = true;
     session.process.kill();
-    this.#finalizeTurn(session, 143);
+    this.#finalizeTurn(session, {
+      eventMetadata: session.eventMetadata,
+      generation: session.turnGeneration,
+    }, 143);
     return true;
   }
 
@@ -676,7 +743,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       if (session.process && !session.process.killed) {
         session.process.kill();
       }
-      this.#finalizeTurn(session, 143);
+      this.#finalizeTurn(session, {
+        eventMetadata: session.eventMetadata,
+        generation: session.turnGeneration,
+      }, 143);
     }
     this.#runningSessions.clear();
   }

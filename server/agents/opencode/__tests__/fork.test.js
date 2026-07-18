@@ -1,12 +1,16 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
 
+async function* neverEndingStream() {
+  await new Promise(() => {});
+}
+
 function createRuntimeWithClient(client) {
   const createInstance = mock(() => Promise.resolve({
     client: {
       permission: { reply: mock(() => Promise.resolve({})) },
       event: {
-        subscribe: mock(() => Promise.resolve({ stream: (async function* () {})() })),
+        subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })),
       },
       ...client,
     },
@@ -128,11 +132,12 @@ describe('OpenCodeRuntime fork', () => {
       ],
       directory: '/repo',
     });
-    expect(promptAsync.mock.calls[0][0]).toEqual({
+    expect(promptAsync.mock.calls[0][0]).toMatchObject({
       sessionID: 'session-1',
       parts: [{ type: 'text', text: 'hello' }],
       directory: '/repo',
     });
+    expect(promptAsync.mock.calls[0][0].messageID).toMatch(/^msg_/);
   });
 
   it('fails resumed turns when OpenCode returns a missing session result', async () => {
@@ -151,16 +156,16 @@ describe('OpenCodeRuntime fork', () => {
       permissionMode: 'default',
     })).rejects.toThrow('Session not found: missing-session');
 
-    expect(promptAsync.mock.calls.map((call) => call[0])).toEqual([
-      {
-        sessionID: 'missing-session',
-        parts: [{ type: 'text', text: 'continue' }],
-        directory: '/repo',
-      },
-      {
-        sessionID: 'missing-session',
-        parts: [{ type: 'text', text: 'continue' }],
-      },
-    ]);
+    expect(promptAsync.mock.calls[0][0]).toMatchObject({
+      sessionID: 'missing-session',
+      parts: [{ type: 'text', text: 'continue' }],
+      directory: '/repo',
+    });
+    expect(promptAsync.mock.calls[1][0]).toMatchObject({
+      sessionID: 'missing-session',
+      parts: [{ type: 'text', text: 'continue' }],
+    });
+    expect(promptAsync.mock.calls[0][0].messageID).toMatch(/^msg_/);
+    expect(promptAsync.mock.calls[1][0].messageID).toBe(promptAsync.mock.calls[0][0].messageID);
   });
 });

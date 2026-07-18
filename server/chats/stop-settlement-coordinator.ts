@@ -5,7 +5,7 @@ import type {
 } from './pending-user-input-service.js';
 import { matchesTurnIdentity } from '../lib/turn-identity.js';
 
-interface StopSettlementCoordinatorOptions {
+export interface StopSettlementCoordinatorOptions {
   terminalTimeoutMs?: number;
   onSettlementError?: (error: unknown) => void;
 }
@@ -71,6 +71,7 @@ export class StopSettlementCoordinator {
       this.#settle(chatId, pending);
       return;
     }
+    if (this.#hasTurnIdentity(pending.turn)) return;
     if (pending.timeout) clearTimeout(pending.timeout);
     pending.timeout = setTimeout(() => this.#settle(chatId, pending), this.#terminalTimeoutMs);
     pending.timeout.unref?.();

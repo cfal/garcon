@@ -139,6 +139,43 @@ describe('AmpCliRuntime lifecycle', () => {
     expect(runningWhenFinished).toBe(false);
   });
 
+  it('kills and rolls back a process whose prompt write fails synchronously', async () => {
+    const provider = new AmpCliRuntime();
+    const threadId = 'T-12121212-1212-1212-1212-121212121212';
+    const createThreadProc = createFakeCommandProc(`${threadId}\n`);
+    const proc = createFakeProc();
+    proc.stdin.write = () => {
+      throw new Error('stdin failed');
+    };
+    const processing = [];
+    const failures = [];
+    provider.onProcessing((_chatId, running) => processing.push(running));
+    provider.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
+    spawnMock.mockReturnValueOnce(createThreadProc).mockReturnValueOnce(proc);
+
+    await expect(provider.startSession({
+      command: 'hello',
+      chatId: 'chat-write-failure',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      clientRequestId: 'req-write-failure',
+      turnId: 'turn-write-failure',
+    })).rejects.toThrow('stdin failed');
+
+    expect(proc.killed).toBe(true);
+    expect(provider.isRunning(threadId)).toBe(false);
+    expect(processing).toEqual([true, false]);
+    expect(failures).toEqual([{
+      message: 'Amp spawn failed: stdin failed',
+      metadata: expect.objectContaining({
+        clientRequestId: 'req-write-failure',
+        turnId: 'turn-write-failure',
+      }),
+    }]);
+  });
+
   it('marks aborted sessions safely and allows a later resume on the same thread', async () => {
     const provider = new AmpCliRuntime();
     const failed = mock();
@@ -198,5 +235,93 @@ describe('AmpCliRuntime lifecycle', () => {
     expect(messages).toHaveBeenCalledTimes(1);
     expect(messages.mock.calls[0][0]).toBe('chat-2');
     expect(messages.mock.calls[0][1][0].content).toBe('resumed output');
+  });
+
+  it('ignores trailing output from a prior process after its successor starts', async () => {
+    const provider = new AmpCliRuntime();
+    const messages = mock();
+    provider.onMessages(messages);
+    const terminals = [];
+    let resolveFirstFinished;
+    const firstFinished = new Promise((resolve) => { resolveFirstFinished = resolve; });
+    provider.onFinished((_chatId, _exitCode, metadata) => {
+      terminals.push(metadata);
+      if (terminals.length === 1) resolveFirstFinished();
+    });
+
+    const threadId = 'T-33333333-3333-3333-3333-333333333333';
+    const createThreadProc = createFakeCommandProc(`${threadId}\n`);
+    const firstProc = createFakeProc();
+    const secondProc = createFakeProc();
+    spawnMock
+      .mockReturnValueOnce(createThreadProc)
+      .mockReturnValueOnce(firstProc)
+      .mockReturnValueOnce(secondProc);
+
+    await provider.startSession({
+      command: 'first',
+      chatId: 'chat-3',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+    });
+    firstProc.pushJson({ type: 'result', is_error: false });
+    await firstFinished;
+
+    let secondSettled = false;
+    const secondTurn = provider.runTurn({
+      command: 'second',
+      agentSessionId: threadId,
+      chatId: 'chat-3',
+      projectPath: '/proj',
+      model: 'default',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      clientRequestId: 'req-b',
+      turnId: 'turn-b',
+    }).then(() => { secondSettled = true; });
+
+    firstProc.pushJson({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'stale output' }],
+      },
+    });
+    firstProc.pushJson({ type: 'result', is_error: true });
+    firstProc.close(0);
+    await firstProc.exited;
+    await Promise.resolve();
+
+    expect(secondSettled).toBe(false);
+    expect(messages).not.toHaveBeenCalled();
+    expect(terminals).toEqual([{
+      clientRequestId: 'req-a',
+      commandType: 'chat-start',
+      turnId: 'turn-a',
+    }]);
+
+    secondProc.pushJson({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'current output' }],
+      },
+    });
+    secondProc.pushJson({ type: 'result', is_error: false });
+    secondProc.close(0);
+    await secondTurn;
+
+    expect(messages).toHaveBeenCalledTimes(1);
+    expect(messages.mock.calls[0][1][0].content).toBe('current output');
+    expect(terminals).toEqual([
+      {
+        clientRequestId: 'req-a',
+        commandType: 'chat-start',
+        turnId: 'turn-a',
+      },
+      { clientRequestId: 'req-b', turnId: 'turn-b' },
+    ]);
   });
 });

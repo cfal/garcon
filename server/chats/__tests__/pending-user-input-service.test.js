@@ -182,6 +182,30 @@ describe('PendingUserInputService', () => {
     expect(service.listForChat('chat-1')).toEqual([]);
   });
 
+  it('assigns ambiguous identityless evidence to the earliest pending input', async () => {
+    const timestamp = '2026-06-01T00:00:00.000Z';
+    const messages = [];
+    const service = new PendingUserInputService({
+      loadNativeMessages: mock(async () => messages),
+      getRetainedHistoryMessages: mock(() => messages),
+    });
+    await service.register('chat-1', 'repeat', {
+      clientRequestId: 'req-a',
+      createdAt: timestamp,
+    });
+    await service.register('chat-1', 'repeat', {
+      clientRequestId: 'req-b',
+      createdAt: timestamp,
+    });
+    messages.push(new UserMessage(timestamp, 'repeat'));
+
+    await service.reconcileRetainedHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'req-b', deliveryStatus: 'accepted' },
+    ]);
+  });
+
   it('conserves identityless evidence across repeated reconciliation batches', async () => {
     const baseTime = Date.parse('2026-06-01T00:00:00.000Z');
     const messages = [];
