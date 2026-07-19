@@ -2,17 +2,35 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '../../common/agents.js';
+import {
+  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+  type AgentId,
+} from '../../common/agents.js';
+import { FakeAnthropicServer } from './fake-anthropic-server.js';
 import { FakeOpenAiServer } from './fake-openai-server.js';
 import {
   GarconTestClient,
+  type ConfiguredDirectTestAgent,
   type ConfiguredTestProvider,
+  type DirectTestAgents,
 } from './garcon-client.js';
 import { GarconProcess } from './garcon-process.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'server');
 let chatIdSequence = 0;
+
+function directAgent(
+  agentId: AgentId,
+  provider: ConfiguredTestProvider,
+): ConfiguredDirectTestAgent {
+  return {
+    agentId,
+    provider,
+    agentSettings: { ownerId: agentId, schemaVersion: 1, values: {} },
+  };
+}
 
 export interface IntegrationDirectories {
   root: string;
@@ -38,14 +56,25 @@ interface IntegrationProcessRunDiagnostics {
 export interface IntegrationDiagnostics {
   directories: IntegrationDirectories;
   processRuns: readonly IntegrationProcessRunDiagnostics[];
-  providerRequests: ReturnType<FakeOpenAiServer['requests']>;
-  providerProtocolViolations: ReturnType<FakeOpenAiServer['protocolViolations']>;
+  providers: {
+    openAi: {
+      requests: ReturnType<FakeOpenAiServer['requests']>;
+      protocolViolations: ReturnType<FakeOpenAiServer['protocolViolations']>;
+    };
+    anthropic: {
+      requests: ReturnType<FakeAnthropicServer['diagnosticRequests']>;
+      protocolViolations: ReturnType<FakeAnthropicServer['protocolViolations']>;
+    };
+  };
 }
 
 export class IntegrationFixture {
   readonly dirs: IntegrationDirectories;
-  readonly fakeOpenAi: FakeOpenAiServer;
-  readonly provider: ConfiguredTestProvider;
+  readonly fakeProviders: {
+    openAi: FakeOpenAiServer;
+    anthropic: FakeAnthropicServer;
+  };
+  readonly directAgents: DirectTestAgents;
   garcon: GarconProcess;
   client: GarconTestClient;
   readonly #clients = new Map<string, GarconTestClient>();
@@ -54,17 +83,17 @@ export class IntegrationFixture {
 
   private constructor(input: {
     dirs: IntegrationDirectories;
-    fakeOpenAi: FakeOpenAiServer;
+    fakeProviders: IntegrationFixture['fakeProviders'];
     garcon: GarconProcess;
     client: GarconTestClient;
-    provider: ConfiguredTestProvider;
+    directAgents: DirectTestAgents;
   }) {
     this.dirs = input.dirs;
-    this.fakeOpenAi = input.fakeOpenAi;
+    this.fakeProviders = input.fakeProviders;
     this.garcon = input.garcon;
     this.client = input.client;
     this.#clients.set('primary', input.client);
-    this.provider = input.provider;
+    this.directAgents = input.directAgents;
   }
 
   static async create(options: IntegrationFixtureOptions = {}): Promise<IntegrationFixture> {
@@ -78,7 +107,10 @@ export class IntegrationFixture {
     };
     await Promise.all(Object.values(dirs).map((directory) => mkdir(directory, { recursive: true })));
 
-    const fakeOpenAi = FakeOpenAiServer.start();
+    const fakeProviders = {
+      openAi: FakeOpenAiServer.start(),
+      anthropic: FakeAnthropicServer.start(),
+    };
     let garcon: GarconProcess | null = null;
     let client: GarconTestClient | null = null;
     try {
@@ -91,25 +123,37 @@ export class IntegrationFixture {
       });
       client = await GarconTestClient.connect(garcon.baseUrl);
       await client.ping();
-      const provider = await client.createOpenAiProvider(fakeOpenAi.baseUrl);
+      const openAiProvider = await client.createOpenAiProvider(fakeProviders.openAi.baseUrl);
+      const anthropicProvider = await client.createAnthropicProvider(fakeProviders.anthropic.baseUrl);
+      const directAgents = {
+        openAi: directAgent(
+          DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+          openAiProvider,
+        ),
+        anthropic: directAgent(
+          DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+          anthropicProvider,
+        ),
+      } satisfies DirectTestAgents;
       await client.updateSettings({
         ui: {
           chatTitle: options.chatTitleEnabled ? {
             enabled: true,
             agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-            model: provider.model,
-            apiProviderId: provider.providerId,
-            modelEndpointId: provider.endpointId,
-            modelProtocol: provider.protocol,
+            model: openAiProvider.model,
+            apiProviderId: openAiProvider.providerId,
+            modelEndpointId: openAiProvider.endpointId,
+            modelProtocol: openAiProvider.protocol,
             thinkingMode: 'none',
           } : { enabled: false },
         },
       });
-      return new IntegrationFixture({ dirs, fakeOpenAi, garcon, client, provider });
+      return new IntegrationFixture({ dirs, fakeProviders, garcon, client, directAgents });
     } catch (error) {
       await client?.close().catch(() => undefined);
       await garcon?.stop().catch(() => undefined);
-      fakeOpenAi.stop();
+      fakeProviders.openAi.stop();
+      fakeProviders.anthropic.stop();
       await rm(root, { recursive: true, force: true });
       throw error;
     }
@@ -165,8 +209,16 @@ export class IntegrationFixture {
     return {
       directories: this.dirs,
       processRuns: [...this.#completedRuns, this.#currentRunDiagnostics()],
-      providerRequests: this.fakeOpenAi.requests(),
-      providerProtocolViolations: this.fakeOpenAi.protocolViolations(),
+      providers: {
+        openAi: {
+          requests: this.fakeProviders.openAi.requests(),
+          protocolViolations: this.fakeProviders.openAi.protocolViolations(),
+        },
+        anthropic: {
+          requests: this.fakeProviders.anthropic.diagnosticRequests(),
+          protocolViolations: this.fakeProviders.anthropic.protocolViolations(),
+        },
+      },
     };
   }
 
@@ -188,7 +240,8 @@ export class IntegrationFixture {
     return [
       `Directories: ${JSON.stringify(this.dirs, null, 2)}`,
       `Process runs:\n${JSON.stringify(this.diagnostics().processRuns, null, 2)}`,
-      `Provider requests:\n${this.fakeOpenAi.describeRequests()}`,
+      `OpenAI requests:\n${this.fakeProviders.openAi.describeRequests()}`,
+      `Anthropic requests:\n${this.fakeProviders.anthropic.describeRequests()}`,
     ].join('\n\n');
   }
 
@@ -207,12 +260,14 @@ export class IntegrationFixture {
       errors.push(error);
     }
     try {
-      this.fakeOpenAi.assertNoProtocolViolations();
+      this.fakeProviders.openAi.assertNoProtocolViolations();
+      this.fakeProviders.anthropic.assertNoProtocolViolations();
       this.garcon.assertNoUnexpectedExit();
     } catch (error) {
       errors.push(error);
     }
-    this.fakeOpenAi.stop();
+    this.fakeProviders.openAi.stop();
+    this.fakeProviders.anthropic.stop();
 
     if (errors.length === 0 && process.env.KEEP_INTEGRATION_ARTIFACTS !== '1') {
       await rm(this.dirs.root, { recursive: true, force: true });

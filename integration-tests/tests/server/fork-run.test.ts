@@ -16,13 +16,13 @@ describe('fork-run lifecycle', () => {
         chatId: sourceChatId,
         content: 'fork-source-first',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, first.turnId);
       const second = await fixture.client.runDirectChat({
         chatId: sourceChatId,
         content: 'fork-source-second',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, second.turnId);
 
@@ -37,12 +37,12 @@ describe('fork-run lifecycle', () => {
         clientMessageId,
         permissionMode: 'default' as const,
         thinkingMode: 'none' as const,
-        model: fixture.provider.model,
-        apiProviderId: fixture.provider.providerId,
-        modelEndpointId: fixture.provider.endpointId,
-        modelProtocol: fixture.provider.protocol,
+        model: fixture.directAgents.openAi.provider.model,
+        apiProviderId: fixture.directAgents.openAi.provider.providerId,
+        modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
+        modelProtocol: fixture.directAgents.openAi.provider.protocol,
       };
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'fork-target-new' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'fork-target-new' });
       const cursor = fixture.client.markEvents();
       const accepted = await fixture.client.forkRunChat(request);
       expect(accepted).toMatchObject({
@@ -160,7 +160,7 @@ describe('fork-run lifecycle', () => {
         turnId: accepted.turnId,
       });
       expect(target.pendingUserInputs).toEqual([]);
-      expect(fixture.fakeOpenAi.requests().filter((entry) =>
+      expect(fixture.fakeProviders.openAi.requests().filter((entry) =>
         entry.lastUserText === 'fork-target-new')).toHaveLength(1);
 
       await fixture.restartGarcon();

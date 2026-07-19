@@ -1,4 +1,5 @@
 import type { Page } from 'puppeteer-core';
+import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 
@@ -28,7 +29,36 @@ export class SpaDriver {
     await this.#page.waitForFunction(() => document.querySelector('button') !== null);
   }
 
-  async startDirectChat(content: string): Promise<RecordedCompletionRequest> {
+  async startOpenAiDirectChat(content: string): Promise<RecordedCompletionRequest> {
+    return this.#startDirectChat({
+      content,
+      agentLabel: 'Direct (Chat Completions)',
+      modelLabel: 'Integration Echo',
+      waitForRequest: () => this.#integration.fakeProviders.openAi.waitForRequest(
+        { lastUserText: content },
+        { timeoutMs: 20_000 },
+      ),
+    });
+  }
+
+  async startAnthropicDirectChat(content: string): Promise<RecordedAnthropicRequest> {
+    return this.#startDirectChat({
+      content,
+      agentLabel: 'Direct (Anthropic)',
+      modelLabel: 'Integration Anthropic Echo',
+      waitForRequest: () => this.#integration.fakeProviders.anthropic.waitForRequest(
+        { lastUserText: content },
+        { timeoutMs: 20_000 },
+      ),
+    });
+  }
+
+  async #startDirectChat<TRequest>(input: {
+    content: string;
+    agentLabel: string;
+    modelLabel: string;
+    waitForRequest: () => Promise<TRequest>;
+  }): Promise<TRequest> {
     await this.clickButton('New Chat');
     await this.#page.waitForFunction(
       () => {
@@ -44,21 +74,22 @@ export class SpaDriver {
       ) === true,
       { timeout: 20_000 },
     );
-    const directProviderSelected = await this.#page.evaluate(() => {
+    const directProviderSelected = await this.#page.evaluate(({ agentLabel, modelLabel }) => {
       const dialog = document.querySelector('[role="dialog"]');
       return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
         const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-        return name.includes('Direct (Chat Completions)') && name.includes('Integration Echo');
+        return name.includes(agentLabel) && name.includes(modelLabel);
       });
-    });
+    }, { agentLabel: input.agentLabel, modelLabel: input.modelLabel });
     if (!directProviderSelected) {
-      await this.clickNewChatDialogButtonContaining('Claude /');
+      await this.#clickNewChatModelSelector();
       await this.#page.waitForFunction(
-        () => document.body.innerText.includes('Direct (Chat Completions)'),
+        (agentLabel) => document.body.innerText.includes(agentLabel),
         { timeout: 30_000 },
+        input.agentLabel,
       );
-      await this.clickButton('Direct (Chat Completions)');
-      await this.clickButton('Integration Echo');
+      await this.clickButton(input.agentLabel);
+      await this.clickButton(input.modelLabel);
     }
 
     const projectPath = await this.#page.$eval(
@@ -71,18 +102,68 @@ export class SpaDriver {
         this.#integration.dirs.project,
       );
     }
-    await this.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', content);
+    await this.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', input.content);
     await this.waitForDialogButtonEnabled('Start session');
     await this.clickButton('Start session');
-    const request = await this.#integration.fakeOpenAi.waitForRequest(
-      { lastUserText: content },
-      { timeoutMs: 20_000 },
-    );
+    const request = await input.waitForRequest();
     await this.#page.waitForFunction(
       () => document.querySelector('[role="dialog"]') === null,
       { timeout: 20_000 },
     );
     return request;
+  }
+
+  async #clickNewChatModelSelector(): Promise<void> {
+    await this.#page.evaluate(() => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      const button = dialog
+        ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
+            (element.getAttribute('aria-label') ?? '').includes(' / '))
+        : null;
+      if (!button) throw new Error('Missing new chat model selector.');
+      if (button.disabled) throw new Error('New chat model selector is disabled.');
+      button.click();
+    });
+  }
+
+  async openChatSearch(): Promise<void> {
+    await this.clickButton('Search chats...');
+    await this.#page.waitForSelector('input[placeholder="Search chats..."]');
+  }
+
+  async searchChats(query: string): Promise<void> {
+    await this.fill('input[placeholder="Search chats..."]', query);
+  }
+
+  async waitForTranscriptSearchResult(input: {
+    count: number;
+    snippet: string;
+  }): Promise<void> {
+    await this.#page.waitForFunction(
+      ({ count, snippet }) => {
+        const rows = [...document.querySelectorAll(
+          '[data-slot="search-dialog-results"] [role="option"]',
+        )];
+        return rows.length === count
+          && rows.some((row) => row.textContent?.includes(snippet));
+      },
+      { timeout: 20_000 },
+      input,
+    );
+  }
+
+  async chatSearchResultCount(): Promise<number> {
+    return this.#page.$$eval(
+      '[data-slot="search-dialog-results"] [role="option"]',
+      (rows) => rows.length,
+    );
+  }
+
+  async chatSearchResultsText(): Promise<string> {
+    return this.#page.$eval(
+      '[data-slot="search-dialog-results"]',
+      (element) => (element as HTMLElement).innerText,
+    );
   }
 
   async sendComposer(content: string): Promise<void> {
@@ -197,20 +278,6 @@ export class SpaDriver {
         : null;
       if (!button) throw new Error(`Missing dialog button: ${expected}`);
       if (button.disabled) throw new Error(`Dialog button is disabled: ${expected}`);
-      button.click();
-    }, name);
-  }
-
-  async clickNewChatDialogButtonContaining(name: string): Promise<void> {
-    await this.#page.evaluate((expected) => {
-      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-      const button = dialog
-        ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
-            (element.getAttribute('aria-label') || element.textContent?.trim() || '')
-              .includes(expected))
-        : null;
-      if (!button) throw new Error(`Missing new chat dialog button containing: ${expected}`);
-      if (button.disabled) throw new Error(`New chat dialog button is disabled: ${expected}`);
       button.click();
     }, name);
   }

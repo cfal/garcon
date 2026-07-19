@@ -13,27 +13,27 @@ describe('provider failures', () => {
       const failures = [
         {
           content: 'http-401',
-          configure: () => fixture.fakeOpenAi.failNextHttp({ lastUserText: 'http-401' }, 401, 'unauthorized'),
+          configure: () => fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'http-401' }, 401, 'unauthorized'),
         },
         {
           content: 'http-429',
-          configure: () => fixture.fakeOpenAi.failNextHttp({ lastUserText: 'http-429' }, 429, 'rate limited'),
+          configure: () => fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'http-429' }, 429, 'rate limited'),
         },
         {
           content: 'http-500',
-          configure: () => fixture.fakeOpenAi.failNextHttp({ lastUserText: 'http-500' }, 500, 'upstream failed'),
+          configure: () => fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'http-500' }, 500, 'upstream failed'),
         },
         {
           content: 'sse-error',
-          configure: () => fixture.fakeOpenAi.failNextStream({ lastUserText: 'sse-error' }, 'stream failed'),
+          configure: () => fixture.fakeProviders.openAi.failNextStream({ lastUserText: 'sse-error' }, 'stream failed'),
         },
         {
           content: 'empty-stream',
-          configure: () => fixture.fakeOpenAi.respondEmptyNext({ lastUserText: 'empty-stream' }),
+          configure: () => fixture.fakeProviders.openAi.respondEmptyNext({ lastUserText: 'empty-stream' }),
         },
         {
           content: 'truncated-stream',
-          configure: () => fixture.fakeOpenAi.truncateNextStream({ lastUserText: 'truncated-stream' }),
+          configure: () => fixture.fakeProviders.openAi.truncateNextStream({ lastUserText: 'truncated-stream' }),
         },
       ];
 
@@ -47,14 +47,14 @@ describe('provider failures', () => {
               chatId,
               content: failure.content,
               projectPath: fixture.dirs.project,
-              provider: fixture.provider,
+              agent: fixture.directAgents.openAi,
               clientRequestId,
               clientMessageId,
             })
           : await fixture.client.runDirectChat({
               chatId,
               content: failure.content,
-              provider: fixture.provider,
+              agent: fixture.directAgents.openAi,
               clientRequestId,
               clientMessageId,
             });
@@ -100,14 +100,14 @@ describe('provider failures', () => {
         expect(clearedIndex).toBeGreaterThanOrEqual(0);
         expect(terminalIndex).toBeGreaterThan(clearedIndex);
       }
-      expect(fixture.fakeOpenAi.requests()).toHaveLength(failures.length);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(failures.length);
     });
   });
 
   test('skips malformed SSE data and retains a later valid completion', async () => {
     await withIntegrationFixture('provider-malformed-sse', async (fixture) => {
       const chatId = fixture.newChatId();
-      fixture.fakeOpenAi.respondMalformedThenTextNext(
+      fixture.fakeProviders.openAi.respondMalformedThenTextNext(
         { lastUserText: 'malformed-then-valid' },
         'valid-after-malformed',
       );
@@ -115,7 +115,7 @@ describe('provider failures', () => {
         chatId,
         content: 'malformed-then-valid',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId)).type).toBe('agent-run-finished');
       const transcript = await fixture.client.getMessages(chatId);
@@ -129,17 +129,17 @@ describe('provider failures', () => {
   test('pauses queued work and gives an edited retry a new delivery identity', async () => {
     await withIntegrationFixture('queued-provider-failure', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'failure-a' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-a' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'failure-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'failure-b');
       await fixture.client.enqueueNew(chatId, 'failure-c');
-      fixture.fakeOpenAi.failNextHttp({ lastUserText: 'failure-b' }, 500, 'queued turn failed');
+      fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'failure-b' }, 500, 'queued turn failed');
       const failureCursor = fixture.client.markEvents();
       heldA.releaseEcho();
 
@@ -187,7 +187,7 @@ describe('provider failures', () => {
         entryId: queuedB.entryId,
       });
       expect(queue.entries.map((entry) => entry.content)).toEqual(['failure-b', 'failure-c']);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'failure-a',
         'failure-b',
       ]);
@@ -207,8 +207,8 @@ describe('provider failures', () => {
         revision: failedEntry.revision + 1,
       });
 
-      const heldEdited = fixture.fakeOpenAi.holdNext({ lastUserText: 'failure-b-edited' });
-      const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'failure-c' });
+      const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-b-edited' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-c' });
       await fixture.client.resumeQueue(chatId, replaced.queue.pause!.id);
       const editedRequest = await heldEdited.received;
       expect(editedRequest.body.messages.map((message) => message.content)).toEqual([
@@ -234,7 +234,7 @@ describe('provider failures', () => {
       });
 
       expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'failure-a',
         'failure-b',
         'failure-b-edited',
@@ -263,16 +263,16 @@ describe('provider failures', () => {
   test('finishes failed-turn recovery before dispatching or settling its queued successor', async () => {
     await withIntegrationFixture('failed-turn-successor-fence', async (fixture) => {
       const chatId = fixture.newChatId();
-      const failedTurn = fixture.fakeOpenAi.holdNext({ lastUserText: 'failure-fence-a' });
+      const failedTurn = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-fence-a' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'failure-fence-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await failedTurn.received;
       await fixture.client.enqueueNew(chatId, 'failure-fence-b');
-      const successor = fixture.fakeOpenAi.holdNext({ lastUserText: 'failure-fence-b' });
+      const successor = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-fence-b' });
       const cursor = fixture.client.markEvents();
 
       failedTurn.releaseStreamError('failed predecessor');
@@ -320,20 +320,20 @@ describe('provider failures', () => {
     await withIntegrationFixture('provider-failure-chat-isolation', async (fixture) => {
       const failedChat = fixture.newChatId();
       const healthyChat = fixture.newChatId();
-      fixture.fakeOpenAi.failNextHttp({ lastUserText: 'isolated-failure' }, 500, 'boom');
-      const healthy = fixture.fakeOpenAi.holdNext({ lastUserText: 'isolated-healthy' });
+      fixture.fakeProviders.openAi.failNextHttp({ lastUserText: 'isolated-failure' }, 500, 'boom');
+      const healthy = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'isolated-healthy' });
 
       const failed = await fixture.client.startDirectChat({
         chatId: failedChat,
         content: 'isolated-failure',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       const healthyAccepted = await fixture.client.startDirectChat({
         chatId: healthyChat,
         content: 'isolated-healthy',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await healthy.received;
       expect((await fixture.client.waitForTurnTerminal(failedChat, failed.turnId)).type).toBe('agent-run-failed');

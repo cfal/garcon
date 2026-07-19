@@ -613,6 +613,11 @@ describe('SidebarSearchStore', () => {
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
 			await store.refreshTranscriptSearch('needle');
+			expect(searchChatTranscripts).toHaveBeenCalledWith(
+				expect.objectContaining({ chatIds: ['c1', 'c2'] }),
+				expect.any(Object),
+			);
+			expect([...store.transcriptSearchResultsByChatId.keys()]).toEqual(['c2']);
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c2']);
 
 			store.updateDraftQuery('other');

@@ -67,6 +67,34 @@ describe('common transcript search', () => {
     await fixture.search.close();
   });
 
+  it('returns only the matching chat when several indexed chats are allowed', async () => {
+    const fixture = await createFixture({
+      native: {
+        one: [new UserMessage(timestamp, 'ordinary first transcript')],
+        two: [new UserMessage(timestamp, 'contains uniqueonly marker')],
+        three: [new UserMessage(timestamp, 'ordinary third transcript')],
+      },
+    });
+    const chats = [chat('one'), chat('two'), chat('three')];
+    await fixture.search.reconcile({ chats, generation: generation(1), signal: signal() });
+
+    const result = await fixture.search.search({
+      query: query('uniqueonly'),
+      chats,
+      limit: 20,
+      signal: signal(),
+    });
+
+    expect(result.hits.map((hit) => hit.chatId)).toEqual(['two']);
+    expect(result.index).toEqual({
+      indexedChatCount: 3,
+      pendingChatCount: 0,
+      failedChatCount: 0,
+      unsupportedChatCount: 0,
+    });
+    await fixture.search.close();
+  });
+
   it('rejects stale reconcile completion after a newer generation is accepted', async () => {
     let releaseFirst: (() => void) | null = null;
     let firstStarted: (() => void) | null = null;

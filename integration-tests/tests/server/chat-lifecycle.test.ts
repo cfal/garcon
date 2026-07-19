@@ -94,7 +94,7 @@ describe('chat lifecycle', () => {
       const chatId = fixture.newChatId();
       const clientRequestId = crypto.randomUUID();
       const clientMessageId = crypto.randomUUID();
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'hello-integration' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'hello-integration' });
       const observer = await fixture.connectObserver('turn-observer');
       const eventCursor = fixture.client.markEvents();
       const observerCursor = observer.markEvents();
@@ -103,7 +103,7 @@ describe('chat lifecycle', () => {
         chatId,
         content: 'hello-integration',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
         clientRequestId,
         clientMessageId,
       });
@@ -145,7 +145,7 @@ describe('chat lifecycle', () => {
         turnId: accepted.turnId,
       });
       expect(transcript.pendingUserInputs).toEqual([]);
-      expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
     });
   });
 
@@ -156,18 +156,18 @@ describe('chat lifecycle', () => {
         chatId,
         content: 'turn-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type).toBe('agent-run-finished');
 
       const second = await fixture.client.runDirectChat({
         chatId,
         content: 'turn-b',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, second.turnId)).type).toBe('agent-run-finished');
 
-      const requests = fixture.fakeOpenAi.requests();
+      const requests = fixture.fakeProviders.openAi.requests();
       expect(requests).toHaveLength(2);
       expect(requests[1].body.messages).toEqual([
         { role: 'user', content: 'turn-a' },
@@ -188,7 +188,7 @@ describe('chat lifecycle', () => {
         chatId,
         content: 'title-enabled-turn',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
         afterIndex: eventCursor,
@@ -200,7 +200,7 @@ describe('chat lifecycle', () => {
         { afterIndex: eventCursor },
       );
 
-      const requests = fixture.fakeOpenAi.requests();
+      const requests = fixture.fakeProviders.openAi.requests();
       expect(requests).toHaveLength(2);
       expect(requests.filter((request) => request.lastUserText === 'title-enabled-turn')).toHaveLength(1);
       const transcript = await fixture.client.getMessages(chatId);
@@ -213,20 +213,20 @@ describe('chat lifecycle', () => {
     await withIntegrationFixture('concurrent-chat-isolation', async (fixture) => {
       const chatA = fixture.newChatId();
       const chatB = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'chat-a' });
-      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'chat-b' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'chat-a' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'chat-b' });
 
       const acceptedA = await fixture.client.startDirectChat({
         chatId: chatA,
         content: 'chat-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       const acceptedB = await fixture.client.startDirectChat({
         chatId: chatB,
         content: 'chat-b',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await Promise.all([heldA.received, heldB.received]);
 
@@ -239,7 +239,7 @@ describe('chat lifecycle', () => {
       expect((await fixture.client.waitForTurnTerminal(chatA, acceptedA.turnId)).type).toBe('agent-run-finished');
       expect(userContents((await fixture.client.getMessages(chatA)).messages)).toEqual(['chat-a']);
       expect(userContents((await fixture.client.getMessages(chatB)).messages)).toEqual(['chat-b']);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText).sort()).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText).sort()).toEqual([
         'chat-a',
         'chat-b',
       ]);
@@ -253,7 +253,7 @@ describe('chat lifecycle', () => {
         chatId,
         content: 'idempotent',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
       });
@@ -262,7 +262,7 @@ describe('chat lifecycle', () => {
       expect(first.status).toBe('accepted');
       expect(duplicate.status).toBe('duplicate');
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type).toBe('agent-run-finished');
-      expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
       expect(countUserContent((await fixture.client.getMessages(chatId)).messages, 'idempotent')).toBe(1);
 
       let conflict: unknown;
@@ -276,19 +276,19 @@ describe('chat lifecycle', () => {
       expect((conflict as GarconApiError).body).toMatchObject({
         errorCode: 'IDEMPOTENCY_CONFLICT',
       });
-      expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
     });
   });
 
   test('rejects a concurrent direct turn before mutating pending or transcript state', async () => {
     await withIntegrationFixture('same-chat-direct-admission', async (fixture) => {
       const chatId = fixture.newChatId();
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'admission-first' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'admission-first' });
       const first = await fixture.client.startDirectChat({
         chatId,
         content: 'admission-first',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
 
@@ -300,7 +300,7 @@ describe('chat lifecycle', () => {
         await fixture.client.runDirectChat({
           chatId,
           content: 'admission-rejected',
-          provider: fixture.provider,
+          agent: fixture.directAgents.openAi,
           clientRequestId: rejectedRequestId,
           clientMessageId: rejectedMessageId,
         });
@@ -329,7 +329,7 @@ describe('chat lifecycle', () => {
       const whileHeld = await fixture.client.getMessages(chatId);
       expect(userContents(whileHeld.messages)).toEqual(['admission-first']);
       expect(whileHeld.pendingUserInputs.map((input) => input.content)).toEqual(['admission-first']);
-      expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
 
       held.releaseEcho();
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type)
@@ -355,11 +355,11 @@ describe('chat lifecycle', () => {
       const later = await fixture.client.runDirectChat({
         chatId,
         content: 'admission-later',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, later.turnId)).type)
         .toBe('agent-run-finished');
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'admission-first',
         'admission-later',
       ]);

@@ -9,7 +9,7 @@ describe('Lightpanda fork and delete', () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startDirectChat('ui-fork-source');
+      await app.startOpenAiDirectChat('ui-fork-source');
       await app.waitForText('echo:ui-fork-source');
 
       const source = (await fixture.integration.client.listChats()).sessions.find((entry) =>
