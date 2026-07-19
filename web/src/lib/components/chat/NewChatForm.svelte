@@ -675,7 +675,6 @@
 
 {#if form.worktreeModalOpen}
 	<GitWorktreePickerModal
-		repositoryRoot={form.trimmedPath}
 		worktrees={form.worktreeItems}
 		isLoading={form.isLoadingWorktrees}
 		isCreating={form.isCreatingWorktree}
