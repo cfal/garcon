@@ -4,17 +4,13 @@
 // callback functions supplied through the deps interface.
 
 import {
-	createQueuedInput,
 	continueRecoveredInput,
 	deleteQueuedInput,
 	getChatExecutionControl,
 	pauseChatQueue,
 	replaceQueuedInput,
 	resumeChatQueue,
-	runChat,
-	sendActiveInput,
 	sendPermissionDecision,
-	startChat,
 	stopChat,
 	interruptAndSendChat,
 	updateChatModel,
@@ -27,10 +23,7 @@ import {
 	type ChatExecutionControlState,
 } from '$shared/chat-execution-control';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
-import {
-	CommandOutcomeUnknownError,
-	submitIdempotentCommand,
-} from '$lib/chat/conversation/idempotent-command.js';
+import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import {
 	parseCompactCommand,
@@ -70,6 +63,8 @@ import {
 	type AgentSwitchSelection,
 } from '$lib/chat/conversation/conversation-agent-switch-service.js';
 import { ConversationSlashCommandService } from '$lib/chat/conversation/conversation-slash-command-service.js';
+import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
+import { classifySubmission } from '$lib/chat/conversation/submission-classifier.js';
 import {
 	errorDetail,
 	pendingUserInput,
@@ -253,9 +248,11 @@ export class ConversationSessionController {
 	#latestAgentSettingsMutationByChatId = new Map<string, symbol>();
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
+	readonly #acceptedInputs: AcceptedInputSubmissionService;
 
 	constructor(private deps: SessionControllerDeps) {
-		this.#slashCommands = new ConversationSlashCommandService(deps);
+		this.#acceptedInputs = new AcceptedInputSubmissionService();
+		this.#slashCommands = new ConversationSlashCommandService(deps, this.#acceptedInputs);
 		this.#agentSwitch = new ConversationAgentSwitchService(deps);
 	}
 
@@ -297,6 +294,22 @@ export class ConversationSessionController {
 		deliveryStatus: 'accepted' | 'unconfirmed' | 'failed',
 	): void {
 		this.deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
+	}
+
+	#beginOptimisticInput(
+		chatId: string,
+		text: string,
+		images: ChatImage[],
+		clientRequestId: string,
+		clientMessageId: string,
+		restoreComposerOnFailure: boolean,
+	): void {
+		this.deps.chatState.upsertPendingUserInput(
+			pendingUserInput(chatId, text, images, clientRequestId, clientMessageId),
+		);
+		this.deps.chatState.isUserScrolledUp = false;
+		if (restoreComposerOnFailure) this.deps.composerState.clearAfterSubmit(chatId);
+		this.deps.composerState.isSubmitting = true;
 	}
 
 	#beginQueueSubmission(chatId: string): number {
@@ -617,30 +630,23 @@ export class ConversationSessionController {
 			await this.#settleControlRefresh(pendingControlRefresh);
 		}
 		const currentControl = deps.conversationUi.getExecutionControl(chatId);
-		const currentQueue = currentControl?.queue ?? null;
 		const continuationEligibleInput =
 			steerCommand.kind !== 'valid' && !(agentId === 'codex' && isCodexGoalCommand(text));
-		const emptyRecoveredContinuation = Boolean(
-			continuationEligibleInput &&
-			currentControl?.recoveredInputContinuation &&
-			currentQueue &&
-			currentQueue.entries.length === 0 &&
-			currentQueue.dispatchingEntryId === null &&
-			currentQueue.pause === null,
-		);
-		const shouldQueueInput =
-			!emptyRecoveredContinuation &&
-			(activeTurn ||
-				(currentQueue?.entries.length ?? 0) > 0 ||
-				currentQueue?.dispatchingEntryId != null ||
-				currentQueue?.pause != null ||
-				currentControl?.recoveredInputContinuation != null);
-		if (shouldQueueInput && submissionImages.length > 0) {
+		const route = classifySubmission({
+			isDraft,
+			isProcessing: activeTurn,
+			control: currentControl,
+			isActiveDeliveryInput:
+				steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)),
+			isRecoveredContinuationEligible: continuationEligibleInput,
+			hasAttachments: submissionImages.length > 0,
+		});
+		if (route === 'queue-attachments-unsupported') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
 			return;
 		}
 
-		const ownsDraftSubmission = isDraft;
+		const ownsDraftSubmission = route === 'draft';
 		if (ownsDraftSubmission) {
 			if (deps.composerState.isSubmitting) return;
 			deps.composerState.isSubmitting = true;
@@ -663,16 +669,7 @@ export class ConversationSessionController {
 			}
 		}
 
-		if (shouldQueueInput) {
-			const queueAllowsActiveDelivery =
-				(currentQueue?.entries.length ?? 0) === 0 &&
-				currentQueue?.dispatchingEntryId == null &&
-				currentQueue?.pause == null &&
-				currentControl?.recoveredInputContinuation == null;
-			const activeDelivery =
-				activeTurn &&
-				queueAllowsActiveDelivery &&
-				(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
+		if (route === 'queue' || route === 'active') {
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
 			const submissionSequence = this.#beginQueueSubmission(chatId);
 			// Clear optimistically before awaiting the network, matching the
@@ -681,15 +678,11 @@ export class ConversationSessionController {
 			if (restoreComposerOnFailure) {
 				deps.composerState.clearAfterSubmit(chatId);
 			}
-			const request = {
-				clientRequestId: createClientCommandId(),
-				chatId,
-				content,
-			};
+			const submission = route === 'active'
+				? this.#acceptedInputs.active({ chatId, content })
+				: this.#acceptedInputs.enqueue({ chatId, content });
 			try {
-				const result = activeDelivery
-					? await submitIdempotentCommand(() => sendActiveInput(request))
-					: await submitIdempotentCommand(() => createQueuedInput(request));
+				const result = await submission.submit();
 				deps.conversationUi.setExecutionControl(chatId, result.control);
 			} catch (err) {
 				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
@@ -716,21 +709,7 @@ export class ConversationSessionController {
 			return;
 		}
 
-		const clientRequestId = createClientCommandId();
-		const clientMessageId = createClientCommandId();
-		deps.chatState.upsertPendingUserInput(
-			pendingUserInput(chatId, text, imagePayload, clientRequestId, clientMessageId),
-		);
-		deps.chatState.isUserScrolledUp = false;
-		if (restoreComposerOnFailure) {
-			deps.composerState.clearAfterSubmit(chatId);
-		}
-		if (!ownsDraftSubmission) {
-			deps.composerState.isSubmitting = true;
-		}
-
-		if (isDraft) {
-			deps.startupCoordinator.beginLocalStartup(chatId);
+		if (route === 'draft') {
 			const agentId = startup?.agentId ?? selected.agentId;
 			const model = startup?.model ?? selected.model ?? deps.agentState.model;
 			const apiProviderId =
@@ -743,9 +722,7 @@ export class ConversationSessionController {
 			const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
 			const agentSettings = startup?.agentSettings ?? deps.agentState.agentSettings;
 
-			const request = {
-				clientRequestId,
-				clientMessageId,
+			const submission = this.#acceptedInputs.start({
 				chatId,
 				agentId: agentId as typeof deps.agentState.agentId,
 				projectPath: selected.projectPath,
@@ -759,11 +736,20 @@ export class ConversationSessionController {
 				command: text,
 				images: imagePayload.length > 0 ? imagePayload : undefined,
 				tags: startup?.tags,
-			};
+			});
+			this.#beginOptimisticInput(
+				chatId,
+				text,
+				imagePayload,
+				submission.clientRequestId,
+				submission.clientMessageId,
+				restoreComposerOnFailure,
+			);
+			deps.startupCoordinator.beginLocalStartup(chatId);
 			try {
-				const response = await submitIdempotentCommand(() => startChat(request));
+				const response = await submission.submit();
 				deps.sessions.applyStartEntry(response.chat);
-				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
+				this.#markPendingUserInputDelivery(submission.clientRequestId, 'accepted');
 				if (response.status === 'accepted') {
 					deps.lifecycle.beginTurn(chatId);
 				} else {
@@ -773,7 +759,7 @@ export class ConversationSessionController {
 				console.error('[SessionController] Failed to start chat:', err);
 				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
 				this.#markPendingUserInputDelivery(
-					clientRequestId,
+					submission.clientRequestId,
 					outcomeUnknown ? 'unconfirmed' : 'failed',
 				);
 				deps.startupCoordinator.completeStartup(chatId);
@@ -797,9 +783,7 @@ export class ConversationSessionController {
 			}
 		} else {
 			const selection = this.#executionModelSelection();
-			const request = {
-				clientRequestId,
-				clientMessageId,
+			const submission = this.#acceptedInputs.run({
 				chatId,
 				command: text,
 				images: imagePayload.length > 0 ? imagePayload : undefined,
@@ -810,21 +794,29 @@ export class ConversationSessionController {
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
-			};
+			});
+			this.#beginOptimisticInput(
+				chatId,
+				text,
+				imagePayload,
+				submission.clientRequestId,
+				submission.clientMessageId,
+				restoreComposerOnFailure,
+			);
 			try {
-				await submitIdempotentCommand(() => runChat(request));
-				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
+				await submission.submit();
+				this.#markPendingUserInputDelivery(submission.clientRequestId, 'accepted');
 				deps.lifecycle.beginTurn(chatId);
 			} catch (err) {
 				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
 				if (isExecutionControlAdmissionConflict(err)) {
-					deps.chatState.clearPendingUserInput(clientRequestId);
+					deps.chatState.clearPendingUserInput(submission.clientRequestId);
 					await this.#settleControlRefresh(this.#startControlRefresh(chatId));
 				} else if (outcomeUnknown) {
-					this.#markPendingUserInputDelivery(clientRequestId, 'unconfirmed');
+					this.#markPendingUserInputDelivery(submission.clientRequestId, 'unconfirmed');
 					void this.#startControlRefresh(chatId);
 				} else {
-					this.#markPendingUserInputDelivery(clientRequestId, 'failed');
+					this.#markPendingUserInputDelivery(submission.clientRequestId, 'failed');
 				}
 				if (!outcomeUnknown) {
 					deps.lifecycle.clearTurnStatus();
@@ -964,9 +956,7 @@ export class ConversationSessionController {
 			if (!chatId || !path) return;
 			const selection = this.#executionModelSelection();
 
-			const request = {
-				clientRequestId: createClientCommandId(),
-				clientMessageId: createClientCommandId(),
+			const submission = this.#acceptedInputs.run({
 				chatId,
 				command: buildApprovalMessage(),
 				permissionMode: mode,
@@ -976,8 +966,8 @@ export class ConversationSessionController {
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
-			};
-			void submitIdempotentCommand(() => runChat(request))
+			});
+			void submission.submit()
 				.then(() => {
 					deps.lifecycle.beginTurn(chatId);
 				})
@@ -1083,13 +1073,9 @@ export class ConversationSessionController {
 	}
 
 	async createQueueEntryForChat(chatId: string, content: string): Promise<void> {
-		const request = {
-			clientRequestId: createClientCommandId(),
-			chatId,
-			content,
-		};
+		const submission = this.#acceptedInputs.enqueue({ chatId, content });
 		try {
-			const result = await submitIdempotentCommand(() => createQueuedInput(request));
+			const result = await submission.submit();
 			this.deps.conversationUi.setExecutionControl(chatId, result.control);
 		} catch (error) {
 			const control = controlFromMutationError(error);

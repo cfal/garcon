@@ -1,4 +1,4 @@
-import { compactChat, forkChat, forkRunChat } from '$lib/api/chats.js';
+import { compactChat, forkChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -17,10 +17,8 @@ import {
 	errorDetail,
 	prepareChatImages,
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
-import {
-	CommandOutcomeUnknownError,
-	submitIdempotentCommand,
-} from '$lib/chat/conversation/idempotent-command.js';
+import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
+import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import * as m from '$lib/paraglide/messages.js';
 
 interface SlashCommandSessions {
@@ -80,7 +78,10 @@ export interface ConversationSlashCommandDeps {
 export class ConversationSlashCommandService {
 	readonly #scheduleInFlight = new Set<string>();
 
-	constructor(private readonly deps: ConversationSlashCommandDeps) {}
+	constructor(
+		private readonly deps: ConversationSlashCommandDeps,
+		private readonly acceptedInputs = new AcceptedInputSubmissionService(),
+	) {}
 
 	async submitScheduleInCommand(
 		chatId: string,
@@ -250,9 +251,7 @@ export class ConversationSlashCommandService {
 			model,
 			sourceChat.modelEndpointId,
 		);
-		const request = {
-			clientRequestId: createClientCommandId(),
-			clientMessageId: createClientCommandId(),
+		const submission = this.acceptedInputs.fork({
 			sourceChatId,
 			chatId: forkChatId,
 			command: message.trim(),
@@ -264,9 +263,9 @@ export class ConversationSlashCommandService {
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
-		};
+		});
 		try {
-			const response = await submitIdempotentCommand(() => forkRunChat(request));
+			const response = await submission.submit();
 			deps.sessions.upsertServerChat(response.chat);
 			deps.sessions.setSelectedChatId(response.chat.id);
 			deps.navigation.navigateToChat?.(response.chat.id);
