@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-import type { AgentCommandImage } from '@garcon/server-agent-common/legacy/session-types';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
 
 const MAX_GOAL_OBJECTIVE_CHARS = 4_000;
@@ -27,7 +27,7 @@ export interface MaterializedGoalDraft {
 export async function materializeGoalDraft(
   codexHome: string | null,
   objective: string,
-  attachments: AgentCommandImage[] | undefined,
+  attachments: readonly AgentAttachment[] | undefined,
 ): Promise<MaterializedGoalDraft> {
   let outputDir: string | null = null;
   try {

@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import type { CodexConfigObject, CodexConfigValue, CodexProviderConfig } from '@garcon/server-agent-common/legacy/session-types';
+import type { CodexConfigObject, CodexConfigValue, CodexProviderConfig } from '../runtime-types.js';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import { resolveCodexCliCommand } from './cli.js';
 import { buildCodexEnv, codexSandboxSettings } from './request-builders.js';

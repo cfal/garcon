@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { getCodexHome, getOpenAiApiKey, getOpenAiBaseUrl } from '../../config.js';
+import type { CodexConfig } from '../../config.js';
 
 interface AgentAuthStatus {
   authenticated: boolean;
@@ -23,12 +23,15 @@ async function responseText(stream: ReadableStream<Uint8Array> | null): Promise<
   return stream ? new Response(stream).text() : '';
 }
 
-async function runCodexLoginStatus(): Promise<{ exitCode: number; output: string }> {
+async function runCodexLoginStatus(
+  config: CodexConfig,
+): Promise<{ exitCode: number; output: string }> {
   // Uses the CLI itself so Garcon follows CODEX_HOME and keyring-backed auth storage.
   const proc = Bun.spawn(['codex', 'login', 'status'], {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
+    env: { ...process.env, CODEX_HOME: config.home() },
   });
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -59,9 +62,9 @@ function parseIdTokenPayload(token: string): CodexIdTokenPayload {
     : {};
 }
 
-async function readCodexAuthLabel(): Promise<string> {
+async function readCodexAuthLabel(config: CodexConfig): Promise<string> {
   try {
-    const authPath = path.join(getCodexHome(), 'auth.json');
+    const authPath = path.join(config.home(), 'auth.json');
     const content = await fs.readFile(authPath, 'utf8');
     const auth = parseAuthFile(content);
     const token = auth.tokens?.id_token;
@@ -78,16 +81,16 @@ async function readCodexAuthLabel(): Promise<string> {
   }
 }
 
-export async function getCodexAuthStatus(): Promise<AgentAuthStatus> {
-  if (getOpenAiBaseUrl()) {
+export async function getCodexAuthStatus(config: CodexConfig): Promise<AgentAuthStatus> {
+  if (config.openAiBaseUrl()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
-  if (getOpenAiApiKey()) {
+  if (config.openAiApiKey()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
 
   try {
-    const { exitCode, output } = await runCodexLoginStatus();
+    const { exitCode, output } = await runCodexLoginStatus(config);
     if (exitCode !== 0) {
       return { authenticated: false, canReauth: true, label: '' };
     }
@@ -101,14 +104,14 @@ export async function getCodexAuthStatus(): Promise<AgentAuthStatus> {
       return {
         authenticated: true,
         canReauth: true,
-        label: await readCodexAuthLabel(),
+        label: await readCodexAuthLabel(config),
       };
     }
 
     return {
       authenticated: true,
       canReauth: true,
-      label: await readCodexAuthLabel(),
+      label: await readCodexAuthLabel(config),
     };
   } catch {
     return { authenticated: false, canReauth: true, label: '' };

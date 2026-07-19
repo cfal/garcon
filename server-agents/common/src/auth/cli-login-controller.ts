@@ -15,7 +15,10 @@ export type CliLoginCommand = readonly [string, ...string[]];
 
 export interface CliLoginPty {
   onData(listener: (chunk: string) => void): void;
-  onExit(listener: (event: { readonly exitCode: number; readonly signal?: number }) => void): void;
+  onExit(listener: (event: {
+    readonly exitCode: number;
+    readonly signal?: string | number;
+  }) => void): void;
   kill(): void;
 }
 

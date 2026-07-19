@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import { getPackageVersion } from '../../../config.js';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import type {
   InitializeResponse,
@@ -62,6 +61,7 @@ export interface CodexAppServerClientOptions {
   spawn?: SpawnCodexAppServer;
   resolveCli?: () => Promise<ResolvedCodexCli>;
   resolveCommand?: () => Promise<string>;
+  clientVersion?: () => string;
 }
 
 export interface CodexAppServerMetric {
@@ -102,6 +102,7 @@ export class CodexAppServerClient extends EventEmitter {
   #spawn: SpawnCodexAppServer;
   #resolveCli: () => Promise<ResolvedCodexCli>;
   #env: Record<string, string>;
+  #clientVersion: () => string;
 
   constructor(options: CodexAppServerClientOptions = {}) {
     super();
@@ -112,6 +113,7 @@ export class CodexAppServerClient extends EventEmitter {
         ? async () => ({ command: await resolveCommand(), source: 'path' })
         : resolveCodexCli);
     this.#env = mergedEnv(options.env);
+    this.#clientVersion = options.clientVersion ?? (() => '0.1.0');
   }
 
   async connect(): Promise<InitializeResponse> {
@@ -244,7 +246,7 @@ export class CodexAppServerClient extends EventEmitter {
       clientInfo: {
         name: 'garcon',
         title: 'Garcon',
-        version: getPackageVersion(),
+        version: this.#clientVersion(),
       },
       capabilities: {
         experimentalApi: true,

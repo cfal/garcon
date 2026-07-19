@@ -31,10 +31,13 @@ export function toAgentEndpointSelection(
   return {
     apiProviderId: selection.apiProviderId,
     endpointId: selection.endpointId,
+    providerLabel: reference.apiProvider.label || selection.apiProviderId,
     protocol: selection.protocol,
     baseUrl: reference.endpoint.baseUrl,
     model: selection.model,
     isLocal: selection.isLocal,
+    capabilities: reference.endpoint.capabilities ?? null,
+    headers: { ...(reference.endpoint.headers ?? {}) },
     credential: {
       kind: 'api-provider-endpoint',
       apiProviderId: selection.apiProviderId,

@@ -24,7 +24,7 @@ function makeRouter(overrides = {}) {
       isLocal: false,
     })),
     resolveEndpointReference: mock((selection) => selection.endpointId ? ({
-      apiProvider: { id: selection.apiProviderId },
+      apiProvider: { id: selection.apiProviderId, label: 'Provider A' },
       endpoint: { id: selection.endpointId, baseUrl: 'https://example.test/v1' },
     }) : null),
   };
@@ -92,10 +92,13 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
       endpoint: {
         apiProviderId: 'provider-a',
         endpointId: 'endpoint-a',
+        providerLabel: 'Provider A',
         protocol: 'openai-compatible',
         baseUrl: 'https://example.test/v1',
         model: 'model-a',
         isLocal: false,
+        capabilities: null,
+        headers: {},
         credential: {
           kind: 'api-provider-endpoint',
           apiProviderId: 'provider-a',

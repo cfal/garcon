@@ -1,4 +1,4 @@
-import type { ApiProtocol } from './api-providers.js';
+import type { ApiProtocol, OpenAiEndpointCapabilities } from './api-providers.js';
 
 export interface AgentAttachment {
   readonly kind: 'image';
@@ -16,10 +16,13 @@ export interface AgentCredentialReference {
 export interface AgentEndpointSelection {
   readonly apiProviderId: string;
   readonly endpointId: string;
+  readonly providerLabel: string;
   readonly protocol: ApiProtocol;
   readonly baseUrl: string;
   readonly model: string;
   readonly isLocal: boolean;
+  readonly capabilities: OpenAiEndpointCapabilities | null;
+  readonly headers: Readonly<Record<string, string>>;
   readonly credential: AgentCredentialReference | null;
 }
 

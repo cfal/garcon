@@ -8,10 +8,13 @@ describe('resolveAgentEndpoint', () => {
     const endpoint = {
       apiProviderId: 'provider',
       endpointId: 'endpoint',
+      providerLabel: 'Provider',
       protocol: 'openai-compatible' as const,
       baseUrl: 'https://example.test',
       model: 'model',
       isLocal: false,
+      capabilities: { chatCompletions: false, responses: true },
+      headers: {},
       credential: {
         kind: 'api-provider-endpoint' as const,
         apiProviderId: 'provider',

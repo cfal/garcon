@@ -1,28 +1,26 @@
 import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage, type CompactionTrigger } from '@garcon/common/chat-types';
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
 import {
-  assertExecutionAdmissionOpen,
-  executionEventMetadata,
-  markExecutionStarted,
-  type AgentChatEntry,
-  type AgentEventMetadata,
-  type AgentSessionSettingsPatch,
-  type PermissionMode,
-  type ResumeTurnRequest,
-  type StartSessionRequest,
-  type StartedAgentSession,
-} from '@garcon/server-agent-common/legacy/session-types';
-import type { AgentTranscriptPage } from '@garcon/server-agent-common/legacy/types';
+  assertCodexExecutionOpen,
+  codexEventMetadata,
+  markCodexExecutionStarted,
+  type CodexChatEntry,
+  type CodexForkSessionRequest,
+  type CodexResumeRequest,
+  type CodexStartedSession,
+  type CodexStartRequest,
+  type CodexTranscriptPage,
+} from '../runtime-types.js';
+import type { PermissionMode } from '@garcon/common/chat-modes';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import { convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-
-const logger = createLogger('agents:codex:app-server:runtime');
 import type {
   ErrorNotification,
   ItemCompletedNotification,
@@ -51,7 +49,7 @@ import {
   parseLeadingSlashCommand,
   writeAttachmentsToTempFiles,
 } from './request-builders.js';
-import { getCodexSkillRefs, type CodexSkillRef } from '../slash-command-discovery.js';
+import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
 import type { CodexGoalCommand } from '../goal-command.js';
 import { cleanupMaterializedGoalDraft, materializeGoalDraft } from './goal-files.js';
 
@@ -66,6 +64,12 @@ const GOAL_TURN_START_TIMEOUT_MS = 30_000;
 const MAX_ACTIVE_INPUT_DELIVERY_TRANSITIONS = 8;
 const MAX_CAPACITY_RETRIES = 3;
 const CAPACITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+const NOOP_LOGGER: AgentLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
 
 interface TurnStartWaiter {
   resolve: (turnId: string) => void;
@@ -106,13 +110,7 @@ interface RunningCodexSession {
   pendingCapacityFailure: { turnId: string; message: string } | null;
   onAbortable?: () => void;
   abortableNotified: boolean;
-  eventMetadata: AgentEventMetadata;
-}
-
-interface CodexForkSessionRequest {
-  sourceSession: AgentChatEntry;
-  envOverrides?: Record<string, string>;
-  codexConfig?: StartSessionRequest['codexConfig'];
+  eventMetadata: RuntimeEventMetadata;
 }
 
 export interface CodexAppServerRuntimeOptions {
@@ -120,6 +118,8 @@ export interface CodexAppServerRuntimeOptions {
   materializationTimeoutMs?: number;
   capacityRetryDelaysMs?: readonly number[];
   capacityRetryDelay?: (delayMs: number) => Promise<void>;
+  logger?: AgentLogger;
+  skillDiscovery?: CodexSkillDiscovery;
 }
 
 export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
@@ -134,6 +134,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #materializationTimeoutMs: number;
   #capacityRetryDelaysMs: readonly number[];
   #capacityRetryDelay: (delayMs: number) => Promise<void>;
+  #logger: AgentLogger;
+  #skillDiscovery: CodexSkillDiscovery;
   #idlePurger = new IdleSessionPurger<RunningCodexSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.status === 'running' || session.status === 'completing',
@@ -152,6 +154,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#capacityRetryDelaysMs = (options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS)
       .slice(0, MAX_CAPACITY_RETRIES);
     this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
+    this.#logger = options.logger ?? NOOP_LOGGER;
+    this.#skillDiscovery = options.skillDiscovery ?? new CodexSkillDiscovery({
+      logger: this.#logger,
+    });
   }
 
   // Resolves available skills only when the command opens with a "/<name>"
@@ -159,7 +165,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async #resolveTurnSkills(command: string, projectPath: string): Promise<CodexSkillRef[] | undefined> {
     if (!projectPath || !parseLeadingSlashCommand(command)) return undefined;
     try {
-      return await getCodexSkillRefs(projectPath);
+      return await this.#skillDiscovery.skillRefs(projectPath);
     } catch {
       return undefined;
     }
@@ -168,7 +174,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async #startRequestedTurn(
     client: CodexAppServerClient,
     session: RunningCodexSession,
-    request: StartSessionRequest | ResumeTurnRequest,
+    request: CodexStartRequest | CodexResumeRequest,
   ): Promise<void> {
     if (request.codexGoalCommand) {
       if ('codexSeedContext' in request && request.codexSeedContext) {
@@ -207,7 +213,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     client: CodexAppServerClient,
     session: RunningCodexSession,
     command: CodexGoalCommand,
-    request: StartSessionRequest | ResumeTurnRequest,
+    request: CodexStartRequest | CodexResumeRequest,
     options: GoalCommandOptions,
   ): Promise<void> {
     const {
@@ -362,7 +368,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   async submitActiveInput(
-    request: ResumeTurnRequest,
+    request: CodexResumeRequest,
     beforeDelivery: () => Promise<void> = async () => {},
   ): Promise<boolean> {
     const session = this.#sessions.get(request.agentSessionId);
@@ -399,7 +405,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     return operation;
   }
 
-  async #deliverReservedActiveInput(session: RunningCodexSession, request: ResumeTurnRequest): Promise<void> {
+  async #deliverReservedActiveInput(session: RunningCodexSession, request: CodexResumeRequest): Promise<void> {
     if (request.codexGoalCommand) {
       await this.#handleGoalCommand(session.client, session, request.codexGoalCommand, request, {
         keepSession: true,
@@ -530,14 +536,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       : cleanup;
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    assertExecutionAdmissionOpen(request);
+  async startSession(request: CodexStartRequest): Promise<CodexStartedSession> {
+    assertCodexExecutionOpen(request);
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
 
     try {
       const initialized = await client.connect();
-      assertExecutionAdmissionOpen(request);
+      assertCodexExecutionOpen(request);
       const started = await client.startThread(buildThreadStartParams(request));
       const threadId = started.thread.id;
       const session = this.#activateSession({
@@ -547,14 +553,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
-        eventMetadata: executionEventMetadata(request, 'chat-start'),
+        eventMetadata: codexEventMetadata(request, 'chat-start'),
       });
       activeSession = session;
       session.onAbortable = request.onAbortable;
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
       this.emitSessionCreated(request.chatId);
-      markExecutionStarted(request);
+      markCodexExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       await this.#startRequestedTurn(client, session, request);
 
@@ -574,21 +580,21 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         client.shutdown();
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
-          this.emitFailed(request.chatId, message, executionEventMetadata(request, 'chat-start'));
+          this.emitFailed(request.chatId, message, codexEventMetadata(request, 'chat-start'));
         }
       }
       throw error;
     }
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async runTurn(request: CodexResumeRequest): Promise<void> {
+    assertCodexExecutionOpen(request);
     const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
 
     try {
       const initialized = await client.connect();
-      assertExecutionAdmissionOpen(request);
+      assertCodexExecutionOpen(request);
       const resumed = await client.resumeThread(buildThreadResumeParams(request));
       const session = this.#activateSession({
         chatId: request.chatId,
@@ -597,7 +603,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
-        eventMetadata: executionEventMetadata(request),
+        eventMetadata: codexEventMetadata(request),
       });
       activeSession = session;
       session.onAbortable = request.onAbortable;
@@ -611,7 +617,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
             throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
           }
-          markExecutionStarted(request);
+          markCodexExecutionStarted(request);
           this.emitProcessing(request.chatId, true);
           if (!request.codexGoalCommand) {
             if (session.managesGoalLifecycle) {
@@ -655,7 +661,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         client.shutdown();
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
-          this.emitFailed(request.chatId, message, executionEventMetadata(request));
+          this.emitFailed(request.chatId, message, codexEventMetadata(request));
         }
       }
       throw error;
@@ -665,8 +671,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   // Triggers native context compaction as its own turn. Mirrors runTurn but
   // starts the turn via thread/compact/start; the resulting contextCompaction
   // item and turn lifecycle arrive through the shared notification handlers.
-  async compact(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async compact(request: CodexResumeRequest): Promise<void> {
+    assertCodexExecutionOpen(request);
     // A live session means a turn is already active for this thread; starting a
     // second one would overwrite the session map and leak the existing client.
     if (this.#sessions.has(request.agentSessionId)) {
@@ -678,7 +684,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
     try {
       const initialized = await client.connect();
-      assertExecutionAdmissionOpen(request);
+      assertCodexExecutionOpen(request);
       const resumed = await client.resumeThread(buildThreadResumeParams(request));
       const session = this.#activateSession({
         chatId: request.chatId,
@@ -687,13 +693,13 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
-        eventMetadata: executionEventMetadata(request),
+        eventMetadata: codexEventMetadata(request),
       });
       session.manualCompactionPending = true;
       activeSession = session;
       session.onAbortable = request.onAbortable;
       this.#releaseBufferedClientEvents(client);
-      markExecutionStarted(request);
+      markCodexExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       await client.compactThread(resumed.thread.id);
     } catch (error) {
@@ -706,7 +712,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         client.shutdown();
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
-          this.emitFailed(request.chatId, message, executionEventMetadata(request));
+          this.emitFailed(request.chatId, message, codexEventMetadata(request));
         }
       }
       throw error;
@@ -726,7 +732,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     try {
       await session.client.interruptTurn(session.threadId, turnId);
     } catch (error) {
-      logger.warn(`codex: failed to interrupt turn ${turnId}:`, (error as Error).message);
+      this.#logger.warn('Codex turn interruption failed', {
+        turnId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
     if (this.#sessions.get(agentSessionId) !== session) return true;
@@ -747,22 +756,22 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       .map((session) => ({ id: session.threadId, status: session.status, startedAt: session.startedAt }));
   }
 
-  async loadMessages(session: AgentChatEntry): Promise<unknown[]> {
+  async loadMessages(session: CodexChatEntry): Promise<ChatMessage[]> {
     return this.#loadJsonlMessages(session);
   }
 
   async loadMessagePage(
-    session: AgentChatEntry,
+    session: CodexChatEntry,
     page: { limit: number; offset: number },
-  ): Promise<AgentTranscriptPage | null> {
-    return loadCodexChatMessagePage(session.nativePath, page.limit, page.offset);
+  ): Promise<CodexTranscriptPage | null> {
+    return loadCodexChatMessagePage(session.nativePath, page.limit, page.offset, this.#logger);
   }
 
-  async getPreview(session: AgentChatEntry): Promise<unknown> {
+  async getPreview(session: CodexChatEntry): Promise<unknown> {
     return this.#getJsonlPreview(session);
   }
 
-  async forkSession(args: CodexForkSessionRequest): Promise<StartedAgentSession | null> {
+  async forkSession(args: CodexForkSessionRequest): Promise<CodexStartedSession | null> {
     const sourceSession = args.sourceSession;
     const sourceThreadId = sourceSession.agentSessionId;
     if (!sourceThreadId) return null;
@@ -784,7 +793,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  async resolveNativePath(session: AgentChatEntry): Promise<string | null> {
+  async resolveNativePath(session: CodexChatEntry): Promise<string | null> {
     if (!session.agentSessionId) return null;
 
     const threads = await this.#getThreadListCache(false);
@@ -802,7 +811,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {
     const pending = this.#pendingApprovals.get(permissionRequestId);
     if (!pending) {
-      logger.warn('codex: resolvePermission, no pending entry for', permissionRequestId);
+      this.#logger.warn('Codex permission response has no pending request', {
+        permissionRequestId,
+      });
       return;
     }
 
@@ -813,7 +824,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     ]);
   }
 
-  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+  updateSessionSettings(agentSessionId: string, patch: { readonly permissionMode?: PermissionMode }): void {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return;
     if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
@@ -837,10 +848,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#threadListCaches.clear();
     this.#bufferingClients.clear();
     this.#bufferedClientEvents.clear();
+    this.#skillDiscovery.clear();
   }
 
   #newClient(
-    request: Pick<StartSessionRequest, 'envOverrides' | 'codexConfig'>,
+    request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>,
     bufferNotifications = false,
   ): CodexAppServerClient {
     const client = this.#createClient({ env: buildCodexEnv(request.envOverrides, request.codexConfig) });
@@ -850,7 +862,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   async #withOperationClient<T>(
-    request: Pick<StartSessionRequest, 'envOverrides' | 'codexConfig'>,
+    request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>,
     operation: (client: CodexAppServerClient) => Promise<T>,
   ): Promise<T> {
     const client = this.#newClient(request);
@@ -945,7 +957,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       };
       this.emit('metric', metric);
     } catch (error) {
-      logger.warn('codex: failed to sample loaded app-server threads:', (error as Error).message);
+      this.#logger.warn('Codex loaded-thread sampling failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -953,7 +967,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     try {
       await client.unsubscribeThread(threadId);
     } catch (error) {
-      logger.warn(`codex: failed to unsubscribe app-server thread ${threadId}:`, (error as Error).message);
+      this.#logger.warn('Codex thread unsubscribe failed', {
+        threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -964,7 +981,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     codexHome: string | null;
     client: CodexAppServerClient;
     permissionMode: PermissionMode;
-    eventMetadata: AgentEventMetadata;
+    eventMetadata: RuntimeEventMetadata;
   }): RunningCodexSession {
     const session: RunningCodexSession = {
       chatId: args.chatId,
@@ -1016,8 +1033,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       }
       this.#handleServerRequest(client, request);
     });
-    client.on('stderr', (line: string) => logger.warn('codex app-server:', line));
-    client.on('warning', (message: string) => logger.warn(message));
+    client.on('stderr', (line: string) => this.#logger.warn('Codex app-server stderr', { line }));
+    client.on('warning', (message: string) => this.#logger.warn(message));
     client.on('metric', (metric: unknown) => this.emit('metric', metric));
     client.on('exit', (code: number) => this.#handleClientExit(client, code));
   }
@@ -1150,7 +1167,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         reconciled = true;
         clearCommitted = !session.goal;
       } catch (reconcileError) {
-        logger.warn('codex: failed to reconcile goal after replacement clear failure:', (reconcileError as Error).message);
+        this.#logger.warn('Codex goal reconciliation failed after replacement clear', {
+          error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError),
+        });
       }
       if (clearCommitted) {
         try {
@@ -1160,7 +1179,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             tokenBudget: previousGoal.tokenBudget,
           })).goal;
         } catch (rollbackError) {
-          logger.warn('codex: failed to restore goal after replacement clear failure:', (rollbackError as Error).message);
+          this.#logger.warn('Codex goal restoration failed after replacement clear', {
+            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+          });
         }
       }
       if (reconciled && !clearCommitted) this.#releaseIgnoredGoalClear(session);
@@ -1179,14 +1200,18 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             tokenBudget: previousGoal.tokenBudget,
           })).goal;
         } catch (rollbackError) {
-          logger.warn('codex: failed to restore goal after replacement failure:', (rollbackError as Error).message);
+          this.#logger.warn('Codex goal restoration failed after replacement', {
+            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+          });
         }
       }
       try {
         session.goal = (await client.getThreadGoal(session.threadId)).goal;
       } catch (reconcileError) {
         session.goal = null;
-        logger.warn('codex: failed to reconcile goal after replacement failure:', (reconcileError as Error).message);
+        this.#logger.warn('Codex goal reconciliation failed after replacement', {
+          error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError),
+        });
       }
       session.managesGoalLifecycle = previouslyManaged || session.goal?.status === 'active';
       throw replacementError;
@@ -1521,15 +1546,15 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     return null;
   }
 
-  #loadJsonlMessages(session: AgentChatEntry): Promise<ChatMessage[]> {
+  #loadJsonlMessages(session: CodexChatEntry): Promise<ChatMessage[]> {
     // Codex app-server `thread/read` also reads rollout JSONL, but projects it
     // through a lossy app-server view that drops raw function_call/tool rows.
     // Garcon uses the native JSONL transcript as the display source of record.
-    return loadCodexChatMessages(session.nativePath);
+    return loadCodexChatMessages(session.nativePath, this.#logger);
   }
 
-  #getJsonlPreview(session: AgentChatEntry): Promise<unknown> {
-    return getCodexPreviewFromNativePath(session.nativePath);
+  #getJsonlPreview(session: CodexChatEntry): Promise<unknown> {
+    return getCodexPreviewFromNativePath(session.nativePath, this.#logger);
   }
 }
 
