@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
-import { ChatExecutionCoordinator } from '../../chat-execution/chat-execution-coordinator.js';
+import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
 import { normalizeStoredChatExecutionControlState } from '../../chat-execution-control-state.js';
 import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
 
