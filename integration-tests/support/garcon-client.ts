@@ -29,6 +29,7 @@ import type {
   MarkChatsReadRequest,
   MarkChatsReadResponse,
 } from '../../common/chat-list.js';
+import type { ChatSearchRequest, ChatSearchResponse } from '../../common/chat-search.js';
 import { parseChatViewMessages, type ChatViewMessage } from '../../common/chat-view.js';
 import { normalizePendingUserInput, type PendingUserInput } from '../../common/pending-user-input.js';
 import { parseQueueState, type QueueState } from '../../common/queue-state.js';
@@ -430,6 +431,27 @@ export class GarconTestClient {
 
   deleteChat(chatId: string): Promise<{ success: boolean }> {
     return this.delete<{ success: boolean }>('/api/v1/chats', { chatId });
+  }
+
+  searchChats(request: ChatSearchRequest): Promise<ChatSearchResponse> {
+    return this.post<ChatSearchResponse>('/api/v1/chats/search', request);
+  }
+
+  async waitForChatSearch(
+    request: ChatSearchRequest,
+    predicate: (response: ChatSearchResponse) => boolean,
+    options: { timeoutMs?: number } = {},
+  ): Promise<ChatSearchResponse> {
+    const deadline = Date.now() + (options.timeoutMs ?? 10_000);
+    let last: ChatSearchResponse | null = null;
+    while (Date.now() < deadline) {
+      last = await this.searchChats(request);
+      if (predicate(last)) return last;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(
+      `Timed out waiting for chat search ${JSON.stringify(request)}. Last response: ${JSON.stringify(last)}`,
+    );
   }
 
   markChatsRead(entries: MarkChatsReadEntry[]): Promise<MarkChatsReadResponse> {
