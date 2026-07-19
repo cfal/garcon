@@ -3,6 +3,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import QueueControls from '../QueueControls.svelte';
 import type { QueueEntry, QueuePause, QueueState } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '../../shared/__tests__/resize-observer-harness.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -100,11 +104,14 @@ describe('QueueControls', () => {
 		expect(onPause).toHaveBeenCalledOnce();
 	});
 
-	it('shows interrupt and send when the current turn can be interrupted', async () => {
+	it('shows Send now with a fast-forward icon when the current turn can be interrupted', async () => {
 		const onInterrupt = vi.fn();
 		renderControls(makeQueue(1), { canInterrupt: true, onInterrupt });
 
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() }));
+		const sendNow = screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() });
+		expect(m.chat_queue_interrupt_and_send()).toBe('Send now');
+		expect(sendNow.querySelector('.lucide-fast-forward')).toBeTruthy();
+		await fireEvent.click(sendNow);
 		expect(onInterrupt).toHaveBeenCalledOnce();
 	});
 
@@ -334,29 +341,80 @@ describe('QueueControls', () => {
 
 	it('shows a neutral interrupt action only while viewing the FIFO head', async () => {
 		const onInterrupt = vi.fn();
-		renderControls(makeQueueWithIds(['q0', 'q1']), { canInterrupt: true, onInterrupt });
+		const { container } = renderControls(makeQueueWithIds(['q0', 'q1']), {
+			canInterrupt: true,
+			onInterrupt,
+		});
 
 		const interrupt = screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() });
-		const editQueue = screen.getByRole('button', { name: m.chat_queue_edit_queue() });
-		const pauseQueue = screen.getByRole('button', { name: m.chat_queue_pause() });
 		expect(interrupt.classList.contains('bg-queue-action-bg')).toBe(false);
 		expect(interrupt.classList.contains('hover:bg-queue-action-hover-bg')).toBe(false);
-		expect([...(interrupt.parentElement?.querySelectorAll('button') ?? [])]).toEqual([
-			interrupt,
-			editQueue,
-			pauseQueue,
-		]);
+		expect(
+			[...container.querySelectorAll<HTMLElement>('[data-surface-action-id]')].map(
+				(element) => element.dataset.surfaceActionId,
+			),
+		).toEqual(['send-now', 'edit-queue', 'pause-queue']);
 
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
 		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
-		expect([...(editQueue.parentElement?.querySelectorAll('button') ?? [])]).toEqual([
-			editQueue,
-			pauseQueue,
-		]);
+		expect(
+			[...container.querySelectorAll<HTMLElement>('[data-surface-action-id]')].map(
+				(element) => element.dataset.surfaceActionId,
+			),
+		).toEqual(['edit-queue', 'pause-queue']);
 
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_previous_message() }));
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() }));
 		expect(onInterrupt).toHaveBeenCalledOnce();
+	});
+
+	it('moves lower-priority queue actions into an overflow menu when space contracts', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		const onPause = vi.fn().mockResolvedValue(undefined);
+		const rendered = renderControls(makeQueueWithIds(['q0', 'q1']), {
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+			onPause,
+		});
+
+		try {
+			await Promise.resolve();
+			const root = rendered.container.querySelector<HTMLElement>(
+				'[data-responsive-surface-actions]',
+			);
+			if (!root) throw new Error('Expected responsive queue actions');
+			Object.defineProperty(root, 'clientWidth', { get: () => 140 });
+			for (const element of rendered.container.querySelectorAll<HTMLElement>(
+				'[data-surface-action-measure]',
+			)) {
+				const width =
+					element.dataset.surfaceActionMeasure === 'send-now'
+						? 96
+						: element.dataset.surfaceActionMeasure === 'edit-queue'
+							? 64
+							: 68;
+				element.getBoundingClientRect = () => ({ width }) as DOMRect;
+			}
+			const menuMeasure = rendered.container.querySelector<HTMLElement>(
+				'[data-surface-action-overflow-measure]',
+			);
+			if (!menuMeasure) throw new Error('Expected queue overflow measurement control');
+			menuMeasure.getBoundingClientRect = () => ({ width: 32 }) as DOMRect;
+
+			ResizeObserverHarness.emit(root, 140);
+			await waitFor(() => {
+				expect(screen.queryByRole('button', { name: m.chat_queue_edit_queue() })).toBeNull();
+				expect(screen.queryByRole('button', { name: m.chat_queue_pause() })).toBeNull();
+			});
+			expect(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_actions() }));
+			await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_pause() }));
+			expect(onPause).toHaveBeenCalledOnce();
+		} finally {
+			rendered.unmount();
+			restoreResizeObserver();
+		}
 	});
 
 	it('keeps pending deletion state scoped to each browsed entry ID', async () => {
