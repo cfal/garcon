@@ -233,16 +233,29 @@ export class IntegrationFixture {
     if (chat.agentId !== DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
       throw new Error(`Chat ${input.chatId} is not a direct OpenAI-compatible chat.`);
     }
-    const nativePath = typeof chat.nativePath === 'string' ? chat.nativePath : '';
+    const nativeSession = chat.nativeSession && typeof chat.nativeSession === 'object'
+      ? chat.nativeSession as Record<string, unknown>
+      : null;
+    const nativeValue = nativeSession?.value && typeof nativeSession.value === 'object'
+      ? nativeSession.value as Record<string, unknown>
+      : null;
+    const nativePath = typeof nativeValue?.path === 'string' ? nativeValue.path : '';
     const endpointId = typeof chat.modelEndpointId === 'string' ? chat.modelEndpointId : '';
     const sessionId = typeof chat.agentSessionId === 'string' ? chat.agentSessionId : '';
     const expectedPath = resolve(
       this.dirs.workspace,
+      'agent-data',
+      DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
       'openai-compatible-sessions',
       endpointId,
       `${sessionId}.jsonl`,
     );
-    if (!nativePath || resolve(nativePath) !== expectedPath) {
+    if (
+      nativeSession?.ownerId !== DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID
+      || nativeSession.schemaVersion !== 1
+      || !nativePath
+      || resolve(nativePath) !== expectedPath
+    ) {
       throw new Error(`Chat ${input.chatId} has an unexpected native transcript path.`);
     }
 
