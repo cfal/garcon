@@ -94,8 +94,8 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 			<button
 				onclick={() => (viewerOpen = true)}
 				class="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				title={m.editor_actions_fullscreen()}
-				aria-label={m.editor_actions_fullscreen()}
+				title={m.chat_mermaid_expand()}
+				aria-label={m.chat_mermaid_expand()}
 				disabled={loading || Boolean(renderError) || !renderedSvg}
 			>
 				<Maximize2 class="h-3 w-3" />
