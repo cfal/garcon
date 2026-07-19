@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import type { ChatTitleUpdatedMessage } from '../../../common/ws-events.js';
+import type {
+  ChatMessagesMessage,
+  ChatTitleUpdatedMessage,
+  ServerWsMessage,
+} from '../../../common/ws-events.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -9,22 +13,104 @@ import {
 } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
+function expectSuccessfulTurnContract(
+  events: readonly ServerWsMessage[],
+  input: {
+    chatId: string;
+    content: string;
+    assistantContent: string;
+    clientRequestId: string;
+    clientMessageId: string;
+    turnId: string;
+  },
+): void {
+  expect(events).toContainEqual(expect.objectContaining({
+    type: 'chat-list-refresh-requested',
+    reason: 'chat-added',
+    chatId: input.chatId,
+  }));
+  expect(events).toContainEqual(expect.objectContaining({
+    type: 'pending-user-input-updated',
+    input: expect.objectContaining({
+      chatId: input.chatId,
+      content: input.content,
+      clientRequestId: input.clientRequestId,
+      clientMessageId: input.clientMessageId,
+      turnId: input.turnId,
+      deliveryStatus: 'accepted',
+    }),
+  }));
+  expect(events).toContainEqual(expect.objectContaining({
+    type: 'chat-processing-updated',
+    chatId: input.chatId,
+    isProcessing: true,
+  }));
+
+  const userEvent = events.find((event): event is ChatMessagesMessage =>
+    event.type === 'chat-messages'
+    && event.chatId === input.chatId
+    && event.messages.some((entry) =>
+      entry.message.type === 'user-message' && entry.message.content === input.content));
+  expect(userEvent).toMatchObject({
+    clientRequestId: input.clientRequestId,
+    turnId: input.turnId,
+  });
+  const user = userEvent?.messages.find((entry) =>
+    entry.message.type === 'user-message' && entry.message.content === input.content);
+  expect(user?.message).toMatchObject({
+    metadata: {
+      clientRequestId: input.clientRequestId,
+      turnId: input.turnId,
+      deliveryStatus: 'accepted',
+    },
+  });
+
+  const assistantIndex = events.findIndex((event) =>
+    event.type === 'chat-messages'
+    && event.chatId === input.chatId
+    && event.clientRequestId === input.clientRequestId
+    && event.turnId === input.turnId
+    && event.messages.some((entry) =>
+      entry.message.type === 'assistant-message' && entry.message.content === input.assistantContent));
+  const clearedIndex = events.findIndex((event) =>
+    event.type === 'pending-user-input-cleared'
+    && event.chatId === input.chatId
+    && event.clientRequestId === input.clientRequestId
+    && event.reason === 'persisted');
+  const terminalIndex = events.findIndex((event) =>
+    event.type === 'agent-run-finished'
+    && event.chatId === input.chatId
+    && event.clientRequestId === input.clientRequestId
+    && event.turnId === input.turnId);
+  expect(assistantIndex).toBeGreaterThanOrEqual(0);
+  expect(clearedIndex).toBeGreaterThanOrEqual(0);
+  expect(terminalIndex).toBeGreaterThan(assistantIndex);
+  expect(terminalIndex).toBeGreaterThan(clearedIndex);
+}
+
 describe('chat lifecycle', () => {
   test('starts and completes a direct chat through HTTP, WebSocket, and provider sockets', async () => {
     await withIntegrationFixture('direct-chat-happy-path', async (fixture) => {
       const chatId = fixture.newChatId();
+      const clientRequestId = crypto.randomUUID();
+      const clientMessageId = crypto.randomUUID();
       const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'hello-integration' });
+      const observer = await fixture.connectObserver('turn-observer');
       const eventCursor = fixture.client.markEvents();
+      const observerCursor = observer.markEvents();
 
       const accepted = await fixture.client.startDirectChat({
         chatId,
         content: 'hello-integration',
         projectPath: fixture.dirs.project,
         provider: fixture.provider,
+        clientRequestId,
+        clientMessageId,
       });
       expect(accepted.status).toBe('accepted');
       expect(accepted.chat.id).toBe(chatId);
       expect(accepted.turnId).toBeString();
+      expect(accepted.clientRequestId).toBe(clientRequestId);
 
       const providerRequest = await held.received;
       expect(providerRequest.body.model).toBe('integration-echo');
@@ -34,15 +120,30 @@ describe('chat lifecycle', () => {
       await fixture.client.waitForProcessing(chatId, true, { afterIndex: eventCursor });
 
       held.releaseEcho();
-      const terminal = await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
-        afterIndex: eventCursor,
-      });
+      const [terminal] = await Promise.all([
+        fixture.client.waitForTurnTerminal(chatId, accepted.turnId, { afterIndex: eventCursor }),
+        observer.waitForTurnTerminal(chatId, accepted.turnId, { afterIndex: observerCursor }),
+      ]);
       expect(terminal.type).toBe('agent-run-finished');
+      const turnContract = {
+        chatId,
+        content: 'hello-integration',
+        assistantContent: 'echo:hello-integration',
+        clientRequestId,
+        clientMessageId,
+        turnId: accepted.turnId!,
+      };
+      expectSuccessfulTurnContract(fixture.client.eventsSince(eventCursor), turnContract);
+      expectSuccessfulTurnContract(observer.eventsSince(observerCursor), turnContract);
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual(['hello-integration']);
       expect(assistantContents(transcript.messages)).toEqual(['echo:hello-integration']);
       expect(countUserContent(transcript.messages, 'hello-integration')).toBe(1);
       expect(userMessages(transcript.messages)[0].metadata?.deliveryStatus).not.toBe('failed');
+      expect(userMessages(transcript.messages)[0].metadata).toMatchObject({
+        clientRequestId,
+        turnId: accepted.turnId,
+      });
       expect(transcript.pendingUserInputs).toEqual([]);
       expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
     });
@@ -176,6 +277,92 @@ describe('chat lifecycle', () => {
         errorCode: 'IDEMPOTENCY_CONFLICT',
       });
       expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
+    });
+  });
+
+  test('rejects a concurrent direct turn before mutating pending or transcript state', async () => {
+    await withIntegrationFixture('same-chat-direct-admission', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'admission-first' });
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'admission-first',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await held.received;
+
+      const rejectedRequestId = crypto.randomUUID();
+      const rejectedMessageId = crypto.randomUUID();
+      const cursor = fixture.client.markEvents();
+      let rejected: unknown;
+      try {
+        await fixture.client.runDirectChat({
+          chatId,
+          content: 'admission-rejected',
+          provider: fixture.provider,
+          clientRequestId: rejectedRequestId,
+          clientMessageId: rejectedMessageId,
+        });
+      } catch (error) {
+        rejected = error;
+      }
+      expect(rejected).toBeInstanceOf(GarconApiError);
+      expect(rejected).toMatchObject({
+        status: 409,
+        body: { errorCode: 'SESSION_BUSY' },
+      });
+      await fixture.client.ping();
+
+      const rejectedEvents = fixture.client.eventsSince(cursor);
+      expect(rejectedEvents.some((event) =>
+        event.type === 'pending-user-input-updated'
+        && event.input.clientRequestId === rejectedRequestId)).toBe(false);
+      expect(rejectedEvents.some((event) =>
+        event.type === 'chat-messages'
+        && (
+          event.clientRequestId === rejectedRequestId
+          || event.messages.some((entry) =>
+            entry.message.type === 'user-message'
+            && entry.message.content === 'admission-rejected')
+        ))).toBe(false);
+      const whileHeld = await fixture.client.getMessages(chatId);
+      expect(userContents(whileHeld.messages)).toEqual(['admission-first']);
+      expect(whileHeld.pendingUserInputs.map((input) => input.content)).toEqual(['admission-first']);
+      expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
+
+      held.releaseEcho();
+      expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type)
+        .toBe('agent-run-finished');
+      await fixture.client.ping();
+      const afterTerminal = fixture.client.eventsSince(cursor);
+      expect(afterTerminal.some((event) =>
+        event.type === 'pending-user-input-updated'
+        && event.input.clientRequestId === rejectedRequestId)).toBe(false);
+      expect(afterTerminal.some((event) =>
+        event.type === 'chat-messages'
+        && (
+          event.clientRequestId === rejectedRequestId
+          || event.messages.some((entry) =>
+            entry.message.type === 'user-message'
+            && entry.message.content === 'admission-rejected')
+        ))).toBe(false);
+      const afterTerminalMessages = await fixture.client.getMessages(chatId);
+      expect(afterTerminalMessages.pendingUserInputs.some((input) =>
+        input.clientRequestId === rejectedRequestId)).toBe(false);
+      expect(countUserContent(afterTerminalMessages.messages, 'admission-rejected')).toBe(0);
+
+      const later = await fixture.client.runDirectChat({
+        chatId,
+        content: 'admission-later',
+        provider: fixture.provider,
+      });
+      expect((await fixture.client.waitForTurnTerminal(chatId, later.turnId)).type)
+        .toBe('agent-run-finished');
+      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+        'admission-first',
+        'admission-later',
+      ]);
     });
   });
 });

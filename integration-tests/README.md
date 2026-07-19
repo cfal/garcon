@@ -115,7 +115,7 @@ bun run check
 bun run test
 ```
 
-`bun run test` includes the server integration lane but not the Lightpanda lane. Run `test:integration:e2e` explicitly for SPA workflow changes. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
+`bun run test:integration` runs the server integration lane but not the Lightpanda lane. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
 
 Focused runs are useful while iterating:
 
