@@ -23,7 +23,6 @@ import { ActiveInputDeliveryError, DomainError } from '../lib/domain-error.js';
 import type { TurnIdentity } from '../lib/turn-identity.js';
 import { QueueExecutionAttempt } from './execution-attempt.js';
 import {
-  QueuedTurnFinalizationTracker,
   type QueuedTurnFinalizationOutcome,
 } from './turn-finalization-tracker.js';
 import {
@@ -64,6 +63,7 @@ import {
 } from './types.ts';
 import { QueueDispatchSaga } from './queue-dispatch-saga.ts';
 import { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
+import { ExecutionOwnership } from './execution-ownership.ts';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 export {
@@ -104,19 +104,7 @@ export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunA
 export class ChatExecutionCoordinator extends EventEmitter implements ChatExecutionService {
   #locks = new KeyedPromiseLock();
   #shuttingDown = false;
-  #draining = new Set<string>();
-  #directTurns = new Map<string, string>();
-  #directTurnAdmissionControllers = new Map<string, AbortController>();
-  #drainAdmissionControllers = new Map<string, AbortController>();
-  #activeDrainEntries = new Map<string, string>();
-  #shutdownDrainAborts = new Map<string, string>();
-  #executionOwnerWaiters = new Set<() => void>();
-  #pendingDrainRequests = new Set<string>();
-  #drainSuppressions = new Map<string, Set<DrainSuppressionReason>>();
-  #executionAttempts = new Map<string, QueueExecutionAttempt>();
-  #turnFinalizations = new QueuedTurnFinalizationTracker();
-  #sessionStopByChatId = new Map<string, SessionStopInFlight>();
-  #continuedRecoveredInputChats = new Set<string>();
+  #ownership = new ExecutionOwnership();
   #recoveryFailure: unknown = undefined;
   #turnRunner: AgentTurnRunnerPort;
   #pendingInputs: PendingInputsPort;
@@ -162,32 +150,27 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
         this.#shuttingDown
         || this.#isDrainSuppressed(chatId)
         || this.#hasDrainSuppression(chatId, 'manual-stop')
-        || this.#directTurns.has(chatId)
-        || this.#sessionStopByChatId.has(chatId)
+        || this.#ownership.hasDirect(chatId)
+        || this.#ownership.stop(chatId) !== undefined
         || this.#turnRunner.isChatRunning(chatId)
       ),
       isShuttingDown: () => this.#shuttingDown,
       hasManualStop: (chatId) => this.#hasDrainSuppression(chatId, 'manual-stop'),
       interruptInFlight: (chatId) => {
-        const stop = this.#sessionStopByChatId.get(chatId);
+        const stop = this.#ownership.stop(chatId);
         return stop?.intent === 'interrupt-and-send' ? stop.promise : null;
       },
       popNext: (chatId) => this.popNextChat(chatId),
       readControl: (chatId) => this.readChatExecutionControl(chatId),
-      setActiveEntry: (chatId, entryId) => { this.#activeDrainEntries.set(chatId, entryId); },
+      setActiveEntry: (chatId, entryId) => { this.#ownership.setActiveDrainEntry(chatId, entryId); },
       setAdmissionController: (chatId, controller) => {
-        this.#drainAdmissionControllers.set(chatId, controller);
+        this.#ownership.setDrainAdmission(chatId, controller);
       },
-      shutdownTargetsEntry: (chatId, entryId) => this.#shutdownDrainAborts.get(chatId) === entryId,
+      shutdownTargetsEntry: (chatId, entryId) => this.#ownership.shutdownTargetsEntry(chatId, entryId),
       resolveOptions: (chatId) => this.#getDrainOptions(chatId),
-      usesRecoveredHistory: (chatId) => this.#continuedRecoveredInputChats.has(chatId),
-      beginFinalization: (chatId, turnId) => this.#turnFinalizations.begin(chatId, turnId),
-      installAttempt: (chatId, attempt) => {
-        if (this.#executionAttempts.has(chatId)) {
-          throw new Error('Another chat turn already owns execution');
-        }
-        this.#executionAttempts.set(chatId, attempt);
-      },
+      usesRecoveredHistory: (chatId) => this.#ownership.usesRecoveredHistory(chatId),
+      beginFinalization: (chatId, turnId) => this.#ownership.beginFinalization(chatId, turnId),
+      installAttempt: (chatId, attempt) => { this.#ownership.installAttempt(chatId, attempt); },
       registerPending: (chatId, content, options) => (
         this.registerPendingUserInput(chatId, content, options)
       ),
@@ -246,72 +229,36 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   beginShutdown(): string[] {
     this.#shuttingDown = true;
     const reason = new Error('Turn interrupted because the server is shutting down');
-    for (const controller of this.#directTurnAdmissionControllers.values()) {
-      controller.abort(reason);
-    }
-    for (const [chatId, entryId] of this.#activeDrainEntries) {
-      this.#shutdownDrainAborts.set(chatId, entryId);
-    }
-    for (const controller of this.#drainAdmissionControllers.values()) {
-      controller.abort(reason);
-    }
-    return [...new Set([
-      ...this.#directTurns.keys(),
-      ...this.#draining,
-      ...this.#executionAttempts.keys(),
-    ])];
+    return this.#ownership.beginShutdown(reason);
   }
 
   async abortForShutdown(chatId: string): Promise<boolean> {
-    const entryId = this.#activeDrainEntries.get(chatId);
-    if (entryId) this.#shutdownDrainAborts.set(chatId, entryId);
-    this.#directTurnAdmissionControllers.get(chatId)?.abort(
+    this.#ownership.abortAdmission(
+      chatId,
       new Error('Turn interrupted because the server is shutting down'),
     );
-    this.#drainAdmissionControllers.get(chatId)?.abort(
-      new Error('Turn interrupted because the server is shutting down'),
-    );
-    if (!this.#executionAttempts.has(chatId) && !this.#turnRunner.isChatRunning(chatId)) {
+    if (!this.#ownership.hasAttempt(chatId) && !this.#turnRunner.isChatRunning(chatId)) {
       return true;
     }
     return this.#abortSession(chatId, 'stop');
   }
 
   async waitForExecutionOwners(): Promise<void> {
-    while (this.#hasExecutionOwner()) {
-      await new Promise<void>((resolve) => {
-        this.#executionOwnerWaiters.add(resolve);
-        if (!this.#hasExecutionOwner()) {
-          this.#executionOwnerWaiters.delete(resolve);
-          resolve();
-        }
-      });
-    }
+    await this.#ownership.waitForOwners();
   }
 
   onAgentTurnTerminal(chatId: string, turn: TurnIdentity | undefined): void {
-    const attempt = this.#executionAttempts.get(chatId);
+    const attempt = this.#ownership.attempt(chatId);
     if (!attempt?.matches(turn)) return;
     attempt.markTerminalObserved();
     this.#settleExecutionAttempt(chatId, attempt);
-  }
-
-  #hasExecutionOwner(): boolean {
-    return this.#draining.size > 0
-      || this.#directTurns.size > 0
-      || this.#executionAttempts.size > 0;
-  }
-
-  #notifyExecutionOwnersChanged(): void {
-    for (const resolve of this.#executionOwnerWaiters) resolve();
-    this.#executionOwnerWaiters.clear();
   }
 
   getQueuedTurnFinalization(
     chatId: string,
     turnId: string | undefined,
   ): Promise<QueuedTurnFinalizationOutcome> | null {
-    return this.#turnFinalizations.get(chatId, turnId);
+    return this.#ownership.finalization(chatId, turnId);
   }
   onChatMessages(cb: ChatMessagesCallback): void {
     this.on('chat-messages', cb);
@@ -325,13 +272,13 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   // pending. Skips when a drain loop is already active to avoid duplicate work.
   async checkChatIdle(chatId: string): Promise<void> {
     if (this.#shuttingDown) return;
-    if (this.#draining.has(chatId)) return;
+    if (this.#ownership.isDraining(chatId)) return;
     if (this.#turnRunner.isChatRunning(chatId)) return;
     const queue = await this.readChatExecutionControl(chatId);
     if (this.#isDrainSuppressed(chatId)) {
       const hasPending = queue.entries.some((e) => e.status === 'queued' || e.status === 'sending');
       if (!hasPending) {
-        this.#pendingDrainRequests.delete(chatId);
+        this.#ownership.consumeDrainRequest(chatId);
         this.emit('chat-idle', chatId);
       }
       return;
@@ -345,7 +292,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     }
     const hasPending = queue.entries.some((e) => e.status === 'queued' || e.status === 'sending');
     if (!hasPending) {
-      this.#pendingDrainRequests.delete(chatId);
+      this.#ownership.consumeDrainRequest(chatId);
       this.emit('chat-idle', chatId);
     }
   }
@@ -435,7 +382,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
 
   async clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState> {
     this.#removeDrainSuppression(chatId, 'abort');
-    this.#pendingDrainRequests.delete(chatId);
+    this.#ownership.consumeDrainRequest(chatId);
     return this.#controlOperations.clear(chatId);
   }
 
@@ -454,7 +401,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     continuationId: string,
   ): Promise<StoredChatExecutionControlState> {
     const result = await this.#controlOperations.continueRecoveredInput(chatId, continuationId);
-    this.#continuedRecoveredInputChats.add(chatId);
+    this.#ownership.continueRecoveredInput(chatId);
     this.#requestDrain(chatId, 'recovered-input continuation');
     return result;
   }
@@ -468,7 +415,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   async dropRecoveredInputContinuation(chatId: string): Promise<StoredChatExecutionControlState> {
-    this.#continuedRecoveredInputChats.delete(chatId);
+    this.#ownership.settleRecoveredInput(chatId);
     const result = (await this.#controlOperations.dropRecoveredInputContinuation(chatId)).control;
     this.#requestDrain(chatId, 'recovered-input settlement');
     return result;
@@ -568,32 +515,17 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
     }
     if (
-      this.#directTurns.has(chatId)
-      || this.#draining.has(chatId)
-      || this.#executionAttempts.has(chatId)
+      this.#ownership.hasOwner(chatId)
       || this.#turnRunner.isChatRunning(chatId)
     ) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
-    const admissionController = new AbortController();
-    const reservation = Object.freeze({
-      chatId,
-      reservationId: crypto.randomUUID(),
-      executionAdmission: Object.freeze({
-        signal: admissionController.signal,
-        markStarted: () => undefined,
-      }),
-    });
-    this.#directTurns.set(chatId, reservation.reservationId);
-    this.#directTurnAdmissionControllers.set(chatId, admissionController);
-    const identity = executionTurnIdentity(turn) ?? { turnId: crypto.randomUUID() };
-    this.#executionAttempts.set(chatId, new QueueExecutionAttempt(identity));
-    return reservation;
+    return this.#ownership.reserveDirect(chatId, turn);
   }
 
   assertDirectTurnReservationActive(reservation: DirectTurnReservation): void {
     this.#assertRecoveryReady();
-    if (this.#directTurns.get(reservation.chatId) !== reservation.reservationId) {
+    if (!this.#ownership.isDirectCurrent(reservation)) {
       throw new DomainError('SESSION_BUSY', 'Direct turn reservation is no longer active', 409, true);
     }
   }
@@ -610,7 +542,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       reservation.chatId,
       checkpoint,
     );
-    if (result.changed) this.#continuedRecoveredInputChats.add(reservation.chatId);
+    if (result.changed) this.#ownership.continueRecoveredInput(reservation.chatId);
     return result.control;
   }
 
@@ -634,7 +566,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     this.#assertRecoveryReady();
     this.assertDirectTurnReservationActive(reservation);
     const identity = executionTurnIdentity(options);
-    const attempt = this.#executionAttempts.get(reservation.chatId);
+    const attempt = this.#ownership.attempt(reservation.chatId);
     if (!attempt) throw new Error('Direct turn execution attempt is missing');
     if (identity && !attempt.matches(identity)) attempt.replaceReservedTurn(identity);
     attempt.markLaunching();
@@ -643,7 +575,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       reservation.executionAdmission.signal.throwIfAborted();
       await this.#turnRunner.runAgentTurn(reservation.chatId, command, {
         ...options,
-        ...(this.#continuedRecoveredInputChats.has(reservation.chatId)
+        ...(this.#ownership.usesRecoveredHistory(reservation.chatId)
           ? { directHistoryRecovery: 'allow-empty' as const }
           : {}),
         executionAdmission: reservation.executionAdmission,
@@ -664,12 +596,12 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     reservation: DirectTurnReservation,
     outcome: 'released' | 'completed' | 'failed',
   ): Promise<void> {
-    if (this.#directTurns.get(reservation.chatId) !== reservation.reservationId) {
+    if (!this.#ownership.isDirectCurrent(reservation)) {
       if (!this.#chatExists(reservation.chatId)) return;
       throw new Error('Direct turn reservation is no longer active');
     }
-    this.#directTurns.delete(reservation.chatId);
-    const attempt = this.#executionAttempts.get(reservation.chatId);
+    this.#ownership.releaseDirect(reservation);
+    const attempt = this.#ownership.attempt(reservation.chatId);
     if (attempt) {
       attempt.markRunSettled();
       if (outcome === 'released' || !this.#turnRunner.isChatRunning(reservation.chatId)) {
@@ -677,8 +609,8 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       }
       this.#settleExecutionAttempt(reservation.chatId, attempt);
     }
-    const drainRequested = this.#pendingDrainRequests.has(reservation.chatId);
-    this.#notifyExecutionOwnersChanged();
+    const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
+    this.#ownership.notifyOwnersChanged();
     if (!this.#chatExists(reservation.chatId)) return;
     if (this.#shuttingDown) return;
     if (outcome === 'completed' || drainRequested) await this.triggerDrain(reservation.chatId);
@@ -686,12 +618,11 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
 
   #settleExecutionAttempt(chatId: string, attempt: QueueExecutionAttempt): void {
     if (!attempt.isSettlementReady) return;
-    if (this.#executionAttempts.get(chatId) !== attempt) return;
+    if (!this.#ownership.isCurrentAttempt(chatId, attempt)) return;
     attempt.markSettled();
-    this.#executionAttempts.delete(chatId);
-    this.#directTurnAdmissionControllers.delete(chatId);
+    this.#ownership.removeAttempt(chatId, attempt);
     this.emit('turn-settled', chatId, attempt.identity());
-    this.#notifyExecutionOwnersChanged();
+    this.#ownership.notifyOwnersChanged();
   }
 
   #isExecutionAttemptRetired(
@@ -699,7 +630,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     attempt: QueueExecutionAttempt | undefined,
   ): boolean {
     return !attempt
-      || (attempt.isSettled && this.#executionAttempts.get(chatId) !== attempt);
+      || (attempt.isSettled && !this.#ownership.isCurrentAttempt(chatId, attempt));
   }
 
   async #waitUntilAttemptAbortable(
@@ -713,7 +644,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       controller.signal,
     ).then(
       (isAbortable) => {
-        if (isAbortable && this.#executionAttempts.get(chatId) === attempt) {
+        if (isAbortable && this.#ownership.isCurrentAttempt(chatId, attempt)) {
           attempt.markAbortable();
         }
         return isAbortable;
@@ -733,32 +664,12 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     try {
       return await operation.promise;
     } finally {
-      if (this.#sessionStopByChatId.get(chatId) === operation) {
-        this.#sessionStopByChatId.delete(chatId);
-      }
+      this.#ownership.clearStop(chatId, operation);
     }
   }
 
   #reserveSessionStop(chatId: string, intent: ChatStopIntent): SessionStopInFlight {
-    const inFlight = this.#sessionStopByChatId.get(chatId);
-    if (inFlight) return inFlight;
-    const stopId = crypto.randomUUID();
-    let resolveStop!: (success: boolean) => void;
-    let rejectStop!: (error: unknown) => void;
-    const stop = new Promise<boolean>((resolve, reject) => {
-      resolveStop = resolve;
-      rejectStop = reject;
-    });
-    const operation: SessionStopInFlight = {
-      intent,
-      stopId,
-      promise: stop,
-      resolve: resolveStop,
-      reject: rejectStop,
-      started: false,
-    };
-    this.#sessionStopByChatId.set(chatId, operation);
-    return operation;
+    return this.#ownership.reserveStop(chatId, intent);
   }
 
   #startSessionStop(chatId: string, operation: SessionStopInFlight): void {
@@ -771,7 +682,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   async #waitForSessionStop(chatId: string): Promise<void> {
-    await this.#sessionStopByChatId.get(chatId)?.promise.catch(() => undefined);
+    await this.#ownership.stop(chatId)?.promise.catch(() => undefined);
   }
 
   async #performAbortSession(
@@ -779,9 +690,11 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     intent: ChatStopIntent,
     stopId: string,
   ): Promise<boolean> {
-    const attempt = this.#executionAttempts.get(chatId);
+    const attempt = this.#ownership.attempt(chatId);
     const registered = attempt?.entryId ? await attempt.waitUntilRegistered() : Boolean(attempt);
-    const currentAttempt = this.#executionAttempts.get(chatId) === attempt ? attempt : undefined;
+    const currentAttempt = attempt && this.#ownership.isCurrentAttempt(chatId, attempt)
+      ? attempt
+      : undefined;
     this.emit(
       'session-stop-requested',
       chatId,
@@ -816,19 +729,17 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   async stopActiveTurn(chatId: string): Promise<StopActiveTurnResult> {
-    const drainWasActive = this.#draining.has(chatId);
+    const drainWasActive = this.#ownership.isDraining(chatId);
     this.#addDrainSuppression(chatId, 'abort');
     this.#addDrainSuppression(chatId, 'manual-stop');
-    const existingStop = this.#sessionStopByChatId.get(chatId);
+    const existingStop = this.#ownership.stop(chatId);
     const stop = this.#reserveSessionStop(chatId, 'stop');
     const ownsStop = existingStop === undefined;
     try {
       await this.pauseChatQueue(chatId);
     } catch (error) {
       if (ownsStop && !stop.started) stop.resolve(false);
-      if (ownsStop && this.#sessionStopByChatId.get(chatId) === stop) {
-        this.#sessionStopByChatId.delete(chatId);
-      }
+      if (ownsStop) this.#ownership.clearStop(chatId, stop);
       this.#removeDrainSuppression(chatId, 'abort');
       this.#removeDrainSuppression(chatId, 'manual-stop');
       throw error;
@@ -839,13 +750,11 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       this.#startSessionStop(chatId, stop);
       stopped = await stop.promise;
     } finally {
-      if (this.#sessionStopByChatId.get(chatId) === stop) {
-        this.#sessionStopByChatId.delete(chatId);
-      }
+      this.#ownership.clearStop(chatId, stop);
       // A durable pause now owns queued-work blocking. Clearing this temporary
       // gate also lets a later fresh queue entry run when Stop found no queue.
       this.#removeDrainSuppression(chatId, 'abort');
-      if (!drainWasActive || !this.#draining.has(chatId)) {
+      if (!drainWasActive || !this.#ownership.isDraining(chatId)) {
         this.#removeDrainSuppression(chatId, 'manual-stop');
       }
     }
@@ -865,7 +774,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   async abortForChatDeletion(chatId: string): Promise<boolean> {
     this.#addDrainSuppression(chatId, 'deletion');
     try {
-      const attempt = this.#executionAttempts.get(chatId);
+      const attempt = this.#ownership.attempt(chatId);
       if (!attempt && !this.#turnRunner.isChatRunning(chatId)) return true;
 
       const aborted = await this.#abortSession(chatId, 'chat-deletion');
@@ -893,64 +802,59 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   #requestDrain(chatId: string, context: string): void {
-    this.#pendingDrainRequests.add(chatId);
+    this.#ownership.requestDrain(chatId);
     void this.triggerDrain(chatId).catch((error: Error) => {
       logger.error(`queue: ${context} drain error:`, error.message);
     });
   }
 
   isChatDraining(chatId: string): boolean {
-    return this.#draining.has(chatId);
+    return this.#ownership.isDraining(chatId);
   }
 
   isChatExecutionReserved(chatId: string): boolean {
-    return this.#draining.has(chatId) || this.#directTurns.has(chatId);
+    return this.#ownership.isReserved(chatId);
   }
 
   // Includes retained nonblocking attempts across the reservation-to-runtime handoff.
   hasChatExecutionOwner(chatId: string): boolean {
-    return this.#draining.has(chatId)
-      || this.#directTurns.has(chatId)
-      || this.#executionAttempts.has(chatId);
+    return this.#ownership.hasOwner(chatId);
   }
 
   // Triggers drain if the agent is not currently running.
   async triggerDrain(chatId: string): Promise<void> {
     if (this.#shuttingDown) return;
-    if (this.#directTurns.has(chatId) || this.#draining.has(chatId)) {
-      this.#pendingDrainRequests.add(chatId);
+    if (this.#ownership.hasDirect(chatId) || this.#ownership.isDraining(chatId)) {
+      this.#ownership.requestDrain(chatId);
       return;
     }
     if (
       this.#isDrainSuppressed(chatId)
-      || this.#sessionStopByChatId.has(chatId)
+      || this.#ownership.stop(chatId) !== undefined
       || this.#turnRunner.isChatRunning(chatId)
     ) return;
-    this.#pendingDrainRequests.delete(chatId);
+    this.#ownership.consumeDrainRequest(chatId);
     await this.#drain(chatId);
   }
 
   async #drain(chatId: string): Promise<void> {
     if (
       this.#shuttingDown
-      || this.#draining.has(chatId)
-      || this.#directTurns.has(chatId)
+      || this.#ownership.isDraining(chatId)
+      || this.#ownership.hasDirect(chatId)
       || this.#isDrainSuppressed(chatId)
-      || this.#sessionStopByChatId.has(chatId)
+      || this.#ownership.stop(chatId) !== undefined
     ) return;
-    this.#draining.add(chatId);
+    this.#ownership.beginDrain(chatId);
     try {
-      this.#pendingDrainRequests.delete(chatId);
+      this.#ownership.consumeDrainRequest(chatId);
       await this.#dispatchSaga.run(chatId);
     } finally {
-      this.#draining.delete(chatId);
-      this.#drainAdmissionControllers.delete(chatId);
-      this.#activeDrainEntries.delete(chatId);
-      this.#shutdownDrainAborts.delete(chatId);
+      this.#ownership.endDrain(chatId);
       this.#removeDrainSuppression(chatId, 'manual-stop');
-      this.#notifyExecutionOwnersChanged();
+      this.#ownership.notifyOwnersChanged();
     }
-    if (!this.#shuttingDown && this.#pendingDrainRequests.has(chatId)) await this.triggerDrain(chatId);
+    if (!this.#shuttingDown && this.#ownership.hasDrainRequest(chatId)) await this.triggerDrain(chatId);
   }
 
   async #returnUnsentEntry(chatId: string, entryId: string): Promise<void> {
@@ -963,24 +867,10 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
 
   async deleteChatQueueFile(chatId: string): Promise<void> {
     await this.#locks.runExclusive(`chat:${chatId}`, async () => {
-      this.#drainSuppressions.delete(chatId);
-      this.#pendingDrainRequests.delete(chatId);
-      this.#directTurns.delete(chatId);
-      this.#directTurnAdmissionControllers.get(chatId)?.abort(
+      this.#ownership.clearChat(
+        chatId,
         new Error('Turn interrupted because the chat was deleted'),
       );
-      this.#directTurnAdmissionControllers.delete(chatId);
-      this.#drainAdmissionControllers.get(chatId)?.abort(
-        new Error('Turn interrupted because the chat was deleted'),
-      );
-      this.#drainAdmissionControllers.delete(chatId);
-      this.#activeDrainEntries.delete(chatId);
-      this.#shutdownDrainAborts.delete(chatId);
-      this.#turnFinalizations.clearChat(chatId);
-      this.#executionAttempts.get(chatId)?.markSettled();
-      this.#executionAttempts.delete(chatId);
-      this.#notifyExecutionOwnersChanged();
-      this.#continuedRecoveredInputChats.delete(chatId);
       await this.#controlOperations.deleteStored(chatId);
     });
   }
@@ -1012,20 +902,15 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   #addDrainSuppression(chatId: string, reason: DrainSuppressionReason): void {
-    const reasons = this.#drainSuppressions.get(chatId) ?? new Set();
-    reasons.add(reason);
-    this.#drainSuppressions.set(chatId, reasons);
+    this.#ownership.addSuppression(chatId, reason);
   }
 
   #removeDrainSuppression(chatId: string, reason: DrainSuppressionReason): void {
-    const reasons = this.#drainSuppressions.get(chatId);
-    if (!reasons) return;
-    reasons.delete(reason);
-    if (reasons.size === 0) this.#drainSuppressions.delete(chatId);
+    this.#ownership.removeSuppression(chatId, reason);
   }
 
   #hasDrainSuppression(chatId: string, reason: DrainSuppressionReason): boolean {
-    return this.#drainSuppressions.get(chatId)?.has(reason) === true;
+    return this.#ownership.hasSuppression(chatId, reason);
   }
 }
 
