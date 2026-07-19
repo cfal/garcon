@@ -234,6 +234,7 @@ interface NormalizedOpenCodeRuntimeOptions {
   unavailableRetryMs: number;
   modelCacheTtlMs: number;
   now: () => number;
+  requiresExecutable: boolean;
   createInstance: (input: {
     port: number;
     signal: AbortSignal;
@@ -274,6 +275,7 @@ function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRu
     unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
     modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
     now: options.now ?? (() => Date.now()),
+    requiresExecutable: options.createInstance === undefined,
     createInstance: options.createInstance ?? createOpenCodeInstance,
   };
 }
@@ -490,10 +492,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#closeInstance();
   }
 
-  // Returns true if the opencode binary is on $PATH, without spawning a server.
+  // Returns whether an OpenCode instance can be created without starting one.
   isAvailable(): boolean {
     if (this.#available !== null) return this.#available;
-    if (this.#config.isTestEnvironment()) {
+    if (!this.#options.requiresExecutable || this.#config.isTestEnvironment()) {
       this.#available = true;
       return true;
     }
@@ -655,7 +657,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     let startup: Promise<OpenCodeInstance> | null = null;
     startup = (async () => {
       try {
-        if (typeof Bun !== 'undefined' && typeof Bun.which === 'function'
+        if (this.#options.requiresExecutable
+            && typeof Bun !== 'undefined' && typeof Bun.which === 'function'
             && !this.#config.isTestEnvironment() && !Bun.which('opencode')) {
           throw new Error('opencode executable not found in $PATH');
         }
