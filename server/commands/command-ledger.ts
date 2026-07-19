@@ -76,6 +76,13 @@ const INTERRUPTIBLE_EXECUTION_COMMANDS = new Set([
   'active-input',
 ]);
 
+const QUEUE_RECEIPT_COMMANDS = new Set([
+  'queue-entry-create',
+  'queue-entry-replace',
+  'queue-entry-delete',
+  'active-input',
+]);
+
 const USER_INPUT_EXECUTION_COMMANDS = new Set([
   'agent-run',
   'fork-run',
@@ -444,6 +451,17 @@ export class CommandLedger {
         ...record,
         payload: { ...record.payload },
       }));
+  }
+
+  async listRetainedQueueReceiptKeys(chatId: string): Promise<ReadonlySet<string>> {
+    return this.#withMutationLock(async () => {
+      await this.#load();
+      return new Set(
+        [...this.#records.values()]
+          .filter((record) => record.chatId === chatId && QUEUE_RECEIPT_COMMANDS.has(record.commandType))
+          .map((record) => record.key),
+      );
+    });
   }
 
   async listForkPreparationsPendingRecovery(): Promise<CommandLedgerRecord[]> {

@@ -2,11 +2,9 @@
 // Extends EventEmitter to notify listeners of queue state changes,
 // dispatching events, stop requests, and session stops.
 
-import { promises as fs } from 'fs';
-import path from 'path';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
-import type { AutomaticQueuePauseKind, QueueEntry, QueuePause } from '../common/queue-state.ts';
+import type { AutomaticQueuePauseKind, QueueEntry } from '../common/queue-state.ts';
 import {
   UserMessage,
   type ChatImage,
@@ -21,7 +19,6 @@ import {
   type RunAgentTurnOptions,
 } from './agents/session-types.js';
 import type { IChatRegistry } from './chats/store.js';
-import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
 import { createLogger } from './lib/log.js';
 import { ActiveInputDeliveryError, DomainError } from './lib/domain-error.js';
@@ -33,18 +30,41 @@ import {
   type QueuedTurnFinalizationOutcome,
 } from './queue/turn-finalization-tracker.js';
 import {
-  MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
-  MAX_STORED_APPLIED_QUEUE_COMMANDS,
   bumpStoredChatExecutionControl,
   cloneStoredChatExecutionControl,
   emptyStoredChatExecutionControl,
   normalizeStoredChatExecutionControlState,
-  parseStoredChatExecutionControlState,
-  storedChatExecutionControlNeedsCanonicalization,
-  type StoredAppliedQueueCommand,
   type StoredChatExecutionControlState,
   type StoredQueueEntry,
 } from './chat-execution-control-state.ts';
+import {
+  JsonChatExecutionControlRepository,
+  type ChatExecutionControlRepository,
+} from './chat-execution/chat-execution-control-repository.ts';
+import {
+  clearQueue,
+  consumeEmptyRecoveredInputContinuation,
+  continueRecoveredInput,
+  createQueueEntry,
+  deleteQueueEntry,
+  dropRecoveredInputContinuation,
+  installRecoveryPause,
+  pauseQueue,
+  popNextQueueEntry,
+  removeSentQueueEntry,
+  replaceQueueEntry,
+  requeueAndPause,
+  restoreStoppedQueueEntry,
+  resumeQueue,
+  returnUnsentQueueEntry,
+  type ControlTransition,
+  type QueueCommandIdentity,
+  type ReceiptRetention,
+  type TransitionContext,
+  type TransitionRejection,
+} from './chat-execution/chat-execution-control-transitions.ts';
+
+export type { QueueCommandIdentity } from './chat-execution/chat-execution-control-transitions.ts';
 
 const logger = createLogger('queue');
 
@@ -133,35 +153,6 @@ export class RecoveredInputContinuationRequiresQueueError extends DomainError {
   }
 }
 
-function queueEntry(entry: StoredQueueEntry): QueueEntry {
-  const { status: _status, delivery: _delivery, ...clientEntry } = entry;
-  return { ...clientEntry };
-}
-
-function installRecoveryPause(control: StoredChatExecutionControlState, pause: QueuePause): boolean {
-  if (control.pause?.kind === pause.kind) return false;
-  if (control.pause) {
-    control.resumePauses = [control.pause, ...(control.resumePauses ?? [])];
-  }
-  control.pause = pause;
-  return true;
-}
-
-function missingQueueEntryError(
-  control: StoredChatExecutionControlState,
-  entryId: string,
-): QueueEntryMutationError {
-  const wasDispatched = control.recentlyDispatched.some((entry) => entry.entryId === entryId);
-  return wasDispatched
-    ? new QueueEntryMutationError('QUEUE_ENTRY_ALREADY_SENT', 'This queued message has already been sent', control)
-    : new QueueEntryMutationError('QUEUE_ENTRY_NOT_FOUND', 'This queued message is no longer available', control);
-}
-
-export interface QueueCommandIdentity {
-  key: string;
-  entryId: string;
-}
-
 interface QueueCommandMutationResult {
   entryId: string;
   control: StoredChatExecutionControlState;
@@ -187,27 +178,42 @@ function executionTurnIdentity(turn: TurnIdentity): TurnIdentity | undefined {
   };
 }
 
-function appliedQueueCommand(
-  control: StoredChatExecutionControlState,
-  command: QueueCommandIdentity,
-): StoredAppliedQueueCommand | null {
-  return control.appliedCommands.find((candidate) => candidate.key === command.key) ?? null;
+const EMPTY_RECEIPT_RETENTION: ReceiptRetention = { protectedKeys: new Set() };
+
+function transitionContext(): TransitionContext {
+  return { now: new Date().toISOString(), newId: () => crypto.randomUUID() };
 }
 
-function recordAppliedQueueCommand(
+function transitionError(
+  rejection: TransitionRejection,
   control: StoredChatExecutionControlState,
-  command: QueueCommandIdentity,
-  operation: StoredAppliedQueueCommand['operation'],
-): void {
-  control.appliedCommands = [
-    ...control.appliedCommands.filter((candidate) => candidate.key !== command.key),
-    {
-      key: command.key,
-      operation,
-      entryId: command.entryId,
-      appliedAt: new Date().toISOString(),
-    },
-  ].slice(-MAX_STORED_APPLIED_QUEUE_COMMANDS);
+): DomainError {
+  switch (rejection.code) {
+    case 'QUEUE_ENTRY_NOT_FOUND':
+      return new QueueEntryMutationError(
+        rejection.code,
+        'This queued message is no longer available',
+        control,
+      );
+    case 'QUEUE_ENTRY_ALREADY_SENT':
+      return new QueueEntryMutationError(
+        rejection.code,
+        'This queued message has already been sent',
+        control,
+      );
+    case 'QUEUE_ENTRY_REVISION_CONFLICT':
+      return new QueueEntryMutationError(
+        rejection.code,
+        'This queued message changed before it could be saved',
+        control,
+      );
+    case 'QUEUE_PAUSE_CHANGED':
+      return new QueuePauseChangedError(control);
+    case 'RECOVERED_INPUT_CONTINUATION_CHANGED':
+      return new RecoveredInputContinuationChangedError(control);
+    case 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE':
+      return new RecoveredInputContinuationRequiresQueueError(control);
+  }
 }
 
 export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
@@ -294,6 +300,9 @@ interface SessionStopInFlight {
   intent: ChatStopIntent;
   stopId: string;
   promise: Promise<boolean>;
+  resolve(success: boolean): void;
+  reject(error: unknown): void;
+  started: boolean;
 }
 
 type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
@@ -339,6 +348,7 @@ export interface ChatQueueService {
     chatId: string,
     content: string,
     command?: QueueCommandIdentity,
+    receipts?: ReceiptRetention,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }>;
   replaceChatQueueEntry(
     chatId: string,
@@ -346,11 +356,13 @@ export interface ChatQueueService {
     content: string,
     expectedRevision: number,
     command?: QueueCommandIdentity,
+    receipts?: ReceiptRetention,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }>;
   deleteChatQueueEntry(
     chatId: string,
     entryId: string,
     command?: QueueCommandIdentity,
+    receipts?: ReceiptRetention,
   ): Promise<QueueCommandMutationResult>;
   deliverActiveInput(
     chatId: string,
@@ -388,10 +400,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #executionAttempts = new Map<string, QueueExecutionAttempt>();
   #turnFinalizations = new QueuedTurnFinalizationTracker();
   #sessionStopByChatId = new Map<string, SessionStopInFlight>();
-  #controlsByChatId = new Map<string, StoredChatExecutionControlState>();
   #continuedRecoveredInputChats = new Set<string>();
   #recoveryFailure: unknown = undefined;
-  #workspaceDir: string;
+  #controls: ChatExecutionControlRepository;
   #turnRunner: AgentTurnRunnerDep;
   #pendingInputs: PendingInputsDep;
   #chatMessages: ChatMessagesDep;
@@ -405,6 +416,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     chatMessages: ChatMessagesDep,
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
+    controls: ChatExecutionControlRepository = new JsonChatExecutionControlRepository(workspaceDir),
   ) {
     super();
     if (!turnRunner) throw new Error('QueueManager requires an agent turn runner');
@@ -415,7 +427,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     if (!chatMessages) throw new Error('QueueManager requires chat message storage');
     if (!getDrainOptions) throw new Error('QueueManager requires a drain option resolver');
     if (!chatExists) throw new Error('QueueManager requires a chat existence resolver');
-    this.#workspaceDir = workspaceDir;
+    this.#controls = controls;
     this.#turnRunner = turnRunner;
     this.#pendingInputs = pendingInputs;
     this.#chatMessages = chatMessages;
@@ -608,31 +620,13 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     }
   }
 
-  #chatQueueFilePath(chatId: string): string {
-    return path.join(this.#workspaceDir, 'queues', `${chatId}.queue.json`);
-  }
-
   async #withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     return this.#locks.runExclusive(key, fn);
   }
 
-  async #readChatExecutionControlFromDisk(chatId: string): Promise<StoredChatExecutionControlState> {
-    try {
-      const data = await fs.readFile(this.#chatQueueFilePath(chatId), 'utf8');
-      return parseStoredChatExecutionControlState(JSON.parse(data));
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyStoredChatExecutionControl();
-      throw error;
-    }
-  }
-
   async #loadChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState> {
     this.#assertRecoveryReady();
-    const cached = this.#controlsByChatId.get(chatId);
-    if (cached) return cached;
-    const loaded = await this.#readChatExecutionControlFromDisk(chatId);
-    this.#controlsByChatId.set(chatId, loaded);
-    return loaded;
+    return this.#controls.load(chatId);
   }
 
   async #commitChatExecutionControl(
@@ -642,11 +636,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     if (!this.#chatExists(chatId)) {
       throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
     }
-    const filePath = this.#chatQueueFilePath(chatId);
-    const normalized = normalizeStoredChatExecutionControlState(control);
-    await writeJsonFileAtomic(filePath, normalized);
-    this.#controlsByChatId.set(chatId, normalized);
-    return cloneStoredChatExecutionControl(normalized);
+    return this.#controls.save(chatId, normalizeStoredChatExecutionControlState(control));
   }
 
   async #commitAndPublish(
@@ -656,6 +646,28 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     const result = await this.#commitChatExecutionControl(chatId, control);
     this.emit('execution-control-updated', chatId, result);
     return result;
+  }
+
+  async #commitTransition<T>(
+    chatId: string,
+    current: StoredChatExecutionControlState,
+    transition: ControlTransition<T>,
+  ): Promise<{ value: T; control: StoredChatExecutionControlState; changed: boolean }> {
+    if (transition.outcome.status === 'rejected') {
+      throw transitionError(transition.outcome.rejection, current);
+    }
+    if (!transition.changed) {
+      return {
+        value: transition.outcome.value,
+        control: cloneStoredChatExecutionControl(current),
+        changed: false,
+      };
+    }
+    return {
+      value: transition.outcome.value,
+      control: await this.#commitAndPublish(chatId, transition.next),
+      changed: true,
+    };
   }
 
   async readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState> {
@@ -668,40 +680,20 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     chatId: string,
     content: string,
     command?: QueueCommandIdentity,
+    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      if (command) {
-        const applied = appliedQueueCommand(queue, command);
-        if (applied) {
-          const current = queue.entries.find((entry) => entry.id === applied.entryId);
-          return {
-            entry: current ? queueEntry(current) : null,
-            entryId: applied.entryId,
-            control: queue,
-            duplicate: true,
-          };
-        }
+      const current = await this.#loadChatExecutionControl(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        createQueueEntry(current, { content, command }, transitionContext(), receipts),
+      );
+      const result = committed.value;
+      if (!result.duplicate) {
+        this.#logMutation('create', chatId, result.entryId, committed.control, result.entry?.revision);
       }
-      const now = new Date().toISOString();
-      const entry: StoredQueueEntry = {
-        id: command?.entryId ?? crypto.randomUUID(),
-        content,
-        revision: 1,
-        status: 'queued',
-        createdAt: now,
-        updatedAt: now,
-      };
-      queue.entries.push(entry);
-      if (command) recordAppliedQueueCommand(queue, command, 'create');
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      this.#logMutation('create', chatId, entry.id, result, entry.revision);
-      return {
-        entry: queueEntry(entry),
-        entryId: entry.id,
-        control: result,
-        duplicate: false,
-      };
+      return { ...result, control: committed.control };
     });
   }
 
@@ -711,60 +703,32 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     content: string,
     expectedRevision: number,
     command?: QueueCommandIdentity,
+    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      if (command) {
-        const applied = appliedQueueCommand(queue, command);
-        if (applied) {
-          const current = queue.entries.find((candidate) => candidate.id === applied.entryId);
-          return {
-            entry: current ? queueEntry(current) : null,
-            entryId: applied.entryId,
-            control: queue,
-            duplicate: true,
-          };
-        }
-      }
-      const entry = queue.entries.find((candidate) => candidate.id === entryId);
-      if (!entry) {
-        const error = missingQueueEntryError(queue, entryId);
-        this.#logMutation('replace', chatId, entryId, queue, undefined, error.code);
-        throw error;
-      }
-      if (entry.status !== 'queued') {
-        const error = new QueueEntryMutationError(
-          'QUEUE_ENTRY_ALREADY_SENT',
-          'This queued message has already been sent',
-          queue,
-        );
-        this.#logMutation('replace', chatId, entryId, queue, entry.revision, error.code);
-        throw error;
-      }
-      if (entry.revision !== expectedRevision) {
-        const error = new QueueEntryMutationError(
-          'QUEUE_ENTRY_REVISION_CONFLICT',
-          'This queued message changed before it could be saved',
-          queue,
-        );
-        this.#logMutation('replace', chatId, entryId, queue, entry.revision, error.code);
-        throw error;
-      }
-
-      entry.content = content;
-      entry.revision += 1;
-      entry.updatedAt = new Date().toISOString();
-      delete entry.delivery;
-      if (command) recordAppliedQueueCommand(queue, command, 'replace');
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      const updated = result.entries.find((candidate) => candidate.id === entryId)!;
-      this.#logMutation('replace', chatId, entryId, result, updated.revision);
-      return {
-        entry: queueEntry(updated),
+      const current = await this.#loadChatExecutionControl(chatId);
+      const transition = replaceQueueEntry(current, {
         entryId,
-        control: result,
-        duplicate: false,
-      };
+        content,
+        expectedRevision,
+        command,
+      }, transitionContext(), receipts);
+      if (transition.outcome.status === 'rejected') {
+        this.#logMutation(
+          'replace',
+          chatId,
+          entryId,
+          current,
+          current.entries.find((entry) => entry.id === entryId)?.revision,
+          transition.outcome.rejection.code,
+        );
+      }
+      const committed = await this.#commitTransition(chatId, current, transition);
+      const result = committed.value;
+      if (!result.duplicate) {
+        this.#logMutation('replace', chatId, entryId, committed.control, result.entry?.revision);
+      }
+      return { ...result, control: committed.control };
     });
   }
 
@@ -772,40 +736,33 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     chatId: string,
     entryId: string,
     command?: QueueCommandIdentity,
+    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      if (command) {
-        const applied = appliedQueueCommand(queue, command);
-        if (applied) {
-          return { entryId: applied.entryId, control: queue, duplicate: true };
-        }
-      }
-      const index = queue.entries.findIndex((entry) => entry.id === entryId);
-      if (index < 0) {
-        const error = missingQueueEntryError(queue, entryId);
-        this.#logMutation('delete', chatId, entryId, queue, undefined, error.code);
-        throw error;
-      }
-      if (queue.entries[index].status !== 'queued') {
-        const error = new QueueEntryMutationError(
-          'QUEUE_ENTRY_ALREADY_SENT',
-          'This queued message has already been sent',
-          queue,
+      const current = await this.#loadChatExecutionControl(chatId);
+      const transition = deleteQueueEntry(
+        current,
+        { entryId, command },
+        transitionContext(),
+        receipts,
+      );
+      if (transition.outcome.status === 'rejected') {
+        this.#logMutation(
+          'delete',
+          chatId,
+          entryId,
+          current,
+          current.entries.find((entry) => entry.id === entryId)?.revision,
+          transition.outcome.rejection.code,
         );
-        this.#logMutation('delete', chatId, entryId, queue, queue.entries[index].revision, error.code);
-        throw error;
       }
-
-      queue.entries.splice(index, 1);
-      if (!queue.entries.some((entry) => entry.status === 'queued')) {
-        queue.pause = null;
-        delete queue.resumePauses;
-      }
-      if (command) recordAppliedQueueCommand(queue, command, 'delete');
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      this.#logMutation('delete', chatId, entryId, result);
-      return { entryId, control: result, duplicate: false };
+      const committed = await this.#commitTransition(chatId, current, transition);
+      if (!committed.value.duplicate) this.#logMutation('delete', chatId, entryId, committed.control);
+      return {
+        entryId: committed.value.entryId,
+        control: committed.control,
+        duplicate: committed.value.duplicate,
+      };
     });
   }
 
@@ -854,45 +811,43 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
+      const current = await this.#loadChatExecutionControl(chatId);
       this.#removeDrainSuppression(chatId, 'abort');
       this.#pendingDrainRequests.delete(chatId);
-      queue.entries = queue.entries.filter((entry) => entry.status === 'sending');
-      queue.pause = null;
-      delete queue.resumePauses;
-      return this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
+      return (await this.#commitTransition(
+        chatId,
+        current,
+        clearQueue(current, transitionContext()),
+      )).control;
     });
   }
 
   async pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      const hasQueuedEntries = queue.entries.some((entry) => entry.status === 'queued');
-      if (!hasQueuedEntries || queue.pause) return queue;
-      queue.pause = {
-        id: crypto.randomUUID(),
-        kind: 'manual',
-        pausedAt: new Date().toISOString(),
-      };
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      this.#logPauseMutation('pause', chatId, result);
-      return result;
+      const current = await this.#loadChatExecutionControl(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        pauseQueue(current, transitionContext()),
+      );
+      if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control);
+      return committed.control;
     });
   }
 
   async resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      if (!queue.pause) return queue;
-      if (queue.pause.id !== pauseId) throw new QueuePauseChangedError(queue);
-      const [resumePause, ...remainingPauses] = queue.resumePauses ?? [];
-      queue.pause = resumePause ?? null;
-      if (remainingPauses.length > 0) queue.resumePauses = remainingPauses;
-      else delete queue.resumePauses;
-      this.#removeDrainSuppression(chatId, 'abort');
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      this.#logPauseMutation('resume', chatId, result);
-      return result;
+      const current = await this.#loadChatExecutionControl(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        resumeQueue(current, pauseId, transitionContext()),
+      );
+      if (committed.changed) {
+        this.#removeDrainSuppression(chatId, 'abort');
+        this.#logPauseMutation('resume', chatId, committed.control);
+      }
+      return committed.control;
     });
   }
 
@@ -901,20 +856,18 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     continuationId: string,
   ): Promise<StoredChatExecutionControlState> {
     const result = await this.#withLock(`chat:${chatId}`, async () => {
-      const control = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      if (control.recoveredInputContinuation?.id !== continuationId) {
-        this.#logRecoveredInputContinuation('stale-reject', chatId, control);
-        throw new RecoveredInputContinuationChangedError(control);
+      const current = await this.#loadChatExecutionControl(chatId);
+      const transition = continueRecoveredInput(current, continuationId, transitionContext());
+      if (transition.outcome.status === 'rejected') {
+        this.#logRecoveredInputContinuation(
+          transition.outcome.rejection.code === 'RECOVERED_INPUT_CONTINUATION_CHANGED'
+            ? 'stale-reject'
+            : 'empty-queue-reject',
+          chatId,
+          current,
+        );
       }
-      if (!control.entries.some((entry) => entry.status === 'queued')) {
-        this.#logRecoveredInputContinuation('empty-queue-reject', chatId, control);
-        throw new RecoveredInputContinuationRequiresQueueError(control);
-      }
-      control.recoveredInputContinuation = null;
-      const committed = await this.#commitAndPublish(
-        chatId,
-        bumpStoredChatExecutionControl(control),
-      );
+      const committed = (await this.#commitTransition(chatId, current, transition)).control;
       this.#continuedRecoveredInputChats.add(chatId);
       this.#logRecoveredInputContinuation('explicit-continue', chatId, committed);
       return committed;
@@ -940,16 +893,17 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async dropRecoveredInputContinuation(chatId: string): Promise<StoredChatExecutionControlState> {
     const result = await this.#withLock(`chat:${chatId}`, async () => {
-      const control = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
+      const current = await this.#loadChatExecutionControl(chatId);
       this.#continuedRecoveredInputChats.delete(chatId);
-      if (!control.recoveredInputContinuation) return control;
-      control.recoveredInputContinuation = null;
-      const committed = await this.#commitAndPublish(
+      const result = await this.#commitTransition(
         chatId,
-        bumpStoredChatExecutionControl(control),
+        current,
+        dropRecoveredInputContinuation(current, transitionContext()),
       );
-      this.#logRecoveredInputContinuation('native-settlement', chatId, committed);
-      return committed;
+      if (result.changed) {
+        this.#logRecoveredInputContinuation('native-settlement', chatId, result.control);
+      }
+      return result.control;
     });
     this.#requestDrain(chatId, 'recovered-input settlement');
     return result;
@@ -959,35 +913,31 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     chatId: string,
   ): Promise<{ entry: StoredQueueEntry; control: StoredChatExecutionControlState } | null> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      if (queue.pause || queue.recoveredInputContinuation) return null;
-      if (queue.entries.some((entry) => entry.status === 'sending')) return null;
-      const next = queue.entries.find((e) => e.status === 'queued');
-      if (!next) return null;
-      next.status = 'sending';
-      next.delivery ??= {
-        clientRequestId: crypto.randomUUID(),
-        clientMessageId: crypto.randomUUID(),
-        turnId: crypto.randomUUID(),
-      };
-      queue.recentlyDispatched = [
-        ...queue.recentlyDispatched.filter((entry) => entry.entryId !== next.id),
-        { entryId: next.id, dispatchedAt: new Date().toISOString() },
-      ].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      const sentEntry = result.entries.find((entry) => entry.id === next.id)!;
-      this.#logMutation('pop', chatId, sentEntry.id, result, sentEntry.revision);
-      return { entry: sentEntry, control: result };
+      const current = await this.#loadChatExecutionControl(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        popNextQueueEntry(current, transitionContext()),
+      );
+      if (!committed.value) return null;
+      const entry = committed.control.entries.find(
+        (candidate) => candidate.id === committed.value!.entry.id,
+      )!;
+      this.#logMutation('pop', chatId, entry.id, committed.control, entry.revision);
+      return { entry, control: committed.control };
     });
   }
 
   async removeSentChat(chatId: string, entryId: string): Promise<StoredChatExecutionControlState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      queue.entries = queue.entries.filter((e) => e.id !== entryId);
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      this.#logMutation('sent', chatId, entryId, result);
-      return result;
+      const current = await this.#loadChatExecutionControl(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        removeSentQueueEntry(current, entryId, transitionContext()),
+      );
+      this.#logMutation('sent', chatId, entryId, committed.control);
+      return committed.control;
     });
   }
 
@@ -997,26 +947,18 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     kind: AutomaticQueuePauseKind,
   ): Promise<StoredChatExecutionControlState> {
     return this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      const entry = queue.entries.find((e) => e.id === entryId);
-      if (entry) {
-        entry.status = 'queued';
-        queue.recentlyDispatched = queue.recentlyDispatched.filter(
-          (dispatched) => dispatched.entryId !== entryId,
-        );
+      const current = await this.#loadChatExecutionControl(chatId);
+      const priorEntry = current.entries.find((entry) => entry.id === entryId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        requeueAndPause(current, { entryId, kind }, transitionContext()),
+      );
+      if (priorEntry) {
+        this.#logMutation('requeue', chatId, entryId, committed.control, priorEntry.revision);
       }
-      queue.pause = queue.entries.some((candidate) => candidate.status === 'queued')
-        ? {
-            id: crypto.randomUUID(),
-            kind,
-            entryId,
-            pausedAt: new Date().toISOString(),
-          }
-        : null;
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      if (entry) this.#logMutation('requeue', chatId, entryId, result, entry.revision);
-      this.#logPauseMutation('pause', chatId, result, entryId);
-      return result;
+      this.#logPauseMutation('pause', chatId, committed.control, entryId);
+      return committed.control;
     });
   }
 
@@ -1135,24 +1077,25 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     return this.#withLock(`chat:${reservation.chatId}`, async () => {
       this.assertDirectTurnReservationActive(reservation);
       reservation.executionAdmission.signal.throwIfAborted();
-      const control = cloneStoredChatExecutionControl(
-        await this.#loadChatExecutionControl(reservation.chatId),
-      );
+      const control = await this.#loadChatExecutionControl(reservation.chatId);
       this.assertDirectTurnReservationActive(reservation);
       reservation.executionAdmission.signal.throwIfAborted();
-      if (!control.recoveredInputContinuation) return control;
-      if (control.entries.length > 0 || control.pause) return control;
-
-      control.recoveredInputContinuation = null;
-      const result = await this.#commitAndPublish(
+      const committed = await this.#commitTransition(
         reservation.chatId,
-        bumpStoredChatExecutionControl(control),
+        control,
+        consumeEmptyRecoveredInputContinuation(control, transitionContext()),
       );
-      this.#continuedRecoveredInputChats.add(reservation.chatId);
-      this.#logRecoveredInputContinuation('interactive-continue', reservation.chatId, result);
+      if (committed.changed) {
+        this.#continuedRecoveredInputChats.add(reservation.chatId);
+        this.#logRecoveredInputContinuation(
+          'interactive-continue',
+          reservation.chatId,
+          committed.control,
+        );
+      }
       this.assertDirectTurnReservationActive(reservation);
       reservation.executionAdmission.signal.throwIfAborted();
-      return result;
+      return committed.control;
     });
   }
 
@@ -1270,9 +1213,20 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   async #abortSession(chatId: string, intent: ChatStopIntent): Promise<boolean> {
-    const inFlight = this.#sessionStopByChatId.get(chatId);
-    if (inFlight) return inFlight.promise;
+    const operation = this.#reserveSessionStop(chatId, intent);
+    this.#startSessionStop(chatId, operation);
+    try {
+      return await operation.promise;
+    } finally {
+      if (this.#sessionStopByChatId.get(chatId) === operation) {
+        this.#sessionStopByChatId.delete(chatId);
+      }
+    }
+  }
 
+  #reserveSessionStop(chatId: string, intent: ChatStopIntent): SessionStopInFlight {
+    const inFlight = this.#sessionStopByChatId.get(chatId);
+    if (inFlight) return inFlight;
     const stopId = crypto.randomUUID();
     let resolveStop!: (success: boolean) => void;
     let rejectStop!: (error: unknown) => void;
@@ -1280,16 +1234,25 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       resolveStop = resolve;
       rejectStop = reject;
     });
-    const operation = { intent, stopId, promise: stop };
+    const operation: SessionStopInFlight = {
+      intent,
+      stopId,
+      promise: stop,
+      resolve: resolveStop,
+      reject: rejectStop,
+      started: false,
+    };
     this.#sessionStopByChatId.set(chatId, operation);
-    this.#performAbortSession(chatId, intent, stopId).then(resolveStop, rejectStop);
-    try {
-      return await stop;
-    } finally {
-      if (this.#sessionStopByChatId.get(chatId) === operation) {
-        this.#sessionStopByChatId.delete(chatId);
-      }
-    }
+    return operation;
+  }
+
+  #startSessionStop(chatId: string, operation: SessionStopInFlight): void {
+    if (operation.started) return;
+    operation.started = true;
+    this.#performAbortSession(chatId, operation.intent, operation.stopId).then(
+      operation.resolve,
+      operation.reject,
+    );
   }
 
   async #waitForSessionStop(chatId: string): Promise<void> {
@@ -1341,9 +1304,16 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     const drainWasActive = this.#draining.has(chatId);
     this.#addDrainSuppression(chatId, 'abort');
     this.#addDrainSuppression(chatId, 'manual-stop');
+    const existingStop = this.#sessionStopByChatId.get(chatId);
+    const stop = this.#reserveSessionStop(chatId, 'stop');
+    const ownsStop = existingStop === undefined;
     try {
       await this.pauseChatQueue(chatId);
     } catch (error) {
+      if (ownsStop && !stop.started) stop.resolve(false);
+      if (ownsStop && this.#sessionStopByChatId.get(chatId) === stop) {
+        this.#sessionStopByChatId.delete(chatId);
+      }
       this.#removeDrainSuppression(chatId, 'abort');
       this.#removeDrainSuppression(chatId, 'manual-stop');
       throw error;
@@ -1351,8 +1321,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
     let stopped: boolean;
     try {
-      stopped = await this.#abortSession(chatId, 'stop');
+      this.#startSessionStop(chatId, stop);
+      stopped = await stop.promise;
     } finally {
+      if (this.#sessionStopByChatId.get(chatId) === stop) {
+        this.#sessionStopByChatId.delete(chatId);
+      }
       // A durable pause now owns queued-work blocking. Clearing this temporary
       // gate also lets a later fresh queue entry run when Stop found no queue.
       this.#removeDrainSuppression(chatId, 'abort');
@@ -1677,38 +1651,32 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async #returnUnsentEntry(chatId: string, entryId: string): Promise<void> {
     await this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      const entry = queue.entries.find((candidate) => candidate.id === entryId);
-      if (!entry || entry.status !== 'sending') return;
-      entry.status = 'queued';
-      queue.recentlyDispatched = queue.recentlyDispatched.filter(
-        (candidate) => candidate.entryId !== entryId,
+      const current = await this.#loadChatExecutionControl(chatId);
+      const entry = current.entries.find((candidate) => candidate.id === entryId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        returnUnsentQueueEntry(current, entryId, transitionContext()),
       );
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      this.#logMutation('requeue', chatId, entryId, result, entry.revision);
+      if (committed.changed) {
+        this.#logMutation('requeue', chatId, entryId, committed.control, entry?.revision);
+      }
     });
   }
 
   async #restorePoppedEntryAfterStop(chatId: string, entryId: string): Promise<void> {
     await this.#withLock(`chat:${chatId}`, async () => {
-      const queue = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
-      const entry = queue.entries.find((candidate) => candidate.id === entryId);
-      if (!entry || entry.status !== 'sending') return;
-
-      entry.status = 'queued';
-      queue.recentlyDispatched = queue.recentlyDispatched.filter(
-        (dispatched) => dispatched.entryId !== entryId,
+      const current = await this.#loadChatExecutionControl(chatId);
+      const entry = current.entries.find((candidate) => candidate.id === entryId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        restoreStoppedQueueEntry(current, entryId, transitionContext()),
       );
-      if (!queue.pause) {
-        queue.pause = {
-          id: crypto.randomUUID(),
-          kind: 'manual',
-          pausedAt: new Date().toISOString(),
-        };
+      if (committed.changed) {
+        this.#logMutation('requeue', chatId, entryId, committed.control, entry?.revision);
+        this.#logPauseMutation('pause', chatId, committed.control, entryId);
       }
-      const result = await this.#commitAndPublish(chatId, bumpStoredChatExecutionControl(queue));
-      this.#logMutation('requeue', chatId, entryId, result, entry.revision);
-      this.#logPauseMutation('pause', chatId, result, entryId);
     });
   }
 
@@ -1731,13 +1699,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.#executionAttempts.get(chatId)?.markSettled();
       this.#executionAttempts.delete(chatId);
       this.#notifyExecutionOwnersChanged();
-      this.#controlsByChatId.delete(chatId);
       this.#continuedRecoveredInputChats.delete(chatId);
-      try {
-        await fs.unlink(this.#chatQueueFilePath(chatId));
-      } catch (error: unknown) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+      await this.#controls.delete(chatId);
     });
   }
 
@@ -1745,35 +1708,26 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     chatsWithRecoveredInput: ReadonlySet<string> = new Set(),
   ): Promise<void> {
     this.#recoveryFailure = undefined;
-    const queuesDir = path.join(this.#workspaceDir, 'queues');
-    let files: string[];
+    let storedChatIds: readonly string[];
     try {
-      files = await fs.readdir(queuesDir);
+      storedChatIds = await this.#controls.listStoredChatIds();
     } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') files = [];
-      else {
-        this.#recoveryFailure = error;
-        throw error;
-      }
+      this.#recoveryFailure = error;
+      throw error;
     }
 
-    const queueFiles = files.filter((f) => f.endsWith('.queue.json'));
     const queuesToDrain = new Set<string>();
-    const queueFileChatIds = new Set<string>();
-    for (const qf of queueFiles) {
-      const filePath = path.join(queuesDir, qf);
-      const chatId = qf.slice(0, -'.queue.json'.length);
-      queueFileChatIds.add(chatId);
+    const queueFileChatIds = new Set(storedChatIds);
+    for (const chatId of storedChatIds) {
       try {
         if (!this.#chatExists(chatId)) {
-          await fs.unlink(filePath);
-          this.#controlsByChatId.delete(chatId);
+          await this.#controls.delete(chatId);
           logger.warn('queue: removed state for a deleted chat', { chatId });
           continue;
         }
-        const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
-        const data = parseStoredChatExecutionControlState(raw);
-        let modified = storedChatExecutionControlNeedsCanonicalization(raw, data);
+        const snapshot = await this.#controls.loadFresh(chatId);
+        const data = snapshot.control;
+        let modified = snapshot.needsCanonicalization;
         const recoveredIds = new Set<string>();
         for (const entry of data.entries) {
           if (entry.status === 'sending') {
@@ -1806,9 +1760,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           const normalized = normalizeStoredChatExecutionControlState(
             bumpStoredChatExecutionControl(data),
           );
-          // The in-memory projection remains fail-closed if persistence fails.
-          this.#controlsByChatId.set(chatId, normalized);
-          await writeJsonFileAtomic(filePath, normalized);
+          await this.#controls.save(chatId, normalized);
           if (shouldInstallContinuation) {
             this.#logRecoveredInputContinuation('startup-install', chatId, normalized);
           }
@@ -1829,7 +1781,6 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
             queuesToDrain.add(chatId);
           }
         } else {
-          this.#controlsByChatId.set(chatId, data);
           if (
             !data.pause
             && !data.recoveredInputContinuation
@@ -1839,7 +1790,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           }
         }
       } catch (error: unknown) {
-        logger.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
+        logger.warn(`queue: could not recover chat queue ${chatId}.queue.json:`, (error as Error).message);
         const recoveryError = new Error(
           `Could not recover chat queue ${chatId}: ${error instanceof Error ? error.message : String(error)}`,
           { cause: error },
@@ -1858,9 +1809,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           installedAt: new Date().toISOString(),
         };
         const normalized = normalizeStoredChatExecutionControlState(control);
-        this.#controlsByChatId.set(chatId, normalized);
-        await writeJsonFileAtomic(this.#chatQueueFilePath(chatId), normalized);
-        this.#logRecoveredInputContinuation('startup-install', chatId, normalized);
+        const committed = await this.#controls.save(chatId, normalized);
+        this.#logRecoveredInputContinuation('startup-install', chatId, committed);
       } catch (error: unknown) {
         const recoveryError = new Error(
           `Could not persist recovered-input continuation for ${chatId}: ${

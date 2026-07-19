@@ -816,10 +816,13 @@ export class ChatCommandService {
 
     let result: Awaited<ReturnType<QueueDep['createChatQueueEntry']>>;
     try {
+      const receipts = {
+        protectedKeys: await this.deps.ledger.listRetainedQueueReceiptKeys(input.chatId),
+      };
       result = await this.deps.queue.createChatQueueEntry(input.chatId, content, {
         key: ledger.record.key,
         entryId: ledger.record.entryId ?? preparedEntryId,
-      });
+      }, receipts);
     } catch (error) {
       await this.deps.ledger.update(ledger.record.key, {
         status: 'failed',
@@ -883,12 +886,16 @@ export class ChatCommandService {
       }
 
       try {
+        const receipts = {
+          protectedKeys: await this.deps.ledger.listRetainedQueueReceiptKeys(input.chatId),
+        };
         const result = await this.deps.queue.replaceChatQueueEntry(
           input.chatId,
           entryId,
           content,
           input.expectedRevision,
           { key: ledger.record.key, entryId },
+          receipts,
         );
         const updated = await this.deps.ledger.update(ledger.record.key, {
           status: 'finished',
@@ -942,10 +949,13 @@ export class ChatCommandService {
       }
 
       try {
+        const receipts = {
+          protectedKeys: await this.deps.ledger.listRetainedQueueReceiptKeys(input.chatId),
+        };
         const result = await this.deps.queue.deleteChatQueueEntry(input.chatId, entryId, {
           key: ledger.record.key,
           entryId,
-        });
+        }, receipts);
         const updated = await this.deps.ledger.update(ledger.record.key, {
           status: 'finished',
           entryId,
@@ -1063,10 +1073,15 @@ export class ChatCommandService {
           };
         }
 
-        const result = await this.deps.queue.createChatQueueEntry(input.chatId, content, {
-          key: ledger.record.key,
-          entryId: ledger.record.entryId ?? preparedEntryId,
-        });
+        const result = await this.deps.queue.createChatQueueEntry(
+          input.chatId,
+          content,
+          {
+            key: ledger.record.key,
+            entryId: ledger.record.entryId ?? preparedEntryId,
+          },
+          { protectedKeys: await this.deps.ledger.listRetainedQueueReceiptKeys(input.chatId) },
+        );
         const updated = await this.deps.ledger.update(ledger.record.key, {
           status: 'finished',
           entryId: result.entryId,

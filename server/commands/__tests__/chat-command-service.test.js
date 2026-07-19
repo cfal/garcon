@@ -1565,6 +1565,8 @@ describe('ChatCommandService', () => {
     expect(queue.createChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'survives restart', {
       key: `queue-entry-create:${SOURCE_CHAT_ID}:${clientRequestId}`,
       entryId,
+    }, {
+      protectedKeys: new Set([`queue-entry-create:${SOURCE_CHAT_ID}:${clientRequestId}`]),
     });
     expect((await readLedgerRecords()).at(-1)).toMatchObject({
       status: 'finished',
@@ -1592,12 +1594,12 @@ describe('ChatCommandService', () => {
     expect(queue.replaceChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'entry-1', 'replacement', 2, {
       key: `queue-entry-replace:${SOURCE_CHAT_ID}:request-replace`,
       entryId: 'entry-1',
-    });
+    }, expect.objectContaining({ protectedKeys: expect.any(Set) }));
     expect(deleted.entryId).toBe('entry-1');
     expect(queue.deleteChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'entry-1', {
       key: `queue-entry-delete:${SOURCE_CHAT_ID}:request-delete`,
       entryId: 'entry-1',
-    });
+    }, expect.objectContaining({ protectedKeys: expect.any(Set) }));
   });
 
   it('replays semantic queue mutation failures without applying them after state changes', async () => {
@@ -1828,6 +1830,7 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         key: `queue-entry-create:${SOURCE_CHAT_ID}:scheduled-prompt-2`,
       }),
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
@@ -1872,6 +1875,7 @@ describe('ChatCommandService', () => {
       SOURCE_CHAT_ID,
       'scheduled second',
       expect.any(Object),
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
@@ -1898,6 +1902,7 @@ describe('ChatCommandService', () => {
       SOURCE_CHAT_ID,
       'scheduled after uncertain input',
       expect.any(Object),
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
     expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
   });

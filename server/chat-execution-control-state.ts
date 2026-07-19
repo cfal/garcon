@@ -268,7 +268,6 @@ export function normalizeStoredChatExecutionControlState(
     ? raw.appliedCommands
         .map(normalizeAppliedCommand)
         .filter((command): command is StoredAppliedQueueCommand => Boolean(command))
-        .slice(-MAX_STORED_APPLIED_QUEUE_COMMANDS)
     : [];
   const version = typeof raw.version === 'number' && Number.isSafeInteger(raw.version) && raw.version >= 0
     ? raw.version

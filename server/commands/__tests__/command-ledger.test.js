@@ -62,6 +62,41 @@ describe('CommandLedger', () => {
     });
   });
 
+  it('lists only retained queue receipt identities for one chat', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const create = await ledger.accept({
+      commandType: 'queue-entry-create',
+      chatId: 'chat-1',
+      clientRequestId: 'queue-create',
+      entryId: 'entry-1',
+      payload: { content: 'queued' },
+    });
+    const active = await ledger.accept({
+      commandType: 'active-input',
+      chatId: 'chat-1',
+      clientRequestId: 'active-input',
+      entryId: 'entry-2',
+      payload: { content: 'active' },
+    });
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'direct',
+      payload: { command: 'direct' },
+    });
+    await ledger.accept({
+      commandType: 'queue-entry-delete',
+      chatId: 'chat-2',
+      clientRequestId: 'other-chat',
+      entryId: 'entry-3',
+      payload: { entryId: 'entry-3' },
+    });
+
+    expect(await ledger.listRetainedQueueReceiptKeys('chat-1')).toEqual(
+      new Set([create.record.key, active.record.key]),
+    );
+  });
+
   it('treats reordered equivalent payloads as duplicates', async () => {
     const ledger = new CommandLedger(workspaceDir);
     await ledger.accept({
