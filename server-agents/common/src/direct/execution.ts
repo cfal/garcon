@@ -93,6 +93,7 @@ implements AgentExecution {
         images: request.attachments,
         nativePath: this.nativeSessions.decode(request.nativeSession).path,
         endpoint,
+        directHistoryRecovery: request.directHistoryRecovery,
       });
     } catch (error) {
       this.#operations.finish(request.chatId, request.operation);

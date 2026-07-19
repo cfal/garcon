@@ -37,6 +37,7 @@ export type DirectStartRequest = DirectExecutionRequest;
 export interface DirectResumeRequest extends DirectExecutionRequest {
   readonly agentSessionId: string;
   readonly nativePath?: string | null;
+  readonly directHistoryRecovery?: 'allow-empty';
 }
 
 export interface DirectStartedSession {
