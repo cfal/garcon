@@ -243,6 +243,8 @@ function makeService(overrides = {}) {
     agentId: 'claude',
     agentSessionId: 'agent-2',
     nativePath: '/tmp/agent-2.jsonl',
+    sourceNextForkOrdinal: 1,
+    rollback: mock(() => Promise.resolve(undefined)),
   }));
   const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
   const chatListProjector = {
@@ -997,6 +999,83 @@ describe('ChatCommandService', () => {
     expect(retry.status).toBe('accepted');
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back a fork target before admitting a pre-schedule retry', async () => {
+    const rollbacks = [];
+    const forkChatFileCopy = mock(async () => {
+      const rollback = mock(async () => undefined);
+      rollbacks.push(rollback);
+      return {
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        agentSessionId: 'agent-2',
+        nativePath: '/tmp/agent-2.jsonl',
+        sourceNextForkOrdinal: 1,
+        rollback,
+      };
+    });
+    const { service, queue } = makeService({ forkChatFileCopy });
+    const input = {
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-fork-retry',
+      clientMessageId: 'msg-fork-retry',
+    };
+    queue.registerPendingUserInput
+      .mockRejectedValueOnce(new Error('fork append failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(service.submitForkRun(input)).rejects.toThrow('fork append failed');
+    const retry = await service.submitForkRun(input);
+
+    expect(retry.status).toBe('accepted');
+    expect(forkChatFileCopy).toHaveBeenCalledTimes(2);
+    expect(rollbacks[0]).toHaveBeenCalledOnce();
+    expect(rollbacks[1]).not.toHaveBeenCalled();
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains durable fork recovery when immediate compensation fails', async () => {
+    const rollback = mock(async () => {
+      throw new Error('rollback failed');
+    });
+    const forkChatFileCopy = mock(async () => ({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      agentSessionId: 'agent-2',
+      nativePath: '/tmp/agent-2.jsonl',
+      sourceNextForkOrdinal: 1,
+      rollback,
+    }));
+    const { service, queue, ledger } = makeService({ forkChatFileCopy });
+    queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+
+    await expect(service.submitForkRun({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-fork-recovery',
+      clientMessageId: 'msg-fork-recovery',
+    })).rejects.toThrow('Failed to prepare and roll back fork-run');
+
+    expect(rollback).toHaveBeenCalledOnce();
+    await expect(ledger.listForkPreparationsPendingRecovery()).resolves.toEqual([
+      expect.objectContaining({
+        chatId: TARGET_CHAT_ID,
+        status: 'failed',
+        forkPreparation: {
+          phase: 'created',
+          sourceChatId: SOURCE_CHAT_ID,
+          nativePath: '/tmp/agent-2.jsonl',
+          sourceNextForkOrdinal: 1,
+        },
+      }),
+    ]);
   });
 
   it('applies shared fork validation before copying', async () => {

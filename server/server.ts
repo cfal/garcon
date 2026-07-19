@@ -14,7 +14,7 @@ import {
   webSocketUpgradeHeaders,
 } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
-import { forkChatFileCopy } from './chats/fork-chat.js';
+import { forkChatFileCopy, rollbackForkTarget } from './chats/fork-chat.js';
 import { wireServerEvents } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
@@ -328,6 +328,35 @@ export async function startServer(): Promise<void> {
     );
     chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
+    const forkPreparations = await commandLedger.listForkPreparationsPendingRecovery();
+    for (const record of forkPreparations) {
+      const preparation = record.forkPreparation!;
+      const sourceChatId = preparation.sourceChatId;
+      pendingInputs.clearChat(record.chatId, 'chat-removed');
+      await queue.deleteChatQueueFile(record.chatId).catch(() => undefined);
+      const target = chatRegistry.getChat(record.chatId);
+      if (target && preparation.phase === 'creating') {
+        const recoveredPreparation = {
+          phase: 'created' as const,
+          sourceChatId,
+          ...(target.nativePath ? { nativePath: target.nativePath } : {}),
+        };
+        await commandLedger.update(record.key, { forkPreparation: recoveredPreparation });
+        record.forkPreparation = recoveredPreparation;
+      }
+      if (target || record.forkPreparation?.phase === 'created') {
+        await rollbackForkTarget({
+          sourceChatId,
+          targetChatId: record.chatId,
+          registry: chatRegistry,
+          settings,
+          nativePath: record.forkPreparation?.nativePath,
+          sourceNextForkOrdinal: record.forkPreparation?.sourceNextForkOrdinal,
+        });
+      }
+      await commandLedger.settleForkPreparationRecovery(record.key);
+      logger.warn(`fork-run: removed interrupted pre-schedule target ${record.chatId}`);
+    }
     const pendingRecovery = new PendingUserInputRecoveryCoordinator(
       {
         ledger: commandLedger,

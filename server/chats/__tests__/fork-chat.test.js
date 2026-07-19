@@ -42,6 +42,11 @@ function createRegistry(sessions) {
       store[chatId] = { ...store[chatId], ...patch };
       return { id: chatId, ...store[chatId] };
     },
+    removeChat(chatId) {
+      if (!store[chatId]) return false;
+      delete store[chatId];
+      return true;
+    },
   };
 }
 
@@ -55,6 +60,11 @@ function createSettings(initialTitles = {}) {
     async setSessionName(chatId, title) {
       titles.set(chatId, title);
     },
+    removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
+    removeSessionName: mock((chatId) => {
+      titles.delete(chatId);
+      return Promise.resolve(undefined);
+    }),
   };
 }
 
@@ -728,5 +738,42 @@ describe('forkChatFileCopy', () => {
     })).rejects.toThrow(/missing source entry missing-entry/);
 
     expect(registry.getChat('601')).toBeNull();
+  });
+
+  it('rolls back every durable target side effect idempotently', async () => {
+    const agentSessionId = '77777777-7777-7777-7777-777777777777';
+    const nativePath = await createSourceNativeFile(agentSessionId);
+    const registry = createRegistry({
+      '950': {
+        agentId: 'claude',
+        model: 'sonnet',
+        projectPath: '/proj',
+        nativePath,
+        tags: [],
+        agentSessionId,
+        nextForkOrdinal: 3,
+      },
+    });
+    const settings = createSettings({ '950': 'Rollback source' });
+    const metadata = createMetadata({ '950': { firstMessage: 'Rollback prompt' } });
+    const result = await forkChatFileCopy({
+      sourceSession: registry.getChat('950'),
+      sourceChatId: '950',
+      targetChatId: '951',
+      registry,
+      settings,
+      metadata,
+    });
+
+    expect(registry.getChat('951')).not.toBeNull();
+    expect(registry.getChat('950')?.nextForkOrdinal).toBe(4);
+    await result.rollback();
+    await result.rollback();
+
+    expect(registry.getChat('951')).toBeNull();
+    expect(registry.getChat('950')?.nextForkOrdinal).toBe(3);
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
+    expect(settings.removeSessionName).toHaveBeenCalledOnce();
+    await expect(fs.stat(result.nativePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
