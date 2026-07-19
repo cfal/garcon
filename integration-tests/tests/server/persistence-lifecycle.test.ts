@@ -3,6 +3,7 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '../../../common/agents.js';
 import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
+import type { CommandLedgerRecord } from '../../../server/commands/command-ledger.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -302,6 +303,16 @@ describe('persistence lifecycle', () => {
       const cleared = await fixture.client.clearQueue(chatId);
       expect(cleared.control.queue.entries).toEqual([]);
       expect(cleared.control.recoveredInputContinuation?.id).toBe(continuationId);
+      await expect(fixture.client.continueRecoveredInput({ chatId, continuationId })).rejects.toMatchObject({
+        status: 409,
+        body: {
+          errorCode: 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE',
+          control: {
+            queue: { entries: [] },
+            recoveredInputContinuation: { id: continuationId },
+          },
+        },
+      });
       const replacement = await fixture.client.enqueueNew(chatId, 'blocked-successor');
       expect(replacement.control.recoveredInputContinuation?.id).toBe(continuationId);
       const repaused = await fixture.client.pauseQueue(chatId);
@@ -413,6 +424,98 @@ describe('persistence lifecycle', () => {
       expect(nativeRows.filter((row) => (
         row.role === 'user' && row.content === 'crash-proof-b'
       ))).toEqual([expect.objectContaining(originalDelivery!)]);
+    });
+  });
+
+  test('does not restore an active-input fallback as its own unconfirmed predecessor', async () => {
+    await withIntegrationFixture('active-input-queue-handoff-recovery', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const seed = await fixture.client.startDirectChat({
+        chatId,
+        content: 'active-handoff-seed',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
+
+      const heldCurrent = fixture.fakeOpenAi.holdNext({ lastUserText: 'active-handoff-current' });
+      const current = await fixture.client.runDirectChat({
+        chatId,
+        content: 'active-handoff-current',
+        provider: fixture.provider,
+      });
+      await heldCurrent.received;
+      const fallbackRequestId = crypto.randomUUID();
+      const fallback = await fixture.client.sendActiveInput({
+        chatId,
+        content: 'active-handoff-fallback',
+        clientRequestId: fallbackRequestId,
+      });
+      const fallbackEntryId = fallback.entryId;
+      if (typeof fallbackEntryId !== 'string') {
+        throw new Error('Active-input fallback did not return a queue entry ID.');
+      }
+      expect(fallback).toMatchObject({ delivery: 'queued', entryId: fallbackEntryId });
+
+      const currentAborted = heldCurrent.expectAbort();
+      await fixture.crashAndRestartBeforeNativeUserPersistence({
+        chatId,
+        clientRequestId: current.clientRequestId,
+        afterCrash: async () => {
+          const ledgerPath = join(fixture.dirs.workspace, 'command-ledger.json');
+          const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as {
+            version: 1;
+            records: CommandLedgerRecord[];
+          };
+          const record = ledger.records.find((candidate) => (
+            candidate.commandType === 'active-input'
+            && candidate.chatId === chatId
+            && candidate.clientRequestId === fallbackRequestId
+          ));
+          if (!record || record.entryId !== fallbackEntryId) {
+            const activeRecords = ledger.records.filter((candidate) => (
+              candidate.commandType === 'active-input' && candidate.chatId === chatId
+            ));
+            throw new Error(
+              'Active-input queue handoff ledger record was not persisted: '
+              + `expected=${fallbackEntryId} records=${JSON.stringify(activeRecords)}`,
+            );
+          }
+          record.status = 'accepted';
+          record.updatedAt = new Date().toISOString();
+          delete record.error;
+          delete record.errorCode;
+          delete record.pendingInputRecovery;
+          await writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8');
+        },
+      });
+      await currentAborted;
+      heldCurrent.releaseTruncatedStream();
+
+      const control = await fixture.client.getExecutionControl(chatId);
+      expect(control.queue.entries).toEqual([
+        expect.objectContaining({ id: fallbackEntryId, content: 'active-handoff-fallback' }),
+      ]);
+      const continuationId = control.recoveredInputContinuation?.id;
+      if (!continuationId) throw new Error('Current direct input did not install continuation.');
+      const page = await fixture.client.getMessages(chatId);
+      expect(page.pendingUserInputs.map((input) => ({
+        clientRequestId: input.clientRequestId,
+        content: input.content,
+      }))).toEqual([
+        { clientRequestId: current.clientRequestId, content: 'active-handoff-current' },
+      ]);
+      expect(page.pendingUserInputs.some((input) => input.clientRequestId === fallbackRequestId)).toBe(false);
+
+      const heldFallback = fixture.fakeOpenAi.holdNext({ lastUserText: 'active-handoff-fallback' });
+      await fixture.client.continueRecoveredInput({ chatId, continuationId });
+      await heldFallback.received;
+      const cursor = fixture.client.markEvents();
+      heldFallback.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
+      expect(fixture.fakeOpenAi.requests().filter((request) => (
+        request.lastUserText === 'active-handoff-fallback'
+      ))).toHaveLength(1);
     });
   });
 

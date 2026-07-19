@@ -27,6 +27,10 @@ import {
 	type ChatExecutionControlState,
 } from '$shared/chat-execution-control';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
+import {
+	CommandOutcomeUnknownError,
+	submitIdempotentCommand,
+} from '$lib/chat/conversation/idempotent-command.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import {
 	parseCompactCommand,
@@ -151,6 +155,7 @@ export interface SessionControllerDeps {
 		patchChat: (chatId: string, patch: Partial<ChatSessionRecord>) => void;
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 		applyStartEntry: (entry: ChatListEntry) => void;
+		applyProcessingEvent: (chatId: string, isProcessing: boolean) => void;
 		upsertServerChat: (entry: ChatListEntry) => void;
 	setSelectedChatId: (id: string | null) => void;
 		renameChat: (chatId: string, newTitle: string) => Promise<boolean>;
@@ -289,7 +294,7 @@ export class ConversationSessionController {
 
 	#markPendingUserInputDelivery(
 		clientRequestId: string,
-		deliveryStatus: 'accepted' | 'failed',
+		deliveryStatus: 'accepted' | 'unconfirmed' | 'failed',
 	): void {
 		this.deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
 	}
@@ -676,15 +681,19 @@ export class ConversationSessionController {
 			if (restoreComposerOnFailure) {
 				deps.composerState.clearAfterSubmit(chatId);
 			}
+			const request = {
+				clientRequestId: createClientCommandId(),
+				chatId,
+				content,
+			};
 			try {
-				const result = await (activeDelivery ? sendActiveInput : createQueuedInput)({
-					clientRequestId: createClientCommandId(),
-					chatId,
-					content,
-				});
+				const result = activeDelivery
+					? await submitIdempotentCommand(() => sendActiveInput(request))
+					: await submitIdempotentCommand(() => createQueuedInput(request));
 				deps.conversationUi.setExecutionControl(chatId, result.control);
 			} catch (err) {
-				if (restoreComposerOnFailure) {
+				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
+				if (restoreComposerOnFailure && !outcomeUnknown) {
 					this.#recordQueueSubmissionFailure(chatId, {
 						sequence: submissionSequence,
 						text: previousText,
@@ -693,11 +702,14 @@ export class ConversationSessionController {
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					m.chat_notice_failed_queue_message({
-						detail: errorDetail(err),
-						content: restoreComposerOnFailure ? previousText : text,
-					}),
+					outcomeUnknown
+						? m.chat_notice_queue_outcome_unconfirmed()
+						: m.chat_notice_failed_queue_message({
+								detail: errorDetail(err),
+								content: restoreComposerOnFailure ? previousText : text,
+							}),
 				);
+				if (outcomeUnknown) void this.#startControlRefresh(chatId);
 			} finally {
 				this.#finishQueueSubmission(chatId);
 			}
@@ -731,24 +743,25 @@ export class ConversationSessionController {
 			const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
 			const agentSettings = startup?.agentSettings ?? deps.agentState.agentSettings;
 
+			const request = {
+				clientRequestId,
+				clientMessageId,
+				chatId,
+				agentId: agentId as typeof deps.agentState.agentId,
+				projectPath: selected.projectPath,
+				model,
+				apiProviderId,
+				modelEndpointId,
+				modelProtocol,
+				permissionMode,
+				thinkingMode,
+				agentSettings,
+				command: text,
+				images: imagePayload.length > 0 ? imagePayload : undefined,
+				tags: startup?.tags,
+			};
 			try {
-				const response = await startChat({
-					clientRequestId,
-					clientMessageId,
-					chatId,
-					agentId: agentId as typeof deps.agentState.agentId,
-					projectPath: selected.projectPath,
-					model,
-					apiProviderId,
-					modelEndpointId,
-					modelProtocol,
-					permissionMode,
-					thinkingMode,
-					agentSettings,
-					command: text,
-					images: imagePayload.length > 0 ? imagePayload : undefined,
-					tags: startup?.tags,
-				});
+				const response = await submitIdempotentCommand(() => startChat(request));
 				deps.sessions.applyStartEntry(response.chat);
 				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
 				if (response.status === 'accepted') {
@@ -758,56 +771,75 @@ export class ConversationSessionController {
 				}
 			} catch (err) {
 				console.error('[SessionController] Failed to start chat:', err);
-				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
+				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
+				this.#markPendingUserInputDelivery(
+					clientRequestId,
+					outcomeUnknown ? 'unconfirmed' : 'failed',
+				);
 				deps.startupCoordinator.completeStartup(chatId);
-				deps.lifecycle.clearTurnStatus();
-				if (restoreComposerOnFailure) {
+				if (!outcomeUnknown) {
+					deps.lifecycle.clearTurnStatus();
+					deps.sessions.applyProcessingEvent(chatId, false);
+				}
+				if (restoreComposerOnFailure && !outcomeUnknown) {
 					deps.composerState.inputText = previousText;
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(chatId);
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					m.chat_notice_failed_start_chat({ detail: errorDetail(err) }),
+					outcomeUnknown
+						? m.chat_notice_delivery_outcome_unconfirmed()
+						: m.chat_notice_failed_start_chat({ detail: errorDetail(err) }),
 				);
 			} finally {
 				deps.composerState.isSubmitting = false;
 			}
 		} else {
 			const selection = this.#executionModelSelection();
+			const request = {
+				clientRequestId,
+				clientMessageId,
+				chatId,
+				command: text,
+				images: imagePayload.length > 0 ? imagePayload : undefined,
+				permissionMode: deps.agentState.permissionMode,
+				thinkingMode: deps.agentState.thinkingMode,
+				agentSettings: deps.agentState.agentSettings,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			};
 			try {
-				await runChat({
-					clientRequestId,
-					clientMessageId,
-					chatId,
-					command: text,
-					images: imagePayload.length > 0 ? imagePayload : undefined,
-					permissionMode: deps.agentState.permissionMode,
-					thinkingMode: deps.agentState.thinkingMode,
-					agentSettings: deps.agentState.agentSettings,
-					model: selection.model,
-					apiProviderId: selection.apiProviderId,
-					modelEndpointId: selection.modelEndpointId,
-					modelProtocol: selection.modelProtocol,
-				});
+				await submitIdempotentCommand(() => runChat(request));
 				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
 				deps.lifecycle.beginTurn(chatId);
 			} catch (err) {
+				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
 				if (isExecutionControlAdmissionConflict(err)) {
 					deps.chatState.clearPendingUserInput(clientRequestId);
 					await this.#settleControlRefresh(this.#startControlRefresh(chatId));
+				} else if (outcomeUnknown) {
+					this.#markPendingUserInputDelivery(clientRequestId, 'unconfirmed');
+					void this.#startControlRefresh(chatId);
 				} else {
 					this.#markPendingUserInputDelivery(clientRequestId, 'failed');
 				}
-				deps.lifecycle.clearTurnStatus();
-				if (restoreComposerOnFailure) {
+				if (!outcomeUnknown) {
+					deps.lifecycle.clearTurnStatus();
+					deps.sessions.applyProcessingEvent(chatId, false);
+				}
+				if (restoreComposerOnFailure && !outcomeUnknown) {
 					deps.composerState.inputText = previousText;
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(chatId);
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					m.chat_notice_failed_send_message({ detail: errorDetail(err) }),
+					outcomeUnknown
+						? m.chat_notice_delivery_outcome_unconfirmed()
+						: m.chat_notice_failed_send_message({ detail: errorDetail(err) }),
 				);
 			} finally {
 				deps.composerState.isSubmitting = false;
@@ -932,7 +964,7 @@ export class ConversationSessionController {
 			if (!chatId || !path) return;
 			const selection = this.#executionModelSelection();
 
-			void runChat({
+			const request = {
 				clientRequestId: createClientCommandId(),
 				clientMessageId: createClientCommandId(),
 				chatId,
@@ -944,7 +976,8 @@ export class ConversationSessionController {
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
-			})
+			};
+			void submitIdempotentCommand(() => runChat(request))
 				.then(() => {
 					deps.lifecycle.beginTurn(chatId);
 				})
@@ -954,7 +987,9 @@ export class ConversationSessionController {
 					}
 					deps.chatState.appendLocalNotice(
 						'error',
-						m.chat_notice_failed_resume_plan({ detail: errorDetail(error) }),
+						error instanceof CommandOutcomeUnknownError
+							? m.chat_notice_delivery_outcome_unconfirmed()
+							: m.chat_notice_failed_resume_plan({ detail: errorDetail(error) }),
 					);
 				});
 		};
@@ -1048,12 +1083,13 @@ export class ConversationSessionController {
 	}
 
 	async createQueueEntryForChat(chatId: string, content: string): Promise<void> {
+		const request = {
+			clientRequestId: createClientCommandId(),
+			chatId,
+			content,
+		};
 		try {
-			const result = await createQueuedInput({
-				clientRequestId: createClientCommandId(),
-				chatId,
-				content,
-			});
+			const result = await submitIdempotentCommand(() => createQueuedInput(request));
 			this.deps.conversationUi.setExecutionControl(chatId, result.control);
 		} catch (error) {
 			const control = controlFromMutationError(error);

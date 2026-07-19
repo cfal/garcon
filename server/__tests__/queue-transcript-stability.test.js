@@ -84,6 +84,7 @@ describe('queue and transcript stability', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         { appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })) },
         () => ({}),
@@ -253,6 +254,7 @@ describe('queue and transcript stability', () => {
         }),
         discard: pendingInputs.discard.bind(pendingInputs),
         markFailed: pendingInputs.markFailed.bind(pendingInputs),
+        markUnconfirmed: pendingInputs.markUnconfirmed.bind(pendingInputs),
       };
       const coordinator = new UserAbortLifecycleCoordinator(pendingInputs, {
         terminalTimeoutMs: 0,
@@ -434,6 +436,7 @@ describe('queue and transcript stability', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),

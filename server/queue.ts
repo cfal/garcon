@@ -118,6 +118,21 @@ export class RecoveredInputContinuationChangedError extends DomainError {
   }
 }
 
+export class RecoveredInputContinuationRequiresQueueError extends DomainError {
+  readonly control: StoredChatExecutionControlState;
+
+  constructor(control: StoredChatExecutionControlState) {
+    super(
+      'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE',
+      'Continue queue requires at least one queued message',
+      409,
+      true,
+    );
+    this.name = 'RecoveredInputContinuationRequiresQueueError';
+    this.control = cloneStoredChatExecutionControl(control);
+  }
+}
+
 function queueEntry(entry: StoredQueueEntry): QueueEntry {
   const { status: _status, delivery: _delivery, ...clientEntry } = entry;
   return { ...clientEntry };
@@ -240,6 +255,7 @@ interface PendingInputsDep {
   ): Promise<unknown>;
   discard(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
+  markUnconfirmed(chatId: string, clientRequestId: string): boolean;
 }
 
 interface ChatMessagesDep {
@@ -318,6 +334,7 @@ export interface ChatQueueService {
   hasChatExecutionOwner(chatId: string): boolean;
   triggerDrain(chatId: string): Promise<void>;
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
+  hasAppliedQueueCreateCommand(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
   createChatQueueEntry(
     chatId: string,
     content: string,
@@ -538,7 +555,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   #logRecoveredInputContinuation(
-    operation: 'startup-install' | 'interactive-continue' | 'explicit-continue' | 'native-settlement',
+    operation: 'startup-install'
+      | 'interactive-continue'
+      | 'explicit-continue'
+      | 'native-settlement'
+      | 'stale-reject'
+      | 'empty-queue-reject',
     chatId: string,
     control: StoredChatExecutionControlState,
   ): void {
@@ -807,20 +829,26 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       ...this.#getDrainOptions(chatId),
       ...options,
     });
-    let accepted = false;
+    let pendingRegistered = false;
+    let deliveryMayHaveStarted = false;
     try {
       const handled = await this.#turnRunner.submitActiveInput!(chatId, content, activeOptions, async () => {
         await this.registerPendingUserInput(chatId, content, activeOptions);
-        accepted = true;
+        pendingRegistered = true;
         await afterPendingRegistered?.();
+        deliveryMayHaveStarted = true;
       });
-      if (!handled && accepted) {
+      if (!handled && deliveryMayHaveStarted) {
         throw new Error('Agent accepted active input without handling it');
       }
       return handled;
     } catch (error) {
-      if (accepted) this.#pendingInputs.markFailed(chatId, activeOptions.clientRequestId!);
-      throw new ActiveInputDeliveryError(error, accepted);
+      if (deliveryMayHaveStarted) {
+        this.#pendingInputs.markUnconfirmed(chatId, activeOptions.clientRequestId!);
+      } else if (pendingRegistered) {
+        this.#pendingInputs.markFailed(chatId, activeOptions.clientRequestId!);
+      }
+      throw new ActiveInputDeliveryError(error, deliveryMayHaveStarted);
     }
   }
 
@@ -875,7 +903,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     const result = await this.#withLock(`chat:${chatId}`, async () => {
       const control = cloneStoredChatExecutionControl(await this.#loadChatExecutionControl(chatId));
       if (control.recoveredInputContinuation?.id !== continuationId) {
+        this.#logRecoveredInputContinuation('stale-reject', chatId, control);
         throw new RecoveredInputContinuationChangedError(control);
+      }
+      if (!control.entries.some((entry) => entry.status === 'queued')) {
+        this.#logRecoveredInputContinuation('empty-queue-reject', chatId, control);
+        throw new RecoveredInputContinuationRequiresQueueError(control);
       }
       control.recoveredInputContinuation = null;
       const committed = await this.#commitAndPublish(
@@ -888,6 +921,21 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     });
     this.#requestDrain(chatId, 'recovered-input continuation');
     return result;
+  }
+
+  async hasAppliedQueueCreateCommand(
+    chatId: string,
+    commandKey: string,
+    entryId: string,
+  ): Promise<boolean> {
+    return this.#withLock(`chat:${chatId}`, async () => {
+      const control = await this.#loadChatExecutionControl(chatId);
+      return control.appliedCommands.some((command) => (
+        command.key === commandKey
+        && command.operation === 'create'
+        && command.entryId === entryId
+      ));
+    });
   }
 
   async dropRecoveredInputContinuation(chatId: string): Promise<StoredChatExecutionControlState> {
@@ -1761,6 +1809,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           // The in-memory projection remains fail-closed if persistence fails.
           this.#controlsByChatId.set(chatId, normalized);
           await writeJsonFileAtomic(filePath, normalized);
+          if (shouldInstallContinuation) {
+            this.#logRecoveredInputContinuation('startup-install', chatId, normalized);
+          }
           if (recoveredIds.size > 0) {
             logger.info('queue: recovered stale chat queue', { chatId, recoveredCount: recoveredIds.size });
             this.#logPauseMutation(
@@ -1809,6 +1860,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         const normalized = normalizeStoredChatExecutionControlState(control);
         this.#controlsByChatId.set(chatId, normalized);
         await writeJsonFileAtomic(this.#chatQueueFilePath(chatId), normalized);
+        this.#logRecoveredInputContinuation('startup-install', chatId, normalized);
       } catch (error: unknown) {
         const recoveryError = new Error(
           `Could not persist recovered-input continuation for ${chatId}: ${

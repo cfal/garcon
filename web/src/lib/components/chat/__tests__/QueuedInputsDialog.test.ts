@@ -8,6 +8,7 @@ import type {
 	RecoveredInputContinuation,
 } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
+import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 
 function entry(index: number, revision = 1, content = `Queued message ${index}`): QueueEntry {
 	return {
@@ -143,6 +144,24 @@ describe('QueuedInputsDialog', () => {
 
 		pendingCreate.resolve();
 		await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+	});
+
+	it('prevents a new-ID retry when queue-as-new remains ambiguous', async () => {
+		const { component, onCreate } = renderDialog(queue([entry(0)]));
+		onCreate.mockRejectedValueOnce(new CommandOutcomeUnknownError());
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		await fireEvent.input(textarea, { target: { value: 'Possibly queued draft' } });
+		component.setQueue(queue([]));
+
+		await fireEvent.click(await screen.findByRole('button', {
+			name: m.chat_queue_queue_draft_as_new(),
+		}));
+
+		await waitFor(() => expect(screen.getByText(m.chat_notice_queue_outcome_unconfirmed())).toBeTruthy());
+		expect(onCreate).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('button', { name: m.chat_queue_queue_draft_as_new() })).toBeNull();
+		expect((textarea as HTMLTextAreaElement).value).toBe('Possibly queued draft');
 	});
 
 	it('shows a revision conflict without overwriting the draft and can reload latest', async () => {

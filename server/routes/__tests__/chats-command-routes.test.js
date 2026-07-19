@@ -45,6 +45,7 @@ import {
   QueueEntryMutationError,
   QueuePauseChangedError,
   RecoveredInputContinuationChangedError,
+  RecoveredInputContinuationRequiresQueueError,
 } from '../../queue.js';
 import {
   createRouteChatListProjector,
@@ -751,6 +752,33 @@ describe('REST chat command routes', () => {
     expect(result.body.control.recoveredInputContinuation.id).toBe(
       '20b5a703-199d-4d29-ae05-d0942574cb79',
     );
+  });
+
+  it('preserves continuation when a stale dialog continues an already-empty queue', async () => {
+    const agent = createRouteAgent();
+    const latest = storedQueue([], {
+      recoveredInputContinuation: {
+        id: '20b5a703-199d-4d29-ae05-d0942574cb79',
+        installedAt: '2026-07-18T00:00:00.000Z',
+      },
+      version: 9,
+    });
+    agent.queue.continuePastRecoveredInput.mockRejectedValueOnce(
+      new RecoveredInputContinuationRequiresQueueError(latest),
+    );
+
+    const result = await callJson(agent.routes['/api/v1/chats/recovered-input/continue'].POST, {
+      chatId: CHAT_ID,
+      continuationId: latest.recoveredInputContinuation.id,
+    });
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE');
+    expect(result.body.control).toMatchObject({
+      version: 9,
+      recoveredInputContinuation: { id: latest.recoveredInputContinuation.id },
+      queue: { entries: [] },
+    });
   });
 
   it('POST /permissions/decision deduplicates identical decisions and rejects conflicts', async () => {

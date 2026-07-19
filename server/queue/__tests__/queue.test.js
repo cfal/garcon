@@ -24,6 +24,7 @@ function createPendingInputs() {
     register: mock(() => Promise.resolve()),
     discard: mock(() => true),
     markFailed: mock(() => true),
+    markUnconfirmed: mock(() => true),
   };
 }
 
@@ -656,6 +657,27 @@ describe('queue invariants', () => {
     );
   });
 
+  it('does not consume a stale explicit continuation after the final queued entry is deleted', async () => {
+    await queue.createChatQueueEntry('stale-continue', 'queued successor');
+    await queue.recoverChatExecutionControls(new Set(['stale-continue']));
+    const recovered = await queue.readChatExecutionControl('stale-continue');
+    const entryId = recovered.entries[0].id;
+    const continuationId = recovered.recoveredInputContinuation.id;
+
+    await queue.deleteChatQueueEntry('stale-continue', entryId);
+
+    await expect(queue.continuePastRecoveredInput('stale-continue', continuationId)).rejects.toMatchObject({
+      code: 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE',
+      control: expect.objectContaining({
+        entries: [],
+        recoveredInputContinuation: expect.objectContaining({ id: continuationId }),
+      }),
+    });
+    expect((await queue.readChatExecutionControl('stale-continue')).recoveredInputContinuation).toMatchObject({
+      id: continuationId,
+    });
+  });
+
   it('fails closed when an empty recovered-input continuation cannot be persisted', async () => {
     const queuesDir = path.join(workspaceDir, 'queues');
     await fs.mkdir(queuesDir, { recursive: true });
@@ -875,6 +897,7 @@ describe('orchestration', () => {
       register: mock(() => Promise.resolve()),
       discard: mock(() => true),
       markFailed: mock(() => true),
+      markUnconfirmed: mock(() => true),
     };
     mockChatMessages = createChatMessages();
     mockDrainOptions = mock(() => ({
@@ -1522,7 +1545,7 @@ describe('orchestration', () => {
       expect(new Set(entries.map((entry) => entry.id)).size).toBe(2);
     });
 
-    it('marks accepted input failed when live delivery throws', async () => {
+    it('marks accepted input unconfirmed when live delivery throws', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery();
@@ -1541,8 +1564,38 @@ describe('orchestration', () => {
       });
 
       expect(mockPendingInputs.register).toHaveBeenCalledTimes(1);
-      expect(mockPendingInputs.markFailed).toHaveBeenCalledWith('c1', 'request-failed');
+      expect(mockPendingInputs.markUnconfirmed).toHaveBeenCalledWith('c1', 'request-failed');
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
+    });
+
+    it('marks a registered input failed when durable admission fails before live delivery', async () => {
+      let delivered = false;
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        delivered = true;
+        return true;
+      });
+
+      await expect(
+        orchQueue.deliverActiveInput(
+          'c1',
+          'not delivered',
+          { clientRequestId: 'request-admission-failed' },
+          async () => {
+            throw new Error('ledger scheduling failed');
+          },
+        ),
+      ).rejects.toMatchObject({
+        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        cause: expect.objectContaining({ message: 'ledger scheduling failed' }),
+        deliveryAccepted: false,
+        retryable: true,
+      });
+
+      expect(delivered).toBe(false);
+      expect(mockPendingInputs.markFailed).toHaveBeenCalledWith('c1', 'request-admission-failed');
+      expect(mockPendingInputs.markUnconfirmed).not.toHaveBeenCalled();
     });
 
     it('rolls back pending registration when transcript append fails before active delivery', async () => {

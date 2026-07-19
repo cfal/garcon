@@ -42,6 +42,7 @@ import {
   QueueEntryMutationError,
   QueuePauseChangedError,
   RecoveredInputContinuationChangedError,
+  RecoveredInputContinuationRequiresQueueError,
   type ChatQueueService,
 } from '../queue.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
@@ -924,7 +925,10 @@ export default function createChatRoutes({
   }
 
   function queueControlErrorResponse(
-    error: QueueEntryMutationError | QueuePauseChangedError | RecoveredInputContinuationChangedError,
+    error: QueueEntryMutationError
+      | QueuePauseChangedError
+      | RecoveredInputContinuationChangedError
+      | RecoveredInputContinuationRequiresQueueError,
   ): Response {
     const body: QueueCommandErrorResponse = {
       success: false,
@@ -1062,7 +1066,10 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      if (error instanceof RecoveredInputContinuationChangedError) {
+      if (
+        error instanceof RecoveredInputContinuationChangedError
+        || error instanceof RecoveredInputContinuationRequiresQueueError
+      ) {
         return queueControlErrorResponse(error);
       }
       return jsonErrorFromUnknown(error);

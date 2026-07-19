@@ -36,6 +36,7 @@ describe('ChatExecutionActivity', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),
@@ -87,6 +88,7 @@ describe('ChatExecutionActivity', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),
@@ -147,6 +149,7 @@ describe('ChatExecutionActivity', () => {
           }),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async (_chatId, messages) => ({

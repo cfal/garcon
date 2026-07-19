@@ -270,8 +270,10 @@ export function normalizeStoredChatExecutionControlState(
         .filter((command): command is StoredAppliedQueueCommand => Boolean(command))
         .slice(-MAX_STORED_APPLIED_QUEUE_COMMANDS)
     : [];
-  const version = typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0;
-  const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
+  const version = typeof raw.version === 'number' && Number.isSafeInteger(raw.version) && raw.version >= 0
+    ? raw.version
+    : 0;
+  const updatedAt = isCanonicalIsoTimestamp(raw.updatedAt) ? raw.updatedAt : null;
   const { pause, resumePauses } = normalizeStoredPauses(raw, entries, version, updatedAt);
   const recoveredInputContinuation = parseRecoveredInputContinuation(raw.recoveredInputContinuation) ?? null;
 
@@ -294,6 +296,19 @@ export function parseStoredChatExecutionControlState(value: unknown): StoredChat
   }
 
   const raw = value as Record<string, unknown>;
+  if (
+    Object.hasOwn(raw, 'version')
+    && (typeof raw.version !== 'number' || !Number.isSafeInteger(raw.version) || raw.version < 0)
+  ) {
+    throw new Error('Queue state version must be a nonnegative safe integer');
+  }
+  if (
+    Object.hasOwn(raw, 'updatedAt')
+    && raw.updatedAt !== null
+    && !isCanonicalIsoTimestamp(raw.updatedAt)
+  ) {
+    throw new Error('Queue state updatedAt must be a canonical timestamp or null');
+  }
   const arrays = [
     ['entries', normalizeStoredQueueEntry],
     ['recentlyDispatched', normalizeRecentlyDispatched],

@@ -234,6 +234,7 @@ export interface PendingUserInputServiceContract {
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
+  markUnconfirmed(chatId: string, clientRequestId: string): boolean;
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
   captureCohort(chatId: string): PendingUserInputCohort;
   reconcileRetainedHistory(chatId: string): Promise<void>;
@@ -306,6 +307,10 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   markFailed(chatId: string, clientRequestId: string): boolean {
     return this.store.updateDeliveryStatus(chatId, clientRequestId, 'failed');
+  }
+
+  markUnconfirmed(chatId: string, clientRequestId: string): boolean {
+    return this.store.updateDeliveryStatus(chatId, clientRequestId, 'unconfirmed');
   }
 
   async register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): Promise<PendingUserInput> {

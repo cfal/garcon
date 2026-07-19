@@ -396,6 +396,7 @@ export async function startServer(): Promise<void> {
         ledger: commandLedger,
         pendingInputs,
         nativeSnapshots: chatViewPages,
+        queuedInputHandoffs: queue,
         chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
         onRecoveredChatSettled: async (chatId) => {
           await queue.dropRecoveredInputContinuation(chatId);

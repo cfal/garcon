@@ -39,6 +39,7 @@ import type {
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import {
+  commandLedgerKey,
   PRE_SCHEDULE_FAILURE_ERROR_CODE,
   SERVER_RESTART_INTERRUPTED_ERROR_CODE,
   type CommandLedger,
@@ -828,7 +829,7 @@ export class ChatCommandService {
       throw error;
     }
     const updated = await this.deps.ledger.update(ledger.record.key, {
-      status: 'scheduled',
+      status: 'finished',
       entryId: result.entryId,
     });
     this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
@@ -986,7 +987,9 @@ export class ChatCommandService {
       if (ledger.kind === 'duplicate') {
         if (ledger.record.status === 'failed') {
           throw new CommandValidationError(
-            'INTERNAL_ERROR',
+            ledger.record.errorCode === 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
+              ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
+              : 'INTERNAL_ERROR',
             ledger.record.error ?? 'The previous active-input delivery failed after acceptance',
             409,
             false,
@@ -1006,7 +1009,7 @@ export class ChatCommandService {
             );
           }
           const updated = await this.deps.ledger.update(ledger.record.key, {
-            status: 'scheduled',
+            status: 'finished',
             entryId: applied.entryId,
           });
           this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
@@ -1065,7 +1068,7 @@ export class ChatCommandService {
           entryId: ledger.record.entryId ?? preparedEntryId,
         });
         const updated = await this.deps.ledger.update(ledger.record.key, {
-          status: 'scheduled',
+          status: 'finished',
           entryId: result.entryId,
         });
         this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
@@ -1082,7 +1085,7 @@ export class ChatCommandService {
         await this.deps.ledger.update(ledger.record.key, {
           status: 'failed',
           error: error instanceof Error ? error.message : String(error),
-          errorCode: deliveryAccepted ? undefined : PRE_SCHEDULE_FAILURE_ERROR_CODE,
+          errorCode: deliveryAccepted ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN' : PRE_SCHEDULE_FAILURE_ERROR_CODE,
           ...(deliveryAccepted ? { pendingInputRecovery: 'required' as const } : {}),
         });
         throw error;
@@ -1631,6 +1634,10 @@ export class ChatCommandService {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
+    const ledgerKey = commandLedgerKey('fork-run', input.chatId, clientRequestId);
+    const priorRecord = await this.deps.ledger.getRecord(ledgerKey);
+    let forkContext: ForkContext | null = null;
+    if (!priorRecord) forkContext = this.#validateFork(input);
     const ledger = await this.deps.ledger.accept({
       commandType: 'fork-run',
       chatId: input.chatId,
@@ -1646,7 +1653,9 @@ export class ChatCommandService {
         409,
       );
     }
-    if (ledger.kind === 'duplicate') {
+    const recoveringAcceptedCommand = ledger.kind === 'duplicate'
+      && ledger.record.status === 'accepted';
+    if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
       this.#throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
@@ -1654,7 +1663,7 @@ export class ChatCommandService {
       };
     }
 
-    const forkContext = this.#validateFork(input);
+    const resolvedForkContext = forkContext ?? this.#validateFork(input);
     let forkResult: ForkChatFileCopyResult | null = null;
     const result = await this.#scheduleAcceptedHttpRun(ledger, input, {
       clientRequestId,
@@ -1665,15 +1674,15 @@ export class ChatCommandService {
         await this.deps.ledger.update(ledger.record.key, {
           forkPreparation: {
             phase: 'creating',
-            sourceChatId: forkContext.sourceChatId,
-            sourceNextForkOrdinal: forkContext.sourceNextForkOrdinal,
+            sourceChatId: resolvedForkContext.sourceChatId,
+            sourceNextForkOrdinal: resolvedForkContext.sourceNextForkOrdinal,
           },
         });
-        forkResult = await this.#forkChatFromContext(forkContext);
+        forkResult = await this.#forkChatFromContext(resolvedForkContext);
         await this.deps.ledger.update(ledger.record.key, {
           forkPreparation: {
             phase: 'created',
-            sourceChatId: forkContext.sourceChatId,
+            sourceChatId: resolvedForkContext.sourceChatId,
             sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
           },
         });
@@ -1683,12 +1692,12 @@ export class ChatCommandService {
           await forkResult.rollback();
         } else {
           await rollbackForkTarget({
-            sourceChatId: forkContext.sourceChatId,
-            targetChatId: forkContext.targetChatId,
+            sourceChatId: resolvedForkContext.sourceChatId,
+            targetChatId: resolvedForkContext.targetChatId,
             registry: this.deps.chats,
             settings: this.deps.settings,
             ownership: this.deps.ownership,
-            sourceNextForkOrdinal: forkContext.sourceNextForkOrdinal,
+            sourceNextForkOrdinal: resolvedForkContext.sourceNextForkOrdinal,
           });
         }
         forkResult = null;
@@ -1712,7 +1721,9 @@ export class ChatCommandService {
         409,
       );
     }
-    if (ledger.kind === 'duplicate') {
+    const recoveringAcceptedCommand = ledger.kind === 'duplicate'
+      && ledger.record.status === 'accepted';
+    if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
       this.#throwRecordedExecutionFailure(ledger.record);
       return commandResultFromRecord(ledger.record, 'duplicate');
     }
@@ -1757,7 +1768,10 @@ export class ChatCommandService {
       });
       assertAdmission();
       this.#runReservedTurn(reservation, input.command, options);
-      return commandResultFromRecord(scheduled ?? ledger.record);
+      return commandResultFromRecord(
+        scheduled ?? ledger.record,
+        recoveringAcceptedCommand ? 'duplicate' : 'accepted',
+      );
     } catch (error) {
       const pendingRegistered = this.deps.pendingInputs.markFailed(
         input.chatId,

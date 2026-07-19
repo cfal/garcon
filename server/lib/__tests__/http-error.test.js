@@ -67,12 +67,12 @@ describe('jsonErrorFromUnknown', () => {
     expect(postAcceptError.cause).toBe(postAcceptCause);
     expect(preAcceptBody).toMatchObject({
       error: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
-      errorCode: 'INTERNAL_ERROR',
+      errorCode: 'ACTIVE_INPUT_NOT_DELIVERED',
       retryable: true,
     });
     expect(postAcceptBody).toMatchObject({
       error: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
-      errorCode: 'INTERNAL_ERROR',
+      errorCode: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
       retryable: false,
     });
     expect(JSON.stringify([preAcceptBody, postAcceptBody])).not.toContain('/secret/workspace');

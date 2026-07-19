@@ -1143,6 +1143,46 @@ describe('ChatCommandService', () => {
     ]);
   });
 
+  it('recovers a duplicate accepted command instead of returning false success', async () => {
+    const { service, queue, ledger } = makeService();
+    const update = ledger.update.bind(ledger);
+    let failedWrites = 0;
+    ledger.update = mock((key, patch) => {
+      if (
+        failedWrites < 2
+        && (patch.status === 'scheduled' || patch.status === 'failed')
+      ) {
+        failedWrites += 1;
+        return Promise.reject(new Error(`ledger write ${failedWrites} failed`));
+      }
+      return update(key, patch);
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'recover accepted command',
+      clientRequestId: 'req-recover-accepted',
+      clientMessageId: 'msg-recover-accepted',
+    };
+
+    await expect(service.submitRun(input)).rejects.toThrow('ledger write 2 failed');
+    expect((await readLedgerRecords()).at(-1)).toMatchObject({
+      clientRequestId: input.clientRequestId,
+      status: 'accepted',
+    });
+
+    const retry = await service.submitRun(input);
+
+    expect(retry.status).toBe('duplicate');
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect((await readLedgerRecords()).at(-1)).toMatchObject({
+      clientRequestId: input.clientRequestId,
+      status: 'scheduled',
+      pendingInputRecovery: 'required',
+    });
+  });
+
   it('applies shared fork validation before copying', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
@@ -1527,7 +1567,7 @@ describe('ChatCommandService', () => {
       entryId,
     });
     expect((await readLedgerRecords()).at(-1)).toMatchObject({
-      status: 'scheduled',
+      status: 'finished',
       entryId,
     });
   });
@@ -1677,13 +1717,13 @@ describe('ChatCommandService', () => {
 
     await expect(service.submitActiveInput(input)).rejects.toThrow('ledger finish failed');
     await expect(service.submitActiveInput(input)).rejects.toMatchObject({
-      code: 'INTERNAL_ERROR',
+      code: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
       retryable: false,
     });
 
     expect(queue.deliverActiveInput).toHaveBeenCalledOnce();
     expect((await readLedgerRecords()).at(-1)).toMatchObject({ status: 'failed' });
-    expect((await readLedgerRecords()).at(-1)?.errorCode).toBeUndefined();
+    expect((await readLedgerRecords()).at(-1)?.errorCode).toBe('ACTIVE_INPUT_OUTCOME_UNKNOWN');
   });
 
   it('reopens pre-accept active delivery failures for the same request id', async () => {
@@ -1736,7 +1776,7 @@ describe('ChatCommandService', () => {
       }),
     );
     records = await readLedgerRecords();
-    expect(records.at(-1)?.status).toBe('scheduled');
+    expect(records.at(-1)?.status).toBe('finished');
     expect(queue.deliverActiveInput).toHaveBeenCalledTimes(2);
     expect(queue.createChatQueueEntry).toHaveBeenCalledOnce();
   });
@@ -1932,10 +1972,10 @@ describe('ChatCommandService', () => {
         pendingInputRecovery: 'required',
       }),
     );
-    expect(records.at(-1)?.errorCode).toBeUndefined();
+    expect(records.at(-1)?.errorCode).toBe('ACTIVE_INPUT_OUTCOME_UNKNOWN');
 
     await expect(service.submitActiveInput(input)).rejects.toMatchObject({
-      code: 'INTERNAL_ERROR',
+      code: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
       status: 409,
       retryable: false,
       message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,

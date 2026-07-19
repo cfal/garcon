@@ -347,6 +347,35 @@ describe('CommandLedger', () => {
     ]);
   });
 
+  it('migrates a legacy scheduled queue create to a terminal command', async () => {
+    const first = new CommandLedger(workspaceDir);
+    const accepted = await first.accept({
+      commandType: 'queue-entry-create',
+      chatId: 'chat-1',
+      clientRequestId: 'req-queued',
+      entryId: 'entry-queued',
+      payload: { chatId: 'chat-1', content: 'queued successor' },
+    });
+    await first.update(accepted.record.key, { status: 'scheduled', entryId: 'entry-queued' });
+
+    const restarted = new CommandLedger(workspaceDir);
+
+    await expect(restarted.listPendingInputRecoveries()).resolves.toEqual([]);
+    await expect(restarted.accept({
+      commandType: 'queue-entry-create',
+      chatId: 'chat-1',
+      clientRequestId: 'req-queued',
+      entryId: 'entry-queued',
+      payload: { chatId: 'chat-1', content: 'queued successor' },
+    })).resolves.toMatchObject({
+      kind: 'duplicate',
+      record: {
+        status: 'finished',
+        entryId: 'entry-queued',
+      },
+    });
+  });
+
   it('returns conflict when a clientRequestId is reused for different payload', async () => {
     const ledger = new CommandLedger(workspaceDir);
     await ledger.accept({
@@ -525,6 +554,50 @@ describe('CommandLedger', () => {
     expect(persisted.records).toEqual([
       expect.objectContaining({ status: 'failed', pendingInputRecovery: 'settled' }),
     ]);
+  });
+
+  it('settles only the exact queued active-input handoff', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const accepted = await ledger.accept({
+      commandType: 'active-input',
+      chatId: 'chat-1',
+      clientRequestId: 'req-handoff',
+      entryId: 'entry-handoff',
+      payload: { content: 'queued fallback' },
+    });
+    await ledger.update(accepted.record.key, {
+      status: 'failed',
+      error: 'Server restarted before command completion',
+      errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      pendingInputRecovery: 'required',
+    });
+
+    await expect(
+      ledger.settleQueuedInputHandoff(accepted.record.key, 'entry-other'),
+    ).resolves.toBe(false);
+    expect(await ledger.listPendingInputRecoveries()).toEqual([
+      expect.objectContaining({
+        key: accepted.record.key,
+        entryId: 'entry-handoff',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+
+    await expect(
+      ledger.settleQueuedInputHandoff(accepted.record.key, 'entry-handoff'),
+    ).resolves.toBe(true);
+
+    const persisted = JSON.parse(await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8'));
+    expect(persisted.records).toEqual([
+      expect.objectContaining({
+        key: accepted.record.key,
+        status: 'finished',
+        entryId: 'entry-handoff',
+        pendingInputRecovery: 'settled',
+      }),
+    ]);
+    expect(persisted.records[0]).not.toHaveProperty('error');
+    expect(persisted.records[0]).not.toHaveProperty('errorCode');
   });
 
   it('does not retain a command in memory after its durable write fails', async () => {

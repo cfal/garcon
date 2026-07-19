@@ -3,11 +3,14 @@ import type { CommandLedger, CommandLedgerRecord } from '../commands/command-led
 import type { PendingUserInputService } from './pending-user-input-service.js';
 import type { PendingUserInputImageEvidence } from './pending-user-input-store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('pending-user-input-recovery');
 
 interface PendingUserInputRecoveryDeps {
   ledger: Pick<
     CommandLedger,
-    'listPendingInputRecoveries' | 'settlePendingInputRecovery'
+    'listPendingInputRecoveries' | 'settlePendingInputRecovery' | 'settleQueuedInputHandoff'
   >;
   pendingInputs: Pick<
     PendingUserInputService,
@@ -15,6 +18,9 @@ interface PendingUserInputRecoveryDeps {
   >;
   nativeSnapshots?: {
     reconcileNativeSnapshot(chatId: string, messages: readonly ChatMessage[]): Promise<void>;
+  };
+  queuedInputHandoffs?: {
+    hasAppliedQueueCreateCommand(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
   };
   chatExists(chatId: string): boolean;
   onRecoveredChatSettled(chatId: string): Promise<void>;
@@ -206,6 +212,22 @@ export class PendingUserInputRecoveryCoordinator {
     const restoredChatIds = new Set<string>();
 
     for (const record of records) {
+      if (
+        record.commandType === 'active-input'
+        && record.entryId
+        && await this.#deps.queuedInputHandoffs?.hasAppliedQueueCreateCommand(
+          record.chatId,
+          record.key,
+          record.entryId,
+        )
+      ) {
+        const settled = await this.#deps.ledger.settleQueuedInputHandoff(record.key, record.entryId);
+        if (!settled) {
+          throw new Error(`Could not settle queued active-input handoff for ${record.chatId}`);
+        }
+        logger.info(`settled queued active-input handoff chat=${record.chatId}`);
+        continue;
+      }
       if (!this.#deps.chatExists(record.chatId)) {
         await this.#deps.ledger.settlePendingInputRecovery(record.chatId, record.clientRequestId);
         discardedMissingChat += 1;

@@ -31,6 +31,70 @@ function recoveredRecord(clientRequestId, chatId = 'chat-1') {
 }
 
 describe('PendingUserInputRecoveryCoordinator', () => {
+  it('settles a restart-interrupted active input already committed to the durable queue', async () => {
+    const record = {
+      ...recoveredRecord('req-queued'),
+      key: 'active-input:chat-1:req-queued',
+      commandType: 'active-input',
+      entryId: 'entry-queued',
+    };
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => [record]),
+      settlePendingInputRecovery: mock(async () => true),
+      settleQueuedInputHandoff: mock(async () => true),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      queuedInputHandoffs: {
+        hasAppliedQueueCreateCommand: mock(async () => true),
+      },
+      chatExists: () => true,
+      onRecoveredChatSettled: mock(async () => undefined),
+    });
+
+    const result = await coordinator.restore();
+
+    expect(result).toEqual({ restored: 0, discardedMissingChat: 0, restoredChatIds: [] });
+    expect(ledger.settleQueuedInputHandoff).toHaveBeenCalledWith(record.key, 'entry-queued');
+    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
+  });
+
+  it('fails closed when an applied queue receipt cannot settle the matching ledger record', async () => {
+    const record = {
+      ...recoveredRecord('req-queued'),
+      key: 'active-input:chat-1:req-queued',
+      commandType: 'active-input',
+      entryId: 'entry-queued',
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger: {
+        listPendingInputRecoveries: mock(async () => [record]),
+        settlePendingInputRecovery: mock(async () => true),
+        settleQueuedInputHandoff: mock(async () => false),
+      },
+      pendingInputs,
+      queuedInputHandoffs: {
+        hasAppliedQueueCreateCommand: mock(async () => true),
+      },
+      chatExists: () => true,
+      onRecoveredChatSettled: mock(async () => undefined),
+    });
+
+    await expect(coordinator.restore()).rejects.toThrow(
+      'Could not settle queued active-input handoff for chat-1',
+    );
+    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
+  });
+
   it('buffers final recovered-cohort settlement until the sink is activated', async () => {
     const onRecoveredChatSettled = mock(async () => undefined);
     const ledger = {

@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
+	import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ListPlus, Loader2, RefreshCw, Save, Undo2 } from '@lucide/svelte';
 
@@ -14,7 +15,9 @@
 
 	let { editor, onCreate, onReplace, onClose }: Props = $props();
 	let editorTextarea: HTMLTextAreaElement | null = $state(null);
-	const canQueueDraftAsNew = $derived(editor.phase === 'sent' || editor.phase === 'removed');
+	const canQueueDraftAsNew = $derived(
+		(editor.phase === 'sent' || editor.phase === 'removed') && !editor.queueDraftOutcomeUnknown,
+	);
 
 	$effect(() => {
 		const entryId = editor.entryId;
@@ -68,7 +71,13 @@
 			await onCreate(draft);
 			if (editor.matchesSession(entryId, sessionRevision)) onClose(entryId);
 		} catch (error) {
-			if (editor.matchesSession(entryId, sessionRevision)) editor.error = errorMessage(error);
+			if (editor.matchesSession(entryId, sessionRevision)) {
+				if (error instanceof CommandOutcomeUnknownError) {
+					editor.markQueueDraftOutcomeUnknown(m.chat_notice_queue_outcome_unconfirmed());
+				} else {
+					editor.error = errorMessage(error);
+				}
+			}
 		} finally {
 			if (editor.matchesSession(entryId, sessionRevision)) editor.mutation = 'idle';
 		}
@@ -127,7 +136,9 @@
 		></textarea>
 	</label>
 
-	{#if editor.error}
+	{#if editor.error && editor.queueDraftOutcomeUnknown}
+		<p class="mt-2 text-sm text-status-warning-muted-foreground" role="status">{editor.error}</p>
+	{:else if editor.error}
 		<p class="mt-2 text-sm text-destructive" role="alert">{editor.error}</p>
 	{/if}
 

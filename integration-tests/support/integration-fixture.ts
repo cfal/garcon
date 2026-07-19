@@ -208,6 +208,7 @@ export class IntegrationFixture {
   async crashAndRestartBeforeNativeUserPersistence(input: {
     chatId: string;
     clientRequestId: string;
+    afterCrash?: () => Promise<void>;
   }): Promise<void> {
     await this.client.close();
     await this.garcon.crash();
@@ -218,6 +219,7 @@ export class IntegrationFixture {
       expiredAt,
     );
     await this.#removeFinalNativeUserRow(input);
+    await input.afterCrash?.();
     this.#archiveCurrentRun();
     await this.#startReplacementGarcon();
   }

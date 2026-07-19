@@ -292,6 +292,14 @@ export class CommandLedger {
     });
   }
 
+  async getRecord(key: string): Promise<CommandLedgerRecord | null> {
+    return this.#withMutationLock(async () => {
+      await this.#load();
+      const record = this.#records.get(key);
+      return record ? { ...record, payload: { ...record.payload } } : null;
+    });
+  }
+
   async accept(input: LedgerAcceptInput): Promise<LedgerAcceptResult> {
     const key = commandLedgerKey(input.commandType, input.chatId, input.clientRequestId);
     return this.#withMutationLock(async () => {
@@ -491,6 +499,32 @@ export class CommandLedger {
     });
   }
 
+  async settleQueuedInputHandoff(key: string, entryId: string): Promise<boolean> {
+    return this.#withMutationLock(async () => {
+      await this.#load();
+      const existing = this.#records.get(key);
+      if (
+        !existing
+        || existing.commandType !== 'active-input'
+        || existing.entryId !== entryId
+        || existing.pendingInputRecovery !== 'required'
+      ) return false;
+      const { error: _error, errorCode: _errorCode, ...retained } = existing;
+      const next: CommandLedgerRecord = {
+        ...retained,
+        status: 'finished',
+        entryId,
+        pendingInputRecovery: 'settled',
+        updatedAt: new Date().toISOString(),
+      };
+      const nextRecords = new Map(this.#records);
+      nextRecords.set(key, next);
+      this.#trimRecords(nextRecords);
+      await this.#commit(nextRecords);
+      return true;
+    });
+  }
+
   async #load(): Promise<void> {
     if (this.#loaded) return;
     await this.#locks.runExclusive(LEDGER_PERSIST_LOCK_KEY, async () => {
@@ -503,6 +537,11 @@ export class CommandLedger {
           : {};
         const payload = compactCommandPayload(storedPayload);
         const payloadHash = commandPayloadHash(payload);
+        const legacyTerminalQueueCreate = record.commandType === 'queue-entry-create'
+          && record.status === 'scheduled'
+          && typeof record.entryId === 'string'
+          && record.entryId.length > 0
+          && record.pendingInputRecovery !== 'required';
         const interrupted = INTERRUPTIBLE_EXECUTION_COMMANDS.has(record.commandType)
           && (record.status === 'accepted' || record.status === 'scheduled' || record.status === 'running');
         const recoversUserInput = USER_INPUT_EXECUTION_COMMANDS.has(record.commandType);
@@ -521,6 +560,7 @@ export class CommandLedger {
         if (
           stableStringify(payload) !== stableStringify(storedPayload)
           || payloadHash !== record.payloadHash
+          || legacyTerminalQueueCreate
           || interrupted
           || pendingInputRecovery !== record.pendingInputRecovery
         ) {
@@ -537,6 +577,11 @@ export class CommandLedger {
               updatedAt: new Date().toISOString(),
               error: 'Server restarted before command completion was recorded',
               errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+            }
+            : {}),
+          ...(legacyTerminalQueueCreate
+            ? {
+              status: 'finished' as const,
             }
             : {}),
         };

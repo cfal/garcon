@@ -87,4 +87,18 @@ describe('QueuedInputEditorState', () => {
 		editor.mutation = 'saving';
 		expect(editor.canSave).toBe(false);
 	});
+
+	it('keeps an ambiguous queue-as-new outcome scoped to one editor session', () => {
+		const host = new QueuedInputEditorTestHost(queue([entry()]));
+		const editor = host.editor;
+		editor.begin(host.queue!.entries[0]);
+		editor.markQueueDraftOutcomeUnknown('Check the queue');
+
+		expect(editor.queueDraftOutcomeUnknown).toBe(true);
+		expect(editor.error).toBe('Check the queue');
+
+		editor.close();
+		expect(editor.queueDraftOutcomeUnknown).toBe(false);
+		expect(editor.error).toBeNull();
+	});
 });

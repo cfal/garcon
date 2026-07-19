@@ -20,6 +20,7 @@ export class QueuedInputEditorState {
 	baseRevision = $state<number | null>(null);
 	mutation = $state<QueuedInputMutation>('idle');
 	error = $state<string | null>(null);
+	queueDraftOutcomeUnknown = $state(false);
 	sessionRevision = $state(0);
 
 	liveEntry = $derived.by(() => {
@@ -52,6 +53,7 @@ export class QueuedInputEditorState {
 		this.baseRevision = entry.revision;
 		this.mutation = 'idle';
 		this.error = null;
+		this.queueDraftOutcomeUnknown = false;
 	}
 
 	matchesSession(entryId: string, sessionRevision: number): boolean {
@@ -71,6 +73,11 @@ export class QueuedInputEditorState {
 		this.error = null;
 	}
 
+	markQueueDraftOutcomeUnknown(message: string): void {
+		this.queueDraftOutcomeUnknown = true;
+		this.error = message;
+	}
+
 	close(): void {
 		this.sessionRevision += 1;
 		this.entryId = null;
@@ -78,5 +85,6 @@ export class QueuedInputEditorState {
 		this.baseRevision = null;
 		this.mutation = 'idle';
 		this.error = null;
+		this.queueDraftOutcomeUnknown = false;
 	}
 }

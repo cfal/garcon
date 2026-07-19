@@ -10,6 +10,8 @@ import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   AgentStopResponse,
+  ActiveInputCommandRequest,
+  ActiveInputCommandResponse,
   CommandAcceptedResponse,
   ForkChatResponse,
   ForkRunCommandRequest,
@@ -493,6 +495,10 @@ export class GarconTestClient {
 
   enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
     return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', request);
+  }
+
+  sendActiveInput(request: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse> {
+    return this.post<ActiveInputCommandResponse>('/api/v1/chats/active-input', request);
   }
 
   enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse> {

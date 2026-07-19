@@ -28,7 +28,7 @@ export class ActiveInputDeliveryError extends DomainError {
 
   constructor(error: unknown, deliveryAccepted: boolean) {
     super(
-      'INTERNAL_ERROR',
+      deliveryAccepted ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN' : 'ACTIVE_INPUT_NOT_DELIVERED',
       deliveryAccepted ? ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE : ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
       500,
       !deliveryAccepted,

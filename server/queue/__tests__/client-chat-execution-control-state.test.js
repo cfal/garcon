@@ -73,6 +73,16 @@ describe('stored chat execution-control projection', () => {
     }))).toThrow('recoveredInputContinuation is invalid');
   });
 
+  it('rejects persisted metadata that the client cannot parse', () => {
+    for (const version of [1.5, Number.MAX_SAFE_INTEGER + 1, -1]) {
+      expect(() => parseStoredChatExecutionControlState(storedControl([], { version })))
+        .toThrow('version must be a nonnegative safe integer');
+    }
+    expect(() => parseStoredChatExecutionControlState(storedControl([], {
+      updatedAt: 'not-a-timestamp',
+    }))).toThrow('updatedAt must be a canonical timestamp or null');
+  });
+
   it('retains bounded recently-dispatched markers after the sending entry leaves', () => {
     const markers = Array.from({ length: MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES + 3 }, (_, index) => ({
       entryId: `q${index}`,

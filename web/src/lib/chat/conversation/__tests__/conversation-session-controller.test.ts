@@ -267,6 +267,7 @@ function createDeps(chat = createRunningChat()) {
 			patchChat: vi.fn(),
 			patchLastReadAt: vi.fn(),
 			applyStartEntry: vi.fn(),
+			applyProcessingEvent: vi.fn(),
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			renameChat: vi.fn().mockResolvedValue(true),
@@ -1219,7 +1220,9 @@ describe('ConversationSessionController', () => {
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
 		});
-		mockStartChat.mockRejectedValueOnce(new Error('startup unavailable'));
+		mockStartChat.mockRejectedValueOnce(
+			new ApiError(400, 'startup unavailable', 'VALIDATION_FAILED'),
+		);
 
 		await new ConversationSessionController(deps).submitForChat('draft-1');
 
@@ -1360,7 +1363,7 @@ describe('ConversationSessionController', () => {
 	});
 
 	it('marks the pending user message failed and restores composer input on REST rejection', async () => {
-		mockRunChat.mockRejectedValueOnce(new Error('network down'));
+		mockRunChat.mockRejectedValueOnce(new ApiError(400, 'request rejected', 'VALIDATION_FAILED'));
 		const { deps } = createDeps();
 		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'please send';
@@ -1371,10 +1374,55 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
-			content: 'Failed to send message: network down',
+			content: 'Failed to send message: request rejected',
 		});
 		expect(deps.composerState.inputText).toBe('please send');
 		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('retries an ambiguous direct response once with the same identity', async () => {
+		mockRunChat.mockRejectedValueOnce(new TypeError('connection closed')).mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-retry',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'duplicate',
+			acceptedAt: '2026-07-19T00:00:00.000Z',
+		});
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.composerState.inputText = 'send exactly once';
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockRunChat).toHaveBeenCalledTimes(2);
+		expect(mockRunChat.mock.calls[1][0]).toEqual(mockRunChat.mock.calls[0][0]);
+		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
+		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('keeps an ambiguous direct outcome unconfirmed without restoring the composer', async () => {
+		mockRunChat.mockRejectedValue(new TypeError('connection closed'));
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.composerState.inputText = 'possibly delivered';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockRunChat).toHaveBeenCalledTimes(2);
+		expect(mockRunChat.mock.calls[1][0]).toEqual(mockRunChat.mock.calls[0][0]);
+		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('unconfirmed');
+		expect(deps.composerState.inputText).toBe('');
+		expect(deps.sessions.applyProcessingEvent).not.toHaveBeenCalledWith('chat-1', false);
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content:
+				'Message delivery could not be confirmed. Check the conversation before sending it again.',
+		});
 	});
 
 	it('removes the optimistic row and refreshes control once on direct admission conflict', async () => {
@@ -1449,6 +1497,28 @@ describe('ConversationSessionController', () => {
 				}),
 			}),
 		);
+	});
+
+	it('does not restore a queued draft when both same-ID attempts have ambiguous outcomes', async () => {
+		const chat = createRunningChat({ isProcessing: true, status: 'running' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = 'possibly queued';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockCreateQueuedInput.mockRejectedValue(new TypeError('connection closed'));
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockCreateQueuedInput).toHaveBeenCalledTimes(2);
+		expect(mockCreateQueuedInput.mock.calls[1][0]).toEqual(mockCreateQueuedInput.mock.calls[0][0]);
+		expect(deps.composerState.inputText).toBe('');
+		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content:
+				'Could not confirm whether the message was added to the queue. Check the queue before sending it again.',
+		});
 	});
 
 	it('sends directly through an empty recovered-input continuation boundary', async () => {
@@ -1767,6 +1837,38 @@ describe('ConversationSessionController', () => {
 			expect.stringContaining('first queued message'),
 		);
 		expect(deps.chatState.clearLocalNotices).toHaveBeenCalledOnce();
+	});
+
+	it('retries queue creation with the same command identity', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const nextControl = controlWithQueue(
+			{},
+			{
+				version: 3,
+				updatedAt: '2026-05-14T00:00:02.000Z',
+			},
+		);
+		mockCreateQueuedInput
+			.mockRejectedValueOnce(new TypeError('connection closed'))
+			.mockResolvedValueOnce({
+				success: true,
+				commandType: 'queue-entry-create',
+				clientRequestId: 'req-create',
+				chatId: 'chat-1',
+				status: 'duplicate',
+				acceptedAt: '2026-05-14T00:00:02.000Z',
+				entryId: 'entry-2',
+				control: nextControl,
+			});
+
+		await new ConversationSessionController(deps).createQueueEntryForChat(
+			'chat-1',
+			'recovered draft',
+		);
+
+		expect(mockCreateQueuedInput).toHaveBeenCalledTimes(2);
+		expect(mockCreateQueuedInput.mock.calls[1][0]).toEqual(mockCreateQueuedInput.mock.calls[0][0]);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', nextControl);
 	});
 
 	it('replaces and deletes queued entries by ID through separate commands', async () => {

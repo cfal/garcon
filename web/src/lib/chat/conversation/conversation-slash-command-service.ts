@@ -17,6 +17,10 @@ import {
 	errorDetail,
 	prepareChatImages,
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
+import {
+	CommandOutcomeUnknownError,
+	submitIdempotentCommand,
+} from '$lib/chat/conversation/idempotent-command.js';
 import * as m from '$lib/paraglide/messages.js';
 
 interface SlashCommandSessions {
@@ -246,22 +250,23 @@ export class ConversationSlashCommandService {
 			model,
 			sourceChat.modelEndpointId,
 		);
+		const request = {
+			clientRequestId: createClientCommandId(),
+			clientMessageId: createClientCommandId(),
+			sourceChatId,
+			chatId: forkChatId,
+			command: message.trim(),
+			permissionMode: sourceChat.permissionMode,
+			thinkingMode: sourceChat.thinkingMode,
+			agentSettings: sourceChat.agentSettings,
+			images: imagePayload.length > 0 ? imagePayload : undefined,
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		};
 		try {
-			const response = await forkRunChat({
-				clientRequestId: createClientCommandId(),
-				clientMessageId: createClientCommandId(),
-				sourceChatId,
-				chatId: forkChatId,
-				command: message.trim(),
-				permissionMode: sourceChat.permissionMode,
-				thinkingMode: sourceChat.thinkingMode,
-				agentSettings: sourceChat.agentSettings,
-				images: imagePayload.length > 0 ? imagePayload : undefined,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
+			const response = await submitIdempotentCommand(() => forkRunChat(request));
 			deps.sessions.upsertServerChat(response.chat);
 			deps.sessions.setSelectedChatId(response.chat.id);
 			deps.navigation.navigateToChat?.(response.chat.id);
@@ -269,10 +274,15 @@ export class ConversationSlashCommandService {
 				deps.lifecycle.beginTurn(response.chat.id);
 			}
 		} catch (error) {
-			this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+			if (!outcomeUnknown) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+			}
 			deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
+				outcomeUnknown
+					? m.chat_notice_fork_outcome_unconfirmed()
+					: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
 		}
 	}
