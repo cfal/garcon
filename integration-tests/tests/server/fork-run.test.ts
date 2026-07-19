@@ -37,8 +37,6 @@ describe('fork-run lifecycle', () => {
         clientMessageId,
         permissionMode: 'default' as const,
         thinkingMode: 'none' as const,
-        claudeThinkingMode: 'auto' as const,
-        ampAgentMode: 'smart' as const,
         model: fixture.provider.model,
         apiProviderId: fixture.provider.providerId,
         modelEndpointId: fixture.provider.endpointId,

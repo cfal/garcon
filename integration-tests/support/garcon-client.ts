@@ -113,6 +113,11 @@ export interface GarconTestClientOptions {
 
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSED = 3;
+const DIRECT_OPENAI_SETTINGS = {
+  ownerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+  schemaVersion: 1,
+  values: {},
+} as const;
 
 export class GarconApiError extends Error {
   constructor(
@@ -350,8 +355,7 @@ export class GarconTestClient {
       modelProtocol: input.provider.protocol,
       permissionMode: 'default',
       thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
+      agentSettings: DIRECT_OPENAI_SETTINGS,
       command: input.content,
     };
   }
@@ -384,8 +388,7 @@ export class GarconTestClient {
       command: input.content,
       permissionMode: 'default',
       thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
+      agentSettings: DIRECT_OPENAI_SETTINGS,
       model: input.provider.model,
       apiProviderId: input.provider.providerId,
       modelEndpointId: input.provider.endpointId,
