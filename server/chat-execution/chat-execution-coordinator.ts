@@ -12,7 +12,7 @@ import {
 import type { IChatRegistry } from '../chats/store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
-import { ActiveInputDeliveryError, DomainError } from '../lib/domain-error.js';
+import { ActiveInputDeliveryError } from '../lib/domain-error.js';
 import type { TurnIdentity } from '../lib/turn-identity.js';
 import {
   type QueuedTurnFinalizationOutcome,
@@ -230,10 +230,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       ),
       isShuttingDown: () => this.#shuttingDown,
       hasManualStop: (chatId) => this.#hasDrainSuppression(chatId, 'manual-stop'),
-      interruptInFlight: (chatId) => {
-        const stop = this.#ownership.stop(chatId);
-        return stop?.intent === 'interrupt-and-send' ? stop.promise : null;
-      },
+      stopBarrier: (chatId) => this.#sessionStops.drainStop(chatId),
       popNext: (chatId) => this.popNextChat(chatId),
       readControl: (chatId) => this.readChatExecutionControl(chatId),
       setActiveEntry: (chatId, entryId) => { this.#ownership.setActiveDrainEntry(chatId, entryId); },
@@ -270,7 +267,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       removeSent: async (chatId, entryId) => {
         await this.removeSentChat(chatId, entryId);
       },
-      waitForSessionStop: (chatId) => this.#sessionStops.wait(chatId),
       publishIdle: (chatId) => { this.emit('chat-idle', chatId); },
       publishTurnFailed: (chatId, message, options) => {
         this.emit('turn-failed', chatId, message, options);
@@ -559,28 +555,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     kind: AutomaticQueuePauseKind,
   ): Promise<StoredChatExecutionControlState> {
     return this.#controlOperations.requeueAndPause(chatId, entryId, kind);
-  }
-
-  // Submits a command to a chat session. Appends the user message to
-  // history, runs the agent turn, then drains any queued entries.
-  async submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
-    const turnOptions = ensureTurnIdentifiers(options);
-    const reservation = this.reserveDirectTurn(chatId, turnOptions);
-    try {
-      reservation.executionAdmission.signal.throwIfAborted();
-      const control = await this.readChatExecutionControl(chatId);
-      this.assertDirectTurnReservationActive(reservation);
-      reservation.executionAdmission.signal.throwIfAborted();
-      if (control.entries.length > 0 || control.pause || control.recoveredInputContinuation) {
-        throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
-      }
-      await this.registerPendingUserInput(chatId, command, turnOptions);
-      reservation.executionAdmission.signal.throwIfAborted();
-    } catch (error) {
-      await this.releaseDirectTurn(reservation);
-      throw error;
-    }
-    await this.runReservedTurn(reservation, command, turnOptions);
   }
 
   async registerPendingUserInput(

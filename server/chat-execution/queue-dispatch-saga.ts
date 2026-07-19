@@ -14,7 +14,7 @@ export interface QueueDispatchHost {
   shouldHalt(chatId: string): boolean;
   isShuttingDown(): boolean;
   hasManualStop(chatId: string): boolean;
-  interruptInFlight(chatId: string): Promise<boolean> | null;
+  stopBarrier(chatId: string): Promise<boolean> | null;
   popNext(chatId: string): Promise<{ entry: StoredQueueEntry; control: StoredChatExecutionControlState } | null>;
   readControl(chatId: string): Promise<StoredChatExecutionControlState>;
   setActiveEntry(chatId: string, entryId: string): void;
@@ -43,7 +43,6 @@ export interface QueueDispatchHost {
     kind: AutomaticQueuePauseKind,
   ): Promise<void>;
   removeSent(chatId: string, entryId: string): Promise<void>;
-  waitForSessionStop(chatId: string): Promise<void>;
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
 }
@@ -84,11 +83,15 @@ export class QueueDispatchSaga {
         await this.host.restoreStopped(chatId, entry.id);
         return;
       }
-      const interrupt = this.host.interruptInFlight(chatId);
-      if (interrupt) {
-        await interrupt.catch(() => undefined);
+      const stop = this.host.stopBarrier(chatId);
+      if (stop) {
+        const stopped = await stop.catch(() => false);
         if (this.host.hasManualStop(chatId)) {
           await this.host.restoreStopped(chatId, entry.id);
+          return;
+        }
+        if (!stopped) {
+          await this.host.returnUnsent(chatId, entry.id);
           return;
         }
       }
@@ -124,7 +127,7 @@ export class QueueDispatchSaga {
       attempt.markRegistered();
       if (this.host.shouldHalt(chatId)) {
         stage = 'running';
-        const shouldStart = await attempt.waitForLaunchDecision();
+        const shouldStart = await attempt.waitForLaunchDecision(admissionController.signal);
         if (!shouldStart) throw new Error('Queued turn stopped before runtime start');
       }
       this.host.publishDispatching(chatId, entry);
@@ -150,7 +153,7 @@ export class QueueDispatchSaga {
       }
       if (stage === 'running' && attempt?.isExpectedAbort === true) {
         attempt.clearExpectedAbort();
-        return this.#settleExpectedAbort(chatId, entry, finalization);
+        return this.#settleExpectedAbort(chatId, entry, options, error, finalization);
       }
       await this.#settleFailure(chatId, entry, options, stage, error, finalization);
       return false;
@@ -229,12 +232,25 @@ export class QueueDispatchSaga {
   async #settleExpectedAbort(
     chatId: string,
     entry: StoredQueueEntry,
+    options: RunAgentTurnOptions,
+    runError: unknown,
     finalization: QueuedTurnFinalizationHandle | undefined,
   ): Promise<boolean> {
+    let stopped = false;
+    try {
+      const stop = this.host.stopBarrier(chatId);
+      stopped = stop ? await stop : false;
+    } catch {
+      // The provider failure remains authoritative when the stop acknowledgement fails.
+    }
+    if (!stopped) {
+      await this.#settleFailure(chatId, entry, options, 'running', runError, finalization);
+      return false;
+    }
+
     try {
       await this.host.removeSent(chatId, entry.id);
       finalization?.settle('committed');
-      await this.host.waitForSessionStop(chatId);
       return true;
     } catch (error: unknown) {
       logger.error('queue: aborted entry finalization failed:', {

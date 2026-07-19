@@ -38,8 +38,12 @@ export class SessionStopSaga {
     }
   }
 
-  async wait(chatId: string): Promise<void> {
-    await this.ownership.stop(chatId)?.promise.catch(() => undefined);
+  drainStop(chatId: string): Promise<boolean> | null {
+    const operation = this.ownership.drainStop(chatId);
+    if (!operation) return null;
+    return operation.promise.finally(() => {
+      this.ownership.consumeDrainStop(chatId, operation);
+    });
   }
 
   async stop(chatId: string): Promise<StopActiveTurnResult> {
@@ -120,7 +124,12 @@ export class SessionStopSaga {
     const currentAttempt = attempt && this.ownership.isCurrentAttempt(chatId, attempt)
       ? attempt
       : undefined;
-    this.host.stopRequested(chatId, stopId, currentAttempt?.identity());
+    try {
+      this.host.stopRequested(chatId, stopId, currentAttempt?.identity());
+    } catch (error) {
+      currentAttempt?.allowLaunch();
+      throw error;
+    }
     if (currentAttempt && registered) {
       currentAttempt.allowLaunch();
       const abortable = await this.#waitUntilAbortable(chatId, currentAttempt);
@@ -128,11 +137,11 @@ export class SessionStopSaga {
         this.host.stopped(chatId, false, intent, stopId);
         return false;
       }
-      if (currentAttempt.entryId) currentAttempt.expectAbort();
+      if (currentAttempt.entryId) currentAttempt.expectAbort(stopId);
     }
     try {
       const success = await this.runner.abortSession(chatId);
-      if (!success) currentAttempt?.clearExpectedAbort();
+      if (!success) currentAttempt?.clearExpectedAbort(stopId);
       this.host.stopped(chatId, success, intent, stopId);
       if (success && currentAttempt && !this.runner.isChatRunning(chatId)) {
         currentAttempt.markTerminalObserved();
@@ -140,7 +149,7 @@ export class SessionStopSaga {
       }
       return success;
     } catch (error) {
-      currentAttempt?.clearExpectedAbort();
+      currentAttempt?.clearExpectedAbort(stopId);
       this.host.stopped(chatId, false, intent, stopId);
       throw error;
     }

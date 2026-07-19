@@ -59,7 +59,3 @@ export function parseChatExecutionControlState(value: unknown): ChatExecutionCon
     updatedAt: raw.updatedAt,
   };
 }
-
-export function normalizeChatExecutionControlState(value: unknown): ChatExecutionControlState {
-  return parseChatExecutionControlState(value) ?? emptyChatExecutionControlState();
-}

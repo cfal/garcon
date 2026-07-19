@@ -272,7 +272,6 @@ export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
 
 export interface ChatExecutionService {
   deleteChatQueueFile(chatId: string): Promise<void>;
-  submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   scheduleDirectInput(input: AcceptedDirectInput): Promise<void>;
   runInitialInput(input: AcceptedDirectInput): Promise<void>;
   scheduleDirectOperation(input: AcceptedDirectOperation): Promise<void>;

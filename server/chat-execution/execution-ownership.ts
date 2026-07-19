@@ -28,6 +28,7 @@ export class ExecutionOwnership {
   readonly #executionAttempts = new Map<string, QueueExecutionAttempt>();
   readonly #turnFinalizations = new QueuedTurnFinalizationTracker();
   readonly #sessionStops = new Map<string, SessionStopInFlight>();
+  readonly #drainStops = new Map<string, SessionStopInFlight>();
   readonly #continuedRecoveredInputs = new Set<string>();
 
   beginShutdown(reason: Error): string[] {
@@ -125,6 +126,7 @@ export class ExecutionOwnership {
     this.#drainAdmissions.delete(chatId);
     this.#activeDrainEntries.delete(chatId);
     this.#shutdownDrainAborts.delete(chatId);
+    this.#drainStops.delete(chatId);
   }
 
   setActiveDrainEntry(chatId: string, entryId: string): void {
@@ -215,6 +217,7 @@ export class ExecutionOwnership {
     this.#turnFinalizations.clearChat(chatId);
     this.#executionAttempts.get(chatId)?.markSettled();
     this.#executionAttempts.delete(chatId);
+    this.#drainStops.delete(chatId);
     this.#continuedRecoveredInputs.delete(chatId);
     this.notifyOwnersChanged();
   }
@@ -237,6 +240,9 @@ export class ExecutionOwnership {
       started: false,
     };
     this.#sessionStops.set(chatId, operation);
+    if (this.#draining.has(chatId) && !this.#drainStops.has(chatId)) {
+      this.#drainStops.set(chatId, operation);
+    }
     return operation;
   }
 
@@ -246,6 +252,14 @@ export class ExecutionOwnership {
 
   clearStop(chatId: string, operation: SessionStopInFlight): void {
     if (this.#sessionStops.get(chatId) === operation) this.#sessionStops.delete(chatId);
+  }
+
+  drainStop(chatId: string): SessionStopInFlight | undefined {
+    return this.#drainStops.get(chatId);
+  }
+
+  consumeDrainStop(chatId: string, operation: SessionStopInFlight): void {
+    if (this.#drainStops.get(chatId) === operation) this.#drainStops.delete(chatId);
   }
 
   continueRecoveredInput(chatId: string): void {
