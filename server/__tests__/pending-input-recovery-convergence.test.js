@@ -43,11 +43,12 @@ function createPendingInputs(nativeMessages) {
   });
 }
 
-async function restorePendingInputs(ledger, pendingInputs) {
+async function restorePendingInputs(ledger, pendingInputs, onRecoveredChatSettled) {
   const coordinator = new PendingUserInputRecoveryCoordinator({
     ledger,
     pendingInputs,
     chatExists: () => true,
+    onRecoveredChatSettled,
   });
   coordinator.start();
   const result = await coordinator.restore();
@@ -85,16 +86,23 @@ describe('pending input restart recovery convergence', () => {
       { clientRequestId },
     )];
     const pendingInputs = createPendingInputs(nativeMessages);
-    const firstRecovery = await restorePendingInputs(new CommandLedger(workspaceDir), pendingInputs);
     const firstQueue = createQueue(pendingInputs);
-    await firstQueue.recoverStaleChatQueues(new Set(firstRecovery.result.restoredChatIds));
-    const firstPause = (await firstQueue.readChatQueue(chatId)).pause;
-    expect(firstPause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+    const firstRecovery = await restorePendingInputs(
+      new CommandLedger(workspaceDir),
+      pendingInputs,
+      async (settledChatId) => {
+        await firstQueue.dropRecoveredInputContinuation(settledChatId);
+      },
+    );
+    await firstQueue.recoverChatExecutionControls(new Set(firstRecovery.result.restoredChatIds));
+    await firstRecovery.coordinator.activateRecoveredChatSettlement();
+    expect((await firstQueue.readChatExecutionControl(chatId)).recoveredInputContinuation)
+      .toMatchObject({ id: expect.any(String) });
 
     await firstRecovery.coordinator.reconcileChat(chatId);
-    await firstQueue.resumeChatQueue(chatId, firstPause.id);
 
     expect(pendingInputs.listForChat(chatId)).toEqual([]);
+    expect((await firstQueue.readChatExecutionControl(chatId)).recoveredInputContinuation).toBeNull();
     await expect(
       new CommandLedger(workspaceDir).listPendingInputRecoveries(),
     ).resolves.toEqual([]);
@@ -103,40 +111,50 @@ describe('pending input restart recovery convergence', () => {
     const secondRecovery = await restorePendingInputs(
       new CommandLedger(workspaceDir),
       restartedPendingInputs,
+      () => Promise.resolve(),
     );
     const secondQueue = createQueue(restartedPendingInputs);
-    await secondQueue.recoverStaleChatQueues(new Set(secondRecovery.result.restoredChatIds));
+    await secondQueue.recoverChatExecutionControls(new Set(secondRecovery.result.restoredChatIds));
 
     expect(secondRecovery.result.restored).toBe(0);
-    expect((await secondQueue.readChatQueue(chatId)).pause).toBeNull();
+    expect((await secondQueue.readChatExecutionControl(chatId)).recoveredInputContinuation).toBeNull();
   });
 
-  it('reinstalls the gate after Resume when native persistence remains unproven', async () => {
+  it('reinstalls continuation after process-local consume when native persistence remains unproven', async () => {
     const chatId = 'chat-unmatched';
     await createLegacyFailedInput(chatId, 'req-unmatched', 'not persisted before restart');
     const pendingInputs = createPendingInputs([]);
-    const firstRecovery = await restorePendingInputs(new CommandLedger(workspaceDir), pendingInputs);
     const firstQueue = createQueue(pendingInputs);
-    await firstQueue.recoverStaleChatQueues(new Set(firstRecovery.result.restoredChatIds));
-    const firstPause = (await firstQueue.readChatQueue(chatId)).pause;
+    const firstRecovery = await restorePendingInputs(
+      new CommandLedger(workspaceDir),
+      pendingInputs,
+      () => Promise.resolve(),
+    );
+    await firstQueue.recoverChatExecutionControls(new Set(firstRecovery.result.restoredChatIds));
+    const firstContinuation = (await firstQueue.readChatExecutionControl(chatId))
+      .recoveredInputContinuation;
 
     await firstRecovery.coordinator.reconcileChat(chatId);
-    await firstQueue.resumeChatQueue(chatId, firstPause.id);
+    const reservation = firstQueue.reserveDirectTurn(chatId);
+    await firstQueue.consumeRecoveredInputContinuationForDirectTurn(reservation);
+    await firstQueue.releaseDirectTurn(reservation);
 
     const restartedPendingInputs = createPendingInputs([]);
     const secondRecovery = await restorePendingInputs(
       new CommandLedger(workspaceDir),
       restartedPendingInputs,
+      () => Promise.resolve(),
     );
     const secondQueue = createQueue(restartedPendingInputs);
-    await secondQueue.recoverStaleChatQueues(new Set(secondRecovery.result.restoredChatIds));
+    await secondQueue.recoverChatExecutionControls(new Set(secondRecovery.result.restoredChatIds));
 
     expect(secondRecovery.result.restored).toBe(1);
     expect(restartedPendingInputs.listForChat(chatId)).toMatchObject([
       { clientRequestId: 'req-unmatched', deliveryStatus: 'unconfirmed' },
     ]);
-    expect((await secondQueue.readChatQueue(chatId)).pause).toMatchObject({
-      kind: 'recovered-unconfirmed-input',
-    });
+    const secondContinuation = (await secondQueue.readChatExecutionControl(chatId))
+      .recoveredInputContinuation;
+    expect(secondContinuation).toMatchObject({ id: expect.any(String) });
+    expect(secondContinuation.id).not.toBe(firstContinuation.id);
   });
 });

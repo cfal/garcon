@@ -3737,7 +3737,7 @@ describe('CodexAppServerRuntime', () => {
 	    });
 
 	    expect(result).toBe(true);
-	    expect((await queue.readChatQueue('chat-1')).entries).toEqual([]);
+	    expect((await queue.readChatExecutionControl('chat-1')).entries).toEqual([]);
     expect(fake.steerTurn).toHaveBeenCalledWith(expect.objectContaining({
       expectedTurnId: 'goal-turn',
       clientUserMessageId: 'message-queue',

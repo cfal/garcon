@@ -15,7 +15,109 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function recoveredRecord(clientRequestId, chatId = 'chat-1') {
+  return {
+    key: `agent-run:${chatId}:${clientRequestId}`,
+    commandType: 'agent-run',
+    chatId,
+    clientRequestId,
+    payloadHash: `hash-${clientRequestId}`,
+    payload: { command: `content-${clientRequestId}` },
+    status: 'failed',
+    acceptedAt: '2026-06-01T00:00:00.000Z',
+    updatedAt: '2026-06-01T00:00:01.000Z',
+    pendingInputRecovery: 'required',
+  };
+}
+
 describe('PendingUserInputRecoveryCoordinator', () => {
+  it('buffers final recovered-cohort settlement until the sink is activated', async () => {
+    const onRecoveredChatSettled = mock(async () => undefined);
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => [recoveredRecord('req-1')]),
+      settlePendingInputRecovery: mock(async () => true),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      chatExists: () => true,
+      onRecoveredChatSettled,
+    });
+    coordinator.start();
+    await coordinator.restore();
+
+    pendingInputs.store.clear('chat-1', 'req-1', 'persisted');
+    await coordinator.waitForSettlements('chat-1');
+    expect(onRecoveredChatSettled).not.toHaveBeenCalled();
+
+    await coordinator.activateRecoveredChatSettlement();
+    expect(onRecoveredChatSettled).toHaveBeenCalledTimes(1);
+    expect(onRecoveredChatSettled).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('notifies only after the final request in a restored chat cohort settles', async () => {
+    const onRecoveredChatSettled = mock(async () => undefined);
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => [
+        recoveredRecord('req-1'),
+        recoveredRecord('req-2'),
+      ]),
+      settlePendingInputRecovery: mock(async () => true),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      chatExists: () => true,
+      onRecoveredChatSettled,
+    });
+    coordinator.start();
+    await coordinator.restore();
+    await coordinator.activateRecoveredChatSettlement();
+
+    pendingInputs.store.clear('chat-1', 'req-1', 'persisted');
+    await coordinator.waitForSettlements('chat-1');
+    expect(onRecoveredChatSettled).not.toHaveBeenCalled();
+
+    pendingInputs.store.clear('chat-1', 'req-2', 'persisted');
+    await coordinator.waitForSettlements('chat-1');
+    expect(onRecoveredChatSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify recovery settlement when the ledger write fails', async () => {
+    const onRecoveredChatSettled = mock(async () => undefined);
+    const ledger = {
+      listPendingInputRecoveries: mock(async () => [recoveredRecord('req-1')]),
+      settlePendingInputRecovery: mock(async () => {
+        throw new Error('ledger unavailable');
+      }),
+    };
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const coordinator = new PendingUserInputRecoveryCoordinator({
+      ledger,
+      pendingInputs,
+      chatExists: () => true,
+      onRecoveredChatSettled,
+    });
+    coordinator.start();
+    await coordinator.restore();
+    await coordinator.activateRecoveredChatSettlement();
+
+    pendingInputs.store.clear('chat-1', 'req-1', 'persisted');
+    await expect(coordinator.waitForSettlements('chat-1')).rejects.toThrow('ledger unavailable');
+    expect(onRecoveredChatSettled).not.toHaveBeenCalled();
+  });
+
   it('keeps reconciliation and shutdown waiting for durable ledger settlement', async () => {
     const settlement = deferred();
     const ledger = {
@@ -46,6 +148,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await coordinator.restore();
@@ -98,6 +201,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     }, settlementErrors);
     coordinator.start();
     await coordinator.restore();
@@ -153,6 +257,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       pendingInputs,
       nativeSnapshots: { reconcileNativeSnapshot: installSnapshot },
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await coordinator.restore();
@@ -205,6 +310,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       pendingInputs,
       nativeSnapshots: chatViews,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await coordinator.restore();
@@ -261,6 +367,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await coordinator.restore();
@@ -298,6 +405,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await pendingInputs.register('chat-1', 'first', { clientRequestId: 'req-first' });
@@ -342,6 +450,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await pendingInputs.register('chat-1', 'retry', { clientRequestId: 'req-retry' });
@@ -369,6 +478,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await pendingInputs.register('chat-1', 'failed', { clientRequestId: 'req-failed' });
@@ -412,6 +522,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await pendingInputs.register('chat-1', 'first', { clientRequestId: 'req-first' });
@@ -451,6 +562,7 @@ describe('PendingUserInputRecoveryCoordinator', () => {
       ledger,
       pendingInputs,
       chatExists: () => true,
+      onRecoveredChatSettled: () => Promise.resolve(),
     });
     coordinator.start();
     await pendingInputs.register('chat-1', 'held', { clientRequestId: 'req-held' });

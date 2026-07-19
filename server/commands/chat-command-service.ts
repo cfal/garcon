@@ -18,6 +18,7 @@ import type {
   QueueEntryDeleteResponse,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
+  RecoveredInputContinueRequest,
   StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
@@ -48,7 +49,11 @@ import {
   type ChatQueueService,
   type DirectTurnReservation,
 } from '../queue.js';
-import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
+import {
+  normalizeStoredChatExecutionControlState,
+  toClientChatExecutionControlState,
+  type StoredChatExecutionControlState,
+} from '../chat-execution-control-state.ts';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import {
@@ -58,7 +63,7 @@ import {
 import { createLogger } from '../lib/log.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
-import { ActiveInputDeliveryError } from '../lib/domain-error.js';
+import { ActiveInputDeliveryError, DomainError } from '../lib/domain-error.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
@@ -79,7 +84,10 @@ type QueueDep = Pick<
   | 'triggerDrain'
   | 'isChatExecutionReserved'
   | 'hasChatExecutionOwner'
-  | 'readChatQueue'
+  | 'readChatExecutionControl'
+  | 'assertDirectTurnReservationActive'
+  | 'consumeRecoveredInputContinuationForDirectTurn'
+  | 'continuePastRecoveredInput'
   | 'createChatQueueEntry'
   | 'replaceChatQueueEntry'
   | 'deleteChatQueueEntry'
@@ -275,6 +283,11 @@ interface QueueMutationInput {
   pauseId?: string;
 }
 
+type DirectRunOrigin =
+  | 'interactive-existing-chat'
+  | 'scheduled-existing-chat'
+  | 'fork-created-chat';
+
 interface PermissionDecisionInput extends PermissionDecisionPayload {
   chatId: string;
   permissionRequestId: string;
@@ -311,6 +324,19 @@ export class CommandValidationError extends Error {
   ) {
     super(message);
     this.name = 'CommandValidationError';
+  }
+}
+
+export class CommandExecutionControlError extends CommandValidationError {
+  constructor(
+    code: CommandErrorCode,
+    message: string,
+    status: number,
+    retryable: boolean,
+    readonly control: StoredChatExecutionControlState,
+  ) {
+    super(code, message, status, retryable);
+    this.name = 'CommandExecutionControlError';
   }
 }
 
@@ -672,7 +698,7 @@ export class ChatCommandService {
         ...input,
         images,
         options: this.#optionsWithoutAttachments(input.options),
-      }),
+      }, 'interactive-existing-chat'),
     );
   }
 
@@ -781,7 +807,9 @@ export class ChatCommandService {
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         entryId: ledger.record.entryId ?? preparedEntryId,
-        queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+        control: toClientChatExecutionControlState(
+          await this.deps.queue.readChatExecutionControl(input.chatId),
+        ),
       };
     }
 
@@ -812,7 +840,7 @@ export class ChatCommandService {
         recoveringAcceptedCommand || result.duplicate ? 'duplicate' : 'accepted',
       ),
       entryId: result.entryId,
-      queue: toClientQueueState(result.queue),
+      control: toClientChatExecutionControlState(result.control),
     };
   }
 
@@ -847,7 +875,9 @@ export class ChatCommandService {
         return {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
           entryId: ledger.record.entryId ?? entryId,
-          queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+          control: toClientChatExecutionControlState(
+            await this.deps.queue.readChatExecutionControl(input.chatId),
+          ),
         };
       }
 
@@ -869,7 +899,7 @@ export class ChatCommandService {
             recoveringAcceptedCommand || result.duplicate ? 'duplicate' : 'accepted',
           ),
           entryId,
-          queue: toClientQueueState(result.queue),
+          control: toClientChatExecutionControlState(result.control),
         };
       } catch (error) {
         const mutationError = error instanceof QueueEntryMutationError ? error : null;
@@ -904,7 +934,9 @@ export class ChatCommandService {
         return {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
           entryId: ledger.record.entryId ?? entryId,
-          queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+          control: toClientChatExecutionControlState(
+            await this.deps.queue.readChatExecutionControl(input.chatId),
+          ),
         };
       }
 
@@ -923,7 +955,7 @@ export class ChatCommandService {
             recoveringAcceptedCommand || result.duplicate ? 'duplicate' : 'accepted',
           ),
           entryId,
-          queue: toClientQueueState(result.queue),
+          control: toClientChatExecutionControlState(result.control),
         };
       } catch (error) {
         const mutationError = error instanceof QueueEntryMutationError ? error : null;
@@ -961,8 +993,8 @@ export class ChatCommandService {
           );
         }
         if (ledger.record.status === 'accepted') {
-          const queue = await this.deps.queue.readChatQueue(input.chatId);
-          const applied = queue.appliedCommands.find(
+          const control = await this.deps.queue.readChatExecutionControl(input.chatId);
+          const applied = control.appliedCommands.find(
             (command) => command.key === ledger.record.key && command.operation === 'create',
           );
           if (!applied) {
@@ -984,7 +1016,7 @@ export class ChatCommandService {
             ...commandResultFromRecord(updated ?? ledger.record, 'duplicate'),
             delivery: 'queued',
             entryId: applied.entryId,
-            queue: toClientQueueState(queue),
+            control: toClientChatExecutionControlState(control),
           };
         }
         if (ledger.record.entryId) {
@@ -996,7 +1028,9 @@ export class ChatCommandService {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
           delivery: ledger.record.entryId ? 'queued' : 'active',
           ...(ledger.record.entryId ? { entryId: ledger.record.entryId } : {}),
-          queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+          control: toClientChatExecutionControlState(
+            await this.deps.queue.readChatExecutionControl(input.chatId),
+          ),
         };
       }
 
@@ -1020,7 +1054,9 @@ export class ChatCommandService {
           return {
             ...commandResultFromRecord(updated ?? ledger.record),
             delivery: 'active',
-            queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+            control: toClientChatExecutionControlState(
+              await this.deps.queue.readChatExecutionControl(input.chatId),
+            ),
           };
         }
 
@@ -1039,7 +1075,7 @@ export class ChatCommandService {
           ...commandResultFromRecord(updated ?? ledger.record),
           delivery: 'queued',
           entryId: result.entryId,
-          queue: toClientQueueState(result.queue),
+          control: toClientChatExecutionControlState(result.control),
         };
       } catch (error) {
         deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
@@ -1065,8 +1101,10 @@ export class ChatCommandService {
       }
       const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
         || this.deps.queue.isChatExecutionReserved(chatId);
-      const queue = await this.deps.queue.readChatQueue(chatId);
-      const queueBlocksDirectRun = queue.entries.length > 0 || queue.pause !== null;
+      const control = await this.deps.queue.readChatExecutionControl(chatId);
+      const queueBlocksDirectRun = control.entries.length > 0
+        || control.pause !== null
+        || control.recoveredInputContinuation !== null;
       if ((busy || queueBlocksDirectRun) && input.busyBehavior === 'skip') {
         return { type: 'skipped-busy', chatId };
       }
@@ -1084,7 +1122,7 @@ export class ChatCommandService {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         options: {},
-      });
+      }, 'scheduled-existing-chat');
       return { type: 'sent', chatId };
     });
   }
@@ -1112,8 +1150,23 @@ export class ChatCommandService {
     return {
       success: true,
       chatId: input.chatId,
-      queue: toClientQueueState(queue),
+      control: toClientChatExecutionControlState(queue),
     };
+  }
+
+  async continueRecoveredInput(input: RecoveredInputContinueRequest): Promise<QueueMutationResponse> {
+    this.#requireChat(input.chatId);
+    const continuationId = input.continuationId.trim();
+    if (!continuationId) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'continuationId is required', 400);
+    }
+    return this.#withChatMutationLock(input.chatId, async () => ({
+      success: true,
+      chatId: input.chatId,
+      control: toClientChatExecutionControlState(
+        await this.deps.queue.continuePastRecoveredInput(input.chatId, continuationId),
+      ),
+    }));
   }
 
   async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
@@ -1160,7 +1213,9 @@ export class ChatCommandService {
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         stopped: ledger.record.status === 'finished',
-        queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+        control: toClientChatExecutionControlState(
+          await this.deps.queue.readChatExecutionControl(input.chatId),
+        ),
       };
     }
 
@@ -1172,7 +1227,7 @@ export class ChatCommandService {
       return {
         ...commandResultFromRecord(updated ?? ledger.record),
         stopped: result.stopped,
-        queue: toClientQueueState(result.queue),
+        control: toClientChatExecutionControlState(result.control),
       };
     } catch (error) {
       await this.deps.ledger.update(ledger.record.key, {
@@ -1201,6 +1256,9 @@ export class ChatCommandService {
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         stopped: ledger.record.status === 'finished',
+        control: toClientChatExecutionControlState(
+          await this.deps.queue.readChatExecutionControl(input.chatId),
+        ),
       };
     }
 
@@ -1212,6 +1270,9 @@ export class ChatCommandService {
       return {
         ...commandResultFromRecord(updated ?? ledger.record),
         stopped,
+        control: toClientChatExecutionControlState(
+          await this.deps.queue.readChatExecutionControl(input.chatId),
+        ),
       };
     } catch (error) {
       await this.deps.ledger.update(ledger.record.key, {
@@ -1259,11 +1320,17 @@ export class ChatCommandService {
       }
       let scheduled: CommandLedgerRecord | null;
       try {
-        await this.#assertDirectExecutionQueueAvailable(input.chatId);
+        this.deps.queue.assertDirectTurnReservationActive(reservation);
+        reservation.executionAdmission.signal.throwIfAborted();
+        await this.#assertDirectExecutionControlAvailable(input.chatId);
+        this.deps.queue.assertDirectTurnReservationActive(reservation);
+        reservation.executionAdmission.signal.throwIfAborted();
         scheduled = await this.deps.ledger.update(ledger.record.key, {
           status: 'scheduled',
           turnId,
         });
+        this.deps.queue.assertDirectTurnReservationActive(reservation);
+        reservation.executionAdmission.signal.throwIfAborted();
       } catch (error) {
         await this.deps.queue.releaseDirectTurn(reservation);
         await this.#markPreScheduleFailure(ledger.record.key, error);
@@ -1477,7 +1544,9 @@ export class ChatCommandService {
       );
     }
 
-    const queue = normalizeStoredQueueState(await this.deps.queue.readChatQueue(chatId));
+    const queue = normalizeStoredChatExecutionControlState(
+      await this.deps.queue.readChatExecutionControl(chatId),
+    );
     const sendingEntry = queue.entries.find((entry) => entry.status === 'sending');
     if (sendingEntry) {
       throw new CommandValidationError(
@@ -1537,7 +1606,10 @@ export class ChatCommandService {
     return null;
   }
 
-  async #submitHttpRun(input: NormalizedSubmitRunInput): Promise<CommandAcceptedResponse> {
+  async #submitHttpRun(
+    input: NormalizedSubmitRunInput,
+    origin: Extract<DirectRunOrigin, 'interactive-existing-chat' | 'scheduled-existing-chat'>,
+  ): Promise<CommandAcceptedResponse> {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
@@ -1552,7 +1624,7 @@ export class ChatCommandService {
       clientRequestId,
       clientMessageId,
       turnId,
-    }, 'agent-run');
+    }, 'agent-run', origin);
   }
 
   async #submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<ForkRunCommandResponse> {
@@ -1588,7 +1660,7 @@ export class ChatCommandService {
       clientRequestId,
       clientMessageId,
       turnId,
-    }, 'fork-run', {
+    }, 'fork-run', 'fork-created-chat', {
       prepare: async () => {
         await this.deps.ledger.update(ledger.record.key, {
           forkPreparation: {
@@ -1630,6 +1702,7 @@ export class ChatCommandService {
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
     commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
+    origin: DirectRunOrigin,
     preparation?: AcceptedRunPreparation,
   ): Promise<CommandAcceptedResponse> {
     if (ledger.kind === 'conflict') {
@@ -1655,24 +1728,34 @@ export class ChatCommandService {
     try {
       reservation = this.deps.queue.reserveDirectTurn(input.chatId, options);
     } catch (error) {
-      await this.#markPreScheduleFailure(ledger.record.key, error);
-      throw error;
+      const admissionError = await this.#withCurrentExecutionControl(input.chatId, error);
+      await this.#markPreScheduleFailure(ledger.record.key, admissionError);
+      throw admissionError;
     }
 
     try {
-      reservation.executionAdmission.signal.throwIfAborted();
-      await this.#assertDirectExecutionQueueAvailable(input.chatId);
-      reservation.executionAdmission.signal.throwIfAborted();
+      const assertAdmission = () => {
+        this.deps.queue.assertDirectTurnReservationActive(reservation);
+        reservation.executionAdmission.signal.throwIfAborted();
+      };
+      assertAdmission();
+      if (origin === 'interactive-existing-chat') {
+        await this.deps.queue.consumeRecoveredInputContinuationForDirectTurn(reservation);
+        assertAdmission();
+      }
+      await this.#assertDirectExecutionControlAvailable(input.chatId);
+      assertAdmission();
       await preparation?.prepare();
-      reservation.executionAdmission.signal.throwIfAborted();
+      assertAdmission();
       await this.#registerPendingInput(input.chatId, input.command, options);
-      reservation.executionAdmission.signal.throwIfAborted();
+      assertAdmission();
       const scheduled = await this.deps.ledger.update(ledger.record.key, {
         status: 'scheduled',
         turnId: options.turnId,
         pendingInputRecovery: 'required',
         forkPreparation: undefined,
       });
+      assertAdmission();
       this.#runReservedTurn(reservation, input.command, options);
       return commandResultFromRecord(scheduled ?? ledger.record);
     } catch (error) {
@@ -1724,16 +1807,42 @@ export class ChatCommandService {
     await this.deps.ledger.update(ledgerKey, patch);
   }
 
-  async #assertDirectExecutionQueueAvailable(chatId: string): Promise<void> {
-    const queue = await this.deps.queue.readChatQueue(chatId);
-    if (queue.entries.length === 0 && !queue.pause) return;
-    throw new CommandValidationError(
+  async #assertDirectExecutionControlAvailable(chatId: string): Promise<void> {
+    const control = await this.deps.queue.readChatExecutionControl(chatId);
+    if (
+      control.entries.length === 0
+      && !control.pause
+      && !control.recoveredInputContinuation
+    ) return;
+    throw new CommandExecutionControlError(
       'SESSION_BUSY',
-      queue.pause
+      control.recoveredInputContinuation
+        ? 'A recovered input must be continued before another direct turn'
+        : control.pause
         ? 'The chat queue is paused and must be reviewed before another direct turn'
         : 'Queued messages are pending and must be sent first',
       409,
       true,
+      control,
+    );
+  }
+
+  async #withCurrentExecutionControl(chatId: string, error: unknown): Promise<unknown> {
+    if (error instanceof CommandExecutionControlError) return error;
+    if (!(error instanceof DomainError) || error.code !== 'SESSION_BUSY') return error;
+
+    let control: StoredChatExecutionControlState;
+    try {
+      control = await this.deps.queue.readChatExecutionControl(chatId);
+    } catch {
+      return error;
+    }
+    return new CommandExecutionControlError(
+      'SESSION_BUSY',
+      error.message,
+      error.status,
+      error.retryable,
+      control,
     );
   }
 
@@ -1792,7 +1901,7 @@ export class ChatCommandService {
     throw new QueueEntryMutationError(
       record.errorCode,
       record.error ?? 'The queued message could not be changed',
-      await this.deps.queue.readChatQueue(record.chatId),
+      await this.deps.queue.readChatExecutionControl(record.chatId),
     );
   }
 

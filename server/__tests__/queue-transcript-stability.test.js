@@ -313,7 +313,7 @@ describe('queue and transcript stability', () => {
         content: 'preparing',
         deliveryStatus: 'unconfirmed',
       }]);
-      expect(await queue.readChatQueue(chatId)).toMatchObject({
+      expect(await queue.readChatExecutionControl(chatId)).toMatchObject({
         entries: [{ content: 'tail', status: 'queued' }],
         pause: { kind: 'manual' },
       });
@@ -398,7 +398,7 @@ describe('queue and transcript stability', () => {
       await drain;
 
       expect(activity.isActive(chatId)).toBe(false);
-      expect((await queue.readChatQueue(chatId)).entries).toEqual([]);
+      expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([]);
       expect(pendingInputs.listForChat(chatId)).toEqual([]);
       expect(views.readPage(chatId, 20).messages.map((entry) => entry.message.content)).toEqual([
         'first',
@@ -457,8 +457,8 @@ describe('queue and transcript stability', () => {
       await ledger.update(accepted.record.key, { status: 'scheduled' });
 
       const restartedQueue = new QueueManager(workspaceDir, ...queueDeps);
-      await restartedQueue.recoverStaleChatQueues();
-      const recoveredQueue = await restartedQueue.readChatQueue(chatId);
+      await restartedQueue.recoverChatExecutionControls();
+      const recoveredQueue = await restartedQueue.readChatExecutionControl(chatId);
       expect(recoveredQueue.entries).toMatchObject([{
         id: created.entry.id,
         content: 'survive restart',

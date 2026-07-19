@@ -115,7 +115,7 @@ describe('PrimaryWsHandler', () => {
       agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
-      queue: { readChatQueue: async () => ({}) },
+      queue: { readChatExecutionControl: async () => ({}) },
       pendingInputs: { listForTransport: () => [] },
       registry: { getChat: () => null },
     });
@@ -187,7 +187,7 @@ describe('PrimaryWsHandler', () => {
       agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
-      queue: { readChatQueue: async () => ({}) },
+      queue: { readChatExecutionControl: async () => ({}) },
       pendingInputs: { listForTransport: () => [] },
       registry: { getChat: () => null },
     });

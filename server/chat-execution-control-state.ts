@@ -4,9 +4,13 @@ import {
   parseQueuePause,
   type QueueEntry,
   type QueuePause,
-  type QueueState,
   type RecentlyDispatchedQueueEntry,
 } from '../common/queue-state.ts';
+import {
+  parseRecoveredInputContinuation,
+  type ChatExecutionControlState,
+  type RecoveredInputContinuation,
+} from '../common/chat-execution-control.ts';
 
 export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../common/queue-state.ts';
 
@@ -30,12 +34,13 @@ export interface StoredAppliedQueueCommand {
   appliedAt: string;
 }
 
-export interface StoredQueueState {
+export interface StoredChatExecutionControlState {
   entries: StoredQueueEntry[];
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   appliedCommands: StoredAppliedQueueCommand[];
   pause: QueuePause | null;
   resumePauses?: QueuePause[];
+  recoveredInputContinuation: RecoveredInputContinuation | null;
   version: number;
   updatedAt: string | null;
 }
@@ -43,42 +48,50 @@ export interface StoredQueueState {
 export const MAX_STORED_APPLIED_QUEUE_COMMANDS = 1000;
 const MAX_STORED_RESUME_PAUSES = 8;
 
-export function emptyStoredQueue(): StoredQueueState {
+export function emptyStoredChatExecutionControl(): StoredChatExecutionControlState {
   return {
     entries: [],
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    recoveredInputContinuation: null,
     version: 0,
     updatedAt: null,
   };
 }
 
-export function cloneStoredQueue(queue: StoredQueueState): StoredQueueState {
+export function cloneStoredChatExecutionControl(
+  control: StoredChatExecutionControlState,
+): StoredChatExecutionControlState {
   const clone = {
-    ...queue,
-    entries: queue.entries.map((entry) => ({
+    ...control,
+    entries: control.entries.map((entry) => ({
       ...entry,
       ...(entry.delivery ? { delivery: { ...entry.delivery } } : {}),
     })),
-    recentlyDispatched: queue.recentlyDispatched.map((entry) => ({ ...entry })),
-    appliedCommands: (queue.appliedCommands ?? []).map((command) => ({
+    recentlyDispatched: control.recentlyDispatched.map((entry) => ({ ...entry })),
+    appliedCommands: (control.appliedCommands ?? []).map((command) => ({
       ...command,
     })),
-    pause: queue.pause ? { ...queue.pause } : null,
+    pause: control.pause ? { ...control.pause } : null,
+    recoveredInputContinuation: control.recoveredInputContinuation
+      ? { ...control.recoveredInputContinuation }
+      : null,
   };
-  if (queue.resumePauses?.length) {
-    clone.resumePauses = queue.resumePauses.map((pause) => ({ ...pause }));
+  if (control.resumePauses?.length) {
+    clone.resumePauses = control.resumePauses.map((pause) => ({ ...pause }));
   } else {
     delete clone.resumePauses;
   }
   return clone;
 }
 
-export function bumpStoredQueue(queue: StoredQueueState): StoredQueueState {
+export function bumpStoredChatExecutionControl(
+  control: StoredChatExecutionControlState,
+): StoredChatExecutionControlState {
   return {
-    ...queue,
-    version: queue.version + 1,
+    ...control,
+    version: control.version + 1,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -150,11 +163,37 @@ function stableStringify(value: unknown): string {
     .join(',')}}`;
 }
 
-export function storedQueueNeedsCanonicalization(
+export function storedChatExecutionControlNeedsCanonicalization(
   value: unknown,
-  queue: StoredQueueState,
+  control: StoredChatExecutionControlState,
 ): boolean {
-  return stableStringify(value) !== stableStringify(queue);
+  return stableStringify(value) !== stableStringify(control);
+}
+
+interface LegacyRecoveredInputPause {
+  id: string;
+  kind: 'recovered-unconfirmed-input';
+  pausedAt: string;
+}
+
+type StoredPause = QueuePause | LegacyRecoveredInputPause;
+
+function isCanonicalIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.endsWith('Z')) return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+function parseStoredPause(value: unknown): StoredPause | null | undefined {
+  const pause = parseQueuePause(value);
+  if (pause !== undefined) return pause;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  if (raw.kind !== 'recovered-unconfirmed-input' || !id || !isCanonicalIsoTimestamp(raw.pausedAt)) {
+    return undefined;
+  }
+  return { id, kind: 'recovered-unconfirmed-input', pausedAt: raw.pausedAt };
 }
 
 function migratedPause(
@@ -182,35 +221,39 @@ function migratedPause(
   };
 }
 
-function normalizeStoredPause(
+function normalizeStoredPauses(
   raw: Record<string, unknown>,
   entries: StoredQueueEntry[],
   version: number,
   updatedAt: string | null,
-): QueuePause | null {
-  const hasQueuedEntries = entries.some((entry) => entry.status === 'queued');
+): { pause: QueuePause | null; resumePauses: QueuePause[] } {
+  if (entries.length === 0) return { pause: null, resumePauses: [] };
+  let active: StoredPause | null;
   if (Object.hasOwn(raw, 'pause')) {
-    const pause = parseQueuePause(raw.pause);
-    if (pause?.kind === 'recovered-unconfirmed-input') return pause;
-    if (!hasQueuedEntries) return null;
-    if (pause !== undefined) return pause;
-    return migratedPause(raw, entries, version, updatedAt);
+    const parsed = parseStoredPause(raw.pause);
+    active = parsed === undefined ? migratedPause(raw, entries, version, updatedAt) : parsed;
+  } else {
+    active = raw.paused === true ? migratedPause(raw, entries, version, updatedAt) : null;
   }
-  if (!hasQueuedEntries) return null;
-  return raw.paused === true ? migratedPause(raw, entries, version, updatedAt) : null;
+  const stack = [
+    ...(active ? [active] : []),
+    ...(Array.isArray(raw.resumePauses)
+      ? raw.resumePauses.flatMap((candidate) => {
+          const pause = parseStoredPause(candidate);
+          return pause ? [pause] : [];
+        })
+      : []),
+  ].filter((pause): pause is QueuePause => pause.kind !== 'recovered-unconfirmed-input');
+  return {
+    pause: stack[0] ?? null,
+    resumePauses: stack.slice(1, MAX_STORED_RESUME_PAUSES + 1),
+  };
 }
 
-function normalizeResumePauses(value: unknown, hasQueuedEntry: boolean): QueuePause[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((candidate) => {
-    const pause = parseQueuePause(candidate);
-    if (!pause || (!hasQueuedEntry && pause.kind !== 'recovered-unconfirmed-input')) return [];
-    return [pause];
-  }).slice(0, MAX_STORED_RESUME_PAUSES);
-}
-
-export function normalizeStoredQueueState(value: unknown): StoredQueueState {
-  if (!value || typeof value !== 'object') return emptyStoredQueue();
+export function normalizeStoredChatExecutionControlState(
+  value: unknown,
+): StoredChatExecutionControlState {
+  if (!value || typeof value !== 'object') return emptyStoredChatExecutionControl();
   const raw = value as Record<string, unknown>;
   const entries = Array.isArray(raw.entries)
     ? raw.entries.map(normalizeStoredQueueEntry).filter((entry): entry is StoredQueueEntry => Boolean(entry))
@@ -229,10 +272,8 @@ export function normalizeStoredQueueState(value: unknown): StoredQueueState {
     : [];
   const version = typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0;
   const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
-  const pause = normalizeStoredPause(raw, entries, version, updatedAt);
-  const resumePauses = pause
-    ? normalizeResumePauses(raw.resumePauses, entries.some((entry) => entry.status === 'queued'))
-    : [];
+  const { pause, resumePauses } = normalizeStoredPauses(raw, entries, version, updatedAt);
+  const recoveredInputContinuation = parseRecoveredInputContinuation(raw.recoveredInputContinuation) ?? null;
 
   return {
     entries,
@@ -240,13 +281,14 @@ export function normalizeStoredQueueState(value: unknown): StoredQueueState {
     appliedCommands,
     pause,
     ...(resumePauses.length ? { resumePauses } : {}),
+    recoveredInputContinuation,
     version,
     updatedAt,
   };
 }
 
 /** Parses durable queue state without discarding entries or idempotency evidence. */
-export function parseStoredQueueState(value: unknown): StoredQueueState {
+export function parseStoredChatExecutionControlState(value: unknown): StoredChatExecutionControlState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Queue state must be an object');
   }
@@ -277,7 +319,17 @@ export function parseStoredQueueState(value: unknown): StoredQueueState {
     }
   }
 
-  const normalized = normalizeStoredQueueState(raw);
+  if (
+    Object.hasOwn(raw, 'recoveredInputContinuation')
+    && raw.recoveredInputContinuation !== null
+    && !parseRecoveredInputContinuation(raw.recoveredInputContinuation)
+  ) {
+    throw new Error('Queue state recoveredInputContinuation is invalid');
+  }
+  if (Array.isArray(raw.resumePauses) && raw.resumePauses.some((pause) => parseStoredPause(pause) === undefined)) {
+    throw new Error('Queue state resumePauses contains an invalid pause');
+  }
+  const normalized = normalizeStoredChatExecutionControlState(raw);
   const entryIds = new Set<string>();
   for (const entry of normalized.entries) {
     if (entryIds.has(entry.id)) {
@@ -288,17 +340,24 @@ export function parseStoredQueueState(value: unknown): StoredQueueState {
   return normalized;
 }
 
-export function toClientQueueState(queue: StoredQueueState): QueueState {
+export function toClientChatExecutionControlState(
+  control: StoredChatExecutionControlState,
+): ChatExecutionControlState {
   return {
-    entries: queue.entries
-      .filter((entry) => entry.status === 'queued')
-      .map(({ status: _status, delivery: _delivery, ...entry }) => ({ ...entry })),
-    dispatchingEntryId: queue.entries.find((entry) => entry.status === 'sending')?.id ?? null,
-    recentlyDispatched: queue.recentlyDispatched
-      .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)
-      .map((entry) => ({ ...entry })),
-    pause: queue.pause ? { ...queue.pause } : null,
-    version: queue.version,
-    updatedAt: queue.updatedAt,
+    queue: {
+      entries: control.entries
+        .filter((entry) => entry.status === 'queued')
+        .map(({ status: _status, delivery: _delivery, ...entry }) => ({ ...entry })),
+      dispatchingEntryId: control.entries.find((entry) => entry.status === 'sending')?.id ?? null,
+      recentlyDispatched: control.recentlyDispatched
+        .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)
+        .map((entry) => ({ ...entry })),
+      pause: control.pause ? { ...control.pause } : null,
+    },
+    recoveredInputContinuation: control.recoveredInputContinuation
+      ? { ...control.recoveredInputContinuation }
+      : null,
+    version: control.version,
+    updatedAt: control.updatedAt,
   };
 }

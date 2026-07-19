@@ -12,9 +12,9 @@ function strOrNull(v: unknown): string | null {
   return typeof v === 'string' ? v : null;
 }
 
-const MAX_RECONNECT_QUEUE_CHAT_IDS = 256;
+const MAX_RECONNECT_CONTROL_CHAT_IDS = 256;
 
-function reconnectQueueChatIds(value: unknown): string[] {
+function reconnectControlChatIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const result: string[] = [];
   const seen = new Set<string>();
@@ -24,7 +24,7 @@ function reconnectQueueChatIds(value: unknown): string[] {
     if (!chatId || seen.has(chatId)) continue;
     seen.add(chatId);
     result.push(chatId);
-    if (result.length >= MAX_RECONNECT_QUEUE_CHAT_IDS) break;
+    if (result.length >= MAX_RECONNECT_CONTROL_CHAT_IDS) break;
   }
   return result;
 }
@@ -33,13 +33,13 @@ export class ReconnectStateQueryRequest {
   readonly type = 'reconnect-state-query' as const;
   constructor(
     public clientRequestId: string | null,
-    public queueChatIds: string[],
+    public controlChatIds: string[],
   ) { }
 
   static fromJson(data: Record<string, unknown>): ReconnectStateQueryRequest {
     return new ReconnectStateQueryRequest(
       strOrNull(data.clientRequestId),
-      reconnectQueueChatIds(data.queueChatIds),
+      reconnectControlChatIds(data.controlChatIds),
     );
   }
 }

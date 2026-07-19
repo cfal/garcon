@@ -397,6 +397,9 @@ export async function startServer(): Promise<void> {
         pendingInputs,
         nativeSnapshots: chatViewPages,
         chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
+        onRecoveredChatSettled: async (chatId) => {
+          await queue.dropRecoveredInputContinuation(chatId);
+        },
       },
       (error) => {
         logger.warn('pending-inputs: failed to settle durable recovery:', errorMessage(error));
@@ -499,9 +502,10 @@ export async function startServer(): Promise<void> {
         loadNativeMessages,
         searchIndex: chatSearch,
       }),
-      recoverQueues: () => queue.recoverStaleChatQueues(
+      recoverControls: () => queue.recoverChatExecutionControls(
         new Set(pendingRecoveryResult.restoredChatIds),
       ),
+      activateRecoveredSettlement: () => pendingRecovery.activateRecoveredChatSettlement(),
       startScheduledPrompts: () => scheduledPrompts.start(),
     });
 

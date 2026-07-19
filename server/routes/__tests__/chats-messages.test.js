@@ -70,7 +70,7 @@ function createRoutesFixture(overrides = {}) {
     runReservedTurn: mock(async () => undefined),
     abortForChatDeletion: mock(async () => true),
     triggerDrain: mock(async () => undefined),
-	    readChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 0, updatedAt: null })),
+	    readChatExecutionControl: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 0, updatedAt: null })),
 	    createChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
 	    replaceChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
 	    deleteChatQueueEntry: mock(async () => ({ entryId: 'entry-1', queue: { entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null } })),
@@ -178,6 +178,7 @@ async function restorePendingInputRecoveries(
     pendingInputs,
     ...(nativeSnapshots ? { nativeSnapshots } : {}),
     chatExists,
+    onRecoveredChatSettled: () => Promise.resolve(),
   });
   recovery.start();
   const result = await recovery.restore();

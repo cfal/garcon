@@ -1,6 +1,6 @@
 import { parseChatMessages, type ChatMessage } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
-import { toClientQueueState } from './queue-state.ts';
+import { toClientChatExecutionControlState } from './chat-execution-control-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
@@ -35,7 +35,7 @@ import {
   ChatReadUpdatedV1Message,
   ChatListRefreshRequestedMessage,
   ChatSessionStoppedMessage,
-  QueueStateUpdatedMessage,
+  ChatExecutionControlUpdatedMessage,
   QueueDispatchingMessage,
   PendingUserInputUpdatedMessage,
   PendingUserInputStatusUpdatedMessage,
@@ -562,9 +562,12 @@ export function wireServerEvents({
     );
   });
 
-  queue.onQueueUpdated((chatId, queueState) => {
+  queue.onExecutionControlUpdated((chatId, controlState) => {
     broadcast(
-      new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)),
+      new ChatExecutionControlUpdatedMessage(
+        chatId,
+        toClientChatExecutionControlState(controlState),
+      ),
     );
   });
   queue.onSessionStopRequested((chatId, stopId, preparingTurn) => {

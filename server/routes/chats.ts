@@ -11,9 +11,16 @@ import {
 import type { JsonObject } from '../../common/json.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
-import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
+import {
+  CommandExecutionControlError,
+  CommandValidationError,
+  runOptionsFromCommandRequest,
+} from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
-import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
+import {
+  normalizeStoredChatExecutionControlState,
+  toClientChatExecutionControlState,
+} from '../chat-execution-control-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,
@@ -31,7 +38,12 @@ import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-e
 import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
-import { QueueEntryMutationError, QueuePauseChangedError, type ChatQueueService } from '../queue.js';
+import {
+  QueueEntryMutationError,
+  QueuePauseChangedError,
+  RecoveredInputContinuationChangedError,
+  type ChatQueueService,
+} from '../queue.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
@@ -66,6 +78,7 @@ import type {
   QueueMutationRequest,
   QueuePauseRequest,
   QueueResumeRequest,
+  RecoveredInputContinueRequest,
   RunningChatsResponse,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
@@ -813,6 +826,16 @@ export default function createChatRoutes({
 
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
+      if (error instanceof CommandExecutionControlError) {
+        const body: QueueCommandErrorResponse = {
+          success: false,
+          error: error.message,
+          errorCode: error.code,
+          retryable: error.retryable,
+          control: toClientChatExecutionControlState(error.control),
+        };
+        return Response.json(body, { status: error.status });
+      }
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
@@ -894,17 +917,21 @@ export default function createChatRoutes({
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
     if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-    const state = toClientQueueState(normalizeStoredQueueState(await queue.readChatQueue(chatId)));
-    return Response.json({ success: true, chatId, queue: state });
+    const control = toClientChatExecutionControlState(
+      normalizeStoredChatExecutionControlState(await queue.readChatExecutionControl(chatId)),
+    );
+    return Response.json({ success: true, chatId, control });
   }
 
-  function queueEntryErrorResponse(error: QueueEntryMutationError | QueuePauseChangedError): Response {
+  function queueControlErrorResponse(
+    error: QueueEntryMutationError | QueuePauseChangedError | RecoveredInputContinuationChangedError,
+  ): Response {
     const body: QueueCommandErrorResponse = {
       success: false,
       error: error.message,
       errorCode: error.code,
       retryable: error.retryable,
-      queue: toClientQueueState(error.queue),
+      control: toClientChatExecutionControlState(error.control),
     };
     return Response.json(body, { status: error.status });
   }
@@ -926,7 +953,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -955,7 +982,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -977,7 +1004,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -1019,7 +1046,25 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      if (error instanceof QueuePauseChangedError) return queueEntryErrorResponse(error);
+      if (error instanceof QueuePauseChangedError) return queueControlErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function postRecoveredInputContinue(
+    body: Partial<RecoveredInputContinueRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const chatId = requireStringField(body, 'chatId');
+      const continuationId = requireStringField(body, 'continuationId');
+      return Response.json(await commands.continueRecoveredInput({ chatId, continuationId }));
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof RecoveredInputContinuationChangedError) {
+        return queueControlErrorResponse(error);
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -1248,6 +1293,9 @@ export default function createChatRoutes({
     },
     '/api/v1/chats/queue/resume': {
       POST: withJsonBody((body: QueueResumeRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')),
+    },
+    '/api/v1/chats/recovered-input/continue': {
+      POST: withJsonBody(postRecoveredInputContinue),
     },
     '/api/v1/chats/permissions/decision': {
       POST: withJsonBody(postPermissionDecision),

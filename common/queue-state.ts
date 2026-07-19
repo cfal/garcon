@@ -15,7 +15,6 @@ export type QueuePause =
   | { id: string; kind: 'manual'; pausedAt: string }
   | { id: string; kind: 'queued-turn-failed'; entryId: string; pausedAt: string }
   | { id: string; kind: 'recovered-inflight'; entryId: string; pausedAt: string }
-  | { id: string; kind: 'recovered-unconfirmed-input'; pausedAt: string }
   | { id: string; kind: 'completion-uncertain'; entryId: string; pausedAt: string }
   | { id: string; kind: 'unknown'; entryId?: string; pausedAt: string | null };
 
@@ -24,50 +23,46 @@ export type AutomaticQueuePauseKind = Exclude<
   'unknown'
 >;
 
-export interface QueueState {
+export interface ChatQueueState {
   entries: QueueEntry[];
   dispatchingEntryId: string | null;
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   pause: QueuePause | null;
-  version: number;
-  updatedAt: string | null;
 }
 
 export const MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES = 32;
 
-export function emptyQueueState(): QueueState {
+export function emptyChatQueueState(): ChatQueueState {
   return {
     entries: [],
     dispatchingEntryId: null,
     recentlyDispatched: [],
     pause: null,
-    version: 0,
-    updatedAt: null,
   };
 }
 
-function positiveInteger(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
-function normalizeQueueEntry(value: unknown): QueueEntry | null {
+function parseQueueEntry(value: unknown): QueueEntry | null {
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
-  const id = typeof item.id === 'string' ? item.id : '';
+  const id = typeof item.id === 'string' ? item.id.trim() : '';
   const content = typeof item.content === 'string' ? item.content : null;
   const createdAt = typeof item.createdAt === 'string' ? item.createdAt : '';
-  if (!id || content === null || !createdAt) return null;
+  const revision = typeof item.revision === 'number' && Number.isSafeInteger(item.revision) && item.revision > 0
+    ? item.revision
+    : null;
+  const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : '';
+  if (!id || content === null || !createdAt || revision === null || !updatedAt) return null;
 
   return {
     id,
     content,
-    revision: positiveInteger(item.revision, 1),
+    revision,
     createdAt,
-    updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : createdAt,
+    updatedAt,
   };
 }
 
-function normalizeRecentlyDispatched(value: unknown): RecentlyDispatchedQueueEntry | null {
+function parseRecentlyDispatched(value: unknown): RecentlyDispatchedQueueEntry | null {
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
   const entryId = typeof item.entryId === 'string' ? item.entryId : '';
@@ -75,8 +70,8 @@ function normalizeRecentlyDispatched(value: unknown): RecentlyDispatchedQueueEnt
   return entryId && dispatchedAt ? { entryId, dispatchedAt } : null;
 }
 
-export function normalizeQueueState(value: unknown): QueueState {
-  return parseQueueState(value) ?? emptyQueueState();
+export function normalizeChatQueueState(value: unknown): ChatQueueState {
+  return parseChatQueueState(value) ?? emptyChatQueueState();
 }
 
 function isIsoTimestamp(value: unknown): value is string {
@@ -98,9 +93,6 @@ export function parseQueuePause(value: unknown): QueuePause | null | undefined {
   }
   if (!isIsoTimestamp(raw.pausedAt)) return undefined;
   if (raw.kind === 'manual') return { id, kind: 'manual', pausedAt: raw.pausedAt };
-  if (raw.kind === 'recovered-unconfirmed-input') {
-    return { id, kind: raw.kind, pausedAt: raw.pausedAt };
-  }
   if (
     raw.kind === 'queued-turn-failed' ||
     raw.kind === 'recovered-inflight' ||
@@ -114,29 +106,30 @@ export function parseQueuePause(value: unknown): QueuePause | null | undefined {
   return undefined;
 }
 
-export function parseQueueState(value: unknown): QueueState | null {
-  if (!value || typeof value !== 'object') return null;
+export function parseChatQueueState(value: unknown): ChatQueueState | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const raw = value as Record<string, unknown>;
   const pause = parseQueuePause(raw.pause);
   if (pause === undefined) return null;
-  const entries = Array.isArray(raw.entries)
-    ? raw.entries.map(normalizeQueueEntry).filter((entry): entry is QueueEntry => Boolean(entry))
-    : [];
-  const recentlyDispatched = Array.isArray(raw.recentlyDispatched)
-    ? raw.recentlyDispatched
-        .map(normalizeRecentlyDispatched)
-        .filter((entry): entry is RecentlyDispatchedQueueEntry => Boolean(entry))
-        .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)
-    : [];
+  if (!Array.isArray(raw.entries) || !Array.isArray(raw.recentlyDispatched)) return null;
+  const entries = raw.entries.map(parseQueueEntry);
+  const recentlyDispatched = raw.recentlyDispatched.map(parseRecentlyDispatched);
+  if (entries.some((entry) => entry === null) || recentlyDispatched.some((entry) => entry === null)) {
+    return null;
+  }
+  const dispatchingEntryId = raw.dispatchingEntryId === null
+    ? null
+    : typeof raw.dispatchingEntryId === 'string' && raw.dispatchingEntryId.trim()
+      ? raw.dispatchingEntryId
+      : undefined;
+  if (dispatchingEntryId === undefined) return null;
 
   return {
-    entries,
-    dispatchingEntryId:
-      typeof raw.dispatchingEntryId === 'string' && raw.dispatchingEntryId ? raw.dispatchingEntryId : null,
-    recentlyDispatched,
-    pause: entries.length > 0 || pause?.kind === 'recovered-unconfirmed-input' ? pause : null,
-    version: typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0,
-    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null,
+    entries: entries as QueueEntry[],
+    dispatchingEntryId,
+    recentlyDispatched: (recentlyDispatched as RecentlyDispatchedQueueEntry[])
+      .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES),
+    pause,
   };
 }

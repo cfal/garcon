@@ -40,7 +40,12 @@ import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
-import { QueueEntryMutationError, QueuePauseChangedError } from '../../queue.js';
+import { DomainError } from '../../lib/domain-error.js';
+import {
+  QueueEntryMutationError,
+  QueuePauseChangedError,
+  RecoveredInputContinuationChangedError,
+} from '../../queue.js';
 import {
   createRouteChatListProjector,
   createRouteCommandLedger,
@@ -69,6 +74,7 @@ function storedQueue(entries = [], overrides = {}) {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    recoveredInputContinuation: null,
     version: 0,
     updatedAt: null,
     ...overrides,
@@ -162,24 +168,26 @@ function createRouteAgent(sessionOverrides = {}) {
       },
     })),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
+    assertDirectTurnReservationActive: mock(() => undefined),
+    consumeRecoveredInputContinuationForDirectTurn: mock(() => Promise.resolve(storedQueue())),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
     stopActiveTurn: mock(() => Promise.resolve({
       stopped: true,
-      queue: storedQueue([], { version: 1 }),
+      control: storedQueue([], { version: 1 }),
     })),
     interruptActiveTurn: mock(() => Promise.resolve(true)),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     isChatExecutionReserved: mock(() => false),
     hasChatExecutionOwner: mock(() => false),
-    readChatQueue: mock(() => Promise.resolve(storedQueue())),
+    readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
         entry: queueEntry('entry-1'),
         entryId: 'entry-1',
-        queue: storedQueue([queueEntry('entry-1')], {
+        control: storedQueue([queueEntry('entry-1')], {
           version: 1,
           updatedAt: '2026-05-14T00:00:00.000Z',
         }),
@@ -190,14 +198,14 @@ function createRouteAgent(sessionOverrides = {}) {
       Promise.resolve({
         entry: queueEntry(entryId, content, 'queued', revision + 1),
         entryId,
-        queue: storedQueue([queueEntry(entryId, content, 'queued', revision + 1)], { version: 2 }),
+        control: storedQueue([queueEntry(entryId, content, 'queued', revision + 1)], { version: 2 }),
         duplicate: false,
       }),
     ),
     deleteChatQueueEntry: mock((_chatId, entryId) =>
       Promise.resolve({
         entryId,
-        queue: storedQueue([], { version: 2 }),
+        control: storedQueue([], { version: 2 }),
         duplicate: false,
       }),
     ),
@@ -211,6 +219,7 @@ function createRouteAgent(sessionOverrides = {}) {
       { pause: manualPause(), version: 2 },
     ))),
     resumeChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { version: 3 }))),
+    continuePastRecoveredInput: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { version: 3 }))),
   };
   const pathCache = createRoutePathCache();
   const metadata = {
@@ -445,6 +454,35 @@ describe('REST chat command routes', () => {
     expect(missing.body.errorCode).toBe('SESSION_NOT_FOUND');
   });
 
+  it('POST /run returns current execution control when direct admission is busy', async () => {
+    const agent = createRouteAgent();
+    const control = storedQueue([], {
+      version: 4,
+      updatedAt: '2026-07-18T00:00:00.000Z',
+    });
+    agent.queue.readChatExecutionControl.mockResolvedValue(control);
+    agent.queue.reserveDirectTurn.mockImplementation(() => {
+      throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
+    });
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody({ clientRequestId: 'req-run-busy', clientMessageId: 'msg-run-busy' }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({
+      success: false,
+      errorCode: 'SESSION_BUSY',
+      retryable: true,
+      control: {
+        version: 4,
+        recoveredInputContinuation: null,
+        queue: { entries: [], pause: null },
+      },
+    });
+  });
+
   it('POST /fork-run forks once and schedules the target turn', async () => {
     const agent = createRouteAgent();
     const { response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
@@ -512,7 +550,7 @@ describe('REST chat command routes', () => {
       clientRequestId: 'req-queue-1',
       entryId: 'entry-1',
     });
-    expect(first.body.queue.version).toBe(1);
+    expect(first.body.control.version).toBe(1);
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
     expect(agent.queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
@@ -622,8 +660,8 @@ describe('REST chat command routes', () => {
 
     expect(result.response.status).toBe(409);
     expect(result.body.errorCode).toBe('QUEUE_ENTRY_REVISION_CONFLICT');
-    expect(result.body.queue.entries).toEqual([expect.objectContaining({ id: 'entry-1', revision: 5 })]);
-    expect(result.body.queue.entries[0]).not.toHaveProperty('status');
+    expect(result.body.control.queue.entries).toEqual([expect.objectContaining({ id: 'entry-1', revision: 5 })]);
+    expect(result.body.control.queue.entries[0]).not.toHaveProperty('status');
   });
 
   it('queue mutations return normalized authoritative state', async () => {
@@ -635,10 +673,10 @@ describe('REST chat command routes', () => {
       pauseId: 'pause-1',
     });
 
-    expect(paused.body.queue.pause).not.toBeNull();
-    expect(paused.body.queue.version).toBe(2);
-    expect(resumed.body.queue.pause).toBeNull();
-    expect(resumed.body.queue.version).toBe(3);
+    expect(paused.body.control.queue.pause).not.toBeNull();
+    expect(paused.body.control.version).toBe(2);
+    expect(resumed.body.control.queue.pause).toBeNull();
+    expect(resumed.body.control.version).toBe(3);
     expect(agent.queue.triggerDrain).toHaveBeenCalledTimes(1);
     expect(agent.queue.resumeChatQueue).toHaveBeenCalledWith(CHAT_ID, 'pause-1');
   });
@@ -663,11 +701,56 @@ describe('REST chat command routes', () => {
 
     expect(result.response.status).toBe(409);
     expect(result.body.errorCode).toBe('QUEUE_PAUSE_CHANGED');
-    expect(result.body.queue.pause).toMatchObject({
+    expect(result.body.control.queue.pause).toMatchObject({
       id: 'pause-new',
       kind: 'queued-turn-failed',
     });
     expect(agent.queue.triggerDrain).not.toHaveBeenCalled();
+  });
+
+  it('continues recovered input by stable ID and returns the current composite control', async () => {
+    const agent = createRouteAgent();
+    const continuationId = '4c31d9ed-f33a-4ccc-8bd1-b11f88d08040';
+    const continued = storedQueue([queueEntry('entry-1')], { version: 7 });
+    agent.queue.continuePastRecoveredInput.mockResolvedValueOnce(continued);
+
+    const result = await callJson(agent.routes['/api/v1/chats/recovered-input/continue'].POST, {
+      chatId: CHAT_ID,
+      continuationId,
+    });
+
+    expect(result.response.status).toBe(200);
+    expect(agent.queue.continuePastRecoveredInput).toHaveBeenCalledWith(CHAT_ID, continuationId);
+    expect(result.body.control).toMatchObject({
+      version: 7,
+      recoveredInputContinuation: null,
+      queue: { entries: [expect.objectContaining({ id: 'entry-1' })] },
+    });
+  });
+
+  it('returns the current composite control for stale continuation IDs', async () => {
+    const agent = createRouteAgent();
+    const latest = storedQueue([queueEntry('entry-1')], {
+      recoveredInputContinuation: {
+        id: '20b5a703-199d-4d29-ae05-d0942574cb79',
+        installedAt: '2026-07-18T00:00:00.000Z',
+      },
+      version: 8,
+    });
+    agent.queue.continuePastRecoveredInput.mockRejectedValueOnce(
+      new RecoveredInputContinuationChangedError(latest),
+    );
+
+    const result = await callJson(agent.routes['/api/v1/chats/recovered-input/continue'].POST, {
+      chatId: CHAT_ID,
+      continuationId: '4c31d9ed-f33a-4ccc-8bd1-b11f88d08040',
+    });
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('RECOVERED_INPUT_CONTINUATION_CHANGED');
+    expect(result.body.control.recoveredInputContinuation.id).toBe(
+      '20b5a703-199d-4d29-ae05-d0942574cb79',
+    );
   });
 
   it('POST /permissions/decision deduplicates identical decisions and rejects conflicts', async () => {
@@ -711,7 +794,7 @@ describe('REST chat command routes', () => {
     const retry = await callJson(handler, payload);
 
     expect(first.body.stopped).toBe(true);
-    expect(first.body.queue.version).toBe(1);
+    expect(first.body.control.version).toBe(1);
     expect(retry.body.status).toBe('duplicate');
     expect(retry.body.stopped).toBe(true);
     expect(agent.queue.stopActiveTurn).toHaveBeenCalledTimes(1);
@@ -953,7 +1036,7 @@ describe('REST chat command routes', () => {
     const agent = createRouteAgent();
     const nextPath = path.join(testBasePath, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
-    agent.queue.readChatQueue.mockResolvedValueOnce({
+    agent.queue.readChatExecutionControl.mockResolvedValueOnce({
       entries: [
         {
           id: 'entry-1',
