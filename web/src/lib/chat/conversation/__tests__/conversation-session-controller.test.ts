@@ -1080,7 +1080,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:00.000Z',
 		});
-		await submit;
+		await expect(submit).resolves.toBe('accepted');
 
 		const acceptedInput = deps.chatState.pendingUserInputs[0];
 		expect(acceptedInput.deliveryStatus).toBe('accepted');
@@ -1369,8 +1369,9 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = 'please send';
 		const controller = new ConversationSessionController(deps);
 
-		await controller.submitForChat('chat-1');
+		const outcome = await controller.submitForChat('chat-1');
 
+		expect(outcome).toBe('rejected');
 		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
@@ -1378,6 +1379,8 @@ describe('ConversationSessionController', () => {
 		});
 		expect(deps.composerState.inputText).toBe('please send');
 		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
+		expect(deps.sessions.applyProcessingEvent).not.toHaveBeenCalledWith('chat-1', false);
 	});
 
 	it('retries an ambiguous direct response once with the same identity', async () => {
@@ -1394,8 +1397,9 @@ describe('ConversationSessionController', () => {
 		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'send exactly once';
 
-		await new ConversationSessionController(deps).submitForChat('chat-1');
+		const outcome = await new ConversationSessionController(deps).submitForChat('chat-1');
 
+		expect(outcome).toBe('accepted');
 		expect(mockRunChat).toHaveBeenCalledTimes(2);
 		expect(mockRunChat.mock.calls[1][0]).toEqual(mockRunChat.mock.calls[0][0]);
 		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
@@ -1433,8 +1437,9 @@ describe('ConversationSessionController', () => {
 		deps.agentState.model = 'opus';
 		deps.composerState.inputText = 'preserve this message';
 
-		await new ConversationSessionController(deps).submitForChat('chat-1');
+		const outcome = await new ConversationSessionController(deps).submitForChat('chat-1');
 
+		expect(outcome).toBe('rejected');
 		expect(deps.chatState.clearPendingUserInput).toHaveBeenCalledOnce();
 		expect(deps.chatState.pendingUserInputs).toEqual([]);
 		expect(mockGetChatExecutionControl).toHaveBeenCalledTimes(1);
@@ -1443,6 +1448,8 @@ describe('ConversationSessionController', () => {
 			emptyControl(),
 		);
 		expect(deps.composerState.inputText).toBe('preserve this message');
+		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
+		expect(deps.sessions.applyProcessingEvent).not.toHaveBeenCalledWith('chat-1', false);
 	});
 
 	it('queues text while a turn is processing without adding a transcript user message', async () => {

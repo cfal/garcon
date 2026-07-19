@@ -64,6 +64,7 @@ import {
 } from '$lib/chat/conversation/conversation-agent-switch-service.js';
 import { ConversationSlashCommandService } from '$lib/chat/conversation/conversation-slash-command-service.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
+import type { ConversationSubmissionOutcome } from '$lib/chat/conversation/conversation-submission-outcome.js';
 import { classifySubmission } from '$lib/chat/conversation/submission-classifier.js';
 import {
 	errorDetail,
@@ -152,7 +153,7 @@ export interface SessionControllerDeps {
 		applyStartEntry: (entry: ChatListEntry) => void;
 		applyProcessingEvent: (chatId: string, isProcessing: boolean) => void;
 		upsertServerChat: (entry: ChatListEntry) => void;
-	setSelectedChatId: (id: string | null) => void;
+		setSelectedChatId: (id: string | null) => void;
 		renameChat: (chatId: string, newTitle: string) => Promise<boolean>;
 	};
 	chatState: SessionTranscriptState;
@@ -542,40 +543,38 @@ export class ConversationSessionController {
 		chatId: string,
 		messageOverride?: string,
 		imageOverride?: File[],
-	): Promise<void> {
+	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		const selected = deps.sessions.byId[chatId];
-		if (!selected?.projectPath) return;
+		if (!selected?.projectPath) return 'no-op';
 		const isDraft = selected.status === 'draft';
 		const startup = deps.sessions.startupByChatId[chatId];
 
 		const text = messageOverride ?? deps.composerState.inputText.trim();
 		const submissionImages = imageOverride ?? deps.composerState.images;
-		if (!text && submissionImages.length === 0) return;
+		if (!text && submissionImages.length === 0) return 'no-op';
 		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
 		const renameCommand = parseRenameCommand(text);
 		if (renameCommand) {
-			await this.#slashCommands.submitRenameCommand(
+			return this.#slashCommands.submitRenameCommand(
 				chatId,
 				selected,
 				renameCommand.title,
 				[...submissionImages],
 				restoreComposerOnFailure,
 			);
-			return;
 		}
 		const scheduleInCommand = parseScheduleInCommand(text);
 		if (scheduleInCommand.kind !== 'not-command') {
-			await this.#slashCommands.submitScheduleInCommand(
+			return this.#slashCommands.submitScheduleInCommand(
 				chatId,
 				selected,
 				scheduleInCommand,
 				[...submissionImages],
 				restoreComposerOnFailure,
 			);
-			return;
 		}
 
 		const agentId = selected.agentId as SessionAgentId;
@@ -583,15 +582,15 @@ export class ConversationSessionController {
 		if (steerCommand.kind !== 'not-command') {
 			if (steerCommand.kind === 'invalid') {
 				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_prompt_required());
-				return;
+				return 'rejected';
 			}
 			if (agentId !== 'codex') {
 				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_codex_only());
-				return;
+				return 'rejected';
 			}
 			if (selected.status !== 'running' || !selected.isProcessing) {
 				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_requires_active_turn());
-				return;
+				return 'rejected';
 			}
 		}
 		if (deps.modelCatalog.supportsFork(agentId)) {
@@ -600,28 +599,26 @@ export class ConversationSessionController {
 				const isProcessing = selected.status === 'running' && selected.isProcessing;
 				if (isProcessing && !deps.modelCatalog.supportsForkWhileRunning(agentId)) {
 					deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
-					return;
+					return 'rejected';
 				}
-				await this.#slashCommands.submitForkCommand(
+				return this.#slashCommands.submitForkCommand(
 					chatId,
 					selected,
 					forkCommand.message,
 					[...submissionImages],
 					messageOverride === undefined && imageOverride === undefined,
 				);
-				return;
 			}
 		}
 
 		const compactCommand = parseCompactCommand(text);
 		if (compactCommand) {
-			await this.#slashCommands.submitCompactCommand(
+			return this.#slashCommands.submitCompactCommand(
 				chatId,
 				selected,
 				compactCommand.instructions,
 				messageOverride === undefined && imageOverride === undefined,
 			);
-			return;
 		}
 
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
@@ -643,12 +640,12 @@ export class ConversationSessionController {
 		});
 		if (route === 'queue-attachments-unsupported') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
-			return;
+			return 'rejected';
 		}
 
 		const ownsDraftSubmission = route === 'draft';
 		if (ownsDraftSubmission) {
-			if (deps.composerState.isSubmitting) return;
+			if (deps.composerState.isSubmitting) return 'no-op';
 			deps.composerState.isSubmitting = true;
 		}
 
@@ -665,7 +662,7 @@ export class ConversationSessionController {
 					'error',
 					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
 				);
-				return;
+				return 'rejected';
 			}
 		}
 
@@ -678,12 +675,14 @@ export class ConversationSessionController {
 			if (restoreComposerOnFailure) {
 				deps.composerState.clearAfterSubmit(chatId);
 			}
-			const submission = route === 'active'
-				? this.#acceptedInputs.active({ chatId, content })
-				: this.#acceptedInputs.enqueue({ chatId, content });
+			const submission =
+				route === 'active'
+					? this.#acceptedInputs.active({ chatId, content })
+					: this.#acceptedInputs.enqueue({ chatId, content });
 			try {
 				const result = await submission.submit();
 				deps.conversationUi.setExecutionControl(chatId, result.control);
+				return 'accepted';
 			} catch (err) {
 				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
 				if (restoreComposerOnFailure && !outcomeUnknown) {
@@ -703,10 +702,10 @@ export class ConversationSessionController {
 							}),
 				);
 				if (outcomeUnknown) void this.#startControlRefresh(chatId);
+				return outcomeUnknown ? 'unknown' : 'rejected';
 			} finally {
 				this.#finishQueueSubmission(chatId);
 			}
-			return;
 		}
 
 		if (route === 'draft') {
@@ -720,9 +719,7 @@ export class ConversationSessionController {
 					apiProviderId:
 						startup?.apiProviderId ?? selected.apiProviderId ?? deps.agentState.apiProviderId,
 					modelEndpointId:
-						startup?.modelEndpointId ??
-						selected.modelEndpointId ??
-						deps.agentState.modelEndpointId,
+						startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.agentState.modelEndpointId,
 					modelProtocol:
 						startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol,
 					permissionMode: startup?.permissionMode ?? deps.agentState.permissionMode,
@@ -751,6 +748,7 @@ export class ConversationSessionController {
 				} else {
 					deps.startupCoordinator.completeStartup(chatId);
 				}
+				return 'accepted';
 			} catch (err) {
 				console.error('[SessionController] Failed to start chat:', err);
 				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
@@ -774,6 +772,7 @@ export class ConversationSessionController {
 						? m.chat_notice_delivery_outcome_unconfirmed()
 						: m.chat_notice_failed_start_chat({ detail: errorDetail(err) }),
 				);
+				return outcomeUnknown ? 'unknown' : 'rejected';
 			} finally {
 				deps.composerState.isSubmitting = false;
 			}
@@ -803,6 +802,7 @@ export class ConversationSessionController {
 				await submission.submit();
 				this.#markPendingUserInputDelivery(submission.clientRequestId, 'accepted');
 				deps.lifecycle.beginTurn(chatId);
+				return 'accepted';
 			} catch (err) {
 				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
 				if (isExecutionControlAdmissionConflict(err)) {
@@ -813,10 +813,6 @@ export class ConversationSessionController {
 					void this.#startControlRefresh(chatId);
 				} else {
 					this.#markPendingUserInputDelivery(submission.clientRequestId, 'failed');
-				}
-				if (!outcomeUnknown) {
-					deps.lifecycle.clearTurnStatus();
-					deps.sessions.applyProcessingEvent(chatId, false);
 				}
 				if (restoreComposerOnFailure && !outcomeUnknown) {
 					deps.composerState.inputText = previousText;
@@ -829,6 +825,7 @@ export class ConversationSessionController {
 						? m.chat_notice_delivery_outcome_unconfirmed()
 						: m.chat_notice_failed_send_message({ detail: errorDetail(err) }),
 				);
+				return outcomeUnknown ? 'unknown' : 'rejected';
 			} finally {
 				deps.composerState.isSubmitting = false;
 			}
@@ -963,7 +960,8 @@ export class ConversationSessionController {
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
 			});
-			void submission.submit()
+			void submission
+				.submit()
 				.then(() => {
 					deps.lifecycle.beginTurn(chatId);
 				})

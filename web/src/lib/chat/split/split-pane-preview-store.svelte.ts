@@ -101,6 +101,7 @@ export class SplitPanePreviewStore {
 		messages: ChatViewMessage[],
 		lastSeq: number,
 	): void {
+		this.#invalidateSnapshotLoad(chatId);
 		this.#transcriptCache.replace(chatId, generationId, messages, lastSeq);
 		this.restore(chatId);
 	}
@@ -121,8 +122,13 @@ export class SplitPanePreviewStore {
 			this.markStale(chatId);
 			return false;
 		}
+		this.#invalidateSnapshotLoad(chatId);
 		this.restore(chatId);
 		return true;
+	}
+
+	#invalidateSnapshotLoad(chatId: string): void {
+		this.#loadEpochs.set(chatId, (this.#loadEpochs.get(chatId) ?? 0) + 1);
 	}
 
 	markStale(chatId: string): void {

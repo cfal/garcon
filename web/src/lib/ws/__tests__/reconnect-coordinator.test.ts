@@ -94,10 +94,12 @@ function snapshotRequiredResponse(
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 async function flushUntil(predicate: () => boolean): Promise<void> {
@@ -918,6 +920,44 @@ describe('ChatReconnectCoordinator', () => {
 			'generation-old',
 			expect.any(Array),
 		);
+	});
+
+	it('does not start a visible snapshot fallback for a stale failed subscription', async () => {
+		const firstVisibleSubscribe = deferred<Record<string, unknown>>();
+		let visibleSubscribeCount = 0;
+		const deps = createReconnectDeps({
+			visibleChatIds: ['chat-2'],
+			visibleCursors: {
+				'chat-2': { chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 },
+			},
+		});
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'reconnect-state-query') return reconnectStateResponse();
+				if (request.type === 'chat-subscribe' && request.chatId === 'chat-2') {
+					visibleSubscribeCount += 1;
+					if (visibleSubscribeCount === 1) return firstVisibleSubscribe.promise;
+					return deltaResponse('chat-2', 'generation-2');
+				}
+				if (request.type === 'chat-subscribe') {
+					return deltaResponse('chat-1', 'generation-selected');
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const first = coordinator.handleConnectionState(true);
+		await flushUntil(() => visibleSubscribeCount === 1);
+		await coordinator.handleConnectionState(false);
+		const second = coordinator.handleConnectionState(true);
+
+		firstVisibleSubscribe.reject(new Error('stale socket closed'));
+		await Promise.all([first, second]);
+
+		expect(deps.loadVisibleChatSnapshot).not.toHaveBeenCalled();
 	});
 
 	it('discards a stale queue refresh after a newer reconnect begins', async () => {

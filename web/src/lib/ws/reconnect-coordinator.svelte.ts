@@ -285,18 +285,18 @@ export class ChatReconnectCoordinator {
 			if (epoch !== this.#reconnectEpoch) return;
 			const cursor = this.options.getVisibleChatCursor?.(chatId) ?? null;
 			if (!cursor) {
-				await this.options.loadVisibleChatSnapshot?.(chatId);
+				await this.#loadVisibleSnapshot(chatId, epoch);
 				continue;
 			}
 			try {
 				const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
 				if (epoch !== this.#reconnectEpoch) return;
 				if (message.mode === 'snapshot-required') {
-					await this.options.loadVisibleChatSnapshot?.(chatId);
+					await this.#loadVisibleSnapshot(chatId, epoch);
 					continue;
 				}
 				if (message.messages.length === 0 && message.lastSeq > cursor.lastSeq) {
-					await this.options.loadVisibleChatSnapshot?.(chatId);
+					await this.#loadVisibleSnapshot(chatId, epoch);
 					continue;
 				}
 				if (message.messages.length > 0) {
@@ -307,13 +307,18 @@ export class ChatReconnectCoordinator {
 						message.lastSeq,
 					);
 					if (applied === false) {
-						await this.options.loadVisibleChatSnapshot?.(chatId);
+						await this.#loadVisibleSnapshot(chatId, epoch);
 					}
 				}
 			} catch {
-				await this.options.loadVisibleChatSnapshot?.(chatId);
+				await this.#loadVisibleSnapshot(chatId, epoch);
 			}
 		}
+	}
+
+	async #loadVisibleSnapshot(chatId: string, epoch: number): Promise<void> {
+		if (epoch !== this.#reconnectEpoch) return;
+		await this.options.loadVisibleChatSnapshot?.(chatId);
 	}
 
 	async #resumeBackgroundChats(excludedChatIds: Set<string>, epoch: number): Promise<void> {

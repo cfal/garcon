@@ -33,6 +33,7 @@
 	import { scheduleInitialTranscriptReveal } from '$lib/chat/transcript/initial-transcript-reveal.js';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { isAcceptedConversationSubmission } from '$lib/chat/conversation/conversation-submission-outcome.js';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import type { QueueEntry } from '$lib/types/chat';
 	import {
@@ -527,8 +528,7 @@
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return false;
 		try {
-			await controller.submitForChat(chatId, message);
-			return true;
+			return isAcceptedConversationSubmission(await controller.submitForChat(chatId, message));
 		} catch {
 			return false;
 		}
