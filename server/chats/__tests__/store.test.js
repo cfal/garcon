@@ -199,7 +199,17 @@ describe('ChatRegistry', () => {
     expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'test' }), CHAT_ID);
     expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(nativeSession('test', { id: 'native-1' }));
     await expect(registry.reconcileSessions(resolver)).resolves.toBe(false);
-    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledTimes(2);
+  });
+
+  it('replaces an existing opaque native session only when the resolver upgrades it', async () => {
+    const artificial = nativeSession('test', { path: '!test:native-1' });
+    const resolved = nativeSession('test', { path: '/sessions/native-1.jsonl' });
+    registry.addChat(newChat({ agentSessionId: 'native-1', nativeSession: artificial }));
+
+    await expect(registry.reconcileSessions(async () => resolved)).resolves.toBe(true);
+    expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(resolved);
+    await expect(registry.reconcileSessions(async () => resolved)).resolves.toBe(false);
   });
 
   it('preserves unresolved sessions and rejects a resolver owner mismatch', async () => {

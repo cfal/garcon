@@ -214,9 +214,6 @@ export function createLegacyAgentIntegration(
           throw new AgentIntegrationError('INVALID_ENDPOINT', 'Endpoint protocol is not supported', false);
         }
       },
-      modelSupportsImages(selection) {
-        return options.agent.capabilities.supportsImages || selection.protocol === 'openai-compatible';
-      },
     } : null,
     singleQuery: options.agent.runSingleQuery ? {
       async run({ prompt, projectPath, model, settings: envelope, endpoint, signal }) {
@@ -721,7 +718,6 @@ function createCatalog(
         generation: agent.runSingleQuery && generation
           ? { priority: generation.priority, model: generation.model || defaultModel || models[0]?.value || '' }
           : null,
-        availability: { state: 'ready', reason: 'Integration is registered.' },
       };
     },
   };

@@ -304,8 +304,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     }));
   }
 
-  startPurgeTimers(): void {}
-  shutdown(): void {}
   onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void): void { this.#events.onMessages(cb); }
   onProcessing(cb: (chatId: string, processing: boolean) => void): void { this.#events.onProcessing(cb); }
   onSessionCreated(cb: (chatId: string) => void): void { this.#events.onSessionCreated(cb); }

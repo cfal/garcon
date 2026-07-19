@@ -30,9 +30,3 @@ export interface AgentAuthStatus {
   readonly source: 'oauth' | 'api-key' | 'environment' | 'cli' | 'none' | 'unknown';
   readonly detail?: string;
 }
-
-export interface AgentAvailability {
-  readonly state: 'ready' | 'setup-required' | 'unavailable';
-  readonly reason: string;
-  readonly detail?: string;
-}

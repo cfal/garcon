@@ -5,7 +5,6 @@ import type {
 import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-resolver.js";
 import type { AgentDirectory } from "./directory.js";
 import { createLogger } from "../lib/log.js";
-import { isPermissionMode, isThinkingMode } from "../../common/chat-modes.js";
 
 const logger = createLogger("agents:catalog-service");
 
@@ -85,19 +84,10 @@ export class AgentCatalogService {
         integration.descriptor.supportsProjectPathUpdate,
       supportsImages: integration.descriptor.supportsImages,
       acceptsApiProviderEndpoints: integration.endpoints !== null,
-      supportedProtocols:
-        integration.descriptor.supportedEndpointProtocols.filter(
-          (protocol): protocol is "anthropic-messages" | "openai-compatible" =>
-            protocol === "anthropic-messages" ||
-            protocol === "openai-compatible",
-        ),
+      supportedProtocols: [...integration.descriptor.supportedEndpointProtocols],
       authLoginSupported: Boolean(integration.auth?.launchLogin),
-      supportedPermissionModes:
-        integration.descriptor.supportedPermissionModes.filter(
-          isPermissionMode,
-        ),
-      supportedThinkingModes:
-        integration.descriptor.supportedThinkingModes.filter(isThinkingMode),
+      supportedPermissionModes: [...integration.descriptor.supportedPermissionModes],
+      supportedThinkingModes: [...integration.descriptor.supportedThinkingModes],
       settings: [...integration.settings.describe()],
       defaultSettings: integration.settings.defaults(),
       requiresStrictModelDiscovery: snapshot.requiresStrictModelDiscovery,
@@ -153,10 +143,6 @@ export class AgentCatalogService {
         defaultModel: "",
         requiresStrictModelDiscovery: false,
         generation: null,
-        availability: {
-          state: "unavailable" as const,
-          reason: "Catalog unavailable.",
-        },
       };
     }
   }

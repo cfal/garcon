@@ -6,12 +6,12 @@ function createIntegration() {
     descriptor: {
       id: "sample-agent",
       label: "Sample Agent",
-      supportedPermissionModes: ["default", "manualBypass", "invalid"],
-      supportedThinkingModes: ["none", "ultra", "invalid"],
+      supportedPermissionModes: ["default", "manualBypass"],
+      supportedThinkingModes: ["none", "ultra"],
       supportsImages: true,
       supportsProjectPathUpdate: true,
       requiresNativePathForProjectPathUpdate: false,
-      supportedEndpointProtocols: ["openai-compatible", "invalid"],
+      supportedEndpointProtocols: ["openai-compatible"],
       configuration: [],
     },
     catalog: {
@@ -26,7 +26,6 @@ function createIntegration() {
         defaultModel: "sample-model",
         requiresStrictModelDiscovery: true,
         generation: { priority: 10, model: "sample-model" },
-        availability: { state: "ready", reason: "test" },
       }),
     },
     settings: {

@@ -473,8 +473,6 @@ export async function startServer(): Promise<void> {
     );
 
     let webSocketPublisher: WebSocketMessagePublisher | null = null;
-    // Start agent runtime purge timers.
-    agentRegistry.startPurgeTimers();
     const eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
         server: {
@@ -717,7 +715,6 @@ export async function startServer(): Promise<void> {
           cleanupFailed = true;
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
-        agentRegistry.shutdown();
         await integrationRegistry.stop();
         terminalManager.shutdown();
         await metadata.flush();

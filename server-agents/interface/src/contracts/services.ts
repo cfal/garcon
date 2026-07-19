@@ -5,7 +5,6 @@ import type {
 } from '@garcon/common/agent-auth';
 import type {
   AgentAuthStatus,
-  AgentAvailability,
   AgentEndpointSelection,
 } from '@garcon/common/agent-execution';
 import type {
@@ -13,7 +12,7 @@ import type {
   AgentSettingsEnvelope,
 } from '@garcon/common/agent-integration';
 import type { AgentModelOption } from '@garcon/common/agents';
-import type { JsonObject, JsonValue } from '@garcon/common/json';
+import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
 import type {
   AgentExecutionContext,
@@ -28,7 +27,6 @@ export interface AgentCatalog {
     readonly defaultModel: string;
     readonly requiresStrictModelDiscovery: boolean;
     readonly generation: { readonly priority: number; readonly model: string } | null;
-    readonly availability: AgentAvailability;
   }>;
 }
 
@@ -42,7 +40,6 @@ export interface AgentSettings {
 
 export interface AgentEndpoints {
   validate(selection: AgentEndpointSelection): Promise<void>;
-  modelSupportsImages(selection: AgentEndpointSelection): boolean;
 }
 
 export interface AgentAuth {
@@ -110,5 +107,3 @@ export interface AgentSingleQueryRequest {
   readonly endpoint: AgentEndpointSelection | null;
   readonly signal: AbortSignal;
 }
-
-export type AgentMigrationValue = JsonValue;

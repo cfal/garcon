@@ -26,6 +26,31 @@ export function validateAgentIntegration(
   if (!integration.catalog || !integration.settings || !integration.lifecycle || !integration.migration) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing a required service facet`);
   }
+  assertUniqueDescriptorValues(
+    integration.descriptor.id,
+    'permission modes',
+    integration.descriptor.supportedPermissionModes,
+  );
+  assertUniqueDescriptorValues(
+    integration.descriptor.id,
+    'thinking modes',
+    integration.descriptor.supportedThinkingModes,
+  );
+  assertUniqueDescriptorValues(
+    integration.descriptor.id,
+    'endpoint protocols',
+    integration.descriptor.supportedEndpointProtocols,
+  );
+}
+
+function assertUniqueDescriptorValues(
+  agentId: string,
+  label: string,
+  values: readonly string[],
+): void {
+  if (new Set(values).size !== values.length) {
+    throw new Error(`Agent integration ${agentId} declares duplicate ${label}`);
+  }
 }
 
 export async function runAgentIntegrationConformance(
