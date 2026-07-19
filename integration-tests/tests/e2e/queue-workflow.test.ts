@@ -65,10 +65,10 @@ describe('Lightpanda queue workflow', () => {
   test('retries queue-as-new with one identity after a lost accepted response', async () => {
     await withE2eFixture('queue-draft-lost-response', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
-      const active = fixture.integration.fakeOpenAi.holdNext({ lastUserText: 'ui-queue-draft-a' });
+      const active = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-queue-draft-a' });
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startDirectChat('ui-queue-draft-a');
+      await app.startOpenAiDirectChat('ui-queue-draft-a');
       await active.received;
 
       const chat = (await fixture.integration.client.listChats()).sessions.find((entry) =>
@@ -106,7 +106,7 @@ describe('Lightpanda queue workflow', () => {
       await app.clickDialogButton('Close');
       active.releaseEcho();
       await app.waitForText('echo:ui-queue-draft-retry');
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === 'ui-queue-draft-retry'
       ))).toHaveLength(1);
       fixture.assertNoBrowserErrors();

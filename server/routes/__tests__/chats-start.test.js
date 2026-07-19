@@ -77,6 +77,21 @@ const queue = {
   releaseDirectTurn: mock(() => Promise.resolve(undefined)),
   completeDirectTurn: mock(() => Promise.resolve(undefined)),
   failDirectTurn: mock(() => Promise.resolve(undefined)),
+  runInitialInput: mock(async (input) => {
+    const reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
+    try {
+      await input.preparation?.prepare();
+      await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+      await input.settlement.markScheduled(input.command, input.options.turnId, true);
+      await input.dispatch?.(reservation.executionAdmission);
+      await queue.completeDirectTurn(reservation);
+    } catch (error) {
+      await input.preparation?.compensate();
+      await queue.failDirectTurn(reservation);
+      await input.settlement.settleOperationFailure(input.command, error);
+      throw error;
+    }
+  }),
 };
 const pathCache = createRoutePathCache();
 const metadata = {
@@ -145,6 +160,7 @@ describe('POST /api/v1/chats/start', () => {
     queue.releaseDirectTurn.mockClear();
     queue.completeDirectTurn.mockClear();
     queue.failDirectTurn.mockClear();
+    queue.runInitialInput.mockClear();
     agents.startSession.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();

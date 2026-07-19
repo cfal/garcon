@@ -24,12 +24,12 @@ async function restartWithoutFinalNativeUserRow(
   chatId: string,
   content: string,
 ): Promise<void> {
-  const held = fixture.fakeOpenAi.holdNext({ lastUserText: content });
+  const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: content });
   const accepted = await fixture.client.startDirectChat({
     chatId,
     content,
     projectPath: fixture.dirs.project,
-    provider: fixture.provider,
+    agent: fixture.directAgents.openAi,
   });
   await held.received;
   const aborted = held.expectAbort();
@@ -47,12 +47,12 @@ describe('recovered input continuation', () => {
       const chatId = fixture.newChatId();
       const predecessor = 'reconnect-unconfirmed-predecessor';
       const successor = 'reconnect-queued-successor';
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: predecessor });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: predecessor });
       const accepted = await fixture.client.startDirectChat({
         chatId,
         content: predecessor,
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
       await fixture.client.enqueueNew(chatId, successor);
@@ -74,7 +74,7 @@ describe('recovered input continuation', () => {
         control: before,
       }]);
 
-      const heldSuccessor = fixture.fakeOpenAi.holdNext({ lastUserText: successor });
+      const heldSuccessor = fixture.fakeProviders.openAi.holdNext({ lastUserText: successor });
       await fixture.client.disconnect();
       const continued = await fixture.client.continueRecoveredInput({ chatId, continuationId });
       expect(continued.control.recoveredInputContinuation).toBeNull();
@@ -95,7 +95,7 @@ describe('recovered input continuation', () => {
       const cursor = fixture.client.markEvents();
       heldSuccessor.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
-      expect(fixture.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === successor
       ))).toHaveLength(1);
     });
@@ -116,11 +116,11 @@ describe('recovered input continuation', () => {
       expect(new Set(before.map((page) => page.generationId)).size).toBe(1);
       for (const page of before) expect(countInputContent(page, predecessor)).toBe(1);
 
-      const heldSuccessor = fixture.fakeOpenAi.holdNext({ lastUserText: successor });
+      const heldSuccessor = fixture.fakeProviders.openAi.holdNext({ lastUserText: successor });
       const accepted = await fixture.client.runDirectChat({
         chatId,
         content: successor,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldSuccessor.received;
       const during = await Promise.all([
@@ -143,7 +143,7 @@ describe('recovered input continuation', () => {
       expect(after.generationId).toBe(before[0].generationId);
       expect(countInputContent(after, predecessor)).toBe(1);
       expect(countInputContent(after, successor)).toBe(1);
-      expect(fixture.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === successor
       ))).toHaveLength(1);
     });
@@ -205,11 +205,11 @@ describe('recovered input continuation', () => {
       expect(blocked.queue.entries.map((entry) => entry.content)).toEqual([
         'scheduled queue behind continuation',
       ]);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'scheduled-unconfirmed-predecessor',
       ]);
 
-      const heldScheduled = fixture.fakeOpenAi.holdNext({
+      const heldScheduled = fixture.fakeProviders.openAi.holdNext({
         lastUserText: 'scheduled queue behind continuation',
       });
       await fixture.client.continueRecoveredInput({ chatId, continuationId });
@@ -217,7 +217,7 @@ describe('recovered input continuation', () => {
       const cursor = fixture.client.markEvents();
       heldScheduled.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
-      expect(fixture.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === 'scheduled queue behind continuation'
       ))).toHaveLength(1);
     });

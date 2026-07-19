@@ -47,7 +47,7 @@ describe('Lightpanda direct chat', () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startDirectChat('ui-lost-response-seed');
+      await app.startOpenAiDirectChat('ui-lost-response-seed');
       await app.waitForText('echo:ui-lost-response-seed');
 
       await replaceFirstAcceptedResponse(fixture.page, '/api/v1/chats/run');

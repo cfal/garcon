@@ -13,14 +13,14 @@ async function restartWithRecoveredInput(
     pause?: boolean;
   },
 ): Promise<void> {
-  const held = fixture.integration.fakeOpenAi.holdNext({
+  const held = fixture.integration.fakeProviders.openAi.holdNext({
     lastUserText: input.predecessor,
   });
   const accepted = await fixture.integration.client.startDirectChat({
     chatId: input.chatId,
     content: input.predecessor,
     projectPath: fixture.integration.dirs.project,
-    provider: fixture.integration.provider,
+    agent: fixture.integration.directAgents.openAi,
   });
   await held.received;
   if (input.queued) await fixture.integration.client.enqueueNew(input.chatId, input.queued);
@@ -38,14 +38,14 @@ async function restartWithNativeRecoveredInput(
   fixture: E2eFixture,
   input: { chatId: string; predecessor: string; queued: string },
 ): Promise<void> {
-  const held = fixture.integration.fakeOpenAi.holdNext({
+  const held = fixture.integration.fakeProviders.openAi.holdNext({
     lastUserText: input.predecessor,
   });
   await fixture.integration.client.startDirectChat({
     chatId: input.chatId,
     content: input.predecessor,
     projectPath: fixture.integration.dirs.project,
-    provider: fixture.integration.provider,
+    agent: fixture.integration.directAgents.openAi,
   });
   await held.received;
   await fixture.integration.client.enqueueNew(input.chatId, input.queued);
@@ -80,7 +80,7 @@ describe('Lightpanda recovered input continuation', () => {
         composer.dataset.recoveryContinuationTest = 'stable';
       });
 
-      const heldSuccessor = fixture.integration.fakeOpenAi.holdNext({ lastUserText: successor });
+      const heldSuccessor = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: successor });
       await app.sendComposer(successor);
       await heldSuccessor.received;
       expect(await app.queuedPreviewText()).toBeNull();
@@ -97,7 +97,7 @@ describe('Lightpanda recovered input continuation', () => {
       await app.waitForText(`echo:${successor}`);
       await app.waitForExactTextCount(predecessor, 1);
       await app.waitForExactTextCount(successor, 1);
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === successor
       ))).toHaveLength(1);
       fixture.assertNoBrowserErrors();
@@ -142,23 +142,23 @@ describe('Lightpanda recovered input continuation', () => {
       await app.waitForTextAbsent('Queue needs attention');
       expect(await app.hasButton('Continue queue')).toBe(false);
       expect(await app.hasButton('Resume queue')).toBe(true);
-      expect(fixture.integration.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.integration.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         predecessor,
       ]);
       await app.clickDialogButton('Close');
 
-      const heldB = fixture.integration.fakeOpenAi.holdNext({ lastUserText: queuedB });
-      const heldC = fixture.integration.fakeOpenAi.holdNext({ lastUserText: queuedC });
+      const heldB = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: queuedB });
+      const heldC = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: queuedC });
       await app.clickButton('Resume queue');
       await heldB.received;
       heldB.releaseEcho();
       await heldC.received;
       heldC.releaseEcho();
       await app.waitForText(`echo:${queuedC}`);
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === queuedB
       ))).toHaveLength(1);
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === queuedC
       ))).toHaveLength(1);
       expect((await fixture.integration.client.getExecutionControl(chatId))).toMatchObject({
@@ -208,7 +208,7 @@ describe('Lightpanda recovered input continuation', () => {
         await app.clickButton('Edit queued message');
         await fixture.page.waitForSelector('[role="dialog"]');
 
-        const heldQueued = fixture.integration.fakeOpenAi.holdNext({ lastUserText: queued });
+        const heldQueued = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: queued });
         releaseMessagesRequest.resolve(undefined);
         await heldQueued.received;
         await app.waitForTextAbsent('Queue needs attention');
@@ -223,7 +223,7 @@ describe('Lightpanda recovered input continuation', () => {
         await app.waitForText(`echo:${queued}`);
         await app.waitForExactTextCount(predecessor, 1);
         await app.waitForExactTextCount(queued, 1);
-        expect(fixture.integration.fakeOpenAi.requests().filter((request) => (
+        expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
           request.lastUserText === queued
         ))).toHaveLength(1);
         fixture.assertNoBrowserErrors();

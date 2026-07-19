@@ -59,7 +59,7 @@ describe('Lightpanda fork and delete', () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startDirectChat('ui-fork-retry-source');
+      await app.startOpenAiDirectChat('ui-fork-retry-source');
       await app.waitForText('echo:ui-fork-retry-source');
 
       const source = (await fixture.integration.client.listChats()).sessions.find((entry) =>
@@ -79,7 +79,7 @@ describe('Lightpanda fork and delete', () => {
       });
       const chats = await fixture.integration.client.listChats();
       expect(chats.sessions.filter((entry) => entry.id === forkId)).toHaveLength(1);
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === 'ui-fork-retry-message'
       ))).toHaveLength(1);
       fixture.assertNoBrowserErrors();

@@ -15,7 +15,11 @@ function transport(overrides: Partial<AcceptedInputTransport> = {}): AcceptedInp
 
 describe('AcceptedInputSubmissionService', () => {
 	it('materializes a draft request once after startup state is installed', async () => {
-		let agentSettings = { owner: 'before-startup' };
+		let agentSettings = {
+			ownerId: 'direct',
+			schemaVersion: 1,
+			values: { phase: 'before-startup' },
+		};
 		const start = vi
 			.fn()
 			.mockRejectedValueOnce(new TypeError('connection closed'))
@@ -26,7 +30,7 @@ describe('AcceptedInputSubmissionService', () => {
 			projectPath: '/project',
 			model: 'model-1',
 			permissionMode: 'default' as const,
-			thinkingMode: 'default' as const,
+			thinkingMode: 'none' as const,
 			agentSettings,
 			command: 'hello',
 		}));
@@ -37,13 +41,19 @@ describe('AcceptedInputSubmissionService', () => {
 
 		const submission = service.start(createInput);
 		expect(createInput).not.toHaveBeenCalled();
-		agentSettings = { owner: 'direct' };
+		agentSettings = {
+			ownerId: 'direct',
+			schemaVersion: 1,
+			values: { phase: 'after-startup' },
+		};
 		await submission.submit();
 
 		expect(createInput).toHaveBeenCalledOnce();
 		expect(start).toHaveBeenCalledTimes(2);
 		expect(start.mock.calls[0]?.[0]).toBe(start.mock.calls[1]?.[0]);
-		expect(start.mock.calls[0]?.[0]).toMatchObject({ agentSettings: { owner: 'direct' } });
+		expect(start.mock.calls[0]?.[0]).toMatchObject({
+			agentSettings: { ownerId: 'direct', values: { phase: 'after-startup' } },
+		});
 	});
 
 	it('creates direct identities before submission and preserves them across retry', async () => {
@@ -65,8 +75,8 @@ describe('AcceptedInputSubmissionService', () => {
 			chatId: 'chat-1',
 			command: 'hello',
 			permissionMode: 'default',
-			thinkingMode: 'default',
-			agentSettings: {},
+			thinkingMode: 'none',
+			agentSettings: { ownerId: 'direct', schemaVersion: 1, values: {} },
 			model: 'model-1',
 		});
 

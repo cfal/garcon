@@ -170,12 +170,12 @@ describe('persistence lifecycle', () => {
   test('consumes exact empty recovered-input continuation with the next interactive run', async () => {
     await withIntegrationFixture('empty-recovered-input-continuation', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldPredecessor = fixture.fakeOpenAi.holdNext({ lastUserText: 'unconfirmed-before-restart' });
+      const heldPredecessor = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'unconfirmed-before-restart' });
       const predecessor = await fixture.client.startDirectChat({
         chatId,
         content: 'unconfirmed-before-restart',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldPredecessor.received;
       const predecessorAborted = heldPredecessor.expectAbort();
@@ -201,17 +201,17 @@ describe('persistence lifecycle', () => {
         deliveryStatus: 'unconfirmed',
       });
 
-      const heldSuccessor = fixture.fakeOpenAi.holdNext({});
+      const heldSuccessor = fixture.fakeProviders.openAi.holdNext({});
       const submissions = await Promise.allSettled([
         fixture.client.runDirectChat({
           chatId,
           content: 'continuation-successor-a',
-          provider: fixture.provider,
+          agent: fixture.directAgents.openAi,
         }),
         fixture.client.runDirectChat({
           chatId,
           content: 'continuation-successor-b',
-          provider: fixture.provider,
+          agent: fixture.directAgents.openAi,
         }),
       ]);
       const accepted = submissions.find((result) => result.status === 'fulfilled');
@@ -235,7 +235,7 @@ describe('persistence lifecycle', () => {
       const cursor = fixture.client.markEvents();
       heldSuccessor.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, accepted.value.turnId, { afterIndex: cursor });
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'unconfirmed-before-restart',
         providerRequest.lastUserText,
       ]);
@@ -250,19 +250,19 @@ describe('persistence lifecycle', () => {
   test('keeps queue pause and recovered continuation independent across restart', async () => {
     await withIntegrationFixture('queued-recovered-input-continuation', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldPredecessor = fixture.fakeOpenAi.holdNext({ lastUserText: 'blocked-predecessor' });
+      const heldPredecessor = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'blocked-predecessor' });
       const predecessor = await fixture.client.startDirectChat({
         chatId,
         content: 'blocked-predecessor',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldPredecessor.received;
       const queued = await fixture.client.enqueueNew(chatId, 'blocked-successor');
       const paused = await fixture.client.pauseQueue(chatId);
       const pauseId = paused.control.queue.pause?.id;
       if (!pauseId) throw new Error('Manual pause was not installed.');
-      const heldSuccessor = fixture.fakeOpenAi.holdNext({ lastUserText: 'blocked-successor' });
+      const heldSuccessor = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'blocked-successor' });
       const predecessorAborted = heldPredecessor.expectAbort();
       await fixture.crashAndRestartBeforeNativeUserPersistence({
         chatId,
@@ -288,7 +288,7 @@ describe('persistence lifecycle', () => {
       const resumed = await fixture.client.resumeQueue(chatId, pauseId);
       expect(resumed.control.queue.pause).toBeNull();
       expect(resumed.control.recoveredInputContinuation?.id).toBe(continuationId);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'blocked-predecessor',
       ]);
 
@@ -333,7 +333,7 @@ describe('persistence lifecycle', () => {
       const continued = await fixture.client.continueRecoveredInput({ chatId, continuationId });
       expect(continued.control.recoveredInputContinuation).toBeNull();
       expect(continued.control.queue.pause?.id).toBe(replacementPauseId);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'blocked-predecessor',
       ]);
       await fixture.client.resumeQueue(chatId, replacementPauseId);
@@ -434,15 +434,15 @@ describe('persistence lifecycle', () => {
         chatId,
         content: 'active-handoff-seed',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
 
-      const heldCurrent = fixture.fakeOpenAi.holdNext({ lastUserText: 'active-handoff-current' });
+      const heldCurrent = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'active-handoff-current' });
       const current = await fixture.client.runDirectChat({
         chatId,
         content: 'active-handoff-current',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldCurrent.received;
       const fallbackRequestId = crypto.randomUUID();
@@ -507,13 +507,13 @@ describe('persistence lifecycle', () => {
       ]);
       expect(page.pendingUserInputs.some((input) => input.clientRequestId === fallbackRequestId)).toBe(false);
 
-      const heldFallback = fixture.fakeOpenAi.holdNext({ lastUserText: 'active-handoff-fallback' });
+      const heldFallback = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'active-handoff-fallback' });
       await fixture.client.continueRecoveredInput({ chatId, continuationId });
       await heldFallback.received;
       const cursor = fixture.client.markEvents();
       heldFallback.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
-      expect(fixture.fakeOpenAi.requests().filter((request) => (
+      expect(fixture.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === 'active-handoff-fallback'
       ))).toHaveLength(1);
     });
