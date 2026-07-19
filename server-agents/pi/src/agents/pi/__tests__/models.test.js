@@ -13,12 +13,12 @@ mock.module('@earendil-works/pi-coding-agent', () => ({
 }));
 
 import {
-  clearPiModelCacheForTests,
-  expirePiModelCacheForTests,
   getPiAvailableModels,
-  getPiModels,
-  getPiModelsStrict,
+  PiModelCatalogService,
 } from '../pi-models.js';
+import { testPiConfig } from './test-fixtures.js';
+
+let models = new PiModelCatalogService(testPiConfig);
 
 afterEach(() => {
   createAgentSessionServicesMock.mockReset();
@@ -29,7 +29,7 @@ afterEach(() => {
   authStorageCreateMock.mockImplementation(() => ({ drainErrors: () => [] }));
   getAgentDirMock.mockReset();
   getAgentDirMock.mockImplementation(() => '/tmp/pi-agent');
-  clearPiModelCacheForTests();
+  models = new PiModelCatalogService(testPiConfig);
 });
 
 describe('Pi model discovery', () => {
@@ -52,7 +52,7 @@ describe('Pi model discovery', () => {
       },
     });
 
-    await expect(getPiModels()).resolves.toEqual([
+    await expect(models.getModels()).resolves.toEqual([
       { value: 'openai/gpt-5.4', label: 'openai: gpt-5.4', supportsImages: true },
       {
         value: 'fireworks/accounts/fireworks/models/deepseek-v3p1',
@@ -106,7 +106,7 @@ describe('Pi model discovery', () => {
   it('returns no models when SDK model discovery fails', async () => {
     createAgentSessionServicesMock.mockRejectedValueOnce(new Error('model registry failed'));
 
-    await expect(getPiModels()).resolves.toEqual([]);
+    await expect(models.getModels()).resolves.toEqual([]);
   });
 
   it('retries transient auth diagnostics before returning models', async () => {
@@ -135,7 +135,7 @@ describe('Pi model discovery', () => {
         },
       });
 
-    await expect(getPiModelsStrict()).resolves.toEqual([
+    await expect(models.getModelsStrict()).resolves.toEqual([
       { value: 'openai/gpt-5.4', label: 'openai: gpt-5.4', supportsImages: false },
     ]);
     expect(createAgentSessionServicesMock).toHaveBeenCalledTimes(2);
@@ -151,8 +151,8 @@ describe('Pi model discovery', () => {
       },
     }));
 
-    await expect(getPiModelsStrict()).rejects.toThrow('auth.json is locked');
-    await expect(getPiModels()).resolves.toEqual([]);
+    await expect(models.getModelsStrict()).rejects.toThrow('auth.json is locked');
+    await expect(models.getModels()).resolves.toEqual([]);
   });
 
   it('returns last-known-good models when a stale refresh fails transiently', async () => {
@@ -172,8 +172,8 @@ describe('Pi model discovery', () => {
       },
     });
 
-    await expect(getPiModels()).resolves.toEqual(expected);
-    expirePiModelCacheForTests();
+    await expect(models.getModels()).resolves.toEqual(expected);
+    models.expireForTests();
 
     authStorageCreateMock.mockImplementation(() => ({ drainErrors: () => [new Error('auth.json is locked')] }));
     createAgentSessionServicesMock.mockImplementation(async () => ({
@@ -184,7 +184,7 @@ describe('Pi model discovery', () => {
       },
     }));
 
-    await expect(getPiModels()).resolves.toEqual(expected);
-    await expect(getPiModelsStrict()).rejects.toMatchObject({ staleModels: expected });
+    await expect(models.getModels()).resolves.toEqual(expected);
+    await expect(models.getModelsStrict()).rejects.toMatchObject({ staleModels: expected });
   });
 });

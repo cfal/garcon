@@ -18,12 +18,18 @@ function createJwtPayload(payload) {
 }
 
 describe('getCodexAuthStatus', () => {
-  const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
-  const originalOpenAiBaseUrl = process.env.OPENAI_BASE_URL;
-  const originalCodexHome = process.env.CODEX_HOME;
   let originalSpawn;
   let spawnMock;
   let tempDir;
+  let codexHome;
+  let openAiApiKey;
+  let openAiBaseUrl;
+  const config = {
+    openAiApiKey: () => openAiApiKey,
+    openAiBaseUrl: () => openAiBaseUrl,
+    home: () => codexHome,
+    packageVersion: () => 'test',
+  };
 
   beforeEach(async () => {
     originalSpawn = Bun.spawn;
@@ -31,20 +37,13 @@ describe('getCodexAuthStatus', () => {
     Bun.spawn = spawnMock;
 
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codex-auth-'));
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.OPENAI_BASE_URL;
-    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = originalCodexHome;
+    codexHome = tempDir;
+    openAiApiKey = null;
+    openAiBaseUrl = null;
   });
 
   afterEach(async () => {
     Bun.spawn = originalSpawn;
-    if (originalOpenAiApiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = originalOpenAiApiKey;
-    if (originalOpenAiBaseUrl === undefined) delete process.env.OPENAI_BASE_URL;
-    else process.env.OPENAI_BASE_URL = originalOpenAiBaseUrl;
-    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = originalCodexHome;
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true });
       tempDir = null;
@@ -52,17 +51,16 @@ describe('getCodexAuthStatus', () => {
   });
 
   it('uses codex login status and reads the label from CODEX_HOME auth.json', async () => {
-    const codexHome = path.join(tempDir, 'custom-codex-home');
+    codexHome = path.join(tempDir, 'custom-codex-home');
     await fs.mkdir(codexHome, { recursive: true });
     await fs.writeFile(path.join(codexHome, 'auth.json'), JSON.stringify({
       tokens: {
         id_token: createJwtPayload({ email: 'person@example.com' }),
       },
     }));
-    process.env.CODEX_HOME = codexHome;
     spawnMock.mockReturnValue(createFakeProc({ stderr: 'Logged in using ChatGPT\n' }));
 
-    expect(await getCodexAuthStatus()).toEqual({
+    expect(await getCodexAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: true,
       label: 'person@example.com',
@@ -81,7 +79,7 @@ describe('getCodexAuthStatus', () => {
       stderr: 'warning: helper install skipped\nLogged in using an API key - sk-proj-***12345\n',
     }));
 
-    expect(await getCodexAuthStatus()).toEqual({
+    expect(await getCodexAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: false,
       label: '',
@@ -89,9 +87,9 @@ describe('getCodexAuthStatus', () => {
   });
 
   it('short-circuits OPENAI_API_KEY without spawning the CLI', async () => {
-    process.env.OPENAI_API_KEY = 'test-key';
+    openAiApiKey = 'test-key';
 
-    expect(await getCodexAuthStatus()).toEqual({
+    expect(await getCodexAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: false,
       label: '',
@@ -100,10 +98,9 @@ describe('getCodexAuthStatus', () => {
   });
 
   it('short-circuits OPENAI_BASE_URL without spawning the CLI', async () => {
-    delete process.env.OPENAI_API_KEY;
-    process.env.OPENAI_BASE_URL = 'http://localhost:11434/v1';
+    openAiBaseUrl = 'http://localhost:11434/v1';
 
-    expect(await getCodexAuthStatus()).toEqual({
+    expect(await getCodexAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: false,
       label: '',

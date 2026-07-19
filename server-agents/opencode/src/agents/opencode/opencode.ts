@@ -10,18 +10,16 @@ import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
 import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-import { isTestEnvironment } from '../../config.js';
+import type { OpenCodeConfig } from '../../config.js';
 import { normalizeThinkingMode, type PermissionMode } from '@garcon/common/chat-modes';
 import {
-  assertExecutionAdmissionOpen,
-  executionEventMetadata,
-  markExecutionStarted,
-  type AgentEventMetadata,
-  type AgentSessionSettingsPatch,
-  type StartSessionRequest,
-  type ResumeTurnRequest,
-} from '@garcon/server-agent-common/legacy/session-types';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+  assertOpenCodeExecutionOpen,
+  markOpenCodeExecutionStarted,
+  openCodeEventMetadata,
+  type OpenCodeResumeRequest,
+  type OpenCodeSessionSettingsPatch,
+  type OpenCodeStartRequest,
+} from './runtime-types.js';
 import {
   createOpenCodeRequestScope,
   isOpenCodeNotFoundResult,
@@ -29,9 +27,19 @@ import {
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
 } from './sdk-result.js';
-import { UnsupportedSingleQueryEffortError } from '@garcon/server-agent-common/legacy/single-query-errors';
+import {
+  AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+  AgentIntegrationError,
+  type AgentLogger,
+} from '@garcon/server-agent-interface';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 
-const logger = createLogger('agents:opencode:opencode');
+const SILENT_LOGGER: AgentLogger = Object.freeze({
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+});
 
 const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 5_000;
 const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
@@ -170,7 +178,7 @@ export function extractPermissionRequest(event: SSEEvent): {
 }
 
 interface OpenCodeTurnContext {
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
   providerMessageId: string;
   providerObservedEventId: string | null;
   assistantMessageIds: Set<string>;
@@ -201,10 +209,12 @@ interface PendingPermission {
   agentSessionId: string;
   chatId: string;
   directory?: string;
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
 }
 
 interface OpenCodeRuntimeOptions {
+  config?: OpenCodeConfig;
+  logger?: AgentLogger;
   startupTimeoutMs?: number;
   modelDiscoveryTimeoutMs?: number;
   requestTimeoutMs?: number;
@@ -224,6 +234,7 @@ interface NormalizedOpenCodeRuntimeOptions {
   unavailableRetryMs: number;
   modelCacheTtlMs: number;
   now: () => number;
+  requiresExecutable: boolean;
   createInstance: (input: {
     port: number;
     signal: AbortSignal;
@@ -264,6 +275,7 @@ function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRu
     unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
     modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
     now: options.now ?? (() => Date.now()),
+    requiresExecutable: options.createInstance === undefined,
     createInstance: options.createInstance ?? createOpenCodeInstance,
   };
 }
@@ -433,6 +445,8 @@ async function createOpenCodeInstance(input: {
 }
 
 export class OpenCodeRuntime extends AgentEventEmitterRuntime {
+  readonly #config: OpenCodeConfig;
+  readonly #logger: AgentLogger;
   #instance: OpenCodeInstance | null = null;
   #initPromise: Promise<OpenCodeInstance> | null = null;
   #sseListenerStarted = false;
@@ -461,6 +475,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
   constructor(options: OpenCodeRuntimeOptions = {}) {
     super();
+    this.#config = options.config ?? { isTestEnvironment: () => false };
+    this.#logger = options.logger ?? SILENT_LOGGER;
     this.#options = normalizeOptions(options);
   }
 
@@ -476,10 +492,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#closeInstance();
   }
 
-  // Returns true if the opencode binary is on $PATH, without spawning a server.
+  // Returns whether an OpenCode instance can be created without starting one.
   isAvailable(): boolean {
     if (this.#available !== null) return this.#available;
-    if (isTestEnvironment()) {
+    if (!this.#options.requiresExecutable || this.#config.isTestEnvironment()) {
       this.#available = true;
       return true;
     }
@@ -572,7 +588,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#sseListenerStarted = false;
   }
 
-  #createTurnContext(eventMetadata: AgentEventMetadata): OpenCodeTurnContext {
+  #createTurnContext(eventMetadata: RuntimeEventMetadata): OpenCodeTurnContext {
     return {
       eventMetadata,
       providerMessageId: `msg_${crypto.randomUUID().replaceAll('-', '')}`,
@@ -641,8 +657,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     let startup: Promise<OpenCodeInstance> | null = null;
     startup = (async () => {
       try {
-        if (typeof Bun !== 'undefined' && typeof Bun.which === 'function'
-            && !isTestEnvironment() && !Bun.which('opencode')) {
+        if (this.#options.requiresExecutable
+            && typeof Bun !== 'undefined' && typeof Bun.which === 'function'
+            && !this.#config.isTestEnvironment() && !Bun.which('opencode')) {
           throw new Error('opencode executable not found in $PATH');
         }
 
@@ -663,7 +680,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       } catch (err) {
         const reason = errorMessage(err);
         if (this.#markTemporarilyUnavailable(reason)) {
-          logger.warn('opencode: marked unavailable after startup failure:', reason);
+          this.#logger.warn('OpenCode marked unavailable after startup failure', { reason });
         }
         throw err;
       } finally {
@@ -697,7 +714,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         const info = props.info || {};
         const messageId = info.id;
         if (!messageId) {
-          logger.warn(`opencode: missing messageID for ${event.type}:`, event);
+          this.#logger.warn('OpenCode event is missing a message ID', { eventType: event.type });
           return;
         }
         if (info.finish !== 'stop') {
@@ -713,13 +730,13 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       case 'message.part.updated': {
         const part = props.part || {};
         if (!part.id) {
-          logger.warn(`opencode: missing partID for ${event.type}`);
+          this.#logger.warn('OpenCode event is missing a part ID', { eventType: event.type });
           return;
         }
 
         const messageId = part.messageID;
         if (!messageId) {
-          logger.warn(`opencode: missing messageID for ${event.type}:`, event);
+          this.#logger.warn('OpenCode event is missing a message ID', { eventType: event.type });
           return;
         }
 
@@ -745,7 +762,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         if (part.text) {
           const partType = assistantPartTypes.get(part.id);
           if (!partType) {
-            logger.warn(`opencode: final text part not seen earlier:`, event);
+            this.#logger.warn('OpenCode final text part was not observed earlier', {
+              eventType: event.type,
+            });
             return;
           }
           assistantPartTypes.delete(part.id);
@@ -781,7 +800,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #emitPermissionMessages(
     chatId: string,
     messages: ChatMessage[],
-    eventMetadata?: AgentEventMetadata,
+    eventMetadata?: RuntimeEventMetadata,
   ): void {
     if (!messages.length) return;
     this.emitMessages(chatId, messages, eventMetadata);
@@ -814,11 +833,14 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       return true;
     }
     if (typeof event.id !== 'string' || !event.id) {
-      logger.warn(`opencode: ignoring ${event.type} without an event id`);
+      this.#logger.warn('Ignoring OpenCode event without an event ID', { eventType: event.type });
       return false;
     }
     if (session.lastEventId && event.id <= session.lastEventId) {
-      logger.debug('opencode: ignoring replayed or out-of-order event:', event.type, event.id);
+      this.#logger.debug('Ignoring replayed or out-of-order OpenCode event', {
+        eventType: event.type,
+        eventId: event.id,
+      });
       return false;
     }
     session.lastEventId = event.id;
@@ -892,14 +914,18 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           const sessionId = extractSessionId(event);
           if (!sessionId) {
             if (event.type !== 'server.heartbeat') {
-              logger.debug('opencode: SSE event with no sessionId, type:', event.type);
+              this.#logger.debug('OpenCode SSE event has no session ID', { eventType: event.type });
             }
             continue;
           }
 
           const session = this.#sessions.get(sessionId);
           if (!session || session.status === 'aborted') {
-            logger.debug('opencode: SSE event for unknown/aborted session:', event.type, 'sid:', sessionId, 'known:', [...this.#sessions.keys()]);
+            this.#logger.debug('OpenCode SSE event targets an unknown or aborted session', {
+              eventType: event.type,
+              sessionId,
+              knownSessionIds: [...this.#sessions.keys()],
+            });
             continue;
           }
 
@@ -907,7 +933,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
           const chatId = session.chatId;
           if (!chatId) {
-            logger.debug('opencode: SSE event before chatId assigned:', event.type, 'sid:', sessionId);
+            this.#logger.debug('OpenCode SSE event arrived before chat assignment', {
+              eventType: event.type,
+              sessionId,
+            });
             continue;
           }
 
@@ -991,7 +1020,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         const retryMs = this.isTemporarilyUnavailable()
           ? Math.max(3000, Math.min(this.getUnavailableRetryAfterMs(), 30_000))
           : 3000;
-        logger.error(`opencode: SSE listener error, reconnecting in ${Math.round(retryMs / 1000)}s:`, err.message);
+        this.#logger.error('OpenCode SSE listener failed and will reconnect', {
+          retrySeconds: Math.round(retryMs / 1000),
+          error: err.message,
+        });
         this.#sseListenerStarted = false;
         if (this.#sseReadyPromise === readyPromise) {
           this.#sseReadyPromise = null;
@@ -1000,7 +1032,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         this.#sseRetryTimer = setTimeout(() => {
           this.#sseRetryTimer = null;
           void this.#startGlobalSSEListener().catch((error) => {
-            logger.error('opencode: SSE listener restart failed:', error);
+            this.#logger.error('OpenCode SSE listener restart failed', {
+              error: errorMessage(error),
+            });
           });
         }, retryMs);
         this.#sseRetryTimer.unref?.();
@@ -1055,7 +1089,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     } catch (err) {
       const reason = errorMessage(err);
       if (this.#markTemporarilyUnavailable(reason)) {
-        logger.warn('opencode: model discovery unavailable:', reason);
+        this.#logger.warn('OpenCode model discovery is unavailable', { reason });
       }
       return this.#cachedModels();
     }
@@ -1086,7 +1120,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       if (err instanceof OpenCodeTimeoutError) {
         const reason = errorMessage(err);
         if (this.#markTemporarilyUnavailable(reason)) {
-          logger.warn('opencode: request timed out:', reason);
+          this.#logger.warn('OpenCode request timed out', { reason });
         }
       }
       throw err;
@@ -1101,12 +1135,15 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const result = await this.#runRequest<T>(label, (signal) => operation(signal, scope));
     if (!scope.directory || !isOpenCodeNotFoundResult(result)) return result;
 
-    logger.warn(`opencode: ${label} missed directory ${scope.directory}; retrying without directory`);
+    this.#logger.warn('OpenCode request missed the scoped directory; retrying without it', {
+      label,
+      directory: scope.directory,
+    });
     return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}));
   }
 
-  async startSession(request: StartSessionRequest): Promise<string> {
-    assertExecutionAdmissionOpen(request);
+  async startSession(request: OpenCodeStartRequest): Promise<string> {
+    assertOpenCodeExecutionOpen(request);
     const {
       command,
       chatId,
@@ -1126,7 +1163,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     await this.#startGlobalSSEListener();
 
     const client = await this.getClient();
-    assertExecutionAdmissionOpen(request);
+    assertOpenCodeExecutionOpen(request);
     const scope = createOpenCodeRequestScope(projectPath);
     const sessionResult: any = await this.#runRequest<any>(
       'OpenCode session create',
@@ -1143,7 +1180,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       throw new Error('Failed to create OpenCode session: missing session id');
     }
 
-    const eventMetadata = executionEventMetadata(
+    const eventMetadata = openCodeEventMetadata(
       { clientRequestId, turnId },
       'chat-start',
     );
@@ -1160,7 +1197,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       turn,
     });
     this.emitSessionCreated(chatId);
-    logger.info('opencode: session created and registered:', agentSessionId);
+    this.#logger.info('OpenCode session created and registered', { agentSessionId });
 
     try {
       await this.#startGlobalSSEListener();
@@ -1168,7 +1205,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
-      markExecutionStarted(request);
+      markOpenCodeExecutionStarted(request);
       this.emitProcessing(chatId, true);
     } catch (error) {
       this.#sessions.delete(agentSessionId);
@@ -1203,7 +1240,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         || sess.status !== 'running'
         || sess.turn !== turn
       ) return;
-      logger.error(`opencode: prompt failed for session ${agentSessionId}:`, err.message);
+      this.#logger.error('OpenCode prompt failed', { agentSessionId, error: err.message });
       sess.status = 'completed';
       sess.lastActivityAt = Date.now();
       this.emitProcessing(chatId, false);
@@ -1213,8 +1250,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return agentSessionId;
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async runTurn(request: OpenCodeResumeRequest): Promise<void> {
+    assertOpenCodeExecutionOpen(request);
     const {
       command,
       agentSessionId,
@@ -1233,10 +1270,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
-    assertExecutionAdmissionOpen(request);
+    assertOpenCodeExecutionOpen(request);
 
     const session = this.#sessions.get(agentSessionId);
-    const eventMetadata = executionEventMetadata({ clientRequestId, turnId });
+    const eventMetadata = openCodeEventMetadata({ clientRequestId, turnId });
     const turn = this.#createTurnContext(eventMetadata);
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
@@ -1270,7 +1307,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
-      markExecutionStarted(request);
+      markOpenCodeExecutionStarted(request);
       this.emitProcessing(chatId, true);
       const promptRequest = this.#runScopedSessionRequest(
         'OpenCode prompt submit',
@@ -1293,7 +1330,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         this.#clearTurnWaiter(agentSessionId);
         throw err;
       }
-      logger.error(`opencode: query failed for session ${agentSessionId}:`, err.message);
+      this.#logger.error('OpenCode query failed', { agentSessionId, error: err.message });
       if (!sess || sess.status !== 'running' || sess.turn !== turn) throw err;
       sess.status = 'completed';
       sess.lastActivityAt = Date.now();
@@ -1337,7 +1374,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       throw new Error('OpenCode session fork did not return a session id');
     }
 
-    logger.info('opencode: session forked:', sessionID, '->', forkedSessionId);
+    this.#logger.info('OpenCode session forked', {
+      sourceSessionId: sessionID,
+      forkedSessionId,
+    });
     return forkedSessionId;
   }
 
@@ -1358,10 +1398,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       );
       throwOpenCodeResultError(result, 'OpenCode session abort failed');
     } catch (error) {
-      logger.warn(
-        `opencode: failed to abort session ${agentSessionId}:`,
-        error instanceof Error ? error.message : String(error),
-      );
+      this.#logger.warn('OpenCode session abort failed', {
+        agentSessionId,
+        error: errorMessage(error),
+      });
       return false;
     }
 
@@ -1382,7 +1422,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return session?.status === 'running';
   }
 
-  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+  updateSessionSettings(agentSessionId: string, patch: OpenCodeSessionSettingsPatch): void {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return;
     if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
@@ -1399,7 +1439,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const pending = this.#pendingPermissions.get(permissionRequestId);
     this.#pendingPermissions.delete(permissionRequestId);
     if (!pending) {
-      logger.warn('opencode: resolvePermission, no pending entry for', permissionRequestId, '(already resolved or cancelled)');
+      this.#logger.warn('OpenCode permission response has no pending request', {
+        permissionRequestId,
+      });
       return;
     }
 
@@ -1434,7 +1476,12 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
     const thinkingMode = normalizeThinkingMode(options.thinkingMode);
     if (thinkingMode !== 'none') {
-      throw new UnsupportedSingleQueryEffortError('opencode', thinkingMode);
+      throw new AgentIntegrationError(
+        'OPERATION_UNSUPPORTED',
+        `opencode does not support explicit one-shot effort ${thinkingMode}.`,
+        false,
+        AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+      );
     }
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
     const scope = createOpenCodeRequestScope(projectPath || cwd);

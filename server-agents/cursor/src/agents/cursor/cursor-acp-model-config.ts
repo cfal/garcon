@@ -1,8 +1,13 @@
 import type { AcpSessionConfigOption } from '../../acp/protocol.js';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { AcpSessionConfigurationContext } from '../shared/acp-agent-runtime.js';
 
-const logger = createLogger('agents:cursor:acp-model-config');
+const SILENT_LOGGER: AgentLogger = Object.freeze({
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+});
 
 const FAST_SUFFIX = '-fast';
 const GPT_REASONING_VALUES = new Set(['none', 'low', 'medium', 'high', 'xhigh', 'extra-high']);
@@ -130,6 +135,7 @@ export function assignmentsForCursorModel(model: string, mode?: CursorAcpSession
 
 export async function configureCursorAcpSession(
   context: AcpSessionConfigurationContext,
+  logger: AgentLogger = SILENT_LOGGER,
 ): Promise<AcpSessionConfigOption[]> {
   return configureCursorAcpSessionOptions({
     client: context.client,
@@ -137,11 +143,12 @@ export async function configureCursorAcpSession(
     model: context.request.model,
     mode: cursorAcpModeForPermissionMode(context.request.permissionMode),
     configOptions: context.configOptions,
-  });
+  }, logger);
 }
 
 export async function configureCursorAcpSessionOptions(
   context: ConfigureCursorAcpSessionOptions,
+  logger: AgentLogger = SILENT_LOGGER,
 ): Promise<AcpSessionConfigOption[]> {
   let options = context.configOptions ?? [];
   const assignments = assignmentsForCursorModel(context.model, context.mode);
@@ -157,11 +164,17 @@ export async function configureCursorAcpSessionOptions(
       options = result.configOptions ?? [];
       assertCurrentValue(options, assignment, context.model);
     }
-    logger.info(`cursor: configured ACP model for ${context.sessionId}: ${formatAssignments(assignments)}`);
+    logger.info('Configured Cursor ACP model', {
+      sessionId: context.sessionId,
+      assignments: formatAssignments(assignments),
+    });
     return options;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.warn(`cursor: failed to configure ACP model ${context.model}: ${message}`);
+    logger.warn('Failed to configure Cursor ACP model', {
+      model: context.model,
+      error: message,
+    });
     throw error;
   }
 }

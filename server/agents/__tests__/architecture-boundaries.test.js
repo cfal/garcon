@@ -36,6 +36,19 @@ describe('agent architecture boundaries', () => {
     expect(existsSync('server/agents/direct')).toBe(false);
   });
 
+  test('uses direct integrations without a legacy compatibility layer', () => {
+    expect(existsSync(join('server-agents/common/src', 'legacy'))).toBe(false);
+    const commonPackage = JSON.parse(readFileSync('server-agents/common/package.json', 'utf8'));
+    expect(Object.keys(commonPackage.exports)).not.toContain('./legacy/*');
+
+    for (const providerId of providerIds) {
+      const source = readFileSync(`server-agents/${providerId}/src/index.ts`, 'utf8');
+      expect(source, providerId).toMatch(
+        /export default class \w+Integration implements AgentIntegration/,
+      );
+    }
+  });
+
   test('imports provider packages only from the default composition module', () => {
     for (const file of walk('server')) {
       if (file.includes('__tests__')) continue;

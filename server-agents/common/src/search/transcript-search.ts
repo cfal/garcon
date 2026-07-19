@@ -9,7 +9,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
-import { stripFirstUserSeed } from '../shared/transcript-seed.js';
+import { stripFirstUserSeed } from '@garcon/common/transcript-seed';
 import { projectHistoricalSearchMessages } from './message-projector.js';
 import { searchIndexStatus, searchTranscriptIndex } from './query.js';
 import {

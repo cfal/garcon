@@ -2,7 +2,7 @@
 // Keeps Responses request/stream parsing separate from chat completions.
 
 import type { SharedModelOption } from '@garcon/common/models';
-import type { AgentCommandImage } from '@garcon/server-agent-common/legacy/session-types';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   DirectChatRuntimeBase,
   type DirectRuntimeSession,
@@ -61,7 +61,7 @@ function buildHeaders(
 
 export function buildOpenAiResponsesUserContent(
   text: string,
-  images?: AgentCommandImage[],
+  images?: readonly AgentAttachment[],
 ): ResponsesInputContent {
   const prompt = appendTextAttachmentContext(text, images);
   const imageParts = imageAttachments(images);
@@ -214,7 +214,7 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
 
   protected buildUserTurn(
     command: string,
-    images?: AgentCommandImage[],
+    images?: readonly AgentAttachment[],
   ): DirectUserTurn<ResponsesInputMessage> {
     const content = buildOpenAiResponsesUserContent(command, images);
     return {

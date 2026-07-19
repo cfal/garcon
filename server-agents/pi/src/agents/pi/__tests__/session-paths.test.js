@@ -9,6 +9,7 @@ import {
   piSessionPathFromHeader,
   resolvePiConfiguredSessionDir,
 } from '../pi-session-paths.js';
+import { testPiConfig } from './test-fixtures.js';
 
 const originalEnv = { ...process.env };
 let tempRoot;
@@ -71,7 +72,7 @@ describe('Pi session path utilities', () => {
     process.env.HOME = tempRoot;
     process.env.PI_CODING_AGENT_SESSION_DIR = '~/pi-sessions';
 
-    expect(resolvePiConfiguredSessionDir('/tmp/project')).toBe(path.join(tempRoot, 'pi-sessions'));
+    expect(resolvePiConfiguredSessionDir('/tmp/project', testPiConfig)).toBe(path.join(tempRoot, 'pi-sessions'));
   });
 
   it('finds a Pi session by id in a configured session directory', async () => {
@@ -79,7 +80,15 @@ describe('Pi session path utilities', () => {
     process.env.PI_CODING_AGENT_SESSION_DIR = sessionDir;
     const sessionPath = await writeSessionFile(sessionDir, 'session-2');
 
-    await expect(findPiSessionFileBySessionId('session-2', '/tmp/pi-project')).resolves.toBe(sessionPath);
-    await expect(findPiSessionFileBySessionId('missing', '/tmp/pi-project')).resolves.toBeNull();
+    await expect(findPiSessionFileBySessionId(
+      'session-2',
+      '/tmp/pi-project',
+      testPiConfig,
+    )).resolves.toBe(sessionPath);
+    await expect(findPiSessionFileBySessionId(
+      'missing',
+      '/tmp/pi-project',
+      testPiConfig,
+    )).resolves.toBeNull();
   });
 });

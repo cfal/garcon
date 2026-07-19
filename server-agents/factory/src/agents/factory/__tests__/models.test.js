@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-import { getFactoryModelCatalog } from '../factory-models.js';
+import { FactoryModelCatalogService } from '../factory-models.js';
+
+const config = {
+  binary: () => 'droid',
+  apiKey: () => null,
+  homeOverride: () => null,
+};
 
 function createHelpProc(stdoutText, exitCode = 0) {
   const encoder = new TextEncoder();
@@ -50,7 +56,7 @@ Model details:
   - GPT-5.4: supports reasoning: Yes; supported: [off, low, medium, high, xhigh]; default: high
 `));
 
-    const catalog = await getFactoryModelCatalog(true);
+    const catalog = await new FactoryModelCatalogService(config).getCatalog(true);
 
     expect(catalog.defaultModel).toBe('claude-opus-4-6');
     expect(catalog.options).toEqual([
@@ -70,7 +76,7 @@ Model details:
   it('falls back to static models when Droid help fails', async () => {
     spawnMock.mockReturnValueOnce(createHelpProc('nope', 1));
 
-    const catalog = await getFactoryModelCatalog(true);
+    const catalog = await new FactoryModelCatalogService(config).getCatalog(true);
 
     expect(catalog.options.length).toBeGreaterThan(0);
     expect(catalog.options.find((entry) => entry.value === catalog.defaultModel)).toBeTruthy();

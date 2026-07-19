@@ -25,11 +25,16 @@ function procWithJson(body, exitCode = 0, stderrText = '') {
 }
 
 describe('getCursorAuthStatus', () => {
-  const originalApiKey = process.env.CURSOR_API_KEY;
+  let apiKey;
   let originalSpawn;
   let spawnMock;
+  const config = {
+    binary: () => 'cursor-agent',
+    apiKey: () => apiKey,
+  };
 
   beforeEach(() => {
+    apiKey = null;
     originalSpawn = Bun.spawn;
     spawnMock = mock();
     Bun.spawn = spawnMock;
@@ -37,17 +42,12 @@ describe('getCursorAuthStatus', () => {
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
-    if (originalApiKey === undefined) {
-      delete process.env.CURSOR_API_KEY;
-    } else {
-      process.env.CURSOR_API_KEY = originalApiKey;
-    }
   });
 
   it('treats CURSOR_API_KEY as authenticated without shelling out', async () => {
-    process.env.CURSOR_API_KEY = 'cursor-test-key';
+    apiKey = 'cursor-test-key';
 
-    await expect(getCursorAuthStatus()).resolves.toEqual({
+    await expect(getCursorAuthStatus(config)).resolves.toEqual({
       authenticated: true,
       canReauth: false,
       label: 'CURSOR_API_KEY',
@@ -57,14 +57,13 @@ describe('getCursorAuthStatus', () => {
   });
 
   it('parses authenticated CLI status JSON', async () => {
-    delete process.env.CURSOR_API_KEY;
     spawnMock.mockReturnValueOnce(procWithJson({
       status: 'authenticated',
       isAuthenticated: true,
       email: 'dev@example.test',
     }));
 
-    await expect(getCursorAuthStatus()).resolves.toMatchObject({
+    await expect(getCursorAuthStatus(config)).resolves.toMatchObject({
       authenticated: true,
       canReauth: false,
       label: 'dev@example.test',
@@ -74,14 +73,13 @@ describe('getCursorAuthStatus', () => {
   });
 
   it('reports unauthenticated CLI status details', async () => {
-    delete process.env.CURSOR_API_KEY;
     spawnMock.mockReturnValueOnce(procWithJson({
       status: 'unauthenticated',
       isAuthenticated: false,
       message: 'Not logged in',
     }));
 
-    await expect(getCursorAuthStatus()).resolves.toMatchObject({
+    await expect(getCursorAuthStatus(config)).resolves.toMatchObject({
       authenticated: false,
       canReauth: false,
       label: '',

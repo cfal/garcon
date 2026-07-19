@@ -4,10 +4,19 @@ import os from 'os';
 import path from 'path';
 
 import { PiCliRuntime, runSingleQuery } from '../pi-cli.js';
+import { testLogger, testModels, testPiConfig } from './test-fixtures.js';
 
 const originalSpawn = Bun.spawn;
 const originalEnv = { ...process.env };
 let tempRoot;
+
+function createRuntime() {
+  return new PiCliRuntime({
+    config: testPiConfig,
+    logger: testLogger,
+    models: testModels,
+  });
+}
 
 function createFakeProc() {
   const encoder = new TextEncoder();
@@ -139,12 +148,12 @@ describe('PiCliRuntime lifecycle', () => {
       cwd: path.join(tempRoot, 'project'),
       model: 'github-copilot/gpt-5.4',
       thinkingMode: 'ultra',
-    });
+    }, testPiConfig);
     await runSingleQuery('hello', {
       cwd: path.join(tempRoot, 'project'),
       model: 'github-copilot/gpt-5.4',
       thinkingMode: 'none',
-    });
+    }, testPiConfig);
 
     expect(spawnMock.mock.calls[0][0]).toEqual(
       expect.arrayContaining(['--thinking', 'ultra']),
@@ -153,7 +162,7 @@ describe('PiCliRuntime lifecycle', () => {
   });
 
   it('resolves startSession from the Pi JSON session header', async () => {
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const processing = mock();
     const created = mock();
     provider.onProcessing(processing);
@@ -185,7 +194,7 @@ describe('PiCliRuntime lifecycle', () => {
   it('continues an existing session using the native session path', async () => {
     const nativePath = path.join(tempRoot, 'pi-session-2.jsonl');
     await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const messages = mock();
     const finished = mock();
     let runningWhenFinished;
@@ -224,7 +233,7 @@ describe('PiCliRuntime lifecycle', () => {
   });
 
   it('kills and rolls back a process whose prompt write fails synchronously', async () => {
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const proc = createFakeProc();
     proc.stdin.write = () => {
       throw new Error('stdin failed');
@@ -247,7 +256,7 @@ describe('PiCliRuntime lifecycle', () => {
   it('ignores trailing output from a completed process after its successor starts', async () => {
     const nativePath = path.join(tempRoot, 'pi-session-reused.jsonl');
     await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const messages = [];
     const terminals = [];
     provider.onMessages((_chatId, batch, metadata) => messages.push({ batch, metadata }));
@@ -306,7 +315,7 @@ describe('PiCliRuntime lifecycle', () => {
   it('emits tool-use and tool-result events from Pi JSON stream events', async () => {
     const nativePath = path.join(tempRoot, 'pi-session-tools.jsonl');
     await fs.writeFile(nativePath, '{}\n', 'utf8');
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const messages = mock();
     provider.onMessages(messages);
 
@@ -353,7 +362,7 @@ describe('PiCliRuntime lifecycle', () => {
   });
 
   it('treats manual bypass like default Pi execution mode', async () => {
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -370,7 +379,7 @@ describe('PiCliRuntime lifecycle', () => {
   });
 
   it('rejects startSession when the process exits before a session header', async () => {
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -381,7 +390,7 @@ describe('PiCliRuntime lifecycle', () => {
   });
 
   it('rejects Pi default because Pi runs require an explicit model', async () => {
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
 
     await expect(provider.startSession(baseStartRequest({ model: 'default' })))
       .rejects.toThrow('Pi requires an explicit model selection.');
@@ -391,7 +400,7 @@ describe('PiCliRuntime lifecycle', () => {
   it('does not pass Garcon embedded Pi package metadata to the Pi CLI', async () => {
     process.env.PI_PACKAGE_DIR = path.join(tempRoot, 'garcon-pi-package');
     process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = process.env.PI_PACKAGE_DIR;
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -414,7 +423,7 @@ describe('PiCliRuntime lifecycle', () => {
     process.env.PI_OFFLINE = '0';
     process.env.PI_SKIP_VERSION_CHECK = '0';
     process.env.PI_TELEMETRY = '1';
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const proc = createFakeProc();
     spawnMock.mockReturnValueOnce(proc);
 
@@ -438,7 +447,7 @@ describe('PiCliRuntime lifecycle', () => {
   });
 
   it('aborts a running Pi process', async () => {
-    const provider = new PiCliRuntime();
+    const provider = createRuntime();
     const processing = mock();
     provider.onProcessing(processing);
     const proc = createFakeProc();

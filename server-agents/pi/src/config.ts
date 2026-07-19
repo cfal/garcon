@@ -1,15 +1,23 @@
 import os from 'node:os';
-import type { AgentHost } from '@garcon/server-agent-interface';
-import { AgentHostEnvironment } from '@garcon/server-agent-common/legacy/host-environment';
+import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
+import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
-const environment = new AgentHostEnvironment();
+export interface PiConfig {
+  readonly binary: () => string;
+  readonly sessionDirectoryOverride: () => string | null;
+  readonly homeDirectory: () => string;
+  readonly isTestEnvironment: () => boolean;
+}
 
-export function bindAgentHost(host: AgentHost): void { environment.bind(host); }
-export function getPiBinary(): string {
-  return environment.value('GARCON_PI_BINARY') ?? environment.value('PI_BINARY') ?? 'pi';
+export function createPiConfig(environment: AgentEnvironmentReader): PiConfig {
+  return Object.freeze({
+    binary: () => readEnvironment(environment, 'GARCON_PI_BINARY')
+      ?? readEnvironment(environment, 'PI_BINARY')
+      ?? 'pi',
+    sessionDirectoryOverride: () => (
+      readEnvironment(environment, 'PI_CODING_AGENT_SESSION_DIR') ?? null
+    ),
+    homeDirectory: () => readEnvironment(environment, 'HOME') ?? os.homedir(),
+    isTestEnvironment: () => readEnvironment(environment, 'NODE_ENV') === 'test',
+  });
 }
-export function getPiSessionDirOverride(): string | null {
-  return environment.value('PI_CODING_AGENT_SESSION_DIR');
-}
-export function getHomeDir(): string { return environment.value('HOME') ?? os.homedir(); }
-export function isTestEnvironment(): boolean { return environment.value('NODE_ENV') === 'test'; }

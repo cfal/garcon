@@ -1,7 +1,9 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import type { AgentCommandImage, CodexProviderConfig, PermissionMode, StartSessionRequest, ThinkingMode } from '@garcon/server-agent-common/legacy/session-types';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
+import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type { ThreadInjectItemsParams } from './protocol.js';
 import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
@@ -75,7 +77,7 @@ export function buildCodexEnv(
 
 function appendCommonThreadParams(
   params: Record<string, unknown>,
-  request: Pick<StartSessionRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>,
+  request: Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>,
 ): Record<string, unknown> {
   const { sandbox, approvalPolicy } = codexSandboxSettings(request.permissionMode);
   params.model = request.model;
@@ -87,7 +89,7 @@ function appendCommonThreadParams(
   return params;
 }
 
-export function buildThreadStartParams(request: StartSessionRequest): Record<string, unknown> {
+export function buildThreadStartParams(request: CodexStartRequest): Record<string, unknown> {
   return appendCommonThreadParams({
     ephemeral: false,
   }, request);
@@ -104,7 +106,7 @@ export function buildInjectedContextItems(context: string): ThreadInjectItemsPar
 export function buildThreadResumeParams(request: {
   agentSessionId: string;
   nativePath?: string | null;
-} & Pick<StartSessionRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
+} & Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
   const params = appendCommonThreadParams({
     threadId: request.agentSessionId,
     excludeTurns: true,
@@ -209,7 +211,7 @@ export function buildUserInput(
   return input;
 }
 
-export async function writeAttachmentsToTempFiles(images?: AgentCommandImage[]): Promise<{
+export async function writeAttachmentsToTempFiles(images?: readonly AgentAttachment[]): Promise<{
   imagePaths: string[];
   filePaths: string[];
   cleanup: () => Promise<void>;

@@ -6,16 +6,16 @@ import {
 import { AssistantMessage } from '@garcon/common/chat-types';
 import type { SharedModelOption } from '@garcon/common/models';
 import {
-  assertExecutionAdmissionOpen,
-  executionEventMetadata,
-  markExecutionStarted,
-  type AgentCommandImage,
-  type AgentEventMetadata,
-  type ResumeTurnRequest,
-  type StartSessionRequest,
-  type StartedAgentSession,
-} from '@garcon/server-agent-common/legacy/session-types';
+  assertDirectExecutionOpen,
+  directEventMetadata,
+  markDirectExecutionStarted,
+  type DirectResumeRequest,
+  type DirectStartedSession,
+  type DirectStartRequest,
+} from './runtime-types.js';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import {
   DirectSessionStore,
@@ -37,7 +37,7 @@ export interface DirectRuntimeSession<TMessage> {
   thinkingMode: ThinkingMode;
   startTime: number;
   lastActivityAt: number;
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
 }
 
 export interface DirectUserTurn<TMessage> {
@@ -82,7 +82,7 @@ export abstract class DirectChatRuntimeBase<
     this.#maxMessagesPerSession = config.maxMessagesPerSession ?? DEFAULT_MAX_MESSAGES_PER_SESSION;
   }
 
-  protected abstract buildUserTurn(command: string, images?: AgentCommandImage[]): DirectUserTurn<TMessage>;
+  protected abstract buildUserTurn(command: string, images?: readonly AgentAttachment[]): DirectUserTurn<TMessage>;
 
   protected abstract buildAssistantMessage(content: string): TMessage;
 
@@ -90,8 +90,8 @@ export abstract class DirectChatRuntimeBase<
 
   protected abstract streamSession(session: DirectRuntimeSession<TMessage>): Promise<string>;
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    assertExecutionAdmissionOpen(request);
+  async startSession(request: DirectStartRequest): Promise<DirectStartedSession> {
+    assertDirectExecutionOpen(request);
     const sessionId = crypto.randomUUID();
     const userTurn = this.buildUserTurn(request.command, request.images);
     const now = Date.now();
@@ -107,7 +107,7 @@ export abstract class DirectChatRuntimeBase<
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
       lastActivityAt: now,
-      eventMetadata: executionEventMetadata(request, 'chat-start'),
+      eventMetadata: directEventMetadata(request, 'chat-start'),
     };
 
     await this.#sessionStore.append(
@@ -116,7 +116,7 @@ export abstract class DirectChatRuntimeBase<
       userTurn.persistedContent,
       this.#turnIdentity(request),
     );
-    assertExecutionAdmissionOpen(request);
+    assertDirectExecutionOpen(request);
     this.#sessions.set(sessionId, session);
     this.emitSessionCreated(request.chatId);
     void this.#runTurnInternal(session, this.#turnIdentity(request), request).catch(() => undefined);
@@ -128,11 +128,11 @@ export abstract class DirectChatRuntimeBase<
     };
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async runTurn(request: DirectResumeRequest): Promise<void> {
+    assertDirectExecutionOpen(request);
     const session = this.#sessions.get(request.agentSessionId)
       ?? await this.#hydrateSession(request.agentSessionId, request);
-    assertExecutionAdmissionOpen(request);
+    assertDirectExecutionOpen(request);
 
     if (session.isRunning) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
@@ -141,7 +141,7 @@ export abstract class DirectChatRuntimeBase<
       session.model = request.model;
     }
     session.thinkingMode = normalizeThinkingMode(request.thinkingMode);
-    session.eventMetadata = executionEventMetadata(request);
+    session.eventMetadata = directEventMetadata(request);
 
     const userTurn = this.buildUserTurn(request.command, request.images);
     const turnIdentity = this.#turnIdentity(request);
@@ -153,7 +153,7 @@ export abstract class DirectChatRuntimeBase<
         userTurn.persistedContent,
         turnIdentity,
       );
-      assertExecutionAdmissionOpen(request);
+      assertDirectExecutionOpen(request);
       if (prepared === 'appended') {
         if (session.messages.length >= this.#maxMessagesPerSession) {
           const first = session.messages[0];
@@ -220,7 +220,7 @@ export abstract class DirectChatRuntimeBase<
 
   async #hydrateSession(
     sessionId: string,
-    request: ResumeTurnRequest,
+    request: DirectResumeRequest,
   ): Promise<DirectRuntimeSession<TMessage>> {
     const messages = await this.#sessionStore.read(sessionId);
     if (!messages) {
@@ -240,7 +240,7 @@ export abstract class DirectChatRuntimeBase<
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
       lastActivityAt: now,
-      eventMetadata: executionEventMetadata(request),
+      eventMetadata: directEventMetadata(request),
     };
     this.#sessions.set(sessionId, session);
     return session;
@@ -255,7 +255,7 @@ export abstract class DirectChatRuntimeBase<
   }
 
   #turnIdentity(
-    request: Pick<StartSessionRequest, 'clientRequestId' | 'clientMessageId' | 'turnId'>,
+    request: Pick<DirectStartRequest, 'clientRequestId' | 'clientMessageId' | 'turnId'>,
   ): DirectMessageIdentity {
     return {
       ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
@@ -283,7 +283,7 @@ export abstract class DirectChatRuntimeBase<
   async #runTurnInternal(
     session: DirectRuntimeSession<TMessage>,
     turnIdentity: DirectMessageIdentity,
-    request: Pick<StartSessionRequest, 'executionAdmission'>,
+    request: Pick<DirectStartRequest, 'executionAdmission'>,
   ): Promise<void> {
     const eventMetadata = session.eventMetadata;
     this.#markSessionRunning(session);
@@ -293,7 +293,7 @@ export abstract class DirectChatRuntimeBase<
     }
 
     try {
-      markExecutionStarted(request);
+      markDirectExecutionStarted(request);
       const response = await this.streamSession(session);
       if (session.aborted) {
         this.#finishAbortedTurn(session, eventMetadata);
@@ -340,7 +340,7 @@ export abstract class DirectChatRuntimeBase<
 
   #finishAbortedTurn(
     session: DirectRuntimeSession<TMessage>,
-    eventMetadata: AgentEventMetadata,
+    eventMetadata: RuntimeEventMetadata,
   ): void {
     this.#markSessionIdle(session);
     this.emitFinished(session.chatId, 0, eventMetadata);

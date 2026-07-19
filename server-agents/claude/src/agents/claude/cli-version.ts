@@ -1,20 +1,13 @@
 // Probes the installed Claude CLI version to decide whether the legacy
 // `--thinking` flag (removed in Claude Code 2.1.198) can still be forwarded.
 
-import { createLogger } from '@garcon/server-agent-common/lib/log';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
-
-const logger = createLogger('agents:claude:cli-version');
+import type { AgentLogger } from '@garcon/server-agent-interface';
 
 // First Claude Code version without the legacy `--thinking` flag.
 const THINKING_FLAG_REMOVED_VERSION: readonly [number, number, number] = [2, 1, 198];
 
 const VERSION_PROBE_TIMEOUT_MS = 5000;
-
-// Memoizes probe results per binary path so each CLI is probed once per
-// server lifetime. Keyed by path: a binary swap mid-flight would require a
-// restart anyway, and re-probing per spawn would add latency to every turn.
-const legacyThinkingFlagSupport = new Map<string, Promise<boolean>>();
 
 type CliVersion = readonly [number, number, number];
 
@@ -54,24 +47,35 @@ async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion |
 // Resolves true only when the CLI predates the `--thinking` removal.
 // Defaults to false on probe failure: omitting the flag is harmless on old
 // CLIs, while passing it makes newer CLIs reject the session.
-function claudeCliSupportsLegacyThinkingFlag(claudeBinary: string): Promise<boolean> {
-  let cached = legacyThinkingFlagSupport.get(claudeBinary);
-  if (!cached) {
-    cached = probeClaudeCliVersion(claudeBinary)
-      .then((version) => {
-        if (!version) {
-          logger.warn(`could not parse Claude CLI version for ${claudeBinary}; assuming --thinking is unsupported`);
+export class ClaudeCliVersionProbe {
+  readonly #legacyThinkingFlagSupport = new Map<string, Promise<boolean>>();
+
+  constructor(private readonly logger: AgentLogger) {}
+
+  supportsLegacyThinkingFlag(claudeBinary: string): Promise<boolean> {
+    let cached = this.#legacyThinkingFlagSupport.get(claudeBinary);
+    if (!cached) {
+      cached = probeClaudeCliVersion(claudeBinary)
+        .then((version) => {
+          if (!version) {
+            this.logger.warn('Could not parse Claude CLI version; legacy thinking disabled', {
+              binary: claudeBinary,
+            });
+            return false;
+          }
+          return isVersionBefore(version, THINKING_FLAG_REMOVED_VERSION);
+        })
+        .catch((error: unknown) => {
+          this.logger.warn('Claude CLI version probe failed; legacy thinking disabled', {
+            binary: claudeBinary,
+            error: errorMessage(error),
+          });
           return false;
-        }
-        return isVersionBefore(version, THINKING_FLAG_REMOVED_VERSION);
-      })
-      .catch((err: unknown) => {
-        logger.warn(`Claude CLI version probe failed for ${claudeBinary}:`, errorMessage(err));
-        return false;
-      });
-    legacyThinkingFlagSupport.set(claudeBinary, cached);
+        });
+      this.#legacyThinkingFlagSupport.set(claudeBinary, cached);
+    }
+    return cached;
   }
-  return cached;
 }
 
-export { claudeCliSupportsLegacyThinkingFlag, isVersionBefore, parseClaudeCliVersion, THINKING_FLAG_REMOVED_VERSION };
+export { isVersionBefore, parseClaudeCliVersion, THINKING_FLAG_REMOVED_VERSION };

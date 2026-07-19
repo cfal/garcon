@@ -1,7 +1,12 @@
-import type { AgentHost } from '@garcon/server-agent-interface';
-import { AgentHostEnvironment } from '@garcon/server-agent-common/legacy/host-environment';
+import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
+import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
-const environment = new AgentHostEnvironment();
+export interface AmpConfig {
+  readonly binary: () => string;
+}
 
-export function bindAgentHost(host: AgentHost): void { environment.bind(host); }
-export function getAmpBinary(): string { return environment.valueOr('AMP_BINARY', 'amp'); }
+export function createAmpConfig(environment: AgentEnvironmentReader): AmpConfig {
+  return Object.freeze({
+    binary: () => readEnvironment(environment, 'AMP_BINARY') ?? 'amp',
+  });
+}

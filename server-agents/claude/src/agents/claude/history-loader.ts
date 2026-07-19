@@ -21,9 +21,8 @@ import { convertClaudeToolUse } from './tool-use-converter.js';
 import { extractCompactionSummary, parseCompactMetadata } from './compaction.js';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { attachNativeMessageSource, getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
-import type { AgentTranscriptPage } from '@garcon/server-agent-common/legacy/types';
+import type { AgentLogger, AgentTranscriptPage } from '@garcon/server-agent-interface';
 import {
   TranscriptRevisionAccumulator,
   attachCompactionRevisionSource,
@@ -32,7 +31,12 @@ import {
 import { deterministicTranscriptTimestamp } from '@garcon/server-agent-common/shared/transcript-timestamp';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
 
-const logger = createLogger('agents:claude:history-loader');
+const NOOP_LOGGER: AgentLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
 
 const HEAD_READ_BYTES = 32 * 1024;
 
@@ -358,7 +362,10 @@ function parseClaudeJsonlLines(lines: string[]): ChatMessage[] {
 }
 
 // Reads a Claude JSONL file and returns ChatMessage[].
-export async function loadClaudeChatMessages(nativePath: string | null | undefined): Promise<ChatMessage[]> {
+export async function loadClaudeChatMessages(
+  nativePath: string | null | undefined,
+  logger: AgentLogger = NOOP_LOGGER,
+): Promise<ChatMessage[]> {
   if (!nativePath) return [];
   try {
     await fs.access(nativePath);
@@ -370,7 +377,10 @@ export async function loadClaudeChatMessages(nativePath: string | null | undefin
     const raw = await fs.readFile(nativePath, 'utf8');
     return parseClaudeJsonlLines(raw.split('\n'));
   } catch (error) {
-    logger.error(`claude: error loading chat messages from ${nativePath}:`, error);
+    logger.error('Claude transcript load failed', {
+      nativePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return [];
   }
 }
@@ -468,6 +478,7 @@ export async function loadClaudeChatMessagePage(
   nativePath: string | null | undefined,
   limit: number,
   offset: number,
+  logger: AgentLogger = NOOP_LOGGER,
 ): Promise<AgentTranscriptPage | null> {
   if (
     !nativePath
@@ -480,7 +491,14 @@ export async function loadClaudeChatMessagePage(
   try {
     await fs.access(nativePath);
   } catch {
-    return { messages: [], total: 0, hasMore: false, offset, limit };
+    return {
+      messages: [],
+      total: 0,
+      hasMore: false,
+      offset,
+      limit,
+      revision: transcriptRevision([]),
+    };
   }
 
   try {
@@ -488,7 +506,7 @@ export async function loadClaudeChatMessagePage(
     // selection under global timestamp ordering requires the skipped suffix too.
     const scan = await scanClaudeMessagePage(nativePath, offset + limit);
     if (scan.requiresFullLoad) {
-      return pageFromMessages(await loadClaudeChatMessages(nativePath), limit, offset);
+      return pageFromMessages(await loadClaudeChatMessages(nativePath, logger), limit, offset);
     }
     const { total, messages, revision } = scan;
     if (offset >= total) {
@@ -507,7 +525,10 @@ export async function loadClaudeChatMessagePage(
       revision,
     };
   } catch (error) {
-    logger.warn(`claude: tail page load failed for ${nativePath}:`, error);
+    logger.warn('Claude transcript page load failed', {
+      nativePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }
@@ -535,6 +556,7 @@ export async function getClaudeSessionMessagesFromNativePath(
   nativePath: string,
   limit: number | null = null,
   offset = 0,
+  logger: AgentLogger = NOOP_LOGGER,
 ): Promise<Record<string, unknown>[] | PaginatedRawMessages> {
   try {
     await fs.access(nativePath);
@@ -574,13 +596,16 @@ export async function getClaudeSessionMessagesFromNativePath(
       limit,
     };
   } catch (error) {
-    logger.error(`claude: error reading messages from ${nativePath}:`, error);
+    logger.error('Claude native messages read failed', {
+      nativePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return limit === null ? [] : { messages: [], total: 0, hasMore: false, offset, limit };
   }
 }
 
 // Reads the head of a JSONL file to find the first user message.
-async function readFirstUserMessage(filePath: string): Promise<{
+async function readFirstUserMessage(filePath: string, logger: AgentLogger): Promise<{
   firstMessage: string | null;
   firstTimestamp: string | number | null;
 }> {
@@ -614,7 +639,7 @@ async function readFirstUserMessage(filePath: string): Promise<{
         if (firstTimestamp) {
           break;
         }
-        logger.error(`claude: got first user message without timestamp: ${firstMessage}`);
+        logger.error('Claude first user message has no timestamp', { filePath });
       }
     }
   } catch { } finally {
@@ -624,19 +649,25 @@ async function readFirstUserMessage(filePath: string): Promise<{
 }
 
 // Builds a preview (title, lastActivity, etc.) from an absolute JSONL path.
-export async function getClaudePreviewFromNativePath(nativePath: string): Promise<ClaudePreview | null> {
+export async function getClaudePreviewFromNativePath(
+  nativePath: string,
+  logger: AgentLogger = NOOP_LOGGER,
+): Promise<ClaudePreview | null> {
   const agentSessionId = path.basename(nativePath, '.jsonl');
 
   try {
     await fs.access(nativePath);
   } catch (err) {
-    logger.error(`claude: preview fetch failed for ${nativePath}:`, err);
+    logger.error('Claude preview path is unavailable', {
+      nativePath,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 
   const { lines, fullyRead } = await readJsonlTailLines(nativePath);
   if (fullyRead) {
-    logger.warn(`claude: fully read ${nativePath}`);
+    logger.warn('Claude preview required a full transcript read', { nativePath });
   }
 
   let lastActivity: string | null = null;
@@ -646,7 +677,11 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
     const entry = parseClaudeJsonlEntry(lines[i]);
     if (!entry) continue;
     if (entry.sessionId !== agentSessionId) {
-      logger.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${String(entry.sessionId)}`);
+      logger.warn('Claude preview skipped a mismatched session entry', {
+        nativePath,
+        expectedSessionId: agentSessionId,
+        actualSessionId: String(entry.sessionId),
+      });
       continue;
     }
 
@@ -682,9 +717,9 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
 
   // TODO: It's possible that the full file was already read if it's small enough (see `fullyRead`),
   // in which case we could have handled it in the loop above.
-  const { firstMessage, firstTimestamp } = await readFirstUserMessage(nativePath);
+  const { firstMessage, firstTimestamp } = await readFirstUserMessage(nativePath, logger);
   if (!firstMessage || !firstTimestamp) {
-    logger.warn(`claude: failed to read first user message from ${nativePath}`);
+    logger.warn('Claude preview has no first user message', { nativePath });
   }
 
   return {

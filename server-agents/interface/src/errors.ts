@@ -30,3 +30,17 @@ export class AgentIntegrationError extends Error {
     this.name = 'AgentIntegrationError';
   }
 }
+
+export const AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE = Object.freeze({
+  operation: 'single-query',
+  setting: 'thinkingMode',
+}) satisfies JsonObject;
+
+export function isUnsupportedSingleQueryThinkingMode(
+  error: unknown,
+): error is AgentIntegrationError {
+  return error instanceof AgentIntegrationError
+    && error.code === 'OPERATION_UNSUPPORTED'
+    && error.details?.operation === AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE.operation
+    && error.details?.setting === AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE.setting;
+}

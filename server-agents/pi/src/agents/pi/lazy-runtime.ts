@@ -1,15 +1,24 @@
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type {
-  ResumeTurnRequest,
-  StartSessionRequest,
-  StartedAgentSession,
-} from '@garcon/server-agent-common/legacy/session-types';
-import type { AgentRuntime } from '@garcon/server-agent-common/legacy/types';
+  PiResumeRequest,
+  PiStartedSession,
+  PiStartRequest,
+} from './runtime-types.js';
 
-type PiRuntime = AgentRuntime & {
+export interface PiRuntime {
+  startSession(request: PiStartRequest): Promise<PiStartedSession>;
+  runTurn(request: PiResumeRequest): Promise<void>;
+  abort(agentSessionId: string): boolean | Promise<boolean>;
+  isRunning(agentSessionId: string): boolean;
+  getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   startPurgeTimer(): void;
   shutdown(): void;
-};
+  onMessages(callback: Parameters<AgentEventEmitterRuntime['onMessages']>[0]): void;
+  onProcessing(callback: Parameters<AgentEventEmitterRuntime['onProcessing']>[0]): void;
+  onSessionCreated(callback: Parameters<AgentEventEmitterRuntime['onSessionCreated']>[0]): void;
+  onFinished(callback: Parameters<AgentEventEmitterRuntime['onFinished']>[0]): void;
+  onFailed(callback: Parameters<AgentEventEmitterRuntime['onFailed']>[0]): void;
+}
 
 export type PiRuntimeLoader = () => Promise<PiRuntime>;
 
@@ -18,11 +27,7 @@ interface PendingRuntimeOperation {
   cancelled: boolean;
 }
 
-function loadPiRuntime(): Promise<PiRuntime> {
-  return import('./pi-cli.js').then(({ PiCliRuntime }) => new PiCliRuntime());
-}
-
-export class LazyPiRuntime extends AgentEventEmitterRuntime implements AgentRuntime {
+export class LazyPiRuntime extends AgentEventEmitterRuntime {
   readonly #loadRuntime: PiRuntimeLoader;
   #runtime: PiRuntime | null = null;
   #runtimePromise: Promise<PiRuntime> | null = null;
@@ -30,16 +35,16 @@ export class LazyPiRuntime extends AgentEventEmitterRuntime implements AgentRunt
   #purgeTimerRequested = false;
   #shutdownRequested = false;
 
-  constructor(loadRuntime: PiRuntimeLoader = loadPiRuntime) {
+  constructor(loadRuntime: PiRuntimeLoader) {
     super();
     this.#loadRuntime = loadRuntime;
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
+  async startSession(request: PiStartRequest): Promise<PiStartedSession> {
     return this.#runAfterLoad(null, (runtime) => runtime.startSession(request));
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
+  async runTurn(request: PiResumeRequest): Promise<void> {
     return this.#runAfterLoad(request.agentSessionId, (runtime) => runtime.runTurn(request));
   }
 

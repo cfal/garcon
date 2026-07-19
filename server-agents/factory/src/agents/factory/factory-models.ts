@@ -1,5 +1,5 @@
 import { FACTORY_MODELS, type SharedModelOption } from '@garcon/common/models';
-import { getFactoryBinary } from "../../config.js";
+import type { FactoryConfig } from '../../config.js';
 import { buildFactoryCliEnv } from './factory-env.js';
 import { inferFactoryModelSupportsImages } from './factory-model-id.js';
 
@@ -26,10 +26,6 @@ const STATIC_IMAGE_SUPPORT = new Map(
   FACTORY_MODELS.OPTIONS.map((entry) => [entry.value, Boolean(entry.supportsImages)]),
 );
 
-let cachedCatalog: FactoryModelCatalog | null = null;
-let cachedAt = 0;
-let inflightCatalog: Promise<FactoryModelCatalog> | null = null;
-
 function buildFallbackCatalog(): FactoryModelCatalog {
   return {
     defaultModel: FACTORY_MODELS.DEFAULT,
@@ -43,8 +39,8 @@ function buildFallbackCatalog(): FactoryModelCatalog {
   };
 }
 
-async function readFactoryHelpOutput(): Promise<string> {
-  const factoryBinary = getFactoryBinary();
+async function readFactoryHelpOutput(config: FactoryConfig): Promise<string> {
+  const factoryBinary = config.binary();
   const proc = Bun.spawn([factoryBinary, 'exec', '--help'], {
     // Discovery stays non-airgapped so Droid includes Factory-hosted models.
     // Airgap mode only lists custom models in current Droid releases.
@@ -152,49 +148,51 @@ function mergeFactoryModels(helpCatalog: FactoryHelpCatalog): FactoryModelCatalo
   return { defaultModel, metadata, options };
 }
 
-async function loadFactoryModelCatalog(): Promise<FactoryModelCatalog> {
+async function loadFactoryModelCatalog(config: FactoryConfig): Promise<FactoryModelCatalog> {
   try {
-    const helpOutput = await readFactoryHelpOutput();
+    const helpOutput = await readFactoryHelpOutput(config);
     return mergeFactoryModels(parseFactoryHelpOutput(helpOutput));
   } catch {
     return buildFallbackCatalog();
   }
 }
 
-export async function getFactoryModelCatalog(forceRefresh = false): Promise<FactoryModelCatalog> {
-  const now = Date.now();
-  if (!forceRefresh && cachedCatalog && now - cachedAt < MODEL_CACHE_TTL_MS) {
-    return cachedCatalog;
+export class FactoryModelCatalogService {
+  #cachedCatalog: FactoryModelCatalog | null = null;
+  #cachedAt = 0;
+  #inflightCatalog: Promise<FactoryModelCatalog> | null = null;
+
+  constructor(private readonly config: FactoryConfig) {}
+
+  async getCatalog(forceRefresh = false): Promise<FactoryModelCatalog> {
+    const now = Date.now();
+    if (!forceRefresh && this.#cachedCatalog && now - this.#cachedAt < MODEL_CACHE_TTL_MS) {
+      return this.#cachedCatalog;
+    }
+    if (!forceRefresh && this.#inflightCatalog) return this.#inflightCatalog;
+
+    this.#inflightCatalog = loadFactoryModelCatalog(this.config).then((catalog) => {
+      this.#cachedCatalog = catalog;
+      this.#cachedAt = Date.now();
+      this.#inflightCatalog = null;
+      return catalog;
+    }).catch((error) => {
+      this.#inflightCatalog = null;
+      throw error;
+    });
+    return this.#inflightCatalog;
   }
-  if (!forceRefresh && inflightCatalog) {
-    return inflightCatalog;
+
+  async getModels(forceRefresh = false): Promise<SharedModelOption[]> {
+    return (await this.getCatalog(forceRefresh)).options;
   }
 
-  inflightCatalog = loadFactoryModelCatalog().then((catalog) => {
-    cachedCatalog = catalog;
-    cachedAt = Date.now();
-    inflightCatalog = null;
-    return catalog;
-  }).catch((error) => {
-    inflightCatalog = null;
-    throw error;
-  });
+  async getDefaultModel(forceRefresh = false): Promise<string> {
+    return (await this.getCatalog(forceRefresh)).defaultModel;
+  }
 
-  return inflightCatalog;
-}
-
-export async function getFactoryModels(forceRefresh = false): Promise<SharedModelOption[]> {
-  const catalog = await getFactoryModelCatalog(forceRefresh);
-  return catalog.options;
-}
-
-export async function getFactoryDefaultModel(forceRefresh = false): Promise<string> {
-  const catalog = await getFactoryModelCatalog(forceRefresh);
-  return catalog.defaultModel;
-}
-
-export async function getFactoryModelMetadata(model: string): Promise<FactoryModelMetadata | null> {
-  if (!model) return null;
-  const catalog = await getFactoryModelCatalog();
-  return catalog.metadata[model] ?? null;
+  async getModelMetadata(model: string): Promise<FactoryModelMetadata | null> {
+    if (!model) return null;
+    return (await this.getCatalog()).metadata[model] ?? null;
+  }
 }

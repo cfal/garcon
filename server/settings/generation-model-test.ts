@@ -7,8 +7,8 @@ import {
   type GenerationModelTestResponse,
   type GenerationTestTarget,
 } from '../../common/generation-test-contracts.js';
+import { isUnsupportedSingleQueryThinkingMode } from '@garcon/server-agent-interface';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import { UnsupportedSingleQueryEffortError } from '../agents/single-query-errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import type { SettingsStore } from './store.js';
@@ -159,7 +159,7 @@ export async function testGenerationModel(input: {
     const durationMs = Math.round(performance.now() - startedAt);
     const outcome = error instanceof GenerationModelTestError
       ? error.code.toLowerCase().replace('generation_test_', '').replaceAll('_', '-')
-      : error instanceof UnsupportedSingleQueryEffortError
+      : isUnsupportedSingleQueryThinkingMode(error)
         ? 'unsupported-effort'
         : isTimeoutError(error)
           ? 'timeout'
@@ -175,7 +175,7 @@ export async function testGenerationModel(input: {
 
     if (error instanceof GenerationModelTestError) throw error;
 
-    if (error instanceof UnsupportedSingleQueryEffortError) {
+    if (isUnsupportedSingleQueryThinkingMode(error)) {
       throw new GenerationModelTestError(
         'GENERATION_TEST_UNSUPPORTED_EFFORT',
         'This agent cannot use the selected effort for one-shot generation.',

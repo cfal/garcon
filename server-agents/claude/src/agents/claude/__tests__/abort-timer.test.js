@@ -2,13 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 let versionProbe = () => Promise.resolve(false);
 
-// The version probe would otherwise consume the mocked Bun.spawn used to fake
-// the CLI process; stub it so spawn only ever produces the controllable proc.
-mock.module('../cli-version.js', () => ({
-  claudeCliSupportsLegacyThinkingFlag: () => versionProbe(),
-}));
-
 import { ClaudeCliRuntime } from '../claude-cli.js';
+
+function createRuntime() {
+  return new ClaudeCliRuntime({
+    binary: () => 'claude',
+    logger: {
+      debug: mock(() => undefined),
+      info: mock(() => undefined),
+      warn: mock(() => undefined),
+      error: mock(() => undefined),
+    },
+    versionProbe: {
+      supportsLegacyThinkingFlag: () => versionProbe(),
+    },
+  });
+}
 
 // Real timer, captured before the per-test global patch, used to flush the
 // async stdout reader loop without going through the tracking wrapper.
@@ -106,7 +115,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   const abortTimerIds = () => scheduled.filter((s) => s.ms === 5000).map((s) => s.id);
 
   it('rolls back a synchronous resume spawn failure so the session can retry', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     const processing = [];
     runtime.onProcessing((_chatId, running) => processing.push(running));
@@ -130,7 +139,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('kills and rolls back a process whose prompt write fails synchronously', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     ctrl.proc.stdin.write = () => {
       throw new Error('stdin failed');
@@ -152,7 +161,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('cancels the force-kill fallback once an interrupt is acknowledged', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
@@ -174,7 +183,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('does not kill a process reused by a new turn sent right after an abort', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
@@ -231,7 +240,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('retires a replaced session before the replacement version probe resolves', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const firstCtrl = createControllableProc();
     const secondCtrl = createControllableProc();
     spawnMock.mockReturnValueOnce(firstCtrl.proc).mockReturnValueOnce(secondCtrl.proc);
@@ -291,7 +300,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('queues a resume behind a start whose version probe is still pending', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
@@ -333,7 +342,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('serializes concurrent resumes on the persistent process', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
@@ -373,7 +382,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('still force-kills when the interrupt is never acknowledged', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
@@ -393,7 +402,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('surfaces the abort force-kill as a clean finish, not a 143 failure', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 
@@ -418,7 +427,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   });
 
   it('still reports a genuine crash during the abort window as a failure', async () => {
-    const runtime = new ClaudeCliRuntime();
+    const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
 

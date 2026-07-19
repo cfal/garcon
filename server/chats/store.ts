@@ -2,6 +2,7 @@
 // chat IDs to agent-specific session metadata.
 
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'events';
@@ -317,8 +318,6 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         continue;
       }
 
-      if (session.nativeSession) continue;
-
       let resolved: AgentNativeSessionRef | null;
       try {
         resolved = await resolveNativeSession(session, chatId);
@@ -333,6 +332,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       if (resolved.ownerId !== session.agentId) {
         throw new Error(`Native session owner mismatch for ${chatId}`);
       }
+      if (isDeepStrictEqual(resolved, session.nativeSession)) continue;
 
       session.nativeSession = resolved;
       dirty = true;

@@ -6,17 +6,20 @@ import {
   SettingsManager,
   type SessionHeader,
 } from '@earendil-works/pi-coding-agent';
-import { getHomeDir, getPiSessionDirOverride } from '../../config.js';
+import type { PiConfig } from '../../config.js';
 
-function expandTilde(value: string): string {
-  if (value === '~') return getHomeDir();
-  if (value.startsWith('~/')) return path.join(getHomeDir(), value.slice(2));
+function expandTilde(value: string, config: PiConfig): string {
+  if (value === '~') return config.homeDirectory();
+  if (value.startsWith('~/')) return path.join(config.homeDirectory(), value.slice(2));
   return value;
 }
 
-export function resolvePiConfiguredSessionDir(projectPath: string): string | undefined {
-  const sessionDirOverride = getPiSessionDirOverride();
-  if (sessionDirOverride) return expandTilde(sessionDirOverride);
+export function resolvePiConfiguredSessionDir(
+  projectPath: string,
+  config: PiConfig,
+): string | undefined {
+  const sessionDirOverride = config.sessionDirectoryOverride();
+  if (sessionDirOverride) return expandTilde(sessionDirOverride, config);
 
   try {
     const settings = SettingsManager.create(projectPath, getAgentDir());
@@ -46,9 +49,10 @@ export function piSessionPathFromHeader(header: SessionHeader, sessionDir?: stri
 export async function findPiSessionFileBySessionId(
   sessionId: string,
   projectPath: string,
+  config: PiConfig,
 ): Promise<string | null> {
   if (!sessionId || !projectPath) return null;
-  const configuredSessionDir = resolvePiConfiguredSessionDir(projectPath);
+  const configuredSessionDir = resolvePiConfiguredSessionDir(projectPath, config);
 
   try {
     const localSessions = await SessionManager.list(projectPath, configuredSessionDir);

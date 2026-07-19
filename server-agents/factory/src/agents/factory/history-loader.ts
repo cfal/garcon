@@ -11,7 +11,7 @@ import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/n
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
 import { attachNativeSourceToMessages, type NativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
   getFactorySessionDiscoveryIndexPath,
   getFactorySessionsRoot,
@@ -21,7 +21,9 @@ import {
   isFactorySystemReminderText,
 } from './factory-text.js';
 
-const logger = createLogger('agents:factory:history-loader');
+const SILENT_LOGGER: AgentLogger = {
+  debug() {}, info() {}, warn() {}, error() {},
+};
 
 export interface FactorySessionDiscoveryEntry {
   createdTimeMs?: number;
@@ -197,7 +199,10 @@ export async function findFactorySessionFileBySessionId(sessionId: string): Prom
   return findFileWithSuffix(getFactorySessionsRoot(), `${sessionId}.jsonl`);
 }
 
-async function readFactorySessionEvents(sessionPath: string): Promise<FactoryStoredEventWithSource[]> {
+async function readFactorySessionEvents(
+  sessionPath: string,
+  logger: AgentLogger,
+): Promise<FactoryStoredEventWithSource[]> {
   const events: FactoryStoredEventWithSource[] = [];
 
   for await (const entry of readJsonlLineEntries(sessionPath)) {
@@ -213,7 +218,10 @@ async function readFactorySessionEvents(sessionPath: string): Promise<FactorySto
         },
       });
     } catch {
-      logger.warn(`factory: skipping invalid JSONL line in ${sessionPath}: ${entry.line.slice(0, 120)}`);
+      logger.warn('Factory transcript contains invalid JSON.', {
+        sessionPath,
+        line: entry.line.slice(0, 120),
+      });
     }
   }
 
@@ -313,20 +321,29 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInpu
   return messages;
 }
 
-export async function loadFactoryChatMessages(sessionPath: string): Promise<ChatMessage[]> {
+export async function loadFactoryChatMessages(
+  sessionPath: string,
+  logger: AgentLogger = SILENT_LOGGER,
+): Promise<ChatMessage[]> {
   try {
-    const events = await readFactorySessionEvents(sessionPath);
+    const events = await readFactorySessionEvents(sessionPath, logger);
     return loadFactoryChatMessagesFromEvents(events);
   } catch (error) {
-    logger.warn(`factory: error loading chat messages from ${sessionPath}:`, error);
+    logger.warn('Factory transcript loading failed.', {
+      sessionPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return [];
   }
 }
 
-export async function loadFactoryChatMessagesBySessionId(sessionId: string): Promise<ChatMessage[]> {
+export async function loadFactoryChatMessagesBySessionId(
+  sessionId: string,
+  logger: AgentLogger = SILENT_LOGGER,
+): Promise<ChatMessage[]> {
   const sessionPath = await findFactorySessionFileBySessionId(sessionId);
   if (!sessionPath) return [];
-  return loadFactoryChatMessages(sessionPath);
+  return loadFactoryChatMessages(sessionPath, logger);
 }
 
 function getPreviewText(message: ChatMessage): string {
@@ -349,11 +366,12 @@ function buildFallbackPreview(fallback: FactoryPreviewFallback): FactoryPreview 
 export async function getFactoryPreviewFromSessionPath(
   sessionPath: string,
   fallback: FactoryPreviewFallback = {},
+  logger: AgentLogger = SILENT_LOGGER,
 ): Promise<FactoryPreview | null> {
   if (!sessionPath) return null;
 
   try {
-    const events = await readFactorySessionEvents(sessionPath);
+    const events = await readFactorySessionEvents(sessionPath, logger);
     const messages = loadFactoryChatMessagesFromEvents(events);
     const sessionStart = events
       .map((entry) => entry.event)
@@ -371,12 +389,18 @@ export async function getFactoryPreviewFromSessionPath(
       lastMessage: lastMessage ? getPreviewText(lastMessage) : title,
     };
   } catch (error) {
-    logger.warn(`factory: preview fetch failed for ${sessionPath}:`, error);
+    logger.warn('Factory transcript preview failed.', {
+      sessionPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return Object.keys(fallback).length > 0 ? buildFallbackPreview(fallback) : null;
   }
 }
 
-export async function getFactoryPreviewFromSessionId(sessionId: string): Promise<FactoryPreview | null> {
+export async function getFactoryPreviewFromSessionId(
+  sessionId: string,
+  logger: AgentLogger = SILENT_LOGGER,
+): Promise<FactoryPreview | null> {
   if (!sessionId) return null;
 
   const [discoveryEntry, sessionPath] = await Promise.all([
@@ -396,5 +420,5 @@ export async function getFactoryPreviewFromSessionId(sessionId: string): Promise
     return buildFallbackPreview(fallback);
   }
 
-  return getFactoryPreviewFromSessionPath(sessionPath, fallback);
+  return getFactoryPreviewFromSessionPath(sessionPath, fallback, logger);
 }

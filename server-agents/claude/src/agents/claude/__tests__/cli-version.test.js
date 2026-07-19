@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { claudeCliSupportsLegacyThinkingFlag, isVersionBefore, parseClaudeCliVersion, THINKING_FLAG_REMOVED_VERSION } from '../cli-version.js';
+import { ClaudeCliVersionProbe, isVersionBefore, parseClaudeCliVersion, THINKING_FLAG_REMOVED_VERSION } from '../cli-version.js';
 
 // Writes an executable fake `claude` binary that logs each invocation and
 // prints the given --version output.
@@ -36,29 +36,39 @@ describe('isVersionBefore', () => {
   });
 });
 
-describe('claudeCliSupportsLegacyThinkingFlag', () => {
+function createProbe() {
+  return new ClaudeCliVersionProbe({
+    debug: mock(() => undefined),
+    info: mock(() => undefined),
+    warn: mock(() => undefined),
+    error: mock(() => undefined),
+  });
+}
+
+describe('ClaudeCliVersionProbe', () => {
   it('reports support for CLIs older than the flag removal', async () => {
     const { binaryPath } = await createFakeClaudeBinary('2.1.150 (Claude Code)');
-    expect(await claudeCliSupportsLegacyThinkingFlag(binaryPath)).toBe(true);
+    expect(await createProbe().supportsLegacyThinkingFlag(binaryPath)).toBe(true);
   });
 
   it('reports no support for CLIs at or beyond the flag removal', async () => {
     const removed = await createFakeClaudeBinary('2.1.198 (Claude Code)');
     const newer = await createFakeClaudeBinary('2.2.0 (Claude Code)');
-    expect(await claudeCliSupportsLegacyThinkingFlag(removed.binaryPath)).toBe(false);
-    expect(await claudeCliSupportsLegacyThinkingFlag(newer.binaryPath)).toBe(false);
+    expect(await createProbe().supportsLegacyThinkingFlag(removed.binaryPath)).toBe(false);
+    expect(await createProbe().supportsLegacyThinkingFlag(newer.binaryPath)).toBe(false);
   });
 
   it('defaults to no support when the version cannot be determined', async () => {
     const { binaryPath } = await createFakeClaudeBinary('mystery build');
-    expect(await claudeCliSupportsLegacyThinkingFlag(binaryPath)).toBe(false);
-    expect(await claudeCliSupportsLegacyThinkingFlag('/nonexistent/claude-binary')).toBe(false);
+    expect(await createProbe().supportsLegacyThinkingFlag(binaryPath)).toBe(false);
+    expect(await createProbe().supportsLegacyThinkingFlag('/nonexistent/claude-binary')).toBe(false);
   });
 
   it('probes each binary path only once', async () => {
     const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.0.0 (Claude Code)');
-    expect(await claudeCliSupportsLegacyThinkingFlag(binaryPath)).toBe(true);
-    expect(await claudeCliSupportsLegacyThinkingFlag(binaryPath)).toBe(true);
+    const probe = createProbe();
+    expect(await probe.supportsLegacyThinkingFlag(binaryPath)).toBe(true);
+    expect(await probe.supportsLegacyThinkingFlag(binaryPath)).toBe(true);
     const calls = await fs.readFile(callLogPath, 'utf8');
     expect(calls.trim().split('\n')).toHaveLength(1);
   });

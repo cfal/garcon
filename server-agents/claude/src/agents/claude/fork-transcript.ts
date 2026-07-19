@@ -1,4 +1,4 @@
-import type { ForkTranscriptEntryContext } from '@garcon/server-agent-common/legacy/types';
+import type { ForkTranscriptEntryContext } from '@garcon/server-agent-common/forking/fork-jsonl';
 import { convertClaudeEntries } from './history-loader.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {

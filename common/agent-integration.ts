@@ -1,15 +1,17 @@
 import type { JsonObject } from './json.js';
+import type { ApiProtocol } from './api-providers.js';
+import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 
 export interface AgentDescriptor {
   readonly id: string;
   readonly label: string;
   readonly icon: string | null;
-  readonly supportedPermissionModes: readonly string[];
-  readonly supportedThinkingModes: readonly string[];
+  readonly supportedPermissionModes: readonly PermissionMode[];
+  readonly supportedThinkingModes: readonly ThinkingMode[];
   readonly supportsImages: boolean;
   readonly supportsProjectPathUpdate: boolean;
   readonly requiresNativePathForProjectPathUpdate: boolean;
-  readonly supportedEndpointProtocols: readonly string[];
+  readonly supportedEndpointProtocols: readonly ApiProtocol[];
   readonly configuration: readonly AgentConfigurationDescriptor[];
 }
 

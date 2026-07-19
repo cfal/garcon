@@ -47,7 +47,6 @@ const integration = {
       defaultModel: '',
       requiresStrictModelDiscovery: false,
       generation: null,
-      availability: { state: 'ready', reason: 'test' },
     }),
   },
   settings: {
@@ -76,5 +75,19 @@ describe('validateAgentIntegration', () => {
       integrationClass,
       integration,
     })).toThrow('Agent integration ID mismatch');
+  });
+
+  test('rejects duplicate descriptor values', () => {
+    const integrationClass = { integrationId: 'other', apiVersion: 1 as const };
+    expect(() => validateAgentIntegration({
+      integrationClass,
+      integration: {
+        ...integration,
+        descriptor: {
+          ...integration.descriptor,
+          supportedPermissionModes: ['default', 'default'],
+        },
+      },
+    })).toThrow('duplicate permission modes');
   });
 });

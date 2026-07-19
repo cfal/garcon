@@ -19,6 +19,13 @@ interface LoaderConfig {
   sessionLabel: string;
 }
 
+export interface DirectCompatiblePreview {
+  readonly createdAt: string | null;
+  readonly firstMessage: string;
+  readonly lastActivity: string | null;
+  readonly lastMessage: string;
+}
+
 export async function loadDirectCompatibleChatMessages(
   sessionId: string | null | undefined,
   config: LoaderConfig,
@@ -73,12 +80,7 @@ export async function getDirectCompatiblePreviewFromSessionId(
   sessionId: string | null | undefined,
   loadMessages: (sessionId: string | null | undefined) => Promise<ChatMessage[]>,
   sessionLabel: string,
-): Promise<{
-  createdAt: string | null;
-  firstMessage: string;
-  lastActivity: string | null;
-  lastMessage: string;
-} | null> {
+): Promise<DirectCompatiblePreview | null> {
   if (!sessionId) return null;
 
   const messages = await loadMessages(sessionId);

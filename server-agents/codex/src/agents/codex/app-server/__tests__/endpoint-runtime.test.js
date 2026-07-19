@@ -3,28 +3,23 @@ import { buildCodexAppServerEndpointRuntime } from '../endpoint-runtime.ts';
 
 function selection(endpoint = {}) {
   return {
-    model: 'acme-code',
-    apiProviderId: 'acme',
-    modelEndpointId: 'acme_openai',
-    modelProtocol: 'openai-compatible',
-    isLocal: false,
-    apiProvider: { id: 'acme', label: 'Acme', endpoints: [] },
-    endpoint: {
-      id: 'acme_openai',
+    selection: {
+      apiProviderId: 'acme',
+      endpointId: 'acme_openai',
+      providerLabel: 'Acme',
       protocol: 'openai-compatible',
       baseUrl: 'https://api.acme.test/v1',
-      apiKey: 'secret',
       capabilities: { responses: true },
-      defaultModel: 'acme-code',
-      models: [],
-      supportsImages: false,
-      modelDiscovery: 'openai-models',
+      model: 'acme-code',
+      isLocal: false,
+      credential: null,
       headers: {
         'HTTP-Referer': 'https://github.com/cfal/garcon',
         'X-OpenRouter-Title': 'Garcon',
       },
       ...endpoint,
     },
+    credential: 'secret',
   };
 }
 
@@ -57,7 +52,10 @@ describe('buildCodexAppServerEndpointRuntime', () => {
   });
 
   it('omits API key env config for blank-key endpoints', () => {
-    expect(buildCodexAppServerEndpointRuntime(selection({ apiKey: '', headers: undefined }))).toEqual({
+    expect(buildCodexAppServerEndpointRuntime({
+      ...selection({ headers: {} }),
+      credential: null,
+    })).toEqual({
       codexConfig: {
         config: {
           model_provider: 'garcon_acme_openai',

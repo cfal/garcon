@@ -1,7 +1,5 @@
-import { getCursorBinary } from "../../config.js";
-import { createLogger } from '@garcon/server-agent-common/lib/log';
-
-const logger = createLogger('agents:cursor:cursor-models');
+import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { CursorConfig } from '../../config.js';
 
 export interface CursorModelOption {
   value: string;
@@ -47,8 +45,8 @@ export function parseCursorModelsOutput(output: string): CursorModelOption[] {
   return models;
 }
 
-async function runCursorModels(): Promise<string> {
-  const proc = Bun.spawn([getCursorBinary(), 'models'], {
+async function runCursorModels(config: CursorConfig): Promise<string> {
+  const proc = Bun.spawn([config.binary(), 'models'], {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -66,12 +64,17 @@ async function runCursorModels(): Promise<string> {
   return stdout;
 }
 
-export async function getCursorModels(): Promise<CursorModelOption[]> {
+export async function getCursorModels(
+  config: CursorConfig,
+  logger: AgentLogger,
+): Promise<CursorModelOption[]> {
   try {
-    const parsed = parseCursorModelsOutput(await runCursorModels());
+    const parsed = parseCursorModelsOutput(await runCursorModels(config));
     if (parsed.length > 0) return parsed;
   } catch (error) {
-    logger.warn('cursor: model discovery failed:', error instanceof Error ? error.message : String(error));
+    logger.warn('Cursor model discovery failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return [];
 }

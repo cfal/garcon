@@ -1,7 +1,12 @@
-import type { AgentHost } from '@garcon/server-agent-interface';
-import { AgentHostEnvironment } from '@garcon/server-agent-common/legacy/host-environment';
+import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
+import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
-const environment = new AgentHostEnvironment();
+export interface OpenCodeConfig {
+  readonly isTestEnvironment: () => boolean;
+}
 
-export function bindAgentHost(host: AgentHost): void { environment.bind(host); }
-export function isTestEnvironment(): boolean { return environment.value('NODE_ENV') === 'test'; }
+export function createOpenCodeConfig(environment: AgentEnvironmentReader): OpenCodeConfig {
+  return Object.freeze({
+    isTestEnvironment: () => readEnvironment(environment, 'NODE_ENV') === 'test',
+  });
+}

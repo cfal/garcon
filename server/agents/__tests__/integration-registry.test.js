@@ -51,7 +51,6 @@ function createFacetIntegration(host, id, lifecycle = {}) {
         defaultModel: '',
         requiresStrictModelDiscovery: false,
         generation: null,
-        availability: { state: 'ready', reason: 'test' },
       }),
     },
     settings: {

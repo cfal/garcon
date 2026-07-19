@@ -1,6 +1,5 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import type { AgentChatEntry } from '@garcon/server-agent-common/legacy/session-types';
-import type { AgentTranscriptSource } from '@garcon/server-agent-common/legacy/types';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
   findFactorySessionFileBySessionId,
   getFactoryPreviewFromSessionPath,
@@ -13,13 +12,22 @@ interface FactoryTranscriptSourceDeps {
   loadFromPath: typeof loadFactoryChatMessages;
 }
 
-const DEFAULT_DEPS: FactoryTranscriptSourceDeps = {
-  findSessionFileBySessionId: findFactorySessionFileBySessionId,
-  getPreviewFromSessionPath: getFactoryPreviewFromSessionPath,
-  loadFromPath: loadFactoryChatMessages,
+const SILENT_LOGGER: AgentLogger = {
+  debug() {}, info() {}, warn() {}, error() {},
 };
 
-function getFactoryNativePath(session: AgentChatEntry): string | null {
+export interface FactoryTranscriptReference {
+  readonly agentSessionId?: string | null;
+  readonly nativePath?: string | null;
+}
+
+export interface FactoryTranscriptReader {
+  loadMessages(session: FactoryTranscriptReference): Promise<ChatMessage[]>;
+  getPreview(session: FactoryTranscriptReference): Promise<unknown>;
+  resolveNativePath(session: FactoryTranscriptReference): Promise<string | null>;
+}
+
+function getFactoryNativePath(session: FactoryTranscriptReference): string | null {
   return typeof session.nativePath === 'string' && session.nativePath.trim()
     ? session.nativePath
     : null;
@@ -27,23 +35,33 @@ function getFactoryNativePath(session: AgentChatEntry): string | null {
 
 export function createFactoryTranscriptSource(
   overrides: Partial<FactoryTranscriptSourceDeps> = {},
-): AgentTranscriptSource {
-  const deps = { ...DEFAULT_DEPS, ...overrides };
+  logger: AgentLogger = SILENT_LOGGER,
+): FactoryTranscriptReader {
+  const deps: FactoryTranscriptSourceDeps = {
+    findSessionFileBySessionId: findFactorySessionFileBySessionId,
+    getPreviewFromSessionPath: (sessionPath) => getFactoryPreviewFromSessionPath(
+      sessionPath,
+      {},
+      logger,
+    ),
+    loadFromPath: (sessionPath) => loadFactoryChatMessages(sessionPath, logger),
+    ...overrides,
+  };
 
   return {
-    async loadMessages(session: AgentChatEntry): Promise<ChatMessage[]> {
+    async loadMessages(session: FactoryTranscriptReference): Promise<ChatMessage[]> {
       const nativePath = getFactoryNativePath(session);
       if (!nativePath) return [];
       return deps.loadFromPath(nativePath);
     },
 
-    async getPreview(session: AgentChatEntry): Promise<unknown> {
+    async getPreview(session: FactoryTranscriptReference): Promise<unknown> {
       const nativePath = getFactoryNativePath(session);
       if (!nativePath) return null;
       return deps.getPreviewFromSessionPath(nativePath);
     },
 
-    async resolveNativePath(session: AgentChatEntry): Promise<string | null> {
+    async resolveNativePath(session: FactoryTranscriptReference): Promise<string | null> {
       if (!session.agentSessionId) return null;
       return deps.findSessionFileBySessionId(session.agentSessionId);
     },

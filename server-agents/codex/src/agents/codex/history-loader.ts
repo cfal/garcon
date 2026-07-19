@@ -10,8 +10,7 @@ import {
 } from './history-normalizer.js';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import type { ChatMessage } from '@garcon/common/chat-types';
-import type { AgentTranscriptPage } from '@garcon/server-agent-common/legacy/types';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+import type { AgentLogger, AgentTranscriptPage } from '@garcon/server-agent-interface';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
 import {
   TranscriptRevisionAccumulator,
@@ -19,7 +18,12 @@ import {
 } from '@garcon/server-agent-common/lib/transcript-revision';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
 
-const logger = createLogger('agents:codex:history-loader');
+const NOOP_LOGGER: AgentLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
 
 export interface CodexMessageBuckets {
   canonical: ChatMessage[];
@@ -265,7 +269,10 @@ async function scanCodexMessagePage(
 // Uses per-content-class dedup. event_msg user messages are treated as
 // canonical transcript content, while response_item user messages are
 // only included as fallback when event_msg user entries are missing.
-export async function loadCodexChatMessages(nativePath: string | null | undefined): Promise<ChatMessage[]> {
+export async function loadCodexChatMessages(
+  nativePath: string | null | undefined,
+  logger: AgentLogger = NOOP_LOGGER,
+): Promise<ChatMessage[]> {
   if (!nativePath) return [];
 
   try {
@@ -280,7 +287,10 @@ export async function loadCodexChatMessages(nativePath: string | null | undefine
 
     return finishCodexMessages(buckets, true);
   } catch (error) {
-    logger.error(`Error loading Codex ChatMessages from ${nativePath}:`, error);
+    logger.error('Codex transcript load failed', {
+      nativePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return [];
   }
 }
@@ -289,6 +299,7 @@ export async function loadCodexChatMessagePage(
   nativePath: string | null | undefined,
   limit: number,
   offset: number,
+  logger: AgentLogger = NOOP_LOGGER,
 ): Promise<AgentTranscriptPage | null> {
   if (
     !nativePath
@@ -305,7 +316,7 @@ export async function loadCodexChatMessagePage(
     const windowSize = offset + limit;
     const scan = await scanCodexMessagePage(nativePath, windowSize);
     if (scan.requiresFullLoad) {
-      return pageFromMessages(await loadCodexChatMessages(nativePath), limit, offset);
+      return pageFromMessages(await loadCodexChatMessages(nativePath, logger), limit, offset);
     }
     const { summary, messages, revision } = scan;
     if (offset >= summary.total) {
@@ -323,7 +334,10 @@ export async function loadCodexChatMessagePage(
       revision,
     };
   } catch (error) {
-    logger.warn(`codex: tail page load failed for ${nativePath}:`, error);
+    logger.warn('Codex transcript page load failed', {
+      nativePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }
@@ -386,7 +400,10 @@ function isCodexMessageEntry(entry: unknown): boolean {
 }
 
 // Builds a preview (title, lastActivity, etc.) from an absolute JSONL path.
-export async function getCodexPreviewFromNativePath(nativePath: string | null | undefined): Promise<{
+export async function getCodexPreviewFromNativePath(
+  nativePath: string | null | undefined,
+  logger: AgentLogger = NOOP_LOGGER,
+): Promise<{
   firstMessage: string;
   lastMessage: string;
   lastActivity: string;
@@ -449,7 +466,10 @@ export async function getCodexPreviewFromNativePath(nativePath: string | null | 
       createdAt: firstMessageTimestamp || null,
     };
   } catch (err) {
-    logger.warn(`Could not build Codex preview from ${nativePath}:`, err);
+    logger.warn('Codex transcript preview load failed', {
+      nativePath,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   } finally {
     await fh?.close();

@@ -17,17 +17,19 @@ function sessionPaths(agentId) {
 }
 
 function endpoint(overrides = {}) {
+  const { credential = '', ...selection } = overrides;
   return {
-    id: 'example_openai',
-    protocol: 'openai-compatible',
-    baseUrl: 'https://api.example.test/v1',
-    apiKey: '',
-    capabilities: { chatCompletions: true, responses: false },
-    defaultModel: 'example-model',
-    models: [{ value: 'example-model', label: 'Example Model' }],
-    supportsImages: false,
-    modelDiscovery: 'openai-models',
-    ...overrides,
+    selection: {
+      apiProviderId: 'example',
+      endpointId: 'example_openai',
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.example.test/v1',
+      model: 'example-model',
+      isLocal: false,
+      credential: null,
+      ...selection,
+    },
+    credential,
   };
 }
 
@@ -37,7 +39,7 @@ describe('buildDirectOpenAiConfig', () => {
       runtimeId: 'direct-openai-compatible',
       runtimeLabel: 'Example',
       endpoint: endpoint(),
-      sessionPaths: sessionPaths('direct-openai-compatible'),
+      sessionPaths: sessionPaths('openai-compatible-sessions'),
     });
 
     expect(config.buildHeaders?.('')).toEqual({
@@ -45,25 +47,20 @@ describe('buildDirectOpenAiConfig', () => {
     });
   });
 
-  it('preserves managed headers for OpenRouter-style endpoints', () => {
+  it('uses the resolved endpoint credential without retaining provider records', () => {
     const config = buildDirectOpenAiConfig({
       runtimeId: 'direct-openai-compatible',
       runtimeLabel: 'OpenRouter',
       endpoint: endpoint({
-        apiKey: 'sk-openrouter',
-        headers: {
-          'HTTP-Referer': 'https://github.com/cfal/garcon',
-          'X-OpenRouter-Title': 'Garcon',
-        },
+        credential: 'sk-openrouter',
       }),
-      sessionPaths: sessionPaths('direct-openai-compatible'),
+      sessionPaths: sessionPaths('openai-compatible-sessions'),
     });
 
+    expect(config.getApiKey()).toBe('sk-openrouter');
     expect(config.buildHeaders?.('sk-openrouter')).toEqual({
       Authorization: 'Bearer sk-openrouter',
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://github.com/cfal/garcon',
-      'X-OpenRouter-Title': 'Garcon',
     });
   });
 });
@@ -74,9 +71,9 @@ describe('buildDirectOpenAiResponsesConfig', () => {
       runtimeId: 'direct-openai-responses-compatible',
       runtimeLabel: 'Example',
       endpoint: endpoint({
-        capabilities: { chatCompletions: false, responses: true },
+        endpointId: 'example_openai',
       }),
-      sessionPaths: sessionPaths('direct-openai-responses-compatible'),
+      sessionPaths: sessionPaths('openai-compatible-responses-sessions'),
     });
 
     expect(config.getBaseUrl()).toBe('https://api.example.test/v1');
@@ -89,59 +86,14 @@ describe('buildDirectOpenAiResponsesConfig', () => {
 });
 
 describe('Direct OpenAI router runtimes', () => {
-  it('routes models by Chat Completions and Responses capabilities', async () => {
-    const apiProviderStore = {
-      list: () => [{
-        id: 'acme',
-        label: 'Acme',
-        endpoints: [
-          endpoint({
-            id: 'chat_endpoint',
-            capabilities: { chatCompletions: true, responses: false },
-            defaultModel: 'chat-model',
-            models: [{ value: 'chat-model', label: 'Chat Model' }],
-          }),
-          endpoint({
-            id: 'responses_endpoint',
-            capabilities: { chatCompletions: false, responses: true },
-            defaultModel: 'responses-model',
-            models: [{ value: 'responses-model', label: 'Responses Model' }],
-          }),
-        ],
-      }],
-    };
-
-    const chatAdapter = createDirectOpenAiChatRuntime(
-      apiProviderStore,
-      sessionPaths('direct-openai-compatible'),
-    );
-    const responsesAdapter = createDirectOpenAiResponsesRuntime(
-      apiProviderStore,
-      sessionPaths('direct-openai-responses-compatible'),
-    );
-
-    expect(await chatAdapter.getModels?.()).toEqual([
-      { value: 'chat-model', label: 'Acme: Chat Model', supportsImages: false },
-    ]);
-    expect(await responsesAdapter.getModels?.()).toEqual([
-      { value: 'responses-model', label: 'Acme: Responses Model', supportsImages: false },
-    ]);
-  });
-
   it('starts purge timers for existing and newly created endpoint runtimes', async () => {
-    const provider = {
-      id: 'acme',
-      label: 'Acme',
-      endpoints: [
-        endpoint({ id: 'chat_endpoint_a' }),
-        endpoint({ id: 'chat_endpoint_b' }),
-      ],
-    };
+    const endpointA = endpoint({ endpointId: 'chat_endpoint_a' });
+    const endpointB = endpoint({ endpointId: 'chat_endpoint_b' });
     const runtimes = new Map();
     const createRuntime = mock((runtimeEndpoint) => {
       const runtime = {
         startSession: mock(async () => ({
-          agentSessionId: `${runtimeEndpoint.id}_session`,
+          agentSessionId: `${runtimeEndpoint.selection.endpointId}_session`,
           nativePath: null,
         })),
         runTurn: mock(async () => {}),
@@ -157,21 +109,12 @@ describe('Direct OpenAI router runtimes', () => {
         onFinished: mock(() => {}),
         onFailed: mock(() => {}),
       };
-      runtimes.set(runtimeEndpoint.id, runtime);
+      runtimes.set(runtimeEndpoint.selection.endpointId, runtime);
       return runtime;
     });
     const router = new DirectEndpointRouterRuntime({
-      agentId: 'direct-openai-compatible',
       label: 'Direct OpenAI',
       protocol: 'openai-compatible',
-      noEndpointMessage: 'No endpoint',
-      apiProviders: {
-        list: () => [provider],
-        getEndpoint: (endpointId) => {
-          const runtimeEndpoint = provider.endpoints.find((entry) => entry.id === endpointId);
-          return runtimeEndpoint ? { apiProvider: provider, endpoint: runtimeEndpoint } : null;
-        },
-      },
       createRuntime,
       runSingleQuery: mock(async () => ''),
     });
@@ -181,14 +124,14 @@ describe('Direct OpenAI router runtimes', () => {
       chatId: 'chat-a',
       command: 'hello',
       projectPath: '/tmp',
-      modelEndpointId: 'chat_endpoint_a',
+      endpoint: endpointA,
     });
     router.startPurgeTimer();
     await router.startSession({
       chatId: 'chat-b',
       command: 'hello',
       projectPath: '/tmp',
-      modelEndpointId: 'chat_endpoint_b',
+      endpoint: endpointB,
     });
     router.shutdown();
 
@@ -206,16 +149,18 @@ describe('buildDirectAnthropicConfig', () => {
       runtimeId: 'direct-anthropic-compatible',
       runtimeLabel: 'Example',
       endpoint: {
-        id: 'example_anthropic',
-        protocol: 'anthropic-messages',
-        baseUrl: 'https://api.example.test',
-        apiKey: 'sk-ant',
-        defaultModel: 'example-model',
-        models: [{ value: 'example-model', label: 'Example Model' }],
-        supportsImages: true,
-        modelDiscovery: 'anthropic-models',
+        selection: {
+          apiProviderId: 'example',
+          endpointId: 'example_anthropic',
+          protocol: 'anthropic-messages',
+          baseUrl: 'https://api.example.test',
+          model: 'example-model',
+          isLocal: false,
+          credential: null,
+        },
+        credential: 'sk-ant',
       },
-      sessionPaths: sessionPaths('direct-anthropic-compatible'),
+      sessionPaths: sessionPaths('anthropic-compatible-sessions'),
     });
 
     expect(config.getApiKey()).toBe('sk-ant');

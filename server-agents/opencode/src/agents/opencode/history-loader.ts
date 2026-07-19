@@ -15,8 +15,8 @@ import {
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import {
   createOpenCodeRequestScope,
   hasOpenCodeResultError,
@@ -26,7 +26,12 @@ import {
   type OpenCodeRequestScope,
 } from './sdk-result.js';
 
-const logger = createLogger('agents:opencode:history-loader');
+const SILENT_LOGGER: AgentLogger = Object.freeze({
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+});
 
 const PREVIEW_TAIL_MESSAGE_LIMIT = 20;
 
@@ -64,6 +69,7 @@ export interface OpenCodeHistoryLoadOptions {
   directory?: string | null;
   signal?: AbortSignal;
   throwOnError?: boolean;
+  logger?: AgentLogger;
 }
 
 interface OpenCodePreview {
@@ -89,6 +95,7 @@ async function callWithDirectoryFallback<T>(
   label: string,
   scope: OpenCodeRequestScope,
   operation: (scope: OpenCodeRequestScope) => Promise<T>,
+  logger: AgentLogger,
 ): Promise<{ result: T; scope: OpenCodeRequestScope }> {
   const result = await operation(scope);
   if (!scope.directory || !isOpenCodeNotFoundResult(result)) return { result, scope };
@@ -96,7 +103,10 @@ async function callWithDirectoryFallback<T>(
   const fallbackScope: OpenCodeRequestScope = {};
   const fallbackResult = await operation(fallbackScope);
   if (!isOpenCodeNotFoundResult(fallbackResult)) {
-    logger.warn(`opencode: ${label} missed directory ${scope.directory}; loaded without directory`);
+    logger.warn('OpenCode request missed the scoped directory; loaded without it', {
+      label,
+      directory: scope.directory,
+    });
   }
   return { result: fallbackResult, scope: fallbackScope };
 }
@@ -107,8 +117,9 @@ export async function getOpenCodePreviewFromSessionId(
   getClient: OpenCodeClientGetter,
   options: OpenCodeHistoryLoadOptions = {},
 ): Promise<OpenCodePreview | null> {
+  const logger = options.logger ?? SILENT_LOGGER;
   if (!sessionId) {
-    logger.error('opencode: preview fetch failed, sessionId is required');
+    logger.error('OpenCode preview fetch requires a session ID');
     return null;
   }
   try {
@@ -118,13 +129,14 @@ export async function getOpenCodePreviewFromSessionId(
       'preview fetch',
       initialScope,
       (requestScope) => client.session.get(withOpenCodeRequestScope({ sessionID: sessionId }, requestScope)),
+      logger,
     );
     if (isOpenCodeNotFoundResult(result)) return null;
     if (hasOpenCodeResultError(result)) {
-      logger.warn(
-        `opencode: preview fetch failed for ${sessionId}:`,
-        openCodeResultErrorMessage(result, 'OpenCode preview fetch failed'),
-      );
+      logger.warn('OpenCode preview fetch failed', {
+        sessionId,
+        error: openCodeResultErrorMessage(result, 'OpenCode preview fetch failed'),
+      });
       return null;
     }
     const session = result.data;
@@ -136,13 +148,14 @@ export async function getOpenCodePreviewFromSessionId(
         sessionID: sessionId,
         limit: PREVIEW_TAIL_MESSAGE_LIMIT,
       }, requestScope)),
+      logger,
     );
     if (isOpenCodeNotFoundResult(messageResult)) return null;
     if (hasOpenCodeResultError(messageResult)) {
-      logger.warn(
-        `opencode: preview message fetch failed for ${sessionId}:`,
-        openCodeResultErrorMessage(messageResult, 'OpenCode preview message fetch failed'),
-      );
+      logger.warn('OpenCode preview message fetch failed', {
+        sessionId,
+        error: openCodeResultErrorMessage(messageResult, 'OpenCode preview message fetch failed'),
+      });
       return null;
     }
     const messages = Array.isArray(messageResult.data) ? messageResult.data : [];
@@ -175,7 +188,10 @@ export async function getOpenCodePreviewFromSessionId(
       createdAt: dateToIso(session.time?.created),
     };
   } catch (err) {
-    logger.error(`opencode: preview fetch failed for ${sessionId}:`, err);
+    logger.error('OpenCode preview fetch failed', {
+      sessionId,
+      error: errorMessage(err),
+    });
     return null;
   }
 }
@@ -195,6 +211,7 @@ export async function fetchOpenCodeStoredMessages(
   getClient: OpenCodeClientGetter,
   options: OpenCodeHistoryLoadOptions = {},
 ): Promise<OpenCodeMessage[]> {
+  const logger = options.logger ?? SILENT_LOGGER;
   if (!sessionId) return [];
   try {
     const client = await getClient();
@@ -207,21 +224,22 @@ export async function fetchOpenCodeStoredMessages(
           ? client.session.messages(args, { signal: options.signal })
           : client.session.messages(args);
       },
+      logger,
     );
     if (isOpenCodeNotFoundResult(result)) return [];
     if (hasOpenCodeResultError(result)) {
       const message = openCodeResultErrorMessage(result, 'OpenCode message fetch failed');
       if (options.throwOnError) throw new Error(message);
-      logger.warn(
-        `opencode: failed to load chat messages for session ${sessionId}:`,
-        message,
-      );
+      logger.warn('OpenCode chat message load failed', { sessionId, error: message });
       return [];
     }
     return Array.isArray(result.data) ? result.data : [];
   } catch (err) {
     if (options.throwOnError) throw err;
-    logger.error(`opencode: failed to load chat messages for session ${sessionId}:`, errorMessage(err));
+    logger.error('OpenCode chat message load failed', {
+      sessionId,
+      error: errorMessage(err),
+    });
     return [];
   }
 }

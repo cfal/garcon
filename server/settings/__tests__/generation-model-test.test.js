@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'node:fs';
+import {
+  AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+  AgentIntegrationError,
+} from '@garcon/server-agent-interface';
 
 import {
   GenerationModelTestError,
   testGenerationModel,
 } from '../generation-model-test.js';
-import { UnsupportedSingleQueryEffortError } from '../../agents/single-query-errors.js';
 import { generationModelTestConfigurationKey } from '../../../common/generation-test-contracts.js';
 
 const titleConfigurationKey = generationModelTestConfigurationKey({
@@ -173,7 +176,12 @@ describe('testGenerationModel', () => {
         status: 502,
       },
       {
-        failure: new UnsupportedSingleQueryEffortError('amp', 'high'),
+        failure: new AgentIntegrationError(
+          'OPERATION_UNSUPPORTED',
+          'amp does not support explicit one-shot effort high.',
+          false,
+          AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+        ),
         code: 'GENERATION_TEST_UNSUPPORTED_EFFORT',
         status: 422,
       },

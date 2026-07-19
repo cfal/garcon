@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -20,6 +20,15 @@ async function temporaryDirectory() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-native-path-'));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+function createLogger() {
+  return {
+    debug: mock(() => undefined),
+    info: mock(() => undefined),
+    warn: mock(() => undefined),
+    error: mock(() => undefined),
+  };
 }
 
 describe('sanitizeClaudeProjectPath', () => {
@@ -95,20 +104,19 @@ describe('resolveClaudeNativePath', () => {
     });
     await fs.mkdir(path.dirname(expectedPath), { recursive: true });
     await fs.writeFile(expectedPath, '{}\n');
-    const warning = spyOn(console, 'warn').mockImplementation(() => {});
+    const logger = createLogger();
 
     const resolved = await resolveClaudeNativePath({
       projectPath,
       agentSessionId: 'session-1',
       nativePath: path.join(configHomeDir, 'projects', 'stale', 'session-1.jsonl'),
-    }, { configHomeDir });
+    }, { configHomeDir, logger });
 
     expect(resolved).toBe(expectedPath);
-    expect(warning).toHaveBeenCalledWith(
-      '[agents:claude:native-path]',
-      expect.stringContaining('stored transcript path is unavailable'),
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Claude stored transcript path is unavailable; using derived path',
+      expect.objectContaining({ agentSessionId: 'session-1' }),
     );
-    warning.mockRestore();
   });
 
   it('recovers within a custom config home inferred from the stored path', async () => {
@@ -121,7 +129,7 @@ describe('resolveClaudeNativePath', () => {
     });
     await fs.mkdir(path.dirname(expectedPath), { recursive: true });
     await fs.writeFile(expectedPath, '{}\n');
-    const warning = spyOn(console, 'warn').mockImplementation(() => {});
+    const logger = createLogger();
 
     const resolved = await resolveClaudeNativePath({
       projectPath,
@@ -132,14 +140,13 @@ describe('resolveClaudeNativePath', () => {
         'stale-encoding',
         'session-1.jsonl',
       ),
-    });
+    }, { logger });
 
     expect(resolved).toBe(expectedPath);
-    expect(warning).toHaveBeenCalledWith(
-      '[agents:claude:native-path]',
-      expect.stringContaining('stored transcript path is unavailable'),
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Claude stored transcript path is unavailable; using derived path',
+      expect.objectContaining({ agentSessionId: 'session-1' }),
     );
-    warning.mockRestore();
   });
 
   it('warns and searches all project directories when derivation misses', async () => {
@@ -155,23 +162,22 @@ describe('resolveClaudeNativePath', () => {
     await fs.mkdir(projectPath, { recursive: true });
     await fs.mkdir(path.dirname(recoveredPath), { recursive: true });
     await fs.writeFile(recoveredPath, '{}\n');
-    const warning = spyOn(console, 'warn').mockImplementation(() => {});
+    const logger = createLogger();
 
     const resolved = await resolveClaudeNativePath({
       projectPath,
       agentSessionId: 'session-1',
-    }, { configHomeDir });
+    }, { configHomeDir, logger });
 
     expect(resolved).toBe(recoveredPath);
-    expect(warning).toHaveBeenCalledWith(
-      '[agents:claude:native-path]',
-      expect.stringContaining('searching'),
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Claude expected transcript path is unavailable; searching projects',
+      expect.objectContaining({ agentSessionId: 'session-1' }),
     );
-    expect(warning).toHaveBeenCalledWith(
-      '[agents:claude:native-path]',
-      expect.stringContaining('recovered transcript path by session search'),
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Claude transcript path recovered by session search',
+      expect.objectContaining({ agentSessionId: 'session-1' }),
     );
-    warning.mockRestore();
   });
 
   it('refuses to choose between duplicate session files', async () => {
@@ -189,21 +195,17 @@ describe('resolveClaudeNativePath', () => {
       await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
       await fs.writeFile(transcriptPath, '{}\n');
     }
-    const warning = spyOn(console, 'warn').mockImplementation(() => {});
-    const error = spyOn(console, 'error').mockImplementation(() => {});
+    const logger = createLogger();
 
     const resolved = await resolveClaudeNativePath({
       projectPath,
       agentSessionId: 'session-1',
-    }, { configHomeDir });
+    }, { configHomeDir, logger });
 
     expect(resolved).toBeNull();
-    expect(error).toHaveBeenCalledWith(
-      '[agents:claude:native-path]',
-      expect.stringContaining('found multiple files'),
-      expect.any(Array),
+    expect(logger.error).toHaveBeenCalledWith(
+      'Claude transcript search found multiple files and refused to choose',
+      expect.objectContaining({ agentSessionId: 'session-1' }),
     );
-    warning.mockRestore();
-    error.mockRestore();
   });
 });

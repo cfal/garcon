@@ -5,12 +5,21 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./legacy/*": "./src/legacy/*.ts",
     "./shared/*": "./src/shared/*.ts",
     "./lib/*": "./src/lib/*.ts",
     "./chats/*": "./src/chats/*.ts",
+    "./auth/*": "./src/auth/*.ts",
     "./direct/*": "./src/direct/*.ts",
-    "./search/*": "./src/search/*.ts"
+    "./search/*": "./src/search/*.ts",
+    "./catalog/*": "./src/catalog/*.ts",
+    "./environment/*": "./src/environment/*.ts",
+    "./execution/*": "./src/execution/*.ts",
+    "./forking/*": "./src/forking/*.ts",
+    "./lifecycle/*": "./src/lifecycle/*.ts",
+    "./logging/*": "./src/logging/*.ts",
+    "./migration/*": "./src/migration/*.ts",
+    "./native-session/*": "./src/native-session/*.ts",
+    "./settings/*": "./src/settings/*.ts"
   },
   "scripts": {
     "typecheck": "bunx tsc -p tsconfig.json"

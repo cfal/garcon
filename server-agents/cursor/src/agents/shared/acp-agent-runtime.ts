@@ -11,18 +11,17 @@ import { createArtificialNativePath } from '@garcon/server-agent-common/chats/ar
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { normalizeToolInput } from '@garcon/server-agent-common/shared/normalize-util';
 import {
-  assertExecutionAdmissionOpen,
-  executionEventMetadata,
-  markExecutionStarted,
-  type PermissionMode,
-  type AgentEventMetadata,
-  type AgentSessionSettingsPatch,
-  type PrepareProjectPathUpdateRequest,
-  type ResumeTurnRequest,
-  type StartSessionRequest,
-  type StartedAgentSession,
-} from '@garcon/server-agent-common/legacy/session-types';
-import type { AgentRuntime } from '@garcon/server-agent-common/legacy/types';
+  acpEventMetadata,
+  assertAcpExecutionOpen,
+  markAcpExecutionStarted,
+  type AcpProjectPathUpdateRequest,
+  type AcpResumeRequest,
+  type AcpSessionSettingsPatch,
+  type AcpStartedSession,
+  type AcpStartRequest,
+} from './runtime-types.js';
+import type { PermissionMode } from '@garcon/common/chat-modes';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
 import { isRecoverableLoadFailure } from '../../acp/errors.js';
@@ -68,7 +67,7 @@ interface AcpAgentRuntimeSession {
   lastActivityAt: number;
   lastUpdateAt: number;
   upstreamRequestId?: string;
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
 }
 
 export type AcpAbortStrategy = 'cancel' | 'process-restart';
@@ -76,7 +75,7 @@ export type AcpAbortStrategy = 'cancel' | 'process-restart';
 export interface AcpSessionConfigurationContext {
   client: AcpClient;
   sessionId: string;
-  request: StartSessionRequest | ResumeTurnRequest;
+  request: AcpStartRequest | AcpResumeRequest;
   configOptions?: AcpSessionConfigOption[];
 }
 
@@ -94,8 +93,8 @@ export interface AcpAgentPolicy {
   newSessionModelConfig?: boolean;
   promptModelConfig?: boolean;
   promptModeConfig?: boolean;
-  buildEnv?: (request: StartSessionRequest | ResumeTurnRequest) => Record<string, string | undefined>;
-  buildPrompt?: (request: StartSessionRequest | ResumeTurnRequest) => Array<{ type: string; text?: string; [key: string]: unknown }>;
+  buildEnv?: (request: AcpStartRequest | AcpResumeRequest) => Record<string, string | undefined>;
+  buildPrompt?: (request: AcpStartRequest | AcpResumeRequest) => Array<{ type: string; text?: string; [key: string]: unknown }>;
   mapPermissionMode?: (mode: PermissionMode) => string | undefined;
   mapModel?: (model: string) => string | undefined;
   resolveNativePath?: (sessionId: string) => string | null;
@@ -117,11 +116,11 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function buildPromptFallback(request: StartSessionRequest | ResumeTurnRequest): Array<{ type: string; text: string }> {
+function buildPromptFallback(request: AcpStartRequest | AcpResumeRequest): Array<{ type: string; text: string }> {
   return [{ type: 'text', text: request.command }];
 }
 
-function buildEnvFallback(request: StartSessionRequest | ResumeTurnRequest): Record<string, string | undefined> {
+function buildEnvFallback(request: AcpStartRequest | AcpResumeRequest): Record<string, string | undefined> {
   return { ...process.env, ...request.envOverrides };
 }
 
@@ -169,7 +168,7 @@ function abortStrategy(policy: AcpAgentPolicy): AcpAbortStrategy {
   return policy.abortStrategy ?? 'cancel';
 }
 
-export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRuntime {
+export class AcpAgentRuntime extends AgentEventEmitterRuntime {
   #policy: AcpAgentPolicy;
   #converter: AcpEventConverter;
   #capabilityCache: AcpCapabilityCache;
@@ -195,12 +194,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#createTransport = options.createTransport ?? (() => new AcpTransport());
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    assertExecutionAdmissionOpen(request);
+  async startSession(request: AcpStartRequest): Promise<AcpStartedSession> {
+    assertAcpExecutionOpen(request);
     const client = await this.#connectClient(request);
     let created: Awaited<ReturnType<AcpClient['newSession']>>;
     try {
-      assertExecutionAdmissionOpen(request);
+      assertAcpExecutionOpen(request);
       const model = this.#newSessionModelForRequest(request);
       created = await client.newSession({
         cwd: request.projectPath,
@@ -233,7 +232,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       startedAt: now,
       lastActivityAt: Date.now(),
       lastUpdateAt: 0,
-      eventMetadata: executionEventMetadata(request, 'chat-start'),
+      eventMetadata: acpEventMetadata(request, 'chat-start'),
     };
     this.#sessions.set(sessionId, session);
     this.#bindClientEvents(session);
@@ -270,8 +269,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     };
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async runTurn(request: AcpResumeRequest): Promise<void> {
+    assertAcpExecutionOpen(request);
     const session = await this.#sessionForTurn(request);
     if (session.running) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
@@ -279,7 +278,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     await this.#runPrompt(session, request);
   }
 
-  async prepareProjectPathUpdate(request: PrepareProjectPathUpdateRequest): Promise<void> {
+  async prepareProjectPathUpdate(request: AcpProjectPathUpdateRequest): Promise<void> {
     const agentSessionId = request.agentSessionId;
     if (!agentSessionId) return;
 
@@ -349,7 +348,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     ], session.eventMetadata);
   }
 
-  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+  updateSessionSettings(agentSessionId: string, patch: AcpSessionSettingsPatch): void {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return;
     if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
@@ -368,7 +367,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#idlePurger.start();
   }
 
-  async #connectClient(request: StartSessionRequest | ResumeTurnRequest): Promise<AcpClient> {
+  async #connectClient(request: AcpStartRequest | AcpResumeRequest): Promise<AcpClient> {
     const command = typeof this.#policy.command === 'function'
       ? this.#policy.command()
       : this.#policy.command;
@@ -395,7 +394,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     return client;
   }
 
-  async #sessionForTurn(request: ResumeTurnRequest): Promise<AcpAgentRuntimeSession> {
+  async #sessionForTurn(request: AcpResumeRequest): Promise<AcpAgentRuntimeSession> {
     const existing = this.#sessions.get(request.agentSessionId);
     if (existing) return existing;
 
@@ -419,7 +418,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
       lastUpdateAt: 0,
-      eventMetadata: executionEventMetadata(request),
+      eventMetadata: acpEventMetadata(request),
     };
     this.#sessions.set(request.agentSessionId, baseSession);
     this.#bindClientEvents(baseSession);
@@ -435,7 +434,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
   async #reconnectSession(
     session: AcpAgentRuntimeSession,
-    request: ResumeTurnRequest,
+    request: AcpResumeRequest,
     order: ReconnectStrategy[],
   ): Promise<boolean> {
     for (const strategy of order) {
@@ -486,10 +485,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
   async #runPrompt(
     session: AcpAgentRuntimeSession,
-    request: StartSessionRequest | ResumeTurnRequest,
+    request: AcpStartRequest | AcpResumeRequest,
     onExecutionStarted?: () => void,
   ): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+    assertAcpExecutionOpen(request);
     const turnGeneration = ++session.turnGeneration;
     session.retired = false;
     session.running = false;
@@ -501,7 +500,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     session.lastActivityAt = Date.now();
     session.lastUpdateAt = Date.now();
     session.upstreamRequestId = undefined;
-    session.eventMetadata = executionEventMetadata(
+    session.eventMetadata = acpEventMetadata(
       request,
       'agentSessionId' in request ? undefined : 'chat-start',
     );
@@ -517,7 +516,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
-      markExecutionStarted(request);
+      markAcpExecutionStarted(request);
       executionStarted = true;
       session.running = true;
       session.state = 'running';
@@ -564,7 +563,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
         const metadata = {
           ...session.eventMetadata,
           ...(session.upstreamRequestId ? { upstreamRequestId: session.upstreamRequestId } : {}),
-        } satisfies AgentEventMetadata;
+        } satisfies RuntimeEventMetadata;
         this.emitFinished(session.chatId, 0, metadata);
       } else if (!session.aborted && !admissionClosed && failureMessage) {
         this.emitMessages(session.chatId, [
@@ -670,7 +669,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     const metadata = {
       ...session.eventMetadata,
       ...(upstreamRequestId ? { upstreamRequestId } : {}),
-    } satisfies AgentEventMetadata;
+    } satisfies RuntimeEventMetadata;
     this.emitMessages(session.chatId, converted, metadata);
   }
 
@@ -808,14 +807,14 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     return this.#policy.mapModel ? this.#policy.mapModel(model) : model;
   }
 
-  #newSessionModelForRequest(request: StartSessionRequest | ResumeTurnRequest): string | undefined {
+  #newSessionModelForRequest(request: AcpStartRequest | AcpResumeRequest): string | undefined {
     if (this.#policy.newSessionModelConfig === false) return undefined;
     return this.#mappedModel(request.model);
   }
 
   async #configureSession(
     session: AcpAgentRuntimeSession,
-    request: StartSessionRequest | ResumeTurnRequest,
+    request: AcpStartRequest | AcpResumeRequest,
   ): Promise<void> {
     const configured = await this.#policy.configureSession?.({
       client: session.client,
@@ -828,20 +827,20 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     }
   }
 
-  #buildPrompt(request: StartSessionRequest | ResumeTurnRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {
+  #buildPrompt(request: AcpStartRequest | AcpResumeRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {
     const prompt = this.#policy.buildPrompt
       ? this.#policy.buildPrompt(request)
       : buildPromptFallback(request);
     return prompt.length > 0 ? prompt : buildPromptFallback(request);
   }
 
-  #buildEnv(request: StartSessionRequest | ResumeTurnRequest): Record<string, string | undefined> {
+  #buildEnv(request: AcpStartRequest | AcpResumeRequest): Record<string, string | undefined> {
     return this.#policy.buildEnv
       ? this.#policy.buildEnv(request)
       : buildEnvFallback(request);
   }
 
-  #promptConfigForRequest(request: StartSessionRequest | ResumeTurnRequest): Record<string, unknown> | null {
+  #promptConfigForRequest(request: AcpStartRequest | AcpResumeRequest): Record<string, unknown> | null {
     const config: Record<string, unknown> = {};
     const mode = this.#policy.promptModeConfig === false
       ? undefined
