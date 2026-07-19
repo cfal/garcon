@@ -461,6 +461,7 @@ describe('chat WebSocket handler', () => {
       lastSeq: 1,
     });
     expect(ws.publish.mock.calls[0][0]).toBe('chat');
+    expect(ws.publish.mock.calls[0][2]).toBe(true);
   });
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {

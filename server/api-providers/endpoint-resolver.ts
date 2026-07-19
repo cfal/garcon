@@ -9,7 +9,6 @@ import type {
 import type { ApiProtocol } from '../../common/api-providers.js';
 import {
   endpointModelOptionValue,
-  endpointSupportsAgent,
   rawModelFromEndpointOptionValue,
 } from '../../common/model-routing.js';
 import type {
@@ -41,13 +40,16 @@ export class ModelSelectionError extends Error {
 }
 
 export class ApiProviderEndpointResolver {
-  constructor(private readonly getApiProviders: () => StoredApiProvider[]) {}
+  constructor(
+    private readonly getApiProviders: () => StoredApiProvider[],
+    private readonly getSupportedProtocols: (agentId: AgentId) => readonly string[] = () => [],
+  ) {}
 
   getModelOptions(agentId: AgentId): AgentModelOption[] {
     const options: AgentModelOption[] = [];
     for (const apiProvider of this.getApiProviders()) {
       for (const endpoint of apiProvider.endpoints) {
-        if (!endpointSupportsAgent(agentId, endpoint)) continue;
+        if (!this.#endpointSupportsAgent(agentId, endpoint)) continue;
         for (const model of endpoint.models) {
           const rawModel = model.rawModel || model.value;
           options.push({
@@ -142,12 +144,16 @@ export class ApiProviderEndpointResolver {
   }
 
   #assertEndpointCompatible(agentId: AgentId, endpoint: StoredApiProviderEndpoint): void {
-    if (!endpointSupportsAgent(agentId, endpoint)) {
+    if (!this.#endpointSupportsAgent(agentId, endpoint)) {
       throw new ModelSelectionError(
         `${endpoint.protocol} endpoint cannot be used with ${agentId}.`,
         'ENDPOINT_NOT_EXPOSED',
       );
     }
+  }
+
+  #endpointSupportsAgent(agentId: AgentId, endpoint: StoredApiProviderEndpoint): boolean {
+    return this.getSupportedProtocols(agentId).includes(endpoint.protocol);
   }
 
   #resolveModel(apiProvider: StoredApiProvider, endpoint: StoredApiProviderEndpoint, selectedModel: string): {

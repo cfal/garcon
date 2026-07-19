@@ -39,8 +39,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		createdAt: null,
 		lastActivityAt: null,
 		lastReadAt: null,
@@ -132,7 +131,6 @@ describe('SidebarController', () => {
 				createdAt: '2025-01-01',
 				lastActivityAt: '2025-01-02',
 				agentSessionId: 'agent-session-1',
-				nativePath: '/tmp',
 			};
 			mockGetChatDetails.mockResolvedValue(details);
 
@@ -153,8 +151,7 @@ describe('SidebarController', () => {
 					model: 'sonnet',
 					permissionMode: 'default',
 					thinkingMode: 'none',
-					claudeThinkingMode: 'auto',
-					ampAgentMode: 'smart',
+					agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 					title: 'Fork',
 					projectPath: '/tmp/project',
 					effectiveProjectKey: '/tmp/project',

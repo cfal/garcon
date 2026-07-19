@@ -94,7 +94,6 @@ export class ChatActionController {
 				createdAt: details.createdAt,
 				lastActivityAt: details.lastActivityAt,
 				agentSessionId: details.agentSessionId,
-				nativePath: details.nativePath,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

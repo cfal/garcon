@@ -21,7 +21,7 @@ Thanks for contributing to Garcon.
 ## Development setup
 
 ```bash
-bun run install
+bun run setup
 bun run start
 ```
 

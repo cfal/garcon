@@ -20,8 +20,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		isArchived: false,
 		isActive: false,
 		isUnread: false,
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		...overrides,
 	};
 }
@@ -65,8 +64,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -133,8 +131,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Test',
 			},
 		});
@@ -160,8 +157,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Test',
 			},
 		});
@@ -186,8 +182,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Pending',
 			},
 		});
@@ -350,8 +345,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'A',
 			},
 		});
@@ -363,8 +357,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'B',
 			},
 		});
@@ -407,8 +400,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: '   ',
 			},
 		});
@@ -436,8 +428,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -456,8 +447,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -479,8 +469,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -511,8 +500,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -850,8 +838,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -870,8 +857,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -880,7 +866,7 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['draft-1']?.isUnread).toBe(false);
 	});
 
-	it('toRecord maps permissionMode, thinkingMode, and claudeThinkingMode from server session', () => {
+	it('toRecord maps permission, thinking, and integration settings from the server session', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([
@@ -888,30 +874,38 @@ describe('ChatSessionsStore', () => {
 				id: 'a',
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'medium',
-				claudeThinkingMode: 'off',
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { thinkingMode: 'off' },
+				},
 			} as any),
 		]);
 
 		expect(store.byId['a']?.permissionMode).toBe('acceptEdits');
 		expect(store.byId['a']?.thinkingMode).toBe('medium');
-		expect(store.byId['a']?.claudeThinkingMode).toBe('off');
+		expect(store.byId['a']?.agentSettings.values.thinkingMode).toBe('off');
 	});
 
-	it('toRecord defaults permissionMode, thinkingMode, and claudeThinkingMode for partial persisted sessions', () => {
+	it('toRecord defaults missing integration settings for partial persisted sessions', () => {
 		const store = new ChatSessionsStore();
 
 		const partial = makeServerSession({ id: 'a' }) as Partial<ChatSession> & {
-			claudeThinkingMode?: string;
+			agentSettings?: ChatSession['agentSettings'];
 		};
-		delete partial.claudeThinkingMode;
+		delete partial.agentSettings;
 		store.upsertFromServer([partial as ChatSession]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');
-		expect(store.byId['a']?.claudeThinkingMode).toBe('auto');
+		expect(store.byId['a']?.agentSettings).toEqual({
+			ownerId: 'claude',
+			schemaVersion: 1,
+			values: {},
+		});
 	});
 
-	it('toRecord normalizes invalid permissionMode, thinkingMode, and claudeThinkingMode values', () => {
+	it('toRecord normalizes invalid universal modes and mismatched integration settings', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([
@@ -919,13 +913,13 @@ describe('ChatSessionsStore', () => {
 				id: 'a',
 				permissionMode: 'bogus' as any,
 				thinkingMode: 'very-hard' as any,
-				claudeThinkingMode: 'sometimes' as any,
+				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
 			} as any),
 		]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');
-		expect(store.byId['a']?.claudeThinkingMode).toBe('auto');
+		expect(store.byId['a']?.agentSettings.ownerId).toBe('claude');
 	});
 
 	it('sameRecord detects permissionMode changes', () => {
@@ -955,8 +949,7 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({
 				id: 'a',
 				thinkingMode: 'max',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 			} as any),
 		]);
 
@@ -964,20 +957,27 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.thinkingMode).toBe('max');
 	});
 
-	it('sameRecord detects ampAgentMode changes', () => {
+	it('sameRecord detects integration setting changes', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		store.byId = {
 			...store.byId,
-			a: { ...store.byId['a']!, ampAgentMode: 'legacy' as never },
+			a: {
+				...store.byId['a']!,
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { thinkingMode: 'legacy' },
+				},
+			},
 		};
 		const ref = store.byId['a'];
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 
 		expect(store.byId['a']).not.toBe(ref);
-		expect(store.byId['a']?.ampAgentMode).toBe('smart');
+		expect(store.byId['a']?.agentSettings.values.thinkingMode).toBe('auto');
 	});
 
 	it('createDraft maps permissionMode and thinkingMode from startup config', () => {
@@ -991,8 +991,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'medium',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -1008,12 +1007,12 @@ describe('ChatSessionsStore', () => {
 		store.patchChat('a', {
 			permissionMode: 'bypassPermissions',
 			thinkingMode: 'low',
-			claudeThinkingMode: 'on',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'on' } },
 		});
 
 		expect(store.byId['a']?.permissionMode).toBe('bypassPermissions');
 		expect(store.byId['a']?.thinkingMode).toBe('low');
-		expect(store.byId['a']?.claudeThinkingMode).toBe('on');
+		expect(store.byId['a']?.agentSettings.values.thinkingMode).toBe('on');
 	});
 
 	it('patchDraftStartup updates startup config for draft chats', () => {
@@ -1027,8 +1026,7 @@ describe('ChatSessionsStore', () => {
 				model: 'opus',
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 				firstMessage: 'Hello',
 			},
 		});
@@ -1037,13 +1035,13 @@ describe('ChatSessionsStore', () => {
 			model: 'sonnet',
 			permissionMode: 'acceptEdits',
 			thinkingMode: 'medium',
-			claudeThinkingMode: 'off',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'off' } },
 		});
 
 		expect(store.startupByChatId['draft-1']?.model).toBe('sonnet');
 		expect(store.startupByChatId['draft-1']?.permissionMode).toBe('acceptEdits');
 		expect(store.startupByChatId['draft-1']?.thinkingMode).toBe('medium');
-		expect(store.startupByChatId['draft-1']?.claudeThinkingMode).toBe('off');
+		expect(store.startupByChatId['draft-1']?.agentSettings.values.thinkingMode).toBe('off');
 	});
 
 	it('patchDraftStartup is a no-op for non-draft chats', () => {

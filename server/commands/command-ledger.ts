@@ -16,7 +16,6 @@ export type PendingInputRecoveryStatus = 'required' | 'settled';
 export interface ForkPreparationState {
   phase: 'creating' | 'created';
   sourceChatId: string;
-  nativePath?: string;
   sourceNextForkOrdinal?: number;
 }
 
@@ -149,13 +148,11 @@ function parseLedgerRecord(value: unknown, index: number): CommandLedgerRecord {
     }
     const phase = value.forkPreparation.phase;
     const sourceChatId = value.forkPreparation.sourceChatId;
-    const nativePath = value.forkPreparation.nativePath;
     const sourceNextForkOrdinal = value.forkPreparation.sourceNextForkOrdinal;
     if (
       (phase !== 'creating' && phase !== 'created')
       || typeof sourceChatId !== 'string'
       || sourceChatId.length === 0
-      || (nativePath !== undefined && (typeof nativePath !== 'string' || nativePath.length === 0))
       || (
         sourceNextForkOrdinal !== undefined
         && (
@@ -170,7 +167,6 @@ function parseLedgerRecord(value: unknown, index: number): CommandLedgerRecord {
     forkPreparation = {
       phase,
       sourceChatId,
-      ...(nativePath !== undefined ? { nativePath } : {}),
       ...(sourceNextForkOrdinal !== undefined ? { sourceNextForkOrdinal } : {}),
     };
   }

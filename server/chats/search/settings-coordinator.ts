@@ -27,7 +27,10 @@ export class TranscriptSearchSettingsCoordinator {
   async setEnabled(enabled: boolean): Promise<void> {
     await this.#lock.runExclusive(SETTINGS_LOCK_KEY, async () => {
       const current = this.#settings.getFeatureSettings().transcriptSearch.enabled;
-      if (current === enabled) return;
+      if (current === enabled) {
+        if (!enabled) await this.#disableAndDelete();
+        return;
+      }
       if (enabled) {
         try {
           await this.#controller.start();
@@ -43,15 +46,18 @@ export class TranscriptSearchSettingsCoordinator {
       }
 
       await this.#settings.setTranscriptSearchEnabled(false);
-      try {
-        await this.#controller.disableAndDelete();
-      } catch (error) {
-        throw new TranscriptSearchSettingsError(
-          'TRANSCRIPT_SEARCH_CLEANUP_FAILED',
-          error instanceof Error ? error.message : String(error),
-        );
-      }
+      await this.#disableAndDelete();
     });
   }
-}
 
+  async #disableAndDelete(): Promise<void> {
+    try {
+      await this.#controller.disableAndDelete();
+    } catch (error) {
+      throw new TranscriptSearchSettingsError(
+        'TRANSCRIPT_SEARCH_CLEANUP_FAILED',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+}

@@ -1,14 +1,13 @@
 import { updateChatAgentModel } from '$lib/api/chats.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
-import type {
-	AmpAgentMode,
-	ClaudeThinkingMode,
-	PermissionMode,
-	ThinkingMode,
-} from '$lib/types/chat';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
-import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
+import {
+	normalizeSupportedPermissionMode,
+	normalizeSupportedThinkingMode,
+} from '$lib/agents/agent-modes.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { errorDetail } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -27,9 +26,9 @@ interface AgentSwitchState {
 	modelProtocol: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	claudeThinkingMode: ClaudeThinkingMode;
-	ampAgentMode: AmpAgentMode;
+	agentSettings: AgentSettingsEnvelope;
 	setAgentId(agentId: SessionAgentId): void;
+	setAgentSettings(settings: AgentSettingsEnvelope): void;
 	setModelSelection(selection: {
 		model: string;
 		apiProviderId: string | null;
@@ -55,6 +54,9 @@ interface AgentSwitchModelCatalog {
 		modelEndpointId?: string | null,
 	): string;
 	getAgentLabel(agentId: SessionAgentId): string;
+	getDefaultAgentSettings(agentId: SessionAgentId): AgentSettingsEnvelope;
+	getPermissionModes(agentId: SessionAgentId): readonly PermissionMode[];
+	getThinkingModes(agentId: SessionAgentId): readonly ThinkingMode[];
 }
 
 export interface ConversationAgentSwitchDeps {
@@ -78,8 +80,7 @@ interface PreviousAgentSelection {
 	modelProtocol: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	claudeThinkingMode: ClaudeThinkingMode;
-	ampAgentMode: AmpAgentMode;
+	agentSettings: AgentSettingsEnvelope;
 }
 
 export class ConversationAgentSwitchService {
@@ -102,6 +103,7 @@ export class ConversationAgentSwitchService {
 		const selection = deps.modelCatalog.selectionFor(next.agentId, next.modelValue);
 
 		deps.agentState.setAgentId(next.agentId);
+		deps.agentState.setAgentSettings(deps.modelCatalog.getDefaultAgentSettings(next.agentId));
 		deps.agentState.setModelSelection({
 			model: next.modelValue,
 			apiProviderId: selection.apiProviderId,
@@ -114,6 +116,7 @@ export class ConversationAgentSwitchService {
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
+			agentSettings: deps.modelCatalog.getDefaultAgentSettings(next.agentId),
 		});
 
 		try {
@@ -125,18 +128,21 @@ export class ConversationAgentSwitchService {
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
 			});
-			deps.agentState.permissionMode = result.permissionMode;
-			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
-				result.agentId,
-				result.thinkingMode,
+			const permissionMode = normalizeSupportedPermissionMode(
+				result.permissionMode,
+				deps.modelCatalog.getPermissionModes(result.agentId),
 			);
-			deps.agentState.claudeThinkingMode = result.claudeThinkingMode;
-			deps.agentState.ampAgentMode = result.ampAgentMode;
+			const thinkingMode = normalizeSupportedThinkingMode(
+				result.thinkingMode,
+				deps.modelCatalog.getThinkingModes(result.agentId),
+			);
+			deps.agentState.permissionMode = permissionMode;
+			deps.agentState.thinkingMode = thinkingMode;
+			deps.agentState.setAgentSettings(result.agentSettings);
 			deps.sessions.patchChat(chatId, {
-				permissionMode: result.permissionMode,
-				thinkingMode: result.thinkingMode,
-				claudeThinkingMode: result.claudeThinkingMode,
-				ampAgentMode: result.ampAgentMode,
+				permissionMode,
+				thinkingMode,
+				agentSettings: result.agentSettings,
 			});
 		} catch (error) {
 			this.#rollback(chatId, previous, next, error);
@@ -161,9 +167,7 @@ export class ConversationAgentSwitchService {
 			modelProtocol: deps.sessions.selectedChat?.modelProtocol ?? deps.agentState.modelProtocol,
 			permissionMode: deps.sessions.selectedChat?.permissionMode ?? deps.agentState.permissionMode,
 			thinkingMode: deps.sessions.selectedChat?.thinkingMode ?? deps.agentState.thinkingMode,
-			claudeThinkingMode:
-				deps.sessions.selectedChat?.claudeThinkingMode ?? deps.agentState.claudeThinkingMode,
-			ampAgentMode: deps.sessions.selectedChat?.ampAgentMode ?? deps.agentState.ampAgentMode,
+			agentSettings: deps.sessions.selectedChat?.agentSettings ?? deps.agentState.agentSettings,
 		};
 	}
 
@@ -185,13 +189,15 @@ export class ConversationAgentSwitchService {
 			modelEndpointId: previous.modelEndpointId ?? null,
 			modelProtocol: previous.modelProtocol ?? null,
 		});
-		deps.agentState.permissionMode = previous.permissionMode;
-		deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
-			previous.agentId,
-			previous.thinkingMode,
+		deps.agentState.permissionMode = normalizeSupportedPermissionMode(
+			previous.permissionMode,
+			deps.modelCatalog.getPermissionModes(previous.agentId),
 		);
-		deps.agentState.claudeThinkingMode = previous.claudeThinkingMode;
-		deps.agentState.ampAgentMode = previous.ampAgentMode;
+		deps.agentState.thinkingMode = normalizeSupportedThinkingMode(
+			previous.thinkingMode,
+			deps.modelCatalog.getThinkingModes(previous.agentId),
+		);
+		deps.agentState.setAgentSettings(previous.agentSettings);
 		deps.sessions.patchChat(chatId, {
 			agentId: previous.agentId,
 			model: previous.model,
@@ -200,8 +206,7 @@ export class ConversationAgentSwitchService {
 			modelProtocol: previous.modelProtocol ?? null,
 			permissionMode: previous.permissionMode,
 			thinkingMode: previous.thinkingMode,
-			claudeThinkingMode: previous.claudeThinkingMode,
-			ampAgentMode: previous.ampAgentMode,
+			agentSettings: previous.agentSettings,
 		});
 		deps.chatState.appendLocalNotice(
 			'error',

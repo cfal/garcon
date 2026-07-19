@@ -2,27 +2,15 @@
 // Manages cycling through permission modes and models.
 
 import type { SessionAgentId } from '$lib/types/app';
-import type {
-	AmpAgentMode,
-	ClaudeThinkingMode,
-	PermissionMode,
-	ThinkingMode,
-} from '$lib/types/chat';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
-import {
-	AMP_AGENT_MODES,
-	THINKING_MODES,
-	CYCLABLE_PERMISSION_MODES,
-	MODE_LABELS,
-} from '$lib/chat/composer/chat-ui-constants.js';
-import type {
-	AmpAgentModeOption,
-	ThinkingModeOption,
-} from '$lib/chat/composer/chat-ui-constants.js';
-import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
+import { THINKING_MODES, MODE_LABELS } from '$lib/chat/composer/chat-ui-constants.js';
+import type { ThinkingModeOption } from '$lib/chat/composer/chat-ui-constants.js';
+import { createEmptyAgentSettings } from '$lib/agents/agent-settings.js';
 
-export { AMP_AGENT_MODES, THINKING_MODES, MODE_LABELS };
-export type { AmpAgentModeOption, ThinkingModeOption };
+export { THINKING_MODES, MODE_LABELS };
+export type { ThinkingModeOption };
 
 export const MODE_STYLES: Record<string, { button: string; dot: string }> = {
 	default: {
@@ -69,33 +57,11 @@ export class AgentState {
 	modelProtocol = $state<ApiProtocol | null>(null);
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
-	claudeThinkingMode = $state<ClaudeThinkingMode>('auto');
-	ampAgentMode = $state<AmpAgentMode>('smart');
-
-	/** Cycles to the next user-cyclable permission mode. */
-	cyclePermissionMode(): void {
-		const currentIndex = CYCLABLE_PERMISSION_MODES.indexOf(this.permissionMode);
-		const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % CYCLABLE_PERMISSION_MODES.length;
-		this.permissionMode = CYCLABLE_PERMISSION_MODES[nextIndex];
-	}
-
-	/** Cycles to the next thinking mode. */
-	cycleThinkingMode(): void {
-		const ids = THINKING_MODES.filter(
-			(mode) => mode.id !== 'ultra' || this.agentId === 'codex',
-		).map((mode) => mode.id);
-		const idx = ids.indexOf(this.thinkingMode);
-		this.thinkingMode = ids[(idx + 1) % ids.length];
-	}
+	agentSettings = $state<AgentSettingsEnvelope>(createEmptyAgentSettings('claude'));
 
 	/** Returns the current thinking mode option. */
 	get currentThinkingMode(): ThinkingModeOption {
 		return THINKING_MODES.find((m) => m.id === this.thinkingMode) || THINKING_MODES[0];
-	}
-
-	/** Returns the current Amp agent mode option. */
-	get currentAmpAgentMode(): AmpAgentModeOption {
-		return AMP_AGENT_MODES.find((m) => m.id === this.ampAgentMode) || AMP_AGENT_MODES[0];
 	}
 
 	/** Returns the style config for the current permission mode. */
@@ -117,12 +83,16 @@ export class AgentState {
 	/** Sets the selected agent. */
 	setAgentId(agentId: SessionAgentId): void {
 		this.agentId = agentId;
-		this.thinkingMode = normalizeThinkingModeForAgent(agentId, this.thinkingMode);
+	}
+
+	setAgentSettings(settings: AgentSettingsEnvelope): void {
+		if (settings.ownerId !== this.agentId) return;
+		this.agentSettings = settings;
 	}
 
 	/** Sets a thinking mode supported by the selected agent. */
 	setThinkingMode(mode: ThinkingMode): void {
-		this.thinkingMode = normalizeThinkingModeForAgent(this.agentId, mode);
+		this.thinkingMode = mode;
 	}
 
 	/** Sets the model and persists the choice. */

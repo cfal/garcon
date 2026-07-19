@@ -11,10 +11,6 @@ mock.module('../../lib/http-request.js', () => ({
   MalformedJsonError,
 }));
 
-mock.module('../../agents/claude/history-loader.js', () => ({
-  getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
   generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: '123', title: 'Generated Title' })),
@@ -27,6 +23,18 @@ import { createRouteChatListProjector, createRouteCommandLedger, createRouteComm
 const CHAT_ID = '1783725900000600';
 const CHAT_ID_2 = '1783725900000601';
 const CHAT_ID_3 = '1783725900000602';
+const chat = () => ({
+  agentId: 'claude',
+  agentSessionId: null,
+  nativeSession: null,
+  agentOwnershipEpoch: 'epoch-1',
+  agentSettingsById: { claude: { ownerId: 'claude', schemaVersion: 1, values: {} } },
+  projectPath: '/proj',
+  tags: [],
+  model: 'opus',
+  permissionMode: 'default',
+  thinkingMode: 'none',
+});
 
 const registry = {
   getChat: mock(() => undefined),
@@ -207,7 +215,7 @@ describe('GET /api/chats archive fields', () => {
 
   it('includes isArchived field on sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: chat(),
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -224,9 +232,9 @@ describe('GET /api/chats archive fields', () => {
 
   it('returns sessions in pinned, normal, archived order', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
-      [CHAT_ID_2]: { agentId: 'claude', projectPath: '/proj', tags: [] },
-      [CHAT_ID_3]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: chat(),
+      [CHAT_ID_2]: chat(),
+      [CHAT_ID_3]: chat(),
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);

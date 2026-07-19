@@ -16,8 +16,8 @@ export const LOCAL_STORAGE_KEYS = {
 	gitTreePaneWidthPx: 'git.treePaneWidthPx',
 	justRegistered: 'just-registered',
 	localSettings: 'pref_local_settings',
-	modelCatalog: 'pref_model_catalog_v3',
-	modelCatalogLegacy: 'pref_model_catalog_v2',
+	modelCatalog: 'pref_model_catalog_v4',
+	modelCatalogLegacy: 'pref_model_catalog_v3',
 	sidebarProjectCollapse: 'pref_sidebar_project_collapse',
 	workspaceLayout: 'workspace_layout_v1',
 } as const;

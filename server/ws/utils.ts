@@ -1,10 +1,12 @@
+import { sendWebSocketPayload } from './transport.js';
+
 const OPEN_WS_STATE = 1;
 
 type WS = import('bun').ServerWebSocket<unknown>;
 
 function sendWebSocketMessage(ws: WS, payload: string): boolean {
   if (ws.readyState !== OPEN_WS_STATE) return false;
-  ws.send(payload);
+  sendWebSocketPayload(ws, payload);
   return true;
 }
 

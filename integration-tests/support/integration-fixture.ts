@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '../../common/agents.js';
 import { FakeOpenAiServer } from './fake-openai-server.js';
 import {
   GarconTestClient,
@@ -92,7 +93,17 @@ export class IntegrationFixture {
       await client.ping();
       const provider = await client.createOpenAiProvider(fakeOpenAi.baseUrl);
       await client.updateSettings({
-        ui: { chatTitle: { enabled: options.chatTitleEnabled ?? false } },
+        ui: {
+          chatTitle: options.chatTitleEnabled ? {
+            enabled: true,
+            agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+            model: provider.model,
+            apiProviderId: provider.providerId,
+            modelEndpointId: provider.endpointId,
+            modelProtocol: provider.protocol,
+            thinkingMode: 'none',
+          } : { enabled: false },
+        },
       });
       return new IntegrationFixture({ dirs, fakeOpenAi, garcon, client, provider });
     } catch (error) {

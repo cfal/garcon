@@ -129,8 +129,7 @@ export class ScheduledPromptFormState {
 		this.startup.projectPath = scheduledPrompt.target.projectPath;
 		this.startup.setPermissionMode(scheduledPrompt.target.permissionMode);
 		this.startup.setThinkingMode(scheduledPrompt.target.thinkingMode);
-		this.startup.setClaudeThinkingMode(scheduledPrompt.target.claudeThinkingMode);
-		this.startup.setAmpAgentMode(scheduledPrompt.target.ampAgentMode);
+		this.startup.replaceAgentSettingsById(scheduledPrompt.target.agentSettingsById);
 		this.startup.chatTags = [...scheduledPrompt.target.tags];
 		this.startup.showTagInput = false;
 		this.startup.validatePath();
@@ -164,8 +163,7 @@ export class ScheduledPromptFormState {
 				modelProtocol: selection.modelProtocol,
 				permissionMode: this.startup.permissionMode,
 				thinkingMode: this.startup.thinkingMode,
-				claudeThinkingMode: this.startup.claudeThinkingMode,
-				ampAgentMode: this.startup.ampAgentMode,
+				agentSettingsById: this.startup.agentSettingsById,
 				tags: [...this.startup.chatTags],
 			},
 			prompt: this.prompt.trim(),

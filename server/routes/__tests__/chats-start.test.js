@@ -168,7 +168,7 @@ describe('POST /api/v1/chats/start', () => {
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
       thinkingMode: 'medium',
-      claudeThinkingMode: 'off',
+      agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
       command: 'hello',
     }));
 
@@ -187,8 +187,9 @@ describe('POST /api/v1/chats/start', () => {
       modelProtocol: null,
       permissionMode: 'acceptEdits',
       thinkingMode: 'medium',
-      claudeThinkingMode: 'off',
-      ampAgentMode: 'smart',
+      agentSettingsById: {
+        codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      },
     });
 	    expect(agents.startSession).toHaveBeenCalledWith(CHAT_ID, 'hello', expect.objectContaining({
 	      projectPath,
@@ -219,7 +220,7 @@ describe('POST /api/v1/chats/start', () => {
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
-      claudeThinkingMode: 'on',
+      agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
       command: 'hello again',
     }));
     agents.startSession.mockImplementationOnce(() => Promise.reject(new Error('boom')));
@@ -238,8 +239,9 @@ describe('POST /api/v1/chats/start', () => {
       modelProtocol: null,
       permissionMode: 'default',
       thinkingMode: 'none',
-      claudeThinkingMode: 'on',
-      ampAgentMode: 'smart',
+      agentSettingsById: {
+        claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
+      },
     });
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1783725900000101');
     expect(queue.failDirectTurn).toHaveBeenCalledTimes(1);
@@ -272,7 +274,7 @@ describe('POST /api/v1/chats/start', () => {
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 
-  it('normalizes invalid mode values from the REST payload before persisting them', async () => {
+  it('normalizes invalid universal modes without altering integration settings', async () => {
     const projectPath = path.join(testBasePath, 'project-d');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -284,7 +286,11 @@ describe('POST /api/v1/chats/start', () => {
       model: 'opus',
       permissionMode: 'bogus',
       thinkingMode: 'very-hard',
-      claudeThinkingMode: 'sometimes',
+      agentSettings: {
+        ownerId: 'claude',
+        schemaVersion: 1,
+        values: { vendorOption: 'sometimes' },
+      },
       command: 'normalize this',
     }));
 
@@ -297,12 +303,24 @@ describe('POST /api/v1/chats/start', () => {
     expect(registry.addChat).toHaveBeenCalledWith(expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
+      agentSettingsById: {
+        claude: {
+          ownerId: 'claude',
+          schemaVersion: 1,
+          values: { vendorOption: 'sometimes' },
+        },
+      },
     }));
     expect(settings.recordChatStartup).toHaveBeenCalledWith(expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
+      agentSettingsById: {
+        claude: {
+          ownerId: 'claude',
+          schemaVersion: 1,
+          values: { vendorOption: 'sometimes' },
+        },
+      },
     }));
   });
 

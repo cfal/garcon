@@ -19,6 +19,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - DO NOT run the same tests again and again to grep for different output. Instead, forward 2>&1 and `tee` the cargo test to a /tmp file, and grep from it after.
 - DO NOT consider backwards compatibility, as the server and client are always distributed together.
 - DO NOT use emojis
+- Keep Garcon core lean and agent agnostic. All agent-specific runtime, dependency, storage, search, and translation code must stay behind `@garcon/server-agent-interface` in `server-agents/<id>/`; `server/agents/default-agent-integrations.ts` is the only core provider import point.
 - If interacting with the Claude, Codex, or Opencode SDK, clone it and look through if as needed:
   - https://github.com/anthropics/claude-agent-sdk-python
     - this is the Python SDK - the Typescript one is closed source, but you can find references in our node_modules
@@ -57,7 +58,7 @@ Required for every WS/API contract change:
 - Do not ship known tool behavior through `UnknownToolUseMessage`.
 - Do not add or preserve client parsing or rendering paths that depend on `unknown-tool-use` for known tool families.
 - Do not key frontend display behavior off `UnknownToolUseMessage.rawName`.
-- Keep agent-specific translation logic inside the owning `server/agents/<agent>/` folder.
+- Keep agent-specific translation logic inside the owning `server-agents/<id>/` package.
 - Keep `common/chat-types.ts` as the single shared contract for all rendered tool-use messages, including provider-specific explicit variants.
 - Keep tool display action labels in `web/src/lib/chat/tools/tool-display-registry.ts` as canonical English provider vocabulary unless a dedicated localization project changes the registry and its tests.
 

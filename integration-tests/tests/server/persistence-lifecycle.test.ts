@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '../../../common/agents.js';
 import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
@@ -235,6 +236,8 @@ describe('persistence lifecycle', () => {
       expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
       const sessionDir = join(
         fixture.dirs.workspace,
+        'agent-data',
+        DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
         'openai-compatible-sessions',
         fixture.provider.endpointId,
       );

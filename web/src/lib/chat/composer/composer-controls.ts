@@ -105,7 +105,7 @@ const THINKING_ICON_METADATA: Record<
 };
 
 export function buildPermissionOptions(
-	modes: PermissionMode[],
+	modes: readonly PermissionMode[],
 ): ComposerModeOption<PermissionMode>[] {
 	return modes.map((mode) => ({
 		value: mode,
@@ -114,19 +114,18 @@ export function buildPermissionOptions(
 }
 
 export function buildThinkingOptions(
-	agentId?: string,
+	modes: readonly ThinkingMode[],
 	model?: string,
 ): ComposerModeOption<ThinkingMode>[] {
-	return THINKING_MODES.filter((mode) => mode.id !== 'ultra' || agentId === 'codex').map((mode) => {
-		const iconMeta = THINKING_ICON_METADATA[mode.id] ?? THINKING_ICON_METADATA.none;
+	return modes.map((modeId) => {
+		const mode = THINKING_MODES.find((candidate) => candidate.id === modeId);
+		const iconMeta = THINKING_ICON_METADATA[modeId] ?? THINKING_ICON_METADATA.none;
 		const rainbow =
-			mode.id === 'ultra' &&
-			agentId === 'codex' &&
-			(model === 'gpt-5.6-sol' || model?.endsWith(':gpt-5.6-sol'));
+			modeId === 'ultra' && (model === 'gpt-5.6-sol' || model?.endsWith(':gpt-5.6-sol'));
 		return {
-			value: mode.id,
-			label: mode.name,
-			description: mode.description || 'Default thinking behavior.',
+			value: modeId,
+			label: mode?.name ?? modeId,
+			description: mode?.description || 'Default thinking behavior.',
 			iconId: iconMeta.iconId,
 			toneClass: rainbow ? 'rainbow-ultra-surface' : iconMeta.toneClass,
 			...(rainbow ? { rainbow: true } : {}),

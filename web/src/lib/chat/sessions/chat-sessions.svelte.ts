@@ -3,11 +3,11 @@
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
 
 import {
-	normalizeAmpAgentMode,
-	normalizeClaudeThinkingMode,
 	normalizePermissionMode,
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
+import { createEmptyAgentSettings, normalizeAgentSettings } from '$lib/agents/agent-settings.js';
 import {
 	deleteChat as deleteChatApi,
 	generateChatTitle,
@@ -29,24 +29,24 @@ export interface ChatSessionsStoreDeps {
 	notifyError?: (message: string) => void;
 }
 
-function normalizeModeFields<
+function normalizeExecutionFields<
 	T extends {
+		agentId: string;
 		permissionMode?: unknown;
 		thinkingMode?: unknown;
-		claudeThinkingMode?: unknown;
-		ampAgentMode?: unknown;
+		agentSettings?: AgentSettingsEnvelope;
 	},
 >(
 	value: T,
-): Pick<
-	ChatSessionRecord,
-	'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'
-> {
+): Pick<ChatSessionRecord, 'permissionMode' | 'thinkingMode' | 'agentSettings'> {
 	return {
 		permissionMode: normalizePermissionMode(value.permissionMode),
 		thinkingMode: normalizeThinkingMode(value.thinkingMode),
-		claudeThinkingMode: normalizeClaudeThinkingMode(value.claudeThinkingMode),
-		ampAgentMode: normalizeAmpAgentMode(value.ampAgentMode),
+		agentSettings: normalizeAgentSettings(
+			value.agentId,
+			value.agentSettings,
+			createEmptyAgentSettings(value.agentId),
+		),
 	};
 }
 
@@ -63,7 +63,7 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		apiProviderId: session.apiProviderId ?? null,
 		modelEndpointId: session.modelEndpointId ?? null,
 		modelProtocol: session.modelProtocol ?? null,
-		...normalizeModeFields(session),
+		...normalizeExecutionFields(session),
 		createdAt: session.activity?.createdAt ?? null,
 		lastActivityAt: session.activity?.lastActivityAt ?? null,
 		lastReadAt: session.activity?.lastReadAt ?? null,
@@ -101,8 +101,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.modelProtocol === b.modelProtocol &&
 		a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
-		a.claudeThinkingMode === b.claudeThinkingMode &&
-		a.ampAgentMode === b.ampAgentMode &&
+		JSON.stringify(a.agentSettings) === JSON.stringify(b.agentSettings) &&
 		a.createdAt === b.createdAt &&
 		a.lastActivityAt === b.lastActivityAt &&
 		a.lastReadAt === b.lastReadAt &&
@@ -451,7 +450,7 @@ export class ChatSessionsStore {
 		const { id, projectPath, startup } = params;
 		const normalizedStartup = {
 			...startup,
-			...normalizeModeFields(startup),
+			...normalizeExecutionFields(startup),
 		};
 
 		const draft: ChatSessionRecord = {
@@ -466,7 +465,7 @@ export class ChatSessionsStore {
 			apiProviderId: normalizedStartup.apiProviderId ?? null,
 			modelEndpointId: normalizedStartup.modelEndpointId ?? null,
 			modelProtocol: normalizedStartup.modelProtocol ?? null,
-			...normalizeModeFields(normalizedStartup),
+			...normalizeExecutionFields(normalizedStartup),
 			createdAt: null,
 			lastActivityAt: null,
 			lastReadAt: null,
@@ -494,7 +493,7 @@ export class ChatSessionsStore {
 		const nextStartup = {
 			...startup,
 			...patch,
-			...normalizeModeFields({ ...startup, ...patch }),
+			...normalizeExecutionFields({ ...startup, ...patch }),
 		};
 		this.startupByChatId = {
 			...this.startupByChatId,
@@ -573,7 +572,7 @@ export class ChatSessionsStore {
 		const nextChat = {
 			...chat,
 			...patch,
-			...normalizeModeFields({ ...chat, ...patch }),
+			...normalizeExecutionFields({ ...chat, ...patch }),
 		};
 		this.byId = {
 			...this.byId,

@@ -1,326 +1,72 @@
 import { describe, expect, it } from 'bun:test';
-import { resolveEffectiveGenerationConfig } from '../generation-effective.js';
+import { resolveEffectiveGenerationConfig } from '../generation-effective.ts';
+
+const base = {
+  persisted: undefined,
+  authByAgent: {},
+  readinessByAgent: {},
+  modelsByAgent: {
+    alpha: [{ value: 'alpha-default', label: 'Alpha' }],
+    beta: [{ value: 'beta-default', label: 'Beta' }],
+  },
+  generationByAgent: {
+    alpha: { priority: 20, model: 'alpha-default' },
+    beta: { priority: 10, model: 'beta-default' },
+  },
+};
 
 describe('resolveEffectiveGenerationConfig', () => {
-  it('disables generation when no agent is authenticated and no settings were persisted', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: {},
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: false },
-        opencode: { authenticated: false },
-        factory: { authenticated: false },
-      },
-      modelsByAgent: { opencode: [], factory: [] },
-    });
+  it('uses catalog generation priority without provider IDs in core', () => {
+    expect(resolveEffectiveGenerationConfig({
+      ...base,
+      readinessByAgent: { alpha: { ready: true }, beta: { ready: true } },
+    })).toMatchObject({ enabled: true, agentId: 'beta', model: 'beta-default', source: 'auto' });
+  });
 
-    expect(result).toEqual({
+  it('does not auto-enable when no generation integration is ready', () => {
+    expect(resolveEffectiveGenerationConfig(base)).toMatchObject({
       enabled: false,
-      agentId: 'claude',
-      model: 'haiku',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'auto',
+      agentId: 'alpha',
+      model: 'alpha-default',
     });
   });
 
-  it('auto-selects codex defaults when codex is the highest authenticated agent', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: {},
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: true },
-        opencode: { authenticated: true },
-        factory: { authenticated: false },
-      },
-      modelsByAgent: { opencode: [], factory: [] },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'codex',
-      model: 'gpt-5.5',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'auto',
-    });
-  });
-
-  it('auto-selects Direct Anthropic endpoint models before Codex when ready', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: {},
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: true },
-      },
-      readinessByAgent: {
-        'direct-anthropic-compatible': { ready: true },
-      },
-      modelsByAgent: {
-        'direct-anthropic-compatible': [
-          { value: 'acme_anthropic:acme-sonnet', label: 'Acme: Acme Sonnet' },
-        ],
-      },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'direct-anthropic-compatible',
-      model: 'acme_anthropic:acme-sonnet',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'auto',
-    });
-  });
-
-  it('prefers OpenCode non-R1 defaults when OpenCode is selected', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: {},
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: false },
-        opencode: { authenticated: true },
-        factory: { authenticated: false },
-      },
-      modelsByAgent: {
-        opencode: [
-          { value: 'deepseek-r1', label: 'DeepSeek R1' },
-          { value: 'deepseek-v3', label: 'DeepSeek V3' },
-          { value: 'openai/gpt-4.1', label: 'GPT-4.1' },
-        ],
-      },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'opencode',
-      model: 'deepseek-v3',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'auto',
-    });
-  });
-
-  it('does not auto-select OpenCode when no OpenCode models were discovered', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: {},
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: false },
-        opencode: { authenticated: true },
-        factory: { authenticated: false },
-      },
-      modelsByAgent: { opencode: [] },
-    });
-
-    expect(result).toEqual({
-      enabled: false,
-      agentId: 'claude',
-      model: 'haiku',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'auto',
-    });
-  });
-
-  it('respects explicitly persisted settings even without authenticated agents', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, agentId: 'opencode', model: 'openai/gpt-4.1' },
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: false },
-        opencode: { authenticated: false },
-        factory: { authenticated: false },
-      },
-      modelsByAgent: { opencode: [], factory: [] },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'opencode',
-      model: 'openai/gpt-4.1',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'manual',
-    });
-  });
-
-  it('preserves a persisted amp agent and fills its default model', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, agentId: 'amp' },
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: false },
-        opencode: { authenticated: false },
-        amp: { authenticated: false },
-      },
-      modelsByAgent: { opencode: [], amp: [] },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'amp',
-      model: 'smart',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'manual',
-    });
-  });
-
-  it('preserves a persisted factory agent and fills its default model', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, agentId: 'factory' },
-      authByAgent: {
-        claude: { authenticated: false },
-        codex: { authenticated: false },
-        opencode: { authenticated: false },
-        amp: { authenticated: false },
-        factory: { authenticated: false },
-      },
-      modelsByAgent: { opencode: [], amp: [], factory: [] },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'factory',
-      model: 'claude-opus-4-6',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'manual',
-    });
-  });
-
-  it('discards a persisted model that belongs to a different provider when the agent falls back', () => {
-    const result = resolveEffectiveGenerationConfig({
+  it('preserves a valid explicit selection and endpoint routing', () => {
+    expect(resolveEffectiveGenerationConfig({
+      ...base,
       persisted: {
         enabled: true,
-        // agentId is absent (e.g. dropped as invalid on normalize) but a Codex model persists.
-        model: 'gpt-5.3-codex-spark',
+        agentId: 'alpha',
+        model: 'alpha-default',
+        apiProviderId: 'provider',
+        modelEndpointId: 'endpoint',
         modelProtocol: 'openai-compatible',
+        thinkingMode: 'max',
       },
-      authByAgent: { claude: { authenticated: true } },
-      modelsByAgent: {
-        claude: [{ value: 'haiku', label: 'Claude Haiku' }],
-        codex: [{ value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark' }],
-      },
-    });
-
-    expect(result).toEqual({
+    })).toEqual({
       enabled: true,
-      agentId: 'claude',
-      model: 'haiku',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'manual',
-    });
-  });
-
-  it('discards a persisted model that does not belong to the explicitly persisted agent', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, agentId: 'claude', model: 'gpt-5.3-codex-spark' },
-      authByAgent: { claude: { authenticated: true } },
-      modelsByAgent: {
-        claude: [{ value: 'haiku', label: 'Claude Haiku' }],
-      },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'claude',
-      model: 'haiku',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'manual',
-    });
-  });
-
-  it('keeps a persisted model that matches the resolved agent by rawModel', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: {
-        enabled: true,
-        agentId: 'direct-openai-compatible',
-        model: 'zai_openai:glm-5.1',
-        apiProviderId: 'zai_openai',
-        modelEndpointId: 'zai_openai',
-        modelProtocol: 'openai-compatible',
-      },
-      authByAgent: {},
-      modelsByAgent: {
-        'direct-openai-compatible': [
-          { value: 'zai_openai:glm-5.1', label: 'Z.AI: GLM-5.1', rawModel: 'glm-5.1' },
-        ],
-      },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'direct-openai-compatible',
-      model: 'zai_openai:glm-5.1',
-      apiProviderId: 'zai_openai',
-      modelEndpointId: 'zai_openai',
+      agentId: 'alpha',
+      model: 'alpha-default',
+      apiProviderId: 'provider',
+      modelEndpointId: 'endpoint',
       modelProtocol: 'openai-compatible',
-      thinkingMode: 'none',
+      thinkingMode: 'max',
       source: 'manual',
     });
   });
 
-  it('uses dynamic agent model defaults from catalog-shaped model maps', () => {
-    const result = resolveEffectiveGenerationConfig({
-      persisted: { enabled: true, agentId: 'direct-openai-compatible' },
-      authByAgent: {},
-      modelsByAgent: {
-        'direct-openai-compatible': [
-          { value: 'zai_openai:glm-5.1', label: 'Z.AI: GLM-5.1' },
-        ],
-      },
-    });
-
-    expect(result).toEqual({
-      enabled: true,
-      agentId: 'direct-openai-compatible',
-      model: 'zai_openai:glm-5.1',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      thinkingMode: 'none',
-      source: 'manual',
-    });
+  it('replaces a model that is not in the selected integration catalog', () => {
+    expect(resolveEffectiveGenerationConfig({
+      ...base,
+      persisted: { agentId: 'beta', model: 'alpha-default' },
+    })).toMatchObject({ agentId: 'beta', model: 'beta-default' });
   });
 
-  it('preserves every explicit effort without agent-specific clamping', () => {
-    for (const thinkingMode of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
-      const result = resolveEffectiveGenerationConfig({
-        persisted: {
-          enabled: true,
-          agentId: 'direct-openai-compatible',
-          model: 'any-model',
-          thinkingMode,
-        },
-        authByAgent: {},
-        modelsByAgent: { 'direct-openai-compatible': [] },
-      });
-
-      expect(result.thinkingMode).toBe(thinkingMode);
-    }
+  it('accepts a catalog raw model alias', () => {
+    expect(resolveEffectiveGenerationConfig({
+      ...base,
+      modelsByAgent: { alpha: [{ value: 'endpoint::model', rawModel: 'model', label: 'Model' }] },
+      persisted: { agentId: 'alpha', model: 'model' },
+    })).toMatchObject({ agentId: 'alpha', model: 'model' });
   });
 });

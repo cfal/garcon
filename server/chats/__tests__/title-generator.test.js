@@ -105,13 +105,17 @@ describe('maybeGenerateChatTitle', () => {
     expect(runSingleQueryMock).not.toHaveBeenCalled();
   });
 
-  it('auto-enables and defaults to codex when codex is authenticated', async () => {
+  it('auto-enables the highest-priority ready catalog generation target', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
     getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
       codex: { authenticated: true },
       opencode: { authenticated: true },
     }));
+    getAgentCatalogEntriesMock.mockImplementation(() => Promise.resolve([
+      { id: 'codex', models: [], generation: { priority: 10, model: 'gpt-5.5' } },
+      { id: 'opencode', models: [], generation: { priority: 20, model: 'openai/gpt-5' } },
+    ]));
 
     await maybeGenerateChatTitle({
       chatId: '301',
@@ -128,7 +132,7 @@ describe('maybeGenerateChatTitle', () => {
     expect(opts.thinkingMode).toBe('none');
   });
 
-  it('auto-enables and skips DeepSeek R1 when selecting OpenCode defaults', async () => {
+  it('uses the integration-owned generation model from the catalog', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({}));
     getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
@@ -143,6 +147,7 @@ describe('maybeGenerateChatTitle', () => {
           { value: 'deepseek-r1', label: 'DeepSeek R1' },
           { value: 'deepseek-v3', label: 'DeepSeek V3' },
         ],
+        generation: { priority: 20, model: 'deepseek-v3' },
       },
     ]));
 
@@ -365,6 +370,9 @@ describe('maybeGenerateChatTitle', () => {
       codex: { authenticated: true },
       opencode: { authenticated: false },
     }));
+    getAgentCatalogEntriesMock.mockImplementation(() => Promise.resolve([
+      { id: 'codex', models: [], generation: { priority: 10, model: 'gpt-5.5' } },
+    ]));
 
     await generateChatTitleFromMessage({
       chatId: '1002',

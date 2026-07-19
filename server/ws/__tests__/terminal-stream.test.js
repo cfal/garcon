@@ -25,11 +25,13 @@ function socket(expiresAtMs = null) {
     readyState: 1,
     sent: [],
     sentByteLengths: [],
+    sentCompression: [],
     sendResults: [],
     closes: [],
-    send(payload) {
+    send(payload, compress) {
       this.sent.push(JSON.parse(payload));
       this.sentByteLengths.push(Buffer.byteLength(payload, "utf8"));
+      this.sentCompression.push(compress);
       return this.sendResults.shift() ?? Buffer.byteLength(payload, "utf8");
     },
     close(code, reason) {
@@ -117,6 +119,7 @@ describe("TerminalStreamHandler", () => {
       code: "terminal-validation",
       message: "Invalid terminal stream message.",
     });
+    expect(ws.sentCompression).toEqual([true]);
     expect(terminals.calls.map((call) => call[0])).toEqual([
       "attach",
       "input",

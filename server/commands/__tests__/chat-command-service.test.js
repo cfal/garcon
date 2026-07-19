@@ -7,7 +7,6 @@ import { randomUUID } from 'crypto';
 import { ChatCommandService } from '../chat-command-service.ts';
 import { CommandLedger } from '../command-ledger.ts';
 import { UserMessage } from '../../../common/chat-types.js';
-import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
 import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
 import {
   ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
@@ -87,6 +86,10 @@ function manualPause(id = 'pause-1') {
   return { id, kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' };
 }
 
+function agentSettings(ownerId = 'claude', values = {}) {
+  return { ownerId, schemaVersion: 1, values };
+}
+
 function projectedChat(chatId, projectPath = '/repo') {
   return {
     id: chatId,
@@ -94,8 +97,7 @@ function projectedChat(chatId, projectPath = '/repo') {
     model: 'opus',
     permissionMode: 'default',
     thinkingMode: 'none',
-    claudeThinkingMode: 'auto',
-    ampAgentMode: 'smart',
+    agentSettings: agentSettings(),
     title: 'Chat',
     projectPath,
     effectiveProjectKey: projectPath,
@@ -115,7 +117,13 @@ function makeService(overrides = {}) {
     id: SOURCE_CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'agent-1',
-    nativePath: '/tmp/agent-1.jsonl',
+    nativeSession: {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      value: { path: '/tmp/agent-1.jsonl', agentSessionId: 'agent-1' },
+    },
+    agentOwnershipEpoch: 'epoch-1',
+    agentSettingsById: { claude: agentSettings() },
     projectPath: '/repo',
     model: 'opus',
     tags: [],
@@ -141,7 +149,7 @@ function makeService(overrides = {}) {
       const next = {
         ...current,
         projectPath: update.projectPath,
-        ...('nativePath' in update ? { nativePath: update.nativePath } : {}),
+        ...('nativeSession' in update ? { nativeSession: update.nativeSession } : {}),
       };
       sessions.set(chatId, next);
       return Promise.resolve(next);
@@ -219,8 +227,7 @@ function makeService(overrides = {}) {
     isAgentSessionRunning: mock(() => false),
     forkAgentSession: mock(() => Promise.resolve(null)),
     compactSession: mock(() => Promise.resolve(undefined)),
-    resolveNativePath: mock((chat) => Promise.resolve(chat.nativePath ?? null)),
-    rewriteForkTranscriptEntry: mock((_agentId, entry) => entry),
+    resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
@@ -242,10 +249,19 @@ function makeService(overrides = {}) {
     chatId: TARGET_CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'agent-2',
-    nativePath: '/tmp/agent-2.jsonl',
     sourceNextForkOrdinal: 1,
     rollback: mock(() => Promise.resolve(undefined)),
   }));
+  const carryOver = {
+    stageFork: mock(() => Promise.resolve()),
+    promoteStaged: mock(() => Promise.resolve()),
+    discardStaged: mock(() => Promise.resolve()),
+  };
+  const ownership = {
+    delete: mock(async (chatId) => {
+      sessions.delete(chatId);
+    }),
+  };
   const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
   const chatListProjector = {
     buildOne: mock((chatId) => {
@@ -272,8 +288,9 @@ function makeService(overrides = {}) {
     chatIds: overrides.chatIds ?? new ChatIdAllocator(chats),
     chatListProjector,
     pathCache,
-    nativeMessages: overrides.nativeMessages,
     forkChatFileCopy,
+    carryOver,
+    ownership,
     chatMutationLock: overrides.chatMutationLock,
   });
   activeServices.push(service);
@@ -289,6 +306,7 @@ function makeService(overrides = {}) {
     sessions,
     chatListProjector,
     pathCache,
+    ownership,
   };
 }
 
@@ -410,6 +428,7 @@ describe('ChatCommandService', () => {
       projectPath: projectBaseDir,
       command: 'start with normalized tags',
       model: 'opus',
+      agentSettings: agentSettings(),
       tags: ['Review Needed', 'review-needed', '  QA  ', 42, '!!!'],
       clientRequestId: 'req-start-tags',
       clientMessageId: 'msg-start-tags',
@@ -439,8 +458,7 @@ describe('ChatCommandService', () => {
       modelProtocol: null,
       permissionMode: 'default',
       thinkingMode: 'ultra',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
+      agentSettings: agentSettings(),
       tags: ['Review Needed', 'review-needed', 'QA'],
     };
 
@@ -463,7 +481,7 @@ describe('ChatCommandService', () => {
     expect(interactiveId).toBe(TARGET_CHAT_ID);
     expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
     expect(scheduledEntry).toEqual(interactive);
-    expect(interactive.thinkingMode).toBe('none');
+    expect(interactive.thinkingMode).toBe('ultra');
     expect(interactive.tags).toEqual(['qa', 'review-needed']);
     expect(agents.startSession).toHaveBeenNthCalledWith(
       1,
@@ -498,7 +516,8 @@ describe('ChatCommandService', () => {
       agentId: 'claude',
       projectPath: projectBaseDir,
       command: 'start safely',
-      model: 'opus',
+          model: 'opus',
+          agentSettings: agentSettings(),
       clientRequestId: 'req-start-reserved',
       clientMessageId: 'msg-start-reserved',
     });
@@ -545,6 +564,7 @@ describe('ChatCommandService', () => {
       projectPath: projectBaseDir,
       command: 'start then fail',
       model: 'opus',
+      agentSettings: agentSettings(),
       clientRequestId: 'req-start-failed',
       clientMessageId: 'msg-start-failed',
     })).rejects.toThrow('provider startup failed');
@@ -580,6 +600,7 @@ describe('ChatCommandService', () => {
       projectPath: projectBaseDir,
       command: 'start before stop',
       model: 'opus',
+      agentSettings: agentSettings(),
       clientRequestId: 'req-start-before-stop',
       clientMessageId: 'msg-start-before-stop',
     });
@@ -646,6 +667,7 @@ describe('ChatCommandService', () => {
       projectPath: projectBaseDir,
       command: 'hello',
       model: 'opus',
+      agentSettings: agentSettings(),
       clientRequestId: '',
       clientMessageId: 'msg-start',
     };
@@ -678,7 +700,8 @@ describe('ChatCommandService', () => {
           agentId: 'claude',
           projectPath: outsidePath,
           command: 'hello',
-          model: 'opus',
+      model: 'opus',
+      agentSettings: agentSettings(),
           clientRequestId: 'req-start-outside',
           clientMessageId: 'msg-start-outside',
         }),
@@ -1011,7 +1034,6 @@ describe('ChatCommandService', () => {
         chatId: TARGET_CHAT_ID,
         agentId: 'claude',
         agentSessionId: 'agent-2',
-        nativePath: '/tmp/agent-2.jsonl',
         sourceNextForkOrdinal: 1,
         rollback,
       };
@@ -1039,6 +1061,39 @@ describe('ChatCommandService', () => {
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('cleans a durable fork target when preparation fails before returning its result', async () => {
+    const forkChatFileCopy = mock(async ({ registry }) => {
+      registry.addChat({
+        id: TARGET_CHAT_ID,
+        agentId: 'claude',
+        agentSessionId: 'agent-2',
+        nativeSession: null,
+        agentOwnershipEpoch: 'target-epoch',
+        agentSettingsById: { claude: agentSettings() },
+        projectPath: '/repo',
+        model: 'opus',
+        tags: [],
+      });
+      registry.updateChat(SOURCE_CHAT_ID, { nextForkOrdinal: 2 });
+      throw new Error('fork setup failed');
+    });
+    const { service, ownership, sessions, settings } = makeService({ forkChatFileCopy });
+
+    await expect(service.submitForkRun({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-fork-setup-failure',
+      clientMessageId: 'msg-fork-setup-failure',
+    })).rejects.toThrow('fork setup failed');
+
+    expect(ownership.delete).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(sessions.has(TARGET_CHAT_ID)).toBeFalse();
+    expect(sessions.get(SOURCE_CHAT_ID).nextForkOrdinal).toBe(1);
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(settings.removeSessionName).toHaveBeenCalledWith(TARGET_CHAT_ID);
+  });
+
   it('retains durable fork recovery when immediate compensation fails', async () => {
     const rollback = mock(async () => {
       throw new Error('rollback failed');
@@ -1048,7 +1103,6 @@ describe('ChatCommandService', () => {
       chatId: TARGET_CHAT_ID,
       agentId: 'claude',
       agentSessionId: 'agent-2',
-      nativePath: '/tmp/agent-2.jsonl',
       sourceNextForkOrdinal: 1,
       rollback,
     }));
@@ -1071,7 +1125,6 @@ describe('ChatCommandService', () => {
         forkPreparation: {
           phase: 'created',
           sourceChatId: SOURCE_CHAT_ID,
-          nativePath: '/tmp/agent-2.jsonl',
           sourceNextForkOrdinal: 1,
         },
       }),
@@ -1112,7 +1165,8 @@ describe('ChatCommandService', () => {
         chatId: TARGET_CHAT_ID,
         agentId: 'claude',
         agentSessionId: 'agent-2',
-        nativePath: '/tmp/agent-2.jsonl',
+        sourceNextForkOrdinal: 1,
+        rollback: mock(() => Promise.resolve(undefined)),
       };
     });
     const { service, queue } = makeService({ forkChatFileCopy });
@@ -1133,31 +1187,15 @@ describe('ChatCommandService', () => {
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a fork when the source changes during the file snapshot', async () => {
-    const forkChatFileCopy = mock(async (input) => {
-      input.assertSourceSnapshotStable(true);
-      throw new Error('unreachable');
-    });
-    const { service } = makeService({ forkChatFileCopy });
-
-    await expect(service.forkChat({
-      sourceChatId: SOURCE_CHAT_ID,
-      chatId: TARGET_CHAT_ID,
-    })).rejects.toMatchObject({
-      code: 'SESSION_BUSY',
-      status: 409,
-    });
-  });
-
   it('deletes chats through the mutation service cleanup path', async () => {
-    const { service, chats, queue, settings, pendingInputs, sessions } = makeService();
+    const { service, ownership, queue, settings, pendingInputs, sessions } = makeService();
 
     const result = await service.deleteChat({ chatId: SOURCE_CHAT_ID });
 
     expect(result).toEqual({ success: true, chatId: SOURCE_CHAT_ID });
     expect(queue.abortForChatDeletion).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(pendingInputs.clearChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'chat-removed');
-    expect(chats.removeChat).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(ownership.delete).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(queue.deleteChatQueueFile).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(settings.removeSessionName).toHaveBeenCalledWith(SOURCE_CHAT_ID);
@@ -1263,19 +1301,8 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves message-point forks to the native source line', async () => {
-    const first = attachNativeMessageSource(new UserMessage('2026-03-27T08:00:00.000Z', 'first'), {
-      entryId: 'entry-1',
-      lineNumber: 2,
-    });
-    const second = attachNativeMessageSource(new UserMessage('2026-03-27T08:01:00.000Z', 'second'), {
-      entryId: 'entry-2',
-      lineNumber: 5,
-    });
-    const nativeMessages = {
-      loadNativeMessages: mock(() => Promise.resolve([first, second])),
-    };
-    const { service, forkChatFileCopy } = makeService({ nativeMessages });
+  it('passes the canonical message cutoff to the owning integration', async () => {
+    const { service, forkChatFileCopy } = makeService();
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -1283,45 +1310,17 @@ describe('ChatCommandService', () => {
       upToSeq: 2,
     });
 
-    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceChatId: SOURCE_CHAT_ID,
         targetChatId: TARGET_CHAT_ID,
-        truncateAfterEntryId: 'entry-2',
-        truncateAfterLine: 5,
+        upToSequence: 2,
       }),
     );
   });
 
-  it('routes file-copy transcript rewrites through the source agent', async () => {
-    const rewritten = { sessionId: 'agent-2' };
-    const { service, agents, forkChatFileCopy } = makeService();
-    agents.rewriteForkTranscriptEntry.mockReturnValue(rewritten);
-
-    await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
-
-    const input = forkChatFileCopy.mock.calls[0][0];
-    const entry = { sessionId: 'agent-1' };
-    const context = {
-      sourceAgentSessionId: 'agent-1',
-      targetAgentSessionId: 'agent-2',
-    };
-    expect(input.rewriteForkTranscriptEntry(entry, context)).toBe(rewritten);
-    expect(agents.rewriteForkTranscriptEntry).toHaveBeenCalledWith('claude', entry, context);
-  });
-
   it('allows message-point forks while the source is processing when the agent supports running forks', async () => {
-    const first = attachNativeMessageSource(new UserMessage('2026-03-27T08:00:00.000Z', 'first'), {
-      entryId: 'entry-1',
-      lineNumber: 2,
-    });
-    const nativeMessages = {
-      loadNativeMessages: mock(() => Promise.resolve([first])),
-    };
-    const { service, agents, forkChatFileCopy } = makeService({
-      nativeMessages,
-    });
+    const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
@@ -1331,13 +1330,11 @@ describe('ChatCommandService', () => {
       upToSeq: 1,
     });
 
-    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceChatId: SOURCE_CHAT_ID,
         targetChatId: TARGET_CHAT_ID,
-        truncateAfterEntryId: 'entry-1',
-        truncateAfterLine: 2,
+        upToSequence: 1,
       }),
     );
   });
@@ -2037,7 +2034,6 @@ describe('ChatCommandService', () => {
       effectiveProjectKey: realNextPath,
       previousProjectPath: '/repo',
       previousEffectiveProjectKey: '/repo',
-      nativePath: '/tmp/agent-1.jsonl',
     });
     expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith(
       'claude',
@@ -2046,7 +2042,7 @@ describe('ChatCommandService', () => {
         agentSessionId: 'agent-1',
         previousProjectPath: '/repo',
         nextProjectPath: realNextPath,
-        nativePath: '/tmp/agent-1.jsonl',
+        nativeSession: expect.objectContaining({ ownerId: 'claude' }),
       }),
     );
     expect(chats.updateProjectPath).toHaveBeenCalledWith(
@@ -2449,70 +2445,4 @@ describe('ChatCommandService', () => {
     expect(agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves an artificial native path before changing directories', async () => {
-    const resolvedNativePath = '/tmp/resolved-agent-1.jsonl';
-    const { service, chats, agents } = makeService({
-      session: { nativePath: '!claude:agent-1' },
-      agents: {
-        resolveNativePath: mock(() => Promise.resolve(resolvedNativePath)),
-      },
-    });
-    const nextPath = path.join(projectBaseDir, 'repo-worktree');
-    await fs.mkdir(nextPath, { recursive: true });
-
-    await service.updateProjectPath({
-      chatId: SOURCE_CHAT_ID,
-      projectPath: nextPath,
-    });
-
-    expect(agents.resolveNativePath).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: SOURCE_CHAT_ID,
-        projectPath: '/repo',
-        nativePath: '!claude:agent-1',
-      }),
-    );
-    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith(
-      'claude',
-      expect.objectContaining({
-        nativePath: resolvedNativePath,
-      }),
-    );
-    expect(chats.updateProjectPath).toHaveBeenCalledWith(
-      SOURCE_CHAT_ID,
-      expect.objectContaining({
-        nativePath: resolvedNativePath,
-        effectiveProjectKey: expect.any(String),
-        previousEffectiveProjectKey: '/repo',
-      }),
-      { flush: true },
-    );
-  });
-
-  it('rejects Pi project path updates when the native transcript path cannot be resolved', async () => {
-    const { service, chats, agents } = makeService({
-      session: {
-        agentId: 'pi',
-        nativePath: '!pi:agent-1',
-      },
-      agents: {
-        resolveNativePath: mock(() => Promise.resolve(null)),
-      },
-    });
-    const nextPath = path.join(projectBaseDir, 'repo-worktree');
-    await fs.mkdir(nextPath, { recursive: true });
-
-    await expect(
-      service.updateProjectPath({
-        chatId: SOURCE_CHAT_ID,
-        projectPath: nextPath,
-      }),
-    ).rejects.toMatchObject({
-      code: 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
-      status: 409,
-    });
-
-    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
-    expect(chats.updateChat).not.toHaveBeenCalled();
-  });
 });

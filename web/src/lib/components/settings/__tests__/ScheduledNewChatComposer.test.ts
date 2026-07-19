@@ -30,6 +30,10 @@ function makeStartup(): NewChatFormState {
 		showTagInput: false,
 		permissionMode: 'default',
 		thinkingMode: 'none',
+		permissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions'],
+		thinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+		agentSettingDescriptors: [],
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		handlePathFocus: vi.fn(),
 		clearError: vi.fn(),
 		resetTabCompletions: vi.fn(),
@@ -50,6 +54,7 @@ function makeStartup(): NewChatFormState {
 		closeWorktreeModal: vi.fn(),
 		setPermissionMode: vi.fn(),
 		setThinkingMode: vi.fn(),
+		setAgentSetting: vi.fn(),
 		selectAgent: vi.fn(),
 		handleModelChange: vi.fn(),
 	} as unknown as NewChatFormState;

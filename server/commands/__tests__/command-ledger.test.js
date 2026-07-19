@@ -174,7 +174,6 @@ describe('CommandLedger', () => {
       forkPreparation: {
         phase: 'created',
         sourceChatId: 'fork-source',
-        nativePath: '/tmp/fork-target.jsonl',
         sourceNextForkOrdinal: 2,
       },
     });
@@ -190,7 +189,6 @@ describe('CommandLedger', () => {
         forkPreparation: {
           phase: 'created',
           sourceChatId: 'fork-source',
-          nativePath: '/tmp/fork-target.jsonl',
           sourceNextForkOrdinal: 2,
         },
       }),

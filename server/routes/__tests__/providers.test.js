@@ -13,7 +13,7 @@ mock.module('../../lib/http-request.js', () => ({
 import createAgentRoutes from '../agents.js';
 import createApiProviderRoutes from '../api-providers.js';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
-import { AgentAuthLoginSessionError } from '../../agents/auth-login.js';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 describe('agent auth login routes', () => {
   const agents = {
@@ -144,7 +144,11 @@ describe('agent auth login routes', () => {
 
   it('returns conflict when completion no longer owns the login session', async () => {
     agents.completeAgentAuthLogin.mockImplementationOnce(() => {
-      throw new AgentAuthLoginSessionError('No matching pending auth login for agent: claude');
+      throw new AgentIntegrationError(
+        'AUTH_LOGIN_SESSION_MISMATCH',
+        'No matching pending auth login for agent: claude',
+        false,
+      );
     });
     parseJsonBody.mockResolvedValueOnce({
       agentId: 'claude',

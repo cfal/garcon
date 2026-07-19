@@ -1,4 +1,6 @@
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
+import type { PermissionMode, ThinkingMode } from './chat-modes.js';
+import type { AgentSettingsEnvelope } from './agent-integration.js';
+import type { JsonObject } from './json.js';
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { QueueState } from './queue-state.js';
@@ -66,8 +68,7 @@ export interface StartChatCommandRequest {
   modelProtocol?: ApiProtocol | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode?: AmpAgentMode;
+  agentSettings: AgentSettingsEnvelope;
   command: string;
   images?: AgentCommandImage[];
   tags?: string[];
@@ -81,8 +82,7 @@ export interface AgentRunCommandRequest {
   images?: AgentCommandImage[];
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  ampAgentMode?: AmpAgentMode;
+  agentSettings: AgentSettingsEnvelope;
   model: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -98,8 +98,7 @@ export interface ForkRunCommandRequest {
   images?: AgentCommandImage[];
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  ampAgentMode?: AmpAgentMode;
+  agentSettings?: AgentSettingsEnvelope;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -232,8 +231,7 @@ export interface ExecutionSettingsPatchRequest {
   chatId: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  ampAgentMode?: AmpAgentMode;
+  agentSettingsPatch?: JsonObject;
 }
 
 export interface ExecutionSettingsPatchResponse {
@@ -241,8 +239,7 @@ export interface ExecutionSettingsPatchResponse {
   chatId: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  ampAgentMode?: AmpAgentMode;
+  agentSettings: AgentSettingsEnvelope;
 }
 
 export interface ModelPatchRequest {
@@ -284,8 +281,7 @@ export interface AgentModelPatchResponse {
   modelProtocol?: ApiProtocol | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode: AmpAgentMode;
+  agentSettings: AgentSettingsEnvelope;
 }
 
 export interface ProjectPathPatchRequest {
@@ -300,7 +296,6 @@ export interface ProjectPathPatchResponse {
   effectiveProjectKey: string;
   previousProjectPath: string;
   previousEffectiveProjectKey: string | null;
-  nativePath: string | null;
 }
 
 export interface RunningChatsResponse {

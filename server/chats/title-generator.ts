@@ -4,7 +4,7 @@
 import { resolveGenerationContextForSelection } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
-import { DEFAULT_AGENT_ID, type AgentCatalogEntry } from '../../common/agents.js';
+import type { AgentCatalogEntry } from '../../common/agents.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 import { DomainError } from '../lib/domain-error.js';
@@ -184,7 +184,7 @@ async function runTitleGeneration({
 
     const prompt = TITLE_GENERATION_PROMPT.replace('{USER_PROMPT}', normalizedSource);
     const titleRaw = await agents.runSingleQuery(prompt, {
-      agentId: cfg.agentId || DEFAULT_AGENT_ID,
+      agentId: cfg.agentId,
       model: cfg.model,
       cwd: projectPath,
       projectPath,

@@ -527,7 +527,7 @@ export function wireServerEvents({
     void broadcastRemoteSettings();
   });
   chatRegistry.onChatAdded((chatId) => {
-    if (chatRegistry.getChat(chatId)?.nativePath) markSearchChatDirty(chatId);
+    if (chatRegistry.getChat(chatId)?.nativeSession) markSearchChatDirty(chatId);
   });
   chatRegistry.onChatRemoved((chatId) => {
     agentRegistry.discardTurn(chatId);

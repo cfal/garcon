@@ -4,10 +4,6 @@
 
 import path from 'path';
 import os from 'os';
-import { existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-
-const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const CLI_VALUE_FLAGS = {
   '--config-dir': '<directory>',
@@ -25,22 +21,7 @@ export interface ServerConfig {
   workspaceDir: string;
   port: number;
   bindAddress: string;
-  claudeBinary: string;
-  ampBinary: string;
-  factoryBinary: string;
-  piBinary: string;
-  cursorBinary: string;
   jwtTokenExpiry: string;
-  anthropicApiKey: string | null;
-  anthropicBaseUrl: string | null;
-  openAiApiKey: string | null;
-  openAiBaseUrl: string | null;
-  codexHome: string;
-  cursorApiKey: string | null;
-  factoryApiKey: string | null;
-  piSessionDirOverride: string | null;
-  homeDir: string;
-  packageVersion: string;
   testEnvironment: boolean;
   projectBasePath: string;
   userShell: string;
@@ -72,27 +53,9 @@ function currentConfig(): Readonly<ServerConfig> {
   return activeConfig ?? parseServerConfig();
 }
 
-function localServerBinary(name: string): string | null {
-  const suffix = process.platform === 'win32' ? '.cmd' : '';
-  const candidate = path.join(
-    SERVER_DIR,
-    'node_modules',
-    '.bin',
-    `${name}${suffix}`,
-  );
-  return existsSync(candidate) ? candidate : null;
-}
-
 function envValue(name: string): string | null {
   const value = process.env[name];
   return value === undefined || value === '' ? null : value;
-}
-
-function trimmedEnvValue(name: string): string | null {
-  const value = envValue(name);
-  if (value === null) return null;
-  const trimmed = value.trim();
-  return trimmed === '' ? null : trimmed;
 }
 
 function cliValue(flag: CliValueFlag): string | null {
@@ -143,31 +106,7 @@ function parseServerConfig(): ServerConfig {
     workspaceDir: parseWorkspaceDir(configDir),
     port: parsePortConfig(),
     bindAddress: parseBindAddress(),
-    claudeBinary: envValue('CLAUDE_BINARY') ?? 'claude',
-    ampBinary: envValue('AMP_BINARY') ?? 'amp',
-    factoryBinary: envValue('FACTORY_BINARY') ?? 'droid',
-    piBinary:
-      envValue('GARCON_PI_BINARY') ??
-      envValue('PI_BINARY') ??
-      localServerBinary('pi') ??
-      'pi',
-    cursorBinary:
-      envValue('GARCON_CURSOR_BINARY') ??
-      envValue('CURSOR_BINARY') ??
-      localServerBinary('cursor-agent') ??
-      localServerBinary('agent') ??
-      'cursor-agent',
     jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
-    anthropicApiKey: trimmedEnvValue('ANTHROPIC_API_KEY'),
-    anthropicBaseUrl: trimmedEnvValue('ANTHROPIC_BASE_URL'),
-    openAiApiKey: trimmedEnvValue('OPENAI_API_KEY'),
-    openAiBaseUrl: trimmedEnvValue('OPENAI_BASE_URL'),
-    codexHome: envValue('CODEX_HOME') ?? path.join(os.homedir(), '.codex'),
-    cursorApiKey: trimmedEnvValue('CURSOR_API_KEY'),
-    factoryApiKey: trimmedEnvValue('FACTORY_API_KEY'),
-    piSessionDirOverride: trimmedEnvValue('PI_CODING_AGENT_SESSION_DIR'),
-    homeDir: envValue('HOME') ?? os.homedir(),
-    packageVersion: envValue('npm_package_version') ?? '0.1.0',
     testEnvironment: envValue('NODE_ENV') === 'test',
     projectBasePath: parseProjectBasePath(),
     userShell: parseUserShell(),
@@ -282,74 +221,9 @@ export function getBindAddress(): string {
   return currentConfig().bindAddress;
 }
 
-// Claude CLI binary path
-export function getClaudeBinary(): string {
-  return currentConfig().claudeBinary;
-}
-
-// Amp CLI binary path
-export function getAmpBinary(): string {
-  return currentConfig().ampBinary;
-}
-
-// Factory Droid CLI binary path
-export function getFactoryBinary(): string {
-  return currentConfig().factoryBinary;
-}
-
-// Pi CLI binary path
-export function getPiBinary(): string {
-  return currentConfig().piBinary;
-}
-
-// Cursor Agent CLI binary path
-export function getCursorBinary(): string {
-  return currentConfig().cursorBinary;
-}
-
 // JWT token expiry (secret is managed by auth/store).
 export function getJwtTokenExpiry(): string {
   return currentConfig().jwtTokenExpiry;
-}
-
-export function getAnthropicApiKey(): string | null {
-  return currentConfig().anthropicApiKey;
-}
-
-export function getAnthropicBaseUrl(): string | null {
-  return currentConfig().anthropicBaseUrl;
-}
-
-export function getOpenAiApiKey(): string | null {
-  return currentConfig().openAiApiKey;
-}
-
-export function getOpenAiBaseUrl(): string | null {
-  return currentConfig().openAiBaseUrl;
-}
-
-export function getCodexHome(): string {
-  return currentConfig().codexHome;
-}
-
-export function getCursorApiKey(): string | null {
-  return currentConfig().cursorApiKey;
-}
-
-export function getFactoryApiKey(): string | null {
-  return currentConfig().factoryApiKey;
-}
-
-export function getPiSessionDirOverride(): string | null {
-  return currentConfig().piSessionDirOverride;
-}
-
-export function getHomeDir(): string {
-  return currentConfig().homeDir;
-}
-
-export function getPackageVersion(): string {
-  return currentConfig().packageVersion;
 }
 
 export function isTestEnvironment(): boolean {

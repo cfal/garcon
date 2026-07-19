@@ -1,29 +1,22 @@
-import type { Agent } from './types.js';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
+import type { IntegrationRegistry } from './integration-registry.js';
 
 export class AgentDirectory {
-  readonly #agents = new Map<string, Agent>();
-
-  constructor(agents: readonly Agent[]) {
-    for (const agent of agents) {
-      this.#agents.set(agent.id, agent);
-    }
-  }
+  constructor(private readonly integrations: IntegrationRegistry) {}
 
   has(agentId: string): boolean {
-    return this.#agents.has(agentId);
+    return this.integrations.has(agentId);
   }
 
-  get(agentId: string): Agent | null {
-    return this.#agents.get(agentId) ?? null;
+  get(agentId: string): AgentIntegration | null {
+    return this.integrations.get(agentId);
   }
 
-  require(agentId: string): Agent {
-    const agent = this.get(agentId);
-    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
-    return agent;
+  require(agentId: string): AgentIntegration {
+    return this.integrations.require(agentId);
   }
 
-  list(): Agent[] {
-    return [...this.#agents.values()];
+  list(): readonly AgentIntegration[] {
+    return this.integrations.list();
   }
 }

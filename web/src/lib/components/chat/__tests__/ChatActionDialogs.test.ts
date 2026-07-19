@@ -22,7 +22,6 @@ describe('ChatActionDialogs', () => {
 				createdAt: '2026-06-27T00:00:00.000Z',
 				lastActivityAt: '2026-06-27T00:10:00.000Z',
 				agentSessionId: 'agent-session-1',
-				nativePath: '/tmp/chat-1.jsonl',
 				isLoading: false,
 				error: null,
 			},
@@ -31,17 +30,16 @@ describe('ChatActionDialogs', () => {
 
 		expect(screen.queryAllByRole('textbox')).toHaveLength(0);
 
-		const nativePath = await screen.findByRole('region', { name: 'Native path' });
-		const agentSessionId = screen.getByRole('region', { name: 'Agent session ID' });
+		const agentSessionId = await screen.findByRole('region', { name: 'Agent session ID' });
 		const firstMessage = screen.getByRole('region', { name: 'First message' });
 
-		for (const surface of [nativePath, agentSessionId, firstMessage]) {
+		for (const surface of [agentSessionId, firstMessage]) {
 			expect(surface.tagName.toLowerCase()).toBe('pre');
 			expect(surface.className).toContain('select-text');
 			expect(surface.className).toContain('text-xs');
 			expect(surface.className).not.toContain('chat-mobile-compact-textarea');
 		}
-		expect(nativePath.textContent).toBe('/tmp/chat-1.jsonl');
+		expect(screen.queryByRole('region', { name: 'Native path' })).toBeNull();
 		expect(agentSessionId.textContent).toBe('agent-session-1');
 		expect(firstMessage.textContent).toBe('First message');
 	});

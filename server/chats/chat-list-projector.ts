@@ -1,7 +1,5 @@
 import type { ChatListEntry, ChatOrderGroup } from '../../common/chat-list.js';
 import {
-  normalizeAmpAgentMode,
-  normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
@@ -117,10 +115,11 @@ export class ChatListProjector {
       modelProtocol: session.modelProtocol ?? null,
       permissionMode: normalizePermissionMode(session.permissionMode),
       thinkingMode: normalizeThinkingMode(session.thinkingMode),
-      claudeThinkingMode: normalizeClaudeThinkingMode(
-        session.claudeThinkingMode,
-      ),
-      ampAgentMode: normalizeAmpAgentMode(session.ampAgentMode),
+      agentSettings: session.agentSettingsById[session.agentId] ?? {
+        ownerId: session.agentId,
+        schemaVersion: 1,
+        values: {},
+      },
       title,
       projectPath: session.projectPath,
       effectiveProjectKey,

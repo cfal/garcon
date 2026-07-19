@@ -1,779 +1,228 @@
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
-import {
-  assertJsonlValid,
-  normalizeForkJsonl,
-  truncateJsonlAfterEntryId,
-  truncateJsonlAfterLine,
-  forkChatFileCopy,
-} from '../fork-chat.js';
-import { rewriteClaudeForkTranscriptEntry } from '../../agents/claude/fork-transcript.js';
-import { rewriteCodexForkTranscriptEntry } from '../../agents/codex/fork-transcript.js';
+import { describe, expect, it, mock } from 'bun:test';
 
-let tmpDir;
+import { forkChatFileCopy } from '../fork-chat.js';
 
-beforeEach(async () => {
-  tmpDir = path.join(os.tmpdir(), `fork-chat-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  await fs.mkdir(tmpDir, { recursive: true });
-});
+const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
-afterEach(async () => {
-  await fs.rm(tmpDir, { recursive: true, force: true });
-});
-
-function createRegistry(sessions) {
-  const store = { ...sessions };
+function sourceSession(overrides = {}) {
   return {
-    addChat(entry) {
-      if (store[entry.id]) return false;
-      store[entry.id] = { ...entry };
-      return true;
+    id: 'source-chat',
+    agentId: 'test',
+    agentSessionId: 'source-native',
+    nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'source-native' } },
+    agentOwnershipEpoch: 'source-epoch',
+    agentSettingsById: {
+      test: envelope('test', { mode: 'careful' }),
+      other: envelope('other', { retained: true }),
     },
-    getChat(chatId) {
-      return store[chatId] ?? null;
-    },
-    listAllChats() {
-      return { ...store };
-    },
-    updateChat(chatId, patch) {
-      if (!store[chatId]) return null;
-      store[chatId] = { ...store[chatId], ...patch };
-      return { id: chatId, ...store[chatId] };
-    },
-    removeChat(chatId) {
-      if (!store[chatId]) return false;
-      delete store[chatId];
-      return true;
-    },
+    model: 'model-a',
+    apiProviderId: 'provider-a',
+    modelEndpointId: 'endpoint-a',
+    modelProtocol: 'openai-compatible',
+    projectPath: '/repo',
+    tags: ['review'],
+    permissionMode: 'acceptEdits',
+    thinkingMode: 'high',
+    ...overrides,
   };
 }
 
-function createSettings(initialTitles = {}) {
-  const titles = new Map(Object.entries(initialTitles));
-  return {
-    ensureInNormal: mock(() => Promise.resolve(undefined)),
-    getChatName(chatId) {
-      return titles.get(chatId) ?? null;
-    },
-    async setSessionName(chatId, title) {
-      titles.set(chatId, title);
-    },
-    removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
-    removeSessionName: mock((chatId) => {
-      titles.delete(chatId);
-      return Promise.resolve(undefined);
+function makeDeps(overrides = {}) {
+  const sessions = new Map([['source-chat', overrides.source ?? sourceSession()]]);
+  const registry = {
+    addChat: mock((entry) => {
+      if (sessions.has(entry.id)) return false;
+      sessions.set(entry.id, entry);
+      return true;
+    }),
+    getChat: mock((chatId) => sessions.get(chatId) ?? null),
+    updateChat: mock((chatId, patch) => {
+      const current = sessions.get(chatId);
+      if (!current) return null;
+      const updated = { ...current, ...patch };
+      sessions.set(chatId, updated);
+      return updated;
+    }),
+    flush: mock(async () => undefined),
+  };
+  const settings = {
+    getChatName: mock(() => 'Source title'),
+    ensureInNormal: mock(async () => undefined),
+    setSessionName: mock(async () => undefined),
+    removeFromAllOrderLists: mock(async () => undefined),
+    removeSessionName: mock(async () => undefined),
+    ...overrides.settings,
+  };
+  const metadata = {
+    getChatMetadata: mock(() => ({ firstMessage: 'First prompt' })),
+    addNewChatMetadata: mock(() => undefined),
+  };
+  const carryOver = {
+    stageFork: mock(async () => undefined),
+    promoteStaged: mock(async () => undefined),
+    discardStaged: mock(async () => undefined),
+  };
+  const ownership = overrides.ownership ?? {
+    delete: mock(async (chatId) => {
+      sessions.delete(chatId);
     }),
   };
-}
-
-function createMetadata(initialMetadata = {}) {
-  const meta = new Map(Object.entries(initialMetadata));
+  const forkAgentSession = overrides.forkAgentSession ?? mock(async () => ({
+    agentSessionId: 'target-native',
+    nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
+  }));
   return {
-    addNewChatMetadata: mock((chatId, firstMessage) => {
-      meta.set(chatId, { firstMessage });
-    }),
-    getChatMetadata(chatId) {
-      return meta.get(chatId) ?? null;
-    },
+    registry,
+    settings,
+    metadata,
+    carryOver,
+    ownership,
+    forkAgentSession,
+    sessions,
   };
 }
-
-async function createSourceNativeFile(agentSessionId) {
-  const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
-  const content = [
-    JSON.stringify({ type: 'session', session_id: agentSessionId }),
-    JSON.stringify({ type: 'message', session_id: agentSessionId, text: 'hello' }),
-    '',
-  ].join('\n');
-  await fs.writeFile(nativePath, content, 'utf8');
-  return nativePath;
-}
-
-describe('assertJsonlValid', () => {
-  it('accepts valid JSONL', () => {
-    const content = '{"a":1}\n{"b":2}\n';
-    expect(() => assertJsonlValid(content, '/tmp/test.jsonl')).not.toThrow();
-  });
-
-  it('accepts empty lines in JSONL', () => {
-    const content = '{"a":1}\n\n{"b":2}\n\n';
-    expect(() => assertJsonlValid(content, '/tmp/test.jsonl')).not.toThrow();
-  });
-
-  it('rejects invalid JSON lines', () => {
-    const content = '{"a":1}\n{invalid}\n';
-    expect(() => assertJsonlValid(content, '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
-  });
-
-  it('includes line number in error message', () => {
-    const content = '{"a":1}\n{bad}\n';
-    try {
-      assertJsonlValid(content, '/tmp/test.jsonl');
-      expect(true).toBe(false); // Should not reach here
-    } catch (e) {
-      expect(e.message).toContain('/tmp/test.jsonl:2');
-    }
-  });
-});
-
-describe('normalizeForkJsonl', () => {
-  it('keeps fully valid JSONL untouched', () => {
-    const content = '{"a":1}\n{"b":2}\n';
-    expect(normalizeForkJsonl(content, '/tmp/test.jsonl')).toEqual({
-      content,
-      discardedSuffixLines: 0,
-      droppedIncompleteTail: false,
-    });
-  });
-
-  it('drops a trailing incomplete line from an in-flight write', () => {
-    const content = '{"a":1}\n{"b":2}\n{"c":';
-    const result = normalizeForkJsonl(content, '/tmp/test.jsonl');
-    expect(result).toEqual({
-      content: '{"a":1}\n{"b":2}',
-      discardedSuffixLines: 0,
-      droppedIncompleteTail: true,
-    });
-    expect(() => assertJsonlValid(result.content, '/tmp/test.jsonl')).not.toThrow();
-  });
-
-  it('throws when a malformed line is followed by more content', () => {
-    const content = '{"a":1}\n{bad}\n{"c":3}\n';
-    expect(() => normalizeForkJsonl(content, '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
-  });
-
-  it('keeps the first value and reports discarded suffix content', () => {
-    const first = JSON.stringify({ type: 'user', uuid: 'entry-1' });
-    const suffix = JSON.stringify({ type: 'mode', mode: 'normal' });
-
-    expect(normalizeForkJsonl(`${first}${suffix}\n`, '/tmp/test.jsonl')).toEqual({
-      content: `${first}\n`,
-      discardedSuffixLines: 1,
-      droppedIncompleteTail: false,
-    });
-  });
-
-  it('keeps a complete first value before a partial suffix', () => {
-    const first = JSON.stringify({ type: 'user', uuid: 'entry-1' });
-
-    expect(normalizeForkJsonl(`${first}{"type":`, '/tmp/test.jsonl')).toEqual({
-      content: first,
-      discardedSuffixLines: 1,
-      droppedIncompleteTail: false,
-    });
-  });
-
-  it('rejects a wholly malformed final line', () => {
-    expect(() => normalizeForkJsonl('{bad}', '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
-  });
-});
-
-describe('truncateJsonlAfterLine', () => {
-  it('keeps content through the requested one-based line', () => {
-    const content = '{"a":1}\n{"b":2}\n{"c":3}\n';
-    expect(truncateJsonlAfterLine(content, 2)).toBe('{"a":1}\n{"b":2}');
-  });
-
-  it('keeps full content when the requested line is past the file', () => {
-    const content = '{"a":1}\n{"b":2}\n';
-    expect(truncateJsonlAfterLine(content, 5)).toBe(content);
-  });
-});
-
-describe('truncateJsonlAfterEntryId', () => {
-  it('keeps content through the matching JSONL entry id', () => {
-    const content = [
-      JSON.stringify({ uuid: 'entry-1', text: 'first' }),
-      JSON.stringify({ uuid: 'entry-2', text: 'second' }),
-      '{"uuid":"entry-3","text":"partial',
-    ].join('\n');
-
-    expect(truncateJsonlAfterEntryId(content, 'entry-2')).toBe([
-      JSON.stringify({ uuid: 'entry-1', text: 'first' }),
-      JSON.stringify({ uuid: 'entry-2', text: 'second' }),
-    ].join('\n'));
-  });
-
-  it('returns null when the JSONL entry id is unavailable', () => {
-    const content = `${JSON.stringify({ uuid: 'entry-1' })}\n`;
-    expect(truncateJsonlAfterEntryId(content, 'missing-entry')).toBeNull();
-  });
-});
 
 describe('forkChatFileCopy', () => {
-  it('snapshots up to the last completed turn when the source is mid-write', async () => {
-    const agentSessionId = '44444444-4444-4444-4444-444444444444';
-    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
-    const partial = [
-      JSON.stringify({ type: 'session', session_id: agentSessionId }),
-      JSON.stringify({ type: 'message', session_id: agentSessionId, text: 'done' }),
-      '{"type":"message","session_id":"' + agentSessionId + '","text":"in-fli',
-    ].join('\n');
-    await fs.writeFile(nativePath, partial, 'utf8');
-
-    const registry = createRegistry({
-      '400': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath,
-        tags: [],
-        agentSessionId,
-      },
-    });
-    const settings = createSettings({ '400': 'Live turn' });
-    const metadata = createMetadata({ '400': { firstMessage: 'Live prompt' } });
+  it('stages the exact combined cutoff and activates it under the target ownership epoch', async () => {
+    const deps = makeDeps();
 
     const result = await forkChatFileCopy({
-      sourceSession: registry.getChat('400'),
-      sourceChatId: '400',
-      targetChatId: '401',
-      registry,
-      settings,
-      metadata,
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      upToSequence: 3,
+      ...deps,
     });
 
-    const forked = await fs.readFile(result.nativePath, 'utf8');
-    expect(() => assertJsonlValid(forked, result.nativePath)).not.toThrow();
-    expect(forked).not.toContain('in-fli');
-    expect(forked).toContain('"text":"done"');
+    expect(result).toEqual({
+      sourceChatId: 'source-chat',
+      chatId: 'target-chat',
+      agentId: 'test',
+      agentSessionId: 'target-native',
+      sourceNextForkOrdinal: 1,
+      rollback: expect.any(Function),
+    });
+    expect(deps.carryOver.stageFork).toHaveBeenCalledWith({
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      targetEpoch: expect.any(String),
+      ownerId: 'test',
+      ownerModel: 'model-a',
+      upToSequence: 3,
+    });
+    expect(deps.forkAgentSession).toHaveBeenCalledWith({
+      sourceSession: expect.objectContaining({
+        agentId: 'test',
+        agentSessionId: 'source-native',
+        agentOwnershipEpoch: 'source-epoch',
+      }),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      messageSequence: 3,
+    });
+    const target = deps.sessions.get('target-chat');
+    expect(target).toMatchObject({
+      agentId: 'test',
+      agentSessionId: 'target-native',
+      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
+      agentOwnershipEpoch: expect.any(String),
+      agentSettingsById: {
+        test: envelope('test', { mode: 'careful' }),
+        other: envelope('other', { retained: true }),
+      },
+      model: 'model-a',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+    });
+    expect(deps.registry.flush).toHaveBeenCalled();
+    expect(deps.carryOver.promoteStaged).toHaveBeenCalledWith(
+      'target-chat',
+      target.agentOwnershipEpoch,
+    );
+    expect(deps.settings.setSessionName).toHaveBeenCalledWith('target-chat', 'Source title (1)');
+    expect(deps.metadata.addNewChatMetadata).toHaveBeenCalledWith('target-chat', 'First prompt');
   });
 
-  it('forks the first value from a concatenated line and warns once', async () => {
-    const agentSessionId = '77777777-7777-7777-7777-777777777777';
-    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
-    const firstLine = JSON.stringify({ type: 'session', sessionId: agentSessionId });
-    const recoveredLine = JSON.stringify({
-      type: 'user',
-      uuid: 'recovered-entry',
-      sessionId: agentSessionId,
-      message: { role: 'user', content: 'keep recovered' },
-    });
-    const discardedSuffix = JSON.stringify({ type: 'mode', mode: 'normal', sessionId: agentSessionId });
-    const lastLine = JSON.stringify({
-      type: 'assistant',
-      uuid: 'last-entry',
-      sessionId: agentSessionId,
-      message: { role: 'assistant', content: 'keep later' },
-    });
-    const sourceContent = `${firstLine}\n${recoveredLine}${discardedSuffix}\n${lastLine}`;
-    await fs.writeFile(nativePath, sourceContent, 'utf8');
-    const registry = createRegistry({
-      '700': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath,
-        tags: [],
-        agentSessionId,
-      },
-    });
-    const settings = createSettings({ '700': 'Recovered fork' });
-    const metadata = createMetadata({ '700': { firstMessage: 'Recovered prompt' } });
-    const warn = spyOn(console, 'warn').mockImplementation(() => {});
-
-    try {
-      const result = await forkChatFileCopy({
-        sourceSession: registry.getChat('700'),
-        sourceChatId: '700',
-        targetChatId: '701',
-        registry,
-        settings,
-        metadata,
-        rewriteForkTranscriptEntry: rewriteClaudeForkTranscriptEntry,
-      });
-
-      const forked = await fs.readFile(result.nativePath, 'utf8');
-      const parsed = forked.trimEnd().split('\n').map((line) => JSON.parse(line));
-      expect(parsed.map((entry) => entry.type)).toEqual(['session', 'user', 'assistant']);
-      expect(forked).toContain('keep recovered');
-      expect(forked).toContain('keep later');
-      expect(forked).not.toContain('"type":"mode"');
-      expect(forked).not.toContain(agentSessionId);
-      expect(forked.endsWith('\n')).toBe(true);
-      expect(await fs.readFile(nativePath, 'utf8')).toBe(sourceContent);
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith(
-        '[chats:fork]',
-        'discarded JSONL suffixes after the first value on 1 line(s) for chat 700',
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it('revalidates the source after reading before creating the fork', async () => {
-    const agentSessionId = '88888888-8888-4888-8888-888888888888';
-    const nativePath = await createSourceNativeFile(agentSessionId);
-    const registry = createRegistry({
-      '800': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath,
-        tags: [],
-        agentSessionId,
-      },
-    });
-    const assertSourceSnapshotStable = mock(() => {
-      if (assertSourceSnapshotStable.mock.calls.length === 2) {
-        throw new Error('source changed while reading');
-      }
-    });
+  it('discards inactive carry-over when the integration fork fails', async () => {
+    const failure = new Error('native fork failed');
+    const deps = makeDeps({ forkAgentSession: mock(async () => { throw failure; }) });
 
     await expect(forkChatFileCopy({
-      sourceSession: registry.getChat('800'),
-      sourceChatId: '800',
-      targetChatId: '801',
-      registry,
-      settings: createSettings(),
-      metadata: createMetadata(),
-      assertSourceSnapshotStable,
-    })).rejects.toThrow('source changed while reading');
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    })).rejects.toBe(failure);
 
-    expect(assertSourceSnapshotStable).toHaveBeenCalledTimes(2);
-    expect(registry.getChat('801')).toBeNull();
+    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith('target-chat', expect.any(String));
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
-  it('copies a complete Direct transcript into the same endpoint directory', async () => {
-    const agentSessionId = '99999999-9999-4999-8999-999999999999';
-    const endpointDir = path.join(tmpDir, 'openai-compatible-sessions', 'acme_openai');
-    const nativePath = path.join(endpointDir, `${agentSessionId}.jsonl`);
-    const sourceContent = [
-      JSON.stringify({ role: 'user', content: `debug session ${agentSessionId}`, timestamp: '2026-07-15T10:00:00.000Z' }),
-      JSON.stringify({ role: 'assistant', content: 'hi', timestamp: '2026-07-15T10:00:01.000Z' }),
-      '',
-    ].join('\n');
-    await fs.mkdir(endpointDir, { recursive: true });
-    await fs.writeFile(nativePath, sourceContent, 'utf8');
-    const registry = createRegistry({
-      '900': {
-        agentId: 'direct-openai-compatible',
-        model: 'acme-model',
-        apiProviderId: 'acme',
-        modelEndpointId: 'acme_openai',
-        modelProtocol: 'openai-compatible',
-        projectPath: '/repos/source',
-        nativePath,
-        tags: ['direct'],
-        agentSessionId,
-      },
-    });
-    const settings = createSettings({ '900': 'Direct source' });
-    const metadata = createMetadata({ '900': { firstMessage: 'hello' } });
+  it('discards inactive carry-over when the integration returns no target', async () => {
+    const deps = makeDeps({ forkAgentSession: mock(async () => null) });
 
-    const result = await forkChatFileCopy({
-      sourceSession: registry.getChat('900'),
-      sourceChatId: '900',
-      targetChatId: '901',
-      registry,
-      settings,
-      metadata,
-    });
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    })).rejects.toThrow('Failed to create fork target');
 
-    const forked = await fs.readFile(result.nativePath, 'utf8');
-    const forkedLines = forked.trimEnd().split('\n').map((line) => JSON.parse(line));
-    expect(path.dirname(result.nativePath)).toBe(endpointDir);
-    expect(path.basename(result.nativePath)).toBe(`${result.agentSessionId}.jsonl`);
-    expect(forkedLines).toEqual([
-      { role: 'user', content: `debug session ${agentSessionId}`, timestamp: '2026-07-15T10:00:00.000Z' },
-      { role: 'assistant', content: 'hi', timestamp: '2026-07-15T10:00:01.000Z' },
-    ]);
-    expect(forked.endsWith('\n')).toBe(true);
-    expect(await fs.readFile(nativePath, 'utf8')).toBe(sourceContent);
-    expect(registry.getChat('901')).toMatchObject({
-      agentId: 'direct-openai-compatible',
-      model: 'acme-model',
-      apiProviderId: 'acme',
-      modelEndpointId: 'acme_openai',
-      modelProtocol: 'openai-compatible',
-      projectPath: '/repos/source',
-      nativePath: result.nativePath,
-      agentSessionId: result.agentSessionId,
-      tags: ['direct'],
-    });
+    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith('target-chat', expect.any(String));
   });
 
-  it('truncates a Direct transcript at the selected physical line', async () => {
-    const agentSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    const endpointDir = path.join(tmpDir, 'anthropic-compatible-sessions', 'acme_anthropic');
-    const nativePath = path.join(endpointDir, `${agentSessionId}.jsonl`);
-    const sourceContent = [
-      JSON.stringify({ role: 'user', content: 'first' }),
-      JSON.stringify({ role: 'assistant', content: 'second' }),
-      JSON.stringify({ role: 'user', content: 'drop' }),
-      '',
-    ].join('\n');
-    await fs.mkdir(endpointDir, { recursive: true });
-    await fs.writeFile(nativePath, sourceContent, 'utf8');
-    const registry = createRegistry({
-      '910': {
-        agentId: 'direct-anthropic-compatible',
-        model: 'acme-model',
-        projectPath: '/repos/source',
-        nativePath,
-        tags: [],
-        agentSessionId,
-      },
-    });
-
-    const result = await forkChatFileCopy({
-      sourceSession: registry.getChat('910'),
-      sourceChatId: '910',
-      targetChatId: '911',
-      truncateAfterLine: 2,
-      registry,
-      settings: createSettings({ '910': 'Direct point' }),
-      metadata: createMetadata({ '910': { firstMessage: 'first' } }),
-    });
-
-    const forked = await fs.readFile(result.nativePath, 'utf8');
-    expect(forked.trimEnd().split('\n').map((line) => JSON.parse(line))).toEqual([
-      { role: 'user', content: 'first' },
-      { role: 'assistant', content: 'second' },
-    ]);
-    expect(forked).not.toContain('drop');
-    expect(await fs.readFile(nativePath, 'utf8')).toBe(sourceContent);
-  });
-
-
-  it('defaults to the first fork ordinal when the source chat has no counter', async () => {
-    const sourceNativePath = await createSourceNativeFile('11111111-1111-1111-1111-111111111111');
-    const registry = createRegistry({
-      '100': {
-        agentId: 'claude',
-        model: 'sonnet',
-        apiProviderId: 'anthropic-custom',
-        modelEndpointId: 'endpoint-1',
-        modelProtocol: 'anthropic-messages',
-        projectPath: '/proj',
-        nativePath: sourceNativePath,
-        tags: ['ops'],
-        agentSessionId: '11111111-1111-1111-1111-111111111111',
-        permissionMode: 'acceptEdits',
-        thinkingMode: 'medium',
-        claudeThinkingMode: 'off',
-        ampAgentMode: 'deep',
-      },
-      '101': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath: null,
-        tags: [],
-        agentSessionId: 'child-1',
-      },
-      '102': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath: null,
-        tags: [],
-        agentSessionId: 'child-2',
-      },
-    });
-    const settings = createSettings({
-      '100': 'Bug hunt',
-      '101': 'Bug hunt (1)',
-      '102': 'Bug hunt (2)',
-    });
-    const metadata = createMetadata({
-      '100': { firstMessage: 'Fallback bug hunt prompt' },
-    });
-
-    const result = await forkChatFileCopy({
-      sourceSession: registry.getChat('100'),
-      sourceChatId: '100',
-      targetChatId: '103',
-      registry,
-      settings,
-      metadata,
-    });
-
-    expect(result.chatId).toBe('103');
-    expect(settings.getChatName('103')).toBe('Bug hunt (1)');
-    expect(registry.getChat('100')?.nextForkOrdinal).toBe(2);
-    expect(registry.getChat('103')?.nextForkOrdinal).toBe(1);
-    expect(registry.getChat('103')).toMatchObject({
-      apiProviderId: 'anthropic-custom',
-      modelEndpointId: 'endpoint-1',
-      modelProtocol: 'anthropic-messages',
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'medium',
-      claudeThinkingMode: 'off',
-      ampAgentMode: 'deep',
-    });
-    expect(metadata.addNewChatMetadata).toHaveBeenCalledWith('103', 'Fallback bug hunt prompt');
-    expect(settings.ensureInNormal).toHaveBeenCalledWith('103');
-  });
-
-  it('appends nested fork ordinals from the persisted source counter', async () => {
-    const sourceNativePath = await createSourceNativeFile('22222222-2222-2222-2222-222222222222');
-    const registry = createRegistry({
-      '200': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath: sourceNativePath,
-        tags: [],
-        agentSessionId: '22222222-2222-2222-2222-222222222222',
-        nextForkOrdinal: 2,
-      },
-    });
-    const settings = createSettings({
-      '200': 'Bug hunt (1)',
-    });
-    const metadata = createMetadata({
-      '200': { firstMessage: 'Nested fork fallback' },
-    });
+  it('uses and advances the persisted source fork ordinal', async () => {
+    const deps = makeDeps({ source: sourceSession({ nextForkOrdinal: 4 }) });
 
     await forkChatFileCopy({
-      sourceSession: registry.getChat('200'),
-      sourceChatId: '200',
-      targetChatId: '201',
-      registry,
-      settings,
-      metadata,
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
     });
 
-    expect(settings.getChatName('201')).toBe('Bug hunt (1) (2)');
-    expect(registry.getChat('200')?.nextForkOrdinal).toBe(3);
-    expect(registry.getChat('201')?.nextForkOrdinal).toBe(1);
-  });
-
-  it('uses agent-native fork results when available', async () => {
-    const sourceNativePath = await createSourceNativeFile('33333333-3333-3333-3333-333333333333');
-    const nativeForkPath = path.join(tmpDir, 'native-codex-fork.jsonl');
-    await fs.writeFile(nativeForkPath, '{"type":"session"}\n', 'utf8');
-    const registry = createRegistry({
-      '300': {
-        agentId: 'codex',
-        model: 'gpt-5.4-codex',
-        projectPath: '/proj',
-        nativePath: sourceNativePath,
-        tags: ['codex'],
-        agentSessionId: '33333333-3333-3333-3333-333333333333',
-      },
-    });
-    const settings = createSettings({ '300': 'Codex work' });
-    const metadata = createMetadata({ '300': { firstMessage: 'Codex prompt' } });
-    const forkAgentSession = mock(async () => ({
-      agentSessionId: 'codex-fork-thread',
-      nativePath: nativeForkPath,
-    }));
-
-    const result = await forkChatFileCopy({
-      sourceSession: registry.getChat('300'),
-      sourceChatId: '300',
-      targetChatId: '301',
-      registry,
-      settings,
-      metadata,
-      forkAgentSession,
-    });
-
-    expect(forkAgentSession).toHaveBeenCalledTimes(1);
-    expect(result.agentSessionId).toBe('codex-fork-thread');
-    expect(result.nativePath).toBe(nativeForkPath);
-    expect(registry.getChat('301')).toMatchObject({
-      agentId: 'codex',
-      agentSessionId: 'codex-fork-thread',
-      nativePath: nativeForkPath,
-      tags: ['codex'],
-    });
-  });
-
-  it('rewrites Codex thread metadata for a message-point file copy', async () => {
-    const agentSessionId = '55555555-5555-5555-5555-555555555555';
-    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
-    const content = [
-      JSON.stringify({
-        timestamp: '2026-07-15T10:00:00.000Z',
-        type: 'session_meta',
-        payload: {
-          session_id: agentSessionId,
-          id: agentSessionId,
-          forked_from_id: 'parent-thread',
-          cwd: '/proj',
-        },
-      }),
-      JSON.stringify({
-        timestamp: '2026-07-15T10:00:01.000Z',
-        type: 'event_msg',
-        payload: { type: 'user_message', message: `keep source reference ${agentSessionId}` },
-      }),
-      JSON.stringify({
-        timestamp: '2026-07-15T10:00:02.000Z',
-        type: 'event_msg',
-        payload: { type: 'user_message', message: 'drop' },
-      }),
-      '{"timestamp":"2026-07-15T10:00:03.000Z","type":"event_msg","payload":',
-    ].join('\n');
-    await fs.writeFile(nativePath, content, 'utf8');
-    const registry = createRegistry({
-      '500': {
-        agentId: 'codex',
-        model: 'gpt-5.4-codex',
-        projectPath: '/proj',
-        nativePath,
-        tags: [],
-        agentSessionId,
-      },
-    });
-    const settings = createSettings({ '500': 'Point fork' });
-    const metadata = createMetadata({ '500': { firstMessage: 'Point prompt' } });
-    const forkAgentSession = mock(async () => ({
-      agentSessionId: 'native-should-not-run',
-      nativePath: path.join(tmpDir, 'native-should-not-run.jsonl'),
-    }));
-
-    const result = await forkChatFileCopy({
-      sourceSession: registry.getChat('500'),
-      sourceChatId: '500',
-      targetChatId: '501',
-      truncateAfterLine: 2,
-      registry,
-      settings,
-      metadata,
-      forkAgentSession,
-      rewriteForkTranscriptEntry: rewriteCodexForkTranscriptEntry,
-    });
-
-    const forked = await fs.readFile(result.nativePath, 'utf8');
-    const forkedEntries = forked.trimEnd().split('\n').map((line) => JSON.parse(line));
-    expect(forkAgentSession).not.toHaveBeenCalled();
-    expect(() => assertJsonlValid(forked, result.nativePath)).not.toThrow();
-    expect(forkedEntries[0].payload.id).toBe(result.agentSessionId);
-    expect(forkedEntries[0].payload.session_id).toBe(result.agentSessionId);
-    expect(forkedEntries[0].payload.forked_from_id).toBe('parent-thread');
-    expect(forkedEntries[1].payload.message).toBe(`keep source reference ${agentSessionId}`);
-    expect(forkedEntries).toHaveLength(2);
-    expect(await fs.readFile(nativePath, 'utf8')).toBe(content);
-  });
-
-  it('forks at the first value on a concatenated message-point line', async () => {
-    const agentSessionId = '88888888-8888-8888-8888-888888888888';
-    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
-    const keep = JSON.stringify({
-      type: 'user',
-      uuid: 'keep-entry',
-      sessionId: agentSessionId,
-      message: { role: 'user', content: 'keep' },
-    });
-    const discarded = JSON.stringify({ type: 'mode', mode: 'normal', sessionId: agentSessionId });
-    const drop = JSON.stringify({
-      type: 'assistant',
-      uuid: 'drop-entry',
-      sessionId: agentSessionId,
-      message: { role: 'assistant', content: 'drop' },
-    });
-    await fs.writeFile(nativePath, `${keep}${discarded}\n${drop}\n{bad}`, 'utf8');
-    const registry = createRegistry({
-      '800': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath,
-        tags: [],
-        agentSessionId,
-      },
-    });
-    const settings = createSettings({ '800': 'Point recovery' });
-    const metadata = createMetadata({ '800': { firstMessage: 'Point recovery prompt' } });
-    const warn = spyOn(console, 'warn').mockImplementation(() => {});
-
-    try {
-      const result = await forkChatFileCopy({
-        sourceSession: registry.getChat('800'),
-        sourceChatId: '800',
-        targetChatId: '801',
-        truncateAfterEntryId: 'keep-entry',
-        truncateAfterLine: 1,
-        registry,
-        settings,
-        metadata,
-      });
-
-      const forked = await fs.readFile(result.nativePath, 'utf8');
-      expect(JSON.parse(forked)).toMatchObject({ uuid: 'keep-entry' });
-      expect(forked).not.toContain('"type":"mode"');
-      expect(forked).not.toContain('drop-entry');
-      expect(warn).toHaveBeenCalledTimes(1);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it('fails message-point forks when the source entry id is unavailable', async () => {
-    const agentSessionId = '66666666-6666-6666-6666-666666666666';
-    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
-    const content = [
-      JSON.stringify({ type: 'session', session_id: agentSessionId }),
-      JSON.stringify({ type: 'message', session_id: agentSessionId, uuid: 'entry-1', text: 'keep' }),
-    ].join('\n');
-    await fs.writeFile(nativePath, content, 'utf8');
-    const registry = createRegistry({
-      '600': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath,
-        tags: [],
-        agentSessionId,
-      },
-    });
-    const settings = createSettings({ '600': 'Missing point fork' });
-    const metadata = createMetadata({ '600': { firstMessage: 'Missing prompt' } });
-
-    await expect(forkChatFileCopy({
-      sourceSession: registry.getChat('600'),
-      sourceChatId: '600',
-      targetChatId: '601',
-      truncateAfterEntryId: 'missing-entry',
-      registry,
-      settings,
-      metadata,
-    })).rejects.toThrow(/missing source entry missing-entry/);
-
-    expect(registry.getChat('601')).toBeNull();
+    expect(deps.settings.setSessionName).toHaveBeenCalledWith('target-chat', 'Source title (4)');
+    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(5);
+    expect(deps.sessions.get('target-chat').nextForkOrdinal).toBe(1);
   });
 
   it('rolls back every durable target side effect idempotently', async () => {
-    const agentSessionId = '77777777-7777-7777-7777-777777777777';
-    const nativePath = await createSourceNativeFile(agentSessionId);
-    const registry = createRegistry({
-      '950': {
-        agentId: 'claude',
-        model: 'sonnet',
-        projectPath: '/proj',
-        nativePath,
-        tags: [],
-        agentSessionId,
-        nextForkOrdinal: 3,
-      },
-    });
-    const settings = createSettings({ '950': 'Rollback source' });
-    const metadata = createMetadata({ '950': { firstMessage: 'Rollback prompt' } });
+    const deps = makeDeps({ source: sourceSession({ nextForkOrdinal: 3 }) });
     const result = await forkChatFileCopy({
-      sourceSession: registry.getChat('950'),
-      sourceChatId: '950',
-      targetChatId: '951',
-      registry,
-      settings,
-      metadata,
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
     });
 
-    expect(registry.getChat('951')).not.toBeNull();
-    expect(registry.getChat('950')?.nextForkOrdinal).toBe(4);
+    expect(deps.sessions.get('target-chat')).toBeDefined();
+    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(4);
     await result.rollback();
     await result.rollback();
 
-    expect(registry.getChat('951')).toBeNull();
-    expect(registry.getChat('950')?.nextForkOrdinal).toBe(3);
-    expect(settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
-    expect(settings.removeSessionName).toHaveBeenCalledOnce();
-    await expect(fs.stat(result.nativePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(deps.sessions.get('target-chat')).toBeUndefined();
+    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(3);
+    expect(deps.ownership.delete).toHaveBeenCalledOnce();
+    expect(deps.settings.removeFromAllOrderLists).toHaveBeenCalledOnce();
+    expect(deps.settings.removeSessionName).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back through integration ownership when target setup fails', async () => {
+    const failure = new Error('settings failed');
+    const deps = makeDeps({
+      source: sourceSession({ nextForkOrdinal: 3 }),
+      settings: { setSessionName: mock(async () => { throw failure; }) },
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    })).rejects.toBe(failure);
+
+    expect(deps.ownership.delete).toHaveBeenCalledWith('target-chat');
+    expect(deps.sessions.get('target-chat')).toBeUndefined();
+    expect(deps.sessions.get('source-chat').nextForkOrdinal).toBe(3);
   });
 });

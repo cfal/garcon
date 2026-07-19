@@ -76,6 +76,13 @@ export function createRouteCommandService({
     agents,
     ledger: commandLedger,
     pendingInputs,
+    ownership: {
+      delete: async (chatId) => {
+        if (!registry.getChat(chatId)) return false;
+        registry.removeChat(chatId);
+        return true;
+      },
+    },
     chatIds: new ChatIdAllocator(registry),
 	pathCache: pathCache ?? createRoutePathCache(),
 	chatListProjector: chatListProjector ?? {
@@ -88,8 +95,11 @@ export function createRouteCommandService({
 				model: session.model ?? null,
 				permissionMode: session.permissionMode ?? 'default',
 				thinkingMode: session.thinkingMode ?? 'none',
-				claudeThinkingMode: session.claudeThinkingMode ?? 'auto',
-				ampAgentMode: session.ampAgentMode ?? 'smart',
+				agentSettings: session.agentSettingsById?.[session.agentId] ?? {
+					ownerId: session.agentId,
+					schemaVersion: 1,
+					values: {},
+				},
 				title: 'Chat',
 				projectPath: session.projectPath,
 				effectiveProjectKey: session.projectPath,
