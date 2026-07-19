@@ -275,7 +275,6 @@
 
 {#if startup.worktreeModalOpen}
 	<GitWorktreePickerModal
-		repositoryRoot={startup.trimmedPath}
 		worktrees={startup.worktreeItems}
 		isLoading={startup.isLoadingWorktrees}
 		isCreating={startup.isCreatingWorktree}
