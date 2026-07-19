@@ -16,7 +16,7 @@ import createTerminalRoutes from './terminals.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
-import type { ChatQueueService } from '../queue.js';
+import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { MetadataIndex } from '../chats/metadata-store.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
@@ -65,7 +65,7 @@ export default function createAllRoutes({
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
-  queue: ChatQueueService;
+  queue: ChatExecutionService;
   pathCache: PathCache;
   metadata: MetadataIndex;
   chatViews: ChatViewPageReader;

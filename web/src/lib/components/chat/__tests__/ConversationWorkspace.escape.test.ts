@@ -2,17 +2,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationWorkspaceEscapeHost from './ConversationWorkspaceEscapeHost.svelte';
-import { getChatMessages, getChatQueue, stopChat } from '$lib/api/chats.js';
+import { getChatExecutionControl, getChatMessages, stopChat } from '$lib/api/chats.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	compactChat: vi.fn(),
 	createQueuedInput: vi.fn(),
+	continueRecoveredInput: vi.fn(),
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
 	getChatMessages: vi.fn(),
-		getChatQueue: vi.fn(),
-		interruptAndSendChat: vi.fn(),
+	getChatExecutionControl: vi.fn(),
+	interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
@@ -60,7 +61,7 @@ vi.mock('$lib/components/chat/SubagentManagementBar.svelte', async () => ({
 }));
 
 const mockGetChatMessages = vi.mocked(getChatMessages);
-const mockGetChatQueue = vi.mocked(getChatQueue);
+const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
 const mockStopChat = vi.mocked(stopChat);
 
 describe('ConversationWorkspace Escape abort handling', () => {
@@ -75,14 +76,12 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			limit: 50,
 			pendingUserInputs: [],
 		});
-		mockGetChatQueue.mockResolvedValue({
+		mockGetChatExecutionControl.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
-			queue: {
-				entries: [],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				pause: null,
+			control: {
+				queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+				recoveredInputContinuation: null,
 				version: 0,
 				updatedAt: null,
 			},
@@ -94,11 +93,9 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			clientRequestId: 'cmd-stop',
 			status: 'accepted',
 			acceptedAt: '2026-01-01T00:00:00.000Z',
-			queue: {
-				entries: [],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				pause: null,
+			control: {
+				queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+				recoveredInputContinuation: null,
 				version: 0,
 				updatedAt: null,
 			},

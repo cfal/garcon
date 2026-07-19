@@ -3,20 +3,29 @@ import type { CommandLedger, CommandLedgerRecord } from '../commands/command-led
 import type { PendingUserInputService } from './pending-user-input-service.js';
 import type { PendingUserInputImageEvidence } from './pending-user-input-store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
+import { createLogger } from '../lib/log.js';
+import { ChatRunningError } from './errors.js';
+
+const logger = createLogger('pending-user-input-recovery');
 
 interface PendingUserInputRecoveryDeps {
   ledger: Pick<
     CommandLedger,
-    'listPendingInputRecoveries' | 'settlePendingInputRecovery'
+    'listPendingInputRecoveries' | 'settlePendingInputRecovery' | 'settleQueuedInputHandoff'
   >;
   pendingInputs: Pick<
     PendingUserInputService,
-    'reconcileRestoredHistory' | 'restoreUnconfirmed' | 'store'
+    'reconcileRestoredHistory' | 'reconcileRetainedHistory' | 'restoreUnconfirmed' | 'store'
   >;
   nativeSnapshots?: {
+    isChatActive?(chatId: string): boolean;
     reconcileNativeSnapshot(chatId: string, messages: readonly ChatMessage[]): Promise<void>;
   };
+  queuedInputHandoffs?: {
+    hasAppliedQueueCreateCommand(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
+  };
   chatExists(chatId: string): boolean;
+  onRecoveredChatSettled(chatId: string): Promise<void>;
 }
 
 export interface PendingUserInputRecoveryResult {
@@ -94,7 +103,10 @@ export class PendingUserInputRecoveryCoordinator {
   #started = false;
   #settlementTasksByRequestKey = new Map<string, Promise<void>>();
   #unsettledRequestIdsByChatId = new Map<string, Set<string>>();
-  #restoredSettlementRequestIdsByChatId = new Map<string, Set<string>>();
+  #restoredRequestIdsByChatId = new Map<string, Set<string>>();
+  #settledRecoveredChatIds = new Set<string>();
+  #recoveredChatSettlementTasks = new Map<string, Promise<void>>();
+  #recoveredChatSettlementActive = false;
   #reconciliationByChatId = new Map<string, Promise<PendingUserInputRecoveryReconciliation>>();
   #acceptingReconciliations = true;
 
@@ -127,20 +139,31 @@ export class PendingUserInputRecoveryCoordinator {
     const task = (async () => {
       let nativeSnapshotApplied = false;
       const nativeSnapshots = this.#deps.nativeSnapshots;
-      const reconciliation = await this.#deps.pendingInputs.reconcileRestoredHistory(
-        chatId,
-        nativeSnapshots
-          ? async (messages) => {
-            await nativeSnapshots.reconcileNativeSnapshot(chatId, messages);
-            nativeSnapshotApplied = true;
-          }
-          : undefined,
-      );
-      const restoredSettlementIds = this.#trackRestoredSettlements(
-        chatId,
-        reconciliation.clearedRequestIds,
-      );
-      await this.#waitForRequestSettlements(chatId, restoredSettlementIds);
+      if (nativeSnapshots?.isChatActive?.(chatId)) {
+        await this.#deps.pendingInputs.reconcileRetainedHistory(chatId);
+        await this.#waitForRestoredSettlements(chatId, []);
+        return { nativeSnapshotApplied: false };
+      }
+
+      let clearedRequestIds: readonly string[];
+      try {
+        const reconciliation = await this.#deps.pendingInputs.reconcileRestoredHistory(
+          chatId,
+          nativeSnapshots
+            ? async (messages) => {
+              await nativeSnapshots.reconcileNativeSnapshot(chatId, messages);
+              nativeSnapshotApplied = true;
+            }
+            : undefined,
+        );
+        clearedRequestIds = reconciliation.clearedRequestIds;
+      } catch (error) {
+        if (!(error instanceof ChatRunningError)) throw error;
+        await this.#deps.pendingInputs.reconcileRetainedHistory(chatId);
+        await this.#waitForRestoredSettlements(chatId, []);
+        return { nativeSnapshotApplied: false };
+      }
+      await this.#waitForRestoredSettlements(chatId, clearedRequestIds);
       return { nativeSnapshotApplied };
     })();
     this.#reconciliationByChatId.set(chatId, task);
@@ -151,6 +174,21 @@ export class PendingUserInputRecoveryCoordinator {
         this.#reconciliationByChatId.delete(chatId);
       }
     }
+  }
+
+  async #waitForRestoredSettlements(
+    chatId: string,
+    clearedRequestIds: readonly string[],
+  ): Promise<void> {
+    const restoredRequestIds = this.#restoredRequestIdsByChatId.get(chatId);
+    const unsettledRequestIds = this.#unsettledRequestIdsByChatId.get(chatId);
+    const settlementRequestIds = new Set(clearedRequestIds);
+    if (restoredRequestIds && unsettledRequestIds) {
+      for (const clientRequestId of restoredRequestIds) {
+        if (unsettledRequestIds.has(clientRequestId)) settlementRequestIds.add(clientRequestId);
+      }
+    }
+    await this.#waitForRequestSettlements(chatId, [...settlementRequestIds]);
   }
 
   beginShutdown(): void {
@@ -164,12 +202,18 @@ export class PendingUserInputRecoveryCoordinator {
     while (true) {
       const reconciliations = [...new Set(this.#reconciliationByChatId.values())];
       const settlementRequests = this.#unattemptedSettlementRequests(attemptedSettlementKeys);
-      if (reconciliations.length === 0 && settlementRequests.length === 0) break;
+      const recoveredChatSettlements = [...new Set(this.#recoveredChatSettlementTasks.values())];
+      if (
+        reconciliations.length === 0
+        && settlementRequests.length === 0
+        && recoveredChatSettlements.length === 0
+      ) break;
       const results = await Promise.allSettled([
         ...reconciliations,
         ...settlementRequests.map(({ chatId, clientRequestId }) => (
           this.#startSettlement(chatId, clientRequestId)
         )),
+        ...recoveredChatSettlements,
       ]);
       errors.push(...results.flatMap((result) => (
         result.status === 'rejected' ? [result.reason] : []
@@ -192,11 +236,31 @@ export class PendingUserInputRecoveryCoordinator {
     const restoredChatIds = new Set<string>();
 
     for (const record of records) {
+      if (
+        record.commandType === 'active-input'
+        && record.entryId
+        && await this.#deps.queuedInputHandoffs?.hasAppliedQueueCreateCommand(
+          record.chatId,
+          record.key,
+          record.entryId,
+        )
+      ) {
+        const settled = await this.#deps.ledger.settleQueuedInputHandoff(record.key, record.entryId);
+        if (!settled) {
+          throw new Error(`Could not settle queued active-input handoff for ${record.chatId}`);
+        }
+        logger.info(`settled queued active-input handoff chat=${record.chatId}`);
+        continue;
+      }
       if (!this.#deps.chatExists(record.chatId)) {
         await this.#deps.ledger.settlePendingInputRecovery(record.chatId, record.clientRequestId);
         discardedMissingChat += 1;
         continue;
       }
+      const restoredRequestIds = this.#restoredRequestIdsByChatId.get(record.chatId)
+        ?? new Set<string>();
+      restoredRequestIds.add(record.clientRequestId);
+      this.#restoredRequestIdsByChatId.set(record.chatId, restoredRequestIds);
       this.#deps.pendingInputs.restoreUnconfirmed({
         chatId: record.chatId,
         clientRequestId: record.clientRequestId,
@@ -223,6 +287,15 @@ export class PendingUserInputRecoveryCoordinator {
     };
   }
 
+  async activateRecoveredChatSettlement(): Promise<void> {
+    if (this.#recoveredChatSettlementActive) return;
+    this.#recoveredChatSettlementActive = true;
+    const tasks = [...this.#settledRecoveredChatIds].map((chatId) => (
+      this.#startRecoveredChatSettlement(chatId)
+    ));
+    await Promise.all(tasks);
+  }
+
   async #waitForRequestSettlements(
     chatId: string,
     clientRequestIds: readonly string[],
@@ -236,19 +309,6 @@ export class PendingUserInputRecoveryCoordinator {
       results.flatMap((result) => result.status === 'rejected' ? [result.reason] : []),
       `Pending-input recovery settlement failed for ${chatId}`,
     );
-  }
-
-  #trackRestoredSettlements(chatId: string, clearedRequestIds: readonly string[]): string[] {
-    const unsettledRequestIds = this.#unsettledRequestIdsByChatId.get(chatId);
-    const restoredRequestIds = this.#restoredSettlementRequestIdsByChatId.get(chatId)
-      ?? new Set<string>();
-    for (const clientRequestId of clearedRequestIds) {
-      if (unsettledRequestIds?.has(clientRequestId)) restoredRequestIds.add(clientRequestId);
-    }
-    if (restoredRequestIds.size > 0) {
-      this.#restoredSettlementRequestIdsByChatId.set(chatId, restoredRequestIds);
-    }
-    return [...restoredRequestIds];
   }
 
   #unattemptedSettlementRequests(
@@ -271,20 +331,40 @@ export class PendingUserInputRecoveryCoordinator {
     const existing = this.#settlementTasksByRequestKey.get(key);
     if (existing) return existing;
     const task = this.#deps.ledger.settlePendingInputRecovery(chatId, clientRequestId)
-      .then(() => {
+      .then(async () => {
         const requestIds = this.#unsettledRequestIdsByChatId.get(chatId);
         requestIds?.delete(clientRequestId);
         if (requestIds?.size === 0) this.#unsettledRequestIdsByChatId.delete(chatId);
-        const restoredRequestIds = this.#restoredSettlementRequestIdsByChatId.get(chatId);
+        const restoredRequestIds = this.#restoredRequestIdsByChatId.get(chatId);
         restoredRequestIds?.delete(clientRequestId);
         if (restoredRequestIds?.size === 0) {
-          this.#restoredSettlementRequestIdsByChatId.delete(chatId);
+          this.#restoredRequestIdsByChatId.delete(chatId);
+          await this.#queueRecoveredChatSettlement(chatId);
         }
       })
       .finally(() => {
         this.#settlementTasksByRequestKey.delete(key);
       });
     this.#settlementTasksByRequestKey.set(key, task);
+    return task;
+  }
+
+  #queueRecoveredChatSettlement(chatId: string): Promise<void> {
+    this.#settledRecoveredChatIds.add(chatId);
+    if (!this.#recoveredChatSettlementActive) return Promise.resolve();
+    return this.#startRecoveredChatSettlement(chatId);
+  }
+
+  #startRecoveredChatSettlement(chatId: string): Promise<void> {
+    const existing = this.#recoveredChatSettlementTasks.get(chatId);
+    if (existing) return existing;
+    this.#settledRecoveredChatIds.delete(chatId);
+    const task = this.#deps.onRecoveredChatSettled(chatId)
+      .catch((error) => this.#reportSettlementError(error))
+      .finally(() => {
+        this.#recoveredChatSettlementTasks.delete(chatId);
+      });
+    this.#recoveredChatSettlementTasks.set(chatId, task);
     return task;
   }
 

@@ -2,29 +2,29 @@ import type {
 	PendingPermissionRequest,
 	PendingViewChat,
 	PermissionMode,
-	QueueState,
+	ChatExecutionControlState,
 } from '$lib/types/chat';
 
 export type PendingPermissionRequestUpdate =
 	| PendingPermissionRequest[]
 	| ((previous: PendingPermissionRequest[]) => PendingPermissionRequest[]);
 
-export interface QueuePruningOptions {
+export interface ExecutionControlPruningOptions {
 	getActiveChatIds: () => Set<string>;
 }
 
-function queueVersion(queue: QueueState | null): number {
-	return queue?.version ?? -1;
+function controlVersion(control: ChatExecutionControlState | null): number {
+	return control?.version ?? -1;
 }
 
 export class ConversationUiState {
 	pendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
 	pendingViewChat = $state<PendingViewChat | null>(null);
 	previousPermissionMode = $state<PermissionMode | null>(null);
-	private queueByChatId = $state<Record<string, QueueState | null>>({});
+	private executionControlByChatId = $state<Record<string, ChatExecutionControlState | null>>({});
 
-	get queueChatIds(): string[] {
-		return Object.keys(this.queueByChatId);
+	get executionControlChatIds(): string[] {
+		return Object.keys(this.executionControlByChatId);
 	}
 
 	setPendingPermissionRequests(update: PendingPermissionRequestUpdate): void {
@@ -44,44 +44,46 @@ export class ConversationUiState {
 		this.previousPermissionMode = mode;
 	}
 
-	getQueue(chatId: string | null | undefined): QueueState | null {
+	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null {
 		if (!chatId) return null;
-		return this.queueByChatId[chatId] ?? null;
+		return this.executionControlByChatId[chatId] ?? null;
 	}
 
-	setMessageQueue(chatId: string, queue: QueueState | null): void {
-		const current = this.queueByChatId[chatId] ?? null;
-		if (queueVersion(queue) < queueVersion(current)) return;
-		this.queueByChatId = { ...this.queueByChatId, [chatId]: queue };
+	setExecutionControl(chatId: string, control: ChatExecutionControlState | null): void {
+		const current = this.executionControlByChatId[chatId] ?? null;
+		if (controlVersion(control) < controlVersion(current)) return;
+		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
 	}
 
-	setMessageQueueFromRefresh(chatId: string, queue: QueueState | null): void {
-		const current = this.queueByChatId[chatId] ?? null;
-		if (current && queueVersion(queue) <= queueVersion(current)) return;
-		this.queueByChatId = { ...this.queueByChatId, [chatId]: queue };
+	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState | null): void {
+		const current = this.executionControlByChatId[chatId] ?? null;
+		if (current && controlVersion(control) <= controlVersion(current)) return;
+		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
 	}
 
-	removeMessageQueue(chatId: string): void {
-		if (!(chatId in this.queueByChatId)) return;
-		const nextQueueByChatId = { ...this.queueByChatId };
-		delete nextQueueByChatId[chatId];
-		this.queueByChatId = nextQueueByChatId;
+	removeExecutionControl(chatId: string): void {
+		if (!(chatId in this.executionControlByChatId)) return;
+		const nextControlByChatId = { ...this.executionControlByChatId };
+		delete nextControlByChatId[chatId];
+		this.executionControlByChatId = nextControlByChatId;
 	}
 
-	pruneQueues(activeChatIds: Set<string>): void {
-		const staleIds = Object.keys(this.queueByChatId).filter((chatId) => !activeChatIds.has(chatId));
+	pruneExecutionControls(activeChatIds: Set<string>): void {
+		const staleIds = Object.keys(this.executionControlByChatId).filter(
+			(chatId) => !activeChatIds.has(chatId),
+		);
 		if (staleIds.length === 0) return;
 
-		const nextQueueByChatId = { ...this.queueByChatId };
+		const nextControlByChatId = { ...this.executionControlByChatId };
 		for (const chatId of staleIds) {
-			delete nextQueueByChatId[chatId];
+			delete nextControlByChatId[chatId];
 		}
-		this.queueByChatId = nextQueueByChatId;
+		this.executionControlByChatId = nextControlByChatId;
 	}
 
-	mountQueuePruning(options: QueuePruningOptions): void {
+	mountExecutionControlPruning(options: ExecutionControlPruningOptions): void {
 		$effect(() => {
-			this.pruneQueues(options.getActiveChatIds());
+			this.pruneExecutionControls(options.getActiveChatIds());
 		});
 	}
 }

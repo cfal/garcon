@@ -42,7 +42,7 @@ const mockNativeReloader = {
 };
 
 const mockQueue = {
-  readChatQueue: mock(() => Promise.resolve(storedQueue())),
+  readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
 };
 
 const mockPendingInputs = {
@@ -55,6 +55,7 @@ function storedQueue() {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    recoveredInputContinuation: null,
     version: 3,
     updatedAt: '2024-01-01T00:00:00.000Z',
   };
@@ -65,7 +66,7 @@ const injectedMocks = [
   mockRegistry.getChat,
   mockChatViews.readReplay,
   mockNativeReloader.reloadFromNative,
-  mockQueue.readChatQueue,
+  mockQueue.readChatExecutionControl,
   mockPendingInputs.listForTransport,
 ];
 
@@ -117,7 +118,7 @@ describe('chat WebSocket handler', () => {
     moduleMocks.forEach((fn) => fn.mockClear());
     mockAgents.getRunningChatIdsSnapshot.mockReturnValue(['chat-running']);
     mockRegistry.getChat.mockReturnValue({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' });
-    mockQueue.readChatQueue.mockResolvedValue(storedQueue());
+    mockQueue.readChatExecutionControl.mockResolvedValue(storedQueue());
     mockChatViews.readReplay.mockReturnValue({
       generationId: 'generation-1',
       mode: 'delta',
@@ -145,48 +146,58 @@ describe('chat WebSocket handler', () => {
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-1',
-      queueChatIds: ['chat-1', 'chat-2'],
+      controlChatIds: ['chat-1', 'chat-2'],
     });
 
-    expect(mockQueue.readChatQueue).toHaveBeenCalledTimes(2);
+    expect(mockQueue.readChatExecutionControl).toHaveBeenCalledTimes(2);
     expect(lastSentPayload()).toEqual({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-1',
       processing: { outcome: 'snapshot', runningChatIds: ['chat-running'] },
-      queueResults: [
-        { chatId: 'chat-1', outcome: 'snapshot', queue: expect.objectContaining({ version: 3 }) },
-        { chatId: 'chat-2', outcome: 'snapshot', queue: expect.objectContaining({ version: 3 }) },
+      controlResults: [
+        { chatId: 'chat-1', outcome: 'snapshot', control: expect.objectContaining({ version: 3 }) },
+        { chatId: 'chat-2', outcome: 'snapshot', control: expect.objectContaining({ version: 3 }) },
       ],
     });
   });
 
-  it('omits the server-only pause stack from reconnect queue snapshots', async () => {
-    mockQueue.readChatQueue.mockResolvedValue({
+  it('omits the server-only pause stack from reconnect execution-control snapshots', async () => {
+    mockQueue.readChatExecutionControl.mockResolvedValue({
       ...storedQueue(),
       pause: {
-        kind: 'recovered-unconfirmed-input',
-        id: 'pause-recovery',
+        kind: 'manual',
+        id: 'pause-manual',
         pausedAt: '2024-01-01T00:00:00.000Z',
       },
       resumePauses: [{
-        kind: 'manual',
-        id: 'pause-manual',
+        kind: 'provider-error',
+        id: 'pause-provider',
         pausedAt: '2023-12-31T23:59:00.000Z',
+        entryId: 'entry-1',
+        errorCode: 'PROVIDER_FAILED',
+        message: 'provider failed',
       }],
+      recoveredInputContinuation: {
+        id: '1a0c7d35-d084-4b91-8275-7d2ce806707b',
+        installedAt: '2024-01-01T00:00:00.000Z',
+      },
     });
 
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-hidden-pauses',
-      queueChatIds: ['chat-1'],
+      controlChatIds: ['chat-1'],
     });
 
-    const queue = lastSentPayload().queueResults[0].queue;
-    expect(queue.pause).toMatchObject({
-      kind: 'recovered-unconfirmed-input',
-      id: 'pause-recovery',
+    const control = lastSentPayload().controlResults[0].control;
+    expect(control.queue.pause).toMatchObject({
+      kind: 'manual',
+      id: 'pause-manual',
     });
-    expect(queue).not.toHaveProperty('resumePauses');
+    expect(control.queue).not.toHaveProperty('resumePauses');
+    expect(control.recoveredInputContinuation).toMatchObject({
+      id: '1a0c7d35-d084-4b91-8275-7d2ce806707b',
+    });
   });
 
   it('returns an authoritative empty processing snapshot', async () => {
@@ -195,14 +206,14 @@ describe('chat WebSocket handler', () => {
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-empty',
-      queueChatIds: [],
+      controlChatIds: [],
     });
 
     expect(lastSentPayload()).toEqual({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-empty',
       processing: { outcome: 'snapshot', runningChatIds: [] },
-      queueResults: [],
+      controlResults: [],
     });
   });
 
@@ -212,7 +223,7 @@ describe('chat WebSocket handler', () => {
         ? null
         : { agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' }
     ));
-    mockQueue.readChatQueue.mockImplementation((chatId) => (
+    mockQueue.readChatExecutionControl.mockImplementation((chatId) => (
       chatId === 'unavailable-chat'
         ? Promise.reject(new Error('disk unavailable'))
         : Promise.resolve(storedQueue())
@@ -221,14 +232,14 @@ describe('chat WebSocket handler', () => {
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-2',
-      queueChatIds: ['chat-1', 'deleted-chat', 'unavailable-chat'],
+      controlChatIds: ['chat-1', 'deleted-chat', 'unavailable-chat'],
     });
 
-    expect(mockQueue.readChatQueue).toHaveBeenCalledTimes(2);
+    expect(mockQueue.readChatExecutionControl).toHaveBeenCalledTimes(2);
     expect(lastSentPayload()).toMatchObject({
       type: 'reconnect-state',
       processing: { outcome: 'snapshot', runningChatIds: ['chat-running'] },
-      queueResults: [
+      controlResults: [
         { chatId: 'chat-1', outcome: 'snapshot' },
         { chatId: 'deleted-chat', outcome: 'not-found' },
         { chatId: 'unavailable-chat', outcome: 'unavailable' },
@@ -245,7 +256,7 @@ describe('chat WebSocket handler', () => {
         ? null
         : { agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' }
     ));
-    mockQueue.readChatQueue.mockImplementation((chatId) => (
+    mockQueue.readChatExecutionControl.mockImplementation((chatId) => (
       chatId === 'unavailable-chat'
         ? Promise.reject(new Error('disk unavailable'))
         : Promise.resolve(storedQueue())
@@ -254,14 +265,14 @@ describe('chat WebSocket handler', () => {
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-processing-unavailable',
-      queueChatIds: ['chat-1', 'deleted-chat', 'unavailable-chat'],
+      controlChatIds: ['chat-1', 'deleted-chat', 'unavailable-chat'],
     });
 
     expect(lastSentPayload()).toMatchObject({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-processing-unavailable',
       processing: { outcome: 'unavailable' },
-      queueResults: [
+      controlResults: [
         { chatId: 'chat-1', outcome: 'snapshot' },
         { chatId: 'deleted-chat', outcome: 'not-found' },
         { chatId: 'unavailable-chat', outcome: 'unavailable' },
@@ -273,12 +284,12 @@ describe('chat WebSocket handler', () => {
     const heldQueue = deferred();
     let runningChatIds = ['chat-before'];
     mockAgents.getRunningChatIdsSnapshot.mockImplementation(() => runningChatIds);
-    mockQueue.readChatQueue.mockReturnValue(heldQueue.promise);
+    mockQueue.readChatExecutionControl.mockReturnValue(heldQueue.promise);
 
     const response = chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-late-capture',
-      queueChatIds: ['chat-1'],
+      controlChatIds: ['chat-1'],
     });
     await Promise.resolve();
     expect(mockAgents.getRunningChatIdsSnapshot).not.toHaveBeenCalled();
@@ -301,7 +312,7 @@ describe('chat WebSocket handler', () => {
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-failed',
-      queueChatIds: ['chat-1'],
+      controlChatIds: ['chat-1'],
     });
 
     expect(lastSentPayload()).toEqual({
@@ -321,7 +332,7 @@ describe('chat WebSocket handler', () => {
 
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
-      queueChatIds: ['chat-1'],
+      controlChatIds: ['chat-1'],
     });
 
     expect(lastSentPayload()).toEqual({

@@ -20,7 +20,18 @@ export class SpaDriver {
   }
 
   async open(): Promise<void> {
-    const response = await this.#page.goto(this.#integration.garcon.baseUrl, {
+    await this.#openUrl(this.#integration.garcon.baseUrl);
+  }
+
+  async openChat(chatId: string): Promise<void> {
+    await this.#openUrl(
+      `${this.#integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+    );
+    await this.waitForSelectedChat(chatId);
+  }
+
+  async #openUrl(url: string): Promise<void> {
+    const response = await this.#page.goto(url, {
       // Lightpanda 0.3.5 executes the document but does not consistently report
       // DOMContentLoaded over CDP. The rendered control is the readiness boundary.
       waitUntil: [],
@@ -378,6 +389,15 @@ export class SpaDriver {
       (expected) => document.body.innerText.includes(expected),
       { timeout },
       text,
+    );
+  }
+
+  async waitForAriaLabel(label: string, timeout = 20_000): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => [...document.querySelectorAll('[aria-label]')].some((element) =>
+        element.getAttribute('aria-label') === expected),
+      { timeout },
+      label,
     );
   }
 

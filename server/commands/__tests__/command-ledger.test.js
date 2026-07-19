@@ -62,6 +62,41 @@ describe('CommandLedger', () => {
     });
   });
 
+  it('lists only retained queue receipt identities for one chat', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const create = await ledger.accept({
+      commandType: 'queue-entry-create',
+      chatId: 'chat-1',
+      clientRequestId: 'queue-create',
+      entryId: 'entry-1',
+      payload: { content: 'queued' },
+    });
+    const active = await ledger.accept({
+      commandType: 'active-input',
+      chatId: 'chat-1',
+      clientRequestId: 'active-input',
+      entryId: 'entry-2',
+      payload: { content: 'active' },
+    });
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'direct',
+      payload: { command: 'direct' },
+    });
+    await ledger.accept({
+      commandType: 'queue-entry-delete',
+      chatId: 'chat-2',
+      clientRequestId: 'other-chat',
+      entryId: 'entry-3',
+      payload: { entryId: 'entry-3' },
+    });
+
+    expect(await ledger.listRetainedQueueReceiptKeys('chat-1')).toEqual(
+      new Set([create.record.key, active.record.key]),
+    );
+  });
+
   it('treats reordered equivalent payloads as duplicates', async () => {
     const ledger = new CommandLedger(workspaceDir);
     await ledger.accept({
@@ -162,6 +197,64 @@ describe('CommandLedger', () => {
     await expect(third.listPendingInputRecoveries()).resolves.toEqual([]);
   });
 
+  it('recovers restart-interrupted session controls without creating input recovery', async () => {
+    const first = new CommandLedger(workspaceDir);
+    const stop = await first.accept({
+      commandType: 'agent-stop',
+      chatId: 'chat-1',
+      clientRequestId: 'req-stop',
+      payload: { chatId: 'chat-1' },
+    });
+    await first.accept({
+      commandType: 'agent-interrupt-and-send',
+      chatId: 'chat-2',
+      clientRequestId: 'req-interrupt',
+      payload: { chatId: 'chat-2' },
+    });
+
+    const restarted = new CommandLedger(workspaceDir);
+    const controls = await restarted.listRestartInterruptedSessionControls();
+    expect(controls).toHaveLength(2);
+    expect(controls[0]).toMatchObject({
+        key: stop.record.key,
+        commandType: 'agent-stop',
+        status: 'failed',
+        errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      });
+    expect(controls[0]).not.toHaveProperty('pendingInputRecovery');
+    expect(controls[1]).toMatchObject({
+        commandType: 'agent-interrupt-and-send',
+        status: 'failed',
+        errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      });
+    expect(controls[1]).not.toHaveProperty('pendingInputRecovery');
+    expect(await restarted.listPendingInputRecoveries()).toEqual([]);
+
+    await expect(restarted.settleRestartInterruptedSessionControl(stop.record.key)).resolves.toBe(true);
+    const settled = await restarted.getRecord(stop.record.key);
+    expect(settled).toMatchObject({ status: 'finished' });
+    expect(settled).not.toHaveProperty('error');
+    expect(settled).not.toHaveProperty('errorCode');
+  });
+
+  it('fails a permission decision that was live across restart', async () => {
+    const first = new CommandLedger(workspaceDir);
+    const permission = await first.accept({
+      commandType: 'permission-decision',
+      chatId: 'chat-1',
+      clientRequestId: 'req-permission',
+      payload: { permissionRequestId: 'permission-1', allow: true },
+    });
+
+    const restarted = new CommandLedger(workspaceDir);
+    const record = await restarted.getRecord(permission.record.key);
+    expect(record).toMatchObject({
+      status: 'failed',
+      errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+    });
+    expect(record).not.toHaveProperty('pendingInputRecovery');
+  });
+
   it('retains interrupted fork preparation until startup compensation settles it', async () => {
     const first = new CommandLedger(workspaceDir);
     const accepted = await first.accept({
@@ -258,7 +351,7 @@ describe('CommandLedger', () => {
     );
   });
 
-  it('does not trim a restart-interrupted execution tombstone behind a full recovery backlog', async () => {
+  it('trims a settled restart-interrupted execution tombstone behind a full recovery backlog', async () => {
     const recoveries = Array.from({ length: 1000 }, (_, index) => ({
       ...makeLedgerRecord(index),
       status: 'failed',
@@ -280,20 +373,8 @@ describe('CommandLedger', () => {
     expect(accepted.kind).toBe('accepted');
 
     const restarted = new CommandLedger(workspaceDir);
-    const duplicate = await restarted.accept({
-      commandType: 'agent-compact',
-      chatId: 'chat-new',
-      clientRequestId: 'req-compact',
-      payload: { chatId: 'chat-new' },
-    });
-
-    expect(duplicate).toMatchObject({
-      kind: 'duplicate',
-      record: {
-        status: 'failed',
-        errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
-      },
-    });
+    await restarted.listPendingInputRecoveries();
+    expect(await restarted.getRecord(accepted.record.key)).toBeNull();
   });
 
   it('does not evict an in-flight command under capacity pressure', async () => {
@@ -345,6 +426,35 @@ describe('CommandLedger', () => {
         pendingInputRecovery: 'required',
       }),
     ]);
+  });
+
+  it('migrates a legacy scheduled queue create to a terminal command', async () => {
+    const first = new CommandLedger(workspaceDir);
+    const accepted = await first.accept({
+      commandType: 'queue-entry-create',
+      chatId: 'chat-1',
+      clientRequestId: 'req-queued',
+      entryId: 'entry-queued',
+      payload: { chatId: 'chat-1', content: 'queued successor' },
+    });
+    await first.update(accepted.record.key, { status: 'scheduled', entryId: 'entry-queued' });
+
+    const restarted = new CommandLedger(workspaceDir);
+
+    await expect(restarted.listPendingInputRecoveries()).resolves.toEqual([]);
+    await expect(restarted.accept({
+      commandType: 'queue-entry-create',
+      chatId: 'chat-1',
+      clientRequestId: 'req-queued',
+      entryId: 'entry-queued',
+      payload: { chatId: 'chat-1', content: 'queued successor' },
+    })).resolves.toMatchObject({
+      kind: 'duplicate',
+      record: {
+        status: 'finished',
+        entryId: 'entry-queued',
+      },
+    });
   });
 
   it('returns conflict when a clientRequestId is reused for different payload', async () => {
@@ -525,6 +635,50 @@ describe('CommandLedger', () => {
     expect(persisted.records).toEqual([
       expect.objectContaining({ status: 'failed', pendingInputRecovery: 'settled' }),
     ]);
+  });
+
+  it('settles only the exact queued active-input handoff', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const accepted = await ledger.accept({
+      commandType: 'active-input',
+      chatId: 'chat-1',
+      clientRequestId: 'req-handoff',
+      entryId: 'entry-handoff',
+      payload: { content: 'queued fallback' },
+    });
+    await ledger.update(accepted.record.key, {
+      status: 'failed',
+      error: 'Server restarted before command completion',
+      errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      pendingInputRecovery: 'required',
+    });
+
+    await expect(
+      ledger.settleQueuedInputHandoff(accepted.record.key, 'entry-other'),
+    ).resolves.toBe(false);
+    expect(await ledger.listPendingInputRecoveries()).toEqual([
+      expect.objectContaining({
+        key: accepted.record.key,
+        entryId: 'entry-handoff',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+
+    await expect(
+      ledger.settleQueuedInputHandoff(accepted.record.key, 'entry-handoff'),
+    ).resolves.toBe(true);
+
+    const persisted = JSON.parse(await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8'));
+    expect(persisted.records).toEqual([
+      expect.objectContaining({
+        key: accepted.record.key,
+        status: 'finished',
+        entryId: 'entry-handoff',
+        pendingInputRecovery: 'settled',
+      }),
+    ]);
+    expect(persisted.records[0]).not.toHaveProperty('error');
+    expect(persisted.records[0]).not.toHaveProperty('errorCode');
   });
 
   it('does not retain a command in memory after its durable write fails', async () => {

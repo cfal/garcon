@@ -132,6 +132,17 @@ describe('PendingUserInputService', () => {
     expect(cleared).toEqual([]);
   });
 
+  it('marks an accepted input unconfirmed without clearing the overlay', async () => {
+    const service = new PendingUserInputService(createReader());
+    await service.register('chat-1', 'possibly delivered', { clientRequestId: 'req-1' });
+
+    expect(service.markUnconfirmed('chat-1', 'req-1')).toBe(true);
+    expect(service.listForChat('chat-1')).toMatchObject([{
+      clientRequestId: 'req-1',
+      deliveryStatus: 'unconfirmed',
+    }]);
+  });
+
   it('omits attachment bytes from repeatable transport snapshots', async () => {
     const service = new PendingUserInputService(createReader());
     await service.register('chat-1', 'with image', {

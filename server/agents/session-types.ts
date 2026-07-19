@@ -142,4 +142,5 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   commandType?: AgentExecutionCommandType;
   executionAdmission?: AgentExecutionAdmission;
   integrationEndpoint?: AgentEndpointSelection | null;
+  directHistoryRecovery?: 'allow-empty';
 };

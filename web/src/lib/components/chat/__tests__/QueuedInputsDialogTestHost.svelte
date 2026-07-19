@@ -2,28 +2,44 @@
 	import { untrack } from 'svelte';
 	import QueuedInputsDialog from '../QueuedInputsDialog.svelte';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte';
-	import type { QueueEntry, QueueState } from '$lib/types/chat';
+	import type { ChatQueueState, QueueEntry, RecoveredInputContinuation } from '$lib/types/chat';
 
 	interface Props {
-		initialQueue: QueueState;
+		initialQueue: ChatQueueState;
+		initialContinuation: RecoveredInputContinuation | null;
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 		onDelete: (entryId: string) => Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
+		onContinue: (continuationId: string) => Promise<void>;
 	}
 
-	let { initialQueue, onCreate, onReplace, onDelete, onPause, onResume }: Props = $props();
+	let {
+		initialQueue,
+		initialContinuation,
+		onCreate,
+		onReplace,
+		onDelete,
+		onPause,
+		onResume,
+		onContinue,
+	}: Props = $props();
 	let open = $state(true);
-	let queue = $state<QueueState>(untrack(() => initialQueue));
+	let queue = $state<ChatQueueState>(untrack(() => initialQueue));
+	let continuation = $state<RecoveredInputContinuation | null>(untrack(() => initialContinuation));
 	const editor = new QueuedInputEditorState({
 		get queue() {
 			return queue;
 		},
 	});
 
-	export function setQueue(nextQueue: QueueState): void {
+	export function setQueue(nextQueue: ChatQueueState): void {
 		queue = nextQueue;
+	}
+
+	export function setContinuation(nextContinuation: RecoveredInputContinuation | null): void {
+		continuation = nextContinuation;
 	}
 
 	export function beginEdit(entry: QueueEntry): void {
@@ -44,12 +60,14 @@
 	<QueuedInputsDialog
 		open={true}
 		{queue}
+		{continuation}
 		{editor}
 		{onCreate}
 		{onReplace}
 		{onDelete}
 		{onPause}
 		{onResume}
+		{onContinue}
 		onClose={closeDialog}
 	/>
 {/if}

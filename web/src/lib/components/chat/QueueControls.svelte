@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { QueueEntry, QueueState } from '$lib/types/chat';
+	import type { ChatQueueState, QueueEntry, RecoveredInputContinuation } from '$lib/types/chat';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		ChevronLeft,
@@ -20,12 +20,14 @@
 
 	interface Props {
 		chatId: string | null;
-		queue: QueueState | null;
+		queue: ChatQueueState | null;
+		continuation: RecoveredInputContinuation | null;
 		canInterrupt?: boolean;
 		onInterrupt?: () => void | Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
-		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
+		onContinue: (continuationId: string) => Promise<void>;
+		onQueueControlError: (action: 'pause' | 'resume' | 'continue', error: unknown) => void;
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
@@ -34,10 +36,12 @@
 	let {
 		chatId,
 		queue,
+		continuation,
 		canInterrupt = false,
 		onInterrupt,
 		onPause,
 		onResume,
+		onContinue,
 		onQueueControlError,
 		onEdit,
 		onOpenManager,
@@ -64,10 +68,12 @@
 	const canBrowseNext = $derived(previewIndex >= 0 && previewIndex < queuedEntryCount - 1);
 	const showQueueManager = $derived(queuedEntryCount > 1);
 	const showInterruptAction = $derived(
-		previewIndex === 0 && !queue?.pause && canInterrupt && Boolean(onInterrupt),
+		previewIndex === 0 && !queue?.pause && !continuation && canInterrupt && Boolean(onInterrupt),
 	);
 	let deletingEntryIds = $state<Set<string>>(new Set());
-	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting'>('idle');
+	let dispatchMutation = $state<
+		'idle' | 'pausing' | 'resuming' | 'continuing' | 'interrupting'
+	>('idle');
 	const queueActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
 		const neutralButtonClass =
@@ -86,6 +92,22 @@
 				priority: 0,
 				showLabel: true,
 				buttonClass: neutralButtonClass,
+			});
+		}
+
+		if (continuation) {
+			actions.push({
+				id: 'continue-queue',
+				label: m.chat_queue_continue(),
+				icon: dispatchMutation === 'continuing' ? Loader2 : Play,
+				iconClass: dispatchMutation === 'continuing' ? 'animate-spin' : undefined,
+				onclick: () => void mutateDispatch('continuing', () => onContinue(continuation.id)),
+				disabled: dispatchMutation !== 'idle',
+				busy: dispatchMutation === 'continuing',
+				priority: 0,
+				showLabel: true,
+				buttonClass:
+					'rounded-lg px-2.5 text-sm text-status-warning-muted-foreground hover:bg-accent',
 			});
 		}
 
@@ -163,8 +185,11 @@
 		try {
 			await action();
 		} catch (error) {
-			if (mutation === 'pausing' || mutation === 'resuming') {
-				onQueueControlError(mutation === 'pausing' ? 'pause' : 'resume', error);
+			if (mutation === 'pausing' || mutation === 'resuming' || mutation === 'continuing') {
+				onQueueControlError(
+					mutation === 'pausing' ? 'pause' : mutation === 'resuming' ? 'resume' : 'continue',
+					error,
+				);
 			}
 		} finally {
 			if (dispatchMutation === mutation) dispatchMutation = 'idle';
@@ -257,7 +282,11 @@
 					<span class="text-xs text-muted-foreground">{m.chat_queue_single_message()}</span>
 				{/if}
 
-				{#if queue?.pause}
+				{#if continuation}
+					<span class="text-xs font-medium text-status-warning-muted-foreground">
+						{m.chat_queue_needs_attention()}
+					</span>
+				{:else if queue?.pause}
 					{#if queue.pause.kind === 'manual'}
 						<span class="text-xs font-medium text-queue-foreground">
 							{m.chat_queue_paused()}

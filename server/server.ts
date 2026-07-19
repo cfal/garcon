@@ -25,7 +25,10 @@ import { migrateWorkspaceChatIds } from './chats/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
-import { QueueManager, queueDrainOptions } from './queue.js';
+import {
+  ChatExecutionCoordinator,
+  queueDrainOptions,
+} from './chat-execution/chat-execution-coordinator.js';
 import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
@@ -329,6 +332,9 @@ export async function startServer(): Promise<void> {
       },
     };
     const chatViewPages = {
+      isChatActive(chatId: string) {
+        return chatExecutionActivity.isActive(chatId);
+      },
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
         return chatViews.getOrCreatePage(
           chatId,
@@ -364,7 +370,7 @@ export async function startServer(): Promise<void> {
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
 
-    const queue = new QueueManager(
+    const queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
       pendingInputs,
@@ -374,6 +380,17 @@ export async function startServer(): Promise<void> {
     );
     chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
+    const interruptedSessionControls = await commandLedger.listRestartInterruptedSessionControls();
+    for (const record of interruptedSessionControls) {
+      if (record.commandType === 'agent-stop' && chatRegistry.getChat(record.chatId)) {
+        await queue.pauseChatQueue(record.chatId);
+      }
+      const settled = await commandLedger.settleRestartInterruptedSessionControl(record.key);
+      if (!settled) {
+        throw new Error(`Could not settle interrupted ${record.commandType} for ${record.chatId}`);
+      }
+      logger.warn(`${record.commandType}: recovered interrupted command for ${record.chatId}`);
+    }
     const forkPreparations = await commandLedger.listForkPreparationsPendingRecovery();
     for (const record of forkPreparations) {
       const preparation = record.forkPreparation!;
@@ -396,7 +413,11 @@ export async function startServer(): Promise<void> {
         ledger: commandLedger,
         pendingInputs,
         nativeSnapshots: chatViewPages,
+        queuedInputHandoffs: queue,
         chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
+        onRecoveredChatSettled: async (chatId) => {
+          await queue.dropRecoveredInputContinuation(chatId);
+        },
       },
       (error) => {
         logger.warn('pending-inputs: failed to settle durable recovery:', errorMessage(error));
@@ -499,9 +520,10 @@ export async function startServer(): Promise<void> {
         loadNativeMessages,
         searchIndex: chatSearch,
       }),
-      recoverQueues: () => queue.recoverStaleChatQueues(
+      recoverControls: () => queue.recoverChatExecutionControls(
         new Set(pendingRecoveryResult.restoredChatIds),
       ),
+      activateRecoveredSettlement: () => pendingRecovery.activateRecoveredChatSettlement(),
       startScheduledPrompts: () => scheduledPrompts.start(),
     });
 

@@ -1,4 +1,4 @@
-import { compactChat, forkChat, forkRunChat } from '$lib/api/chats.js';
+import { compactChat, forkChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -17,6 +17,9 @@ import {
 	errorDetail,
 	prepareChatImages,
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
+import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
+import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
+import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
 
 interface SlashCommandSessions {
@@ -76,7 +79,10 @@ export interface ConversationSlashCommandDeps {
 export class ConversationSlashCommandService {
 	readonly #scheduleInFlight = new Set<string>();
 
-	constructor(private readonly deps: ConversationSlashCommandDeps) {}
+	constructor(
+		private readonly deps: ConversationSlashCommandDeps,
+		private readonly acceptedInputs = new AcceptedInputSubmissionService(),
+	) {}
 
 	async submitScheduleInCommand(
 		chatId: string,
@@ -84,22 +90,22 @@ export class ConversationSlashCommandService {
 		command: ScheduleInCommandParseResult,
 		images: File[],
 		ownsComposer: boolean,
-	): Promise<void> {
+	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (command.kind === 'invalid') {
 			deps.chatState.appendLocalNotice('error', scheduleInErrorMessage(command.error));
-			return;
+			return 'rejected';
 		}
-		if (command.kind !== 'valid') return;
+		if (command.kind !== 'valid') return 'no-op';
 		if (chat.status === 'draft') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_schedule_in_draft());
-			return;
+			return 'rejected';
 		}
 		if (images.length > 0) {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_schedule_in_attachments());
-			return;
+			return 'rejected';
 		}
-		if (this.#scheduleInFlight.has(chatId)) return;
+		if (this.#scheduleInFlight.has(chatId)) return 'no-op';
 
 		this.#scheduleInFlight.add(chatId);
 		const previousText = deps.composerState.inputText;
@@ -120,6 +126,7 @@ export class ConversationSlashCommandService {
 				deps.chatState.isUserScrolledUp = false;
 				deps.scrollToBottom();
 			}
+			return 'accepted';
 		} catch (error) {
 			if (ownsComposer && deps.sessions.selectedChatId === chatId) {
 				deps.composerState.inputText = previousText;
@@ -131,6 +138,7 @@ export class ConversationSlashCommandService {
 					m.chat_notice_schedule_in_failed({ detail: errorDetail(error) }),
 				);
 			}
+			return 'rejected';
 		} finally {
 			this.#scheduleInFlight.delete(chatId);
 		}
@@ -142,19 +150,19 @@ export class ConversationSlashCommandService {
 		title: string,
 		images: File[],
 		clearComposer: boolean,
-	): Promise<void> {
+	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (!title) {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_rename_title_required());
-			return;
+			return 'rejected';
 		}
 		if (chat.status !== 'running') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_rename_draft());
-			return;
+			return 'rejected';
 		}
 		if (images.length > 0) {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_rename_attachments());
-			return;
+			return 'rejected';
 		}
 
 		const previousText = deps.composerState.inputText;
@@ -166,6 +174,7 @@ export class ConversationSlashCommandService {
 			deps.composerState.images = previousImages;
 			deps.composerState.saveDraft(chatId);
 		}
+		return renamed ? 'accepted' : 'rejected';
 	}
 
 	async submitCompactCommand(
@@ -173,11 +182,11 @@ export class ConversationSlashCommandService {
 		chat: ChatSessionRecord,
 		instructions: string,
 		clearComposer: boolean,
-	): Promise<void> {
+	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (chat.status !== 'running') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_compact_draft());
-			return;
+			return 'rejected';
 		}
 
 		const previousText = deps.composerState.inputText;
@@ -189,6 +198,7 @@ export class ConversationSlashCommandService {
 				clientRequestId: createClientCommandId(),
 				instructions: instructions || undefined,
 			});
+			return 'accepted';
 		} catch (error) {
 			if (clearComposer) {
 				deps.composerState.inputText = previousText;
@@ -198,6 +208,7 @@ export class ConversationSlashCommandService {
 				'error',
 				m.chat_notice_failed_compact({ detail: errorDetail(error) }),
 			);
+			return 'rejected';
 		}
 	}
 
@@ -207,11 +218,11 @@ export class ConversationSlashCommandService {
 		message: string,
 		images: File[],
 		clearComposer: boolean,
-	): Promise<void> {
+	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (sourceChat.status !== 'running') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
-			return;
+			return 'rejected';
 		}
 
 		const previousText = deps.composerState.inputText;
@@ -221,8 +232,7 @@ export class ConversationSlashCommandService {
 		if (clearComposer) deps.composerState.clearAfterSubmit(sourceChatId);
 
 		if (!message.trim()) {
-			await this.#submitForkOnlyCommand(sourceChatId, previousText, previousImages, clearComposer);
-			return;
+			return this.#submitForkOnlyCommand(sourceChatId, previousText, previousImages, clearComposer);
 		}
 
 		let imagePayload: ChatImage[] = [];
@@ -235,7 +245,7 @@ export class ConversationSlashCommandService {
 					'error',
 					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
 				);
-				return;
+				return 'rejected';
 			}
 		}
 
@@ -246,34 +256,40 @@ export class ConversationSlashCommandService {
 			model,
 			sourceChat.modelEndpointId,
 		);
+		const submission = this.acceptedInputs.fork({
+			sourceChatId,
+			chatId: forkChatId,
+			command: message.trim(),
+			permissionMode: sourceChat.permissionMode,
+			thinkingMode: sourceChat.thinkingMode,
+			agentSettings: sourceChat.agentSettings,
+			images: imagePayload.length > 0 ? imagePayload : undefined,
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
 		try {
-			const response = await forkRunChat({
-				clientRequestId: createClientCommandId(),
-				clientMessageId: createClientCommandId(),
-				sourceChatId,
-				chatId: forkChatId,
-				command: message.trim(),
-				permissionMode: sourceChat.permissionMode,
-				thinkingMode: sourceChat.thinkingMode,
-				agentSettings: sourceChat.agentSettings,
-				images: imagePayload.length > 0 ? imagePayload : undefined,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
+			const response = await submission.submit();
 			deps.sessions.upsertServerChat(response.chat);
 			deps.sessions.setSelectedChatId(response.chat.id);
 			deps.navigation.navigateToChat?.(response.chat.id);
 			if (response.status === 'accepted') {
 				deps.lifecycle.beginTurn(response.chat.id);
 			}
+			return 'accepted';
 		} catch (error) {
-			this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+			if (!outcomeUnknown) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+			}
 			deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
+				outcomeUnknown
+					? m.chat_notice_fork_outcome_unconfirmed()
+					: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
+			return outcomeUnknown ? 'unknown' : 'rejected';
 		}
 	}
 
@@ -310,15 +326,17 @@ export class ConversationSlashCommandService {
 		previousText: string,
 		previousImages: File[],
 		restoreComposer: boolean,
-	): Promise<void> {
+	): Promise<ConversationSubmissionOutcome> {
 		try {
 			await this.#performForkOnly(sourceChatId);
+			return 'accepted';
 		} catch (error) {
 			this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
 			this.deps.chatState.appendLocalNotice(
 				'error',
 				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
+			return 'rejected';
 		}
 	}
 

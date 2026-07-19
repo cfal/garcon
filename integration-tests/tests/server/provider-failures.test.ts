@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type {
   AgentRunFailedMessage,
-  QueueStateUpdatedMessage,
+  ChatExecutionControlUpdatedMessage,
 } from '../../../common/ws-events.js';
 import { countUserContent, userMessages } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -151,9 +151,9 @@ describe('provider failures', () => {
       );
       expect(failed.error).toContain('500');
       await fixture.client.waitForEvent(
-        (event): event is QueueStateUpdatedMessage => event.type === 'queue-state-updated'
+        (event): event is ChatExecutionControlUpdatedMessage => event.type === 'chat-execution-control-updated'
           && event.chatId === chatId
-          && event.queue.pause?.kind === 'queued-turn-failed',
+          && event.control.queue.pause?.kind === 'queued-turn-failed',
         'queued failure pause',
         { afterIndex: failureCursor },
       );
@@ -171,9 +171,9 @@ describe('provider failures', () => {
       expect(failedPending.input.turnId).toBe(failed.turnId);
       expect(failedPending.input.clientMessageId).toBeString();
       const pauseEventIndex = failureEvents.findIndex((event) => (
-        event.type === 'queue-state-updated'
+        event.type === 'chat-execution-control-updated'
         && event.chatId === chatId
-        && event.queue.pause?.kind === 'queued-turn-failed'
+        && event.control.queue.pause?.kind === 'queued-turn-failed'
       ));
       const terminalEventIndex = failureEvents.findIndex((event) => (
         event.type === 'agent-run-failed' && event.chatId === chatId
@@ -181,7 +181,7 @@ describe('provider failures', () => {
       expect(pauseEventIndex).toBeGreaterThanOrEqual(0);
       expect(terminalEventIndex).toBeGreaterThan(pauseEventIndex);
       expect(failed.clientRequestId).toBeString();
-      const queue = await fixture.client.getQueue(chatId);
+      const queue = (await fixture.client.getExecutionControl(chatId)).queue;
       expect(queue.pause).toMatchObject({
         kind: 'queued-turn-failed',
         entryId: queuedB.entryId,
@@ -201,15 +201,15 @@ describe('provider failures', () => {
         content: 'failure-b-edited',
         expectedRevision: failedEntry.revision,
       });
-      const editedEntry = replaced.queue.entries.find((entry) => entry.id === failedEntry.id);
+      const editedEntry = replaced.control.queue.entries.find((entry) => entry.id === failedEntry.id);
       expect(editedEntry).toMatchObject({
         content: 'failure-b-edited',
         revision: failedEntry.revision + 1,
       });
 
-      const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-b-edited' });
-      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-c' });
-      await fixture.client.resumeQueue(chatId, replaced.queue.pause!.id);
+		const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-b-edited' });
+		const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'failure-c' });
+		await fixture.client.resumeQueue(chatId, replaced.control.queue.pause!.id);
       const editedRequest = await heldEdited.received;
       expect(editedRequest.body.messages.map((message) => message.content)).toEqual([
         'failure-a',
@@ -233,8 +233,8 @@ describe('provider failures', () => {
         afterIndex: completionCursor,
       });
 
-      expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
-      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+		expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
+		expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'failure-a',
         'failure-b',
         'failure-b-edited',

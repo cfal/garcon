@@ -1680,6 +1680,24 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.drafts.reviewComments).toHaveLength(0);
 			expect(wb.drafts.reviewSummary).toBe('');
 		});
+
+		it('keeps the review draft when chat submission is rejected', async () => {
+			wb.drafts.addDraftComment({
+				filePath: 'a.ts',
+				side: 'after',
+				line: 1,
+				body: 'test',
+				severity: 'note',
+			});
+			wb.drafts.reviewSummary = 'summary';
+			const send = vi.fn().mockResolvedValue(false);
+
+			const result = await wb.drafts.finalizeReviewToAgent(send);
+
+			expect(result).toBe(false);
+			expect(wb.drafts.reviewComments).toHaveLength(1);
+			expect(wb.drafts.reviewSummary).toBe('summary');
+		});
 	});
 
 	describe('tree pane width', () => {

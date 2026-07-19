@@ -31,7 +31,7 @@ function createWiringFixture(overrides = {}) {
     settleTurn: mock(() => undefined),
   };
   const queue = {
-    onQueueUpdated: noOpSubscription,
+    onExecutionControlUpdated: noOpSubscription,
     onSessionStopRequested: noOpSubscription,
     onDispatching: noOpSubscription,
     onChatMessages: noOpSubscription,
@@ -201,7 +201,7 @@ describe('server event wiring', () => {
       settleTurn: mock(() => undefined),
     };
     const queue = {
-      onQueueUpdated: mock(() => undefined),
+      onExecutionControlUpdated: mock(() => undefined),
       onSessionStopRequested: mock((callback) => { queueListeners.stopRequested = callback; }),
       onDispatching: mock(() => undefined),
       onChatMessages: mock(() => undefined),
@@ -302,7 +302,7 @@ describe('server event wiring', () => {
       settleTurn: mock(() => undefined),
     };
     const queue = {
-      onQueueUpdated: mock(() => undefined),
+      onExecutionControlUpdated: mock(() => undefined),
       onSessionStopRequested: mock((callback) => { queueListeners.stopRequested = callback; }),
       onDispatching: mock(() => undefined),
       onChatMessages: mock(() => undefined),

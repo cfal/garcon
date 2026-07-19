@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { UserMessage } from '../../common/chat-types.js';
-import { QueueManager } from '../queue.js';
+import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
 import { ChatExecutionActivity } from '../chats/chat-execution-activity.js';
 import { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { ChatRunningError } from '../chats/errors.js';
@@ -68,7 +68,7 @@ describe('queue and transcript stability', () => {
     const runtime = new HeldDirectRuntime();
     let agentSessionId = null;
     try {
-      const queue = new QueueManager(
+      const queue = new ChatExecutionCoordinator(
         workspaceDir,
         {
           runAgentTurn: mock(async () => undefined),
@@ -84,6 +84,7 @@ describe('queue and transcript stability', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         { appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })) },
         () => ({}),
@@ -166,7 +167,7 @@ describe('queue and transcript stability', () => {
       const coordinator = new UserAbortLifecycleCoordinator(pendingInputs, {
         terminalTimeoutMs: 60_000,
       });
-      const queue = new QueueManager(
+      const queue = new ChatExecutionCoordinator(
         workspaceDir,
         {
           runAgentTurn: mock(async (_chatId, content, options) => {
@@ -253,6 +254,7 @@ describe('queue and transcript stability', () => {
         }),
         discard: pendingInputs.discard.bind(pendingInputs),
         markFailed: pendingInputs.markFailed.bind(pendingInputs),
+        markUnconfirmed: pendingInputs.markUnconfirmed.bind(pendingInputs),
       };
       const coordinator = new UserAbortLifecycleCoordinator(pendingInputs, {
         terminalTimeoutMs: 0,
@@ -271,7 +273,7 @@ describe('queue and transcript stability', () => {
         isChatRunning: mock(() => false),
         waitUntilTurnAbortable: mock(() => runtimeAbortable.promise),
       };
-      const queue = new QueueManager(
+      const queue = new ChatExecutionCoordinator(
         workspaceDir,
         turnRunner,
         pendingPort,
@@ -313,7 +315,7 @@ describe('queue and transcript stability', () => {
         content: 'preparing',
         deliveryStatus: 'unconfirmed',
       }]);
-      expect(await queue.readChatQueue(chatId)).toMatchObject({
+      expect(await queue.readChatExecutionControl(chatId)).toMatchObject({
         entries: [{ content: 'tail', status: 'queued' }],
         pause: { kind: 'manual' },
       });
@@ -339,7 +341,7 @@ describe('queue and transcript stability', () => {
         ),
       });
       let turnCount = 0;
-      const queue = new QueueManager(
+      const queue = new ChatExecutionCoordinator(
         workspaceDir,
         {
           runAgentTurn: mock(async (_chatId, content, options) => {
@@ -398,7 +400,7 @@ describe('queue and transcript stability', () => {
       await drain;
 
       expect(activity.isActive(chatId)).toBe(false);
-      expect((await queue.readChatQueue(chatId)).entries).toEqual([]);
+      expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([]);
       expect(pendingInputs.listForChat(chatId)).toEqual([]);
       expect(views.readPage(chatId, 20).messages.map((entry) => entry.message.content)).toEqual([
         'first',
@@ -434,6 +436,7 @@ describe('queue and transcript stability', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),
@@ -441,7 +444,7 @@ describe('queue and transcript stability', () => {
         () => ({}),
         () => true,
       ];
-      const queue = new QueueManager(workspaceDir, ...queueDeps);
+      const queue = new ChatExecutionCoordinator(workspaceDir, ...queueDeps);
       const created = await queue.createChatQueueEntry(chatId, 'survive restart');
       await queue.popNextChat(chatId);
 
@@ -456,9 +459,9 @@ describe('queue and transcript stability', () => {
       expect(accepted.kind).toBe('accepted');
       await ledger.update(accepted.record.key, { status: 'scheduled' });
 
-      const restartedQueue = new QueueManager(workspaceDir, ...queueDeps);
-      await restartedQueue.recoverStaleChatQueues();
-      const recoveredQueue = await restartedQueue.readChatQueue(chatId);
+      const restartedQueue = new ChatExecutionCoordinator(workspaceDir, ...queueDeps);
+      await restartedQueue.recoverChatExecutionControls();
+      const recoveredQueue = await restartedQueue.readChatExecutionControl(chatId);
       expect(recoveredQueue.entries).toMatchObject([{
         id: created.entry.id,
         content: 'survive restart',

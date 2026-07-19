@@ -10,6 +10,8 @@ import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   AgentStopResponse,
+  ActiveInputCommandRequest,
+  ActiveInputCommandResponse,
   CommandAcceptedResponse,
   ForkChatResponse,
   ForkRunCommandRequest,
@@ -20,6 +22,7 @@ import type {
   QueueEntryDeleteResponse,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
+  RecoveredInputContinueRequest,
   StartChatCommandRequest,
   StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
@@ -30,9 +33,18 @@ import type {
   MarkChatsReadResponse,
 } from '../../common/chat-list.js';
 import type { ChatSearchRequest, ChatSearchResponse } from '../../common/chat-search.js';
+import {
+  normalizeScheduledPromptsSnapshot,
+  type CreateScheduledPromptRequest,
+  type ScheduledPromptsMutationResponse,
+  type ScheduledPromptsSnapshot,
+} from '../../common/scheduled-prompts.js';
+import {
+  parseChatExecutionControlState,
+	type ChatExecutionControlState,
+} from '../../common/chat-execution-control.js';
 import { parseChatViewMessages, type ChatViewMessage } from '../../common/chat-view.js';
 import { normalizePendingUserInput, type PendingUserInput } from '../../common/pending-user-input.js';
-import { parseQueueState, type QueueState } from '../../common/queue-state.js';
 import type {
   RemoteSettingsSnapshot,
   UpdateRemoteSettingsInput,
@@ -364,6 +376,28 @@ export class GarconTestClient {
     return this.get<ChatListResponse>('/api/v1/chats');
   }
 
+  async getScheduledPrompts(): Promise<ScheduledPromptsSnapshot> {
+    const response = await this.get<unknown>('/api/v1/scheduled-prompts');
+    const snapshot = normalizeScheduledPromptsSnapshot(response);
+    if (!snapshot) throw new Error(`Invalid scheduled prompts response: ${JSON.stringify(response)}`);
+    return snapshot;
+  }
+
+  async createScheduledPrompt(
+    request: CreateScheduledPromptRequest,
+  ): Promise<ScheduledPromptsMutationResponse> {
+    const response = await this.post<unknown>('/api/v1/scheduled-prompts', request);
+    if (!response || typeof response !== 'object' || Array.isArray(response)) {
+      throw new Error(`Invalid scheduled prompt mutation response: ${JSON.stringify(response)}`);
+    }
+    const raw = response as Record<string, unknown>;
+    const snapshot = normalizeScheduledPromptsSnapshot(raw.snapshot);
+    if (raw.success !== true || !snapshot) {
+      throw new Error(`Invalid scheduled prompt mutation response: ${JSON.stringify(response)}`);
+    }
+    return { success: true, snapshot };
+  }
+
   updateSettings(patch: UpdateRemoteSettingsInput): Promise<{
     success: boolean;
     settings: RemoteSettingsSnapshot;
@@ -463,6 +497,10 @@ export class GarconTestClient {
     return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', request);
   }
 
+  sendActiveInput(request: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse> {
+    return this.post<ActiveInputCommandResponse>('/api/v1/chats/active-input', request);
+  }
+
   enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse> {
     return this.enqueue({ chatId, content, clientRequestId: crypto.randomUUID() });
   }
@@ -487,6 +525,10 @@ export class GarconTestClient {
     return this.post<QueueMutationResponse>('/api/v1/chats/queue/clear', { chatId });
   }
 
+  continueRecoveredInput(request: RecoveredInputContinueRequest): Promise<QueueMutationResponse> {
+    return this.post<QueueMutationResponse>('/api/v1/chats/recovered-input/continue', request);
+  }
+
   stopChat(request: AgentStopCommandRequest): Promise<AgentStopResponse> {
     return this.post<AgentStopResponse>('/api/v1/chats/stop', request);
   }
@@ -495,13 +537,13 @@ export class GarconTestClient {
     return this.post<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', request);
   }
 
-  async getQueue(chatId: string): Promise<QueueState> {
+  async getExecutionControl(chatId: string): Promise<ChatExecutionControlState> {
     const response = await this.get<Record<string, unknown>>(
       `/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`,
     );
-    const queue = parseQueueState(response.queue);
-    if (!queue) throw new Error(`Invalid queue response: ${JSON.stringify(response)}`);
-    return queue;
+    const control = parseChatExecutionControlState(response.control);
+    if (!control) throw new Error(`Invalid execution control response: ${JSON.stringify(response)}`);
+    return control;
   }
 
   async getMessages(chatId: string, options: { limit?: number; beforeSeq?: number } = {}): Promise<ChatMessagesPage> {
@@ -546,10 +588,10 @@ export class GarconTestClient {
     );
   }
 
-  async reconnectState(queueChatIds: string[]): Promise<ReconnectStateMessage> {
+  async reconnectState(controlChatIds: string[]): Promise<ReconnectStateMessage> {
     const clientRequestId = crypto.randomUUID();
     const afterIndex = this.markEvents();
-    this.sendWs(new ReconnectStateQueryRequest(clientRequestId, queueChatIds));
+    this.sendWs(new ReconnectStateQueryRequest(clientRequestId, controlChatIds));
     return await this.waitForEvent(
       (message): message is ReconnectStateMessage =>
         message.type === 'reconnect-state' && message.clientRequestId === clientRequestId,
@@ -656,6 +698,35 @@ export class GarconTestClient {
     } finally {
       this.#waiters.delete(waiter);
     }
+  }
+
+  async waitForEventCount<T extends ServerWsMessage>(
+    predicate: (message: ServerWsMessage) => message is T,
+    count: number,
+    description: string,
+    options: { afterIndex?: number; timeoutMs?: number } = {},
+  ): Promise<T[]> {
+    if (!Number.isSafeInteger(count) || count < 1) throw new Error('Event count must be positive.');
+    const deadline = Date.now() + (options.timeoutMs ?? 10_000);
+    const matches: T[] = [];
+    let cursor = options.afterIndex ?? 0;
+
+    while (matches.length < count) {
+      const available = this.#eventRecords.length;
+      for (; cursor < available; cursor += 1) {
+        const message = this.#eventRecords[cursor].parsed;
+        if (predicate(message)) matches.push(message);
+      }
+      if (matches.length >= count) return matches.slice(0, count);
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(`Timed out waiting for ${description}.\n${this.describeEvents()}`);
+      }
+      await this.waitForEvent(predicate, description, { afterIndex: cursor, timeoutMs: remaining });
+    }
+
+    return matches;
   }
 
   get<T>(path: string): Promise<T> {

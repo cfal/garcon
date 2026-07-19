@@ -49,6 +49,7 @@ export interface AgentResumeRequest extends AgentExecutionContext {
   readonly nativeSession: AgentNativeSessionRef | null;
   readonly prompt: string;
   readonly attachments: readonly AgentAttachment[];
+  readonly directHistoryRecovery?: 'allow-empty';
 }
 
 export interface AgentActiveInput extends AgentResumeRequest {

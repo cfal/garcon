@@ -1,6 +1,6 @@
 import { parseChatMessages, type ChatMessage } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
-import { toClientQueueState } from './queue-state.ts';
+import { toClientChatExecutionControlState } from './chat-execution-control-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
@@ -10,7 +10,7 @@ import type { ChatNativeReloader } from './chats/chat-native-reload.js';
 import type { PendingUserInputService } from './chats/pending-user-input-service.js';
 import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
-import type { QueueManager } from './queue.js';
+import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import { commandLedgerKey, type CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
@@ -35,7 +35,7 @@ import {
   ChatReadUpdatedV1Message,
   ChatListRefreshRequestedMessage,
   ChatSessionStoppedMessage,
-  QueueStateUpdatedMessage,
+  ChatExecutionControlUpdatedMessage,
   QueueDispatchingMessage,
   PendingUserInputUpdatedMessage,
   PendingUserInputStatusUpdatedMessage,
@@ -63,7 +63,7 @@ export interface ServerEventWiringDeps {
   agentRegistry: AgentRegistry;
   chatRegistry: ChatRegistry;
   settings: SettingsStore;
-  queue: QueueManager;
+  queue: ChatExecutionCoordinator;
   metadata: MetadataIndex;
   chatViews: ChatViewStore;
   chatNativeReloader: NativeReloaderDep;
@@ -562,9 +562,12 @@ export function wireServerEvents({
     );
   });
 
-  queue.onQueueUpdated((chatId, queueState) => {
+  queue.onExecutionControlUpdated((chatId, controlState) => {
     broadcast(
-      new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)),
+      new ChatExecutionControlUpdatedMessage(
+        chatId,
+        toClientChatExecutionControlState(controlState),
+      ),
     );
   });
   queue.onSessionStopRequested((chatId, stopId, preparingTurn) => {

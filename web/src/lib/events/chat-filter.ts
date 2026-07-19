@@ -17,7 +17,7 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-session-deleted',
 	'chat-processing-updated',
 	'chat-generation-reset',
-	'queue-state-updated',
+	'chat-execution-control-updated',
 	'chat-title-updated',
 	'chat-project-path-updated',
 	'chat-read-updated-v1',

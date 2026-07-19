@@ -10,8 +10,12 @@ import {
 
 vi.mock('$lib/api/chats.js', () => ({
 	compactChat: vi.fn(),
+	createQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
+	runChat: vi.fn(),
+	sendActiveInput: vi.fn(),
+	startChat: vi.fn(),
 }));
 
 vi.mock('$lib/api/scheduled-prompts.js', () => ({
@@ -268,6 +272,56 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('chat-2');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('retries an ambiguous fork response with the same command identity', async () => {
+		const { deps } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkRunChat
+			.mockRejectedValueOnce(new TypeError('connection closed'))
+			.mockResolvedValueOnce({
+				success: true,
+				commandType: 'fork-run',
+				clientRequestId: 'request-1',
+				chatId: 'chat-2',
+				status: 'duplicate',
+				acceptedAt: '2026-07-14T00:00:00.000Z',
+				chat: forked,
+			});
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(mockForkRunChat).toHaveBeenCalledTimes(2);
+		expect(mockForkRunChat.mock.calls[1][0]).toEqual(mockForkRunChat.mock.calls[0][0]);
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('does not restore a fork prompt after two ambiguous outcomes', async () => {
+		const { deps, composerState, appendLocalNotice } = createDeps();
+		mockForkRunChat.mockRejectedValue(new TypeError('connection closed'));
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(mockForkRunChat).toHaveBeenCalledTimes(2);
+		expect(mockForkRunChat.mock.calls[1][0]).toEqual(mockForkRunChat.mock.calls[0][0]);
+		expect(composerState.inputText).toBe('');
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			'Could not confirm whether the fork was created. Check the chat list before trying again.',
+		);
 	});
 
 	it('forks without a message and preserves the requested sequence', async () => {

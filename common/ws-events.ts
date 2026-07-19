@@ -6,8 +6,8 @@ import type {
   PendingUserInputClearReason,
 } from './pending-user-input';
 import { normalizePendingUserInput } from './pending-user-input';
-import type { QueueState } from './queue-state';
-import { parseQueueState } from './queue-state';
+import type { ChatExecutionControlState } from './chat-execution-control';
+import { parseChatExecutionControlState } from './chat-execution-control';
 import type { RemoteSettingsSnapshot } from './settings';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
@@ -132,11 +132,11 @@ export class ChatProcessingUpdatedMessage {
   ) {}
 }
 
-export class QueueStateUpdatedMessage {
-  readonly type = 'queue-state-updated' as const;
+export class ChatExecutionControlUpdatedMessage {
+  readonly type = 'chat-execution-control-updated' as const;
   constructor(
     public chatId: string,
-    public queue: QueueState,
+    public control: ChatExecutionControlState,
   ) {}
 }
 
@@ -149,8 +149,8 @@ export class QueueDispatchingMessage {
   ) {}
 }
 
-export type ReconnectQueueResult =
-  | { chatId: string; outcome: 'snapshot'; queue: QueueState }
+export type ReconnectControlResult =
+  | { chatId: string; outcome: 'snapshot'; control: ChatExecutionControlState }
   | { chatId: string; outcome: 'not-found' }
   | { chatId: string; outcome: 'unavailable' };
 
@@ -162,7 +162,7 @@ export class ReconnectStateMessage {
   readonly type = 'reconnect-state' as const;
   constructor(
     public processing: ReconnectProcessingResult,
-    public queueResults: ReconnectQueueResult[],
+    public controlResults: ReconnectControlResult[],
     public clientRequestId?: string,
   ) {}
 }
@@ -317,7 +317,7 @@ export type ServerWsMessage =
   | ChatProjectPathUpdatedMessage
   | ChatSessionStoppedMessage
   | ChatProcessingUpdatedMessage
-  | QueueStateUpdatedMessage
+  | ChatExecutionControlUpdatedMessage
   | QueueDispatchingMessage
   | ReconnectStateMessage
   | PendingUserInputUpdatedMessage
@@ -350,9 +350,9 @@ function nonNegativeInt(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
 }
 
-function reconnectQueueResults(value: unknown): ReconnectQueueResult[] | null {
+function reconnectControlResults(value: unknown): ReconnectControlResult[] | null {
   if (!Array.isArray(value)) return null;
-  const results: ReconnectQueueResult[] = [];
+  const results: ReconnectControlResult[] = [];
   const seen = new Set<string>();
   for (const valueResult of value) {
     if (!valueResult || typeof valueResult !== 'object') return null;
@@ -360,10 +360,10 @@ function reconnectQueueResults(value: unknown): ReconnectQueueResult[] | null {
     const chatId = requiredStr(result.chatId);
     if (!chatId || seen.has(chatId)) return null;
     seen.add(chatId);
-    if (result.outcome === 'snapshot' && result.queue && typeof result.queue === 'object') {
-      const queue = parseQueueState(result.queue);
-      if (!queue) return null;
-      results.push({ chatId, outcome: 'snapshot', queue });
+    if (result.outcome === 'snapshot') {
+      const control = parseChatExecutionControlState(result.control);
+      if (!control) return null;
+      results.push({ chatId, outcome: 'snapshot', control });
       continue;
     }
     if (result.outcome === 'not-found' || result.outcome === 'unavailable') {
@@ -595,11 +595,11 @@ export function parseServerWsMessage(
         ? new ChatProcessingUpdatedMessage(chatId, Boolean(data.isProcessing))
         : null;
     }
-    case 'queue-state-updated': {
+    case 'chat-execution-control-updated': {
       const chatId = requiredStr(data.chatId);
-      const queue = parseQueueState(data.queue);
-      return chatId && queue
-        ? new QueueStateUpdatedMessage(chatId, queue)
+      const control = parseChatExecutionControlState(data.control);
+      return chatId && control
+        ? new ChatExecutionControlUpdatedMessage(chatId, control)
         : null;
     }
     case 'queue-dispatching': {
@@ -615,11 +615,11 @@ export function parseServerWsMessage(
     }
     case 'reconnect-state': {
       const processing = reconnectProcessingResult(data.processing);
-      const queueResults = reconnectQueueResults(data.queueResults);
-      if (!processing || !queueResults) return null;
+      const controlResults = reconnectControlResults(data.controlResults);
+      if (!processing || !controlResults) return null;
       return new ReconnectStateMessage(
         processing,
-        queueResults,
+        controlResults,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
           : undefined,

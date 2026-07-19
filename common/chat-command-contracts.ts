@@ -3,7 +3,7 @@ import type { AgentSettingsEnvelope } from './agent-integration.js';
 import type { JsonObject } from './json.js';
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
-import type { QueueState } from './queue-state.js';
+import type { ChatExecutionControlState } from './chat-execution-control.js';
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
 
@@ -17,6 +17,10 @@ export type CommandErrorCode =
   | 'QUEUE_ENTRY_ALREADY_SENT'
   | 'QUEUE_ENTRY_REVISION_CONFLICT'
   | 'QUEUE_PAUSE_CHANGED'
+  | 'RECOVERED_INPUT_CONTINUATION_CHANGED'
+  | 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE'
+  | 'ACTIVE_INPUT_NOT_DELIVERED'
+  | 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
   | 'PROJECT_PATH_UPDATE_UNSUPPORTED'
   | 'CHAT_NOT_IDLE'
@@ -127,12 +131,12 @@ export interface QueueEntryDeleteCommandRequest {
 
 export interface QueueEntryCommandResponse extends CommandAcceptedResponse {
   entryId: string;
-  queue: QueueState;
+  control: ChatExecutionControlState;
 }
 
 export interface QueueEntryDeleteResponse extends CommandAcceptedResponse {
   entryId: string;
-  queue: QueueState;
+  control: ChatExecutionControlState;
 }
 
 export interface ActiveInputCommandRequest {
@@ -144,11 +148,11 @@ export interface ActiveInputCommandRequest {
 export interface ActiveInputCommandResponse extends CommandAcceptedResponse {
   delivery: 'active' | 'queued';
   entryId?: string;
-  queue: QueueState;
+  control: ChatExecutionControlState;
 }
 
 export interface QueueCommandErrorResponse extends HttpErrorResponse {
-  queue?: QueueState;
+  control?: ChatExecutionControlState;
 }
 
 export interface QueueMutationRequest {
@@ -164,8 +168,15 @@ export interface QueueResumeRequest extends QueueMutationRequest {
 export interface QueueMutationResponse {
   success: true;
   chatId: string;
-  queue: QueueState;
+  control: ChatExecutionControlState;
 }
+
+export interface RecoveredInputContinueRequest {
+  chatId: string;
+  continuationId: string;
+}
+
+export type RecoveredInputContinueResponse = QueueMutationResponse;
 
 export interface AskUserQuestionAnswerPayload {
   questionId: string;
@@ -207,7 +218,7 @@ export interface AgentStopCommandRequest {
 
 export interface AgentStopResponse extends CommandAcceptedResponse {
   stopped: boolean;
-  queue: QueueState;
+  control: ChatExecutionControlState;
 }
 
 export interface AgentInterruptAndSendCommandRequest {
@@ -218,6 +229,7 @@ export interface AgentInterruptAndSendCommandRequest {
 
 export interface AgentInterruptAndSendResponse extends CommandAcceptedResponse {
   stopped: boolean;
+  control: ChatExecutionControlState;
 }
 
 export interface CompactCommandRequest {

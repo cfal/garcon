@@ -21,7 +21,6 @@
 	import type { SplitPanePreviewCursor } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
-	import { getChatQueue } from '$lib/api/chats.js';
 	import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
@@ -34,6 +33,7 @@
 	import { scheduleInitialTranscriptReveal } from '$lib/chat/transcript/initial-transcript-reveal.js';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { isAcceptedConversationSubmission } from '$lib/chat/conversation/conversation-submission-outcome.js';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import type { QueueEntry } from '$lib/types/chat';
 	import {
@@ -132,7 +132,8 @@
 	const conversationUi = new ConversationUiState();
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
-	const dialogQueue = $derived(conversationUi.getQueue(queuedInputsDialogChatId));
+	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
+	const dialogQueue = $derived(dialogControl?.queue ?? null);
 	const queuedInputEditor = new QueuedInputEditorState({
 		get queue() {
 			return dialogQueue;
@@ -146,7 +147,6 @@
 		chatState,
 		conversationUi,
 		getSelectedChatId: () => sessions.selectedChatId,
-		getQueue: getChatQueue,
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
 		invalidateProcessingAuthority: () => sessions.invalidateProcessingAuthority(),
 		quietRefreshChats: () => sessions.quietRefreshChats(),
@@ -177,10 +177,11 @@
 	setAgentState(agentState);
 	setConversationLifecycle(lifecycle);
 
-	const activeQueue = $derived.by(() => {
+	const activeControl = $derived.by(() => {
 		const chatId = sessions.selectedChatId;
-		return conversationUi.getQueue(chatId);
+		return conversationUi.getExecutionControl(chatId);
 	});
+	const activeQueue = $derived(activeControl?.queue ?? null);
 	const scrollToTopButtonClass = $derived(
 		cn(
 			'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
@@ -292,7 +293,7 @@
 	});
 	reconnectCoordinator.mount();
 
-	conversationUi.mountQueuePruning({
+	conversationUi.mountExecutionControlPruning({
 		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
 	});
 
@@ -527,8 +528,7 @@
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return false;
 		try {
-			await controller.submitForChat(chatId, message);
-			return true;
+			return isAcceptedConversationSubmission(await controller.submitForChat(chatId, message));
 		} catch {
 			return false;
 		}
@@ -631,12 +631,18 @@
 			<QueueControls
 				chatId={sessions.selectedChatId}
 				queue={activeQueue}
+				continuation={activeControl?.recoveredInputContinuation ?? null}
 				canInterrupt={canInterruptSelectedChat}
 				onInterrupt={() => controller.handleInterruptAndSend()}
 				onPause={() => controller.handleQueuePause()}
 				onResume={(pauseId) => controller.handleQueueResume(pauseId)}
-				onQueueControlError={(action, error) =>
-					controller.handleQueueControlError(action, error)}
+				onContinue={(continuationId) => {
+					const chatId = sessions.selectedChatId;
+					return chatId
+						? controller.continueRecoveredInputForChat(chatId, continuationId)
+						: Promise.resolve();
+				}}
+				onQueueControlError={(action, error) => controller.handleQueueControlError(action, error)}
 				onEdit={editQueuedInput}
 				onOpenManager={openQueuedInputsManager}
 				onDelete={(id) => controller.handleDeleteQueuedInput(id)}
@@ -665,6 +671,7 @@
 		<QueuedInputsDialog
 			open={true}
 			queue={dialogQueue}
+			continuation={dialogControl?.recoveredInputContinuation ?? null}
 			editor={queuedInputEditor}
 			onClose={closeQueuedInputsDialog}
 			onCreate={async (content) => {
@@ -691,6 +698,10 @@
 			onResume={async (pauseId) => {
 				if (!queuedInputsDialogChatId) return;
 				await controller.resumeQueueForChat(queuedInputsDialogChatId, pauseId);
+			}}
+			onContinue={async (continuationId) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.continueRecoveredInputForChat(queuedInputsDialogChatId, continuationId);
 			}}
 		/>
 	{/if}

@@ -13,7 +13,7 @@ export class QueueExecutionAttempt {
   readonly entryId: string | undefined;
   #turn: TurnIdentity;
   #phase: ExecutionAttemptPhase;
-  #expectedAbort = false;
+  readonly #expectedAbortStopIds = new Set<string>();
   #runSettled = false;
   #terminalObserved = false;
 
@@ -44,7 +44,7 @@ export class QueueExecutionAttempt {
   }
 
   get isExpectedAbort(): boolean {
-    return this.#expectedAbort;
+    return this.#expectedAbortStopIds.size > 0;
   }
 
   get isRunSettled(): boolean {
@@ -75,8 +75,18 @@ export class QueueExecutionAttempt {
     return this.#abortable;
   }
 
-  waitForLaunchDecision(): Promise<boolean> {
-    return this.#launchDecision;
+  waitForLaunchDecision(signal?: AbortSignal): Promise<boolean> {
+    if (!signal) return this.#launchDecision;
+    if (signal.aborted) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const finish = (shouldLaunch: boolean) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(shouldLaunch);
+      };
+      const onAbort = () => { finish(false); };
+      signal.addEventListener('abort', onAbort, { once: true });
+      void this.#launchDecision.then(finish);
+    });
   }
 
   waitUntilSettled(): Promise<void> {
@@ -111,12 +121,16 @@ export class QueueExecutionAttempt {
     this.#settleAbortable(true);
   }
 
-  expectAbort(): void {
-    this.#expectedAbort = true;
+  expectAbort(stopId: string): void {
+    this.#expectedAbortStopIds.add(stopId);
   }
 
-  clearExpectedAbort(): void {
-    this.#expectedAbort = false;
+  clearExpectedAbort(stopId?: string): void {
+    if (stopId) {
+      this.#expectedAbortStopIds.delete(stopId);
+      return;
+    }
+    this.#expectedAbortStopIds.clear();
   }
 
   markRunSettled(): void {

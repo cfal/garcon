@@ -151,6 +151,27 @@ describe('SplitPanePreviewStore', () => {
 		).toEqual(['new']);
 	});
 
+	it('does not let an older HTTP snapshot overwrite a newer live delta', async () => {
+		let resolveSnapshot!: (value: ReturnType<typeof page>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveSnapshot = resolve;
+			}),
+		);
+		const store = new SplitPanePreviewStore();
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+
+		const load = store.loadSnapshot('chat-1');
+		expect(store.applyMessages('chat-1', 'generation-1', [entry(2, 'live')], 2)).toBe(true);
+		resolveSnapshot(page([entry(1, 'first')], 'generation-1'));
+		await load;
+
+		expect(store.entry('chat-1').lastSeq).toBe(2);
+		expect(
+			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
+		).toEqual(['first', 'live']);
+	});
+
 	it('prunes preview entries without deleting shared cache snapshots', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });

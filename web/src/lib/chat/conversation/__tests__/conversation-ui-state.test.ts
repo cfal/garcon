@@ -1,14 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
-import type { PendingPermissionRequest, QueueState } from '$lib/types/chat';
+import type {
+	ChatExecutionControlState,
+	ChatQueueState,
+	PendingPermissionRequest,
+} from '$lib/types/chat';
 import { BashToolUseMessage } from '$shared/chat-types';
 
-function makeQueue(overrides: Partial<QueueState> = {}): QueueState {
+function makeQueue(overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
 		entries: [],
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
+		...overrides,
+	};
+}
+
+function makeControl(
+	queue: ChatQueueState = makeQueue(),
+	overrides: Partial<ChatExecutionControlState> = {},
+): ChatExecutionControlState {
+	return {
+		queue,
+		recoveredInputContinuation: null,
 		version: 0,
 		updatedAt: null,
 		...overrides,
@@ -54,31 +69,35 @@ describe('ConversationUiState', () => {
 		expect(store.pendingPermissionRequests).toEqual([]);
 	});
 
-	it('stores queues by chat and prunes queues for removed chats', () => {
+	it('stores execution controls by chat and prunes controls for removed chats', () => {
 		const store = new ConversationUiState();
-		const queue = makeQueue();
+		const control = makeControl();
 
-		store.setMessageQueue('chat-a', queue);
-		store.setMessageQueue('chat-b', null);
-		store.pruneQueues(new Set(['chat-a']));
+		store.setExecutionControl('chat-a', control);
+		store.setExecutionControl('chat-b', null);
+		store.pruneExecutionControls(new Set(['chat-a']));
 
-		expect(store.getQueue('chat-a')).toEqual(queue);
-		expect(store.getQueue('chat-b')).toBeNull();
-		expect(store.queueChatIds).toEqual(['chat-a']);
+		expect(store.getExecutionControl('chat-a')).toEqual(control);
+		expect(store.getExecutionControl('chat-b')).toBeNull();
+		expect(store.executionControlChatIds).toEqual(['chat-a']);
 	});
 
-	it('does not let refresh responses overwrite same-version live queue state', () => {
+	it('does not let refresh responses overwrite same-version live execution-control state', () => {
 		const store = new ConversationUiState();
-		const live = makeQueue({ entries: [makeEntry('entry-live', 'live')], version: 4 });
-		const staleRefresh = makeQueue({
-			entries: [makeEntry('entry-refresh', 'stale')],
-			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-01-01T00:00:00.000Z' },
+		const live = makeControl(makeQueue({ entries: [makeEntry('entry-live', 'live')] }), {
 			version: 4,
 		});
+		const staleRefresh = makeControl(
+			makeQueue({
+				entries: [makeEntry('entry-refresh', 'stale')],
+				pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-01-01T00:00:00.000Z' },
+			}),
+			{ version: 4 },
+		);
 
-		store.setMessageQueue('chat-a', live);
-		store.setMessageQueueFromRefresh('chat-a', staleRefresh);
+		store.setExecutionControl('chat-a', live);
+		store.setExecutionControlFromRefresh('chat-a', staleRefresh);
 
-		expect(store.getQueue('chat-a')).toEqual(live);
+		expect(store.getExecutionControl('chat-a')).toEqual(live);
 	});
 });

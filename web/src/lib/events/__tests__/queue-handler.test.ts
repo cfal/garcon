@@ -1,43 +1,45 @@
 import { describe, expect, it, vi } from 'vitest';
-import { QueueDispatchingMessage, QueueStateUpdatedMessage } from '$shared/ws-events';
-import { handleQueueSending, handleQueueUpdated, type QueueContext } from '../handlers/queue';
+import { ChatExecutionControlUpdatedMessage, QueueDispatchingMessage } from '$shared/ws-events';
+import {
+	handleExecutionControlUpdated,
+	handleQueueSending,
+	type QueueContext,
+} from '../handlers/queue';
 
 function makeQueueContext(overrides: Partial<QueueContext> = {}): {
 	ctx: QueueContext;
-	setMessageQueue: ReturnType<typeof vi.fn>;
+	setExecutionControl: ReturnType<typeof vi.fn>;
 	markTurnRunning: ReturnType<typeof vi.fn>;
 } {
-	const setMessageQueue = vi.fn();
+	const setExecutionControl = vi.fn();
 	const markTurnRunning = vi.fn();
 	const ctx: QueueContext = {
 		getCurrentChatId: () => 'chat-a',
 		getSelectedChatId: () => 'chat-a',
-		conversationUi: { setMessageQueue },
+		conversationUi: { setExecutionControl },
 		markTurnRunning,
 		onChatProcessing: vi.fn(),
 		...overrides,
 	};
-	return { ctx, setMessageQueue, markTurnRunning };
+	return { ctx, setExecutionControl, markTurnRunning };
 }
 
 describe('queue handler', () => {
-	it('caches queue updates by chat id regardless of selection', () => {
-		const { ctx, setMessageQueue } = makeQueueContext({
+	it('caches execution-control updates by chat id regardless of selection', () => {
+		const { ctx, setExecutionControl } = makeQueueContext({
 			getCurrentChatId: () => 'chat-a',
 			getSelectedChatId: () => 'chat-a',
 		});
-		const queueState = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: null,
+		const control = {
+			queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+			recoveredInputContinuation: null,
 			version: 2,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};
 
-		handleQueueUpdated(new QueueStateUpdatedMessage('chat-b', queueState), ctx);
+		handleExecutionControlUpdated(new ChatExecutionControlUpdatedMessage('chat-b', control), ctx);
 
-		expect(setMessageQueue).toHaveBeenCalledWith('chat-b', queueState);
+		expect(setExecutionControl).toHaveBeenCalledWith('chat-b', control);
 	});
 
 	it('marks the selected turn running only for current or selected chat', () => {

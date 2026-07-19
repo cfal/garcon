@@ -48,7 +48,7 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 		defaultHeaders['Authorization'] = `Bearer ${token}`;
 	}
 
-	return fetch(
+	return globalThis.fetch(
 		url,
 		withTimeout(
 			{

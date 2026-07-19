@@ -9,20 +9,25 @@ describe('execution control plane startup', () => {
       onTerminal = (turnId) => settled.push(turnId);
       return { waitForIdle: mock(async () => undefined) };
     });
-    const recoverQueues = mock(async () => {
+    const recoverControls = mock(async () => {
       onTerminal('recovered-turn');
+    });
+    const activateRecoveredSettlement = mock(async () => {
+      settled.push('settlement-activated');
     });
     const startScheduledPrompts = mock(async () => undefined);
 
     const wiring = await startExecutionControlPlane({
       wireEvents,
-      recoverQueues,
+      recoverControls,
+      activateRecoveredSettlement,
       startScheduledPrompts,
     });
 
-    expect(settled).toEqual(['recovered-turn']);
+    expect(settled).toEqual(['recovered-turn', 'settlement-activated']);
     expect(wireEvents).toHaveBeenCalledTimes(1);
-    expect(recoverQueues).toHaveBeenCalledTimes(1);
+    expect(recoverControls).toHaveBeenCalledTimes(1);
+    expect(activateRecoveredSettlement).toHaveBeenCalledTimes(1);
     expect(startScheduledPrompts).toHaveBeenCalledTimes(1);
     expect(wiring.waitForIdle).toBeDefined();
   });
@@ -32,9 +37,23 @@ describe('execution control plane startup', () => {
 
     await expect(startExecutionControlPlane({
       wireEvents: () => ({}),
-      recoverQueues: async () => { throw new Error('recovery failed'); },
+      recoverControls: async () => { throw new Error('recovery failed'); },
+      activateRecoveredSettlement: async () => undefined,
       startScheduledPrompts,
     })).rejects.toThrow('recovery failed');
+
+    expect(startScheduledPrompts).not.toHaveBeenCalled();
+  });
+
+  it('does not start scheduled producers when settlement activation fails', async () => {
+    const startScheduledPrompts = mock(async () => undefined);
+
+    await expect(startExecutionControlPlane({
+      wireEvents: () => ({}),
+      recoverControls: async () => undefined,
+      activateRecoveredSettlement: async () => { throw new Error('activation failed'); },
+      startScheduledPrompts,
+    })).rejects.toThrow('activation failed');
 
     expect(startScheduledPrompts).not.toHaveBeenCalled();
   });

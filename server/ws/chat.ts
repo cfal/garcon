@@ -1,5 +1,5 @@
 // WebSocket chat handler. Thin request dispatcher that delegates
-// orchestration to QueueManager and state queries to other services.
+// orchestration to ChatExecutionCoordinator and state queries to other services.
 // All dependencies are injected via the constructor.
 
 import { sendWebSocketJson } from './utils.js';
@@ -28,9 +28,9 @@ import { isDomainError } from '../lib/domain-error.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
-import type { ChatQueueService } from '../queue.js';
+import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
-import { toClientQueueState } from '../queue-state.js';
+import { toClientChatExecutionControlState } from '../chat-execution-control-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 const logger = createLogger('ws:chat');
@@ -44,7 +44,7 @@ type AgentRegistryDep = Pick<
 >;
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
-type QueueDep = Pick<ChatQueueService, 'readChatQueue'>;
+type QueueDep = Pick<ChatExecutionService, 'readChatExecutionControl'>;
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
@@ -62,7 +62,7 @@ interface ChatHandlerDeps {
   registry: IChatRegistry;
 }
 
-const RECONNECT_QUEUE_READ_CONCURRENCY = 8;
+const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
 
 function readReconnectProcessingResult(
   agents: AgentRegistryDep,
@@ -160,9 +160,9 @@ export class ChatHandler {
     writer: WebSocketWriter,
   ): Promise<void> {
     try {
-      const queueResults = await mapWithConcurrencyResult(
-        data.queueChatIds,
-        RECONNECT_QUEUE_READ_CONCURRENCY,
+      const controlResults = await mapWithConcurrencyResult(
+        data.controlChatIds,
+        RECONNECT_CONTROL_READ_CONCURRENCY,
         async (chatId) => {
           if (!this.#registry.getChat(chatId)) {
             return { chatId, outcome: 'not-found' as const };
@@ -171,7 +171,9 @@ export class ChatHandler {
             return {
               chatId,
               outcome: 'snapshot' as const,
-              queue: toClientQueueState(await this.#queue.readChatQueue(chatId)),
+              control: toClientChatExecutionControlState(
+                await this.#queue.readChatExecutionControl(chatId),
+              ),
             };
           } catch (error: unknown) {
             logger.warn(
@@ -186,7 +188,7 @@ export class ChatHandler {
       const processing = readReconnectProcessingResult(this.#agents);
       writer.send(new ReconnectStateMessage(
         processing,
-        queueResults,
+        controlResults,
         data.clientRequestId ?? undefined,
       ));
     } catch (error: unknown) {

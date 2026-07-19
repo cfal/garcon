@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 
 import { UserMessage } from '../../../common/chat-types.js';
-import { QueueManager } from '../../queue.js';
+import { ChatExecutionCoordinator } from '../../chat-execution/chat-execution-coordinator.js';
 import { ChatExecutionActivity } from '../chat-execution-activity.js';
 import { ChatNativeReloader } from '../chat-native-reload.js';
 import { ChatViewStore } from '../chat-view-store.js';
@@ -24,7 +24,7 @@ describe('ChatExecutionActivity', () => {
     try {
       const activity = new ChatExecutionActivity({ isChatRunning: () => false });
       const views = new ChatViewStore(activity.isActive);
-      const queue = new QueueManager(
+      const queue = new ChatExecutionCoordinator(
         workspaceDir,
         {
           runAgentTurn: mock(async () => undefined),
@@ -36,6 +36,7 @@ describe('ChatExecutionActivity', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),
@@ -75,7 +76,7 @@ describe('ChatExecutionActivity', () => {
       const releaseNative = deferred();
       const activity = new ChatExecutionActivity({ isChatRunning: () => false });
       const views = new ChatViewStore(activity.isActive);
-      const queue = new QueueManager(
+      const queue = new ChatExecutionCoordinator(
         workspaceDir,
         {
           runAgentTurn: mock(async () => undefined),
@@ -87,6 +88,7 @@ describe('ChatExecutionActivity', () => {
           register: mock(async () => undefined),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),
@@ -132,7 +134,7 @@ describe('ChatExecutionActivity', () => {
         now: () => now,
         staleNonActiveMs: 1,
       });
-      const queue = new QueueManager(
+      const queue = new ChatExecutionCoordinator(
         workspaceDir,
         {
           runAgentTurn: mock(async () => undefined),
@@ -147,6 +149,7 @@ describe('ChatExecutionActivity', () => {
           }),
           discard: mock(() => true),
           markFailed: mock(() => true),
+          markUnconfirmed: mock(() => true),
         },
         {
           appendMessages: mock(async (_chatId, messages) => ({

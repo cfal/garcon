@@ -1,155 +1,133 @@
-import { describe, it, expect } from 'vitest';
-import { parseServerWsMessage, QueueStateUpdatedMessage } from '$shared/ws-events';
+import { describe, expect, it } from 'vitest';
+import { ChatExecutionControlUpdatedMessage, parseServerWsMessage } from '$shared/ws-events';
 
-describe('queue-state WS contract', () => {
-	it('normalizes a pause away when queue has no editable entries', () => {
+const installedAt = '2026-07-18T00:00:00.000Z';
+const continuationId = '8c8c35c6-2189-49cf-a94b-b63e29b972ba';
+
+function control(overrides: Record<string, unknown> = {}) {
+	return {
+		queue: {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+		},
+		recoveredInputContinuation: null,
+		version: 7,
+		updatedAt: installedAt,
+		...overrides,
+	};
+}
+
+describe('chat execution-control WS contract', () => {
+	it('parses one composite versioned snapshot', () => {
 		const parsed = parseServerWsMessage({
-			type: 'queue-state-updated',
+			type: 'chat-execution-control-updated',
 			chatId: '123',
-			queue: {
-				entries: [],
-				pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' },
-			},
+			control: control({
+				recoveredInputContinuation: { id: continuationId, installedAt },
+			}),
 		});
 
-		expect(parsed instanceof QueueStateUpdatedMessage).toBe(true);
-		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
-		expect(parsed.queue.entries).toEqual([]);
-		expect(parsed.queue.pause).toBeNull();
-	});
-
-	it('preserves restart uncertainty when queue has no editable entries', () => {
-		const pause = {
-			id: 'pause-recovery',
-			kind: 'recovered-unconfirmed-input',
-			pausedAt: '2026-07-18T00:00:00.000Z',
-		};
-		const parsed = parseServerWsMessage({
-			type: 'queue-state-updated',
-			chatId: '123',
-			queue: { entries: [], pause },
-		});
-
-		expect(parsed).toBeInstanceOf(QueueStateUpdatedMessage);
-		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
-		expect(parsed.queue.pause).toEqual(pause);
-	});
-
-	it('drops invalid queue entries at parse boundary', () => {
-		const parsed = parseServerWsMessage({
-			type: 'queue-state-updated',
-			chatId: '123',
-			queue: {
-				pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' },
-				entries: [
-					{ id: 'ok', content: 'hello', revision: 2, createdAt: '2026-02-27T00:00:00.000Z' },
-					{ id: 1, content: 'bad', revision: 1, createdAt: '2026-02-27T00:00:00.000Z' },
-				],
-			},
-		});
-
-		expect(parsed instanceof QueueStateUpdatedMessage).toBe(true);
-		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
-		expect(parsed.queue.entries).toHaveLength(1);
-		expect(parsed.queue.entries[0].id).toBe('ok');
-		expect(parsed.queue.entries[0].revision).toBe(2);
+		expect(parsed).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
+		if (!(parsed instanceof ChatExecutionControlUpdatedMessage)) return;
+		expect(parsed.control.version).toBe(7);
+		expect(parsed.control.updatedAt).toBe(installedAt);
+		expect(parsed.control.queue.entries).toEqual([]);
+		expect(parsed.control.recoveredInputContinuation).toEqual({ id: continuationId, installedAt });
 	});
 
 	it.each([
-		{ id: 'manual', kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' },
-		{
-			id: 'failed',
-			kind: 'queued-turn-failed',
-			entryId: 'ok',
-			pausedAt: '2026-07-16T00:00:00.000Z',
-		},
-		{
-			id: 'recovered',
-			kind: 'recovered-inflight',
-			entryId: 'ok',
-			pausedAt: '2026-07-16T00:00:00.000Z',
-		},
-		{
-			id: 'recovered-input',
-			kind: 'recovered-unconfirmed-input',
-			pausedAt: '2026-07-16T00:00:00.000Z',
-		},
-		{
-			id: 'uncertain',
-			kind: 'completion-uncertain',
-			entryId: 'ok',
-			pausedAt: '2026-07-16T00:00:00.000Z',
-		},
+		{ id: 'manual', kind: 'manual', pausedAt: installedAt },
+		{ id: 'failed', kind: 'queued-turn-failed', entryId: 'ok', pausedAt: installedAt },
+		{ id: 'recovered', kind: 'recovered-inflight', entryId: 'ok', pausedAt: installedAt },
+		{ id: 'uncertain', kind: 'completion-uncertain', entryId: 'ok', pausedAt: installedAt },
 		{ id: 'unknown', kind: 'unknown', entryId: 'ok', pausedAt: null },
-	])('round-trips the $kind pause variant', (pause) => {
+	])('round-trips the $kind queue pause variant', (pause) => {
 		const parsed = parseServerWsMessage({
-			type: 'queue-state-updated',
+			type: 'chat-execution-control-updated',
 			chatId: '123',
-			queue: {
-				entries: [
-					{ id: 'ok', content: 'hello', revision: 1, createdAt: '2026-07-16T00:00:00.000Z' },
-				],
-				pause,
-			},
+			control: control({
+				queue: {
+					entries: [
+						{
+							id: 'ok',
+							content: 'hello',
+							revision: 1,
+							createdAt: installedAt,
+							updatedAt: installedAt,
+						},
+					],
+					dispatchingEntryId: null,
+					recentlyDispatched: [],
+					pause,
+				},
+			}),
 		});
 
-		expect(parsed).toBeInstanceOf(QueueStateUpdatedMessage);
-		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
-		expect(parsed.queue.pause).toEqual(pause);
+		expect(parsed).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
+		if (!(parsed instanceof ChatExecutionControlUpdatedMessage)) return;
+		expect(parsed.control.queue.pause).toEqual(pause);
 	});
 
 	it.each([
+		{ id: 'not-a-uuid', installedAt },
+		{ id: continuationId, installedAt: 'invalid' },
 		undefined,
-		true,
-		{ id: '', kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' },
-		{ id: 'pause-1', kind: 'manual', pausedAt: 'invalid' },
-		{ id: 'pause-1', kind: 'queued-turn-failed', pausedAt: '2026-07-16T00:00:00.000Z' },
-	])('rejects malformed pause state %#', (pause) => {
-		expect(parseServerWsMessage({
-			type: 'queue-state-updated',
-			chatId: '123',
-			queue: { entries: [], pause },
-		})).toBeNull();
+	])('rejects malformed continuation state %#', (recoveredInputContinuation) => {
+		expect(
+			parseServerWsMessage({
+				type: 'chat-execution-control-updated',
+				chatId: '123',
+				control: control({ recoveredInputContinuation }),
+			}),
+		).toBeNull();
 	});
 
-	it('preserves dispatch identity and drops malformed sent markers', () => {
+	it('rejects malformed queue entries rather than partially applying a snapshot', () => {
+		expect(
+			parseServerWsMessage({
+				type: 'chat-execution-control-updated',
+				chatId: '123',
+				control: control({
+					queue: {
+						entries: [
+							{
+								id: 1,
+								content: 'bad',
+								revision: 1,
+								createdAt: installedAt,
+								updatedAt: installedAt,
+							},
+						],
+						dispatchingEntryId: null,
+						recentlyDispatched: [],
+						pause: null,
+					},
+				}),
+			}),
+		).toBeNull();
+	});
+
+	it('preserves dispatch identity and recent dispatch markers', () => {
 		const parsed = parseServerWsMessage({
-			type: 'queue-state-updated',
+			type: 'chat-execution-control-updated',
 			chatId: '123',
-			queue: {
-				entries: [],
-				dispatchingEntryId: 'entry-1',
-				recentlyDispatched: [
-					{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' },
-					{ entryId: 2, dispatchedAt: 'invalid' },
-				],
-				pause: null,
-			},
+			control: control({
+				queue: {
+					entries: [],
+					dispatchingEntryId: 'entry-1',
+					recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: installedAt }],
+					pause: null,
+				},
+			}),
 		});
 
-		expect(parsed instanceof QueueStateUpdatedMessage).toBe(true);
-		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
-		expect(parsed.queue.dispatchingEntryId).toBe('entry-1');
-		expect(parsed.queue.recentlyDispatched).toEqual([
-			{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' },
+		expect(parsed).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
+		if (!(parsed instanceof ChatExecutionControlUpdatedMessage)) return;
+		expect(parsed.control.queue.dispatchingEntryId).toBe('entry-1');
+		expect(parsed.control.queue.recentlyDispatched).toEqual([
+			{ entryId: 'entry-1', dispatchedAt: installedAt },
 		]);
-	});
-
-	it('preserves queue version and updatedAt fields', () => {
-		const parsed = parseServerWsMessage({
-			type: 'queue-state-updated',
-			chatId: '123',
-			queue: {
-				pause: null,
-				entries: [],
-				version: 7,
-				updatedAt: '2026-05-14T00:00:00.000Z',
-			},
-		});
-
-		expect(parsed instanceof QueueStateUpdatedMessage).toBe(true);
-		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
-		expect(parsed.queue.version).toBe(7);
-		expect(parsed.queue.updatedAt).toBe('2026-05-14T00:00:00.000Z');
 	});
 });

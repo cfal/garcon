@@ -21,8 +21,8 @@ import type {
 } from '$shared/chat-list';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import type {
-  AgentInterruptAndSendCommandRequest,
-  AgentInterruptAndSendResponse,
+	AgentInterruptAndSendCommandRequest,
+	AgentInterruptAndSendResponse,
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
 	AgentStopResponse,
@@ -48,6 +48,8 @@ import type {
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
+	RecoveredInputContinueRequest,
+	RecoveredInputContinueResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type {
@@ -59,10 +61,19 @@ import type {
 	AgentModelPatchResponse,
 } from '$shared/chat-command-contracts';
 import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
-import type { QueueState } from '$shared/queue-state';
+import {
+	parseChatExecutionControlState,
+	type ChatExecutionControlState,
+} from '$shared/chat-execution-control';
 import type { AgentCommandImage } from '$shared/ws-requests';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
+
+function withParsedControl<T extends { control: ChatExecutionControlState }>(response: T): T {
+	const control = parseChatExecutionControlState(response.control);
+	if (!control) throw new Error('Invalid chat execution control response');
+	return { ...response, control };
+}
 
 export interface StartChatParams {
 	clientRequestId: string;
@@ -126,20 +137,20 @@ export async function generateChatTitle(
 	});
 }
 
-export async function forkRunChat(
-	params: ForkRunCommandRequest,
-): Promise<ForkRunCommandResponse> {
+export async function forkRunChat(params: ForkRunCommandRequest): Promise<ForkRunCommandResponse> {
 	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params);
 }
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
-	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
+	return withParsedControl(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params));
 }
 
 export async function interruptAndSendChat(
 	params: AgentInterruptAndSendCommandRequest,
 ): Promise<AgentInterruptAndSendResponse> {
-	return apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params);
+	return withParsedControl(
+		await apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params),
+	);
 }
 
 export async function compactChat(params: CompactCommandRequest): Promise<CommandAcceptedResponse> {
@@ -155,47 +166,81 @@ export async function sendPermissionDecision(
 export async function createQueuedInput(
 	params: QueueEntryCreateCommandRequest,
 ): Promise<QueueEntryCommandResponse> {
-	return apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params);
+	return withParsedControl(
+		await apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params),
+	);
 }
 
 export async function replaceQueuedInput(
 	params: QueueEntryReplaceCommandRequest,
 ): Promise<QueueEntryCommandResponse> {
-	return apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params);
+	return withParsedControl(
+		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params),
+	);
 }
 
 export async function deleteQueuedInput(
 	params: QueueEntryDeleteCommandRequest,
 ): Promise<QueueEntryDeleteResponse> {
-	return apiDelete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', params);
+	return withParsedControl(
+		await apiDelete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', params),
+	);
 }
 
 export async function sendActiveInput(
 	params: ActiveInputCommandRequest,
 ): Promise<ActiveInputCommandResponse> {
-	return apiPost<ActiveInputCommandResponse>('/api/v1/chats/active-input', params);
+	return withParsedControl(
+		await apiPost<ActiveInputCommandResponse>('/api/v1/chats/active-input', params),
+	);
 }
 
-export async function getChatQueue(
+export async function getChatExecutionControl(
 	chatId: string,
-): Promise<{ success: true; chatId: string; queue: QueueState }> {
-	return apiGet<{ success: true; chatId: string; queue: QueueState }>(
-		`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`,
+): Promise<{ success: true; chatId: string; control: ChatExecutionControlState }> {
+	return withParsedControl(
+		await apiGet<{
+			success: true;
+			chatId: string;
+			control: ChatExecutionControlState;
+		}>(`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`),
 	);
 }
 
 export async function clearChatQueue(chatId: string): Promise<QueueMutationResponse> {
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/clear', { chatId });
+	return withParsedControl(
+		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/clear', { chatId }),
+	);
 }
 
 export async function pauseChatQueue(chatId: string): Promise<QueueMutationResponse> {
 	const request: QueuePauseRequest = { chatId };
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', request);
+	return withParsedControl(
+		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', request),
+	);
 }
 
-export async function resumeChatQueue(chatId: string, pauseId: string): Promise<QueueMutationResponse> {
+export async function resumeChatQueue(
+	chatId: string,
+	pauseId: string,
+): Promise<QueueMutationResponse> {
 	const request: QueueResumeRequest = { chatId, pauseId };
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request);
+	return withParsedControl(
+		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request),
+	);
+}
+
+export async function continueRecoveredInput(
+	chatId: string,
+	continuationId: string,
+): Promise<RecoveredInputContinueResponse> {
+	const request: RecoveredInputContinueRequest = { chatId, continuationId };
+	return withParsedControl(
+		await apiPost<RecoveredInputContinueResponse>(
+			'/api/v1/chats/recovered-input/continue',
+			request,
+		),
+	);
 }
 
 export async function updateExecutionSettings(

@@ -12,8 +12,12 @@ import {
   ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
   ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
   ActiveInputDeliveryError,
+  DomainError,
 } from '../../lib/domain-error.js';
-import { QueueEntryMutationError, QueueManager } from '../../queue.js';
+import {
+  QueueEntryMutationError,
+  ChatExecutionCoordinator,
+} from '../../chat-execution/chat-execution-coordinator.js';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 
@@ -76,6 +80,7 @@ function storedQueue(entries = [], overrides = {}) {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    recoveredInputContinuation: null,
     version: 0,
     updatedAt: null,
     ...overrides,
@@ -88,6 +93,10 @@ function manualPause(id = 'pause-1') {
 
 function agentSettings(ownerId = 'claude', values = {}) {
   return { ownerId, schemaVersion: 1, values };
+}
+
+function recoveredContinuation(id = 'f43ade99-984e-4058-a976-bf4f4d1d2903') {
+  return { id, installedAt: '2026-07-18T00:00:00.000Z' };
 }
 
 function projectedChat(chatId, projectPath = '/repo') {
@@ -156,26 +165,194 @@ function makeService(overrides = {}) {
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
   };
+  const executionTasks = new Set();
   const queue = overrides.queueService ?? {
+    scheduleDirectInput: mock(async (input) => {
+      let reservation;
+      try {
+        reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
+        if (input.continueRecoveredInput) {
+          await queue.consumeRecoveredInputContinuationForDirectTurn(reservation);
+        }
+        const control = await queue.readChatExecutionControl(input.command.chatId);
+        if (control.entries.length > 0 || control.pause || control.recoveredInputContinuation) {
+          throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
+        }
+        await input.preparation?.prepare();
+        await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+        await input.settlement.markScheduled(input.command, input.options.turnId, true);
+      } catch (error) {
+        if (reservation) await queue.releaseDirectTurn(reservation);
+        const pendingInputRecovery = pendingInputs.markFailed(
+          input.command.chatId,
+          input.options.clientRequestId,
+        );
+        let failure = error;
+        try {
+          await input.preparation?.compensate();
+        } catch (compensationError) {
+          failure = new AggregateError(
+            [error, compensationError],
+            `Failed to prepare and roll back ${input.preparation.operation} for ${input.command.chatId}`,
+          );
+        }
+        await input.settlement.markPreScheduleFailure(input.command, {
+          error: failure,
+          pendingInputRecovery,
+          retryable: failure === error,
+          preserveForkPreparation: failure !== error,
+        });
+        throw failure;
+      }
+      const task = queue.runReservedTurn(reservation, input.content, input.options)
+        .then(() => queue.completeDirectTurn(reservation), () => queue.failDirectTurn(reservation));
+      executionTasks.add(task);
+      void task.finally(() => executionTasks.delete(task));
+    }),
+    runInitialInput: mock(async (input) => {
+      let reservation;
+      try {
+        reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
+        await input.preparation?.prepare();
+        await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+        await input.settlement.markScheduled(input.command, input.options.turnId, true);
+        await input.dispatch?.(reservation.executionAdmission);
+        await queue.completeDirectTurn(reservation);
+      } catch (error) {
+        await input.settlement.settleOperationFailure(input.command, error);
+        await input.preparation?.compensate();
+        if (reservation) await queue.failDirectTurn(reservation);
+        throw error;
+      }
+    }),
+    scheduleDirectOperation: mock(async (input) => {
+      const reservation = queue.reserveDirectTurn(input.command.chatId, input.command);
+      const control = await queue.readChatExecutionControl(input.command.chatId);
+      if (control.entries.length > 0 || control.pause || control.recoveredInputContinuation) {
+        await queue.releaseDirectTurn(reservation);
+        const error = new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
+        await input.settlement.markPreScheduleFailure(input.command, {
+          error,
+          pendingInputRecovery: false,
+          retryable: true,
+        });
+        throw error;
+      }
+      await input.settlement.markScheduled(input.command, input.command.turnId, false);
+      const task = input.dispatch(reservation.executionAdmission)
+        .then(() => queue.completeDirectTurn(reservation), () => queue.failDirectTurn(reservation));
+      executionTasks.add(task);
+      void task.finally(() => executionTasks.delete(task));
+    }),
+    enqueueAccepted: mock(async (input) => {
+      const result = await queue.createChatQueueEntry(
+        input.command.chatId,
+        input.content,
+        { key: input.command.key, entryId: input.command.entryId },
+        { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+      );
+      await input.settlement.settleQueueMutation(input.command, result.entryId);
+      await queue.triggerDrain(input.command.chatId);
+      return result;
+    }),
+    replaceAccepted: mock(async (input) => {
+      try {
+        const result = await queue.replaceChatQueueEntry(
+          input.command.chatId,
+          input.command.entryId,
+          input.content,
+          input.expectedRevision,
+          { key: input.command.key, entryId: input.command.entryId },
+          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    deleteAccepted: mock(async (input) => {
+      try {
+        const result = await queue.deleteChatQueueEntry(
+          input.command.chatId,
+          input.command.entryId,
+          { key: input.command.key, entryId: input.command.entryId },
+          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    deliverAcceptedActiveInput: mock(async (input) => {
+      let deliveryAccepted = false;
+      try {
+        const delivered = await queue.deliverActiveInput(
+          input.command.chatId,
+          input.content,
+          { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
+          async () => {
+            await input.settlement.markScheduled(input.command, input.command.turnId, true);
+          },
+        );
+        if (delivered) {
+          deliveryAccepted = true;
+          await input.settlement.settleActiveInput(input.command);
+          return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
+        }
+        const result = await queue.enqueueAccepted(input);
+        return { delivery: 'queued', entryId: result.entryId, control: result.control };
+      } catch (error) {
+        deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
+        await input.settlement.settleActiveInputFailure(input.command, error, deliveryAccepted);
+        throw error;
+      }
+    }),
+    recoverAcceptedActiveInput: mock(async (input) => {
+      const control = await queue.readChatExecutionControl(input.command.chatId);
+      const applied = control.appliedCommands.find(
+        (command) => command.key === input.command.key && command.operation === 'create',
+      );
+      if (!applied) {
+        throw new DomainError(
+          'INTERNAL_ERROR',
+          'The previous active-input delivery did not reach a durable outcome',
+          409,
+          false,
+        );
+      }
+      await input.settlement.settleQueueMutation(input.command, applied.entryId);
+      return {
+        delivery: 'queued',
+        entryId: applied.entryId,
+        control,
+      };
+    }),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     reserveDirectTurn: mock((chatId) => directReservation(chatId)),
+    assertDirectTurnReservationActive: mock(() => undefined),
+    consumeRecoveredInputContinuationForDirectTurn: mock(() => Promise.resolve(storedQueue())),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
-    stopActiveTurn: mock(() => Promise.resolve({ stopped: true, queue: storedQueue() })),
+    stopActiveTurn: mock(() => Promise.resolve({ stopped: true, control: storedQueue() })),
     interruptActiveTurn: mock(() => Promise.resolve(true)),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+    waitForDispatches: mock(() => Promise.all([...executionTasks]).then(() => undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     isChatExecutionReserved: mock(() => false),
     hasChatExecutionOwner: mock(() => false),
-    readChatQueue: mock(() => Promise.resolve(storedQueue())),
+    readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
         entry: queueEntry('entry-1'),
         entryId: 'entry-1',
-        queue: storedQueue([queueEntry('entry-1')], { version: 1 }),
+        control: storedQueue([queueEntry('entry-1')], { version: 1 }),
         duplicate: false,
       }),
     ),
@@ -183,14 +360,14 @@ function makeService(overrides = {}) {
       Promise.resolve({
         entry: queueEntry(entryId, content, 'queued', revision + 1),
         entryId,
-        queue: storedQueue([queueEntry(entryId, content, 'queued', revision + 1)], { version: 1 }),
+        control: storedQueue([queueEntry(entryId, content, 'queued', revision + 1)], { version: 1 }),
         duplicate: false,
       }),
     ),
     deleteChatQueueEntry: mock((_chatId, entryId) =>
       Promise.resolve({
         entryId,
-        queue: storedQueue([], { version: 1 }),
+        control: storedQueue([], { version: 1 }),
         duplicate: false,
       }),
     ),
@@ -198,6 +375,12 @@ function makeService(overrides = {}) {
     clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     pauseChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     resumeChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
+    resumeAndDrain: mock(async (chatId, pauseId) => {
+      const control = await queue.resumeChatQueue(chatId, pauseId);
+      await queue.triggerDrain(chatId);
+      return control;
+    }),
+    continuePastRecoveredInput: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     ...overrides.queue,
   };
   const settings = {
@@ -311,7 +494,7 @@ function makeService(overrides = {}) {
 }
 
 function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
-  return new QueueManager(
+  return new ChatExecutionCoordinator(
     workspaceDir,
     {
       runAgentTurn: mock(async () => undefined),
@@ -588,7 +771,7 @@ describe('ChatCommandService', () => {
     });
     const stopActiveTurn = mock(async () => {
       events.push('stop');
-      return { stopped: true, queue: storedQueue() };
+      return { stopped: true, control: storedQueue() };
     });
     const { service } = makeService({
       agents: { startSession },
@@ -630,7 +813,7 @@ describe('ChatCommandService', () => {
     const stopActiveTurn = mock(async () => {
       markStopEntered();
       await stopGate;
-      return { stopped: true, queue: storedQueue() };
+      return { stopped: true, control: storedQueue() };
     });
     const { service, queue } = makeService({ queue: { stopActiveTurn } });
 
@@ -775,6 +958,105 @@ describe('ChatCommandService', () => {
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
+  it('reports restart-interrupted active input and control duplicates consistently', async () => {
+    const interruptedRecord = (commandType, clientRequestId, payload) => ({
+      key: `${commandType}:${SOURCE_CHAT_ID}:${clientRequestId}`,
+      commandType,
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId,
+      payloadHash: 'hash',
+      payload,
+      status: 'failed',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:01:00.000Z',
+      error: 'Server restarted before command completion was recorded',
+      errorCode: 'SERVER_RESTART_INTERRUPTED',
+    });
+    const cases = [
+      {
+        record: interruptedRecord('active-input', 'req-active-restart', {
+          chatId: SOURCE_CHAT_ID,
+          content: 'active after restart',
+        }),
+        submit: (service) => service.submitActiveInput({
+          chatId: SOURCE_CHAT_ID,
+          content: 'active after restart',
+          clientRequestId: 'req-active-restart',
+        }),
+      },
+      {
+        record: interruptedRecord('agent-stop', 'req-stop-restart', {
+          chatId: SOURCE_CHAT_ID,
+          agentId: undefined,
+        }),
+        submit: (service) => service.submitStop({
+          chatId: SOURCE_CHAT_ID,
+          clientRequestId: 'req-stop-restart',
+        }),
+      },
+      {
+        record: interruptedRecord('agent-interrupt-and-send', 'req-interrupt-restart', {
+          chatId: SOURCE_CHAT_ID,
+          agentId: undefined,
+        }),
+        submit: (service) => service.submitInterruptAndSend({
+          chatId: SOURCE_CHAT_ID,
+          clientRequestId: 'req-interrupt-restart',
+        }),
+      },
+    ];
+
+    for (const { record, submit } of cases) {
+      const ledger = {
+        accept: mock(async () => ({ kind: 'duplicate', record })),
+        update: mock(async () => record),
+      };
+      const { service, queue } = makeService({ ledger });
+      await expect(submit(service)).rejects.toMatchObject({
+        code: 'SERVER_RESTART_INTERRUPTED',
+        status: 409,
+        retryable: false,
+      });
+      expect(queue.deliverActiveInput).not.toHaveBeenCalled();
+      expect(queue.stopActiveTurn).not.toHaveBeenCalled();
+      expect(queue.interruptActiveTurn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('reports a restart-interrupted permission decision instead of accepting the duplicate', async () => {
+    const record = {
+      key: `permission-decision:${SOURCE_CHAT_ID}:req-permission-restart`,
+      commandType: 'permission-decision',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-permission-restart',
+      payloadHash: 'hash',
+      payload: {},
+      status: 'failed',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:01:00.000Z',
+      error: 'Server restarted before command completion was recorded',
+      errorCode: 'SERVER_RESTART_INTERRUPTED',
+    };
+    const ledger = {
+      accept: mock(async () => ({ kind: 'duplicate', record })),
+      update: mock(async () => record),
+    };
+    const { service, agents } = makeService({ ledger });
+
+    await expect(service.submitPermissionDecision({
+      chatId: SOURCE_CHAT_ID,
+      permissionRequestId: 'permission-1',
+      allow: true,
+      alwaysAllow: false,
+      clientRequestId: 'req-permission-restart',
+    })).rejects.toMatchObject({
+      code: 'SERVER_RESTART_INTERRUPTED',
+      status: 409,
+      retryable: false,
+    });
+    expect(agents.resolvePermission).not.toHaveBeenCalled();
+  });
+
   it('keeps a live-failed direct input recoverable across a later restart', async () => {
     const { service, ledger } = makeService({
       queue: {
@@ -855,12 +1137,13 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-concurrent-1',
       clientMessageId: 'msg-concurrent-1',
     })).resolves.toMatchObject({ status: 'accepted' });
-    await expect(service.submitRun({
+    const rejection = service.submitRun({
       chatId: SOURCE_CHAT_ID,
       command: 'second',
       clientRequestId: 'req-concurrent-2',
       clientMessageId: 'msg-concurrent-2',
-    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
+    });
+    await expect(rejection).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
 
     expect(registerPendingUserInput).toHaveBeenCalledTimes(1);
     expect(runReservedTurn).toHaveBeenCalledTimes(1);
@@ -873,7 +1156,7 @@ describe('ChatCommandService', () => {
   it('rejects a direct run that would bypass durable queued input', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue(
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue(
           [queueEntry('entry-1', 'first')],
           { pause: manualPause() },
         ))),
@@ -898,35 +1181,38 @@ describe('ChatCommandService', () => {
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a direct run while restart uncertainty pauses an empty queue', async () => {
+  it('consumes empty restart uncertainty for an interactive direct run', async () => {
+    let control = storedQueue([], { recoveredInputContinuation: recoveredContinuation() });
+    const consumeRecoveredInputContinuationForDirectTurn = mock(() => {
+      control = storedQueue([], { version: 2 });
+      return Promise.resolve(control);
+    });
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
-          pause: {
-            id: 'pause-recovery',
-            kind: 'recovered-unconfirmed-input',
-            pausedAt: '2026-07-18T00:00:00.000Z',
-          },
-        }))),
+        readChatExecutionControl: mock(() => Promise.resolve(control)),
+        consumeRecoveredInputContinuationForDirectTurn,
       },
     });
 
     await expect(service.submitRun({
       chatId: SOURCE_CHAT_ID,
-      command: 'must wait for review',
+      command: 'continue with a successor',
       clientRequestId: 'req-recovery-gate',
       clientMessageId: 'msg-recovery-gate',
-    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
+    })).resolves.toMatchObject({ status: 'accepted' });
 
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
-    expect(queue.runReservedTurn).not.toHaveBeenCalled();
-    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(consumeRecoveredInputContinuationForDirectTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: SOURCE_CHAT_ID }),
+    );
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn.mock.calls[0][2].directHistoryRecovery).toBeUndefined();
   });
 
   it('rejects a direct run while the queue head is dispatching', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1', 'first', 'sending')]))),
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1', 'first', 'sending')]))),
       },
     });
 
@@ -1129,6 +1415,46 @@ describe('ChatCommandService', () => {
         },
       }),
     ]);
+  });
+
+  it('recovers a duplicate accepted command instead of returning false success', async () => {
+    const { service, queue, ledger } = makeService();
+    const update = ledger.update.bind(ledger);
+    let failedWrites = 0;
+    ledger.update = mock((key, patch) => {
+      if (
+        failedWrites < 2
+        && (patch.status === 'scheduled' || patch.status === 'failed')
+      ) {
+        failedWrites += 1;
+        return Promise.reject(new Error(`ledger write ${failedWrites} failed`));
+      }
+      return update(key, patch);
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'recover accepted command',
+      clientRequestId: 'req-recover-accepted',
+      clientMessageId: 'msg-recover-accepted',
+    };
+
+    await expect(service.submitRun(input)).rejects.toThrow('ledger write 2 failed');
+    expect((await readLedgerRecords()).at(-1)).toMatchObject({
+      clientRequestId: input.clientRequestId,
+      status: 'accepted',
+    });
+
+    const retry = await service.submitRun(input);
+
+    expect(retry.status).toBe('duplicate');
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect((await readLedgerRecords()).at(-1)).toMatchObject({
+      clientRequestId: input.clientRequestId,
+      status: 'scheduled',
+      pendingInputRecovery: 'required',
+    });
   });
 
   it('applies shared fork validation before copying', async () => {
@@ -1407,15 +1733,11 @@ describe('ChatCommandService', () => {
     expect(agents.compactSession).not.toHaveBeenCalled();
   });
 
-  it('refuses /compact while recovered input uncertainty pauses the queue', async () => {
+  it('refuses /compact while recovered input continuation is active', async () => {
     const { service, agents, chats, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
-          pause: {
-            id: 'pause-recovered',
-            kind: 'recovered-unconfirmed-input',
-            pausedAt: '2026-07-18T00:00:00.000Z',
-          },
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([], {
+          recoveredInputContinuation: recoveredContinuation(),
         }))),
       },
     });
@@ -1444,7 +1766,7 @@ describe('ChatCommandService', () => {
           Promise.resolve({
             entry: queueEntry('q1', 'still waiting'),
             entryId: 'q1',
-            queue: postCreate,
+            control: postCreate,
             duplicate: false,
           }),
         ),
@@ -1458,9 +1780,9 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-enqueue-1',
     });
 
-    expect(result.queue.entries.map((e) => e.id)).toEqual(['q1']);
-    expect(result.queue.entries[0]).not.toHaveProperty('status');
-    expect(result.queue.dispatchingEntryId).toBe('s1');
+    expect(result.control.queue.entries.map((e) => e.id)).toEqual(['q1']);
+    expect(result.control.queue.entries[0]).not.toHaveProperty('status');
+    expect(result.control.queue.dispatchingEntryId).toBe('s1');
   });
 
   it('deduplicates identical queue create retries', async () => {
@@ -1477,7 +1799,7 @@ describe('ChatCommandService', () => {
     expect(first.status).toBe('accepted');
     expect(retry.status).toBe('duplicate');
     expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
-    expect(queue.triggerDrain).toHaveBeenCalledTimes(2);
+    expect(queue.triggerDrain).toHaveBeenCalledTimes(1);
   });
 
   it('recovers an accepted queue create from its durable queue receipt', async () => {
@@ -1494,7 +1816,7 @@ describe('ChatCommandService', () => {
     queue.createChatQueueEntry.mockResolvedValueOnce({
       entry: queueEntry(entryId, 'survives restart'),
       entryId,
-      queue: storedQueue([queueEntry(entryId, 'survives restart')], {
+      control: storedQueue([queueEntry(entryId, 'survives restart')], {
         appliedCommands: [
           {
             key: `queue-entry-create:${SOURCE_CHAT_ID}:${clientRequestId}`,
@@ -1517,9 +1839,11 @@ describe('ChatCommandService', () => {
     expect(queue.createChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'survives restart', {
       key: `queue-entry-create:${SOURCE_CHAT_ID}:${clientRequestId}`,
       entryId,
+    }, {
+      protectedKeys: new Set([`queue-entry-create:${SOURCE_CHAT_ID}:${clientRequestId}`]),
     });
     expect((await readLedgerRecords()).at(-1)).toMatchObject({
-      status: 'scheduled',
+      status: 'finished',
       entryId,
     });
   });
@@ -1544,12 +1868,12 @@ describe('ChatCommandService', () => {
     expect(queue.replaceChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'entry-1', 'replacement', 2, {
       key: `queue-entry-replace:${SOURCE_CHAT_ID}:request-replace`,
       entryId: 'entry-1',
-    });
+    }, expect.objectContaining({ protectedKeys: expect.any(Set) }));
     expect(deleted.entryId).toBe('entry-1');
     expect(queue.deleteChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'entry-1', {
       key: `queue-entry-delete:${SOURCE_CHAT_ID}:request-delete`,
       entryId: 'entry-1',
-    });
+    }, expect.objectContaining({ protectedKeys: expect.any(Set) }));
   });
 
   it('replays semantic queue mutation failures without applying them after state changes', async () => {
@@ -1561,7 +1885,7 @@ describe('ChatCommandService', () => {
     );
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(latestQueue)),
+        readChatExecutionControl: mock(() => Promise.resolve(latestQueue)),
         replaceChatQueueEntry: mock(() => Promise.reject(replaceFailure)),
       },
     });
@@ -1578,7 +1902,7 @@ describe('ChatCommandService', () => {
     });
     await expect(service.submitQueueEntryReplace(replaceInput)).rejects.toMatchObject({
       code: 'QUEUE_ENTRY_REVISION_CONFLICT',
-      queue: expect.objectContaining({ version: 3 }),
+      control: expect.objectContaining({ version: 3 }),
     });
 
     expect(queue.replaceChatQueueEntry).toHaveBeenCalledOnce();
@@ -1613,7 +1937,7 @@ describe('ChatCommandService', () => {
   it('completes handled active input without exposing a synthetic queue entry', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 4 }))),
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([], { version: 4 }))),
         deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
           await afterPendingRegistered();
           return true;
@@ -1629,12 +1953,15 @@ describe('ChatCommandService', () => {
 
     expect(result.status).toBe('accepted');
     expect(result.delivery).toBe('active');
-    expect(result.queue.entries).toEqual([]);
+    expect(result.control.queue.entries).toEqual([]);
     expect(result.entryId).toBeUndefined();
     expect(queue.triggerDrain).not.toHaveBeenCalled();
-    expect(queue.deliverActiveInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, '/goal pause', {
-      clientRequestId: 'request-active',
-    }, expect.any(Function));
+    expect(queue.deliverActiveInput).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      '/goal pause',
+      expect.objectContaining({ clientRequestId: 'request-active' }),
+      expect.any(Function),
+    );
     const records = await readLedgerRecords();
     expect(records.at(-1)).toMatchObject({
       status: 'finished',
@@ -1645,7 +1972,7 @@ describe('ChatCommandService', () => {
   it('does not redeliver active input when recording the completed delivery fails', async () => {
     const { service, queue, ledger } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue())),
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
         deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
           await afterPendingRegistered();
           return true;
@@ -1669,20 +1996,20 @@ describe('ChatCommandService', () => {
 
     await expect(service.submitActiveInput(input)).rejects.toThrow('ledger finish failed');
     await expect(service.submitActiveInput(input)).rejects.toMatchObject({
-      code: 'INTERNAL_ERROR',
+      code: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
       retryable: false,
     });
 
     expect(queue.deliverActiveInput).toHaveBeenCalledOnce();
     expect((await readLedgerRecords()).at(-1)).toMatchObject({ status: 'failed' });
-    expect((await readLedgerRecords()).at(-1)?.errorCode).toBeUndefined();
+    expect((await readLedgerRecords()).at(-1)?.errorCode).toBe('ACTIVE_INPUT_OUTCOME_UNKNOWN');
   });
 
   it('reopens pre-accept active delivery failures for the same request id', async () => {
     let attempts = 0;
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue())),
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
         deliverActiveInput: mock(async () => {
           attempts += 1;
           if (attempts === 1) throw new ActiveInputDeliveryError(new Error('live registration failed'), false);
@@ -1692,7 +2019,7 @@ describe('ChatCommandService', () => {
           Promise.resolve({
             entry: queueEntry('queued-retry', 'retry me'),
             entryId: 'queued-retry',
-            queue: storedQueue([queueEntry('queued-retry', 'retry me')], {
+            control: storedQueue([queueEntry('queued-retry', 'retry me')], {
               version: 1,
             }),
             duplicate: false,
@@ -1728,7 +2055,7 @@ describe('ChatCommandService', () => {
       }),
     );
     records = await readLedgerRecords();
-    expect(records.at(-1)?.status).toBe('scheduled');
+    expect(records.at(-1)?.status).toBe('finished');
     expect(queue.deliverActiveInput).toHaveBeenCalledTimes(2);
     expect(queue.createChatQueueEntry).toHaveBeenCalledOnce();
   });
@@ -1780,6 +2107,7 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         key: `queue-entry-create:${SOURCE_CHAT_ID}:scheduled-prompt-2`,
       }),
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
@@ -1805,7 +2133,7 @@ describe('ChatCommandService', () => {
   it('queues scheduled input behind a dispatching queue head', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() =>
+        readChatExecutionControl: mock(() =>
           Promise.resolve(storedQueue([queueEntry('entry-sending', 'in flight', 'sending')], { version: 2 })),
         ),
       },
@@ -1824,19 +2152,16 @@ describe('ChatCommandService', () => {
       SOURCE_CHAT_ID,
       'scheduled second',
       expect.any(Object),
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
-  it('queues scheduled input behind an empty recovered-input pause', async () => {
+  it('queues scheduled input behind recovered-input continuation', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
-          pause: {
-            id: 'pause-recovery',
-            kind: 'recovered-unconfirmed-input',
-            pausedAt: '2026-07-18T00:00:00.000Z',
-          },
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([], {
+          recoveredInputContinuation: recoveredContinuation(),
         }))),
       },
     });
@@ -1854,19 +2179,16 @@ describe('ChatCommandService', () => {
       SOURCE_CHAT_ID,
       'scheduled after uncertain input',
       expect.any(Object),
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
     expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
   });
 
-  it('skips scheduled input when an empty recovered-input pause blocks direct execution', async () => {
+  it('skips scheduled input when recovered-input continuation blocks direct execution', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
-          pause: {
-            id: 'pause-recovery',
-            kind: 'recovered-unconfirmed-input',
-            pausedAt: '2026-07-18T00:00:00.000Z',
-          },
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([], {
+          recoveredInputContinuation: recoveredContinuation(),
         }))),
       },
     });
@@ -1903,7 +2225,7 @@ describe('ChatCommandService', () => {
   it('does not replay post-accept active delivery failures for the same request id', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue())),
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
         deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
           await afterPendingRegistered();
           throw new ActiveInputDeliveryError(new Error('live steer failed after acceptance'), true);
@@ -1932,10 +2254,10 @@ describe('ChatCommandService', () => {
         pendingInputRecovery: 'required',
       }),
     );
-    expect(records.at(-1)?.errorCode).toBeUndefined();
+    expect(records.at(-1)?.errorCode).toBe('ACTIVE_INPUT_OUTCOME_UNKNOWN');
 
     await expect(service.submitActiveInput(input)).rejects.toMatchObject({
-      code: 'INTERNAL_ERROR',
+      code: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
       status: 409,
       retryable: false,
       message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
@@ -1986,8 +2308,8 @@ describe('ChatCommandService', () => {
       action: 'clear',
     });
 
-    expect(result.queue.entries).toEqual([]);
-    expect(result.queue.dispatchingEntryId).toBe('s1');
+    expect(result.control.queue.entries).toEqual([]);
+    expect(result.control.queue.dispatchingEntryId).toBe('s1');
   });
 
   it('resumes only the named pause and schedules drain after the mutation succeeds', async () => {
@@ -2001,7 +2323,6 @@ describe('ChatCommandService', () => {
 
     expect(result.success).toBe(true);
     expect(queue.resumeChatQueue).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'pause-current');
-    expect(queue.triggerDrain).toHaveBeenCalledWith(SOURCE_CHAT_ID);
   });
 
   it('rejects resume without a pause ID before mutating the queue', async () => {
@@ -2078,7 +2399,7 @@ describe('ChatCommandService', () => {
     const { service, queue, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
-    queue.readChatQueue.mockResolvedValueOnce({
+    queue.readChatExecutionControl.mockResolvedValueOnce({
       entries: [
         {
           id: 'sending-1',
@@ -2105,7 +2426,7 @@ describe('ChatCommandService', () => {
     const { service, queue, agents } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
-    queue.readChatQueue.mockResolvedValueOnce(storedQueue([
+    queue.readChatExecutionControl.mockResolvedValueOnce(storedQueue([
       queueEntry('queued-1', 'continue', 'queued'),
     ]));
 
@@ -2181,12 +2502,8 @@ describe('ChatCommandService', () => {
     const { service, chats, agents } = makeService({
       pendingInputsService,
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
-          pause: {
-            id: 'pause-recovery',
-            kind: 'recovered-unconfirmed-input',
-            pausedAt: '2026-07-18T00:00:00.000Z',
-          },
+        readChatExecutionControl: mock(() => Promise.resolve(storedQueue([], {
+          recoveredInputContinuation: recoveredContinuation(),
         }))),
       },
     });
@@ -2278,7 +2595,7 @@ describe('ChatCommandService', () => {
 
     try {
       await waitForCheckpoint(entryRemoved.promise, drain, 'queue drain');
-      expect((await queueService.readChatQueue(SOURCE_CHAT_ID)).entries).toEqual([]);
+      expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toEqual([]);
       expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(true);
 
       await expect(service.updateProjectPath({
@@ -2310,10 +2627,10 @@ describe('ChatCommandService', () => {
     const queueService = makeRealQueue(pendingInputsService, {
       isChatRunning: mock(() => runtimeRunning),
     });
-    const readChatQueue = queueService.readChatQueue.bind(queueService);
+    const readChatExecutionControl = queueService.readChatExecutionControl.bind(queueService);
     let holdNextQueueRead = false;
-    queueService.readChatQueue = mock(async (...args) => {
-      const queue = await readChatQueue(...args);
+    queueService.readChatExecutionControl = mock(async (...args) => {
+      const queue = await readChatExecutionControl(...args);
       if (holdNextQueueRead) {
         holdNextQueueRead = false;
         queueReadStarted.resolve();
