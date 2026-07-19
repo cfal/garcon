@@ -258,16 +258,20 @@ export class WsConnection {
 
 			websocket.onclose = (event) => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				const now = Date.now();
 				console.warn('WebSocket closed:', {
 					code: event.code,
 					reason: event.reason || null,
 					wasClean: event.wasClean,
+					extensions: websocket.extensions || null,
+					bufferedAmount: websocket.bufferedAmount,
+					lastInboundAgoMs: this.#lastInboundAt === null ? null : now - this.#lastInboundAt,
 					visibilityState: document.visibilityState,
 					online: navigator.onLine,
 					connectedForMs:
 						this.connectionStatus.lastConnectedAt === null
 							? null
-							: Date.now() - this.connectionStatus.lastConnectedAt,
+							: now - this.connectionStatus.lastConnectedAt,
 				});
 				const reason =
 					this.connectionStatus.reason === 'socket-error' ? 'socket-error' : 'socket-close';
@@ -278,6 +282,8 @@ export class WsConnection {
 				if (!this.#isCurrentSocket(websocket)) return;
 				console.error('WebSocket error:', {
 					readyState: websocket.readyState,
+					extensions: websocket.extensions || null,
+					bufferedAmount: websocket.bufferedAmount,
 					visibilityState: document.visibilityState,
 					online: navigator.onLine,
 				});

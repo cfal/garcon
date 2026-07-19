@@ -30,6 +30,7 @@ import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
+import { PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS } from './ws/transport-options.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatExecutionActivity } from './chats/chat-execution-activity.js';
@@ -591,12 +592,12 @@ export async function startServer(): Promise<void> {
         return new Response('Not found', { status: 404 });
       },
       websocket: {
+        ...PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS,
         idleTimeout: config.wsIdleTimeoutSeconds,
         sendPings: true,
         backpressureLimit: config.wsBackpressureLimit,
         closeOnBackpressureLimit: true,
         maxPayloadLength: config.wsMaxPayloadLength,
-        perMessageDeflate: true,
         open(ws) {
           const admission = wsAdmission.confirm(ws.data.connectionId);
           if (!admission.ok) {
@@ -625,6 +626,12 @@ export async function startServer(): Promise<void> {
           primaryWs.drain(ws);
         },
         close(ws, code, reason) {
+          logger.info('primary WebSocket closed:', {
+            connectionId: ws.data.connectionId,
+            code,
+            reason: reason || null,
+            bufferedAmount: ws.getBufferedAmount(),
+          });
           try {
             primaryWs.close(ws, code, reason);
           } finally {

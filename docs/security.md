@@ -19,3 +19,13 @@ mutating Chat commands use authenticated HTTP requests. Terminal input and resiz
 active shell operations, so terminal authorization also expires at the token deadline.
 Expiry clears queued terminal output and detaches terminal subscriptions without closing
 the shared Chat connection. Refreshed credentials take effect by replacing `/ws`.
+
+## WebSocket Transport Compatibility
+
+Garcon deliberately does not negotiate `permessage-deflate` on `/ws`. Browser terminal
+input consists of frequent small frames, while Chat and terminal output make the
+connection heavily full-duplex. Garcon does not request compression for its
+server-to-browser WebSocket messages, so negotiating the extension adds a client
+compression path with little benefit for this traffic profile. Disabling it avoids that
+path without changing message semantics. Reverse proxies must not add WebSocket
+compression back to `/ws`.
