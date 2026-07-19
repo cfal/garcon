@@ -3,7 +3,10 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '../../../common/agents.js';
 import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
-import type { CommandLedgerRecord } from '../../../server/commands/command-ledger.js';
+import {
+  commandPayloadHash,
+  type CommandLedgerRecord,
+} from '../../../server/commands/command-ledger.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -516,6 +519,97 @@ describe('persistence lifecycle', () => {
       expect(fixture.fakeProviders.openAi.requests().filter((request) => (
         request.lastUserText === 'active-handoff-fallback'
       ))).toHaveLength(1);
+    });
+  });
+
+  test('recovers an accepted Stop as a durable pause before startup drain', async () => {
+    await withIntegrationFixture('accepted-stop-restart-recovery', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const seed = await fixture.client.startDirectChat({
+        chatId,
+        content: 'stop-recovery-seed',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
+
+      const heldCurrent = fixture.fakeProviders.openAi.holdNext({
+        lastUserText: 'stop-recovery-current',
+      });
+      const current = await fixture.client.runDirectChat({
+        chatId,
+        content: 'stop-recovery-current',
+        agent: fixture.directAgents.openAi,
+      });
+      await heldCurrent.received;
+      await fixture.client.enqueueNew(chatId, 'stop-recovery-successor');
+
+      const stopRequestId = crypto.randomUUID();
+      const currentAborted = heldCurrent.expectAbort();
+      await fixture.crashAndRestartBeforeNativeUserPersistence({
+        chatId,
+        clientRequestId: current.clientRequestId,
+        afterCrash: async () => {
+          const ledgerPath = join(fixture.dirs.workspace, 'command-ledger.json');
+          const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as {
+            version: 1;
+            records: CommandLedgerRecord[];
+          };
+          const currentRecord = ledger.records.find((record) => (
+            record.commandType === 'agent-run'
+            && record.chatId === chatId
+            && record.clientRequestId === current.clientRequestId
+          ));
+          if (!currentRecord) throw new Error('Current direct command ledger record was not persisted.');
+          currentRecord.status = 'finished';
+          currentRecord.pendingInputRecovery = 'settled';
+          currentRecord.updatedAt = new Date().toISOString();
+          delete currentRecord.error;
+          delete currentRecord.errorCode;
+
+          const acceptedAt = new Date().toISOString();
+          const payload = { chatId };
+          ledger.records.push({
+            key: `agent-stop:${chatId}:${stopRequestId}`,
+            commandType: 'agent-stop',
+            chatId,
+            clientRequestId: stopRequestId,
+            payload,
+            payloadHash: commandPayloadHash(payload),
+            status: 'accepted',
+            acceptedAt,
+            updatedAt: acceptedAt,
+          });
+          await writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8');
+        },
+      });
+      await currentAborted;
+      heldCurrent.releaseTruncatedStream();
+
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+        'stop-recovery-seed',
+        'stop-recovery-current',
+      ]);
+      const recovered = await fixture.client.getExecutionControl(chatId);
+      expect(recovered.queue.pause?.kind).toBe('manual');
+      expect(recovered.queue.entries.map((entry) => entry.content)).toEqual([
+        'stop-recovery-successor',
+      ]);
+
+      const duplicate = await fixture.client.stopChat({ chatId, clientRequestId: stopRequestId });
+      expect(duplicate).toMatchObject({
+        status: 'duplicate',
+        stopped: true,
+        control: recovered,
+      });
+
+      const heldSuccessor = fixture.fakeProviders.openAi.holdNext({
+        lastUserText: 'stop-recovery-successor',
+      });
+      await fixture.client.resumeQueue(chatId, recovered.queue.pause!.id);
+      await heldSuccessor.received;
+      heldSuccessor.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId);
     });
   });
 

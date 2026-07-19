@@ -76,6 +76,18 @@ const INTERRUPTIBLE_EXECUTION_COMMANDS = new Set([
   'active-input',
 ]);
 
+const RESTART_INTERRUPTED_COMMANDS = new Set([
+  ...INTERRUPTIBLE_EXECUTION_COMMANDS,
+  'agent-stop',
+  'agent-interrupt-and-send',
+  'permission-decision',
+]);
+
+const RESTART_RECOVERABLE_SESSION_CONTROL_COMMANDS = new Set([
+  'agent-stop',
+  'agent-interrupt-and-send',
+]);
+
 const QUEUE_RECEIPT_COMMANDS = new Set([
   'queue-entry-create',
   'queue-entry-replace',
@@ -453,6 +465,40 @@ export class CommandLedger {
       }));
   }
 
+  async listRestartInterruptedSessionControls(): Promise<CommandLedgerRecord[]> {
+    await this.#load();
+    return [...this.#records.values()]
+      .filter((record) => (
+        RESTART_RECOVERABLE_SESSION_CONTROL_COMMANDS.has(record.commandType)
+        && record.status === 'failed'
+        && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
+      ))
+      .map((record) => ({ ...record, payload: { ...record.payload } }));
+  }
+
+  async settleRestartInterruptedSessionControl(key: string): Promise<boolean> {
+    return this.#withMutationLock(async () => {
+      await this.#load();
+      const existing = this.#records.get(key);
+      if (
+        !existing
+        || !RESTART_RECOVERABLE_SESSION_CONTROL_COMMANDS.has(existing.commandType)
+        || existing.status !== 'failed'
+        || existing.errorCode !== SERVER_RESTART_INTERRUPTED_ERROR_CODE
+      ) return false;
+      const { error: _error, errorCode: _errorCode, ...retained } = existing;
+      const nextRecords = new Map(this.#records);
+      nextRecords.set(key, {
+        ...retained,
+        status: 'finished',
+        updatedAt: new Date().toISOString(),
+      });
+      this.#trimRecords(nextRecords);
+      await this.#commit(nextRecords);
+      return true;
+    });
+  }
+
   async listRetainedQueueReceiptKeys(chatId: string): Promise<ReadonlySet<string>> {
     return this.#withMutationLock(async () => {
       await this.#load();
@@ -560,7 +606,7 @@ export class CommandLedger {
           && typeof record.entryId === 'string'
           && record.entryId.length > 0
           && record.pendingInputRecovery !== 'required';
-        const interrupted = INTERRUPTIBLE_EXECUTION_COMMANDS.has(record.commandType)
+        const interrupted = RESTART_INTERRUPTED_COMMANDS.has(record.commandType)
           && (record.status === 'accepted' || record.status === 'scheduled' || record.status === 'running');
         const recoversUserInput = USER_INPUT_EXECUTION_COMMANDS.has(record.commandType);
         const priorRecovery = record.pendingInputRecovery === 'required'
@@ -654,12 +700,13 @@ export class CommandLedger {
     while (records.size > LEDGER_RECORD_LIMIT) {
       const oldest = [...records]
         .find(([, record]) => {
-          const interruptedExecution = INTERRUPTIBLE_EXECUTION_COMMANDS.has(record.commandType)
-            && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE;
           return TERMINAL_COMMAND_STATUSES.has(record.status)
             && record.pendingInputRecovery !== 'required'
             && record.forkPreparation === undefined
-            && !interruptedExecution;
+            && !(
+              RESTART_RECOVERABLE_SESSION_CONTROL_COMMANDS.has(record.commandType)
+              && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
+            );
         })?.[0];
       if (!oldest) return;
       records.delete(oldest);

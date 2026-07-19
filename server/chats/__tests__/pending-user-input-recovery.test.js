@@ -372,7 +372,12 @@ describe('PendingUserInputRecoveryCoordinator', () => {
     const coordinator = new PendingUserInputRecoveryCoordinator({
       ledger,
       pendingInputs,
-      nativeSnapshots: chatViews,
+      nativeSnapshots: {
+        isChatActive: () => active,
+        reconcileNativeSnapshot: (chatId, messages) => (
+          chatViews.reconcileNativeSnapshot(chatId, messages)
+        ),
+      },
       chatExists: () => true,
       onRecoveredChatSettled: () => Promise.resolve(),
     });
@@ -384,10 +389,15 @@ describe('PendingUserInputRecoveryCoordinator', () => {
     active = true;
     nativeLoad.resolve([nativeMessage]);
 
-    await expect(reconciliation).rejects.toMatchObject({ code: 'CHAT_RUNNING' });
+    await expect(reconciliation).resolves.toEqual({ nativeSnapshotApplied: false });
     expect(pendingInputs.listForChat('chat-1')).toHaveLength(1);
     expect(ledger.settlePendingInputRecovery).not.toHaveBeenCalled();
     expect(chatViews.readPage('chat-1', 20)).toBeNull();
+
+    await expect(coordinator.reconcileChat('chat-1')).resolves.toEqual({
+      nativeSnapshotApplied: false,
+    });
+    expect(loadNativeMessages).toHaveBeenCalledTimes(1);
 
     active = false;
     await expect(coordinator.reconcileChat('chat-1')).resolves.toEqual({

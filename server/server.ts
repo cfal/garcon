@@ -332,6 +332,9 @@ export async function startServer(): Promise<void> {
       },
     };
     const chatViewPages = {
+      isChatActive(chatId: string) {
+        return chatExecutionActivity.isActive(chatId);
+      },
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
         return chatViews.getOrCreatePage(
           chatId,
@@ -377,6 +380,17 @@ export async function startServer(): Promise<void> {
     );
     chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
+    const interruptedSessionControls = await commandLedger.listRestartInterruptedSessionControls();
+    for (const record of interruptedSessionControls) {
+      if (record.commandType === 'agent-stop' && chatRegistry.getChat(record.chatId)) {
+        await queue.pauseChatQueue(record.chatId);
+      }
+      const settled = await commandLedger.settleRestartInterruptedSessionControl(record.key);
+      if (!settled) {
+        throw new Error(`Could not settle interrupted ${record.commandType} for ${record.chatId}`);
+      }
+      logger.warn(`${record.commandType}: recovered interrupted command for ${record.chatId}`);
+    }
     const forkPreparations = await commandLedger.listForkPreparationsPendingRecovery();
     for (const record of forkPreparations) {
       const preparation = record.forkPreparation!;

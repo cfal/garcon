@@ -958,6 +958,105 @@ describe('ChatCommandService', () => {
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
+  it('reports restart-interrupted active input and control duplicates consistently', async () => {
+    const interruptedRecord = (commandType, clientRequestId, payload) => ({
+      key: `${commandType}:${SOURCE_CHAT_ID}:${clientRequestId}`,
+      commandType,
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId,
+      payloadHash: 'hash',
+      payload,
+      status: 'failed',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:01:00.000Z',
+      error: 'Server restarted before command completion was recorded',
+      errorCode: 'SERVER_RESTART_INTERRUPTED',
+    });
+    const cases = [
+      {
+        record: interruptedRecord('active-input', 'req-active-restart', {
+          chatId: SOURCE_CHAT_ID,
+          content: 'active after restart',
+        }),
+        submit: (service) => service.submitActiveInput({
+          chatId: SOURCE_CHAT_ID,
+          content: 'active after restart',
+          clientRequestId: 'req-active-restart',
+        }),
+      },
+      {
+        record: interruptedRecord('agent-stop', 'req-stop-restart', {
+          chatId: SOURCE_CHAT_ID,
+          agentId: undefined,
+        }),
+        submit: (service) => service.submitStop({
+          chatId: SOURCE_CHAT_ID,
+          clientRequestId: 'req-stop-restart',
+        }),
+      },
+      {
+        record: interruptedRecord('agent-interrupt-and-send', 'req-interrupt-restart', {
+          chatId: SOURCE_CHAT_ID,
+          agentId: undefined,
+        }),
+        submit: (service) => service.submitInterruptAndSend({
+          chatId: SOURCE_CHAT_ID,
+          clientRequestId: 'req-interrupt-restart',
+        }),
+      },
+    ];
+
+    for (const { record, submit } of cases) {
+      const ledger = {
+        accept: mock(async () => ({ kind: 'duplicate', record })),
+        update: mock(async () => record),
+      };
+      const { service, queue } = makeService({ ledger });
+      await expect(submit(service)).rejects.toMatchObject({
+        code: 'SERVER_RESTART_INTERRUPTED',
+        status: 409,
+        retryable: false,
+      });
+      expect(queue.deliverActiveInput).not.toHaveBeenCalled();
+      expect(queue.stopActiveTurn).not.toHaveBeenCalled();
+      expect(queue.interruptActiveTurn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('reports a restart-interrupted permission decision instead of accepting the duplicate', async () => {
+    const record = {
+      key: `permission-decision:${SOURCE_CHAT_ID}:req-permission-restart`,
+      commandType: 'permission-decision',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-permission-restart',
+      payloadHash: 'hash',
+      payload: {},
+      status: 'failed',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:01:00.000Z',
+      error: 'Server restarted before command completion was recorded',
+      errorCode: 'SERVER_RESTART_INTERRUPTED',
+    };
+    const ledger = {
+      accept: mock(async () => ({ kind: 'duplicate', record })),
+      update: mock(async () => record),
+    };
+    const { service, agents } = makeService({ ledger });
+
+    await expect(service.submitPermissionDecision({
+      chatId: SOURCE_CHAT_ID,
+      permissionRequestId: 'permission-1',
+      allow: true,
+      alwaysAllow: false,
+      clientRequestId: 'req-permission-restart',
+    })).rejects.toMatchObject({
+      code: 'SERVER_RESTART_INTERRUPTED',
+      status: 409,
+      retryable: false,
+    });
+    expect(agents.resolvePermission).not.toHaveBeenCalled();
+  });
+
   it('keeps a live-failed direct input recoverable across a later restart', async () => {
     const { service, ledger } = makeService({
       queue: {

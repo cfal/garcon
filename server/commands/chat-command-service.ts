@@ -906,14 +906,15 @@ export class ChatCommandService {
       this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
       if (ledger.kind === 'duplicate') {
         if (ledger.record.status === 'failed') {
-          throw new CommandValidationError(
-            ledger.record.errorCode === 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
-              ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
-              : 'INTERNAL_ERROR',
-            ledger.record.error ?? 'The previous active-input delivery failed after acceptance',
-            409,
-            false,
-          );
+          if (ledger.record.errorCode === 'ACTIVE_INPUT_OUTCOME_UNKNOWN') {
+            throw new CommandValidationError(
+              'ACTIVE_INPUT_OUTCOME_UNKNOWN',
+              ledger.record.error ?? 'The previous active-input delivery failed after acceptance',
+              409,
+              false,
+            );
+          }
+          this.#throwRecordedExecutionFailure(ledger.record);
         }
         if (ledger.record.status === 'accepted') {
           const outcome = await this.deps.queue.recoverAcceptedActiveInput({
@@ -1055,6 +1056,11 @@ export class ChatCommandService {
       },
     });
     this.#throwOnConflict(ledger, 'Conflicting permission decision retry');
+    if (
+      ledger.kind === 'duplicate'
+      && ledger.record.status === 'failed'
+      && ledger.record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
+    ) this.#throwRecordedExecutionFailure(ledger.record);
     if (ledger.kind !== 'duplicate') {
       this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
         allow: input.allow,
@@ -1081,6 +1087,10 @@ export class ChatCommandService {
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
 
     if (ledger.kind === 'duplicate') {
+      if (
+        ledger.record.status === 'failed'
+        && ledger.record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
+      ) this.#throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         stopped: ledger.record.status === 'finished',
@@ -1124,6 +1134,10 @@ export class ChatCommandService {
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
 
     if (ledger.kind === 'duplicate') {
+      if (
+        ledger.record.status === 'failed'
+        && ledger.record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
+      ) this.#throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         stopped: ledger.record.status === 'finished',
