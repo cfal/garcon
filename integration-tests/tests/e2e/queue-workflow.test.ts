@@ -33,7 +33,7 @@ describe('Lightpanda queue workflow', () => {
       await app.clickButton('Previous queued message');
       await app.waitForQueuedPreview('ui-queue-b');
 
-      await app.clickResponsiveAction('Edit');
+      await app.clickResponsiveAction('Edit queue');
       await app.clickQueuedRowAction('ui-queue-b', 'Edit queued message');
       await app.fillQueuedEditor('ui-queue-b-edited');
       await app.clickDialogButton('Save edit');

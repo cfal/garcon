@@ -253,7 +253,7 @@
 	"chat_queue_dialog_title": "Queued messages",
 	"chat_queue_discard": "Discard",
 	"chat_queue_edit_message": "Edit queued message",
-	"chat_queue_edit_queue": "Edit",
+	"chat_queue_edit_queue": "Edit queue",
 	"chat_queue_empty": "No queued messages",
 	"chat_queue_pending_count": "{count} queued",
 	"chat_queue_single_message": "1 message in queue",

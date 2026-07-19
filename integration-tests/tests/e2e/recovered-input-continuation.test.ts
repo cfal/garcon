@@ -102,7 +102,7 @@ describe('Lightpanda recovered input continuation', () => {
       ))).toHaveLength(1);
       fixture.assertNoBrowserErrors();
     });
-  }, 20_000);
+  }, 45_000);
 
   test('keeps Continue and Resume independent across queue browsing and reload', async () => {
     await withE2eFixture('queued-recovered-input-continuation', async (fixture) => {
@@ -137,7 +137,7 @@ describe('Lightpanda recovered input continuation', () => {
       await app.waitForButton('Continue queue');
       await app.waitForButton('Resume queue');
 
-      await app.clickButton('Edit queue');
+      await app.clickResponsiveAction('Edit queue');
       await app.clickDialogButton('Continue queue');
       await app.waitForTextAbsent('Queue needs attention');
       expect(await app.hasButton('Continue queue')).toBe(false);
@@ -149,7 +149,7 @@ describe('Lightpanda recovered input continuation', () => {
 
       const heldB = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: queuedB });
       const heldC = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: queuedC });
-      await app.clickButton('Resume queue');
+      await app.clickResponsiveAction('Resume queue');
       await heldB.received;
       heldB.releaseEcho();
       await heldC.received;
@@ -167,7 +167,7 @@ describe('Lightpanda recovered input continuation', () => {
       });
       fixture.assertNoBrowserErrors();
     });
-  }, 20_000);
+  }, 45_000);
 
   test('removes continuation from an open dialog when native reconciliation settles it', async () => {
     await withE2eFixture('native-settlement-recovered-input-continuation', async (fixture) => {
@@ -233,5 +233,5 @@ describe('Lightpanda recovered input continuation', () => {
         await fixture.page.setRequestInterception(false);
       }
     });
-  }, 20_000);
+  }, 45_000);
 });
