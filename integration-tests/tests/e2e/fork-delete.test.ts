@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { ChatSessionDeletedWsMessage } from '../../../common/ws-events.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -30,10 +31,17 @@ describe('Lightpanda fork and delete', () => {
         )}`);
       }
 
+      const deleteCursor = fixture.integration.client.markEvents();
       await app.clickButton('Chat actions');
       await app.clickMenuItem('Delete');
       await app.clickDialogButton('Delete');
       await app.waitForTextAbsent('Delete chat');
+      await fixture.integration.client.waitForEvent(
+        (event): event is ChatSessionDeletedWsMessage =>
+          event.type === 'chat-session-deleted' && event.chatId === fork.id,
+        'observer chat deletion',
+        { afterIndex: deleteCursor },
+      );
 
       const afterDelete = await fixture.integration.client.listChats();
       expect(afterDelete.sessions.map((entry) => entry.id)).toEqual([source.id]);

@@ -32,7 +32,7 @@ export interface ConversationRouterStoreDeps {
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 		removeChat: (chatId: string) => void;
 		setSelectedChatId: (id: string | null) => void;
-		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
+		applyProcessingEvent: (chatId: string, isProcessing: boolean) => void;
 		reconcileProcessing: (activeChatIds: Set<string>) => void;
 		quietRefreshChats: () => Promise<void> | void;
 	};
@@ -148,7 +148,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 			setSelectedChatId: (id) => deps.sessions.setSelectedChatId(id),
 			reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
 			setChatProcessing: (chatId, isProcessing) =>
-				deps.sessions.setChatProcessing(chatId, isProcessing),
+				deps.sessions.applyProcessingEvent(chatId, isProcessing),
 			patchChatPreview: (chatId, content, timestamp) => {
 				deps.sessions.patchPreview(chatId, content, timestamp);
 			},

@@ -185,6 +185,11 @@ interface ForkTruncatePoint {
   lineNumber?: number;
 }
 
+interface AcceptedRunPreparation {
+  prepare(): Promise<void>;
+  compensate(): Promise<void>;
+}
+
 interface SubmitRunInput {
   chatId: string;
   command: string;
@@ -1586,21 +1591,35 @@ export class ChatCommandService {
       };
     }
 
-    try {
-      await this.#forkChatFromContext(this.#validateFork(input));
-    } catch (error: unknown) {
-      await this.deps.ledger.update(ledger.record.key, {
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-
+    const forkContext = this.#validateFork(input);
+    let forkResult: ForkChatFileCopyResult | null = null;
     const result = await this.#scheduleAcceptedHttpRun(ledger, input, {
       clientRequestId,
       clientMessageId,
       turnId,
-    }, 'fork-run');
+    }, 'fork-run', {
+      prepare: async () => {
+        await this.deps.ledger.update(ledger.record.key, {
+          forkPreparation: {
+            phase: 'creating',
+            sourceChatId: forkContext.sourceChatId,
+          },
+        });
+        forkResult = await this.#forkChatFromContext(forkContext);
+        await this.deps.ledger.update(ledger.record.key, {
+          forkPreparation: {
+            phase: 'created',
+            sourceChatId: forkContext.sourceChatId,
+            nativePath: forkResult.nativePath,
+            sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
+          },
+        });
+      },
+      compensate: async () => {
+        if (forkResult) await forkResult.rollback();
+        forkResult = null;
+      },
+    });
     return { ...result, chat: await this.#projectCommandChat(input.chatId) };
   }
 
@@ -1609,6 +1628,7 @@ export class ChatCommandService {
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
     commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
+    preparation?: AcceptedRunPreparation,
   ): Promise<CommandAcceptedResponse> {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError(
@@ -1641,12 +1661,15 @@ export class ChatCommandService {
       reservation.executionAdmission.signal.throwIfAborted();
       await this.#assertDirectExecutionQueueAvailable(input.chatId);
       reservation.executionAdmission.signal.throwIfAborted();
+      await preparation?.prepare();
+      reservation.executionAdmission.signal.throwIfAborted();
       await this.#registerPendingInput(input.chatId, input.command, options);
       reservation.executionAdmission.signal.throwIfAborted();
       const scheduled = await this.deps.ledger.update(ledger.record.key, {
         status: 'scheduled',
         turnId: options.turnId,
         pendingInputRecovery: 'required',
+        forkPreparation: undefined,
       });
       this.#runReservedTurn(reservation, input.command, options);
       return commandResultFromRecord(scheduled ?? ledger.record);
@@ -1656,8 +1679,29 @@ export class ChatCommandService {
         options.clientRequestId!,
       );
       await this.deps.queue.releaseDirectTurn(reservation);
-      await this.#markPreScheduleFailure(ledger.record.key, error, pendingRegistered);
-      throw error;
+      let failure: unknown = error;
+      let retryable = true;
+      let forkRecoveryRequired = false;
+      if (preparation) {
+        try {
+          await preparation.compensate();
+        } catch (compensationError) {
+          retryable = false;
+          forkRecoveryRequired = true;
+          failure = new AggregateError(
+            [error, compensationError],
+            `Failed to prepare and roll back ${commandType} for ${input.chatId}`,
+          );
+        }
+      }
+      await this.#markPreScheduleFailure(
+        ledger.record.key,
+        failure,
+        pendingRegistered,
+        retryable,
+        forkRecoveryRequired,
+      );
+      throw failure;
     }
   }
 
@@ -1665,13 +1709,17 @@ export class ChatCommandService {
     ledgerKey: string,
     error: unknown,
     pendingRegistered = false,
+    retryable = true,
+    preserveForkPreparation = false,
   ): Promise<void> {
-    await this.deps.ledger.update(ledgerKey, {
+    const patch: Partial<Omit<CommandLedgerRecord, 'key'>> = {
       status: 'failed',
       error: error instanceof Error ? error.message : String(error),
-      errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+      errorCode: retryable ? PRE_SCHEDULE_FAILURE_ERROR_CODE : undefined,
       ...(pendingRegistered ? { pendingInputRecovery: 'required' as const } : {}),
-    });
+    };
+    if (!preserveForkPreparation) patch.forkPreparation = undefined;
+    await this.deps.ledger.update(ledgerKey, patch);
   }
 
   async #assertDirectExecutionQueueAvailable(chatId: string): Promise<void> {

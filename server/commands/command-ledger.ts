@@ -13,6 +13,13 @@ export type CommandLedgerStatus =
 
 export type PendingInputRecoveryStatus = 'required' | 'settled';
 
+export interface ForkPreparationState {
+  phase: 'creating' | 'created';
+  sourceChatId: string;
+  nativePath?: string;
+  sourceNextForkOrdinal?: number;
+}
+
 export interface CommandLedgerRecord {
   key: string;
   commandType: string;
@@ -28,6 +35,7 @@ export interface CommandLedgerRecord {
   error?: string;
   errorCode?: string;
   pendingInputRecovery?: PendingInputRecoveryStatus;
+  forkPreparation?: ForkPreparationState;
 }
 
 export interface LedgerAcceptInput {
@@ -134,6 +142,38 @@ function parseLedgerRecord(value: unknown, index: number): CommandLedgerRecord {
   ) {
     throw new Error(`Invalid command ledger records[${index}].pendingInputRecovery`);
   }
+  let forkPreparation: ForkPreparationState | undefined;
+  if (value.forkPreparation !== undefined) {
+    if (!isPlainRecord(value.forkPreparation)) {
+      throw new Error(`Invalid command ledger records[${index}].forkPreparation`);
+    }
+    const phase = value.forkPreparation.phase;
+    const sourceChatId = value.forkPreparation.sourceChatId;
+    const nativePath = value.forkPreparation.nativePath;
+    const sourceNextForkOrdinal = value.forkPreparation.sourceNextForkOrdinal;
+    if (
+      (phase !== 'creating' && phase !== 'created')
+      || typeof sourceChatId !== 'string'
+      || sourceChatId.length === 0
+      || (nativePath !== undefined && (typeof nativePath !== 'string' || nativePath.length === 0))
+      || (
+        sourceNextForkOrdinal !== undefined
+        && (
+          typeof sourceNextForkOrdinal !== 'number'
+          || !Number.isInteger(sourceNextForkOrdinal)
+          || sourceNextForkOrdinal < 1
+        )
+      )
+    ) {
+      throw new Error(`Invalid command ledger records[${index}].forkPreparation`);
+    }
+    forkPreparation = {
+      phase,
+      sourceChatId,
+      ...(nativePath !== undefined ? { nativePath } : {}),
+      ...(sourceNextForkOrdinal !== undefined ? { sourceNextForkOrdinal } : {}),
+    };
+  }
   return {
     key,
     commandType,
@@ -159,6 +199,7 @@ function parseLedgerRecord(value: unknown, index: number): CommandLedgerRecord {
     ...(value.pendingInputRecovery !== undefined
       ? { pendingInputRecovery: value.pendingInputRecovery as PendingInputRecoveryStatus }
       : {}),
+    ...(forkPreparation ? { forkPreparation } : {}),
   };
 }
 
@@ -275,6 +316,7 @@ export class CommandLedger {
             entryId: input.entryId,
             error: undefined,
             errorCode: undefined,
+            forkPreparation: undefined,
           };
           const nextRecords = new Map(this.#records);
           nextRecords.set(key, record);
@@ -398,6 +440,32 @@ export class CommandLedger {
         ...record,
         payload: { ...record.payload },
       }));
+  }
+
+  async listForkPreparationsPendingRecovery(): Promise<CommandLedgerRecord[]> {
+    await this.#load();
+    return [...this.#records.values()]
+      .filter((record) => (
+        record.commandType === 'fork-run'
+        && record.forkPreparation !== undefined
+      ))
+      .map((record) => ({ ...record, payload: { ...record.payload } }));
+  }
+
+  async settleForkPreparationRecovery(key: string): Promise<boolean> {
+    return this.#withMutationLock(async () => {
+      await this.#load();
+      const existing = this.#records.get(key);
+      if (!existing?.forkPreparation) return false;
+      const nextRecords = new Map(this.#records);
+      nextRecords.set(key, {
+        ...existing,
+        forkPreparation: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+      await this.#commit(nextRecords);
+      return true;
+    });
   }
 
   async settlePendingInputRecovery(chatId: string, clientRequestId: string): Promise<boolean> {
@@ -531,6 +599,7 @@ export class CommandLedger {
             && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE;
           return TERMINAL_COMMAND_STATUSES.has(record.status)
             && record.pendingInputRecovery !== 'required'
+            && record.forkPreparation === undefined
             && !interruptedExecution;
         })?.[0];
       if (!oldest) return;

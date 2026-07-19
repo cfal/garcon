@@ -27,8 +27,11 @@ export interface IntegrationFixtureOptions {
 
 interface IntegrationProcessRunDiagnostics {
   serverLogs: readonly string[];
-  httpExchanges: ReturnType<GarconTestClient['exchanges']>;
-  websocketEvents: ReturnType<GarconTestClient['eventRecords']>;
+  clients: Array<{
+    name: string;
+    httpExchanges: ReturnType<GarconTestClient['exchanges']>;
+    websocketEvents: ReturnType<GarconTestClient['eventRecords']>;
+  }>;
 }
 
 export interface IntegrationDiagnostics {
@@ -44,6 +47,7 @@ export class IntegrationFixture {
   readonly provider: ConfiguredTestProvider;
   garcon: GarconProcess;
   client: GarconTestClient;
+  readonly #clients = new Map<string, GarconTestClient>();
   readonly #completedRuns: IntegrationProcessRunDiagnostics[] = [];
   #disposed = false;
 
@@ -58,6 +62,7 @@ export class IntegrationFixture {
     this.fakeOpenAi = input.fakeOpenAi;
     this.garcon = input.garcon;
     this.client = input.client;
+    this.#clients.set('primary', input.client);
     this.provider = input.provider;
   }
 
@@ -104,15 +109,35 @@ export class IntegrationFixture {
     return String(Date.now() * 1_000 + chatIdSequence);
   }
 
+  async connectObserver(name: string): Promise<GarconTestClient> {
+    const normalizedName = name.trim();
+    if (!normalizedName || normalizedName === 'primary') {
+      throw new Error('Observer name must be non-empty and cannot be "primary".');
+    }
+    if (this.#clients.has(normalizedName)) {
+      throw new Error(`Integration client already exists: ${normalizedName}`);
+    }
+    const observer = await GarconTestClient.connect(this.garcon.baseUrl);
+    try {
+      await observer.ping();
+      this.#clients.set(normalizedName, observer);
+      return observer;
+    } catch (error) {
+      await observer.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
   async restartGarcon(): Promise<void> {
-    await this.client.close();
+    await this.#closeClients();
     await this.garcon.stop();
     this.#archiveCurrentRun();
+    this.#clients.clear();
     await this.#startReplacementGarcon();
   }
 
   async crashAndRestartGarcon(): Promise<void> {
-    await this.client.close();
+    await this.#closeClients();
     await this.garcon.crash();
     const expiredAt = new Date(Date.now() - 60_000);
     await utimes(
@@ -121,6 +146,7 @@ export class IntegrationFixture {
       expiredAt,
     );
     this.#archiveCurrentRun();
+    this.#clients.clear();
     await this.#startReplacementGarcon();
   }
 
@@ -160,7 +186,7 @@ export class IntegrationFixture {
     this.#disposed = true;
     const errors: unknown[] = [];
     try {
-      await this.client.close();
+      await this.#closeClients();
     } catch (error) {
       errors.push(error);
     }
@@ -194,7 +220,13 @@ export class IntegrationFixture {
       homeDir: this.dirs.home,
     });
     this.client = await GarconTestClient.connect(this.garcon.baseUrl);
-    await this.client.ping();
+    this.#clients.set('primary', this.client);
+    try {
+      await this.client.ping();
+    } catch (error) {
+      await this.client.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   #archiveCurrentRun(): void {
@@ -204,9 +236,22 @@ export class IntegrationFixture {
   #currentRunDiagnostics(): IntegrationProcessRunDiagnostics {
     return {
       serverLogs: this.garcon.logs,
-      httpExchanges: this.client.exchanges(),
-      websocketEvents: this.client.eventRecords(),
+      clients: [...this.#clients].map(([name, client]) => ({
+        name,
+        httpExchanges: client.exchanges(),
+        websocketEvents: client.eventRecords(),
+      })),
     };
+  }
+
+  async #closeClients(): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.#clients.values()].map((client) => client.close()),
+    );
+    const errors = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => result.reason);
+    if (errors.length > 0) throw new AggregateError(errors, 'Failed to close integration clients.');
   }
 }
 

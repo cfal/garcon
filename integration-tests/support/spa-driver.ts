@@ -188,6 +188,33 @@ export class SpaDriver {
     }, text);
   }
 
+  async waitForSidebarPreview(chatText: string, previewText: string): Promise<void> {
+    await this.#page.waitForFunction(
+      (chatMarker, preview) => {
+        const summary = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]')]
+          .find((element) => element.innerText.includes(chatMarker));
+        return summary?.innerText.includes(preview) === true;
+      },
+      { timeout: 20_000 },
+      chatText,
+      previewText,
+    );
+  }
+
+  async waitForSidebarUnread(chatText: string, expected: boolean): Promise<void> {
+    await this.#page.waitForFunction(
+      (chatMarker, shouldBeUnread) => {
+        const summary = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]')]
+          .find((element) => element.innerText.includes(chatMarker));
+        if (!summary) return false;
+        return Boolean(summary.querySelector('[aria-label="Unread"]')) === shouldBeUnread;
+      },
+      { timeout: 20_000 },
+      chatText,
+      expected,
+    );
+  }
+
   async clickQueuedRowAction(content: string, action: QueueRowAction): Promise<void> {
     await this.#page.evaluate(({ content, action }) => {
       const dialog = document.querySelector<HTMLElement>('[role="dialog"]');

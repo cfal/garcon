@@ -21,6 +21,8 @@ interface ForkChatSettings {
   getChatName(chatId: string): string | null | undefined;
   ensureInNormal(chatId: string): Promise<unknown>;
   setSessionName(chatId: string, title: string): Promise<unknown>;
+  removeFromAllOrderLists(chatId: string): Promise<unknown>;
+  removeSessionName(chatId: string): Promise<unknown>;
 }
 
 interface ForkChatMetadata {
@@ -61,6 +63,45 @@ export interface ForkChatFileCopyResult {
   agentId: string;
   agentSessionId: string;
   nativePath: string;
+  sourceNextForkOrdinal: number;
+  rollback(): Promise<void>;
+}
+
+export interface ForkTargetRollbackInput {
+  sourceChatId: string;
+  targetChatId: string;
+  registry: IChatRegistry;
+  settings: ForkChatSettings;
+  nativePath?: string | null;
+  sourceNextForkOrdinal?: number;
+}
+
+export async function rollbackForkTarget({
+  sourceChatId,
+  targetChatId,
+  registry,
+  settings,
+  nativePath,
+  sourceNextForkOrdinal,
+}: ForkTargetRollbackInput): Promise<void> {
+  const target = registry.getChat(targetChatId);
+  const targetNativePath = nativePath ?? target?.nativePath ?? null;
+  const source = registry.getChat(sourceChatId);
+  await Promise.all([
+    settings.removeFromAllOrderLists(targetChatId),
+    settings.removeSessionName(targetChatId),
+  ]);
+  if (targetNativePath && targetNativePath !== source?.nativePath) {
+    await fs.unlink(targetNativePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+  }
+  if (source && sourceNextForkOrdinal !== undefined) {
+    registry.updateChat(sourceChatId, {
+      nextForkOrdinal: sourceNextForkOrdinal,
+    });
+  }
+  registry.removeChat(targetChatId);
 }
 
 export interface NormalizedForkJsonl {
@@ -342,19 +383,42 @@ export async function forkChatFileCopy({
     throw new Error(`Chat ID collision: ${targetChatId}`);
   }
 
-  // Carry-over segments hold prior-agent history for a switched chat; a fork must
-  // inherit them so the forked chat renders the same continuation.
-  carryOver?.copy(sourceChatId, targetChatId);
+  let rolledBack = false;
+  const rollback = async () => {
+    if (rolledBack) return;
+    await rollbackForkTarget({
+      sourceChatId,
+      targetChatId,
+      registry,
+      settings,
+      nativePath: destinationNativePath,
+      sourceNextForkOrdinal: nextForkOrdinal,
+    });
+    rolledBack = true;
+  };
 
-  registry.updateChat(sourceChatId, { nextForkOrdinal: nextForkOrdinal + 1 });
-  await settings.ensureInNormal(targetChatId);
+  try {
+    // Carry-over segments hold prior-agent history for a switched chat; a fork must
+    // inherit them so the forked chat renders the same continuation.
+    carryOver?.copy(sourceChatId, targetChatId);
 
-  const sourceMeta = metadata.getChatMetadata(sourceChatId);
-  if (sourceMeta?.firstMessage) {
-    metadata.addNewChatMetadata(targetChatId, sourceMeta.firstMessage);
+    registry.updateChat(sourceChatId, { nextForkOrdinal: nextForkOrdinal + 1 });
+    await settings.ensureInNormal(targetChatId);
+
+    const sourceMeta = metadata.getChatMetadata(sourceChatId);
+    if (sourceMeta?.firstMessage) {
+      metadata.addNewChatMetadata(targetChatId, sourceMeta.firstMessage);
+    }
+
+    await settings.setSessionName(targetChatId, forkTitle);
+  } catch (error) {
+    try {
+      await rollback();
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], `Failed to create and roll back fork ${targetChatId}`);
+    }
+    throw error;
   }
-
-  await settings.setSessionName(targetChatId, forkTitle);
 
   return {
     sourceChatId,
@@ -362,5 +426,7 @@ export async function forkChatFileCopy({
     agentId: sourceAgentId,
     agentSessionId: newAgentSessionId,
     nativePath: destinationNativePath,
+    sourceNextForkOrdinal: nextForkOrdinal,
+    rollback,
   };
 }

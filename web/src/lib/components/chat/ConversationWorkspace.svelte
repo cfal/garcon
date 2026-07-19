@@ -148,6 +148,7 @@
 		getSelectedChatId: () => sessions.selectedChatId,
 		getQueue: getChatQueue,
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
+		invalidateProcessingAuthority: () => sessions.invalidateProcessingAuthority(),
 		quietRefreshChats: () => sessions.quietRefreshChats(),
 		getBackgroundCursors: () => transcriptCache.listCursors(20),
 		getVisibleChatIds: () => getVisibleChatIds?.() ?? [],

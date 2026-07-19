@@ -141,8 +141,7 @@ export interface SessionControllerDeps {
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 		applyStartEntry: (entry: ChatListEntry) => void;
 		upsertServerChat: (entry: ChatListEntry) => void;
-		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
-		setSelectedChatId: (id: string | null) => void;
+	setSelectedChatId: (id: string | null) => void;
 		renameChat: (chatId: string, newTitle: string) => Promise<boolean>;
 	};
 	chatState: SessionTranscriptState;
@@ -699,7 +698,6 @@ export class ConversationSessionController {
 				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
 				if (response.status === 'accepted') {
 					deps.lifecycle.beginTurn(chatId);
-					deps.sessions.setChatProcessing(chatId, true);
 				} else {
 					deps.startupCoordinator.completeStartup(chatId);
 				}
@@ -708,7 +706,6 @@ export class ConversationSessionController {
 				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
 				deps.startupCoordinator.completeStartup(chatId);
 				deps.lifecycle.clearTurnStatus();
-				deps.sessions.setChatProcessing(chatId, false);
 				if (restoreComposerOnFailure) {
 					deps.composerState.inputText = previousText;
 					deps.composerState.images = previousImages;
@@ -745,11 +742,9 @@ export class ConversationSessionController {
 				});
 				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
 				deps.lifecycle.beginTurn(chatId);
-				deps.sessions.setChatProcessing(chatId, true);
 			} catch (err) {
 				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
 				deps.lifecycle.clearTurnStatus();
-				deps.sessions.setChatProcessing(chatId, false);
 				if (restoreComposerOnFailure) {
 					deps.composerState.inputText = previousText;
 					deps.composerState.images = previousImages;
@@ -822,7 +817,6 @@ export class ConversationSessionController {
 					return;
 				}
 				deps.lifecycle.clearTurnStatus();
-				deps.sessions.setChatProcessing(chatId, false);
 			})
 			.catch((error) => {
 				restorePreviousStatus();
@@ -900,7 +894,6 @@ export class ConversationSessionController {
 			})
 				.then(() => {
 					deps.lifecycle.beginTurn(chatId);
-					deps.sessions.setChatProcessing(chatId, true);
 				})
 				.catch((error) => {
 					deps.chatState.appendLocalNotice(

@@ -221,6 +221,26 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.lastActivityAt).toBe('2026-02-25T12:00:00.000Z');
 	});
 
+	it('patchPreview derives unread state when live activity advances past the read receipt', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({
+			id: 'a',
+			activity: {
+				createdAt: null,
+				lastActivityAt: '2026-02-25T10:00:00.000Z',
+				lastReadAt: '2026-02-25T10:00:00.000Z',
+			},
+			isUnread: false,
+		})]);
+
+		store.patchPreview('a', 'Background reply', '2026-02-25T12:00:00.000Z');
+
+		expect(store.byId['a']?.lastActivityAt).toBe('2026-02-25T12:00:00.000Z');
+		expect(store.byId['a']?.isUnread).toBe(true);
+		store.patchLastReadAt('a', '2026-02-25T12:00:00.000Z');
+		expect(store.byId['a']?.isUnread).toBe(false);
+	});
+
 	it('upsertFromServer does not erase a non-empty preview with a blank payload', () => {
 		const store = new ChatSessionsStore();
 
@@ -233,6 +253,91 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']).toBe(ref);
 		expect(store.byId['a']?.lastMessage).toBe('Persisted preview');
+	});
+
+	it('upsertFromServer does not let a stale list snapshot overwrite live activity', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({
+			id: 'a',
+			activity: {
+				createdAt: null,
+				lastActivityAt: '2026-02-25T10:00:00.000Z',
+				lastReadAt: '2026-02-25T10:00:00.000Z',
+			},
+			preview: { lastMessage: 'Initial message' },
+		})]);
+		store.patchPreview('a', 'Live background reply', '2026-02-25T12:00:00.000Z');
+
+		store.upsertFromServer([makeServerSession({
+			id: 'a',
+			activity: {
+				createdAt: null,
+				lastActivityAt: '2026-02-25T11:00:00.000Z',
+				lastReadAt: '2026-02-25T10:00:00.000Z',
+			},
+			preview: { lastMessage: 'Stale server preview' },
+			isUnread: false,
+		})]);
+
+		expect(store.byId['a']).toMatchObject({
+			lastMessage: 'Live background reply',
+			lastActivityAt: '2026-02-25T12:00:00.000Z',
+			lastReadAt: '2026-02-25T10:00:00.000Z',
+			isUnread: true,
+		});
+	});
+
+	it('upsertFromServer preserves a newer local read receipt while accepting newer activity', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({
+			id: 'a',
+			activity: {
+				createdAt: null,
+				lastActivityAt: '2026-02-25T10:00:00.000Z',
+				lastReadAt: '2026-02-25T10:00:00.000Z',
+			},
+		})]);
+		store.patchLastReadAt('a', '2026-02-25T12:00:00.000Z');
+
+		store.upsertFromServer([makeServerSession({
+			id: 'a',
+			activity: {
+				createdAt: null,
+				lastActivityAt: '2026-02-25T11:00:00.000Z',
+				lastReadAt: '2026-02-25T10:00:00.000Z',
+			},
+			isUnread: true,
+		})]);
+
+		expect(store.byId['a']).toMatchObject({
+			lastActivityAt: '2026-02-25T11:00:00.000Z',
+			lastReadAt: '2026-02-25T12:00:00.000Z',
+			isUnread: false,
+		});
+	});
+
+	it('ignores preview and read updates older than the current projection', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({
+			id: 'a',
+			activity: {
+				createdAt: null,
+				lastActivityAt: '2026-02-25T12:00:00.000Z',
+				lastReadAt: '2026-02-25T11:00:00.000Z',
+			},
+			preview: { lastMessage: 'Current preview' },
+			isUnread: true,
+		})]);
+
+		store.patchPreview('a', 'Older preview', '2026-02-25T10:00:00.000Z');
+		store.patchLastReadAt('a', '2026-02-25T09:00:00.000Z');
+
+		expect(store.byId['a']).toMatchObject({
+			lastMessage: 'Current preview',
+			lastActivityAt: '2026-02-25T12:00:00.000Z',
+			lastReadAt: '2026-02-25T11:00:00.000Z',
+			isUnread: true,
+		});
 	});
 
 	it('upsertFromServer clears startup config for all chats now owned by the server', () => {
@@ -415,23 +520,32 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['draft-1']?.isProcessing).toBe(false);
 	});
 
-	it('setChatProcessing updates a single chat', () => {
+	it('applyProcessingEvent updates a single chat', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		expect(store.byId['a']?.isProcessing).toBe(false);
 
-		store.setChatProcessing('a', true);
+		store.applyProcessingEvent('a', true);
 		expect(store.byId['a']?.isProcessing).toBe(true);
 
-		store.setChatProcessing('a', false);
+		store.applyProcessingEvent('a', false);
 		expect(store.byId['a']?.isProcessing).toBe(false);
+	});
+
+	it('upsertFromServer observes processing changes before a WS baseline exists', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: false })]);
+
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
+
+		expect(store.byId['a']?.isProcessing).toBe(true);
 	});
 
 	it('applies an early processing event when an external chat enters the snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.setChatProcessing('scheduled-chat', true);
+		store.applyProcessingEvent('scheduled-chat', true);
 		const ref = store.byId;
 
 		expect(store.byId).toBe(ref);
@@ -446,8 +560,8 @@ describe('ChatSessionsStore', () => {
 	it('cancels an early processing event when completion arrives before the snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.setChatProcessing('scheduled-chat', true);
-		store.setChatProcessing('scheduled-chat', false);
+		store.applyProcessingEvent('scheduled-chat', true);
+		store.applyProcessingEvent('scheduled-chat', false);
 		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
 
 		expect(store.byId['scheduled-chat']?.isProcessing).toBe(false);
@@ -456,20 +570,20 @@ describe('ChatSessionsStore', () => {
 	it('clears an early processing event when its chat is deleted', () => {
 		const store = new ChatSessionsStore();
 
-		store.setChatProcessing('scheduled-chat', true);
+		store.applyProcessingEvent('scheduled-chat', true);
 		store.removeChat('scheduled-chat');
 		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
 
 		expect(store.byId['scheduled-chat']?.isProcessing).toBe(false);
 	});
 
-	it('setChatProcessing is a no-op when value unchanged', () => {
+	it('applyProcessingEvent is a no-op when value unchanged', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		const ref = store.byId;
 
-		store.setChatProcessing('a', false);
+		store.applyProcessingEvent('a', false);
 
 		expect(store.byId).toBe(ref);
 	});
@@ -497,8 +611,8 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({ id: 'a' }),
 			makeServerSession({ id: 'b', title: 'B' }),
 		]);
-		store.setChatProcessing('a', true);
-		store.setChatProcessing('b', true);
+		store.applyProcessingEvent('a', true);
+		store.applyProcessingEvent('b', true);
 
 		store.reconcileProcessing(new Set(['b']));
 
@@ -509,7 +623,7 @@ describe('ChatSessionsStore', () => {
 	it('reconcileProcessing replaces early processing events with its authoritative snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.setChatProcessing('stale-chat', true);
+		store.applyProcessingEvent('stale-chat', true);
 		store.reconcileProcessing(new Set(['active-chat']));
 		store.upsertFromServer([
 			makeServerSession({ id: 'stale-chat', isActive: false }),
@@ -527,7 +641,7 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({ id: 'a' }),
 			makeServerSession({ id: 'b', title: 'B' }),
 		]);
-		store.setChatProcessing('a', true);
+		store.applyProcessingEvent('a', true);
 
 		const ref = store.byId;
 		store.reconcileProcessing(new Set(['a']));
@@ -539,12 +653,59 @@ describe('ChatSessionsStore', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		store.setChatProcessing('a', true);
+		store.applyProcessingEvent('a', true);
 
 		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated' })]);
 
 		expect(store.byId['a']?.isProcessing).toBe(true);
 		expect(store.byId['a']?.title).toBe('Updated');
+	});
+
+	it('upsertFromServer preserves a terminal WS event over a stale active REST snapshot', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
+		store.applyProcessingEvent('a', false);
+		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated', isActive: true })]);
+
+		expect(store.byId['a']?.isProcessing).toBe(false);
+		expect(store.byId['a']?.title).toBe('Updated');
+	});
+
+	it('invalidateProcessingAuthority lets the next REST snapshot converge processing', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
+		store.reconcileProcessing(new Set(['a']));
+		store.applyProcessingEvent('a', true);
+
+		store.invalidateProcessingAuthority();
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: false })]);
+
+		expect(store.byId['a']?.isProcessing).toBe(false);
+	});
+
+	it('prunes processing authority for a known chat removed from the server list', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.applyProcessingEvent('a', true);
+
+		store.upsertFromServer([]);
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: false })]);
+
+		expect(store.byId['a']?.isProcessing).toBe(false);
+	});
+
+	it('reconnect processing baseline governs chats arriving in later list responses', () => {
+		const store = new ChatSessionsStore();
+
+		store.reconcileProcessing(new Set(['active-chat']));
+		store.upsertFromServer([
+			makeServerSession({ id: 'active-chat', isActive: false }),
+			makeServerSession({ id: 'stale-chat', title: 'Stale', isActive: true }),
+		]);
+
+		expect(store.byId['active-chat']?.isProcessing).toBe(true);
+		expect(store.byId['stale-chat']?.isProcessing).toBe(false);
 	});
 
 	it('reconcileProcessing after upsertFromServer correctly sets processing state', () => {

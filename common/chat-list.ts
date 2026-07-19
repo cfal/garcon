@@ -53,3 +53,17 @@ export interface SetLastSelectedChatResponse {
   success: true;
   lastSelectedChatId: string | null;
 }
+
+export interface MarkChatsReadEntry {
+  chatId: string;
+  lastReadAt: string;
+}
+
+export interface MarkChatsReadRequest {
+  entries: MarkChatsReadEntry[];
+}
+
+export interface MarkChatsReadResponse {
+  success: true;
+  results: MarkChatsReadEntry[];
+}

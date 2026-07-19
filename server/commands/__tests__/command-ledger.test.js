@@ -162,6 +162,43 @@ describe('CommandLedger', () => {
     await expect(third.listPendingInputRecoveries()).resolves.toEqual([]);
   });
 
+  it('retains interrupted fork preparation until startup compensation settles it', async () => {
+    const first = new CommandLedger(workspaceDir);
+    const accepted = await first.accept({
+      commandType: 'fork-run',
+      chatId: 'fork-target',
+      clientRequestId: 'req-fork-interrupted',
+      payload: { sourceChatId: 'fork-source', command: 'continue' },
+    });
+    await first.update(accepted.record.key, {
+      forkPreparation: {
+        phase: 'created',
+        sourceChatId: 'fork-source',
+        nativePath: '/tmp/fork-target.jsonl',
+        sourceNextForkOrdinal: 2,
+      },
+    });
+
+    const restarted = new CommandLedger(workspaceDir);
+    const interrupted = await restarted.listForkPreparationsPendingRecovery();
+
+    expect(interrupted).toEqual([
+      expect.objectContaining({
+        key: accepted.record.key,
+        status: 'failed',
+        errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+        forkPreparation: {
+          phase: 'created',
+          sourceChatId: 'fork-source',
+          nativePath: '/tmp/fork-target.jsonl',
+          sourceNextForkOrdinal: 2,
+        },
+      }),
+    ]);
+    await expect(restarted.settleForkPreparationRecovery(accepted.record.key)).resolves.toBe(true);
+    await expect(restarted.listForkPreparationsPendingRecovery()).resolves.toEqual([]);
+  });
+
   it('does not trim unresolved restart recovery records', async () => {
     const recoveryRecord = {
       ...makeLedgerRecord(-1),

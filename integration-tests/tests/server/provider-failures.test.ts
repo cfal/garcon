@@ -3,7 +3,7 @@ import type {
   AgentRunFailedMessage,
   QueueStateUpdatedMessage,
 } from '../../../common/ws-events.js';
-import { countUserContent } from '../../support/chat-assertions.js';
+import { countUserContent, userMessages } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('provider failures', () => {
@@ -39,6 +39,8 @@ describe('provider failures', () => {
 
       for (const [index, failure] of failures.entries()) {
         failure.configure();
+        const clientRequestId = crypto.randomUUID();
+        const clientMessageId = crypto.randomUUID();
         const cursor = fixture.client.markEvents();
         const accepted = index === 0
           ? await fixture.client.startDirectChat({
@@ -46,19 +48,57 @@ describe('provider failures', () => {
               content: failure.content,
               projectPath: fixture.dirs.project,
               provider: fixture.provider,
+              clientRequestId,
+              clientMessageId,
             })
           : await fixture.client.runDirectChat({
               chatId,
               content: failure.content,
               provider: fixture.provider,
+              clientRequestId,
+              clientMessageId,
             });
-        expect(accepted.status).toBe('accepted');
+        expect(accepted).toMatchObject({ status: 'accepted', clientRequestId });
+        expect(accepted.turnId).toBeString();
         const terminal = await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
           afterIndex: cursor,
         });
-        expect(terminal.type).toBe('agent-run-failed');
+        expect(terminal).toMatchObject({
+          type: 'agent-run-failed',
+          chatId,
+          clientRequestId,
+          turnId: accepted.turnId,
+        });
         expect((terminal as AgentRunFailedMessage).error).toBeString();
-        expect(countUserContent((await fixture.client.getMessages(chatId)).messages, failure.content)).toBe(1);
+        const transcript = await fixture.client.getMessages(chatId);
+        expect(countUserContent(transcript.messages, failure.content)).toBe(1);
+        const failedUser = userMessages(transcript.messages).find((message) =>
+          message.content === failure.content);
+        expect(failedUser?.metadata).toMatchObject({
+          clientRequestId,
+          turnId: accepted.turnId,
+        });
+        expect(transcript.pendingUserInputs).toEqual([]);
+        const events = fixture.client.eventsSince(cursor);
+        expect(events).toContainEqual(expect.objectContaining({
+          type: 'pending-user-input-updated',
+          input: expect.objectContaining({
+            chatId,
+            clientRequestId,
+            clientMessageId,
+            turnId: accepted.turnId,
+          }),
+        }));
+        const clearedIndex = events.findIndex((event) =>
+          event.type === 'pending-user-input-cleared'
+          && event.clientRequestId === clientRequestId
+          && event.reason === 'persisted');
+        const terminalIndex = events.findIndex((event) =>
+          event.type === 'agent-run-failed'
+          && event.clientRequestId === clientRequestId
+          && event.turnId === accepted.turnId);
+        expect(clearedIndex).toBeGreaterThanOrEqual(0);
+        expect(terminalIndex).toBeGreaterThan(clearedIndex);
       }
       expect(fixture.fakeOpenAi.requests()).toHaveLength(failures.length);
     });
@@ -118,6 +158,18 @@ describe('provider failures', () => {
         { afterIndex: failureCursor },
       );
       const failureEvents = fixture.client.events().slice(failureCursor);
+      const failedPending = failureEvents.find((event) =>
+        event.type === 'pending-user-input-updated'
+        && event.input.content === 'failure-b');
+      if (failedPending?.type !== 'pending-user-input-updated') {
+        throw new Error('Missing failed queued input identity.');
+      }
+      if (!failed.turnId || !failed.clientRequestId) {
+        throw new Error('Missing failed queued delivery identity.');
+      }
+      expect(failedPending.input.clientRequestId).toBe(failed.clientRequestId);
+      expect(failedPending.input.turnId).toBe(failed.turnId);
+      expect(failedPending.input.clientMessageId).toBeString();
       const pauseEventIndex = failureEvents.findIndex((event) => (
         event.type === 'queue-state-updated'
         && event.chatId === chatId
@@ -167,9 +219,19 @@ describe('provider failures', () => {
       ]);
       heldEdited.releaseEcho();
       await heldC.received;
+      const pendingC = (await fixture.client.getMessages(chatId)).pendingUserInputs.find(
+        (input) => input.content === 'failure-c',
+      );
+      if (!pendingC) throw new Error('Missing pending identity for failure-c.');
+      expect(pendingC.clientRequestId).toBeString();
+      expect(pendingC.clientMessageId).toBeString();
+      expect(pendingC.turnId).toBeString();
+      const pendingCTurnId = pendingC.turnId;
       const completionCursor = fixture.client.markEvents();
       heldC.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: completionCursor });
+      await fixture.client.waitForTurnTerminal(chatId, pendingCTurnId, {
+        afterIndex: completionCursor,
+      });
 
       expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
       expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
@@ -233,12 +295,21 @@ describe('provider failures', () => {
       expect(failedIndex).toBeGreaterThanOrEqual(0);
       expect(dispatchIndex).toBeGreaterThan(failedIndex);
       const inFlight = await fixture.client.getMessages(chatId);
-      expect(inFlight.pendingUserInputs.find((input) => input.content === 'failure-fence-b'))
-        .toMatchObject({ deliveryStatus: 'accepted' });
+      const successorInput = inFlight.pendingUserInputs.find(
+        (input) => input.content === 'failure-fence-b',
+      );
+      if (!successorInput) throw new Error('Missing pending successor identity.');
+      expect(successorInput.deliveryStatus).toBe('accepted');
+      expect(successorInput.clientRequestId).toBeString();
+      expect(successorInput.clientMessageId).toBeString();
+      expect(successorInput.turnId).toBeString();
+      const successorTurnId = successorInput.turnId;
 
       const terminalCursor = fixture.client.markEvents();
       successor.releaseEcho();
-      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: terminalCursor });
+      await fixture.client.waitForTurnTerminal(chatId, successorTurnId, {
+        afterIndex: terminalCursor,
+      });
       const settled = await fixture.client.getMessages(chatId);
       expect(countUserContent(settled.messages, 'failure-fence-b')).toBe(1);
       expect(settled.pendingUserInputs).toEqual([]);

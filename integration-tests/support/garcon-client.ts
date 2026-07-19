@@ -11,6 +11,8 @@ import type {
   AgentStopResponse,
   CommandAcceptedResponse,
   ForkChatResponse,
+  ForkRunCommandRequest,
+  ForkRunCommandResponse,
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
@@ -20,7 +22,12 @@ import type {
   StartChatCommandRequest,
   StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
-import type { ChatListResponse } from '../../common/chat-list.js';
+import type {
+  ChatListResponse,
+  MarkChatsReadEntry,
+  MarkChatsReadRequest,
+  MarkChatsReadResponse,
+} from '../../common/chat-list.js';
 import { parseChatViewMessages, type ChatViewMessage } from '../../common/chat-view.js';
 import { normalizePendingUserInput, type PendingUserInput } from '../../common/pending-user-input.js';
 import { parseQueueState, type QueueState } from '../../common/queue-state.js';
@@ -32,13 +39,16 @@ import {
   parseServerWsMessage,
   type AgentRunFailedMessage,
   type AgentRunFinishedMessage,
+  type ChatReloadedMessage,
   type ChatProcessingUpdatedMessage,
   type ChatSubscribedMessage,
+  type ClientRequestErrorMessage,
   type ReconnectStateMessage,
   type ServerWsMessage,
   type WsPongMessage,
 } from '../../common/ws-events.js';
 import {
+  ChatReloadRequest,
   ChatSubscribeRequest,
   ReconnectStateQueryRequest,
   WsPingRequest,
@@ -113,6 +123,13 @@ export class GarconApiError extends Error {
   ) {
     super(`${method} ${path} returned ${status}: ${JSON.stringify(body)}`);
     this.name = 'GarconApiError';
+  }
+}
+
+export class GarconWsRequestError extends Error {
+  constructor(readonly response: ClientRequestErrorMessage) {
+    super(`${response.requestType} failed with ${response.code}: ${response.message}`);
+    this.name = 'GarconWsRequestError';
   }
 }
 
@@ -196,6 +213,10 @@ export class GarconTestClient {
 
   events(): readonly ServerWsMessage[] {
     return this.#eventRecords.map((record) => record.parsed);
+  }
+
+  eventsSince(index: number): readonly ServerWsMessage[] {
+    return this.#eventRecords.slice(index).map((record) => record.parsed);
   }
 
   rawEvents(): readonly unknown[] {
@@ -376,8 +397,17 @@ export class GarconTestClient {
     return this.post<ForkChatResponse>('/api/v1/chats/fork', request);
   }
 
+  forkRunChat(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse> {
+    return this.post<ForkRunCommandResponse>('/api/v1/chats/fork-run', request);
+  }
+
   deleteChat(chatId: string): Promise<{ success: boolean }> {
     return this.delete<{ success: boolean }>('/api/v1/chats', { chatId });
+  }
+
+  markChatsRead(entries: MarkChatsReadEntry[]): Promise<MarkChatsReadResponse> {
+    const request: MarkChatsReadRequest = { entries };
+    return this.post<MarkChatsReadResponse>('/api/v1/chats/read', request);
   }
 
   enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
@@ -493,6 +523,25 @@ export class GarconTestClient {
       `chat-subscribed ${clientRequestId}`,
       { afterIndex },
     );
+  }
+
+  async reloadChat(chatId: string): Promise<ChatReloadedMessage> {
+    const clientRequestId = crypto.randomUUID();
+    const afterIndex = this.markEvents();
+    this.sendWs(new ChatReloadRequest(clientRequestId, chatId));
+    const outcome = await this.waitForEvent(
+      (message): message is ChatReloadedMessage | ClientRequestErrorMessage =>
+        (message.type === 'chat-reloaded' && message.clientRequestId === clientRequestId)
+        || (
+          message.type === 'client-request-error'
+          && message.clientRequestId === clientRequestId
+          && message.requestType === 'chat-reload'
+        ),
+      `chat-reload ${clientRequestId}`,
+      { afterIndex },
+    );
+    if (outcome.type === 'client-request-error') throw new GarconWsRequestError(outcome);
+    return outcome;
   }
 
   async waitForProcessing(

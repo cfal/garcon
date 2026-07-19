@@ -16,6 +16,9 @@ import type { ApiProtocol } from '$shared/api-providers';
 import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import type {
 	ChatListResponse,
+	MarkChatsReadEntry,
+	MarkChatsReadRequest,
+	MarkChatsReadResponse,
 	SetLastSelectedChatRequest,
 	SetLastSelectedChatResponse,
 } from '$shared/chat-list';
@@ -354,16 +357,12 @@ export async function toggleArchive(chatId: string): Promise<ToggleArchiveRespon
 	return apiPost<ToggleArchiveResponse>('/api/v1/chats/archive', { chatId });
 }
 
-export interface MarkReadBatchResponse {
-	success: boolean;
-	results: Array<{ chatId: string; lastReadAt: string }>;
-}
-
 /** Marks chats as read in a single batched request. */
 export async function markChatsReadBatch(
-	entries: Array<{ chatId: string; lastReadAt: string }>,
-): Promise<MarkReadBatchResponse> {
-	return apiPost<MarkReadBatchResponse>('/api/v1/chats/read', { entries });
+	entries: MarkChatsReadEntry[],
+): Promise<MarkChatsReadResponse> {
+	const request: MarkChatsReadRequest = { entries };
+	return apiPost<MarkChatsReadResponse>('/api/v1/chats/read', request);
 }
 
 export type ValidateStartErrorCode =

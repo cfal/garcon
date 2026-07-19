@@ -41,6 +41,7 @@ export interface ChatReconnectCoordinatorOptions {
 	getSelectedChatId: () => string | null;
 	getQueue: (chatId: string) => Promise<{ queue: QueueState }>;
 	reconcileProcessing: (activeChatIds: Set<string>) => void;
+	invalidateProcessingAuthority: () => void;
 	quietRefreshChats: () => Promise<void> | void;
 	getBackgroundCursors: () => ChatTranscriptCursor[];
 	getVisibleChatIds?: () => string[];
@@ -84,6 +85,7 @@ export class ChatReconnectCoordinator {
 		if (!connected) {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
+			this.options.invalidateProcessingAuthority();
 			return;
 		}
 		if (this.#wasConnected) return;
@@ -144,7 +146,11 @@ export class ChatReconnectCoordinator {
 			return { queueRefresh: Promise.resolve() };
 		}
 
-		if (runningChatIds !== null) this.options.reconcileProcessing(runningChatIds);
+		if (runningChatIds !== null) {
+			this.options.reconcileProcessing(runningChatIds);
+		} else {
+			this.options.invalidateProcessingAuthority();
+		}
 		await this.#refreshChatsQuietly();
 		if (epoch !== this.#reconnectEpoch) {
 			return { queueRefresh: Promise.resolve() };

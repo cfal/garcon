@@ -25,7 +25,6 @@ interface SlashCommandSessions {
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
 	upsertServerChat(entry: ChatListEntry): void;
 	setSelectedChatId(chatId: string | null): void;
-	setChatProcessing(chatId: string, isProcessing: boolean): void;
 }
 
 interface SlashCommandChatState {
@@ -269,7 +268,6 @@ export class ConversationSlashCommandService {
 			deps.navigation.navigateToChat?.(response.chat.id);
 			if (response.status === 'accepted') {
 				deps.lifecycle.beginTurn(response.chat.id);
-				deps.sessions.setChatProcessing(response.chat.id, true);
 			}
 		} catch (error) {
 			this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);

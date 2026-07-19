@@ -167,6 +167,7 @@ function createReconnectDeps(
 			queue: queueState(false),
 		})),
 		reconcileProcessing: vi.fn(),
+		invalidateProcessingAuthority: vi.fn(),
 		quietRefreshChats: vi.fn(async () => undefined),
 		getBackgroundCursors: vi.fn(() => options.backgroundCursors ?? []),
 		getVisibleChatIds: vi.fn(() => options.visibleChatIds ?? []),
@@ -192,6 +193,7 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.getSelectedChatId,
 		deps.getQueue,
 		deps.reconcileProcessing,
+		deps.invalidateProcessingAuthority,
 		deps.quietRefreshChats,
 		deps.getBackgroundCursors,
 		deps.getVisibleChatIds,
@@ -494,7 +496,7 @@ describe('ChatReconnectCoordinator', () => {
 		);
 	});
 
-	it('preserves processing while applying queues when processing is unavailable', async () => {
+	it('invalidates stale processing authority while applying queues when processing is unavailable', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			queueChatIds: ['chat-2', 'chat-3'],
@@ -523,6 +525,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
+		expect(deps.invalidateProcessingAuthority).toHaveBeenCalledTimes(2);
 		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
 			queueState(true),
@@ -530,6 +533,28 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.conversationUi.removeMessageQueue).toHaveBeenCalledWith('chat-2');
 		expect(deps.getQueue).toHaveBeenCalledOnce();
 		expect(deps.getQueue).toHaveBeenCalledWith('chat-3');
+	});
+
+	it('invalidates processing authority when the reconnect-state request fails', async () => {
+		const deps = createReconnectDeps();
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		clearConnectionCalls(deps);
+
+		await coordinator.handleConnectionState(false);
+		deps.ws.sendRequest.mockImplementation(async (request: object) => {
+			if (!('type' in request)) throw new Error('Request is missing a type');
+			if (request.type === 'reconnect-state-query') {
+				throw new Error('reconnect state unavailable');
+			}
+			if (request.type === 'chat-subscribe') return deltaResponse('chat-1');
+			throw new Error(`Unexpected request: ${String(request.type)}`);
+		});
+		await coordinator.handleConnectionState(true);
+
+		expect(deps.invalidateProcessingAuthority).toHaveBeenCalledTimes(2);
+		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
+		expect(deps.quietRefreshChats).toHaveBeenCalledOnce();
 	});
 
 	it('falls back queue reads but preserves processing state when reconnect control data is malformed', async () => {
