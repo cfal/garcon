@@ -20,6 +20,8 @@ import type {
   ChatListEntry,
   ChatListResponse,
   ChatOrderGroup,
+  MarkChatsReadRequest,
+  MarkChatsReadResponse,
   SetLastSelectedChatRequest,
   SetLastSelectedChatResponse,
 } from '../../common/chat-list.js';
@@ -655,11 +657,13 @@ export default function createChatRoutes({
     }
   }
 
-  async function postMarkRead(body: Record<string, unknown>): Promise<Response> {
+  async function postMarkRead(
+    body: MarkChatsReadRequest & Record<string, unknown>,
+  ): Promise<Response> {
     try {
       const entries = Array.isArray(body.entries) ? body.entries : [];
       if (entries.length === 0) {
-        return Response.json({ success: true, results: [] });
+        return Response.json({ success: true, results: [] } satisfies MarkChatsReadResponse);
       }
 
       const now = new Date().toISOString();
@@ -680,7 +684,7 @@ export default function createChatRoutes({
         results.push({ chatId, lastReadAt: merged });
       }
 
-      return Response.json({ success: true, results });
+      return Response.json({ success: true, results } satisfies MarkChatsReadResponse);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }

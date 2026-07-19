@@ -8,6 +8,7 @@ vi.mock('$lib/api/chats', () => ({
 import { ReadReceiptOutboxStore } from '../read-receipt-outbox.svelte';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import { markChatsReadBatch } from '$lib/api/chats';
+import type { MarkChatsReadResponse } from '$shared/chat-list';
 
 const mockMarkBatch = vi.mocked(markChatsReadBatch);
 
@@ -82,10 +83,7 @@ describe('ReadReceiptOutboxStore', () => {
 	it('flushes pending receipts that arrive while a batch is already in flight', async () => {
 		const { outbox } = createTestStore();
 		let resolveFirstBatch:
-			| ((value: {
-					success: boolean;
-					results: Array<{ chatId: string; lastReadAt: string }>;
-			  }) => void)
+			| ((value: MarkChatsReadResponse) => void)
 			| undefined;
 
 		mockMarkBatch.mockImplementationOnce(
