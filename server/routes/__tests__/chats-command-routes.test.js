@@ -157,6 +157,111 @@ function createRouteAgent(sessionOverrides = {}) {
     reorderRelative: mock(() => Promise.resolve({ success: true })),
   };
   const queue = {
+    scheduleDirectInput: mock(async (input) => {
+      const reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
+      try {
+        if (input.continueRecoveredInput) {
+          await queue.consumeRecoveredInputContinuationForDirectTurn(reservation);
+        }
+        const control = await queue.readChatExecutionControl(input.command.chatId);
+        if (control.entries.length > 0 || control.pause || control.recoveredInputContinuation) {
+          throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
+        }
+        await input.preparation?.prepare();
+        await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+        await input.settlement.markScheduled(input.command, input.options.turnId, true);
+      } catch (error) {
+        await queue.releaseDirectTurn(reservation);
+        await input.preparation?.compensate();
+        await input.settlement.markPreScheduleFailure(input.command, {
+          error,
+          pendingInputRecovery: false,
+          retryable: true,
+        });
+        throw error;
+      }
+      void queue.runReservedTurn(reservation, input.content, input.options);
+    }),
+    runInitialInput: mock(async (input) => {
+      const reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
+      await input.preparation?.prepare();
+      await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+      await input.settlement.markScheduled(input.command, input.options.turnId, true);
+      await input.dispatch?.(reservation.executionAdmission);
+      await queue.completeDirectTurn(reservation);
+    }),
+    scheduleDirectOperation: mock(async (input) => {
+      const reservation = queue.reserveDirectTurn(input.command.chatId, input.command);
+      await input.settlement.markScheduled(input.command, input.command.turnId, false);
+      void input.dispatch(reservation.executionAdmission);
+    }),
+    enqueueAccepted: mock(async (input) => {
+      try {
+        const result = await queue.createChatQueueEntry(
+          input.command.chatId,
+          input.content,
+          { key: input.command.key, entryId: input.command.entryId },
+          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        await queue.triggerDrain(input.command.chatId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    replaceAccepted: mock(async (input) => {
+      try {
+        const result = await queue.replaceChatQueueEntry(
+          input.command.chatId,
+          input.command.entryId,
+          input.content,
+          input.expectedRevision,
+          { key: input.command.key, entryId: input.command.entryId },
+          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    deleteAccepted: mock(async (input) => {
+      try {
+        const result = await queue.deleteChatQueueEntry(
+          input.command.chatId,
+          input.command.entryId,
+          { key: input.command.key, entryId: input.command.entryId },
+          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    deliverAcceptedActiveInput: mock(async (input) => {
+      const delivered = await queue.deliverActiveInput(
+        input.command.chatId,
+        input.content,
+        { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
+        () => input.settlement.markScheduled(input.command, input.command.turnId, true),
+      );
+      if (delivered) {
+        await input.settlement.settleActiveInput(input.command);
+        return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
+      }
+      const result = await queue.enqueueAccepted(input);
+      return { delivery: 'queued', entryId: result.entryId, control: result.control };
+    }),
+    recoverAcceptedActiveInput: mock(async (input) => ({
+      delivery: 'queued',
+      entryId: input.command.entryId,
+      control: await queue.readChatExecutionControl(input.command.chatId),
+    })),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
@@ -220,7 +325,13 @@ function createRouteAgent(sessionOverrides = {}) {
       { pause: manualPause(), version: 2 },
     ))),
     resumeChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { version: 3 }))),
+    resumeAndDrain: mock(async (chatId, pauseId) => {
+      const control = await queue.resumeChatQueue(chatId, pauseId);
+      await queue.triggerDrain(chatId);
+      return control;
+    }),
     continuePastRecoveredInput: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { version: 3 }))),
+    waitForDispatches: mock(() => Promise.resolve(undefined)),
   };
   const pathCache = createRoutePathCache();
   const metadata = {
@@ -561,6 +672,7 @@ describe('REST chat command routes', () => {
       expect.objectContaining({
         key: `queue-entry-create:${CHAT_ID}:req-queue-1`,
       }),
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
   });
 
@@ -590,15 +702,22 @@ describe('REST chat command routes', () => {
     );
 
     expect(replaced.response.status).toBe(200);
-    expect(agent.queue.replaceChatQueueEntry).toHaveBeenCalledWith(CHAT_ID, 'entry-1', '  edited in the middle\n', 4, {
-      key: `queue-entry-replace:${CHAT_ID}:req-replace-1`,
-      entryId: 'entry-1',
-    });
+    expect(agent.queue.replaceChatQueueEntry).toHaveBeenCalledWith(
+      CHAT_ID,
+      'entry-1',
+      '  edited in the middle\n',
+      4,
+      {
+        key: `queue-entry-replace:${CHAT_ID}:req-replace-1`,
+        entryId: 'entry-1',
+      },
+      expect.objectContaining({ protectedKeys: expect.any(Set) }),
+    );
     expect(deleted.response.status).toBe(200);
     expect(agent.queue.deleteChatQueueEntry).toHaveBeenCalledWith(CHAT_ID, 'entry-1', {
       key: `queue-entry-delete:${CHAT_ID}:req-delete-1`,
       entryId: 'entry-1',
-    });
+    }, expect.objectContaining({ protectedKeys: expect.any(Set) }));
   });
 
   it('POST /active-input uses the independent active delivery command', async () => {
@@ -611,9 +730,12 @@ describe('REST chat command routes', () => {
 
     expect(result.response.status).toBe(202);
     expect(result.body.delivery).toBe('active');
-    expect(agent.queue.deliverActiveInput).toHaveBeenCalledWith(CHAT_ID, 'focus here', {
-      clientRequestId: 'req-steer-1',
-    }, expect.any(Function));
+    expect(agent.queue.deliverActiveInput).toHaveBeenCalledWith(
+      CHAT_ID,
+      'focus here',
+      expect.objectContaining({ clientRequestId: 'req-steer-1' }),
+      expect.any(Function),
+    );
   });
 
   it('POST /queue/entries rejects conflicting retries', async () => {

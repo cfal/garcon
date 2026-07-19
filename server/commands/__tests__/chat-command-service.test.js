@@ -12,6 +12,7 @@ import {
   ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
   ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
   ActiveInputDeliveryError,
+  DomainError,
 } from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
@@ -164,7 +165,172 @@ function makeService(overrides = {}) {
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
   };
+  const executionTasks = new Set();
   const queue = overrides.queueService ?? {
+    scheduleDirectInput: mock(async (input) => {
+      let reservation;
+      try {
+        reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
+        if (input.continueRecoveredInput) {
+          await queue.consumeRecoveredInputContinuationForDirectTurn(reservation);
+        }
+        const control = await queue.readChatExecutionControl(input.command.chatId);
+        if (control.entries.length > 0 || control.pause || control.recoveredInputContinuation) {
+          throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
+        }
+        await input.preparation?.prepare();
+        await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+        await input.settlement.markScheduled(input.command, input.options.turnId, true);
+      } catch (error) {
+        if (reservation) await queue.releaseDirectTurn(reservation);
+        const pendingInputRecovery = pendingInputs.markFailed(
+          input.command.chatId,
+          input.options.clientRequestId,
+        );
+        let failure = error;
+        try {
+          await input.preparation?.compensate();
+        } catch (compensationError) {
+          failure = new AggregateError(
+            [error, compensationError],
+            `Failed to prepare and roll back ${input.preparation.operation} for ${input.command.chatId}`,
+          );
+        }
+        await input.settlement.markPreScheduleFailure(input.command, {
+          error: failure,
+          pendingInputRecovery,
+          retryable: failure === error,
+          preserveForkPreparation: failure !== error,
+        });
+        throw failure;
+      }
+      const task = queue.runReservedTurn(reservation, input.content, input.options)
+        .then(() => queue.completeDirectTurn(reservation), () => queue.failDirectTurn(reservation));
+      executionTasks.add(task);
+      void task.finally(() => executionTasks.delete(task));
+    }),
+    runInitialInput: mock(async (input) => {
+      let reservation;
+      try {
+        reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
+        await input.preparation?.prepare();
+        await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
+        await input.settlement.markScheduled(input.command, input.options.turnId, true);
+        await input.dispatch?.(reservation.executionAdmission);
+        await queue.completeDirectTurn(reservation);
+      } catch (error) {
+        await input.settlement.settleOperationFailure(input.command, error);
+        await input.preparation?.compensate();
+        if (reservation) await queue.failDirectTurn(reservation);
+        throw error;
+      }
+    }),
+    scheduleDirectOperation: mock(async (input) => {
+      const reservation = queue.reserveDirectTurn(input.command.chatId, input.command);
+      const control = await queue.readChatExecutionControl(input.command.chatId);
+      if (control.entries.length > 0 || control.pause || control.recoveredInputContinuation) {
+        await queue.releaseDirectTurn(reservation);
+        const error = new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
+        await input.settlement.markPreScheduleFailure(input.command, {
+          error,
+          pendingInputRecovery: false,
+          retryable: true,
+        });
+        throw error;
+      }
+      await input.settlement.markScheduled(input.command, input.command.turnId, false);
+      const task = input.dispatch(reservation.executionAdmission)
+        .then(() => queue.completeDirectTurn(reservation), () => queue.failDirectTurn(reservation));
+      executionTasks.add(task);
+      void task.finally(() => executionTasks.delete(task));
+    }),
+    enqueueAccepted: mock(async (input) => {
+      const result = await queue.createChatQueueEntry(
+        input.command.chatId,
+        input.content,
+        { key: input.command.key, entryId: input.command.entryId },
+        { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+      );
+      await input.settlement.settleQueueMutation(input.command, result.entryId);
+      await queue.triggerDrain(input.command.chatId);
+      return result;
+    }),
+    replaceAccepted: mock(async (input) => {
+      try {
+        const result = await queue.replaceChatQueueEntry(
+          input.command.chatId,
+          input.command.entryId,
+          input.content,
+          input.expectedRevision,
+          { key: input.command.key, entryId: input.command.entryId },
+          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    deleteAccepted: mock(async (input) => {
+      try {
+        const result = await queue.deleteChatQueueEntry(
+          input.command.chatId,
+          input.command.entryId,
+          { key: input.command.key, entryId: input.command.entryId },
+          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
+    deliverAcceptedActiveInput: mock(async (input) => {
+      let deliveryAccepted = false;
+      try {
+        const delivered = await queue.deliverActiveInput(
+          input.command.chatId,
+          input.content,
+          { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
+          async () => {
+            await input.settlement.markScheduled(input.command, input.command.turnId, true);
+          },
+        );
+        if (delivered) {
+          deliveryAccepted = true;
+          await input.settlement.settleActiveInput(input.command);
+          return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
+        }
+        const result = await queue.enqueueAccepted(input);
+        return { delivery: 'queued', entryId: result.entryId, control: result.control };
+      } catch (error) {
+        deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
+        await input.settlement.settleActiveInputFailure(input.command, error, deliveryAccepted);
+        throw error;
+      }
+    }),
+    recoverAcceptedActiveInput: mock(async (input) => {
+      const control = await queue.readChatExecutionControl(input.command.chatId);
+      const applied = control.appliedCommands.find(
+        (command) => command.key === input.command.key && command.operation === 'create',
+      );
+      if (!applied) {
+        throw new DomainError(
+          'INTERNAL_ERROR',
+          'The previous active-input delivery did not reach a durable outcome',
+          409,
+          false,
+        );
+      }
+      await input.settlement.settleQueueMutation(input.command, applied.entryId);
+      return {
+        delivery: 'queued',
+        entryId: applied.entryId,
+        control,
+      };
+    }),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     reserveDirectTurn: mock((chatId) => directReservation(chatId)),
     assertDirectTurnReservationActive: mock(() => undefined),
@@ -177,6 +343,7 @@ function makeService(overrides = {}) {
     interruptActiveTurn: mock(() => Promise.resolve(true)),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+    waitForDispatches: mock(() => Promise.all([...executionTasks]).then(() => undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     isChatExecutionReserved: mock(() => false),
     hasChatExecutionOwner: mock(() => false),
@@ -208,6 +375,11 @@ function makeService(overrides = {}) {
     clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     pauseChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     resumeChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
+    resumeAndDrain: mock(async (chatId, pauseId) => {
+      const control = await queue.resumeChatQueue(chatId, pauseId);
+      await queue.triggerDrain(chatId);
+      return control;
+    }),
     continuePastRecoveredInput: mock(() => Promise.resolve(storedQueue([], { version: 1 }))),
     ...overrides.queue,
   };
@@ -1528,7 +1700,7 @@ describe('ChatCommandService', () => {
     expect(first.status).toBe('accepted');
     expect(retry.status).toBe('duplicate');
     expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
-    expect(queue.triggerDrain).toHaveBeenCalledTimes(2);
+    expect(queue.triggerDrain).toHaveBeenCalledTimes(1);
   });
 
   it('recovers an accepted queue create from its durable queue receipt', async () => {
@@ -1685,9 +1857,12 @@ describe('ChatCommandService', () => {
     expect(result.control.queue.entries).toEqual([]);
     expect(result.entryId).toBeUndefined();
     expect(queue.triggerDrain).not.toHaveBeenCalled();
-    expect(queue.deliverActiveInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, '/goal pause', {
-      clientRequestId: 'request-active',
-    }, expect.any(Function));
+    expect(queue.deliverActiveInput).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      '/goal pause',
+      expect.objectContaining({ clientRequestId: 'request-active' }),
+      expect.any(Function),
+    );
     const records = await readLedgerRecords();
     expect(records.at(-1)).toMatchObject({
       status: 'finished',
@@ -2049,7 +2224,6 @@ describe('ChatCommandService', () => {
 
     expect(result.success).toBe(true);
     expect(queue.resumeChatQueue).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'pause-current');
-    expect(queue.triggerDrain).toHaveBeenCalledWith(SOURCE_CHAT_ID);
   });
 
   it('rejects resume without a pause ID before mutating the queue', async () => {

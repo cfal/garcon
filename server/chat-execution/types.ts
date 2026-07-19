@@ -94,6 +94,92 @@ export interface StopActiveTurnResult {
   control: StoredChatExecutionControlState;
 }
 
+export interface AcceptedExecutionCommand {
+  key: string;
+  chatId: string;
+  clientRequestId: string;
+  turnId?: string;
+  entryId?: string;
+}
+
+export interface PreScheduleFailure {
+  error: unknown;
+  pendingInputRecovery: boolean;
+  retryable: boolean;
+  preserveForkPreparation?: boolean;
+}
+
+export interface CommandSettlementPort {
+  markScheduled(
+    command: AcceptedExecutionCommand,
+    turnId: string,
+    requiresInputRecovery: boolean,
+  ): Promise<void>;
+  markPreScheduleFailure(
+    command: AcceptedExecutionCommand,
+    failure: PreScheduleFailure,
+  ): Promise<void>;
+  settleQueueMutation(command: AcceptedExecutionCommand, entryId: string): Promise<void>;
+  settleQueueMutationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
+  settleActiveInput(command: AcceptedExecutionCommand): Promise<void>;
+  settleActiveInputFailure(
+    command: AcceptedExecutionCommand,
+    error: unknown,
+    deliveryAccepted: boolean,
+  ): Promise<void>;
+  settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
+  listUnsettledQueueReceiptKeys(chatId: string): Promise<ReadonlySet<string>>;
+}
+
+export interface DirectInputPreparation {
+  operation: 'chat-start' | 'fork-run';
+  prepare(): Promise<void>;
+  compensate(): Promise<void>;
+}
+
+export interface AcceptedDirectInput {
+  command: AcceptedExecutionCommand;
+  content: string;
+  options: RunAgentTurnOptions;
+  settlement: CommandSettlementPort;
+  continueRecoveredInput?: boolean;
+  preparation?: DirectInputPreparation;
+  dispatch?: (admission: AgentExecutionAdmission) => Promise<void>;
+}
+
+export interface AcceptedDirectOperation {
+  command: AcceptedExecutionCommand;
+  settlement: CommandSettlementPort;
+  dispatch: (admission: AgentExecutionAdmission) => Promise<void>;
+}
+
+export interface AcceptedQueueCreate {
+  command: AcceptedExecutionCommand & { entryId: string };
+  content: string;
+  settlement: CommandSettlementPort;
+}
+
+export interface AcceptedQueueReplace extends AcceptedQueueCreate {
+  expectedRevision: number;
+}
+
+export interface AcceptedQueueDelete {
+  command: AcceptedExecutionCommand & { entryId: string };
+  settlement: CommandSettlementPort;
+}
+
+export interface AcceptedActiveInput {
+  command: AcceptedExecutionCommand & { entryId: string };
+  content: string;
+  settlement: CommandSettlementPort;
+}
+
+export interface AcceptedActiveInputOutcome {
+  delivery: 'active' | 'queued';
+  entryId?: string;
+  control: StoredChatExecutionControlState;
+}
+
 export interface DirectTurnReservation {
   readonly chatId: string;
   readonly reservationId: string;
@@ -187,6 +273,14 @@ export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
 export interface ChatExecutionService {
   deleteChatQueueFile(chatId: string): Promise<void>;
   submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  scheduleDirectInput(input: AcceptedDirectInput): Promise<void>;
+  runInitialInput(input: AcceptedDirectInput): Promise<void>;
+  scheduleDirectOperation(input: AcceptedDirectOperation): Promise<void>;
+  enqueueAccepted(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult>;
+  replaceAccepted(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult>;
+  deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult>;
+  deliverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
+  recoverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
   registerPendingUserInput(
     chatId: string,
     command: string,
@@ -211,6 +305,7 @@ export interface ChatExecutionService {
   beginShutdown(): string[];
   abortForShutdown(chatId: string): Promise<boolean>;
   waitForExecutionOwners(): Promise<void>;
+  waitForDispatches(): Promise<void>;
   getQueuedTurnFinalization(
     chatId: string,
     turnId: string | undefined,
@@ -250,6 +345,7 @@ export interface ChatExecutionService {
   clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
   pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
   resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
+  resumeAndDrain(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
   continuePastRecoveredInput(
     chatId: string,
     continuationId: string,
