@@ -12,10 +12,11 @@ describe('AgentSettingsControls', () => {
 				{
 					key: 'effort',
 					type: 'enum',
-					label: 'Effort',
+					label: 'Server Thinking',
+					labelKey: 'thinking',
 					options: [
-						{ value: 'low', label: 'Low' },
-						{ value: 'high', label: 'High' },
+						{ value: 'low', label: 'Server Auto', labelKey: 'automatic' },
+						{ value: 'high', label: 'Server On', labelKey: 'enabled' },
 					],
 				},
 				{ key: 'review', type: 'boolean', label: 'Review changes' },
@@ -28,7 +29,12 @@ describe('AgentSettingsControls', () => {
 			onChange,
 		});
 
-		await fireEvent.change(screen.getByLabelText('Effort'), { target: { value: 'high' } });
+		const effortTrigger = screen.getByRole('button', { name: 'Thinking: Auto' });
+		expect(effortTrigger.className).toContain('bg-composer-agent-setting');
+		expect(screen.queryByRole('combobox', { name: 'Thinking' })).toBeNull();
+
+		await fireEvent.click(effortTrigger);
+		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'On' }));
 		await fireEvent.click(screen.getByLabelText('Review changes'));
 
 		expect(onChange).toHaveBeenNthCalledWith(

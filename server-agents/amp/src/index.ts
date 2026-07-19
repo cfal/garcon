@@ -66,9 +66,10 @@ export default class AmpAgentIntegration implements AgentIntegration {
         key: 'ampAgentMode',
         type: 'enum',
         label: 'Mode',
+        labelKey: 'mode',
         options: [
-          { value: 'smart', label: 'Smart' },
-          { value: 'deep', label: 'Deep' },
+          { value: 'smart', label: 'Smart', labelKey: 'smart' },
+          { value: 'deep', label: 'Deep', labelKey: 'deep' },
         ],
       }],
     });

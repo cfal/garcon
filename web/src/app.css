@@ -114,6 +114,9 @@
 	--color-status-success: hsl(var(--status-success));
 	--color-status-success-foreground: hsl(var(--status-success-foreground));
 	--color-status-success-border: hsl(var(--status-success-border));
+	--color-composer-agent-setting: hsl(var(--composer-agent-setting));
+	--color-composer-agent-setting-foreground: hsl(var(--composer-agent-setting-foreground));
+	--color-composer-agent-setting-border: hsl(var(--composer-agent-setting-border));
 	--color-status-error: hsl(var(--status-error));
 	--color-status-error-foreground: hsl(var(--status-error-foreground));
 	--color-status-error-border: hsl(var(--status-error-border));
@@ -302,6 +305,9 @@
 	--status-success: 146 60% 95%;
 	--status-success-foreground: 146 65% 24%;
 	--status-success-border: 146 35% 76%;
+	--composer-agent-setting: 214 95% 93%;
+	--composer-agent-setting-foreground: 214 78% 30%;
+	--composer-agent-setting-border: 214 55% 72%;
 	--status-error: 0 86% 96%;
 	--status-error-foreground: 0 72% 34%;
 	--status-error-border: 0 50% 78%;
@@ -514,6 +520,9 @@
 	--status-success: 146 36% 24%;
 	--status-success-foreground: 146 76% 86%;
 	--status-success-border: 146 30% 36%;
+	--composer-agent-setting: 214 48% 24%;
+	--composer-agent-setting-foreground: 214 88% 86%;
+	--composer-agent-setting-border: 214 42% 42%;
 	--status-error: 0 34% 24%;
 	--status-error-foreground: 0 82% 86%;
 	--status-error-border: 0 28% 36%;

@@ -8,6 +8,8 @@ import {
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
 import {
+	isAgentSettingLabelKey,
+	isAgentSettingOptionLabelKey,
 	parseAgentSettingsEnvelope,
 	type AgentSettingDescriptor,
 	type AgentSettingsEnvelope,
@@ -111,30 +113,55 @@ function normalizeThinkingModes(value: unknown): ThinkingMode[] {
 
 function normalizeSettingDescriptors(value: unknown): AgentSettingDescriptor[] {
 	if (!Array.isArray(value)) return [];
-	return value.filter((candidate): candidate is AgentSettingDescriptor => {
-		if (!candidate || typeof candidate !== 'object') return false;
+	return value.flatMap((candidate): AgentSettingDescriptor[] => {
+		if (!candidate || typeof candidate !== 'object') return [];
 		const descriptor = candidate as Record<string, unknown>;
-		if (typeof descriptor.key !== 'string' || typeof descriptor.label !== 'string') return false;
-		if (descriptor.type === 'boolean' || descriptor.type === 'string') return true;
-		if (descriptor.type === 'credential-ref') return typeof descriptor.credentialKind === 'string';
-		if (descriptor.type === 'enum') {
-			return (
-				Array.isArray(descriptor.options) &&
-				descriptor.options.every(
-					(option) =>
-						Boolean(option) &&
-						typeof option === 'object' &&
-						typeof (option as Record<string, unknown>).value === 'string' &&
-						typeof (option as Record<string, unknown>).label === 'string',
-				)
-			);
+		if (typeof descriptor.key !== 'string' || typeof descriptor.label !== 'string') return [];
+		const base = {
+			key: descriptor.key,
+			label: descriptor.label,
+			...(isAgentSettingLabelKey(descriptor.labelKey) ? { labelKey: descriptor.labelKey } : {}),
+		};
+		if (descriptor.type === 'boolean' || descriptor.type === 'string') {
+			return [{ ...base, type: descriptor.type }];
 		}
-		return (
-			descriptor.type === 'number' &&
+		if (descriptor.type === 'credential-ref') {
+			return typeof descriptor.credentialKind === 'string'
+				? [{ ...base, type: descriptor.type, credentialKind: descriptor.credentialKind }]
+				: [];
+		}
+		if (descriptor.type === 'enum') {
+			if (!Array.isArray(descriptor.options)) return [];
+			const options = descriptor.options.flatMap((candidateOption) => {
+				if (!candidateOption || typeof candidateOption !== 'object') return [];
+				const option = candidateOption as Record<string, unknown>;
+				if (typeof option.value !== 'string' || typeof option.label !== 'string') return [];
+				return [
+					{
+						value: option.value,
+						label: option.label,
+						...(isAgentSettingOptionLabelKey(option.labelKey) ? { labelKey: option.labelKey } : {}),
+					},
+				];
+			});
+			return options.length === descriptor.options.length
+				? [{ ...base, type: descriptor.type, options }]
+				: [];
+		}
+		return descriptor.type === 'number' &&
 			typeof descriptor.min === 'number' &&
 			typeof descriptor.max === 'number' &&
 			typeof descriptor.step === 'number'
-		);
+			? [
+					{
+						...base,
+						type: descriptor.type,
+						min: descriptor.min,
+						max: descriptor.max,
+						step: descriptor.step,
+					},
+				]
+			: [];
 	});
 }
 

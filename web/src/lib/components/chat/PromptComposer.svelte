@@ -796,13 +796,6 @@
 				</div>
 			</div>
 
-			<AgentSettingsControls
-				descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
-				envelope={agentState.agentSettings}
-				onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
-				disabled={!onAgentSettingChange}
-			/>
-
 			<ComposerBottomBar
 				{canAttachImages}
 				{snippetInteractionKey}
@@ -830,6 +823,14 @@
 				sendTitle={isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message()}
 				{sendButtonClass}
 			>
+				{#snippet agentSettings()}
+					<AgentSettingsControls
+						descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
+						envelope={agentState.agentSettings}
+						onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
+						disabled={!onAgentSettingChange}
+					/>
+				{/snippet}
 				{#snippet modelSelector()}
 					<ComposerModelSelector
 						value={modelSelectorValue}

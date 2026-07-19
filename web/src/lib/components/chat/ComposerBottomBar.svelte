@@ -28,6 +28,7 @@
 		thinkingOptions: ComposerModeOption<ThinkingMode>[];
 		selectedThinking: ThinkingMode;
 		onThinkingSelect: (mode: ThinkingMode) => void;
+		agentSettings?: SvelteSnippet;
 		modelSelector?: SvelteSnippet;
 		canSend: boolean;
 		onSend: () => void;
@@ -55,6 +56,7 @@
 		thinkingOptions,
 		selectedThinking,
 		onThinkingSelect,
+		agentSettings,
 		modelSelector,
 		canSend,
 		onSend,
@@ -76,7 +78,7 @@
 	);
 </script>
 
-<div class="mt-1 px-2 py-1.5">
+<div class="mt-1 px-2 py-1.5" data-slot="composer-bottom-bar">
 	<div class="flex min-w-0 flex-wrap items-center gap-2">
 		<div class="flex min-w-0 grow flex-wrap items-center gap-2">
 			{#if showAddMenu}
@@ -154,6 +156,10 @@
 					{/each}
 				</DropdownMenuContent>
 			</DropdownMenu>
+
+			{#if agentSettings}
+				{@render agentSettings()}
+			{/if}
 
 			{#if selectorsSide === 'left' && modelSelector}
 				{@render modelSelector()}

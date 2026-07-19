@@ -38,6 +38,17 @@ describe('ClaudeAgentIntegration', () => {
     expect(integration.commands).toBeDefined();
     expect(integration.endpoints).toBeDefined();
     expect(integration.singleQuery).toBeDefined();
+    expect(integration.settings.describe()).toEqual([
+      expect.objectContaining({
+        key: 'claudeThinkingMode',
+        labelKey: 'thinking',
+        options: [
+          expect.objectContaining({ value: 'auto', labelKey: 'automatic' }),
+          expect.objectContaining({ value: 'on', labelKey: 'enabled' }),
+          expect.objectContaining({ value: 'off', labelKey: 'disabled' }),
+        ],
+      }),
+    ]);
     expect(host.environment.get).not.toHaveBeenCalled();
   });
 

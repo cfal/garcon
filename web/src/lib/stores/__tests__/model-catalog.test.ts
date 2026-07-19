@@ -78,7 +78,8 @@ describe('ModelCatalogStore', () => {
 								key: 'effort',
 								type: 'enum',
 								label: 'Effort',
-								options: [{ value: 'high', label: 'High' }],
+								labelKey: 'thinking',
+								options: [{ value: 'high', label: 'High', labelKey: 'deep' }],
 							},
 						],
 						defaultSettings: {
@@ -102,7 +103,12 @@ describe('ModelCatalogStore', () => {
 		expect(store.getPermissionModes('sample')).toEqual(['default', 'manualBypass']);
 		expect(store.getThinkingModes('sample')).toEqual(['none', 'high']);
 		expect(store.getAgentSettingsDescriptors('sample')).toEqual([
-			expect.objectContaining({ key: 'effort', type: 'enum' }),
+			expect.objectContaining({
+				key: 'effort',
+				type: 'enum',
+				labelKey: 'thinking',
+				options: [expect.objectContaining({ value: 'high', labelKey: 'deep' })],
+			}),
 		]);
 		expect(store.getDefaultAgentSettings('sample')).toEqual({
 			ownerId: 'sample',

@@ -212,13 +212,8 @@
 	</div>
 
 	<div>
-		<AgentSettingsControls
-			descriptors={startup.agentSettingDescriptors}
-			envelope={startup.agentSettings}
-			onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
-		/>
 		<div
-			class="relative mt-3 min-h-[120px] rounded-lg border border-border"
+			class="relative min-h-[120px] rounded-lg border border-border"
 			data-slot="scheduled-new-chat-composer"
 		>
 			<textarea
@@ -251,6 +246,13 @@
 					showSendButton={false}
 					mobileRightGroupFullRow={true}
 				>
+					{#snippet agentSettings()}
+						<AgentSettingsControls
+							descriptors={startup.agentSettingDescriptors}
+							envelope={startup.agentSettings}
+							onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
+						/>
+					{/snippet}
 					{#snippet modelSelector()}
 						<ComposerModelSelector
 							value={modelSelectorValue}
