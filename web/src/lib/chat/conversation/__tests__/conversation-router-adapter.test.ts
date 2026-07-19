@@ -56,7 +56,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			patchLastReadAt: vi.fn(),
 			removeChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
-			setChatProcessing: vi.fn(),
+			applyProcessingEvent: vi.fn(),
 			reconcileProcessing: vi.fn(),
 			quietRefreshChats: vi.fn(),
 		},

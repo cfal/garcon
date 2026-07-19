@@ -108,6 +108,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.lastReadAt === b.lastReadAt &&
 		a.isPinned === b.isPinned &&
 		a.isArchived === b.isArchived &&
+		a.isProcessing === b.isProcessing &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
 		a.lastMessage === b.lastMessage &&
@@ -116,9 +117,30 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	);
 }
 
-function preserveLocalPreview(prev: ChatSessionRecord | undefined, next: ChatSessionRecord): void {
-	if (prev?.lastMessage && !next.lastMessage) {
-		next.lastMessage = prev.lastMessage;
+function reconcileActivityProjection(
+	previous: ChatSessionRecord | undefined,
+	next: ChatSessionRecord,
+): void {
+	if (!previous) return;
+	let preservedLocalTimestamp = false;
+
+	if (previous.lastActivityAt && (!next.lastActivityAt || previous.lastActivityAt > next.lastActivityAt)) {
+		next.lastActivityAt = previous.lastActivityAt;
+		next.lastMessage = previous.lastMessage;
+		preservedLocalTimestamp = true;
+	} else if (previous.lastMessage && !next.lastMessage) {
+		next.lastMessage = previous.lastMessage;
+	}
+
+	if (previous.lastReadAt && (!next.lastReadAt || previous.lastReadAt > next.lastReadAt)) {
+		next.lastReadAt = previous.lastReadAt;
+		preservedLocalTimestamp = true;
+	}
+
+	if (preservedLocalTimestamp) {
+		next.isUnread = Boolean(
+			next.lastActivityAt && (!next.lastReadAt || next.lastActivityAt > next.lastReadAt),
+		);
 	}
 }
 
@@ -198,7 +220,8 @@ export class ChatSessionsStore {
 	#selectionWriteInFlight = false;
 	#selectionWritePending: string | null | undefined = undefined;
 	#selectionWriteAcked: string | null = null;
-	readonly #pendingProcessingChatIds = new Set<string>();
+	#processingSnapshot: Set<string> | null = null;
+	readonly #processingOverrides = new Map<string, boolean>();
 
 	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
@@ -365,6 +388,11 @@ export class ChatSessionsStore {
 	upsertFromServer(sessions: ChatSession[]): void {
 		const nextById: Record<string, ChatSessionRecord> = {};
 		const nextOrder: string[] = [];
+		const previousServerChatIds = new Set(
+			Object.values(this.byId)
+				.filter((record) => record.status !== 'draft')
+				.map((record) => record.id),
+		);
 
 		// Preserve drafts that the server doesn't know about yet.
 		for (const [id, record] of Object.entries(this.byId)) {
@@ -377,19 +405,12 @@ export class ChatSessionsStore {
 
 		for (const session of sessions) {
 			const next = toRecord(session);
-			if (this.#pendingProcessingChatIds.delete(next.id)) {
-				next.isProcessing = true;
-			}
+			next.isProcessing = this.#resolveProcessing(next.id, next.isProcessing);
 			const prev = this.byId[next.id];
-			preserveLocalPreview(prev, next);
+			reconcileActivityProjection(prev, next);
 			if (prev && sameRecord(prev, next)) {
 				nextById[next.id] = prev;
 			} else {
-				// Preserve WS-authoritative isProcessing flag; the REST
-				// isActive snapshot can lag behind real-time WS events.
-				if (prev?.isProcessing && !next.isProcessing) {
-					next.isProcessing = true;
-				}
 				nextById[next.id] = next;
 			}
 			nextOrder.push(next.id);
@@ -410,6 +431,11 @@ export class ChatSessionsStore {
 
 		// Prepend draft IDs that aren't in the server order.
 		const serverIdSet = new Set(nextOrder);
+		for (const chatId of previousServerChatIds) {
+			if (serverIdSet.has(chatId)) continue;
+			this.#processingOverrides.delete(chatId);
+			this.#processingSnapshot?.delete(chatId);
+		}
 		const draftOrder: string[] = [];
 		for (const id of this.order) {
 			if (nextById[id]?.status === 'draft' && !serverIdSet.has(id)) {
@@ -487,10 +513,8 @@ export class ChatSessionsStore {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.byId[entry.id];
-		preserveLocalPreview(previous, next);
-		if (this.#pendingProcessingChatIds.delete(entry.id) || previous?.isProcessing) {
-			next.isProcessing = true;
-		}
+		reconcileActivityProjection(previous, next);
+		next.isProcessing = this.#resolveProcessing(entry.id, next.isProcessing);
 		const nextById = { ...this.byId, [entry.id]: next };
 		const nextOrder = insertServerEntry(this.order, nextById, entry.id, entry.orderGroup, previous);
 		this.byId = nextById;
@@ -503,7 +527,8 @@ export class ChatSessionsStore {
 	}
 
 	removeChat(chatId: string): void {
-		this.#pendingProcessingChatIds.delete(chatId);
+		this.#processingOverrides.delete(chatId);
+		this.#processingSnapshot?.delete(chatId);
 		if (!this.byId[chatId]) return;
 
 		const nextById = { ...this.byId };
@@ -525,11 +550,19 @@ export class ChatSessionsStore {
 	patchPreview(chatId: string, content: string, timestamp?: string): void {
 		const chat = this.byId[chatId];
 		if (!chat) return;
+		if (timestamp && chat.lastActivityAt && timestamp < chat.lastActivityAt) return;
 		const lastActivityAt = timestamp ?? chat.lastActivityAt;
-		if ((chat.lastMessage || '') === content && chat.lastActivityAt === lastActivityAt) return;
+		const isUnread = timestamp
+			? Boolean(lastActivityAt && (!chat.lastReadAt || lastActivityAt > chat.lastReadAt))
+			: chat.isUnread;
+		if (
+			(chat.lastMessage || '') === content
+			&& chat.lastActivityAt === lastActivityAt
+			&& chat.isUnread === isUnread
+		) return;
 		this.byId = {
 			...this.byId,
-			[chatId]: { ...chat, lastMessage: content, lastActivityAt },
+			[chatId]: { ...chat, lastMessage: content, lastActivityAt, isUnread },
 		};
 	}
 
@@ -554,25 +587,25 @@ export class ChatSessionsStore {
 	patchLastReadAt(chatId: string, lastReadAt: string): void {
 		const chat = this.byId[chatId];
 		if (!chat) return;
-		const isUnread = Boolean(chat.lastActivityAt && chat.lastActivityAt > lastReadAt);
-		if (chat.lastReadAt === lastReadAt && chat.isUnread === isUnread) return;
+		const reconciledLastReadAt = chat.lastReadAt && chat.lastReadAt > lastReadAt
+			? chat.lastReadAt
+			: lastReadAt;
+		const isUnread = Boolean(
+			chat.lastActivityAt && chat.lastActivityAt > reconciledLastReadAt,
+		);
+		if (chat.lastReadAt === reconciledLastReadAt && chat.isUnread === isUnread) return;
 		this.byId = {
 			...this.byId,
-			[chatId]: { ...chat, lastReadAt, isUnread },
+			[chatId]: { ...chat, lastReadAt: reconciledLastReadAt, isUnread },
 		};
 	}
 
-	/** Sets the processing flag for a single chat. Processing events can arrive
-	 *  before an external chat appears in the latest server snapshot. */
-	setChatProcessing(chatId: string, isProcessing: boolean): void {
+	/** Applies a WebSocket-authoritative processing event for one chat. */
+	applyProcessingEvent(chatId: string, isProcessing: boolean): void {
+		this.#processingOverrides.set(chatId, isProcessing);
 		const chat = this.byId[chatId];
-		if (!chat) {
-			if (isProcessing) this.#pendingProcessingChatIds.add(chatId);
-			else this.#pendingProcessingChatIds.delete(chatId);
-			return;
-		}
+		if (!chat) return;
 
-		this.#pendingProcessingChatIds.delete(chatId);
 		if (chat.isProcessing === isProcessing) return;
 		this.byId = {
 			...this.byId,
@@ -580,19 +613,17 @@ export class ChatSessionsStore {
 		};
 	}
 
-	/** Reconciles processing state from a server-authoritative snapshot.
-	 *  Only mutates records whose isProcessing value actually differs
-	 *  from the snapshot to avoid unnecessary Svelte reactivity triggers.
-	 *
-	 *  NOTE: A narrow race exists where a snapshot arrives slightly after
-	 *  a turn_complete event, briefly re-setting isProcessing=true for a
-	 *  just-finished chat. This is self-healing -- the next lifecycle
-	 *  event corrects it. */
+	/** Drops authority retained from a previous socket so REST can converge state. */
+	invalidateProcessingAuthority(): void {
+		this.#processingSnapshot = null;
+		this.#processingOverrides.clear();
+	}
+
+	/** Replaces processing state from a reconnect snapshot. Later WebSocket
+	 *  events override this baseline; REST list responses never do. */
 	reconcileProcessing(activeChatIds: Set<string>): void {
-		this.#pendingProcessingChatIds.clear();
-		for (const chatId of activeChatIds) {
-			if (!this.byId[chatId]) this.#pendingProcessingChatIds.add(chatId);
-		}
+		this.#processingSnapshot = new Set(activeChatIds);
+		this.#processingOverrides.clear();
 
 		let changed = false;
 		const nextById = { ...this.byId };
@@ -608,6 +639,13 @@ export class ChatSessionsStore {
 		if (changed) {
 			this.byId = nextById;
 		}
+	}
+
+	#resolveProcessing(chatId: string, restValue: boolean): boolean {
+		const override = this.#processingOverrides.get(chatId);
+		if (override !== undefined) return override;
+		if (this.#processingSnapshot) return this.#processingSnapshot.has(chatId);
+		return restValue;
 	}
 }
 

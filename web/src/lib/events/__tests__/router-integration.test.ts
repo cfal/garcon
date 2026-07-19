@@ -274,6 +274,24 @@ describe('event router integration', () => {
 		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
 	});
 
+	it('does not invent an authoritative activity timestamp for queue dispatch previews', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[{
+				type: 'queue-dispatching',
+				chatId: 'chat-a',
+				entryId: 'entry-1',
+				content: 'queued message',
+			}],
+			stores,
+		);
+
+		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith(
+			'chat-a',
+			'queued message',
+		);
+	});
+
 	it('warms visible split-pane previews before background chat filtering skips them', () => {
 		const defaults = createStores();
 		const stores = createStores({

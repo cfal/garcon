@@ -75,7 +75,7 @@ export interface EventRouterAgentSettings {
 export interface EventRouterSessionsStore {
 	selectedChat: () => ChatSessionRouterView | null;
 	setSelectedChatId: (chatId: string | null) => void;
-	patchChatPreview: (chatId: string, content: string, timestamp: string) => void;
+	patchChatPreview: (chatId: string, content: string, timestamp?: string) => void;
 	refreshChats: () => void;
 	navigateToChat: (chatId: string) => void;
 	removeChat: (chatId: string) => void;
@@ -391,7 +391,6 @@ function buildDispatch(
 				stores.sessions.patchChatPreview(
 					sendChatId,
 					String(msg.content).slice(0, 200),
-					new Date().toISOString(),
 				);
 			}
 		},

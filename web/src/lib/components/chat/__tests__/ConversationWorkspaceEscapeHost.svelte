@@ -74,8 +74,9 @@
 		upsertServerChat: () => {},
 		removeChat: () => {},
 		setSelectedChatId: () => {},
-		setChatProcessing: () => {},
+		applyProcessingEvent: () => {},
 		reconcileProcessing: () => {},
+		invalidateProcessingAuthority: () => {},
 		quietRefreshChats: () => Promise.resolve(),
 	};
 

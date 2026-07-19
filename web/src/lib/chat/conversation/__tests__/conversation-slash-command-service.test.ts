@@ -104,7 +104,6 @@ function createDeps(chat = createChat()) {
 			renameChat: vi.fn().mockResolvedValue(true),
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
-			setChatProcessing: vi.fn(),
 		},
 		chatState: {
 			activeChatId: chat.id,
@@ -271,7 +270,6 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('chat-2');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
-		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-2', true);
 	});
 
 	it('forks without a message and preserves the requested sequence', async () => {

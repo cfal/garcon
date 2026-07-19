@@ -247,7 +247,6 @@ function createDeps(chat = createRunningChat()) {
 			patchLastReadAt: vi.fn(),
 			applyStartEntry: vi.fn(),
 			upsertServerChat: vi.fn(),
-			setChatProcessing: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			renameChat: vi.fn().mockResolvedValue(true),
 		},
@@ -679,7 +678,6 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', queue);
 		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
-		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', false);
 	});
 
 	it('uses the distinct interrupt command without invoking Stop', async () => {
@@ -729,7 +727,6 @@ describe('ConversationSessionController', () => {
 
 		expect(loadingStatus).toEqual(previousStatus);
 		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
-		expect(deps.sessions.setChatProcessing).not.toHaveBeenCalledWith('chat-1', false);
 		expect(deps.chatState.localNotices).toEqual([
 			expect.objectContaining({
 				noticeType: 'error',
@@ -762,7 +759,6 @@ describe('ConversationSessionController', () => {
 
 		expect(loadingStatus).toEqual(previousStatus);
 		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
-		expect(deps.sessions.setChatProcessing).not.toHaveBeenCalledWith('chat-1', false);
 		expect(deps.chatState.localNotices).toEqual([
 			expect.objectContaining({
 				noticeType: 'error',
@@ -1037,7 +1033,6 @@ describe('ConversationSessionController', () => {
 		const acceptedInput = deps.chatState.pendingUserInputs[0];
 		expect(acceptedInput.deliveryStatus).toBe('accepted');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
-		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
 	});
 
 	it('submits follow-up messages with the current Claude thinking mode', async () => {
@@ -1284,7 +1279,6 @@ describe('ConversationSessionController', () => {
 		});
 		expect(deps.composerState.inputText).toBe('please send');
 		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
-		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', false);
 	});
 
 	it('queues text while a turn is processing without adding a transcript user message', async () => {
