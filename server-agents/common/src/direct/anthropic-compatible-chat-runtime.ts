@@ -118,10 +118,13 @@ function persistedToAnthropicMessage(message: DirectConversationMessage): Anthro
   };
 }
 
-function appendAnthropicDelta(accumulated: string, data: string): {
-  accumulated: string;
+interface AnthropicStreamState {
+  text: string;
   errorMessage: string | null;
-} {
+  sawMessageStop: boolean;
+}
+
+function consumeAnthropicEvent(state: AnthropicStreamState, data: string): void {
   try {
     const parsed = JSON.parse(data) as {
       type?: string;
@@ -129,8 +132,13 @@ function appendAnthropicDelta(accumulated: string, data: string): {
       error?: { message?: string };
     };
 
+    if (parsed.type === 'message_stop') {
+      state.sawMessageStop = true;
+      return;
+    }
     if (parsed.type === 'error' && parsed.error?.message) {
-      return { accumulated, errorMessage: parsed.error.message };
+      state.errorMessage = parsed.error.message;
+      return;
     }
 
     if (
@@ -138,13 +146,11 @@ function appendAnthropicDelta(accumulated: string, data: string): {
       && parsed.delta?.type === 'text_delta'
       && typeof parsed.delta.text === 'string'
     ) {
-      return { accumulated: accumulated + parsed.delta.text, errorMessage: null };
+      state.text += parsed.delta.text;
     }
   } catch {
-    return { accumulated, errorMessage: null };
+    return;
   }
-
-  return { accumulated, errorMessage: null };
 }
 
 export async function runAnthropicCompatibleSingleQuery(
@@ -246,20 +252,24 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
         throw new Error(`${this.config.runtimeLabel} response did not include a stream body.`);
       }
 
-      let accumulated = '';
-      let lastStreamError = '';
+      const state: AnthropicStreamState = {
+        text: '',
+        errorMessage: null,
+        sawMessageStop: false,
+      };
 
       await readSseDataEvents(response.body, (data) => {
-        const result = appendAnthropicDelta(accumulated, data);
-        accumulated = result.accumulated;
-        if (result.errorMessage) lastStreamError = result.errorMessage;
+        consumeAnthropicEvent(state, data);
       });
 
-      if (!accumulated.trim() && lastStreamError) {
-        throw new Error(`${this.config.runtimeLabel} stream error: ${lastStreamError}`);
+      if (state.errorMessage) {
+        throw new Error(`${this.config.runtimeLabel} stream error: ${state.errorMessage}`);
+      }
+      if (!state.sawMessageStop) {
+        throw new Error(`${this.config.runtimeLabel} stream ended before message_stop.`);
       }
 
-      return accumulated;
+      return state.text;
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;

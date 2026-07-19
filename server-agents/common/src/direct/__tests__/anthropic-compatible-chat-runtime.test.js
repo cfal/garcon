@@ -13,11 +13,14 @@ import {
 const originalFetch = globalThis.fetch;
 const createdDirs = [];
 
-function streamResponse(chunks) {
+function streamResponse(chunks, options = {}) {
   const encoder = new TextEncoder();
+  const events = options.complete === false
+    ? chunks
+    : [...chunks, { type: 'message_stop' }];
   return new Response(new ReadableStream({
     start(controller) {
-      for (const chunk of chunks) {
+      for (const chunk of events) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
       }
       controller.close();
@@ -55,6 +58,12 @@ function makeRuntime(dir, overrides = {}) {
 function waitForMessages(runtime) {
   return new Promise((resolve) => {
     runtime.onMessages((_chatId, messages) => resolve(messages));
+  });
+}
+
+function waitForFailure(runtime) {
+  return new Promise((resolve) => {
+    runtime.onFailed((_chatId, message) => resolve(message));
   });
 }
 
@@ -319,5 +328,52 @@ describe('AnthropicCompatibleChatRuntime', () => {
     )).rejects.toThrow('Direct (Anthropic) API error 400: unsupported effort');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects partial streamed text followed by an Anthropic error event', async () => {
+    const dir = await tempDir();
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+      { type: 'error', error: { message: 'generation failed' } },
+    ]));
+    const runtime = makeRuntime(dir);
+    const failure = waitForFailure(runtime);
+
+    await runtime.startSession({
+      chatId: 'chat-error',
+      command: 'fail',
+      projectPath: '/tmp/project',
+      model: 'acme-sonnet',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    await expect(failure).resolves.toBe(
+      'Direct (Anthropic) stream error: generation failed',
+    );
+  });
+
+  it('rejects a valid partial stream that closes before message_stop', async () => {
+    const dir = await tempDir();
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+    ], { complete: false }));
+    const runtime = makeRuntime(dir);
+    const failure = waitForFailure(runtime);
+
+    await runtime.startSession({
+      chatId: 'chat-truncated',
+      command: 'truncate',
+      projectPath: '/tmp/project',
+      model: 'acme-sonnet',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    await expect(failure).resolves.toBe(
+      'Direct (Anthropic) stream ended before message_stop.',
+    );
   });
 });
