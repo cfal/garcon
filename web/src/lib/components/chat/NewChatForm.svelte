@@ -15,11 +15,8 @@
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
-	import {
-		CLAUDE_PERMISSION_MODES,
-		NON_CLAUDE_PERMISSION_MODES,
-	} from '$lib/chat/composer/chat-ui-constants.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';
 	import {
@@ -103,8 +100,7 @@
 
 	function canFocusTextarea(): boolean {
 		return (
-			!transientLayers.makesMainInert ||
-			transientLayers.ownsTopModalTarget(textareaRef ?? null)
+			!transientLayers.makesMainInert || transientLayers.ownsTopModalTarget(textareaRef ?? null)
 		);
 	}
 
@@ -158,12 +154,7 @@
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
 	$effect(() => {
-		if (
-			!pendingTextareaFocus ||
-			!form.settingsLoaded ||
-			form.showBrowser ||
-			!canFocusTextarea()
-		)
+		if (!pendingTextareaFocus || !form.settingsLoaded || form.showBrowser || !canFocusTextarea())
 			return;
 		if (!textareaRef) return;
 		if (prefill) {
@@ -382,12 +373,8 @@
 		}
 	}
 
-	const permissionOptions = $derived(
-		buildPermissionOptions(
-			form.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
-		),
-	);
-	const thinkingOptions = $derived(buildThinkingOptions(form.agentId, form.modelValue));
+	const permissionOptions = $derived(buildPermissionOptions(form.permissionModes));
+	const thinkingOptions = $derived(buildThinkingOptions(form.thinkingModes, form.modelValue));
 	const modelSelectorMode: ModelSelectorMode = {
 		agent: 'select',
 		source: 'select',
@@ -410,10 +397,7 @@
 	}
 </script>
 
-<div
-	class="p-2 sm:p-4"
-	{@attach snippetExpansion.pending && snippetExpansionLayer}
->
+<div class="p-2 sm:p-4" {@attach snippetExpansion.pending && snippetExpansionLayer}>
 	<div class="relative">
 		<div
 			class="space-y-6"
@@ -555,6 +539,12 @@
 					<p class="text-sm text-destructive">{form.error}</p>
 				{/if}
 			</div>
+
+			<AgentSettingsControls
+				descriptors={form.agentSettingDescriptors}
+				envelope={form.agentSettings}
+				onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
+			/>
 
 			<div
 				class="relative min-h-[120px] border border-border rounded-lg"

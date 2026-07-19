@@ -7,14 +7,16 @@ function makeSession(overrides = {}) {
   return {
     agentId: 'claude',
     agentSessionId: 'agent-session',
-    nativePath: null,
+    nativeSession: null,
+    agentOwnershipEpoch: 'epoch-1',
+    agentSettingsById: {
+      claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
+    },
     projectPath: '/alias',
     tags: ['work'],
     model: 'opus',
     permissionMode: 'default',
     thinkingMode: 'none',
-    claudeThinkingMode: 'auto',
-    ampAgentMode: 'smart',
     ...overrides,
   };
 }

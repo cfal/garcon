@@ -55,8 +55,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		isArchived: false,
 		isActive: false,
 		isUnread: false,
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		...overrides,
 	};
 }

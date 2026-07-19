@@ -9,10 +9,6 @@ mock.module('../../lib/http-request.js', () => ({
   MalformedJsonError,
 }));
 
-mock.module('../../agents/claude/history-loader.js', () => ({
-  getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
   generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: '123', title: 'Generated Title' })),
@@ -69,6 +65,7 @@ const agents = {
   supportsForkAtMessage: mock(() => true),
   supportsForkWhileRunning: mock(() => false),
   isAgentSessionRunning: mock(() => false),
+  forkAgentSession: mock(() => Promise.resolve({})),
 };
 
 const commandLedger = createRouteCommandLedger('chats-fork');
@@ -174,7 +171,7 @@ describe('POST /api/v1/chats/fork', () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     agents.supportsFork.mockImplementation(() => false);
     registry.getChat.mockImplementation((id) => {
-      if (id === SOURCE_CHAT_ID) return { agentId: 'opencode', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return { agentId: 'unsupported-agent', projectPath: '/proj' };
       return null;
     });
 
@@ -184,14 +181,14 @@ describe('POST /api/v1/chats/fork', () => {
 
     expect(response.status).toBe(422);
     expect(body.success).toBe(false);
-    expect(body.error).toContain('opencode');
+    expect(body.error).toContain('unsupported-agent');
   });
 
   it('returns 409 when target chat already exists', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockImplementation((id) => {
-      if (id === SOURCE_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
-      if (id === TARGET_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
+      if (id === TARGET_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
       return null;
     });
 
@@ -208,7 +205,20 @@ describe('POST /api/v1/chats/fork', () => {
     let forkedChat = null;
     parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockImplementation((id) => {
-      if (id === SOURCE_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return {
+        agentId: 'test-agent',
+        agentSessionId: 'source-session',
+        nativeSession: {
+          ownerId: 'test-agent',
+          schemaVersion: 1,
+          value: { id: 'source-session' },
+        },
+        agentOwnershipEpoch: 'source-epoch',
+        agentSettingsById: {
+          'test-agent': { ownerId: 'test-agent', schemaVersion: 1, values: {} },
+        },
+        projectPath: '/proj',
+      };
       if (id === TARGET_CHAT_ID) return forkedChat;
       return null;
     });
@@ -218,7 +228,17 @@ describe('POST /api/v1/chats/fork', () => {
     forkChatFileCopy.mockImplementation(async ({ registry: forkRegistry }) => {
       forkRegistry.addChat({
         id: TARGET_CHAT_ID,
-        agentId: 'claude',
+        agentId: 'test-agent',
+        agentSessionId: 'new-session',
+        nativeSession: {
+          ownerId: 'test-agent',
+          schemaVersion: 1,
+          value: { id: 'new-session' },
+        },
+        agentOwnershipEpoch: 'target-epoch',
+        agentSettingsById: {
+          'test-agent': { ownerId: 'test-agent', schemaVersion: 1, values: {} },
+        },
         projectPath: '/proj',
         model: '',
         tags: [],
@@ -226,9 +246,8 @@ describe('POST /api/v1/chats/fork', () => {
       return {
         sourceChatId: SOURCE_CHAT_ID,
         chatId: TARGET_CHAT_ID,
-        agentId: 'claude',
+        agentId: 'test-agent',
         agentSessionId: 'new-uuid',
-        nativePath: '/tmp/new-uuid.jsonl',
       };
     });
 
@@ -240,7 +259,7 @@ describe('POST /api/v1/chats/fork', () => {
     expect(body.success).toBe(true);
     expect(body.chat).toMatchObject({
       id: TARGET_CHAT_ID,
-      agentId: 'claude',
+      agentId: 'test-agent',
       projectPath: '/proj',
       effectiveProjectKey: '/proj',
       orderGroup: 'orphan',
@@ -261,7 +280,7 @@ describe('POST /api/v1/chats/fork', () => {
   it('returns 500 for unexpected errors', async () => {
     parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockImplementation((id) => {
-      if (id === SOURCE_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
       return null;
     });
     forkChatFileCopy.mockRejectedValue(new Error('Disk full'));

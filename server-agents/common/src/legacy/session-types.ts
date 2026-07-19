@@ -1,0 +1,267 @@
+// Shared agent types. Defines the typed contracts for session
+// lifecycle operations so that callers and agents share a single
+// source of truth for required fields.
+
+import {
+  normalizeAmpAgentMode,
+  normalizeClaudeThinkingMode,
+  normalizePermissionMode,
+  normalizeThinkingMode,
+  type AmpAgentMode,
+  type ClaudeThinkingMode,
+  type PermissionMode,
+  type ThinkingMode,
+} from '@garcon/common/chat-modes';
+import type { AgentCommandImage } from '@garcon/common/ws-requests';
+import type { AgentId } from '@garcon/common/agents';
+import type { ApiProtocol } from '@garcon/common/api-providers';
+
+export type CodexGoalCommand =
+  | { kind: 'status' }
+  | { kind: 'set'; objective: string }
+  | { kind: 'replace'; objective: string }
+  | { kind: 'edit'; objective: string | null }
+  | { kind: 'clear' }
+  | { kind: 'pause' }
+  | { kind: 'resume' }
+  | { kind: 'unsupported'; subcommand: string };
+
+export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
+export type AgentName = AgentId;
+export type AgentExecutionCommandType =
+  | 'chat-start'
+  | 'agent-run'
+  | 'fork-run'
+  | 'agent-compact';
+
+export type CodexConfigValue = string | number | boolean | CodexConfigValue[] | { [key: string]: CodexConfigValue };
+export type CodexConfigObject = { [key: string]: CodexConfigValue };
+
+export interface CodexProviderConfig {
+  config: CodexConfigObject;
+  env?: Record<string, string>;
+}
+
+// Persisted chat execution state read from the registry.
+export interface PersistedChatExecutionConfig {
+  projectPath?: string;
+  model?: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
+}
+
+export interface AgentExecutionAdmission {
+  readonly signal: AbortSignal;
+  markStarted(): void;
+}
+
+export function assertExecutionAdmissionOpen(
+  request: { executionAdmission?: AgentExecutionAdmission },
+): void {
+  request.executionAdmission?.signal.throwIfAborted();
+}
+
+export function markExecutionStarted(
+  request: { executionAdmission?: AgentExecutionAdmission },
+): void {
+  assertExecutionAdmissionOpen(request);
+  request.executionAdmission?.markStarted();
+}
+
+// Core execution context shared by all session operations.
+export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
+  chatId: string;
+  projectPath: string;
+  model: string;
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  clientRequestId?: string;
+  clientMessageId?: string;
+  turnId?: string;
+  executionAdmission?: AgentExecutionAdmission;
+}
+
+export interface AgentEventMetadata {
+  clientRequestId?: string;
+  commandType?: AgentExecutionCommandType;
+  turnId?: string;
+  upstreamRequestId?: string;
+}
+
+export function executionEventMetadata(
+  request: Pick<AgentExecutionConfig, 'clientRequestId' | 'turnId'>,
+  commandType?: AgentExecutionCommandType,
+): AgentEventMetadata {
+  return Object.freeze({
+    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
+    ...(commandType ? { commandType } : {}),
+    ...(request.turnId ? { turnId: request.turnId } : {}),
+  });
+}
+
+export interface AgentSessionSettingsPatch {
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
+  model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+}
+
+export class UnsupportedAgentSettingError extends Error {
+  constructor(
+    readonly agentId: string,
+    readonly setting: keyof AgentSessionSettingsPatch,
+  ) {
+    super(`${agentId} does not support live setting: ${setting}`);
+    this.name = 'UnsupportedAgentSettingError';
+  }
+}
+
+// Request to start a new agent session.
+export interface StartSessionRequest extends AgentExecutionConfig {
+  command: string;
+  codexGoalCommand?: CodexGoalCommand;
+  codexSeedContext?: string;
+  images?: AgentCommandImage[];
+  envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
+  /** Reports when abort() can prevent or cancel this exact turn. */
+  onAbortable?: () => void;
+}
+
+export interface StartedAgentSession {
+  agentSessionId: string;
+  nativePath: string | null;
+}
+
+// Claude start requires a pre-generated agentSessionId.
+export interface ClaudeStartSessionRequest extends StartSessionRequest {
+  agentSessionId: string;
+}
+
+// Request to resume an existing session with a new user turn.
+export interface ResumeTurnRequest extends AgentExecutionConfig {
+  agentSessionId: string;
+  command: string;
+  codexGoalCommand?: CodexGoalCommand;
+  images?: AgentCommandImage[];
+  envOverrides?: Record<string, string>;
+  codexConfig?: CodexProviderConfig;
+  nativePath?: string | null;
+  /** Reports when abort() can prevent or cancel this exact turn. */
+  onAbortable?: () => void;
+}
+
+export interface PrepareProjectPathUpdateRequest {
+  chatId: string;
+  agentSessionId: string | null;
+  previousProjectPath: string;
+  nextProjectPath: string;
+  nativePath: string | null;
+}
+
+// One-shot query with relaxed requirements (no session lifecycle).
+export interface SingleQueryRequest {
+  prompt: string;
+  model?: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  cwd?: string;
+  projectPath?: string;
+}
+
+// Typed view of a chat registry entry used by agents.
+export interface AgentChatEntry {
+  agentId: AgentName;
+  projectPath: string;
+  agentSessionId?: string | null;
+  model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
+  nativePath?: string | null;
+}
+
+export interface RequiredChatExecutionConfig extends PersistedChatExecutionConfig {
+  projectPath: string;
+  model: string;
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
+  claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
+}
+
+// Validates persisted execution settings before they reach agents or queue drain.
+export function requireChatExecutionConfig(
+  chatId: string,
+  entry: PersistedChatExecutionConfig | null | undefined,
+): RequiredChatExecutionConfig {
+  if (!entry) {
+    throw new Error(`Session not initialized: ${chatId}`);
+  }
+  if (!entry.projectPath) {
+    throw new Error(`Chat ${chatId} is missing projectPath`);
+  }
+  if (!entry.model) {
+    throw new Error(`Chat ${chatId} is missing model`);
+  }
+
+  return {
+    projectPath: entry.projectPath,
+    model: entry.model,
+    permissionMode: normalizePermissionMode(entry.permissionMode),
+    thinkingMode: normalizeThinkingMode(entry.thinkingMode),
+    claudeThinkingMode: normalizeClaudeThinkingMode(entry.claudeThinkingMode),
+    ampAgentMode: normalizeAmpAgentMode(entry.ampAgentMode),
+  };
+}
+
+// Public API request for AgentRegistry.startSession().
+export interface StartAgentSessionRequest {
+  chatId: string;
+  command: string;
+  projectPath: string;
+  images?: AgentCommandImage[];
+  model?: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
+}
+
+// Public API request for AgentRegistry.runAgentTurn().
+export interface RunAgentTurnRequest {
+  chatId: string;
+  command: string;
+  images?: AgentCommandImage[];
+  model?: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  claudeThinkingMode?: ClaudeThinkingMode;
+  ampAgentMode?: AmpAgentMode;
+}
+
+// Runtime-supplied turn fields forwarded through the queue and WS layers.
+export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'> & {
+  clientRequestId?: string;
+  clientMessageId?: string;
+  turnId?: string;
+  commandType?: AgentExecutionCommandType;
+  executionAdmission?: AgentExecutionAdmission;
+};

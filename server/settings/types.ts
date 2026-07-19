@@ -1,10 +1,9 @@
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type {
-  AmpAgentMode,
-  ClaudeThinkingMode,
   PermissionMode,
   ThinkingMode,
 } from '../../common/chat-modes.js';
+import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type { TranscriptSearchFeatureSettings } from '../../common/settings.js';
 
 export interface UiSettings {
@@ -73,8 +72,7 @@ export interface RecentAgentSetting {
 export interface ExecutionDefaults {
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode: AmpAgentMode;
+  agentSettingsById: Record<string, AgentSettingsEnvelope>;
 }
 
 export interface ExecutionDefaultsSettings {

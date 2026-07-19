@@ -6,6 +6,7 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { isDomainError } from '../lib/domain-error.js';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 interface AgentRouteDeps {
   agents: AgentRegistryServiceContract;
@@ -120,6 +121,9 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
       if (invalidAgent) return invalidAgent;
       return Response.json(await agents.completeAgentAuthLogin(agentId, sessionId, code));
     } catch (error) {
+      if (error instanceof AgentIntegrationError && error.code === 'AUTH_LOGIN_SESSION_MISMATCH') {
+        return Response.json({ error: error.message }, { status: 409 });
+      }
       if (isDomainError(error)) {
         return Response.json({ error: error.message }, { status: error.status });
       }

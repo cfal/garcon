@@ -1,174 +1,82 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 function walk(dir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((entry) => {
-    const path = join(dir, entry);
-    if (statSync(path).isDirectory()) return walk(path);
-    return path.endsWith('.ts') || path.endsWith('.js') ? [path] : [];
+    if (entry === 'node_modules' || entry === 'dist' || entry === 'build') return [];
+    const filePath = join(dir, entry);
+    if (statSync(filePath).isDirectory()) return walk(filePath);
+    return /\.(?:ts|js)$/.test(filePath) ? [filePath] : [];
   });
 }
 
+const providerIds = [
+  'amp',
+  'claude',
+  'codex',
+  'cursor',
+  'direct-anthropic-compatible',
+  'direct-openai-compatible',
+  'direct-openai-responses-compatible',
+  'factory',
+  'opencode',
+  'pi',
+];
+
 describe('agent architecture boundaries', () => {
-  test('keeps ACP transport generic and Cursor ACP translation colocated', () => {
-    expect(existsSync('server/acp')).toBe(true);
-    expect(existsSync('server/agents/shared/acp-agent-runtime.ts')).toBe(true);
-    expect(existsSync('server/agents/shared/acp-event-converter.ts')).toBe(true);
-    expect(existsSync('server/agents/cursor/cursor-acp-policy.ts')).toBe(true);
-    expect(existsSync('server/agents/cursor/cursor-acp-event-converter.ts')).toBe(true);
-
-    const sharedRuntime = readFileSync('server/agents/shared/acp-agent-runtime.ts', 'utf8');
-    expect(sharedRuntime).not.toContain('CursorAskQuestion');
-    expect(sharedRuntime).not.toContain('CursorCreatePlan');
+  test('moves every provider implementation into an isolated package', () => {
+    for (const providerId of providerIds) {
+      expect(existsSync(`server-agents/${providerId}/package.json`), providerId).toBe(true);
+      expect(existsSync(`server-agents/${providerId}/src/index.ts`), providerId).toBe(true);
+      expect(existsSync(`server/agents/${providerId}`), providerId).toBe(false);
+    }
+    expect(existsSync('server/acp')).toBe(false);
+    expect(existsSync('server/agents/direct')).toBe(false);
   });
 
-  test('keeps server/providers empty', () => {
-    expect(walk('server/providers')).toEqual([]);
-  });
-
-  test('keeps agent converters and history loaders colocated with their owning agent', () => {
-    expect(existsSync('server/agents/converters')).toBe(false);
-    expect(existsSync('server/agents/loaders')).toBe(false);
-
-    for (const root of ['server/agents', 'server/chats', 'server/routes', 'server/ws']) {
-      for (const file of walk(root)) {
-        if (file.endsWith('architecture-boundaries.test.js')) continue;
-        const source = readFileSync(file, 'utf8');
-        expect(source).not.toContain('agents/converters');
-        expect(source).not.toContain('agents/loaders');
-        expect(source).not.toContain('../converters/');
-        expect(source).not.toContain('../loaders/');
+  test('imports provider packages only from the default composition module', () => {
+    for (const file of walk('server')) {
+      if (file.includes('__tests__')) continue;
+      const source = readFileSync(file, 'utf8');
+      if (source.includes('@garcon/server-agent-') && !source.includes('@garcon/server-agent-interface')) {
+        expect(relative('.', file)).toBe('server/agents/default-agent-integrations.ts');
       }
     }
   });
 
-  test('does not keep the transitional adapter/plugin layer', () => {
-    expect(existsSync('server/providers/provider-adapter.ts')).toBe(false);
-    expect(existsSync('server/providers/provider-adapters.ts')).toBe(false);
-    expect(existsSync('server/providers/agent-plugin.ts')).toBe(false);
-    expect(existsSync('server/providers/agent-plugin-bridge.ts')).toBe(false);
+  test('keeps the public interface provider-free and runtime-light', () => {
+    for (const file of walk('server-agents/interface/src')) {
+      const source = readFileSync(file, 'utf8');
+      expect(source, file).not.toMatch(/server-agent-(?:amp|claude|codex|cursor|factory|opencode|pi)/);
+      expect(source, file).not.toMatch(/\b(?:Worker|SQLite|FTS5?|source-kind)\b/i);
+    }
   });
 
-  test('keeps AgentRegistry out of API provider mutation ownership', () => {
-    const source = readFileSync('server/agents/registry.ts', 'utf8');
-    expect(source).not.toContain('createApiProvider(');
-    expect(source).not.toContain('updateApiProvider(');
-    expect(source).not.toContain('deleteApiProvider(');
-    expect(source).not.toContain('testApiProvider(');
-    expect(source).not.toContain('discoverApiProviderModels(');
+  test('keeps the common toolkit independent of providers and core', () => {
+    for (const file of walk('server-agents/common/src')) {
+      const source = readFileSync(file, 'utf8');
+      expect(source, file).not.toMatch(/@garcon\/server-agent-(?:amp|claude|codex|cursor|factory|opencode|pi)/);
+      expect(source, file).not.toMatch(/(?:^|['"])\.{1,2}\/.*server\//m);
+    }
   });
 
-  test('keeps AgentRegistry as a facade over focused agent services', () => {
-    expect(existsSync('server/agents/runtime-router.ts')).toBe(true);
-    expect(existsSync('server/agents/event-bus.ts')).toBe(true);
-    expect(existsSync('server/agents/session-settings-service.ts')).toBe(true);
-
-    const source = readFileSync('server/agents/registry.ts', 'utf8');
-    expect(source).toContain('new AgentRuntimeRouter');
-    expect(source).toContain('new AgentEventBus');
-    expect(source).toContain('new AgentSessionSettingsService');
-    expect(source).not.toContain('resolveFileMentionsInCommand');
-    expect(source).not.toContain('assertSameApiProviderBoundary');
-    expect(source).not.toContain('#turnMetadataByChatId');
-    expect(source).not.toContain('liveSessionSettingsPatch');
-  });
-
-  test('keeps shared agent contracts split from API provider templates', () => {
-    expect(existsSync('common/providers.ts')).toBe(false);
-    const source = readFileSync('common/agents.ts', 'utf8');
-    expect(source).not.toContain('API_PROVIDER_TEMPLATE_IDS');
-    expect(source).not.toContain('ApiProviderTemplateId');
-  });
-
-  test('composition root creates agents through the default agent suite', () => {
-    const source = readFileSync('server/server.ts', 'utf8');
-    expect(source).toContain('const agentRegistry = new AgentRegistry');
-    expect(source).toContain('createDefaultAgentSuite');
-    expect(source).not.toContain('new CodexAppServerRuntime');
-    expect(source).not.toContain('new ClaudeCliRuntime');
-    expect(source).not.toContain('createCursorAgent(');
-    expect(source).not.toContain('providerRegistry');
-    expect(source).not.toContain('CursorRequestIdentityStore');
-    expect(source).not.toContain('adapterToAgent');
-  });
-
-  test('generic chat and route modules do not import concrete agent internals', () => {
-    const checkedRoots = ['server/chats', 'server/routes', 'server/ws'];
-    const forbidden = [
-      '../agents/claude',
-      '../agents/pi',
-      '../agents/codex',
-      '../agents/cursor',
-      '../agents/opencode',
-      '../agents/amp',
-      '../agents/factory',
-      '../../agents/claude',
-      '../../agents/pi',
-      '../../agents/codex',
-      '../../agents/cursor',
-      '../../agents/opencode',
-      '../../agents/amp',
-      '../../agents/factory',
-    ];
-
-    for (const root of checkedRoots) {
+  test('keeps generic server modules out of provider implementation paths', () => {
+    for (const root of ['server/chats', 'server/routes', 'server/ws']) {
       for (const file of walk(root)) {
         if (file.includes('__tests__')) continue;
         const source = readFileSync(file, 'utf8');
-        for (const importPath of forbidden) {
-          expect(source, `${file} imports ${importPath}`).not.toContain(importPath);
-        }
+        expect(source, file).not.toMatch(/server-agents\/(?:amp|claude|codex|cursor|factory|opencode|pi)/);
+        expect(source, file).not.toMatch(/agents\/(?:amp|claude|codex|cursor|factory|opencode|pi)/);
       }
     }
   });
 
-  test('server execution paths use AgentRegistry for runtime capabilities', () => {
-    const files = [
-      'server/routes/chats.ts',
-      'server/ws/chat.ts',
-      'server/chats/fork-chat.ts',
-    ];
-
-    for (const file of files) {
-      const source = readFileSync(file, 'utf8');
-      expect(source).not.toContain('supportsFork as');
-      expect(source).not.toContain('supportsImages as');
-      expect(source).not.toContain('BUILTIN_AGENT_CAPABILITIES');
-    }
-  });
-
-  test('does not use provider terminology for agent runtime base classes', () => {
-    for (const file of walk('server/agents')) {
-      if (file.includes('__tests__')) continue;
-      const source = readFileSync(file, 'utf8');
-      expect(source).not.toContain('AbsProvider');
-    }
-  });
-
-  test('chat store keeps legacy provider fields inside one-time persistence migration', () => {
-    const source = readFileSync('server/chats/store.ts', 'utf8');
-    expect(source).toContain('rawEntry.agentSessionId');
-    expect(source).toContain('migratePersistedChatEntry');
-    expect(source).toContain('LEGACY_AGENT_SESSION_ID_FIELD');
-    expect(source).not.toContain('providerSessionId:');
-    expect(source).not.toContain('provider:');
-    expect(source).not.toMatch(/rawEntry\.provider(?:SessionId)?/);
-    expect(source).not.toContain('...(rawEntry as Record<string, unknown>)');
-  });
-
-  test('keeps the public agent contract faceted without extra driver interfaces', () => {
-    const source = readFileSync('server/agents/types.ts', 'utf8');
-    expect(source).toContain('export interface AgentRuntime');
-    expect(source).toContain('updateSessionSettings?');
-    expect(source).toContain('export interface AgentTranscriptSource');
-    expect(source).toContain('export interface AgentAuth');
-    expect(source).toContain('export interface AgentCapabilities');
-    expect(source).not.toMatch(/Agent(?:RuntimeModeControls|AuthDriver|CapabilityDriver)/);
-    expect(source).not.toContain('setPermissionMode?');
-    expect(source).not.toContain('setThinkingMode?');
-    expect(source).not.toContain('setClaudeThinkingMode?');
-    expect(source).not.toContain('setAmpAgentMode?');
+  test('discovers build contributions from package metadata', () => {
+    const source = readFileSync('scripts/build-exe.js', 'utf8');
+    expect(source).toContain('collectAgentBuildContributions');
+    expect(source).not.toContain('server/agents/pi');
+    expect(source).not.toContain('server/chats/search/worker');
   });
 });

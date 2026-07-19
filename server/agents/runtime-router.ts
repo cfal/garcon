@@ -1,70 +1,41 @@
-import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
-import { getMaxSessions } from '../config.js';
+import crypto from 'node:crypto';
+import type {
+  AgentExecutionContext,
+  AgentOperationIdentity,
+} from '@garcon/server-agent-interface';
+import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
+import type { ChatMessage } from '@garcon/common/chat-types';
+import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
+import { normalizePermissionMode, normalizeThinkingMode } from '../../common/chat-modes.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
-import type { AgentCommandImage } from '../../common/ws-requests.js';
-import { DEFAULT_AGENT_ID } from '../../common/agents.js';
-import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
-import type { SlashCommand } from '../../common/slash-commands.js';
-import type {
-  AmpAgentMode,
-  ClaudeThinkingMode,
-  PermissionMode,
-  ThinkingMode,
-} from '../../common/chat-modes.js';
-import { normalizeThinkingModeForAgent } from '../../common/chat-modes.js';
+import { getMaxSessions } from '../config.js';
+import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
+import { createLogger } from '../lib/log.js';
+import type { AgentDirectory } from './directory.js';
+import type { AgentEventBus } from './event-bus.js';
 import type {
   AgentChatEntry,
-  AgentExecutionCommandType,
   AgentExecutionAdmission,
+  AgentExecutionCommandType,
   PrepareProjectPathUpdateRequest,
-  ResumeTurnRequest,
   RunAgentTurnOptions,
-  StartSessionRequest,
   StartedAgentSession,
 } from './session-types.js';
 import { assertExecutionAdmissionOpen } from './session-types.js';
-import type { AgentDirectory } from './directory.js';
-import type { AgentEventBus } from './event-bus.js';
-import { createLogger } from '../lib/log.js';
-import { parseCodexGoalCommand, type CodexGoalCommand } from './codex/goal-command.js';
-import {
-  endpointRuntimeConfig,
-  mergeRuntimeConfig,
-  requireAgentChatEntry,
-  selectionRequestFields,
-} from './execution-planning.js';
+import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
+import { toAgentChatReference } from './integration-chat-reference.js';
 
 const logger = createLogger('agents:runtime-router');
 
-interface PreparedAgentCommand {
-  command: string;
-  codexGoalCommand?: CodexGoalCommand;
-}
-
-function prepareAgentCommand(agentId: string, command: string): PreparedAgentCommand {
-  if (agentId !== 'codex') return { command };
-  const parsed = parseCodexGoalCommand(command);
-  if (!parsed) return { command };
-  if (hasGoalObjective(parsed)) return { command: parsed.objective, codexGoalCommand: parsed };
-  return { command, codexGoalCommand: parsed };
-}
-
-function hasGoalObjective(command: CodexGoalCommand): command is Extract<CodexGoalCommand, { objective: string }> {
-  return 'objective' in command && typeof command.objective === 'string';
-}
-
-function withResolvedGoalObjective(
-  command: CodexGoalCommand | undefined,
-  resolvedCommand: string,
-): CodexGoalCommand | undefined {
-  return command && hasGoalObjective(command) ? { ...command, objective: resolvedCommand } : command;
-}
-
-function assertCanStartCodexGoalCommand(command: CodexGoalCommand | undefined): void {
-  if (!command || command.kind === 'set') return;
-  throw new Error('Start a Codex session with /goal <objective> before using goal controls.');
+export interface AgentRuntimeRouterOptions {
+  registry: IChatRegistry;
+  directory: AgentDirectory;
+  endpointResolver: ApiProviderEndpointResolver;
+  events: AgentEventBus;
+  getCarryOverRevision(chatId: string): string;
+  loadCarryOver(chatId: string, entry: AgentChatEntry): readonly ChatMessage[];
 }
 
 export class AgentRuntimeRouter {
@@ -72,247 +43,122 @@ export class AgentRuntimeRouter {
   readonly #directory: AgentDirectory;
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
+  readonly #getCarryOverRevision: (chatId: string) => string;
+  readonly #loadCarryOver: (chatId: string, entry: AgentChatEntry) => readonly ChatMessage[];
 
-  constructor(args: {
-    registry: IChatRegistry;
-    directory: AgentDirectory;
-    endpointResolver: ApiProviderEndpointResolver;
-    events: AgentEventBus;
-  }) {
-    this.#registry = args.registry;
-    this.#directory = args.directory;
-    this.#endpointResolver = args.endpointResolver;
-    this.#events = args.events;
+  constructor(options: AgentRuntimeRouterOptions) {
+    this.#registry = options.registry;
+    this.#directory = options.directory;
+    this.#endpointResolver = options.endpointResolver;
+    this.#events = options.events;
+    this.#getCarryOverRevision = options.getCarryOverRevision;
+    this.#loadCarryOver = options.loadCarryOver;
   }
 
-  #getEndpointRuntimeConfig(agentId: string, selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>) {
-    return endpointRuntimeConfig(
-      this.#directory.require(agentId),
-      this.#endpointResolver,
-      selection,
-    );
-  }
-
-  async startSession(chatId: string, command: string, opts: {
-    images?: AgentCommandImage[];
+  async startSession(chatId: string, prompt: string, opts: {
+    images?: RunAgentTurnOptions['images'];
     model?: string;
-    permissionMode?: PermissionMode;
-    thinkingMode?: ThinkingMode;
-    claudeThinkingMode?: ClaudeThinkingMode;
-    ampAgentMode?: AmpAgentMode;
+    permissionMode?: RunAgentTurnOptions['permissionMode'];
+    thinkingMode?: RunAgentTurnOptions['thinkingMode'];
+    agentSettings?: AgentSettingsEnvelope;
     projectPath?: string;
     clientRequestId?: string;
     clientMessageId?: string;
     turnId?: string;
     commandType?: AgentExecutionCommandType;
     executionAdmission?: AgentExecutionAdmission;
-    codexGoalCommand?: CodexGoalCommand;
-    codexSeedContext?: string;
-    // Skips @-mention resolution when the command is already resolved (e.g. a
-    // seeded cross-agent continuation, whose historical text must stay opaque).
-    skipFileMentions?: boolean;
+    carryOver?: readonly ChatMessage[];
   } = {}): Promise<void> {
     assertExecutionAdmissionOpen(opts);
-    const rawEntry = this.#registry.getChat(chatId);
-
-    const maxSessions = getMaxSessions();
-    if (maxSessions > 0) {
-      const running = this.getRunningSessionCount();
-      if (running >= maxSessions) {
-        throw new Error(`Session limit reached (${maxSessions}). Wait for existing sessions to complete or increase GARCON_MAX_SESSIONS.`);
-      }
+    if (getMaxSessions() > 0 && this.getRunningSessionCount() >= getMaxSessions()) {
+      throw new Error(
+        `Session limit reached (${getMaxSessions()}). Wait for existing sessions to complete or increase GARCON_MAX_SESSIONS.`,
+      );
     }
-
-    const entry = requireAgentChatEntry(chatId, rawEntry);
+    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    const integration = this.#directory.require(entry.agentId);
     const selection = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
-      model: entry.model,
+      model: opts.model ?? entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
-
-    const agent = this.#directory.require(entry.agentId);
-    const runtimeConfig = this.#getEndpointRuntimeConfig(entry.agentId, selection);
-    const prepared = opts.codexGoalCommand
-      ? { command, codexGoalCommand: opts.codexGoalCommand }
-      : prepareAgentCommand(entry.agentId, command);
-    assertCanStartCodexGoalCommand(prepared.codexGoalCommand);
-    const resolvedCommand = opts.skipFileMentions
-      ? prepared.command
-      : await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
+    await this.#validateEndpoint(integration, selection);
+    const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
     assertExecutionAdmissionOpen(opts);
-    let started: StartedAgentSession | null = null;
-    let registryBound = false;
-    let runtimeAbortable = false;
-    let abortabilityPublished = false;
-    const commandType = opts.commandType ?? 'chat-start';
-    const publishAbortability = () => {
-      if (
-        abortabilityPublished
-        || !runtimeAbortable
-        || !registryBound
-        || !started
-        || !agent.runtime.isRunning(started.agentSessionId)
-      ) {
-        return;
-      }
-      abortabilityPublished = true;
-      this.#events.markTurnAbortable(chatId, {
-        clientRequestId: opts.clientRequestId,
-        commandType,
-        turnId: opts.turnId,
-      });
-    };
-    const request: StartSessionRequest = {
-      chatId,
-      command: resolvedCommand,
-      codexGoalCommand: opts.codexGoalCommand
-        ?? withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
-      codexSeedContext: opts.codexSeedContext,
-      projectPath: entry.projectPath,
-      model: selection.model,
-      permissionMode: entry.permissionMode,
-      thinkingMode: normalizeThinkingModeForAgent(entry.agentId, entry.thinkingMode),
-      claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
-      clientRequestId: opts.clientRequestId,
-      clientMessageId: opts.clientMessageId,
-      turnId: opts.turnId,
-      executionAdmission: opts.executionAdmission,
-      images: opts.images,
-      onAbortable: () => {
-        runtimeAbortable = true;
-        publishAbortability();
-      },
-      ...runtimeConfig,
-      ...selectionRequestFields(selection),
-    };
+    const operation = operationIdentity(opts, opts.commandType ?? 'chat-start');
+    const request = {
+      ...this.#executionContext(chatId, entry, selection, operation, opts),
+      prompt: resolvedPrompt,
+      attachments: attachments(opts.images),
+      carryOver: opts.carryOver ?? [],
+    } satisfies Parameters<typeof integration.execution.start>[0];
 
-    this.#events.trackTurn(chatId, { ...opts, commandType });
+    this.#events.trackTurn(chatId, operationMetadata(operation));
+    let started: Awaited<ReturnType<typeof integration.execution.start>> | null = null;
     try {
-      started = await agent.runtime.startSession(request);
+      started = await integration.execution.start(request);
       assertExecutionAdmissionOpen(opts);
       const updated = await this.#registry.updateChat(chatId, {
         agentSessionId: started.agentSessionId,
-        nativePath: started.nativePath,
+        nativeSession: started.nativeSession,
         apiProviderId: selection.apiProviderId,
         modelEndpointId: selection.endpointId,
         modelProtocol: selection.protocol,
       }, { flush: true });
-      if (!updated) {
-        throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
-      }
-      registryBound = true;
-      publishAbortability();
+      if (!updated) throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     } catch (error) {
       this.#events.clearTurn(chatId);
       if (started) {
-        try {
-          await agent.runtime.abort(started.agentSessionId);
-        } catch (abortError) {
+        await integration.execution.abort(started.agentSessionId).catch((abortError) => {
           logger.warn(
             `agents: failed to abort ${entry.agentId} session after registry bind failure:`,
             abortError instanceof Error ? abortError.message : String(abortError),
           );
-        }
+        });
       }
       throw error;
     }
   }
 
-  async runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
+  async runAgentTurn(chatId: string, prompt: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     assertExecutionAdmissionOpen(opts);
-    const rawEntry = this.#registry.getChat(chatId);
-    if (!rawEntry) {
-      throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
+    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    if (!entry.agentSessionId) {
+      await this.startSession(chatId, prompt, {
+        ...opts,
+        commandType: opts.commandType ?? 'agent-run',
+        carryOver: this.#loadCarryOver(chatId, entry),
+      });
+      return;
     }
 
-    const { agentId, agentSessionId } = rawEntry;
-    if (!agentSessionId) {
-      // A cross-agent switch leaves no native session but stages seed text so the
-      // first turn resumes the prior conversation under the new agent.
-      if (rawEntry.carryOverContext) {
-        const prepared = prepareAgentCommand(agentId, command);
-        // Resolve @-mentions on the user's message only; the seed is historical
-        // transcript text and must stay opaque so it cannot re-inject file
-        // contents into the fresh session.
-        const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, rawEntry.projectPath);
-        const codexGoalCommand = withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand);
-        const injectCodexSeed = agentId === 'codex' && Boolean(codexGoalCommand);
-        const seededCommand = injectCodexSeed
-          ? resolvedCommand
-          : `${rawEntry.carryOverContext}\n\n${resolvedCommand}`;
-        await this.startSession(chatId, seededCommand, {
-          images: opts.images,
-          model: opts.model,
-          permissionMode: opts.permissionMode,
-          thinkingMode: opts.thinkingMode,
-          claudeThinkingMode: opts.claudeThinkingMode,
-          ampAgentMode: opts.ampAgentMode,
-          clientRequestId: opts.clientRequestId,
-          clientMessageId: opts.clientMessageId,
-          turnId: opts.turnId,
-          commandType: opts.commandType,
-          executionAdmission: opts.executionAdmission,
-          codexGoalCommand,
-          codexSeedContext: injectCodexSeed ? rawEntry.carryOverContext : undefined,
-          skipFileMentions: true,
-        });
-        await this.#registry.updateChat(chatId, { carryOverContext: null }, { flush: true });
-        return;
-      }
-      throw new Error(`Session missing agent session ID: ${chatId}`);
-    }
-
-    const entry = requireAgentChatEntry(chatId, rawEntry);
-    const effectiveModel = opts.model ?? entry.model;
-
-    const previousSelection = this.#endpointResolver.resolveSelection({
-      agentId,
+    const previous = this.#endpointResolver.resolveSelection({
+      agentId: entry.agentId,
       model: entry.model,
-      apiProviderId: rawEntry.apiProviderId,
-      modelEndpointId: rawEntry.modelEndpointId,
+      apiProviderId: entry.apiProviderId,
+      modelEndpointId: entry.modelEndpointId,
     });
-
-    const nextApiProviderId = opts.apiProviderId !== undefined ? opts.apiProviderId : rawEntry.apiProviderId;
-    const nextEndpointId = opts.modelEndpointId !== undefined ? opts.modelEndpointId : rawEntry.modelEndpointId;
     const selection = this.#endpointResolver.resolveSelection({
-      agentId,
-      model: effectiveModel,
-      apiProviderId: nextApiProviderId,
-      modelEndpointId: nextEndpointId,
+      agentId: entry.agentId,
+      model: opts.model ?? entry.model,
+      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
+      modelEndpointId: opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
-
-    assertSameApiProviderBoundary(previousSelection, selection);
-
-    const agent = this.#directory.require(agentId);
-    const runtimeConfig = this.#getEndpointRuntimeConfig(agentId, selection);
-    const prepared = prepareAgentCommand(agentId, command);
-    const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
+    assertSameApiProviderBoundary(previous, selection);
+    const integration = this.#directory.require(entry.agentId);
+    await this.#validateEndpoint(integration, selection);
+    const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
     assertExecutionAdmissionOpen(opts);
-    this.#events.trackTurn(chatId, opts);
+    const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
+    this.#events.trackTurn(chatId, operationMetadata(operation));
     try {
-      await agent.runtime.runTurn({
-        chatId,
-        agentSessionId,
-        command: resolvedCommand,
-        codexGoalCommand: withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
-        projectPath: entry.projectPath,
-        model: selection.model,
-        permissionMode: opts.permissionMode ?? entry.permissionMode,
-        thinkingMode: normalizeThinkingModeForAgent(agentId, opts.thinkingMode ?? entry.thinkingMode),
-        claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
-        clientRequestId: opts.clientRequestId,
-        clientMessageId: opts.clientMessageId,
-        turnId: opts.turnId,
-        executionAdmission: opts.executionAdmission,
-        images: opts.images,
-        nativePath: rawEntry.nativePath,
-        onAbortable: () => this.#events.markTurnAbortable(chatId, {
-          clientRequestId: opts.clientRequestId,
-          turnId: opts.turnId,
-        }),
-        ...runtimeConfig,
-        ...selectionRequestFields(selection),
+      await integration.execution.resume({
+        ...this.#executionContext(chatId, entry, selection, operation, opts),
+        agentSessionId: entry.agentSessionId,
+        nativeSession: entry.nativeSession ?? null,
+        prompt: resolvedPrompt,
+        attachments: attachments(opts.images),
       });
     } catch (error) {
       this.#events.clearTurn(chatId);
@@ -322,37 +168,33 @@ export class AgentRuntimeRouter {
 
   async submitActiveInput(
     chatId: string,
-    command: string,
+    prompt: string,
     opts: RunAgentTurnOptions,
     beforeDelivery: () => Promise<void>,
   ): Promise<boolean> {
-    const rawEntry = this.#registry.getChat(chatId);
-    if (!rawEntry?.agentSessionId) return false;
-    const entry = requireAgentChatEntry(chatId, rawEntry);
-    const agent = this.#directory.require(entry.agentId);
-    if (!agent.runtime.submitActiveInput) return false;
-    const prepared = prepareAgentCommand(entry.agentId, command);
-    const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
-    return agent.runtime.submitActiveInput({
-      chatId,
-      agentSessionId: rawEntry.agentSessionId,
-      command: resolvedCommand,
-      codexGoalCommand: withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
-      projectPath: entry.projectPath,
+    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    if (!entry.agentSessionId) return false;
+    const integration = this.#directory.require(entry.agentId);
+    if (!integration.execution.submitActiveInput) return false;
+    const selection = this.#endpointResolver.resolveSelection({
+      agentId: entry.agentId,
       model: opts.model ?? entry.model,
-      permissionMode: opts.permissionMode ?? entry.permissionMode,
-      thinkingMode: normalizeThinkingModeForAgent(entry.agentId, opts.thinkingMode ?? entry.thinkingMode),
-      claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
-      clientRequestId: opts.clientRequestId,
-      clientMessageId: opts.clientMessageId,
-      turnId: opts.turnId,
-      images: opts.images,
-      nativePath: rawEntry.nativePath,
-    }, beforeDelivery);
+      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
+      modelEndpointId: opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
+    });
+    await this.#validateEndpoint(integration, selection);
+    const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
+    this.#events.trackTurn(chatId, operationMetadata(operation));
+    return integration.execution.submitActiveInput({
+      ...this.#executionContext(chatId, entry, selection, operation, opts),
+      agentSessionId: entry.agentSessionId,
+      nativeSession: entry.nativeSession ?? null,
+      prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
+      attachments: attachments(opts.images),
+      beforeDelivery,
+    });
   }
 
-  // Triggers context compaction for a chat. Agents with a dedicated mechanism
-  // implement runtime.compact(); the rest fall back to running a `/compact` turn.
   async compactSession(chatId: string, opts: {
     instructions?: string;
     clientRequestId?: string;
@@ -360,242 +202,300 @@ export class AgentRuntimeRouter {
     executionAdmission?: AgentExecutionAdmission;
   } = {}): Promise<void> {
     assertExecutionAdmissionOpen(opts);
-    const rawEntry = this.#registry.getChat(chatId);
-    if (!rawEntry) {
-      throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
-    }
-
-    const { agentId, agentSessionId } = rawEntry;
-    if (!agentSessionId) {
-      throw new Error(`Session missing agent session ID: ${chatId}`);
-    }
-
-    const entry = requireAgentChatEntry(chatId, rawEntry);
+    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);
+    const integration = this.#directory.require(entry.agentId);
     const selection = this.#endpointResolver.resolveSelection({
-      agentId,
+      agentId: entry.agentId,
       model: entry.model,
-      apiProviderId: rawEntry.apiProviderId,
-      modelEndpointId: rawEntry.modelEndpointId,
+      apiProviderId: entry.apiProviderId,
+      modelEndpointId: entry.modelEndpointId,
     });
-
-    const agent = this.#directory.require(agentId);
-    const runtimeConfig = this.#getEndpointRuntimeConfig(agentId, selection);
-    const instructions = opts.instructions?.trim();
-    const request: ResumeTurnRequest = {
-      chatId,
-      agentSessionId,
-      command: instructions ? `/compact ${instructions}` : '/compact',
-      projectPath: entry.projectPath,
-      model: selection.model,
-      permissionMode: entry.permissionMode,
-      thinkingMode: normalizeThinkingModeForAgent(agentId, entry.thinkingMode),
-      claudeThinkingMode: entry.claudeThinkingMode,
-      clientRequestId: opts.clientRequestId,
-      turnId: opts.turnId,
-      executionAdmission: opts.executionAdmission,
-      nativePath: rawEntry.nativePath,
-      onAbortable: () => this.#events.markTurnAbortable(chatId, {
-        clientRequestId: opts.clientRequestId,
-        turnId: opts.turnId,
-      }),
-      ...runtimeConfig,
-      ...selectionRequestFields(selection),
-    };
-
-    this.#events.trackTurn(chatId, {
-      clientRequestId: opts.clientRequestId,
-      commandType: 'agent-compact',
-      turnId: opts.turnId,
-    });
-    logger.info(`compact: dispatching chat=${chatId} agent=${agentId} native=${typeof agent.runtime.compact === 'function' ? 'compact()' : 'runTurn(/compact)'}`);
+    await this.#validateEndpoint(integration, selection);
+    const operation = operationIdentity(opts, 'agent-compact');
+    const prompt = opts.instructions?.trim()
+      ? `/compact ${opts.instructions.trim()}`
+      : '/compact';
+    this.#events.trackTurn(chatId, operationMetadata(operation));
     try {
-      if (agent.runtime.compact) {
-        await agent.runtime.compact(request);
-      } else {
-        await agent.runtime.runTurn(request);
-      }
+      const request = {
+        ...this.#executionContext(chatId, entry, selection, operation, opts),
+        agentSessionId: entry.agentSessionId,
+        nativeSession: entry.nativeSession ?? null,
+        prompt,
+        attachments: [],
+      };
+      if (integration.execution.compact) await integration.execution.compact(request);
+      else await integration.execution.resume(request);
     } catch (error) {
       this.#events.clearTurn(chatId);
       throw error;
     }
   }
 
-  async prepareProjectPathUpdate(
-    agentId: string,
-    request: PrepareProjectPathUpdateRequest,
-  ): Promise<void> {
-    const agent = this.#directory.get(agentId);
-    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
-    await agent.runtime.prepareProjectPathUpdate?.(request);
+  async prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void> {
+    const integration = this.#directory.require(agentId);
+    if (!integration.execution.prepareProjectPathUpdate) return;
+    const entry = this.#registry.getChat(request.chatId);
+    if (!entry) throw new Error(`Session not found: ${request.chatId}`);
+    await integration.execution.prepareProjectPathUpdate({
+      chat: toAgentChatReference(
+        integration,
+        request.chatId,
+        entry,
+        this.#getCarryOverRevision(request.chatId),
+      ),
+      nextProjectPath: request.nextProjectPath,
+      signal: new AbortController().signal,
+    });
   }
 
   async abortSession(chatId: string): Promise<boolean> {
     const entry = this.#registry.getChat(chatId);
-    const agentSessionId = entry?.agentSessionId;
-    if (!agentSessionId) return false;
-    const agent = this.#directory.get(entry.agentId);
-    if (!agent) return false;
-    return agent.runtime.abort(agentSessionId);
+    if (!entry?.agentSessionId) return false;
+    return this.#directory.require(entry.agentId).execution.abort(entry.agentSessionId);
   }
 
   isChatRunning(chatId: string): boolean {
     const entry = this.#registry.getChat(chatId);
-    if (!entry) return false;
-    return this.isAgentSessionRunning(entry.agentId, entry.agentSessionId);
+    return Boolean(entry && this.isAgentSessionRunning(entry.agentId, entry.agentSessionId));
   }
 
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
-    if (!agentSessionId) return false;
-    const agent = this.#directory.get(agentId);
-    if (!agent) return false;
-    return agent.runtime.isRunning(agentSessionId);
+    return Boolean(agentSessionId && this.#directory.get(agentId)?.execution.isRunning(agentSessionId));
   }
 
-  getRunningSessions(): Record<string, Array<{ id: string;[key: string]: unknown }>> {
-    const mapToChatId = (arr: Array<{ id: string;[key: string]: unknown }>) =>
-      arr
-        .map((e) => (typeof e === 'string' ? { id: e } : e))
-        .map((e) => {
-          const match = e?.id ? this.#registry.getChatByAgentSessionId(e.id) : null;
-          const mapped = match ? match[0] : null;
-          return mapped ? { ...e, id: mapped } : null;
-        })
-        .filter((e): e is NonNullable<typeof e> => Boolean(e));
-
-    const result: Record<string, Array<{ id: string;[key: string]: unknown }>> = {};
-    for (const agent of this.#directory.list()) {
-      result[agent.id] = mapToChatId(agent.runtime.getRunningSessions());
+  getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>> {
+    const result: Record<string, Array<{ id: string; [key: string]: unknown }>> = {};
+    for (const integration of this.#directory.list()) {
+      result[integration.descriptor.id] = integration.execution.runningSessions().flatMap((session) => {
+        const match = this.#registry.getChatByAgentSessionId(session.agentSessionId);
+        return match ? [{
+          id: match[0],
+          ...(session.status ? { status: session.status } : {}),
+          ...(session.startedAt ? { startedAt: session.startedAt } : {}),
+        }] : [];
+      });
     }
     return result;
   }
 
   getRunningChatIdsSnapshot(): string[] {
     const chatIds = new Set<string>();
-    let unmappedSessionCount = 0;
-    let oldestUnmappedStartedAt: number | null = null;
-
-    for (const agent of this.#directory.list()) {
-      const sessions = agent.runtime.getRunningSessions();
+    const unmapped: string[] = [];
+    for (const integration of this.#directory.list()) {
+      const sessions = integration.execution.runningSessions();
       if (!Array.isArray(sessions)) {
-        throw new Error(`Running sessions for ${agent.id} are not an array`);
+        throw new Error(`Running sessions for ${integration.descriptor.id} are not an array`);
       }
-
       for (const session of sessions) {
-        const agentSessionId = session && typeof session.id === 'string'
-          ? session.id.trim()
-          : '';
-        if (!agentSessionId) {
-          throw new Error(`Running session for ${agent.id} has no ID`);
-        }
-
-        const match = this.#registry.getChatByAgentSessionId(agentSessionId);
-        if (!match) {
-          unmappedSessionCount += 1;
-          const startedAt = typeof session.startedAt === 'string'
-            ? Date.parse(session.startedAt)
-            : Number.NaN;
-          if (
-            Number.isFinite(startedAt)
-            && (oldestUnmappedStartedAt === null || startedAt < oldestUnmappedStartedAt)
-          ) {
-            oldestUnmappedStartedAt = startedAt;
-          }
-          continue;
-        }
-        chatIds.add(match[0]);
+        const id = session?.agentSessionId?.trim();
+        if (!id) throw new Error(`Running session for ${integration.descriptor.id} has no ID`);
+        const match = this.#registry.getChatByAgentSessionId(id);
+        if (match) chatIds.add(match[0]);
+        else unmapped.push(id);
       }
     }
-
-    if (unmappedSessionCount > 0) {
-      const oldestAge = oldestUnmappedStartedAt === null
-        ? 'unknown'
-        : `${Math.max(0, Math.floor((Date.now() - oldestUnmappedStartedAt) / 1000))}s`;
-      throw new Error(
-        `Running chat snapshot has ${unmappedSessionCount} unmapped session(s) (oldest age ${oldestAge})`,
-      );
+    if (unmapped.length > 0) {
+      throw new Error(`Running chat snapshot has ${unmapped.length} unmapped session(s)`);
     }
-
     return [...chatIds].sort();
   }
 
   getRunningSessionCount(): number {
-    let total = 0;
-    for (const agent of this.#directory.list()) {
-      total += agent.runtime.getRunningSessions().length;
-    }
-    return total;
+    return this.#directory.list().reduce(
+      (total, integration) => total + integration.execution.runningSessions().length,
+      0,
+    );
   }
 
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
-    if (!chatId || !permissionRequestId) return;
-
-    const chat = this.#registry.getChat(chatId);
-    if (!chat) {
-      logger.warn('agents: resolvePermission, unknown chatId:', chatId);
-      return;
-    }
-
-    const agent = this.#directory.get(chat.agentId);
-    if (agent?.runtime.resolvePermission) {
-      Promise.resolve(agent.runtime.resolvePermission(permissionRequestId, decision)).catch((err: Error) => {
-        logger.warn(`agents: ${chat.agentId} permission reply failed:`, err.message);
-      });
-      return;
-    }
-
-    logger.warn('agents: no permission handler for agent:', chat.agentId);
+    const entry = this.#registry.getChat(chatId);
+    const respond = entry ? this.#directory.get(entry.agentId)?.execution.respondToPermission : null;
+    if (!respond || !permissionRequestId) return;
+    Promise.resolve(respond(permissionRequestId, decision)).catch((error) => {
+      logger.warn('agents: permission reply failed:', error instanceof Error ? error.message : String(error));
+    });
   }
 
   async forkAgentSession(args: {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
+    messageSequence?: number;
   }): Promise<StartedAgentSession | null> {
-    const agent = this.#directory.get(args.sourceSession.agentId);
-    if (!agent?.forkSession) return null;
     const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
+    const integration = this.#directory.require(source.agentId);
+    if (!integration.forking) return null;
     const selection = this.#endpointResolver.resolveSelection({
       agentId: source.agentId,
       model: source.model,
       apiProviderId: source.apiProviderId,
       modelEndpointId: source.modelEndpointId,
     });
-    const runtimeConfig = endpointRuntimeConfig(agent, this.#endpointResolver, selection);
-    return agent.forkSession({
-      ...args,
-      sourceSession: {
-        ...source,
-        model: selection.model,
-        ...selectionRequestFields(selection),
-      },
-      ...runtimeConfig,
+    await this.#validateEndpoint(integration, selection);
+    const operation = operationIdentity({}, 'fork-run');
+    const sourceReference = toAgentChatReference(
+      integration,
+      args.sourceChatId,
+      source,
+      this.#getCarryOverRevision(args.sourceChatId),
+    );
+    const sourceSnapshot = args.messageSequence
+      ? await integration.transcript.load({
+          chat: sourceReference,
+          signal: new AbortController().signal,
+        })
+      : null;
+    if (args.messageSequence) {
+      const messageCount = this.#loadCarryOver(args.sourceChatId, source).length
+        + (sourceSnapshot?.messages.length ?? 0);
+      if (args.messageSequence > messageCount) {
+        throw new Error(`Message not found for seq ${args.messageSequence}`);
+      }
+    }
+    const result = await integration.forking.fork({
+      ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
+      source: sourceReference,
+      point: args.messageSequence ? {
+        messageSequence: args.messageSequence,
+        sourceRevision: {
+          native: sourceSnapshot!.revision,
+          carryOver: sourceReference.carryOverRevision,
+        },
+      } : null,
+    });
+    return {
+      agentSessionId: result.agentSessionId,
+      nativeSession: result.nativeSession,
+    };
+  }
+
+  async runSingleQuery(
+    prompt: string,
+    options: { agentId: string; [key: string]: unknown },
+  ): Promise<string> {
+    const { agentId } = options;
+    const integration = this.#directory.require(agentId);
+    if (!integration.singleQuery) throw new Error(`Single query unsupported for agent: ${agentId}`);
+    const model = typeof options.model === 'string' ? options.model : '';
+    const selection = model ? this.#endpointResolver.resolveSelection({
+      agentId,
+      model,
+      apiProviderId: typeof options.apiProviderId === 'string' ? options.apiProviderId : null,
+      modelEndpointId: typeof options.modelEndpointId === 'string' ? options.modelEndpointId : null,
+    }) : null;
+    if (selection) await this.#validateEndpoint(integration, selection);
+    return integration.singleQuery.run({
+      prompt,
+      projectPath: typeof options.projectPath === 'string' ? options.projectPath : process.cwd(),
+      model: selection?.model ?? model,
+      settings: integration.settings.parse(
+        isAgentSettingsEnvelope(options.agentSettings)
+          ? options.agentSettings
+          : integration.settings.defaults(),
+      ),
+      endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
+      signal: new AbortController().signal,
     });
   }
 
-  async runSingleQuery(prompt: string, options: { agentId?: string;[key: string]: unknown } = {}): Promise<string> {
-    const { agentId = DEFAULT_AGENT_ID, ...rest } = options;
-    const agent = this.#directory.get(agentId);
-    if (agent?.runSingleQuery) {
-      const model = typeof rest.model === 'string' ? rest.model : '';
-      if (model) {
-        const selection = this.#endpointResolver.resolveSelection({
-          agentId,
-          model,
-          apiProviderId: typeof rest.apiProviderId === 'string' ? rest.apiProviderId : null,
-          modelEndpointId: typeof rest.modelEndpointId === 'string' ? rest.modelEndpointId : null,
-        });
-        rest.model = selection.model;
-        mergeRuntimeConfig(rest, endpointRuntimeConfig(agent, this.#endpointResolver, selection));
-        Object.assign(rest, selectionRequestFields(selection));
-      }
-      return agent.runSingleQuery(prompt, rest);
-    }
-    throw new Error(`Single query unsupported for agent: ${agentId}`);
+  async discoverSlashCommands(agentId: string, projectPath: string) {
+    const commands = this.#directory.get(agentId)?.commands;
+    return commands ? [...await commands.discover(projectPath, new AbortController().signal)] : [];
   }
 
-  async discoverSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
-    const agent = this.#directory.get(agentId);
-    if (!agent?.discoverSlashCommands) return [];
-    return agent.discoverSlashCommands(projectPath);
+  async #validateEndpoint(
+    integration: ReturnType<AgentDirectory['require']>,
+    selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
+  ): Promise<void> {
+    const endpoint = toAgentEndpointSelection(this.#endpointResolver, selection);
+    if (!endpoint) return;
+    if (!integration.endpoints) {
+      throw new Error(`Agent integration ${integration.descriptor.id} does not accept API provider endpoints`);
+    }
+    await integration.endpoints.validate(endpoint);
   }
+
+  #executionContext(
+    chatId: string,
+    entry: ReturnType<typeof requireAgentChatEntry>,
+    selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
+    operation: AgentOperationIdentity,
+    opts: {
+      permissionMode?: RunAgentTurnOptions['permissionMode'];
+      thinkingMode?: RunAgentTurnOptions['thinkingMode'];
+      agentSettings?: RunAgentTurnOptions['agentSettings'];
+      executionAdmission?: AgentExecutionAdmission;
+    },
+  ): AgentExecutionContext {
+    const integration = this.#directory.require(entry.agentId);
+    const permissionMode = supportedValue(
+      integration.descriptor.supportedPermissionModes,
+      normalizePermissionMode(opts.permissionMode ?? entry.permissionMode),
+      'default',
+    );
+    const thinkingMode = supportedValue(
+      integration.descriptor.supportedThinkingModes,
+      normalizeThinkingMode(opts.thinkingMode ?? entry.thinkingMode),
+      'none',
+    );
+    const settings = integration.settings.parse(
+      opts.agentSettings
+        ?? entry.agentSettingsById?.[entry.agentId]
+        ?? integration.settings.defaults(),
+    );
+    return {
+      chatId,
+      projectPath: entry.projectPath,
+      model: selection.model,
+      permissionMode,
+      thinkingMode,
+      settings,
+      endpoint: toAgentEndpointSelection(this.#endpointResolver, selection),
+      operation,
+      admission: {
+        signal: opts.executionAdmission?.signal ?? new AbortController().signal,
+        markStarted: () => opts.executionAdmission?.markStarted(),
+        markAbortable: () => this.#events.markTurnAbortable(chatId, operationMetadata(operation)),
+      },
+    };
+  }
+}
+
+function operationIdentity(
+  value: { clientRequestId?: string; clientMessageId?: string; turnId?: string },
+  commandType: AgentExecutionCommandType,
+): AgentOperationIdentity {
+  return {
+    commandType,
+    clientRequestId: value.clientRequestId ?? null,
+    clientMessageId: value.clientMessageId ?? null,
+    turnId: value.turnId ?? crypto.randomUUID(),
+  };
+}
+
+function operationMetadata(operation: AgentOperationIdentity) {
+  return {
+    commandType: operation.commandType,
+    ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
+    turnId: operation.turnId,
+  };
+}
+
+function attachments(images: RunAgentTurnOptions['images'] = []) {
+  return images.map((image) => ({
+    kind: 'image' as const,
+    data: image.data,
+    name: image.name ?? null,
+    mimeType: image.mimeType ?? 'application/octet-stream',
+  }));
+}
+
+function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {
+  return values.includes(value) ? value : fallback;
+}
+
+function isAgentSettingsEnvelope(value: unknown): value is AgentSettingsEnvelope {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

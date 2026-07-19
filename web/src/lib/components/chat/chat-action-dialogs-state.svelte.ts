@@ -25,7 +25,6 @@ export interface ChatDetailsDialog {
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	agentSessionId: string | null;
-	nativePath: string | null;
 	isLoading: boolean;
 	error: string | null;
 }
@@ -81,7 +80,6 @@ export class ChatActionDialogsState {
 			createdAt: null,
 			lastActivityAt: null,
 			agentSessionId: null,
-			nativePath: null,
 			isLoading: true,
 			error: null,
 		};
@@ -94,7 +92,6 @@ export class ChatActionDialogsState {
 			createdAt: string | null;
 			lastActivityAt: string | null;
 			agentSessionId: string | null;
-			nativePath: string | null;
 		},
 	): void {
 		if (!this.chatDetailsDialog || this.chatDetailsDialog.chatId !== chatId) return;

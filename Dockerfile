@@ -6,16 +6,31 @@ FROM ${BUN_IMAGE}:${BUN_TAG} AS build
 
 WORKDIR /app
 
-# Copy root package.json and sub-package manifests for layer caching
-COPY package.json ./
-COPY server/package.json server/bun.lock server/
-COPY web/package.json web/bun.lock web/
+# Copy workspace manifests for layer caching
+COPY package.json bun.lock bunfig.toml ./
+COPY common/package.json common/
+COPY server/package.json server/
+COPY web/package.json web/
+COPY server-agents/interface/package.json server-agents/interface/
+COPY server-agents/common/package.json server-agents/common/
+COPY server-agents/amp/package.json server-agents/amp/
+COPY server-agents/claude/package.json server-agents/claude/
+COPY server-agents/codex/package.json server-agents/codex/
+COPY server-agents/cursor/package.json server-agents/cursor/
+COPY server-agents/direct-anthropic-compatible/package.json server-agents/direct-anthropic-compatible/
+COPY server-agents/direct-openai-compatible/package.json server-agents/direct-openai-compatible/
+COPY server-agents/direct-openai-responses-compatible/package.json server-agents/direct-openai-responses-compatible/
+COPY server-agents/factory/package.json server-agents/factory/
+COPY server-agents/opencode/package.json server-agents/opencode/
+COPY server-agents/pi/package.json server-agents/pi/
 
-RUN bun run install
+RUN bun install --frozen-lockfile
 
 # Copy source
 COPY common/ common/
 COPY server/ server/
+COPY server-agents/ server-agents/
+COPY scripts/ scripts/
 COPY web/ web/
 
 # Build the SvelteKit frontend
@@ -57,14 +72,18 @@ VOLUME ["${HOME}/.opencode"]
 
 WORKDIR /app
 
-# Copy root package.json
-COPY package.json ./
+# Preserve the isolated workspace store and source links.
+COPY --from=build /app/package.json /app/bun.lock /app/bunfig.toml ./
+COPY --from=build /app/node_modules/ node_modules/
 
 # Copy server with its deps
 COPY --from=build /app/server/ server/
 
 # Copy shared common module
 COPY --from=build /app/common/ common/
+
+# Copy server-agent workspace packages targeted by isolated links.
+COPY --from=build /app/server-agents/ server-agents/
 
 # Copy built web assets
 COPY --from=build /app/web/build/ web/build/

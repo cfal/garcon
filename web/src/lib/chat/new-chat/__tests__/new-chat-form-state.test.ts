@@ -48,8 +48,7 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 			global: {
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettingsById: {},
 			},
 			byAgent: {},
 		},
@@ -140,6 +139,22 @@ const mockModelCatalog = {
 		if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
 		return '';
 	}),
+	getDefaultAgentSettings: vi.fn((agentId: string) => ({
+		ownerId: agentId,
+		schemaVersion: 1,
+		values: agentId === 'claude' ? { thinkingMode: 'auto' } : {},
+	})),
+	getAgentSettingsDescriptors: vi.fn(() => []),
+	getPermissionModes: vi.fn((agentId: string) =>
+		agentId === 'claude'
+			? ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan']
+			: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions'],
+	),
+	getThinkingModes: vi.fn((agentId: string) =>
+		agentId === 'codex'
+			? ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+			: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+	),
 	getModels: vi.fn((agentId: string): ModelOption[] => {
 		if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
 		if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
@@ -241,7 +256,7 @@ describe('NewChatFormState', () => {
 		formState = new NewChatFormState(mockModelCatalog as any, mockRemoteSettings as any);
 	});
 
-	it('clears Codex ultra thinking when switching to another agent', () => {
+	it('normalizes thinking when the next integration does not support the selected mode', () => {
 		formState.selectAgent('codex');
 		formState.setThinkingMode('ultra');
 
@@ -250,7 +265,7 @@ describe('NewChatFormState', () => {
 		expect(formState.thinkingMode).toBe('none');
 	});
 
-	it('retains ultra thinking for Codex', () => {
+	it('retains thinking modes supported by the selected integration', () => {
 		formState.selectAgent('codex');
 		formState.setThinkingMode('ultra');
 
@@ -334,7 +349,9 @@ describe('NewChatFormState', () => {
 						codex: {
 							permissionMode: 'acceptEdits',
 							thinkingMode: 'medium',
-							claudeThinkingMode: 'off',
+							agentSettingsById: {
+								codex: { ownerId: 'codex', schemaVersion: 1, values: { effort: 'high' } },
+							},
 						},
 					},
 				},
@@ -348,11 +365,15 @@ describe('NewChatFormState', () => {
 		expect(formState.modelValue).toBe('gpt-5.4');
 		expect(formState.permissionMode).toBe('acceptEdits');
 		expect(formState.thinkingMode).toBe('medium');
-		expect(formState.claudeThinkingMode).toBe('off');
+		expect(formState.agentSettings).toEqual({
+			ownerId: 'codex',
+			schemaVersion: 1,
+			values: { effort: 'high' },
+		});
 		expect(formState.projectPath).toBe('/workspace/project');
 	});
 
-	it('offers manual bypass in Claude and non-Claude permission mode menus', () => {
+	it('uses the catalog permission modes for each integration', () => {
 		formState.agentId = 'claude';
 		expect(formState.permissionModes).toEqual([
 			'default',
@@ -468,8 +489,6 @@ describe('NewChatFormState', () => {
 					global: {
 						permissionMode: 'bogus' as any,
 						thinkingMode: 'very-hard' as any,
-						claudeThinkingMode: 'sometimes' as any,
-						ampAgentMode: 'unreal' as any,
 					},
 				},
 			}),
@@ -479,8 +498,7 @@ describe('NewChatFormState', () => {
 
 		expect(formState.permissionMode).toBe('default');
 		expect(formState.thinkingMode).toBe('none');
-		expect(formState.claudeThinkingMode).toBe('auto');
-		expect(formState.ampAgentMode).toBe('smart');
+		expect(formState.agentSettings.ownerId).toBe('claude');
 	});
 
 	it('does not replace manually touched execution modes when changing agent', async () => {
@@ -500,14 +518,10 @@ describe('NewChatFormState', () => {
 						claude: {
 							permissionMode: 'acceptEdits',
 							thinkingMode: 'none',
-							claudeThinkingMode: 'on',
-							ampAgentMode: 'smart',
 						},
 						codex: {
 							permissionMode: 'bypassPermissions',
 							thinkingMode: 'medium',
-							claudeThinkingMode: 'off',
-							ampAgentMode: 'deep',
 						},
 					},
 				},
@@ -585,7 +599,9 @@ describe('NewChatFormState', () => {
 		formState.handleModelChange('gpt-5.4');
 		formState.permissionMode = 'acceptEdits';
 		formState.thinkingMode = 'medium';
-		formState.claudeThinkingMode = 'on';
+		formState.agentSettingsById = {
+			codex: { ownerId: 'codex', schemaVersion: 1, values: { effort: 'high' } },
+		};
 
 		const config = formState.buildConfig();
 
@@ -595,7 +611,11 @@ describe('NewChatFormState', () => {
 			model: 'gpt-5.4',
 			permissionMode: 'acceptEdits',
 			thinkingMode: 'medium',
-			claudeThinkingMode: 'on',
+			agentSettings: {
+				ownerId: 'codex',
+				schemaVersion: 1,
+				values: { effort: 'high' },
+			},
 		});
 		expect(mockRemoteSettings.update).not.toHaveBeenCalled();
 	});

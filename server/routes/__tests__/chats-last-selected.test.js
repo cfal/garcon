@@ -90,14 +90,26 @@ function createFixture() {
 
 function chatEntry(projectPath = '/proj') {
   return {
-    agentId: 'claude',
+    agentId: 'test-agent',
+    agentSessionId: 'test-session',
+    nativeSession: {
+      ownerId: 'test-agent',
+      schemaVersion: 1,
+      value: { id: 'test-session' },
+    },
+    agentOwnershipEpoch: 'epoch-1',
+    agentSettingsById: {
+      'test-agent': {
+        ownerId: 'test-agent',
+        schemaVersion: 1,
+        values: {},
+      },
+    },
     projectPath,
     tags: [],
     model: 'sonnet',
     permissionMode: 'default',
     thinkingMode: 'none',
-    claudeThinkingMode: 'auto',
-    ampAgentMode: 'smart',
   };
 }
 

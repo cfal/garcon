@@ -23,22 +23,18 @@ import type {
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { InvalidChatIdError, parseChatId, type ChatId } from '../../common/chat-id.js';
 import {
-  normalizeAmpAgentMode,
-  normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
-  normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
+import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
 import { normalizeTags } from '../../common/tags.ts';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
-import type { ChatMessage } from '../../common/chat-types.js';
 import type {
   AgentExecutionCommandType,
   RunAgentTurnOptions,
   StartedAgentSession,
 } from '../agents/session-types.js';
-import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import {
@@ -55,15 +51,17 @@ import {
 import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import type { ForkTranscriptEntryContext } from '../agents/types.js';
-import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
-import { getNativeMessageSource } from '../agents/shared/native-message-source.js';
+import {
+  rollbackForkTarget,
+  type ForkChatFileCopyResult,
+} from '../chats/fork-chat.js';
 import { createLogger } from '../lib/log.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import { ActiveInputDeliveryError } from '../lib/domain-error.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { PathCache } from '../chats/path-cache.js';
+import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
 
 const logger = createLogger('commands:chat-command-service');
 
@@ -108,7 +106,16 @@ interface MetadataDep {
 }
 
 interface CarryOverDep {
-  copy(sourceChatId: string, targetChatId: string): void;
+  stageFork(input: {
+    sourceChatId: string;
+    targetChatId: string;
+    targetEpoch: string;
+    ownerId: string;
+    ownerModel: string;
+    upToSequence?: number;
+  }): Promise<void>;
+  promoteStaged(chatId: string, targetEpoch: string): Promise<void>;
+  discardStaged(chatId: string, targetEpoch: string): Promise<void>;
 }
 
 type PendingInputsDep = Pick<
@@ -135,8 +142,7 @@ type AgentRegistryDep = Pick<
   | 'isAgentSessionRunning'
   | 'forkAgentSession'
   | 'compactSession'
-  | 'resolveNativePath'
-  | 'rewriteForkTranscriptEntry'
+  | 'resolveNativeSession'
   | 'prepareProjectPathUpdate'
 >;
 
@@ -150,46 +156,32 @@ type ForkChatFileCopyDep = (args: {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
-  truncateAfterEntryId?: string;
-  truncateAfterLine?: number;
+  upToSequence?: number;
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
   carryOver?: CarryOverDep;
-  forkAgentSession?: (args: {
+  ownership: Pick<AgentOwnershipJournal, 'delete'>;
+  forkAgentSession: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
     targetChatId: string;
+    messageSequence?: number;
   }) => Promise<StartedAgentSession | null>;
-  supportsFork?: (agentId: string) => boolean;
-  assertSourceSnapshotStable?: (sourceChanged: boolean) => void;
-  rewriteForkTranscriptEntry?: (
-    entry: unknown,
-    context: ForkTranscriptEntryContext,
-  ) => unknown;
 }) => Promise<ForkChatFileCopyResult>;
 
 interface ForkContext {
   sourceChatId: string;
   targetChatId: string;
   sourceSession: ChatRegistryEntry;
+  sourceNextForkOrdinal: number;
   upToSeq?: number;
-}
-
-interface NativeMessagesDep {
-  loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
-}
-
-interface ForkTruncatePoint {
-  entryId?: string;
-  lineNumber?: number;
 }
 
 interface AcceptedRunPreparation {
   prepare(): Promise<void>;
   compensate(): Promise<void>;
 }
-
 interface SubmitRunInput {
   chatId: string;
   command: string;
@@ -224,8 +216,8 @@ export interface ChatStartInput {
   modelProtocol?: ApiProtocol | null;
   permissionMode?: unknown;
   thinkingMode?: unknown;
-  claudeThinkingMode?: unknown;
-  ampAgentMode?: unknown;
+  agentSettings?: unknown;
+  agentSettingsById?: unknown;
   tags?: unknown[];
   images?: unknown;
 }
@@ -242,8 +234,7 @@ export interface ScheduledChatStartInput {
   modelProtocol?: ApiProtocol | null;
   permissionMode?: unknown;
   thinkingMode?: unknown;
-  claudeThinkingMode?: unknown;
-  ampAgentMode?: unknown;
+  agentSettingsById?: unknown;
   tags?: unknown[];
 }
 
@@ -261,8 +252,7 @@ interface NormalizedChatStart {
   modelProtocol: ApiProtocol | null;
   permissionMode: ReturnType<typeof normalizePermissionMode>;
   thinkingMode: ReturnType<typeof normalizeThinkingMode>;
-  claudeThinkingMode: ReturnType<typeof normalizeClaudeThinkingMode>;
-  ampAgentMode: ReturnType<typeof normalizeAmpAgentMode>;
+  agentSettings: AgentSettingsEnvelope;
   tags: string[];
 }
 
@@ -346,9 +336,7 @@ export function runOptionsFromCommandRequest(
   if (body.model !== undefined) options.model = body.model;
   if (body.permissionMode !== undefined) options.permissionMode = normalizePermissionMode(body.permissionMode);
   if (body.thinkingMode !== undefined) options.thinkingMode = normalizeThinkingMode(body.thinkingMode);
-  if (body.claudeThinkingMode !== undefined)
-    options.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
-  if (body.ampAgentMode !== undefined) options.ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
+  if (body.agentSettings !== undefined) options.agentSettings = body.agentSettings;
   if (body.apiProviderId !== undefined) options.apiProviderId = body.apiProviderId;
   if (body.modelEndpointId !== undefined) options.modelEndpointId = body.modelEndpointId;
   if (body.modelProtocol !== undefined) options.modelProtocol = body.modelProtocol;
@@ -363,12 +351,12 @@ interface ChatCommandServiceDeps {
   metadata: MetadataDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
-  nativeMessages?: NativeMessagesDep;
-  forkChatFileCopy?: ForkChatFileCopyDep;
+  forkChatFileCopy: ForkChatFileCopyDep;
   carryOver?: CarryOverDep;
   chatIds: Pick<ChatIdAllocator, 'allocate'>;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
+  ownership: Pick<AgentOwnershipJournal, 'delete'>;
   // Shared with AgentSwitchService so agent switches serialize against
   // send/fork/compaction/delete on the same chat. Defaults to a private lock
   // when omitted, which suffices for isolated unit tests.
@@ -456,6 +444,16 @@ export class ChatCommandService {
       images,
     });
 
+    const directSettings = parseAgentSettingsEnvelope(input.agentSettings);
+    const settingsById = input.agentSettingsById && typeof input.agentSettingsById === 'object'
+      ? input.agentSettingsById as Record<string, unknown>
+      : null;
+    const scheduledSettings = parseAgentSettingsEnvelope(settingsById?.[agentId]);
+    const agentSettings = directSettings ?? scheduledSettings;
+    if (!agentSettings || agentSettings.ownerId !== agentId) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'agentSettings must be owned by agentId');
+    }
+
     return {
       chatId,
       clientRequestId,
@@ -469,9 +467,8 @@ export class ChatCommandService {
       modelEndpointId: input.modelEndpointId ?? null,
       modelProtocol: input.modelProtocol ?? null,
       permissionMode: normalizePermissionMode(input.permissionMode),
-      thinkingMode: normalizeThinkingModeForAgent(agentId, input.thinkingMode),
-      claudeThinkingMode: normalizeClaudeThinkingMode(input.claudeThinkingMode),
-      ampAgentMode: normalizeAmpAgentMode(input.ampAgentMode),
+      thinkingMode: normalizeThinkingMode(input.thinkingMode),
+      agentSettings,
       tags: normalizeTags(Array.isArray(input.tags) ? input.tags : []),
     };
   }
@@ -521,8 +518,7 @@ export class ChatCommandService {
         modelProtocol: input.modelProtocol,
         permissionMode: input.permissionMode,
         thinkingMode: input.thinkingMode,
-        claudeThinkingMode: input.claudeThinkingMode,
-        ampAgentMode: input.ampAgentMode,
+        agentSettings: input.agentSettings,
         tags: input.tags,
       },
     });
@@ -557,7 +553,7 @@ export class ChatCommandService {
       this.deps.chats.addChat({
         id: input.chatId,
         agentId: input.agentId,
-        nativePath: null,
+        nativeSession: null,
         projectPath: input.projectPath,
         tags: input.tags,
         agentSessionId: null,
@@ -567,8 +563,7 @@ export class ChatCommandService {
         modelProtocol: input.modelProtocol,
         permissionMode: input.permissionMode,
         thinkingMode: input.thinkingMode,
-        claudeThinkingMode: input.claudeThinkingMode,
-        ampAgentMode: input.ampAgentMode,
+        agentSettingsById: { [input.agentId]: input.agentSettings },
       });
       this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
 
@@ -581,8 +576,7 @@ export class ChatCommandService {
         modelProtocol: input.modelProtocol,
         permissionMode: input.permissionMode,
         thinkingMode: input.thinkingMode,
-        claudeThinkingMode: input.claudeThinkingMode,
-        ampAgentMode: input.ampAgentMode,
+        agentSettingsById: { [input.agentId]: input.agentSettings },
       });
       await this.deps.settings.ensureInNormal(input.chatId);
       reservation.executionAdmission.signal.throwIfAborted();
@@ -607,6 +601,7 @@ export class ChatCommandService {
         clientMessageId: input.clientMessageId,
         turnId,
         executionAdmission: reservation.executionAdmission,
+        agentSettings: input.agentSettings,
       });
     } catch (error: unknown) {
       try {
@@ -732,7 +727,7 @@ export class ChatCommandService {
     // Removes registry state after abort because abortSession resolves the
     // owning agent through the chat entry.
     this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
-    this.deps.chats.removeChat(chatId);
+    await this.deps.ownership.delete(chatId);
 
     await Promise.all([
       this.deps.queue.deleteChatQueueFile(chatId).catch(() => {
@@ -1355,12 +1350,11 @@ export class ChatCommandService {
         effectiveProjectKey,
         previousProjectPath: chat.projectPath,
         previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
-        nativePath: chat.nativePath ?? null,
       };
     }
 
     await this.#assertChatIdleForProjectPathUpdate(input.chatId, chat);
-    const nativePath = await this.#nativePathForProjectPathUpdate(chat);
+    const nativeSession = await this.#nativeSessionForProjectPathUpdate(input.chatId, chat);
 
     try {
       await this.deps.agents.prepareProjectPathUpdate(chat.agentId, {
@@ -1368,7 +1362,7 @@ export class ChatCommandService {
         agentSessionId: chat.agentSessionId,
         previousProjectPath: chat.projectPath,
         nextProjectPath,
-        nativePath,
+        nativeSession,
       });
     } catch (error) {
       throw new CommandValidationError(
@@ -1385,7 +1379,7 @@ export class ChatCommandService {
       effectiveProjectKey,
       previousProjectPath: chat.projectPath,
       previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
-      ...(nativePath && nativePath !== chat.nativePath ? { nativePath } : {}),
+      ...(nativeSession !== chat.nativeSession ? { nativeSession } : {}),
     };
     const updated = await this.deps.chats.updateProjectPath(input.chatId, event, { flush: true });
     if (!updated) {
@@ -1399,7 +1393,6 @@ export class ChatCommandService {
       effectiveProjectKey,
       previousProjectPath: event.previousProjectPath,
       previousEffectiveProjectKey: event.previousEffectiveProjectKey,
-      nativePath: updated.nativePath ?? null,
     };
   }
 
@@ -1524,26 +1517,24 @@ export class ChatCommandService {
     }
   }
 
-  async #nativePathForProjectPathUpdate(chat: ChatRegistryEntry): Promise<string | null> {
-    if (this.#isRealNativePath(chat.nativePath)) return chat.nativePath;
+  async #nativeSessionForProjectPathUpdate(
+    chatId: string,
+    chat: ChatRegistryEntry,
+  ): Promise<ChatRegistryEntry['nativeSession']> {
+    if (chat.nativeSession) return chat.nativeSession;
 
-    const resolved = await this.deps.agents.resolveNativePath(chat);
-    if (this.#isRealNativePath(resolved)) return resolved;
+    const resolved = await this.deps.agents.resolveNativeSession(chat, chatId);
+    if (resolved) return resolved;
 
-    if (this.deps.agents.requiresNativePathForProjectPathUpdate?.(chat.agentId)) {
+    if (this.deps.agents.requiresNativePathForProjectPathUpdate(chat.agentId)) {
       throw new CommandValidationError(
         'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
-        'Cannot update the project path until the session file can be resolved',
+        'Cannot update the project path until the native session can be resolved',
         409,
         true,
       );
     }
-
-    return this.#isRealNativePath(chat.nativePath) ? chat.nativePath : null;
-  }
-
-  #isRealNativePath(nativePath: unknown): nativePath is string {
-    return typeof nativePath === 'string' && nativePath.length > 0 && !isArtificialNativePath(nativePath);
+    return null;
   }
 
   async #submitHttpRun(input: NormalizedSubmitRunInput): Promise<CommandAcceptedResponse> {
@@ -1603,6 +1594,7 @@ export class ChatCommandService {
           forkPreparation: {
             phase: 'creating',
             sourceChatId: forkContext.sourceChatId,
+            sourceNextForkOrdinal: forkContext.sourceNextForkOrdinal,
           },
         });
         forkResult = await this.#forkChatFromContext(forkContext);
@@ -1610,13 +1602,23 @@ export class ChatCommandService {
           forkPreparation: {
             phase: 'created',
             sourceChatId: forkContext.sourceChatId,
-            nativePath: forkResult.nativePath,
             sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
           },
         });
       },
       compensate: async () => {
-        if (forkResult) await forkResult.rollback();
+        if (forkResult) {
+          await forkResult.rollback();
+        } else {
+          await rollbackForkTarget({
+            sourceChatId: forkContext.sourceChatId,
+            targetChatId: forkContext.targetChatId,
+            registry: this.deps.chats,
+            settings: this.deps.settings,
+            ownership: this.deps.ownership,
+            sourceNextForkOrdinal: forkContext.sourceNextForkOrdinal,
+          });
+        }
         forkResult = null;
       },
     });
@@ -1838,6 +1840,7 @@ export class ChatCommandService {
       sourceChatId,
       targetChatId,
       sourceSession,
+      sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
       ...(upToSeq ? { upToSeq } : {}),
     };
   }
@@ -1847,41 +1850,18 @@ export class ChatCommandService {
       throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
     }
 
-    const truncatePoint = await this.#resolveForkTruncatePoint(context);
-
     return this.deps.forkChatFileCopy({
       sourceSession: context.sourceSession,
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,
-      ...(truncatePoint?.entryId ? { truncateAfterEntryId: truncatePoint.entryId } : {}),
-      ...(truncatePoint?.lineNumber ? { truncateAfterLine: truncatePoint.lineNumber } : {}),
+      ...(context.upToSeq ? { upToSequence: context.upToSeq } : {}),
       registry: this.deps.chats,
       settings: this.deps.settings,
       metadata: this.deps.metadata,
       carryOver: this.deps.carryOver,
-      forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
-      supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
-      assertSourceSnapshotStable: (sourceChanged) => {
-        this.#assertSourceSnapshotStable(context.sourceSession, sourceChanged);
-      },
-      rewriteForkTranscriptEntry: (entry, rewriteContext) => (
-        this.deps.agents.rewriteForkTranscriptEntry(
-          context.sourceSession.agentId,
-          entry,
-          rewriteContext,
-        )
-      ),
+      ownership: this.deps.ownership,
+      forkAgentSession: this.deps.agents.forkAgentSession.bind(this.deps.agents),
     });
-  }
-
-  #assertSourceSnapshotStable(sourceSession: ChatRegistryEntry, sourceChanged: boolean): void {
-    if (this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)) return;
-    if (
-      sourceChanged
-      || this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
-    ) {
-      throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
-    }
   }
 
   async #projectCommandChat(chatId: string): Promise<import('../../common/chat-list.js').ChatListEntry> {
@@ -1902,38 +1882,6 @@ export class ChatCommandService {
       throw new CommandValidationError('VALIDATION_FAILED', 'upToSeq must be a positive integer');
     }
     return parsed;
-  }
-
-  async #resolveForkTruncatePoint(context: ForkContext): Promise<ForkTruncatePoint | undefined> {
-    if (!context.upToSeq) return undefined;
-    if (!this.deps.nativeMessages) {
-      throw new CommandValidationError(
-        'UNSUPPORTED_AGENT',
-        'Message-point forking is not configured on this server',
-        503,
-        true,
-      );
-    }
-
-    const messages = await this.deps.nativeMessages.loadNativeMessages(context.sourceChatId);
-    const target = messages[context.upToSeq - 1];
-    if (!target) {
-      throw new CommandValidationError('VALIDATION_FAILED', `Message not found for seq ${context.upToSeq}`, 404);
-    }
-
-    const source = getNativeMessageSource(target);
-    const lineNumber = source?.lineNumber;
-    const entryId = typeof source?.entryId === 'string' && source.entryId.trim() ? source.entryId : undefined;
-    if ((!lineNumber || !Number.isInteger(lineNumber) || lineNumber <= 0) && !entryId) {
-      throw new CommandValidationError(
-        'VALIDATION_FAILED',
-        'Cannot fork from this message because its native source position is unavailable',
-      );
-    }
-    return {
-      ...(entryId ? { entryId } : {}),
-      ...(lineNumber && Number.isInteger(lineNumber) && lineNumber > 0 ? { lineNumber } : {}),
-    };
   }
 
   #assertContent(command: string, images?: RunAgentTurnOptions['images']): void {
@@ -1996,6 +1944,15 @@ export class ChatCommandService {
   }
 }
 
+function normalizeNextForkOrdinal(value: unknown): number | null {
+  const parsed = typeof value === 'string'
+    ? Number.parseInt(value, 10)
+    : typeof value === 'number'
+      ? value
+      : Number.NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): Record<string, unknown> {
   return {
     chatId: input.chatId,
@@ -2004,8 +1961,7 @@ function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): R
     images: input.images,
     permissionMode: input.options?.permissionMode,
     thinkingMode: input.options?.thinkingMode,
-    claudeThinkingMode: input.options?.claudeThinkingMode,
-    ampAgentMode: input.options?.ampAgentMode,
+    agentSettings: input.options?.agentSettings,
     model: input.options?.model,
     apiProviderId: input.options?.apiProviderId,
     modelEndpointId: input.options?.modelEndpointId,
@@ -2022,8 +1978,7 @@ function forkPayload(input: NormalizedSubmitForkRunInput, clientMessageId: strin
     images: input.images,
     permissionMode: input.options?.permissionMode,
     thinkingMode: input.options?.thinkingMode,
-    claudeThinkingMode: input.options?.claudeThinkingMode,
-    ampAgentMode: input.options?.ampAgentMode,
+    agentSettings: input.options?.agentSettings,
     model: input.options?.model,
     apiProviderId: input.options?.apiProviderId,
     modelEndpointId: input.options?.modelEndpointId,

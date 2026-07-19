@@ -1,0 +1,16 @@
+{
+  "name": "@garcon/server-agent-claude",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "bunx tsc -p tsconfig.json" },
+  "dependencies": {
+    "@garcon/common": "workspace:*",
+    "@garcon/server-agent-common": "workspace:*",
+    "@garcon/server-agent-interface": "workspace:*",
+    "bun-pty": "^0.4.10"
+  },
+  "devDependencies": { "@types/bun": "^1.3.14", "typescript": "^6.0.3" },
+  "garconBuild": { "apiVersion": 1, "integrationId": "claude", "standaloneEntrypoints": [], "preMainModules": [], "embeddedDependencyMetadata": [] }
+}

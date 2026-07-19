@@ -27,12 +27,11 @@ function makeSnapshot(overrides?: Record<string, unknown>) {
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
 		pinnedChatIds: [],
 		recentAgentSettings: [],
-		executionDefaults: {
+			executionDefaults: {
 			global: {
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettingsById: {},
 			},
 			byAgent: {},
 		},

@@ -1,11 +1,7 @@
 // Application-level types shared across the Svelte frontend.
 
-import type {
-	AmpAgentMode,
-	ClaudeThinkingMode,
-	PermissionMode,
-	ThinkingMode,
-} from '$shared/chat-modes';
+import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 
 export type SessionAgentId = string;
@@ -21,8 +17,7 @@ export interface NewChatConfig {
 	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	claudeThinkingMode: ClaudeThinkingMode;
-	ampAgentMode?: AmpAgentMode;
+	agentSettings: AgentSettingsEnvelope;
 	firstMessage: string;
 	initialImages?: File[];
 	tags?: string[];

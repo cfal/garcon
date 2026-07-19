@@ -1,46 +1,35 @@
-// Facade over focused agent services. Keep external callers stable while
-// runtime routing, catalog reads, event fan-out, and settings mutation
-// live behind narrower ownership boundaries.
-
-import type { IChatRegistry } from "../chats/store.js";
-import type { ChatMessage } from '../../common/chat-types.js';
-import type { AgentCommandImage } from "../../common/ws-requests.js";
+import type { AgentTranscriptPage } from '@garcon/server-agent-interface';
+import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
-import type {
-  AmpAgentMode,
-  ClaudeThinkingMode,
-  PermissionMode,
-  ThinkingMode,
-} from "../../common/chat-modes.js";
-import type {
-  AgentChatEntry,
-  AgentExecutionCommandType,
-  AgentExecutionAdmission,
-  AgentSessionSettingsPatch,
-  PrepareProjectPathUpdateRequest,
-  RunAgentTurnOptions,
-  StartedAgentSession,
-} from "./session-types.js";
-import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
-import type { Agent, AgentTranscriptPage, ForkTranscriptEntryContext } from './types.js';
-import {
-  isVisibleAgentId,
-  type AgentCatalogEntry,
-  type AgentModelOption,
-} from "../../common/agents.js";
-import type { ApiProtocol } from "../../common/api-providers.js";
-import type { SlashCommand } from "../../common/slash-commands.js";
-import type { AgentModelQuery } from './types.js';
+import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { AgentCommandImage } from '../../common/ws-requests.js';
+import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
+import type { SlashCommand } from '../../common/slash-commands.js';
 import type {
   AgentAuthLoginCompleteResult,
   AgentAuthLoginLaunchResult,
   AgentAuthLoginStatus,
 } from '../../common/agent-auth.js';
-import { AgentCatalogService } from './catalog-service.js';
+import type { IChatRegistry } from '../chats/store.js';
+import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
+import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import type { IntegrationRegistry } from './integration-registry.js';
+import type {
+  AgentChatEntry,
+  AgentExecutionAdmission,
+  AgentExecutionCommandType,
+  AgentSessionSettingsPatch,
+  PrepareProjectPathUpdateRequest,
+  RunAgentTurnOptions,
+  StartedAgentSession,
+} from './session-types.js';
+import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
 import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter } from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
+import { toAgentChatReference } from './integration-chat-reference.js';
 
 export interface AgentRegistryServiceContract {
   hasAgent(agentId: string): boolean;
@@ -54,41 +43,19 @@ export interface AgentRegistryServiceContract {
   supportsImages(agentId: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
-  submitActiveInput(
-    chatId: string,
-    command: string,
-    opts: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
-  ): Promise<boolean>;
+  submitActiveInput(chatId: string, command: string, opts: RunAgentTurnOptions, beforeDelivery: () => Promise<void>): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   getRunningChatIdsSnapshot(): string[];
-  startSession(chatId: string, command: string, opts?: {
-    images?: AgentCommandImage[];
-    model?: string;
-    permissionMode?: PermissionMode;
-    thinkingMode?: ThinkingMode;
-    claudeThinkingMode?: ClaudeThinkingMode;
-    ampAgentMode?: AmpAgentMode;
-    projectPath?: string;
-    clientRequestId?: string;
-    clientMessageId?: string;
-    turnId?: string;
-    commandType?: AgentExecutionCommandType;
-    executionAdmission?: AgentExecutionAdmission;
-  }): Promise<void>;
-  forkAgentSession?(args: {
+  startSession(chatId: string, command: string, opts?: StartSessionOptions): Promise<void>;
+  forkAgentSession(args: {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
+    messageSequence?: number;
   }): Promise<StartedAgentSession | null>;
-  compactSession(chatId: string, opts?: {
-    instructions?: string;
-    clientRequestId?: string;
-    turnId?: string;
-    executionAdmission?: AgentExecutionAdmission;
-  }): Promise<void>;
+  compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-    getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
@@ -101,329 +68,230 @@ export interface AgentRegistryServiceContract {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean>;
-  runSingleQuery(prompt: string, options?: { agentId?: string; [key: string]: unknown }): Promise<string>;
+  runSingleQuery(prompt: string, options: { agentId: string; [key: string]: unknown }): Promise<string>;
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
   prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
-  resolveNativePath(session: AgentChatEntry): Promise<string | null>;
-  rewriteForkTranscriptEntry(
-    agentId: string,
-    entry: unknown,
-    context: ForkTranscriptEntryContext,
-  ): unknown;
+  resolveNativeSession(session: AgentChatEntry, chatId?: string): Promise<AgentNativeSessionRef | null>;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
-interface AgentAuthStatus {
-  authenticated?: boolean;
+type MutableAgentTranscriptPage = Omit<AgentTranscriptPage, 'messages'> & { messages: ChatMessage[] };
+
+interface StartSessionOptions {
+  images?: AgentCommandImage[];
+  model?: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  agentSettings?: RunAgentTurnOptions['agentSettings'];
+  projectPath?: string;
+  clientRequestId?: string;
+  clientMessageId?: string;
+  turnId?: string;
+  commandType?: AgentExecutionCommandType;
+  executionAdmission?: AgentExecutionAdmission;
 }
 
-function isAgentAuthStatus(value: unknown): value is AgentAuthStatus {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+interface CompactSessionOptions {
+  instructions?: string;
+  clientRequestId?: string;
+  turnId?: string;
+  executionAdmission?: AgentExecutionAdmission;
 }
 
 export class AgentRegistry implements AgentRegistryServiceContract {
-  #registry: IChatRegistry;
-  #directory: AgentDirectory;
-  #endpointResolver: ApiProviderEndpointResolver;
-  #catalog: AgentCatalogService;
-  #events: AgentEventBus;
-  #runtime: AgentRuntimeRouter;
-  #settings: AgentSessionSettingsService;
+  readonly #registry: IChatRegistry;
+  readonly #directory: AgentDirectory;
+  readonly #catalog: AgentCatalogService;
+  readonly #events: AgentEventBus;
+  readonly #runtime: AgentRuntimeRouter;
+  readonly #settings: AgentSessionSettingsService;
+  readonly #getCarryOverRevision: (chatId: string) => string;
 
   constructor(args: {
     registry: IChatRegistry;
-    agents: Agent[];
+    integrations: IntegrationRegistry;
     endpointResolver: ApiProviderEndpointResolver;
+    getCarryOverRevision(chatId: string): string;
+    loadCarryOver(chatId: string, entry: AgentChatEntry): readonly ChatMessage[];
+    chatMutationLock?: KeyedPromiseLock;
   }) {
     this.#registry = args.registry;
-    this.#endpointResolver = args.endpointResolver;
-    this.#directory = new AgentDirectory(args.agents);
+    this.#getCarryOverRevision = args.getCarryOverRevision;
+    this.#directory = new AgentDirectory(args.integrations);
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
-      endpointResolver: this.#endpointResolver,
+      endpointResolver: args.endpointResolver,
     });
     this.#events = new AgentEventBus(this.#directory);
     this.#runtime = new AgentRuntimeRouter({
       registry: this.#registry,
       directory: this.#directory,
-      endpointResolver: this.#endpointResolver,
+      endpointResolver: args.endpointResolver,
       events: this.#events,
+      getCarryOverRevision: args.getCarryOverRevision,
+      loadCarryOver: args.loadCarryOver,
     });
     this.#settings = new AgentSessionSettingsService({
       registry: this.#registry,
       directory: this.#directory,
-      endpointResolver: this.#endpointResolver,
+      endpointResolver: args.endpointResolver,
+      chatMutationLock: args.chatMutationLock,
     });
   }
 
-  hasAgent(agentId: string): boolean {
-    return this.#directory.has(agentId);
-  }
-
-  supportsAuthLogin(agentId: string): boolean {
-    const agent = this.#directory.get(agentId);
-    return agent?.capabilities.authLoginSupported === true && agent.auth.launchLogin !== undefined;
-  }
-
-  supportsAuthLoginCompletion(agentId: string): boolean {
-    const agent = this.#directory.get(agentId);
-    return agent?.capabilities.authLoginSupported === true && agent.auth.completeLogin !== undefined;
-  }
-
-  supportsFork(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.supportsFork ?? false;
-  }
-
-  supportsForkAtMessage(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.supportsForkAtMessage ?? false;
-  }
-
-  supportsForkWhileRunning(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.supportsForkWhileRunning ?? false;
-  }
-
-  supportsUpdateProjectPath(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.supportsUpdateProjectPath ?? false;
-  }
-
+  hasAgent(agentId: string): boolean { return this.#directory.has(agentId); }
+  supportsAuthLogin(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.launchLogin); }
+  supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
+  supportsFork(agentId: string): boolean { return this.#directory.get(agentId)?.forking !== null; }
+  supportsForkAtMessage(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessage ?? false; }
+  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsWhileRunning ?? false; }
+  supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.requiresNativePathForProjectPathUpdate ?? false;
+    return this.#directory.get(agentId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;
   }
-
-  supportsImages(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.supportsImages ?? false;
-  }
+  supportsImages(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsImages ?? false; }
 
   requiresStrictModelDiscovery(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.requiresStrictModelDiscovery ?? false;
+    return this.#catalog.requiresStrictModelDiscovery(agentId);
   }
 
-  acceptsApiProviderEndpoints(agentId: string): boolean {
-    return this.#directory.get(agentId)?.capabilities.acceptsApiProviderEndpoints ?? false;
-  }
-
-  supportedProtocols(agentId: string): ApiProtocol[] {
-    return this.#directory.get(agentId)?.capabilities.supportedProtocols ?? [];
-  }
-
-  async startSession(chatId: string, command: string, opts: {
-    images?: AgentCommandImage[];
-    model?: string;
-    permissionMode?: PermissionMode;
-    thinkingMode?: ThinkingMode;
-    claudeThinkingMode?: ClaudeThinkingMode;
-    ampAgentMode?: AmpAgentMode;
-    projectPath?: string;
-    clientRequestId?: string;
-    clientMessageId?: string;
-    turnId?: string;
-    executionAdmission?: AgentExecutionAdmission;
-  } = {}): Promise<void> {
+  startSession(chatId: string, command: string, opts: StartSessionOptions = {}): Promise<void> {
     return this.#runtime.startSession(chatId, command, opts);
   }
-
-  async runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
+  runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
   }
-
-  async submitActiveInput(
-    chatId: string,
-    command: string,
-    opts: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
-  ): Promise<boolean> {
+  submitActiveInput(chatId: string, command: string, opts: RunAgentTurnOptions, beforeDelivery: () => Promise<void>): Promise<boolean> {
     return this.#runtime.submitActiveInput(chatId, command, opts, beforeDelivery);
   }
-
-  async abortSession(chatId: string): Promise<boolean> {
-    return this.#runtime.abortSession(chatId);
-  }
-
-  async compactSession(chatId: string, opts: {
-    instructions?: string;
-    clientRequestId?: string;
-    turnId?: string;
-    executionAdmission?: AgentExecutionAdmission;
-  } = {}): Promise<void> {
-    return this.#runtime.compactSession(chatId, opts);
-  }
-
-  isChatRunning(chatId: string): boolean {
-    return this.#runtime.isChatRunning(chatId);
-  }
-
-  waitUntilTurnAbortable(
-    chatId: string,
-    turn: { clientRequestId?: string; turnId?: string },
-    signal?: AbortSignal,
-  ): Promise<boolean> {
+  abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
+  compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
+  isChatRunning(chatId: string): boolean { return this.#runtime.isChatRunning(chatId); }
+  waitUntilTurnAbortable(chatId: string, turn: TurnEventMetadata, signal?: AbortSignal): Promise<boolean> {
     return this.#events.waitUntilTurnAbortable(chatId, turn, signal);
   }
-
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
     return this.#runtime.isAgentSessionRunning(agentId, agentSessionId);
   }
-
-  getRunningSessions(): Record<string, Array<{ id: string;[key: string]: unknown }>> {
-    return this.#runtime.getRunningSessions();
-  }
-
-  getRunningChatIdsSnapshot(): string[] {
-    return this.#runtime.getRunningChatIdsSnapshot();
-  }
-
-  getRunningSessionCount(): number {
-    return this.#runtime.getRunningSessionCount();
-  }
-
+  getRunningSessions() { return this.#runtime.getRunningSessions(); }
+  getRunningChatIdsSnapshot(): string[] { return this.#runtime.getRunningChatIdsSnapshot(); }
+  getRunningSessionCount(): number { return this.#runtime.getRunningSessionCount(); }
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
     this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
   }
-
-  async prepareProjectPathUpdate(
-    agentId: string,
-    request: PrepareProjectPathUpdateRequest,
-  ): Promise<void> {
-    await this.#runtime.prepareProjectPathUpdate(agentId, request);
+  prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void> {
+    return this.#runtime.prepareProjectPathUpdate(agentId, request);
   }
-
-  async forkAgentSession(args: {
+  forkAgentSession(args: {
     sourceSession: AgentChatEntry;
     sourceChatId: string;
     targetChatId: string;
-  }): Promise<StartedAgentSession | null> {
+    messageSequence?: number;
+  }) {
     return this.#runtime.forkAgentSession(args);
   }
-
-  async updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry> {
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch) {
     return this.#settings.updateSessionSettings(chatId, patch);
   }
-
-  async runSingleQuery(prompt: string, options: { agentId?: string;[key: string]: unknown } = {}): Promise<string> {
+  runSingleQuery(prompt: string, options: { agentId: string; [key: string]: unknown }) {
     return this.#runtime.runSingleQuery(prompt, options);
   }
-
-  async getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
+  getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
     return this.#runtime.discoverSlashCommands(agentId, projectPath);
   }
 
-  async getPreview(session: AgentChatEntry | null): Promise<unknown> {
+  async getPreview(session: AgentChatEntry | null, chatId = ''): Promise<unknown> {
     if (!session?.agentId) return null;
-    const agent = this.#directory.get(session.agentId);
-    if (!agent?.transcript.getPreview) return null;
-    return agent.transcript.getPreview(session);
+    const integration = this.#directory.get(session.agentId);
+    return integration?.transcript.preview({
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      signal: new AbortController().signal,
+    }) ?? null;
   }
 
-  async loadMessages(session: AgentChatEntry | null, chatId?: string): Promise<ChatMessage[]> {
+  async loadMessages(session: AgentChatEntry | null, chatId = ''): Promise<ChatMessage[]> {
     if (!session?.agentId) return [];
-    const agent = this.#directory.get(session.agentId);
-    if (!agent) return [];
-    return agent.transcript.loadMessages(session, { chatId });
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return [];
+    return [...(await integration.transcript.load({
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      signal: new AbortController().signal,
+    })).messages];
   }
 
   async loadMessagePage(
     session: AgentChatEntry | null,
     limit: number,
     offset: number,
-    chatId?: string,
-  ): Promise<AgentTranscriptPage | null> {
+    chatId = '',
+  ): Promise<MutableAgentTranscriptPage | null> {
     if (!session?.agentId) return null;
-    const agent = this.#directory.get(session.agentId);
-    if (!agent?.transcript.loadMessagePage) return null;
-    return agent.transcript.loadMessagePage(session, { limit, offset }, { chatId });
+    const integration = this.#directory.get(session.agentId);
+    if (!integration?.transcript.loadPage) return null;
+    const page = await integration.transcript.loadPage({
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      page: { limit, offset },
+      signal: new AbortController().signal,
+    });
+    return page ? { ...page, messages: [...page.messages] } : null;
   }
 
-  async getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
+  getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
     return this.#catalog.getModels(agentId, query);
   }
-
-  async modelSupportsImages(input: {
-    agentId: string;
-    model: string;
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-  }): Promise<boolean> {
+  modelSupportsImages(input: Parameters<AgentCatalogService['modelSupportsImages']>[0]): Promise<boolean> {
     return this.#catalog.modelSupportsImages(input);
   }
 
-  async resolveNativePath(session: AgentChatEntry): Promise<string | null> {
+  async resolveNativeSession(session: AgentChatEntry, chatId = ''): Promise<AgentNativeSessionRef | null> {
     if (!session.agentSessionId) return null;
-    const agent = this.#directory.get(session.agentId);
-    if (!agent?.transcript.resolveNativePath) return null;
-    return agent.transcript.resolveNativePath(session);
-  }
-
-  rewriteForkTranscriptEntry(
-    agentId: string,
-    entry: unknown,
-    context: ForkTranscriptEntryContext,
-  ): unknown {
-    const rewrite = this.#directory.get(agentId)?.transcript.rewriteForkTranscriptEntry;
-    return rewrite ? rewrite(entry, context) : entry;
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return null;
+    const reference = await integration.transcript.resolveNativeSession({
+      chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+      signal: new AbortController().signal,
+    });
+    if (reference?.ownerId !== session.agentId && reference !== null) {
+      throw new Error(`Native session owner mismatch for ${chatId || session.agentSessionId}`);
+    }
+    return reference;
   }
 
   async launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {
-    const agent = this.#directory.get(agentId);
-    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
-    if (!agent.capabilities.authLoginSupported || !agent.auth.launchLogin) {
-      throw new Error(`Auth login is not supported for agent: ${agentId}`);
-    }
-    return agent.auth.launchLogin();
+    const auth = this.#directory.require(agentId).auth;
+    if (!auth?.launchLogin) throw new Error(`Auth login is not supported for agent: ${agentId}`);
+    return auth.launchLogin();
   }
-
-  async completeAgentAuthLogin(
-    agentId: string,
-    sessionId: string,
-    code: string,
-  ): Promise<AgentAuthLoginCompleteResult> {
-    const agent = this.#directory.get(agentId);
-    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
-    if (!agent.auth.completeLogin) {
-      throw new Error(`Auth login completion is not supported for agent: ${agentId}`);
-    }
-    return agent.auth.completeLogin(sessionId, code);
+  async completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult> {
+    const complete = this.#directory.require(agentId).auth?.completeLogin;
+    if (!complete) throw new Error(`Auth login completion is not supported for agent: ${agentId}`);
+    return complete(sessionId, code);
   }
-
-  async getAgentAuthLoginStatus(
-    agentId: string,
-    expectedSessionId?: string,
-  ): Promise<AgentAuthLoginStatus> {
-    const agent = this.#directory.get(agentId);
-    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
-    if (!agent.auth.loginStatus) return { state: 'idle', running: false };
-    return agent.auth.loginStatus(expectedSessionId);
+  async getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus> {
+    return this.#directory.require(agentId).auth?.loginStatus?.(expectedSessionId)
+      ?? { state: 'idle', running: false };
   }
-
   async getAgentAuthStatus(agentId: string): Promise<unknown | null> {
-    const agent = this.#directory.get(agentId);
-    if (!agent) return null;
-    return agent.auth.getAuthStatus();
+    const auth = this.#directory.get(agentId)?.auth;
+    return auth ? auth.status(new AbortController().signal) : null;
   }
-
   async getAgentAuthStatusMap(): Promise<Record<string, unknown>> {
-    const authEntries = await Promise.all(
-      this.#directory.list().map(async (agent) => [agent.id, await agent.auth.getAuthStatus()] as const),
-    );
-    return Object.fromEntries(authEntries);
+    return Object.fromEntries(await Promise.all(this.#directory.list().map(async (integration) => [
+      integration.descriptor.id,
+      integration.auth
+        ? await integration.auth.status(new AbortController().signal)
+        : { authenticated: false, canReauth: false, label: integration.descriptor.label, source: 'none' },
+    ])));
   }
-
-  async getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, {
-    ready: boolean;
-    nativeReady: boolean;
-    endpointReady: boolean;
-    reason: string;
-  }>> {
+  async getAgentReadinessMap(authByAgent?: Record<string, unknown>) {
     const auth = authByAgent ?? await this.getAgentAuthStatusMap();
-    const result: Record<string, { ready: boolean; nativeReady: boolean; endpointReady: boolean; reason: string }> = {};
-    for (const agent of this.#directory.list()) {
-      const agentId = agent.id;
-      if (!isVisibleAgentId(agentId)) continue;
-      const endpointReady = agent.capabilities.acceptsApiProviderEndpoints
-        && this.#catalog.hasEndpointModels(agentId);
-      const status = auth[agentId];
-      const nativeReady = isAgentAuthStatus(status) && status.authenticated === true;
-      result[agentId] = {
+    return Object.fromEntries(this.#directory.list().map((integration) => {
+      const status = auth[integration.descriptor.id] as { authenticated?: boolean } | undefined;
+      const nativeReady = status?.authenticated === true;
+      const endpointReady = integration.endpoints !== null
+        && this.#catalog.hasEndpointModels(integration.descriptor.id);
+      return [integration.descriptor.id, {
         ready: nativeReady || endpointReady,
         nativeReady,
         endpointReady,
@@ -432,60 +300,20 @@ export class AgentRegistry implements AgentRegistryServiceContract {
           : nativeReady
             ? 'Native agent authentication is available.'
             : 'No native authentication or compatible API provider endpoint is configured.',
-      };
-    }
-    return result;
+      }];
+    }));
   }
 
-  startPurgeTimers(): void {
-    for (const agent of this.#directory.list()) {
-      agent.runtime.startPurgeTimer?.();
-    }
-  }
-
-  shutdown(): void {
-    for (const agent of this.#directory.list()) {
-      agent.runtime.shutdown?.();
-    }
-  }
-
-  onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
-    this.#events.onMessages(cb);
-  }
-
-  onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
-    this.#events.onProcessing(cb);
-  }
-
-  onSessionCreated(cb: (chatId: string) => void): void {
-    this.#events.onSessionCreated(cb);
-  }
-
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
-    this.#events.onFinished(cb);
-  }
-
-  onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
-    this.#events.onFailed(cb);
-  }
-
-  settleTurn(chatId: string, turn: TurnEventMetadata): void {
-    this.#events.settleTurn(chatId, turn);
-  }
-
-  discardTurn(chatId: string): void {
-    this.#events.clearTurn(chatId);
-  }
-
-  getActiveTurn(chatId: string): TurnEventMetadata | undefined {
-    return this.#events.getActiveTurn(chatId);
-  }
-
-  async getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}): Promise<AgentCatalogEntry | null> {
-    return this.#catalog.getAgentCatalogEntry(agentId, query);
-  }
-
-  async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
-    return this.#catalog.getAgentCatalogEntries();
-  }
+  startPurgeTimers(): void {}
+  shutdown(): void {}
+  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void): void { this.#events.onMessages(cb); }
+  onProcessing(cb: (chatId: string, processing: boolean) => void): void { this.#events.onProcessing(cb); }
+  onSessionCreated(cb: (chatId: string) => void): void { this.#events.onSessionCreated(cb); }
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void { this.#events.onFinished(cb); }
+  onFailed(cb: (chatId: string, error: string, metadata?: TurnEventMetadata) => void): void { this.#events.onFailed(cb); }
+  settleTurn(chatId: string, turn: TurnEventMetadata): void { this.#events.settleTurn(chatId, turn); }
+  discardTurn(chatId: string): void { this.#events.clearTurn(chatId); }
+  getActiveTurn(chatId: string): TurnEventMetadata | undefined { return this.#events.getActiveTurn(chatId); }
+  getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
+  getAgentCatalogEntries() { return this.#catalog.getAgentCatalogEntries(); }
 }

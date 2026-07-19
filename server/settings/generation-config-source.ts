@@ -8,6 +8,7 @@ export interface GenerationContext {
   authByAgent: Record<string, { authenticated?: boolean }>;
   readinessByAgent: Record<string, { ready?: boolean }>;
   modelsByAgent: Record<string, AgentModelOption[]>;
+  generationByAgent: Record<string, { priority: number; model: string }>;
 }
 
 interface GenerationContextAgentSource {
@@ -22,6 +23,7 @@ function emptyGenerationContext(): GenerationContext {
     authByAgent: {},
     readinessByAgent: {},
     modelsByAgent: {},
+    generationByAgent: {},
   };
 }
 
@@ -75,6 +77,14 @@ function modelsByAgentFromCatalog(entries: AgentCatalogEntry[]): Record<string, 
   );
 }
 
+function generationByAgentFromCatalog(
+  entries: AgentCatalogEntry[],
+): Record<string, { priority: number; model: string }> {
+  return Object.fromEntries(entries.flatMap((entry) => (
+    entry.generation ? [[entry.id, entry.generation] as const] : []
+  )));
+}
+
 function authByAgentFromRaw(raw: Record<string, unknown>): Record<string, { authenticated?: boolean }> {
   return Object.fromEntries(
     Object.entries(raw).map(([agentId, value]) => {
@@ -121,6 +131,7 @@ export async function resolveGenerationContext(source: GenerationContextAgentSou
     authByAgent: authByAgentFromRaw(rawAuthByAgent),
     readinessByAgent: readinessByAgentFromRaw(rawReadinessByAgent),
     modelsByAgent: modelsByAgentFromCatalog(catalogEntries),
+    generationByAgent: generationByAgentFromCatalog(catalogEntries),
   };
 }
 

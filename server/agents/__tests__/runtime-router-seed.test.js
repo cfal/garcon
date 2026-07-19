@@ -1,266 +1,135 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
-import { randomUUID } from 'crypto';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
+import { UserMessage } from '../../../common/chat-types.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
-import { SEED_CONTEXT_OPEN } from '../shared/transcript-seed.ts';
 
-// Drives the real AgentRuntimeRouter with a mocked agent runtime so the
-// seed-composition path in runAgentTurn is exercised end to end. A real project
-// directory lets file-mention resolution run against actual files.
 let projectDir;
 
 function makeRouter(overrides = {}) {
+  const settings = { ownerId: 'test', schemaVersion: 1, values: {} };
   const entry = {
-    id: '1',
-    agentId: 'codex',
+    id: 'chat-1',
+    agentId: 'test',
     agentSessionId: null,
-    nativePath: null,
+    nativeSession: null,
+    agentOwnershipEpoch: 'epoch-1',
+    agentSettingsById: { test: settings },
     projectPath: projectDir,
-    model: 'gpt-5',
+    model: 'model-a',
     apiProviderId: null,
     modelEndpointId: null,
+    modelProtocol: null,
     permissionMode: 'default',
-    thinkingMode: 'off',
-    claudeThinkingMode: 'off',
-    ampAgentMode: 'default',
-    carryOverContext: overrides.carryOverContext,
+    thinkingMode: 'none',
+    tags: [],
     ...overrides.entry,
   };
-  const sessions = new Map([['1', entry]]);
+  const start = overrides.start ?? mock(async () => ({
+    agentSessionId: 'native-1',
+    nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+  }));
+  const integration = {
+    descriptor: {
+      id: 'test',
+      supportedPermissionModes: ['default'],
+      supportedThinkingModes: ['none'],
+    },
+    execution: { start, isRunning: () => false, runningSessions: () => [] },
+    settings: { defaults: () => settings, parse: (input) => input },
+  };
   const registry = {
-    getChat: mock((chatId) => sessions.get(chatId) ?? null),
-    updateChat: mock((chatId, patch) => {
-      const current = sessions.get(chatId);
-      if (!current) return null;
-      const next = { ...current, ...patch };
-      sessions.set(chatId, next);
-      return next;
-    }),
+    getChat: mock(() => entry),
+    updateChat: mock(async (_chatId, patch) => Object.assign(entry, patch)),
     getChatByAgentSessionId: mock(() => null),
   };
-
-  const startSession = overrides.startSession
-    ?? mock(() => Promise.resolve({ agentSessionId: 'agent-new', nativePath: '/tmp/agent-new.jsonl' }));
-  const runTurn = overrides.runTurn ?? mock(() => Promise.resolve(undefined));
-  const submitActiveInput = overrides.submitActiveInput ?? mock(() => Promise.resolve(true));
-  const agent = {
-    id: 'codex',
-    runtime: {
-      startSession,
-      runTurn,
-      submitActiveInput,
-      isRunning: mock(() => false),
-      abort: mock(() => Promise.resolve(true)),
-      getRunningSessions: mock(() => []),
-    },
-  };
-  const directory = {
-    require: mock((agentId) => {
-      if (agentId !== agent.id) throw new Error(`Unsupported agent: ${agentId}`);
-      return agent;
-    }),
-    get: mock((agentId) => (agentId === agent.id ? agent : null)),
-    list: mock(() => [agent]),
-  };
-
-  const endpointResolver = {
-    resolveSelection: mock((input) => ({
-      model: input.model,
-      apiProviderId: input.apiProviderId ?? null,
-      endpointId: input.modelEndpointId ?? null,
-      protocol: null,
-      isLocal: false,
-    })),
-    resolveEndpointReference: mock(() => null),
-  };
-
   const events = {
     trackTurn: mock(() => undefined),
     clearTurn: mock(() => undefined),
+    markTurnAbortable: mock(() => undefined),
   };
-
-  const router = new AgentRuntimeRouter({ registry, directory, endpointResolver, events });
-  return { router, registry, startSession, runTurn, submitActiveInput, sessions, events };
+  const carryOver = overrides.carryOver ?? [
+    new UserMessage('2026-07-18T00:00:00.000Z', 'carried context'),
+  ];
+  const router = new AgentRuntimeRouter({
+    registry,
+    directory: {
+      require: mock(() => integration),
+      get: mock(() => integration),
+      list: mock(() => [integration]),
+    },
+    endpointResolver: {
+      resolveSelection: mock((request) => ({
+        model: request.model,
+        apiProviderId: null,
+        endpointId: null,
+        protocol: null,
+        isLocal: false,
+      })),
+      resolveEndpointReference: mock(() => null),
+    },
+    events,
+    getCarryOverRevision: () => 'carry-1',
+    loadCarryOver: () => carryOver,
+  });
+  return { router, start, registry, events, carryOver };
 }
 
-describe('AgentRuntimeRouter seed branch', () => {
+describe('AgentRuntimeRouter fresh-session boundary', () => {
   beforeEach(async () => {
-    projectDir = path.join(os.tmpdir(), `garcon-runtime-router-${randomUUID()}`);
-    await fs.mkdir(projectDir, { recursive: true });
-    // A real file so the user command's @-mention resolves to content.
-    await fs.writeFile(path.join(projectDir, 'notes.txt'), 'USER FILE BODY', 'utf8');
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-runtime-router-'));
+    await fs.writeFile(path.join(projectDir, 'notes.txt'), 'USER FILE BODY');
   });
 
   afterEach(async () => {
     await fs.rm(projectDir, { recursive: true, force: true });
   });
 
-  it('seeds the fresh session with the carried context and keeps it opaque', async () => {
-    // The seed references a file that also exists on disk; it must NOT be
-    // expanded because the seed is historical text passed with skipFileMentions.
-    await fs.writeFile(path.join(projectDir, 'secret.txt'), 'SECRET FILE BODY', 'utf8');
-    const carryOverContext = `${SEED_CONTEXT_OPEN}\nUser: earlier turn mentioning @secret.txt\n</carried-context>`;
-    const { router, registry, startSession } = makeRouter({ carryOverContext });
+  it('passes canonical carry-over separately from the resolved user prompt', async () => {
+    const { router, start, carryOver } = makeRouter();
 
-    await router.runAgentTurn('1', 'please read @notes.txt', {
-      clientRequestId: 'req-1',
+    await router.runAgentTurn('chat-1', 'review @notes.txt', {
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
       turnId: 'turn-1',
     });
 
-    expect(startSession).toHaveBeenCalledTimes(1);
-    const request = startSession.mock.calls[0][0];
-
-    // Composed command starts with the carried seed context verbatim.
-    expect(request.command.startsWith(carryOverContext)).toBe(true);
-    expect(request.codexSeedContext).toBeUndefined();
-
-    // The user command's @-mention is resolved: file body is inlined.
-    expect(request.command).toContain('USER FILE BODY');
-
-    // The seed's @-mention stays opaque: its file body is never inlined.
-    expect(request.command).not.toContain('SECRET FILE BODY');
-    expect(request.command).toContain('@secret.txt');
-
-    // carryOverContext is cleared after seeding so the next turn resumes natively.
-    const clearingCall = registry.updateChat.mock.calls.find(
-      ([, patch]) => patch && 'carryOverContext' in patch && patch.carryOverContext === null,
-    );
-    expect(clearingCall).toBeDefined();
-  });
-
-  it('converts /goal into a native Codex goal on direct session start', async () => {
-    const { router, startSession } = makeRouter();
-
-    await router.startSession('1', '/goal ship direct work', { turnId: 'turn-1' });
-
-    expect(startSession).toHaveBeenCalledTimes(1);
-    const request = startSession.mock.calls[0][0];
-    expect(request.command).toBe('ship direct work');
-    expect(request.codexGoalCommand).toEqual({ kind: 'set', objective: 'ship direct work' });
-  });
-
-  it('does not invoke a new runtime after execution admission closes', async () => {
-    const admission = new AbortController();
-    admission.abort(new Error('Turn interrupted because the server is shutting down'));
-    const { router, startSession } = makeRouter();
-
-    await expect(router.startSession('1', 'do not start', {
-      executionAdmission: { signal: admission.signal, markStarted: mock() },
-    })).rejects.toThrow('server is shutting down');
-
-    expect(startSession).not.toHaveBeenCalled();
-  });
-
-  it('does not invoke a resumed runtime after execution admission closes', async () => {
-    const admission = new AbortController();
-    admission.abort(new Error('Turn interrupted because the server is shutting down'));
-    const { router, runTurn } = makeRouter({
-      entry: { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' },
-    });
-
-    await expect(router.runAgentTurn('1', 'do not resume', {
-      executionAdmission: { signal: admission.signal, markStarted: mock() },
-    })).rejects.toThrow('server is shutting down');
-
-    expect(runTurn).not.toHaveBeenCalled();
-  });
-
-  it('resolves file mentions in a new goal objective before session start', async () => {
-    const { router, startSession } = makeRouter();
-
-    await router.startSession('1', '/goal incorporate @notes.txt', { turnId: 'turn-1' });
-
-    const request = startSession.mock.calls[0][0];
-    expect(request.command).toContain('USER FILE BODY');
-    expect(request.codexGoalCommand).toEqual({
-      kind: 'set',
-      objective: expect.stringContaining('USER FILE BODY'),
-    });
-  });
-
-  it('carries /goal metadata through a seeded fresh session', async () => {
-    const carryOverContext = `${SEED_CONTEXT_OPEN}\nUser: prior\n</carried-context>`;
-    const { router, startSession } = makeRouter({ carryOverContext });
-
-    await router.runAgentTurn('1', '/goal ship seeded work', { turnId: 'turn-1' });
-
-    expect(startSession).toHaveBeenCalledTimes(1);
-    const request = startSession.mock.calls[0][0];
-    expect(request.command).toBe('ship seeded work');
-    expect(request.command).not.toContain('/goal');
-    expect(request.codexGoalCommand).toEqual({ kind: 'set', objective: 'ship seeded work' });
-    expect(request.codexSeedContext).toBe(carryOverContext);
-  });
-
-  it('preserves Codex goal lifecycle controls as controls on resumed turns', async () => {
-    const { router, runTurn } = makeRouter({
-      entry: { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' },
-    });
-
-    await router.runAgentTurn('1', '/goal clear', { turnId: 'turn-1' });
-
-    expect(runTurn).toHaveBeenCalledTimes(1);
-    const request = runTurn.mock.calls[0][0];
-    expect(request.command).toBe('/goal clear');
-    expect(request.codexGoalCommand).toEqual({ kind: 'clear' });
-  });
-
-  it('resolves file mentions inside active goal objectives before runtime delivery', async () => {
-    const { router, submitActiveInput } = makeRouter({
-      entry: { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' },
-    });
-
-    await router.submitActiveInput('1', '/goal edit incorporate @notes.txt', {
-      clientRequestId: 'request-active',
-      clientMessageId: 'message-active',
-    });
-
-    const request = submitActiveInput.mock.calls[0][0];
-    expect(request.command).toContain('USER FILE BODY');
-    expect(request.codexGoalCommand).toEqual({
-      kind: 'edit',
-      objective: expect.stringContaining('USER FILE BODY'),
-    });
-    expect(request.clientMessageId).toBe('message-active');
-  });
-
-  it('passes skipFileMentions so startSession does not re-resolve the seed', async () => {
-    // Spy on startSession at the router boundary to capture the flag the seed
-    // branch forwards. resolveFileMentions must have run on the user command
-    // before startSession, and startSession must be told to skip re-resolution.
-    const carryOverContext = `${SEED_CONTEXT_OPEN}\nUser: prior\n</carried-context>`;
-    const { router } = makeRouter({ carryOverContext });
-    const seen = [];
-    const original = router.startSession.bind(router);
-    router.startSession = (chatId, command, opts) => {
-      seen.push(opts);
-      return original(chatId, command, opts);
-    };
-
-    await router.runAgentTurn('1', 'follow-up @notes.txt', { turnId: 'turn-1' });
-
-    expect(seen).toHaveLength(1);
-    expect(seen[0].skipFileMentions).toBe(true);
-  });
-
-  it('preserves the accepted command type through a seeded fresh session', async () => {
-    const { router, events } = makeRouter({
-      carryOverContext: `${SEED_CONTEXT_OPEN}\nUser: prior\n</carried-context>`,
-    });
-
-    await router.runAgentTurn('1', 'continue', {
-      clientRequestId: 'req-run',
-      commandType: 'fork-run',
-      turnId: 'turn-run',
-    });
-
-    expect(events.trackTurn).toHaveBeenCalledWith('1', expect.objectContaining({
-      clientRequestId: 'req-run',
-      commandType: 'fork-run',
-      turnId: 'turn-run',
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('USER FILE BODY'),
+      carryOver,
+      operation: {
+        commandType: 'agent-run',
+        clientRequestId: 'request-1',
+        clientMessageId: 'message-1',
+        turnId: 'turn-1',
+      },
     }));
+  });
+
+  it('binds only the opaque native session returned by the integration', async () => {
+    const { router, registry } = makeRouter();
+
+    await router.startSession('chat-1', 'start', { turnId: 'turn-1' });
+
+    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', {
+      agentSessionId: 'native-1',
+      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+    }, { flush: true });
+  });
+
+  it('does not invoke an integration after execution admission closes', async () => {
+    const admission = new AbortController();
+    admission.abort(new Error('server is shutting down'));
+    const { router, start } = makeRouter();
+
+    await expect(router.startSession('chat-1', 'do not start', {
+      executionAdmission: { signal: admission.signal, markStarted: mock(), markAbortable: mock() },
+    })).rejects.toThrow('server is shutting down');
+    expect(start).not.toHaveBeenCalled();
   });
 });

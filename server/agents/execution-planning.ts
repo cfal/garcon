@@ -1,75 +1,44 @@
-import type { ApiProtocol } from '../../common/api-providers.js';
-import type {
-  AmpAgentMode,
-  ClaudeThinkingMode,
-  PermissionMode,
-  ThinkingMode,
-} from '../../common/chat-modes.js';
+import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type {
   ApiProviderEndpointResolver,
   ResolvedModelSelection,
 } from '../api-providers/endpoint-resolver.js';
 import type { AgentChatEntry } from './session-types.js';
 import { requireChatExecutionConfig } from './session-types.js';
-import type { Agent, AgentEndpointRuntimeConfig } from './types.js';
 
-export type RequiredAgentChatEntry = AgentChatEntry & {
-  projectPath: string;
-  model: string;
-  permissionMode: PermissionMode;
-  thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode: AmpAgentMode;
-};
+export type RequiredAgentChatEntry = AgentChatEntry & ReturnType<typeof requireChatExecutionConfig>;
 
 export function requireAgentChatEntry(
   chatId: string,
   entry: AgentChatEntry | null | undefined,
 ): RequiredAgentChatEntry {
   const execution = requireChatExecutionConfig(chatId, entry);
-  if (!entry) {
-    throw new Error(`Session not initialized: ${chatId}`);
-  }
-  return {
-    ...entry,
-    ...execution,
-  };
+  if (!entry) throw new Error(`Session not initialized: ${chatId}`);
+  return { ...entry, ...execution };
 }
 
-export function selectionRequestFields(selection: ResolvedModelSelection): {
-  apiProviderId?: string | null;
-  modelEndpointId?: string | null;
-  modelProtocol?: ApiProtocol | null;
-} {
-  if (!selection.endpointId) return {};
-  return {
-    apiProviderId: selection.apiProviderId,
-    modelEndpointId: selection.endpointId,
-    modelProtocol: selection.protocol,
-  };
-}
-
-export function endpointRuntimeConfig(
-  agent: Agent,
+export function toAgentEndpointSelection(
   endpointResolver: ApiProviderEndpointResolver,
   selection: ResolvedModelSelection,
-): AgentEndpointRuntimeConfig {
-  if (!agent.prepareEndpointRuntime) return {};
+): AgentEndpointSelection | null {
   const reference = endpointResolver.resolveEndpointReference(selection);
-  if (!reference || !selection.apiProviderId || !selection.endpointId || !selection.protocol) return {};
-  return agent.prepareEndpointRuntime({
-    model: selection.model,
+  if (
+    !reference
+    || !selection.apiProviderId
+    || !selection.endpointId
+    || !selection.protocol
+  ) return null;
+  return {
     apiProviderId: selection.apiProviderId,
-    modelEndpointId: selection.endpointId,
-    modelProtocol: selection.protocol,
+    endpointId: selection.endpointId,
+    protocol: selection.protocol,
+    baseUrl: reference.endpoint.baseUrl,
+    model: selection.model,
     isLocal: selection.isLocal,
-    ...reference,
-  }) ?? {};
-}
-
-export function mergeRuntimeConfig<T extends Record<string, unknown>>(
-  target: T,
-  runtimeConfig: AgentEndpointRuntimeConfig,
-): T & AgentEndpointRuntimeConfig {
-  return Object.assign(target, runtimeConfig);
+    credential: {
+      kind: 'api-provider-endpoint',
+      apiProviderId: selection.apiProviderId,
+      endpointId: selection.endpointId,
+    },
+  };
 }

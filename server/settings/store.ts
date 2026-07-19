@@ -60,8 +60,6 @@ const LEGACY_LAST_KEYS = [
   'lastModelProtocol',
   'lastPermissionMode',
   'lastThinkingMode',
-  'lastClaudeThinkingMode',
-  'lastAmpAgentMode',
 ] as const;
 
 interface SanitizedSettingsResult {
@@ -192,8 +190,6 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
   const hasLegacyModeFields = [
     'lastPermissionMode',
     'lastThinkingMode',
-    'lastClaudeThinkingMode',
-    'lastAmpAgentMode',
   ].some((key) => key in raw);
   if (hasLegacyModeFields) {
     const legacyDefaults = legacyExecutionDefaults(raw);

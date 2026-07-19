@@ -4,197 +4,174 @@ import { AgentSwitchError, AgentSwitchService } from '../agent-switch-service.ts
 import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 import { UserMessage } from '../../../common/chat-types.js';
 
-// Builds a fully mocked AgentSwitchService with a real KeyedPromiseLock so the
-// switch runs through its serialization path. Overrides tune per-test behavior.
+const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
+
+function integration(id, overrides = {}) {
+  return {
+    descriptor: {
+      id,
+      supportedPermissionModes: ['default', 'acceptEdits'],
+      supportedThinkingModes: ['none', 'high'],
+      ...overrides.descriptor,
+    },
+    execution: {
+      isRunning: overrides.isRunning ?? mock(() => false),
+    },
+    transcript: {
+      load: overrides.load ?? mock(async () => ({
+        messages: [new UserMessage('2026-07-07T00:00:00.000Z', 'prior turn')],
+        revision: 'native-1',
+      })),
+    },
+    settings: {
+      defaults: mock(() => envelope(id)),
+      parse: mock((input) => input),
+    },
+  };
+}
+
 function makeService(overrides = {}) {
   const entry = {
     id: '1',
-    agentId: 'claude',
-    agentSessionId: 'agent-1',
-    nativePath: '/tmp/agent-1.jsonl',
+    agentId: 'source',
+    agentSessionId: 'source-session',
+    nativeSession: { ownerId: 'source', schemaVersion: 1, value: { path: '/tmp/source.jsonl' } },
+    agentOwnershipEpoch: 'epoch-source',
+    agentSettingsById: { source: envelope('source', { retained: true }) },
     projectPath: '/repo',
-    model: 'opus',
+    model: 'source-model',
     apiProviderId: null,
     modelEndpointId: null,
-    permissionMode: 'default',
-    thinkingMode: 'off',
-    claudeThinkingMode: 'off',
-    ampAgentMode: 'default',
+    modelProtocol: null,
+    permissionMode: 'acceptEdits',
+    thinkingMode: 'high',
+    tags: [],
     ...overrides.entry,
   };
-  const sessions = new Map([['1', entry]]);
-  const registry = {
-    getChat: mock((chatId) => sessions.get(chatId) ?? null),
-    updateChat: mock((chatId, patch) => {
-      const current = sessions.get(chatId);
-      if (!current) return null;
-      const next = { ...current, ...patch };
-      sessions.set(chatId, next);
-      return next;
+  const source = integration('source', overrides.source);
+  const target = integration('target', overrides.target);
+  const registry = { getChat: mock(() => entry) };
+  const directory = {
+    get: mock((id) => id === 'source' ? source : id === 'target' ? target : null),
+    require: mock((id) => {
+      const found = id === 'source' ? source : id === 'target' ? target : null;
+      if (!found) throw new Error(`Unknown integration: ${id}`);
+      return found;
     }),
   };
-
-  const loadMessages = overrides.loadMessages
-    ?? mock(() => Promise.resolve([new UserMessage('2026-07-07T00:00:00.000Z', 'prior turn')]));
-  const isRunning = overrides.isRunning ?? mock(() => false);
-  const fromAgent = {
-    label: 'Claude',
-    runtime: { isRunning },
-    transcript: { loadMessages },
-  };
-  const directory = {
-    get: mock((agentId) => (agentId === entry.agentId ? fromAgent : null)),
-  };
-
   const endpointResolver = {
-    resolveSelection: mock((input) => ({
-      model: input.model,
-      apiProviderId: input.apiProviderId ?? null,
-      endpointId: input.modelEndpointId ?? null,
+    resolveSelection: mock((request) => ({
+      model: request.model,
+      apiProviderId: request.apiProviderId ?? null,
+      endpointId: request.modelEndpointId ?? null,
       protocol: null,
       isLocal: false,
+      credentialRef: null,
+      baseUrl: null,
     })),
   };
-
-  const carryOver = {
-    getMessages: overrides.carryOverMessages ?? mock(() => []),
-    appendSegment: mock(() => undefined),
+  const carryOver = { getRevision: mock(() => 'carry-1') };
+  const ownership = {
+    transfer: mock(async (request) => ({
+      ...entry,
+      ...request.patch,
+      agentId: request.targetAgentId,
+      agentSessionId: null,
+      nativeSession: null,
+      agentOwnershipEpoch: 'epoch-target',
+    })),
   };
-
   const service = new AgentSwitchService({
     registry,
     directory,
     endpointResolver,
     carryOver,
+    ownership,
     chatMutationLock: overrides.lock ?? new KeyedPromiseLock(),
   });
-
-  return { service, registry, directory, endpointResolver, carryOver, loadMessages, isRunning, sessions };
+  return { service, source, target, ownership, endpointResolver };
 }
 
 describe('AgentSwitchService', () => {
-  it('snapshots the source transcript and stages a fresh session under the target', async () => {
-    const { service, registry, carryOver, loadMessages } = makeService();
+  it('loads the source transcript and delegates the atomic ownership transfer', async () => {
+    const { service, source, target, ownership } = makeService();
 
-    const updated = await service.switchAgentModel({
+    const updated = await service.switchAgentModel({ chatId: '1', agentId: 'target', model: 'target-model' });
+
+    expect(source.transcript.load).toHaveBeenCalledTimes(1);
+    expect(ownership.transfer).toHaveBeenCalledWith(expect.objectContaining({
       chatId: '1',
-      agentId: 'codex',
-      model: 'gpt-5',
-    });
-
-    // Loads the outgoing native transcript for the source chat.
-    expect(loadMessages).toHaveBeenCalledTimes(1);
-    expect(loadMessages.mock.calls[0][1]).toEqual({ chatId: '1' });
-
-    // Appends the outgoing agent id and its messages to carry-over.
-    expect(carryOver.appendSegment).toHaveBeenCalledTimes(1);
-    const [segmentChatId, segment] = carryOver.appendSegment.mock.calls[0];
-    expect(segmentChatId).toBe('1');
-    expect(segment.agentId).toBe('claude');
-    expect(segment.messages.length).toBe(1);
-
-    // Registry is patched to the target agent with a cleared native session and
-    // a non-empty carried-context seed, plus normalized modes.
-    expect(registry.updateChat).toHaveBeenCalledTimes(1);
-    const [, patch] = registry.updateChat.mock.calls[0];
-    expect(patch.agentId).toBe('codex');
-    expect(patch.agentSessionId).toBeNull();
-    expect(patch.nativePath).toBeNull();
-    expect(typeof patch.carryOverContext).toBe('string');
-    expect(patch.carryOverContext.length).toBeGreaterThan(0);
-    expect(patch.permissionMode).toBeDefined();
-    expect(patch.thinkingMode).toBeDefined();
-    expect(patch.claudeThinkingMode).toBeDefined();
-    expect(patch.ampAgentMode).toBeDefined();
-
-    expect(updated.agentId).toBe('codex');
+      targetAgentId: 'target',
+      carryOverSegment: expect.objectContaining({ agentId: 'source', model: 'source-model' }),
+      patch: expect.objectContaining({
+        model: 'target-model',
+        permissionMode: 'acceptEdits',
+        thinkingMode: 'high',
+        agentSettingsById: {
+          source: envelope('source', { retained: true }),
+          target: envelope('target'),
+        },
+      }),
+    }));
+    expect(target.settings.parse).toHaveBeenCalledWith(envelope('target'));
+    expect(updated.agentId).toBe('target');
   });
 
-  it('refuses to switch while the outgoing turn is running', async () => {
-    const { service, registry, carryOver } = makeService({ isRunning: mock(() => true) });
+  it('rejects a switch while the source integration reports a running session', async () => {
+    const { service, ownership } = makeService({ source: { isRunning: mock(() => true) } });
 
-    let error;
-    try {
-      await service.switchAgentModel({ chatId: '1', agentId: 'codex', model: 'gpt-5' });
-    } catch (caught) {
-      error = caught;
-    }
-    expect(error).toBeInstanceOf(AgentSwitchError);
-    expect(error.message).toBe('Stop the current turn before switching agents.');
-    expect(error.status).toBe(409);
-    expect(error.code).toBe('SESSION_BUSY');
-
-    // A running turn short-circuits before any mutation or snapshot.
-    expect(registry.updateChat).not.toHaveBeenCalled();
-    expect(carryOver.appendSegment).not.toHaveBeenCalled();
+    await expect(service.switchAgentModel({ chatId: '1', agentId: 'target', model: 'target-model' }))
+      .rejects.toBeInstanceOf(AgentSwitchError);
+    expect(ownership.transfer).not.toHaveBeenCalled();
   });
 
-  it('clears Codex ultra thinking when switching to another agent', async () => {
-    const { service, registry } = makeService({
-      entry: { agentId: 'codex', thinkingMode: 'ultra' },
+  it('normalizes modes against the target descriptor without provider rules', async () => {
+    const { service, ownership } = makeService({
+      entry: { permissionMode: 'plan', thinkingMode: 'ultra' },
+      target: { descriptor: { supportedPermissionModes: ['default'], supportedThinkingModes: ['none'] } },
     });
 
-    await service.switchAgentModel({ chatId: '1', agentId: 'claude', model: 'opus' });
+    await service.switchAgentModel({ chatId: '1', agentId: 'target', model: 'target-model' });
 
-    expect(registry.updateChat.mock.calls[0][1].thinkingMode).toBe('none');
+    expect(ownership.transfer.mock.calls[0][0].patch).toMatchObject({
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
   });
 
-  it('reads carry-over and skips a duplicate segment on a chained switch', async () => {
-    const carriedMessages = [new UserMessage('2026-07-07T00:00:00.000Z', 'earlier chained turn')];
-    const { service, carryOver, loadMessages } = makeService({
-      entry: { agentSessionId: null, nativePath: null },
-      carryOverMessages: mock(() => carriedMessages),
+  it('does not duplicate carry-over when the source has no native session', async () => {
+    const { service, source, ownership } = makeService({
+      entry: { agentSessionId: null, nativeSession: null },
     });
 
-    const updated = await service.switchAgentModel({
-      chatId: '1',
-      agentId: 'codex',
-      model: 'gpt-5',
-    });
+    await service.switchAgentModel({ chatId: '1', agentId: 'target', model: 'target-model' });
 
-    // No native session means history comes from carry-over, not the transcript.
-    expect(loadMessages).not.toHaveBeenCalled();
-    expect(carryOver.getMessages).toHaveBeenCalledWith('1');
-
-    // A chained switch already has its history staged, so it must not re-append.
-    expect(carryOver.appendSegment).not.toHaveBeenCalled();
-
-    expect(updated.agentId).toBe('codex');
-    expect(updated.carryOverContext).toContain('earlier chained turn');
+    expect(source.transcript.load).not.toHaveBeenCalled();
+    expect(ownership.transfer.mock.calls[0][0].carryOverSegment).toBeNull();
   });
 
-  it('serializes concurrent switches on the same chat via the shared lock', async () => {
-    // Blocking the first switch inside loadMessages proves the second waits: if
-    // the lock were bypassed the second switch would reach updateChat while the
-    // first is still parked at the gate.
+  it('serializes same-chat transfers through the shared mutation lock', async () => {
     const order = [];
-    let releaseFirst;
-    const firstGate = new Promise((resolve) => {
-      releaseFirst = resolve;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const load = mock(async () => {
+      order.push('load');
+      await gate;
+      return { messages: [], revision: 'native-1' };
     });
-    const loadMessages = mock(async () => {
-      order.push('first-load-start');
-      await firstGate;
-      order.push('first-load-end');
-      return [];
-    });
-    const { service, registry } = makeService({ loadMessages });
-    const baseUpdate = registry.updateChat.getMockImplementation();
-    registry.updateChat.mockImplementation((chatId, patch) => {
-      order.push(`update:${patch.agentId}`);
-      return baseUpdate(chatId, patch);
+    const { service, ownership } = makeService({ source: { load } });
+    ownership.transfer.mockImplementation(async (request) => {
+      order.push(`transfer:${request.patch.model}`);
+      return { agentId: request.targetAgentId, ...request.patch };
     });
 
-    const first = service.switchAgentModel({ chatId: '1', agentId: 'codex', model: 'gpt-5' });
-    const second = service.switchAgentModel({ chatId: '1', agentId: 'amp', model: 'sonnet' });
-
-    // Drain the microtask queue so the first switch reaches its blocking load;
-    // the second must still be parked behind the lock, never reaching updateChat.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(order).toEqual(['first-load-start']);
-    releaseFirst();
+    const first = service.switchAgentModel({ chatId: '1', agentId: 'target', model: 'one' });
+    const second = service.switchAgentModel({ chatId: '1', agentId: 'target', model: 'two' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(['load']);
+    release();
     await Promise.all([first, second]);
-    // The first fully completes (through updateChat) before the second begins.
-    expect(order).toEqual(['first-load-start', 'first-load-end', 'update:codex', 'update:amp']);
+    expect(order).toEqual(['load', 'transfer:one', 'load', 'transfer:two']);
   });
 });

@@ -1,38 +1,39 @@
 // Chat registry. Manages a single chats.json file that maps
 // chat IDs to agent-specific session metadata.
 
-import { promises as fs } from 'fs';
-import path from 'path';
+import crypto from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { EventEmitter } from 'events';
 import {
-  normalizeAmpAgentMode,
-  normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
-  type AmpAgentMode,
-  type ClaudeThinkingMode,
   type PermissionMode,
   type ThinkingMode,
 } from '../../common/chat-modes.js';
+import {
+  parseAgentSettingsById,
+  type AgentSettingsEnvelope,
+} from '../../common/agent-integration.js';
+import type { JsonObject, JsonValue } from '../../common/json.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { parseChatId } from '../../common/chat-id.js';
 import type { AgentName } from "../agents/session-types.js";
-import { isArtificialNativePath, parseArtificialNativePath } from './artificial-native-path.js';
+import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatProjectPathUpdatedPayload } from '../../common/ws-events.js';
 
 const logger = createLogger('chats:store');
 
-const CHAT_REGISTRY_VERSION = 2;
-const LEGACY_AGENT_ID_FIELD = 'provider';
-const LEGACY_AGENT_SESSION_ID_FIELD = 'providerSessionId';
-const NATIVE_PATH_LRU_MAX = 64;
+const CHAT_REGISTRY_VERSION = 3;
 // Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
 const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
-  'nativePath',
+  'nativeSession',
+  'agentOwnershipEpoch',
+  'agentSettingsById',
   'tags',
   'agentSessionId',
   'nextForkOrdinal',
@@ -43,14 +44,13 @@ const ALLOWED_PATCH_FIELDS = [
   'lastReadAt',
   'permissionMode',
   'thinkingMode',
-  'claudeThinkingMode',
-  'ampAgentMode',
-  'carryOverContext',
 ] as const;
 
 export interface ChatRegistryEntry {
   agentId: AgentName;
-  nativePath: string | null;
+  nativeSession: AgentNativeSessionRef | null;
+  agentOwnershipEpoch: string;
+  agentSettingsById: Record<string, AgentSettingsEnvelope>;
   projectPath: string;
   tags: string[];
   agentSessionId: string | null;
@@ -62,12 +62,6 @@ export interface ChatRegistryEntry {
   lastReadAt?: string | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode: AmpAgentMode;
-  // Pending cross-agent seed text. Set when a chat switches agents so the next
-  // turn starts a fresh native session prefixed with the prior conversation;
-  // cleared once that seeded turn starts.
-  carryOverContext?: string | null;
 }
 
 export interface ChatRegistrySnapshot {
@@ -80,7 +74,9 @@ export interface NewChatRegistryEntry {
   agentId: AgentName;
   model: string;
   projectPath: string;
-  nativePath?: string | null;
+  nativeSession?: AgentNativeSessionRef | null;
+  agentOwnershipEpoch?: string;
+  agentSettingsById?: Record<string, AgentSettingsEnvelope>;
   tags?: string[];
   agentSessionId?: string | null;
   nextForkOrdinal?: number;
@@ -89,9 +85,6 @@ export interface NewChatRegistryEntry {
   modelProtocol?: ApiProtocol | null;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  ampAgentMode?: AmpAgentMode;
-  carryOverContext?: string | null;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -104,14 +97,17 @@ export type ChatRemovedCallback = (chatId: string) => void;
 export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
 export type ChatProjectPathUpdatedCallback = (payload: ChatProjectPathUpdatedPayload) => void;
 export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
-  nativePath?: string | null;
+  nativeSession?: AgentNativeSessionRef | null;
 }
-export type ResolveNativePath = (session: ChatRegistryEntry) => Promise<string | null>;
+export type ResolveNativeSession = (
+  session: ChatRegistryEntry,
+  chatId: string,
+) => Promise<AgentNativeSessionRef | null>;
 
 export interface IChatRegistry {
   init(): Promise<ChatRegistrySnapshot>;
   getRegistry(): ChatRegistrySnapshot;
-  reconcileSessions(resolveNativePath: ResolveNativePath): Promise<boolean>;
+  reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean>;
   listAllChats(): Record<string, ChatRegistryEntry>;
   getChat(id: string): ChatRegistryEntry | null;
   addChat(entry: NewChatRegistryEntry): boolean;
@@ -123,7 +119,6 @@ export interface IChatRegistry {
     options: { flush: true },
   ): Promise<ChatRegistryResolvedEntry | null>;
   removeChat(id: string): boolean;
-  getChatByNativePath(nativePath: string | null | undefined): [string, ChatRegistryEntry] | null;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
   saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
   flush(): Promise<void>;
@@ -144,14 +139,10 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 function normalizeRegistryModes(entry: {
   permissionMode?: unknown;
   thinkingMode?: unknown;
-  claudeThinkingMode?: unknown;
-  ampAgentMode?: unknown;
-}): Pick<ChatRegistryEntry, 'permissionMode' | 'thinkingMode' | 'claudeThinkingMode' | 'ampAgentMode'> {
+}): Pick<ChatRegistryEntry, 'permissionMode' | 'thinkingMode'> {
   return {
     permissionMode: normalizePermissionMode(entry.permissionMode),
     thinkingMode: normalizeThinkingMode(entry.thinkingMode),
-    claudeThinkingMode: normalizeClaudeThinkingMode(entry.claudeThinkingMode),
-    ampAgentMode: normalizeAmpAgentMode(entry.ampAgentMode),
   };
 }
 
@@ -177,57 +168,17 @@ function normalizeAgentId(rawEntry: Record<string, unknown>): AgentName {
   return typeof value === 'string' ? value as AgentName : '';
 }
 
-function artificialNativePathMatchesAgent(artificialAgentId: string, agentId: AgentName): boolean {
-  if (!agentId) return true;
-  return artificialAgentId === agentId || artificialAgentId.startsWith(`${agentId}-`);
-}
-
-function migratePersistedChatEntry(rawEntry: Record<string, unknown>): {
-  entry: Record<string, unknown>;
-  migrated: boolean;
-} {
-  const entry = { ...rawEntry };
-  let migrated = LEGACY_AGENT_ID_FIELD in rawEntry || LEGACY_AGENT_SESSION_ID_FIELD in rawEntry;
-
-  const legacyAgentId = rawEntry[LEGACY_AGENT_ID_FIELD];
-  if (typeof entry.agentId !== 'string' && typeof legacyAgentId === 'string') {
-    entry.agentId = legacyAgentId;
-    migrated = true;
-  }
-
-  if (typeof entry.agentSessionId !== 'string') {
-    const recoveredAgentSessionId = recoverAgentSessionId(rawEntry, normalizeAgentId(entry));
-    if (recoveredAgentSessionId) {
-      entry.agentSessionId = recoveredAgentSessionId;
-      migrated = true;
-    }
-  }
-
-  return { entry, migrated };
-}
-
-function recoverAgentSessionId(rawEntry: Record<string, unknown>, agentId: AgentName): string | null {
-  const legacySessionId = rawEntry[LEGACY_AGENT_SESSION_ID_FIELD];
-  if (typeof legacySessionId === 'string' && legacySessionId) return legacySessionId;
-
-  const nativePath = normalizeNullableString(rawEntry.nativePath);
-  if (!nativePath) return null;
-
-  const artificial = parseArtificialNativePath(nativePath);
-  if (artificial && artificialNativePathMatchesAgent(artificial.agentId, agentId)) {
-    return artificial.agentSessionId;
-  }
-
-  if (path.extname(nativePath) !== '.jsonl') return null;
-  const basename = path.basename(nativePath, '.jsonl');
-  return basename || null;
-}
-
 function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegistryEntry {
+  const agentId = normalizeAgentId(rawEntry);
+  const nativeSession = normalizeNativeSession(rawEntry.nativeSession, agentId);
+  const agentSettingsById = parseAgentSettingsById(rawEntry.agentSettingsById);
+  if (!agentSettingsById) throw new Error(`Invalid agentSettingsById for ${agentId || 'unknown agent'}`);
   return {
-    agentId: normalizeAgentId(rawEntry),
+    agentId,
     agentSessionId: normalizeNullableString(rawEntry.agentSessionId),
-    nativePath: normalizeNullableString(rawEntry.nativePath),
+    nativeSession,
+    agentOwnershipEpoch: normalizeOwnershipEpoch(rawEntry.agentOwnershipEpoch),
+    agentSettingsById,
     projectPath: normalizeString(rawEntry.projectPath),
     tags: Array.isArray(rawEntry.tags) ? rawEntry.tags.filter((tag): tag is string => typeof tag === 'string') : [],
     model: normalizeString(rawEntry.model),
@@ -238,15 +189,45 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
       : null,
     lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
     nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
-    carryOverContext: typeof rawEntry.carryOverContext === 'string' ? rawEntry.carryOverContext : undefined,
     ...normalizeRegistryModes(rawEntry),
   };
+}
+
+function normalizeOwnershipEpoch(value: unknown): string {
+  if (typeof value !== 'string' || !value) throw new Error('Chat is missing agentOwnershipEpoch');
+  return value;
+}
+
+function normalizeNativeSession(value: unknown, agentId: string): AgentNativeSessionRef | null {
+  if (value === null || value === undefined) return null;
+  if (!isObjectRecord(value)) throw new Error(`Invalid native session for ${agentId}`);
+  if (value.ownerId !== agentId) throw new Error(`Native session owner mismatch for ${agentId}`);
+  if (!Number.isSafeInteger(value.schemaVersion) || Number(value.schemaVersion) < 1) {
+    throw new Error(`Invalid native session schema version for ${agentId}`);
+  }
+  if (!isJsonObject(value.value)) throw new Error(`Invalid native session value for ${agentId}`);
+  return {
+    ownerId: agentId,
+    schemaVersion: Number(value.schemaVersion),
+    value: value.value,
+  };
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return isObjectRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null) return true;
+  if (typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isJsonObject(value);
 }
 
 export class ChatRegistry extends EventEmitter implements IChatRegistry {
   #registry: ChatRegistrySnapshot | null = null;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  #nativePathCache = new Map<string, string>();
   #agentSessionIdIndex = new Map<string, string>();
   #workspaceDir: string;
 
@@ -290,25 +271,22 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         this.#registry = createEmptyRegistry();
         return this.#registry;
       }
+      if (parsed.version !== CHAT_REGISTRY_VERSION) {
+        throw new Error(`Unsupported chat registry version: ${String(parsed.version)}`);
+      }
       const sessions: Record<string, ChatRegistryEntry> = {};
-      let migrated = parsed.version !== CHAT_REGISTRY_VERSION;
       for (const [rawChatId, rawEntry] of Object.entries(parsed.sessions)) {
         const chatId = parseChatId(rawChatId);
         if (!isObjectRecord(rawEntry)) {
           throw new Error(`Invalid chat registry entry for ${chatId}`);
         }
-        const migratedEntry = migratePersistedChatEntry(rawEntry);
-        sessions[chatId] = normalizeChatRegistryEntry(migratedEntry.entry);
-        migrated = migrated || migratedEntry.migrated;
+        sessions[chatId] = normalizeChatRegistryEntry(rawEntry);
       }
       this.#registry = {
         version: CHAT_REGISTRY_VERSION,
         sessions,
       };
       this.#rebuildAgentSessionIdIndex();
-      if (migrated) {
-        await this.saveRegistry(this.#registry);
-      }
       return this.#registry;
     } catch (error: unknown) {
       const errno = error as NodeJS.ErrnoException;
@@ -328,7 +306,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     return this.#registry;
   }
 
-  async reconcileSessions(resolveNativePath: ResolveNativePath): Promise<boolean> {
+  async reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean> {
     const registry = this.getRegistry();
     const sessions = registry.sessions;
     let dirty = false;
@@ -339,29 +317,24 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         continue;
       }
 
-      if (session.nativePath) {
-        if (isArtificialNativePath(session.nativePath)) continue;
-        try {
-          await fs.access(session.nativePath);
-          continue;
-        } catch {
-          this.#nativePathCache.delete(session.nativePath);
-        }
-      }
+      if (session.nativeSession) continue;
 
-      let resolvedPath: string | null;
+      let resolved: AgentNativeSessionRef | null;
       try {
-        resolvedPath = await resolveNativePath(session);
+        resolved = await resolveNativeSession(session, chatId);
       } catch (error) {
-        logger.warn(`sessions: nativePath reconciliation failed for ${chatId}:`, (error as Error).message);
+        logger.warn(`sessions: native session reconciliation failed for ${chatId}:`, (error as Error).message);
         continue;
       }
-      if (!resolvedPath) {
-        logger.warn(`sessions: preserving chat ${chatId} with unresolved nativePath`);
+      if (!resolved) {
+        logger.warn(`sessions: preserving chat ${chatId} with unresolved native session`);
         continue;
+      }
+      if (resolved.ownerId !== session.agentId) {
+        throw new Error(`Native session owner mismatch for ${chatId}`);
       }
 
-      session.nativePath = resolvedPath;
+      session.nativeSession = resolved;
       dirty = true;
     }
 
@@ -391,7 +364,9 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     agentId,
     model,
     projectPath,
-    nativePath = null,
+    nativeSession = null,
+    agentOwnershipEpoch = crypto.randomUUID(),
+    agentSettingsById = {},
     tags = [],
     agentSessionId = null,
     nextForkOrdinal = 1,
@@ -400,9 +375,6 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     modelProtocol = null,
     permissionMode = 'default',
     thinkingMode = 'none',
-    claudeThinkingMode = 'auto',
-    ampAgentMode = 'smart',
-    carryOverContext = undefined,
   }: NewChatRegistryEntry): boolean {
     const chatId = parseChatId(id);
     if (!agentId) throw new Error('Agent not specified');
@@ -412,10 +384,15 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     if (chatId in registry.sessions) {
       throw new Error(`Chat with ID ${chatId} already exists`);
     }
-    const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode, claudeThinkingMode, ampAgentMode });
+    if (nativeSession?.ownerId !== agentId && nativeSession !== null) {
+      throw new Error(`Native session owner mismatch for ${chatId}`);
+    }
+    const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode });
     registry.sessions[chatId] = {
       agentId,
-      nativePath,
+      nativeSession,
+      agentOwnershipEpoch,
+      agentSettingsById,
       projectPath,
       tags,
       agentSessionId,
@@ -424,7 +401,6 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       apiProviderId,
       modelEndpointId,
       modelProtocol,
-      carryOverContext,
       ...normalizedModes,
     };
     this.#setAgentSessionIdIndex(chatId, agentSessionId);
@@ -450,14 +426,14 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     if ('thinkingMode' in normalizedPatch) {
       normalizedPatch.thinkingMode = normalizeThinkingMode(normalizedPatch.thinkingMode);
     }
-    if ('claudeThinkingMode' in normalizedPatch) {
-      normalizedPatch.claudeThinkingMode = normalizeClaudeThinkingMode(normalizedPatch.claudeThinkingMode);
-    }
-    if ('ampAgentMode' in normalizedPatch) {
-      normalizedPatch.ampAgentMode = normalizeAmpAgentMode(normalizedPatch.ampAgentMode);
-    }
     if ('nextForkOrdinal' in normalizedPatch) {
       normalizedPatch.nextForkOrdinal = normalizeNextForkOrdinal(normalizedPatch.nextForkOrdinal);
+    }
+    if ('nativeSession' in normalizedPatch && normalizedPatch.nativeSession?.ownerId !== (normalizedPatch.agentId ?? existing.agentId)) {
+      if (normalizedPatch.nativeSession !== null) throw new Error(`Native session owner mismatch for ${id}`);
+    }
+    if ('agentSettingsById' in normalizedPatch && !parseAgentSettingsById(normalizedPatch.agentSettingsById)) {
+      throw new Error(`Invalid agent settings for ${id}`);
     }
     const previousAgentSessionId = existing.agentSessionId;
     for (const key of ALLOWED_PATCH_FIELDS) {
@@ -492,7 +468,12 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       throw new Error(`Project path update identity mismatch: ${id}`);
     }
     existing.projectPath = update.projectPath;
-    if ('nativePath' in update) existing.nativePath = update.nativePath ?? null;
+    if ('nativeSession' in update) {
+      if (update.nativeSession?.ownerId !== existing.agentId && update.nativeSession !== null) {
+        throw new Error(`Native session owner mismatch for ${id}`);
+      }
+      existing.nativeSession = update.nativeSession ?? null;
+    }
     await this.#flushRegistrySave();
     this.#emitChatProjectPathUpdated({
       chatId: update.chatId,
@@ -508,30 +489,11 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     const registry = this.getRegistry();
     const entry = registry.sessions[id];
     if (!entry) return false;
-    if (entry.nativePath) this.#nativePathCache.delete(entry.nativePath);
     this.#unsetAgentSessionIdIndex(id, entry.agentSessionId);
     delete registry.sessions[id];
     this.#emitChatRemoved(id);
     this.#scheduleRegistrySave();
     return true;
-  }
-
-  getChatByNativePath(nativePath: string | null | undefined): [string, ChatRegistryEntry] | null {
-    const registry = this.#registry;
-    if (!registry) {
-      throw new Error('Registry cache not initialized. Call init() during startup.');
-    }
-    if (!nativePath) return null;
-    const cachedMatch = this.#getFromNativePathCache(nativePath, registry.sessions);
-    if (cachedMatch) return cachedMatch;
-
-    for (const [id, entry] of Object.entries(registry.sessions)) {
-      if (entry.nativePath === nativePath) {
-        this.#addToNativePathCache(nativePath, id);
-        return [id, entry];
-      }
-    }
-    return null;
   }
 
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null {
@@ -581,32 +543,6 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         logger.warn('sessions: failed to persist registry:', error.message);
       });
     }, REGISTRY_SAVE_DEBOUNCE_MS);
-  }
-
-  #addToNativePathCache(nativePath: string, chatId: string): void {
-    if (!nativePath || !chatId) return;
-    if (this.#nativePathCache.has(nativePath)) this.#nativePathCache.delete(nativePath);
-    this.#nativePathCache.set(nativePath, chatId);
-    if (this.#nativePathCache.size > NATIVE_PATH_LRU_MAX) {
-      const oldest = this.#nativePathCache.keys().next().value;
-      if (oldest) this.#nativePathCache.delete(oldest);
-    }
-  }
-
-  #getFromNativePathCache(
-    nativePath: string,
-    sessions: Record<string, ChatRegistryEntry>,
-  ): [string, ChatRegistryEntry] | null {
-    const cachedChatId = this.#nativePathCache.get(nativePath);
-    if (!cachedChatId) return null;
-    const cachedEntry = sessions[cachedChatId];
-    if (!cachedEntry?.nativePath || cachedEntry.nativePath !== nativePath) {
-      this.#nativePathCache.delete(nativePath);
-      return null;
-    }
-    this.#nativePathCache.delete(nativePath);
-    this.#nativePathCache.set(nativePath, cachedChatId);
-    return [cachedChatId, cachedEntry];
   }
 
   #rebuildAgentSessionIdIndex(): void {

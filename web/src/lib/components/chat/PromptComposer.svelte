@@ -3,6 +3,7 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
 	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
 	import {
@@ -39,10 +40,6 @@
 		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
 		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
 	} from '$lib/chat/conversation/chat-max-width.js';
-	import {
-		CLAUDE_PERMISSION_MODES,
-		NON_CLAUDE_PERMISSION_MODES,
-	} from '$lib/chat/composer/chat-ui-constants.js';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/composer/file-mentions.js';
 	import {
 		applySlashCommand,
@@ -61,6 +58,8 @@
 	} from '$lib/utils/local-persistence';
 	import { FileText, ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+	import type { AgentSettingDescriptor } from '$shared/agent-integration';
+	import type { JsonValue } from '$shared/json';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
@@ -79,6 +78,7 @@
 		onModelChange?: (selection: ModelSelectorChange) => void;
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
+		onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
 		onAbort?: (() => void) | null;
 		quickCommitTrayVisible?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
@@ -97,6 +97,7 @@
 		onModelChange,
 		onPermissionModeChange,
 		onThinkingModeChange,
+		onAgentSettingChange,
 		onAbort = null,
 		quickCommitTrayVisible = false,
 		quickCommitSummary = null,
@@ -567,11 +568,11 @@
 		),
 	);
 	const permissionOptions = $derived(
-		buildPermissionOptions(
-			agentState.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
-		),
+		buildPermissionOptions(modelCatalog.getPermissionModes(agentState.agentId)),
 	);
-	const thinkingOptions = $derived(buildThinkingOptions(agentState.agentId, agentState.model));
+	const thinkingOptions = $derived(
+		buildThinkingOptions(modelCatalog.getThinkingModes(agentState.agentId), agentState.model),
+	);
 	const canAttachImages = $derived(
 		modelCatalog.supportsImages(agentState.agentId, agentState.model),
 	);
@@ -614,10 +615,7 @@
 	const composerFrameWrapperClass = $derived(
 		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[localSettings.chatMaxWidth]),
 	);
-	const composerSurfaceClass = cn(
-		'relative z-20',
-		CHAT_DOCK_SURFACE_CLASS,
-	);
+	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS);
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
 		cn(
@@ -797,6 +795,13 @@
 						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}></textarea>
 				</div>
 			</div>
+
+			<AgentSettingsControls
+				descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
+				envelope={agentState.agentSettings}
+				onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
+				disabled={!onAgentSettingChange}
+			/>
 
 			<ComposerBottomBar
 				{canAttachImages}

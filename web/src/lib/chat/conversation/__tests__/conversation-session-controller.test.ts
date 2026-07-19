@@ -27,12 +27,7 @@ import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-s
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type {
-	ClaudeThinkingMode,
-	PendingPermissionRequest,
-	PermissionMode,
-	QueueState,
-} from '$lib/types/chat';
+import type { PendingPermissionRequest, PermissionMode, QueueState } from '$lib/types/chat';
 import type { LoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 
@@ -41,8 +36,8 @@ vi.mock('$lib/api/chats.js', () => ({
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
-		getChatQueue: vi.fn(),
-		interruptAndSendChat: vi.fn(),
+	getChatQueue: vi.fn(),
+	interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
@@ -107,8 +102,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		modelProtocol: null,
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		createdAt: null,
 		lastActivityAt: '2026-03-27T08:00:00.000Z',
 		lastReadAt: null,
@@ -140,8 +134,7 @@ function createServerEntry(id: string) {
 		model: 'sonnet',
 		permissionMode: 'default' as const,
 		thinkingMode: 'none' as const,
-		claudeThinkingMode: 'auto' as const,
-		ampAgentMode: 'smart' as const,
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		title: 'Forked chat',
 		projectPath: '/workspace/project',
 		effectiveProjectKey: '/workspace/project',
@@ -261,7 +254,15 @@ function createDeps(chat = createRunningChat()) {
 			restoreDraft: vi.fn(),
 		},
 		agentState: {
-			setAgentId: vi.fn(),
+			setAgentId: vi.fn(function (this: { agentId: string }, agentId: string) {
+				this.agentId = agentId;
+			}),
+			setAgentSettings: vi.fn(function (
+				this: { agentSettings: { ownerId: string; schemaVersion: number; values: object } },
+				agentSettings,
+			) {
+				this.agentSettings = agentSettings;
+			}),
 			setModelSelection: vi.fn(),
 			agentId: 'claude',
 			model: '',
@@ -270,8 +271,7 @@ function createDeps(chat = createRunningChat()) {
 			modelProtocol: null,
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto' as ClaudeThinkingMode,
-			ampAgentMode: 'smart',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		},
 		lifecycle: {
 			currentChatId: null as string | null,
@@ -304,6 +304,27 @@ function createDeps(chat = createRunningChat()) {
 			})),
 			selectionValueFor: vi.fn((_provider, model) => model),
 			getAgentLabel: vi.fn((agentId: string) => agentId),
+			getDefaultAgentSettings: vi.fn((agentId: string) => ({
+				ownerId: agentId,
+				schemaVersion: 1,
+				values: {},
+			})),
+			getPermissionModes: vi.fn(() => [
+				'default' as const,
+				'acceptEdits' as const,
+				'manualBypass' as const,
+				'bypassPermissions' as const,
+				'plan' as const,
+			]),
+			getThinkingModes: vi.fn(() => [
+				'none' as const,
+				'low' as const,
+				'medium' as const,
+				'high' as const,
+				'xhigh' as const,
+				'max' as const,
+				'ultra' as const,
+			]),
 			supportsFork: vi.fn(() => true),
 			supportsForkWhileRunning: vi.fn(() => true),
 		},
@@ -352,8 +373,7 @@ describe('ConversationSessionController', () => {
 			modelProtocol: null,
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		});
 		mockUpdateChatModel.mockReset();
 		mockUpdateChatModel.mockResolvedValue({
@@ -646,13 +666,15 @@ describe('ConversationSessionController', () => {
 	it('applies the paused queue snapshot returned by Stop', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		const queue = {
-			entries: [{
-				id: 'entry-1',
-				content: 'queued',
-				revision: 1,
-				createdAt: '2026-07-17T00:00:00.000Z',
-				updatedAt: '2026-07-17T00:00:00.000Z',
-			}],
+			entries: [
+				{
+					id: 'entry-1',
+					content: 'queued',
+					revision: 1,
+					createdAt: '2026-07-17T00:00:00.000Z',
+					updatedAt: '2026-07-17T00:00:00.000Z',
+				},
+			],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
 			pause: {
@@ -694,10 +716,12 @@ describe('ConversationSessionController', () => {
 
 		await controller.handleInterruptAndSend();
 
-		expect(mockInterruptAndSendChat).toHaveBeenCalledWith(expect.objectContaining({
-			chatId: 'chat-1',
-			agentId: 'claude',
-		}));
+		expect(mockInterruptAndSendChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				agentId: 'claude',
+			}),
+		);
 		expect(mockStopChat).not.toHaveBeenCalled();
 		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
 	});
@@ -1035,7 +1059,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('submits follow-up messages with the current Claude thinking mode', async () => {
+	it('submits follow-up messages with the current integration settings', async () => {
 		mockRunChat.mockResolvedValueOnce({
 			success: true,
 			commandType: 'agent-run',
@@ -1047,7 +1071,11 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps();
 		deps.agentState.model = 'opus';
-		deps.agentState.claudeThinkingMode = 'on';
+		deps.agentState.agentSettings = {
+			ownerId: 'claude',
+			schemaVersion: 1,
+			values: { thinkingMode: 'on' },
+		};
 		deps.composerState.inputText = 'hello over REST';
 		const controller = new ConversationSessionController(deps);
 
@@ -1057,17 +1085,21 @@ describe('ConversationSessionController', () => {
 			expect.objectContaining({
 				chatId: 'chat-1',
 				command: 'hello over REST',
-				claudeThinkingMode: 'on',
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { thinkingMode: 'on' },
+				},
 			}),
 		);
 	});
 
-	it('starts draft chats with the draft Claude thinking mode', async () => {
+	it('starts draft chats with the draft integration settings', async () => {
 		const draft = createRunningChat({
 			id: 'draft-1',
 			status: 'draft',
 			model: 'opus',
-			claudeThinkingMode: 'off',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'off' } },
 		});
 		const { deps } = createDeps(draft);
 		deps.sessions.isDraft = vi.fn(() => true);
@@ -1080,8 +1112,12 @@ describe('ConversationSessionController', () => {
 				modelProtocol: null,
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'on',
-				ampAgentMode: 'smart',
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { thinkingMode: 'on' },
+				},
+				firstMessage: 'start from draft',
 				tags: ['draft'],
 			},
 		};
@@ -1104,8 +1140,7 @@ describe('ConversationSessionController', () => {
 			expect.objectContaining({
 				chatId: 'draft-1',
 				command: 'start from draft',
-				claudeThinkingMode: 'on',
-				ampAgentMode: 'smart',
+				agentSettings: expect.objectContaining({ values: { thinkingMode: 'on' } }),
 			}),
 		);
 		const startPayload = mockStartChat.mock.calls[0][0];
@@ -1209,7 +1244,7 @@ describe('ConversationSessionController', () => {
 		}
 	});
 
-	it('resumes approved plans with the current Claude thinking mode', async () => {
+	it('resumes approved plans with the current integration settings', async () => {
 		mockRunChat.mockResolvedValueOnce({
 			success: true,
 			commandType: 'agent-run',
@@ -1221,7 +1256,11 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps();
 		deps.agentState.model = 'opus';
-		deps.agentState.claudeThinkingMode = 'off';
+		deps.agentState.agentSettings = {
+			ownerId: 'claude',
+			schemaVersion: 1,
+			values: { thinkingMode: 'off' },
+		};
 		const controller = new ConversationSessionController(deps);
 
 		controller.handleExitPlanMode('perm-1', 'bypass', 'Use the approved design.');
@@ -1231,7 +1270,7 @@ describe('ConversationSessionController', () => {
 			expect.objectContaining({
 				chatId: 'chat-1',
 				permissionMode: 'bypassPermissions',
-				claudeThinkingMode: 'off',
+				agentSettings: expect.objectContaining({ values: { thinkingMode: 'off' } }),
 			}),
 		);
 	});
@@ -1360,10 +1399,12 @@ describe('ConversationSessionController', () => {
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(mockCreateQueuedInput).toHaveBeenCalledWith(expect.objectContaining({
-			chatId: 'chat-1',
-			content: 'wait for explicit review',
-		}));
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				content: 'wait for explicit review',
+			}),
+		);
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.pendingUserInputs).toEqual([]);
 	});
@@ -1470,9 +1511,7 @@ describe('ConversationSessionController', () => {
 		const dispatchingQueue: QueueState = {
 			entries: [],
 			dispatchingEntryId: 'entry-sending',
-			recentlyDispatched: [
-				{ entryId: 'entry-sending', dispatchedAt: '2026-05-14T00:00:00.000Z' },
-			],
+			recentlyDispatched: [{ entryId: 'entry-sending', dispatchedAt: '2026-05-14T00:00:00.000Z' }],
 			pause: null,
 			version: 2,
 			updatedAt: '2026-05-14T00:00:00.000Z',
@@ -1760,7 +1799,11 @@ describe('ConversationSessionController', () => {
 			version: 2,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};
-		mockPauseChatQueue.mockResolvedValueOnce({ success: true, chatId: 'chat-1', queue: pausedQueue });
+		mockPauseChatQueue.mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			queue: pausedQueue,
+		});
 		mockResumeChatQueue.mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
@@ -1882,10 +1925,12 @@ describe('ConversationSessionController', () => {
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(mockCreateQueuedInput).toHaveBeenCalledWith(expect.objectContaining({
-			chatId: 'chat-1',
-			content: 'Wait behind the uncertain input',
-		}));
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				content: 'Wait behind the uncertain input',
+			}),
+		);
 		expect(mockSendActiveInput).not.toHaveBeenCalled();
 	});
 
@@ -1960,8 +2005,7 @@ describe('ConversationSessionController', () => {
 				modelProtocol: null,
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
 			});
 			const controller = new ConversationSessionController(deps);
 

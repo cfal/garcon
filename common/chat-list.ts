@@ -1,10 +1,6 @@
 import type { ApiProtocol } from './api-providers.js';
-import type {
-  AmpAgentMode,
-  ClaudeThinkingMode,
-  PermissionMode,
-  ThinkingMode,
-} from './chat-modes.js';
+import type { PermissionMode, ThinkingMode } from './chat-modes.js';
+import type { AgentSettingsEnvelope } from './agent-integration.js';
 
 export interface ChatListEntry {
   id: string;
@@ -15,8 +11,7 @@ export interface ChatListEntry {
   modelProtocol?: ApiProtocol | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode: AmpAgentMode;
+  agentSettings: AgentSettingsEnvelope;
   title: string;
   projectPath: string;
   effectiveProjectKey: string;

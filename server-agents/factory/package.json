@@ -1,0 +1,11 @@
+{
+  "name": "@garcon/server-agent-factory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "bunx tsc -p tsconfig.json" },
+  "dependencies": { "@garcon/common": "workspace:*", "@garcon/server-agent-common": "workspace:*", "@garcon/server-agent-interface": "workspace:*" },
+  "devDependencies": { "@types/bun": "^1.3.14", "typescript": "^6.0.3" },
+  "garconBuild": { "apiVersion": 1, "integrationId": "factory", "standaloneEntrypoints": [], "preMainModules": [], "embeddedDependencyMetadata": [] }
+}

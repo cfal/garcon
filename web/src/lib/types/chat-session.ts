@@ -1,12 +1,8 @@
 // Canonical chat session types used by the ChatSessionsStore.
 
 import type { SessionAgentId } from '$lib/types/app';
-import type {
-	AmpAgentMode,
-	ClaudeThinkingMode,
-	PermissionMode,
-	ThinkingMode,
-} from '$lib/types/chat';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatOrderGroup } from '$shared/chat-list';
 
@@ -20,8 +16,7 @@ export interface ChatStartupConfig {
 	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	claudeThinkingMode: ClaudeThinkingMode;
-	ampAgentMode: AmpAgentMode;
+	agentSettings: AgentSettingsEnvelope;
 	firstMessage: string;
 	initialImages?: File[];
 	tags?: string[];
@@ -41,8 +36,7 @@ export interface ChatSessionRecord {
 	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	claudeThinkingMode: ClaudeThinkingMode;
-	ampAgentMode: AmpAgentMode;
+	agentSettings: AgentSettingsEnvelope;
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	lastReadAt: string | null;

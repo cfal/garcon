@@ -29,8 +29,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		modelProtocol: null,
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'auto' } },
 		createdAt: null,
 		lastActivityAt: null,
 		lastReadAt: null,
@@ -63,10 +62,12 @@ function createDeps(chat = createChat()) {
 		modelProtocol: null,
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'auto' } },
 		setAgentId(agentId) {
 			this.agentId = agentId;
+		},
+		setAgentSettings(settings) {
+			this.agentSettings = settings;
 		},
 		setModelSelection(selection) {
 			this.model = selection.model;
@@ -92,6 +93,15 @@ function createDeps(chat = createChat()) {
 			})),
 			selectionValueFor: vi.fn((_agentId, model) => model),
 			getAgentLabel: vi.fn((agentId) => (agentId === 'codex' ? 'Codex' : 'Claude')),
+			getDefaultAgentSettings: vi.fn((agentId) => ({
+				ownerId: agentId,
+				schemaVersion: 1,
+				values: {},
+			})),
+			getPermissionModes: vi.fn(
+				() => ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'] as const,
+			),
+			getThinkingModes: vi.fn(() => ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const),
 		},
 		reloadTranscript,
 	} satisfies ConversationAgentSwitchDeps;
@@ -131,8 +141,7 @@ describe('ConversationAgentSwitchService', () => {
 			modelProtocol: 'openai-compatible',
 			permissionMode: 'bypassPermissions',
 			thinkingMode: 'high',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { effort: 'high' } },
 		});
 
 		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', nextSelection());
@@ -195,8 +204,7 @@ describe('ConversationAgentSwitchService', () => {
 			modelProtocol: 'openai-compatible',
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
 		});
 
 		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', nextSelection());
