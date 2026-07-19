@@ -2,15 +2,27 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import { CursorRequestIdentityStore } from './cursor-request-identities.js';
 import { getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
 import { getCursorPreviewFromSessionId, loadCursorChatMessagesBySessionId } from './history-loader.js';
-import type { AgentChatEntry } from '@garcon/server-agent-common/legacy/session-types';
-import type { AgentTranscriptSource } from '@garcon/server-agent-common/legacy/types';
+
+export interface CursorTranscriptReference {
+  readonly agentSessionId?: string | null;
+  readonly nativePath?: string | null;
+  readonly projectPath: string;
+}
+
+export interface CursorTranscriptReader {
+  loadMessages(
+    session: CursorTranscriptReference,
+    context?: { readonly chatId?: string },
+  ): Promise<ChatMessage[]>;
+  getPreview(session: CursorTranscriptReference): Promise<unknown>;
+}
 
 // Cursor ACP sessions persist SQLite transcripts under ~/.cursor/acp-sessions.
 export function createCursorTranscriptSource(
   requestIdentities: CursorRequestIdentityStore,
-): AgentTranscriptSource {
+): CursorTranscriptReader {
   return {
-    async loadMessages(session: AgentChatEntry, context?: { chatId?: string }): Promise<ChatMessage[]> {
+    async loadMessages(session, context): Promise<ChatMessage[]> {
       const agentSessionId = session.agentSessionId
         || getCursorAgentSessionIdFromNativePath(session.nativePath)
         || '';
@@ -20,7 +32,7 @@ export function createCursorTranscriptSource(
         agentSessionId,
       });
     },
-    async getPreview(session: AgentChatEntry): Promise<unknown> {
+    async getPreview(session): Promise<unknown> {
       const agentSessionId = session.agentSessionId
         || getCursorAgentSessionIdFromNativePath(session.nativePath)
         || '';

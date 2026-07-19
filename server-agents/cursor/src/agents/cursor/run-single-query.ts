@@ -1,10 +1,13 @@
-import { getCursorBinary } from '../../config.js';
+import type { CursorConfig } from '../../config.js';
 import { AcpClient } from '../../acp/client.js';
 import { AcpTransport } from '../../acp/transport.js';
 import { asObject, asString } from '../shared/acp-event-converter.js';
 import { configureCursorAcpSessionOptions } from './cursor-acp-model-config.js';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
-import { UnsupportedSingleQueryEffortError } from '@garcon/server-agent-common/legacy/single-query-errors';
+import {
+  AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+  AgentIntegrationError,
+} from '@garcon/server-agent-interface';
 
 interface CursorSingleQueryOptions {
   cwd?: string;
@@ -44,8 +47,16 @@ function normalizeOptions(options: Record<string, unknown>): CursorSingleQueryOp
   };
 }
 
-function optionsEnv(options: CursorSingleQueryOptions): Record<string, string | undefined> {
-  return { ...process.env, ...options.envOverrides };
+function optionsEnv(
+  options: CursorSingleQueryOptions,
+  config: CursorConfig,
+): Record<string, string | undefined> {
+  const apiKey = config.apiKey();
+  return {
+    ...process.env,
+    ...(apiKey ? { CURSOR_API_KEY: apiKey } : {}),
+    ...options.envOverrides,
+  };
 }
 
 function isJsonRpcId(value: unknown): value is string | number {
@@ -55,10 +66,16 @@ function isJsonRpcId(value: unknown): value is string | number {
 export async function runSingleQuery(
   prompt: string,
   rawOptions: Record<string, unknown> = {},
+  config: CursorConfig,
 ): Promise<string> {
   const thinkingMode = normalizeThinkingMode(rawOptions.thinkingMode);
   if (thinkingMode !== 'none') {
-    throw new UnsupportedSingleQueryEffortError('cursor', thinkingMode);
+    throw new AgentIntegrationError(
+      'OPERATION_UNSUPPORTED',
+      `cursor does not support explicit one-shot effort ${thinkingMode}.`,
+      false,
+      AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+    );
   }
   const options = normalizeOptions(rawOptions);
   const cwd = options.cwd || options.projectPath || process.cwd();
@@ -106,10 +123,10 @@ export async function runSingleQuery(
 
   try {
     await client.connect({
-      command: getCursorBinary(),
+      command: config.binary(),
       args: ['acp'],
       cwd,
-      env: optionsEnv(options),
+      env: optionsEnv(options, config),
     });
 
     const created = await client.newSession({

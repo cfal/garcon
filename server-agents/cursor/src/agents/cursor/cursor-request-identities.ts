@@ -1,9 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { UserMessage, type ChatMessage } from '@garcon/common/chat-types';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 
-const logger = createLogger('agents:cursor:cursor-request-identities');
+const SILENT_LOGGER: AgentLogger = Object.freeze({
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+});
 
 interface CursorRequestIdentityRecord {
   chatId: string;
@@ -75,9 +80,11 @@ function withUserMetadata(message: UserMessage, metadata: Record<string, string>
 export class CursorRequestIdentityStore {
   #filePath: string | null;
   #records: CursorRequestIdentityRecord[] = [];
+  readonly #logger: AgentLogger;
 
-  constructor(workspaceDir?: string | null) {
+  constructor(workspaceDir?: string | null, logger: AgentLogger = SILENT_LOGGER) {
     this.#filePath = workspaceDir ? path.join(workspaceDir, 'cursor-request-identities.json') : null;
+    this.#logger = logger;
     this.#load();
   }
 
@@ -184,7 +191,9 @@ export class CursorRequestIdentityStore {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        logger.warn('cursor: failed to load request identities:', error instanceof Error ? error.message : String(error));
+        this.#logger.warn('Failed to load Cursor request identities', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }
@@ -199,7 +208,9 @@ export class CursorRequestIdentityStore {
       };
       fs.writeFileSync(this.#filePath, JSON.stringify(payload, null, 2), 'utf8');
     } catch (error) {
-      logger.warn('cursor: failed to persist request identities:', error instanceof Error ? error.message : String(error));
+      this.#logger.warn('Failed to persist Cursor request identities', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

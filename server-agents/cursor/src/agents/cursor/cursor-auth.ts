@@ -1,7 +1,7 @@
-import { getCursorApiKey, getCursorBinary } from "../../config.js";
+import type { CursorConfig } from '../../config.js';
 
-async function runCursorStatus(): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const proc = Bun.spawn([getCursorBinary(), 'status', '--format', 'json'], {
+async function runCursorStatus(config: CursorConfig): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const proc = Bun.spawn([config.binary(), 'status', '--format', 'json'], {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -17,8 +17,8 @@ async function runCursorStatus(): Promise<{ stdout: string; stderr: string; exit
   return { stdout, stderr, exitCode };
 }
 
-export async function getCursorAuthStatus() {
-  if (getCursorApiKey()) {
+export async function getCursorAuthStatus(config: CursorConfig) {
+  if (config.apiKey()) {
     return {
       authenticated: true,
       canReauth: false as const,
@@ -28,7 +28,7 @@ export async function getCursorAuthStatus() {
   }
 
   try {
-    const { stdout, stderr, exitCode } = await runCursorStatus();
+    const { stdout, stderr, exitCode } = await runCursorStatus(config);
     const body = JSON.parse(stdout || '{}') as Record<string, unknown>;
     const authenticated = body.isAuthenticated === true
       || body.authenticated === true

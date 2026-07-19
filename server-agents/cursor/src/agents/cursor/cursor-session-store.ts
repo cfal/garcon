@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import { constants, promises as fs } from 'fs';
 import path from 'path';
-import type { AgentChatEntry, StartedAgentSession } from '@garcon/server-agent-common/legacy/session-types';
 import { createCursorAcpNativePath, getCursorAgentSessionIdFromNativePath } from './cursor-native-path.js';
 import {
   cursorAcpSessionDirPath,
@@ -12,6 +11,17 @@ import {
 export interface CursorForkSessionOptions {
   cursorHome?: string;
   createSessionId?: () => string;
+}
+
+export interface CursorSessionReference {
+  readonly agentSessionId?: string | null;
+  readonly nativePath?: string | null;
+  readonly projectPath: string;
+}
+
+export interface CursorForkedSession {
+  readonly agentSessionId: string;
+  readonly nativePath: string | null;
 }
 
 async function copyDirectoryEntries(sourceDir: string, targetDir: string): Promise<void> {
@@ -68,9 +78,9 @@ async function copySqliteStore(sourceDbPath: string, targetDbPath: string): Prom
 }
 
 export async function forkCursorAcpSession(
-  sourceSession: Pick<AgentChatEntry, 'agentSessionId' | 'nativePath' | 'projectPath'>,
+  sourceSession: CursorSessionReference,
   options: CursorForkSessionOptions = {},
-): Promise<StartedAgentSession> {
+): Promise<CursorForkedSession> {
   const sourceSessionId = sourceSession.agentSessionId
     || getCursorAgentSessionIdFromNativePath(sourceSession.nativePath);
   if (!sourceSessionId) {

@@ -3,12 +3,12 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { createCursorAgent } from '../index.js';
 import { cursorAcpStoreDbPath, cursorStreamJsonStoreDbPath } from '../history-loader.js';
+import { forkCursorAcpSession } from '../cursor-session-store.js';
 
 let tempRoot;
 
-describe('createCursorAgent', () => {
+describe('Cursor session forking', () => {
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-cursor-agent-'));
   });
@@ -26,24 +26,13 @@ describe('createCursorAgent', () => {
     await fs.mkdir(path.dirname(sourceDbPath), { recursive: true });
     await fs.writeFile(sourceDbPath, 'source db');
 
-    const agent = createCursorAgent({
-      workspaceDir,
+    const forked = await forkCursorAcpSession({
+      projectPath: workspaceDir,
+      agentSessionId: sourceSessionId,
+      nativePath: `!cursor-stream-json:${sourceSessionId}`,
+    }, {
       cursorHome,
       createSessionId: () => targetSessionId,
-    });
-
-    expect(agent.capabilities.supportsFork).toBe(true);
-    expect(agent.capabilities.supportsUpdateProjectPath).toBe(true);
-    const forked = await agent.forkSession?.({
-      sourceChatId: '1',
-      targetChatId: '2',
-      sourceSession: {
-        agentId: 'cursor',
-        projectPath: workspaceDir,
-        agentSessionId: sourceSessionId,
-        nativePath: `!cursor-stream-json:${sourceSessionId}`,
-        model: 'default',
-      },
     });
 
     expect(forked).toEqual({

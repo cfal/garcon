@@ -2,6 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import { getCursorModels, parseCursorModelsOutput } from '../cursor-models.js';
 
+const TEST_CURSOR_CONFIG = {
+  binary: () => 'cursor-agent',
+  apiKey: () => null,
+};
+const TEST_LOGGER = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
+
 function procWithOutput(stdoutText, exitCode = 0, stderrText = '') {
   const encoder = new TextEncoder();
   const streamFor = (text) => new ReadableStream({
@@ -54,7 +65,7 @@ gpt-5.3-codex - Duplicate
   it('returns discovered models when cursor-agent models succeeds', async () => {
     spawnMock.mockReturnValueOnce(procWithOutput('auto - Auto\ncomposer-1 - Composer 1\n'));
 
-    await expect(getCursorModels()).resolves.toEqual([
+    await expect(getCursorModels(TEST_CURSOR_CONFIG, TEST_LOGGER)).resolves.toEqual([
       { value: 'auto', label: 'Auto', supportsImages: false },
       { value: 'composer-1', label: 'Composer 1', supportsImages: false },
     ]);
@@ -64,6 +75,6 @@ gpt-5.3-codex - Duplicate
   it('returns no models when Cursor reports none for the account', async () => {
     spawnMock.mockReturnValueOnce(procWithOutput('No models available for this account\n'));
 
-    await expect(getCursorModels()).resolves.toEqual([]);
+    await expect(getCursorModels(TEST_CURSOR_CONFIG, TEST_LOGGER)).resolves.toEqual([]);
   });
 });

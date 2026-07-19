@@ -13,6 +13,11 @@ import { CursorAcpEventConverter } from '../cursor-acp-event-converter.js';
 import { createCursorAcpPolicy } from '../cursor-acp-policy.js';
 import { runSingleQuery } from '../run-single-query.js';
 
+const TEST_CURSOR_CONFIG = {
+  binary: () => 'cursor-agent',
+  apiKey: () => null,
+};
+
 function deferred() {
   let resolve;
   const promise = new Promise((resolvePromise) => {
@@ -302,7 +307,7 @@ function startRequest(overrides = {}) {
 
 function createRuntimeHarness(options = {}) {
   const acp = createAcpHarness(options);
-  const runtime = new AcpAgentRuntime(createCursorAcpPolicy(), {
+  const runtime = new AcpAgentRuntime(createCursorAcpPolicy(TEST_CURSOR_CONFIG), {
     converter: new CursorAcpEventConverter(),
     createTransport: acp.createTransport,
   });
@@ -398,7 +403,7 @@ describe('Cursor ACP runtime', () => {
     const configurationStarted = deferred();
     const continueConfiguration = deferred();
     const policy = {
-      ...createCursorAcpPolicy(),
+      ...createCursorAcpPolicy(TEST_CURSOR_CONFIG),
       async configureSession() {
         configurationStarted.resolve();
         await continueConfiguration.promise;
@@ -678,7 +683,11 @@ describe('Cursor ACP runtime', () => {
 
   it('rejects permissions in noninteractive Cursor single-query mode without hanging', async () => {
     const acp = createAcpHarness();
-    const query = runSingleQuery('hello', { model: 'gpt-5.5-extra-high', createTransport: acp.createTransport });
+    const query = runSingleQuery(
+      'hello',
+      { model: 'gpt-5.5-extra-high', createTransport: acp.createTransport },
+      TEST_CURSOR_CONFIG,
+    );
     const prompt = await acp.waitForClientMethod('session/prompt');
 
     const setConfigCalls = acp.writes.filter((message) => message.method === 'session/set_config_option');
@@ -718,7 +727,11 @@ describe('Cursor ACP runtime', () => {
       throw new Error('transport should not be created');
     });
 
-    await expect(runSingleQuery('hello', { thinkingMode: 'max', createTransport })).rejects.toThrow(
+    await expect(runSingleQuery(
+      'hello',
+      { thinkingMode: 'max', createTransport },
+      TEST_CURSOR_CONFIG,
+    )).rejects.toThrow(
       'cursor does not support explicit one-shot effort max',
     );
     expect(createTransport).not.toHaveBeenCalled();
