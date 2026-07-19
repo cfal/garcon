@@ -1,10 +1,18 @@
-import type { AgentHost } from '@garcon/server-agent-interface';
-import { AgentHostEnvironment } from '@garcon/server-agent-common/legacy/host-environment';
+import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
+import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
-const environment = new AgentHostEnvironment();
+export interface ClaudeConfig {
+  readonly binary: () => string;
+  readonly anthropicApiKey: () => string | null;
+  readonly anthropicBaseUrl: () => string | null;
+  readonly configHomeDir: () => string | null;
+}
 
-export function bindAgentHost(host: AgentHost): void { environment.bind(host); }
-export function getClaudeBinary(): string { return environment.valueOr('CLAUDE_BINARY', 'claude'); }
-export function getCursorBinary(): string { return environment.valueOr('CURSOR_BINARY', 'cursor-agent'); }
-export function getAnthropicApiKey(): string | null { return environment.value('ANTHROPIC_API_KEY'); }
-export function getAnthropicBaseUrl(): string | null { return environment.value('ANTHROPIC_BASE_URL'); }
+export function createClaudeConfig(environment: AgentEnvironmentReader): ClaudeConfig {
+  return Object.freeze({
+    binary: () => readEnvironment(environment, 'CLAUDE_BINARY') ?? 'claude',
+    anthropicApiKey: () => readEnvironment(environment, 'ANTHROPIC_API_KEY'),
+    anthropicBaseUrl: () => readEnvironment(environment, 'ANTHROPIC_BASE_URL'),
+    configHomeDir: () => readEnvironment(environment, 'CLAUDE_CONFIG_DIR'),
+  });
+}

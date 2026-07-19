@@ -4,12 +4,9 @@
 // trigger init, reads the command list, then kills the process before the
 // model turn does meaningful work. Results are cached per project.
 
-import { getClaudeBinary } from '../../config.js';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { SlashCommand } from '@garcon/common/slash-commands';
-
-const logger = createLogger('agents:claude:slash-command-discovery');
+import type { AgentLogger } from '@garcon/server-agent-interface';
 
 const PROBE_TIMEOUT_MS = 12_000;
 const CACHE_TTL_MS = 5 * 60_000;
@@ -22,9 +19,6 @@ interface CacheEntry {
   commands: SlashCommand[];
   expiresAt: number;
 }
-
-const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<SlashCommand[]>>();
 
 // Maps the init message's `slash_commands`/`skills` arrays to typed commands.
 // Names present in `skills` are tagged as skills; everything else (built-ins
@@ -41,8 +35,11 @@ export function parseInitSlashCommands(slashCommands: unknown, skills: unknown):
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function probeClaudeSlashCommands(projectPath: string): Promise<SlashCommand[]> {
-  const claudeBinary = getClaudeBinary();
+function probeClaudeSlashCommands(
+  projectPath: string,
+  claudeBinary: string,
+  logger: AgentLogger,
+): Promise<SlashCommand[]> {
   const args = [
     '--print',
     '--output-format', 'stream-json',
@@ -138,34 +135,43 @@ function probeClaudeSlashCommands(projectPath: string): Promise<SlashCommand[]> 
 
 // Returns the Claude slash commands for a project, served from cache when
 // fresh. Concurrent callers for the same project share a single probe.
-export async function getClaudeSlashCommands(projectPath: string): Promise<SlashCommand[]> {
-  const cached = cache.get(projectPath);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.commands;
+export class ClaudeSlashCommandDiscovery {
+  readonly #cache = new Map<string, CacheEntry>();
+  readonly #inFlight = new Map<string, Promise<SlashCommand[]>>();
+
+  constructor(
+    private readonly binary: () => string,
+    private readonly logger: AgentLogger,
+  ) {}
+
+  async discover(projectPath: string): Promise<SlashCommand[]> {
+    const cached = this.#cache.get(projectPath);
+    if (cached && cached.expiresAt > Date.now()) return cached.commands;
+    const existing = this.#inFlight.get(projectPath);
+    if (existing) return existing;
+
+    const probe = probeClaudeSlashCommands(projectPath, this.binary(), this.logger)
+      .catch((error: unknown) => {
+        this.logger.warn('Claude slash-command probe rejected', {
+          projectPath,
+          error: errorMessage(error),
+        });
+        return [] as SlashCommand[];
+      })
+      .then((commands) => {
+        const ttl = commands.length > 0 ? CACHE_TTL_MS : EMPTY_CACHE_TTL_MS;
+        this.#cache.set(projectPath, { commands, expiresAt: Date.now() + ttl });
+        return commands;
+      })
+      .finally(() => {
+        this.#inFlight.delete(projectPath);
+      });
+    this.#inFlight.set(projectPath, probe);
+    return probe;
   }
 
-  const existing = inFlight.get(projectPath);
-  if (existing) return existing;
-
-  const probe = probeClaudeSlashCommands(projectPath)
-    .catch((err: unknown) => {
-      // The probe is designed not to reject, but guard so discovery never
-      // surfaces as a failed HTTP request to the composer.
-      logger.warn(`probe rejected for ${projectPath}: ${errorMessage(err)}`);
-      return [] as SlashCommand[];
-    })
-    .then((commands) => {
-      // Cache successful results for the full TTL; negatively-cache empty
-      // results briefly so a transient miss is retried soon rather than
-      // suppressed for minutes or re-probed on every keystroke.
-      const ttl = commands.length > 0 ? CACHE_TTL_MS : EMPTY_CACHE_TTL_MS;
-      cache.set(projectPath, { commands, expiresAt: Date.now() + ttl });
-      return commands;
-    })
-    .finally(() => {
-      inFlight.delete(projectPath);
-    });
-
-  inFlight.set(projectPath, probe);
-  return probe;
+  clear(): void {
+    this.#cache.clear();
+    this.#inFlight.clear();
+  }
 }

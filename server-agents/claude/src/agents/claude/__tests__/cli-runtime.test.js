@@ -1,14 +1,21 @@
 import { describe, expect, it, mock } from 'bun:test';
 
-mock.module('../../../config.js', () => ({
-  getClaudeBinary: mock(() => 'claude'),
-}));
-
-mock.module('../cli-version.js', () => ({
-  claudeCliSupportsLegacyThinkingFlag: mock(() => Promise.resolve(false)),
-}));
-
 import { ClaudeCliRuntime } from '../claude-cli.js';
+
+function createRuntime() {
+  return new ClaudeCliRuntime({
+    binary: () => 'claude',
+    logger: {
+      debug: mock(() => undefined),
+      info: mock(() => undefined),
+      warn: mock(() => undefined),
+      error: mock(() => undefined),
+    },
+    versionProbe: {
+      supportsLegacyThinkingFlag: mock(() => Promise.resolve(false)),
+    },
+  });
+}
 
 function deferred() {
   let resolve;
@@ -62,7 +69,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     Bun.spawn = mock(() => fake.proc);
 
     try {
-      const runtime = new ClaudeCliRuntime();
+      const runtime = createRuntime();
       const processing = [];
       runtime.onProcessing((chatId, isProcessing) => {
         processing.push({ chatId, isProcessing });
@@ -106,7 +113,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     Bun.spawn = mock(() => fake.proc);
 
     try {
-      runtime = new ClaudeCliRuntime();
+      runtime = createRuntime();
 
       const start = runtime.startClaudeCliSession({
         command: 'hello',

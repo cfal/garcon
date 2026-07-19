@@ -1,16 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const getClaudeBinary = mock(() => 'claude');
-const getAnthropicApiKey = mock(() => process.env.ANTHROPIC_API_KEY?.trim() || null);
-const getAnthropicBaseUrl = mock(() => process.env.ANTHROPIC_BASE_URL?.trim() || null);
-
-mock.module('../../../config.js', () => ({
-  getAnthropicApiKey,
-  getAnthropicBaseUrl,
-  getClaudeBinary,
-  isHttpCompressionEnabled: mock(() => true),
-}));
-
 import { getClaudeAuthStatus } from '../claude-auth.js';
 
 function createFakeProc({ stdout = '', stderr = '', exitCode = 0 }) {
@@ -22,32 +11,27 @@ function createFakeProc({ stdout = '', stderr = '', exitCode = 0 }) {
 }
 
 describe('getClaudeAuthStatus', () => {
-  const originalAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
-  const originalAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
   let originalSpawn;
   let spawnMock;
+  let anthropicApiKey;
+  let anthropicBaseUrl;
+  const config = {
+    binary: () => '/tmp/custom-claude',
+    anthropicApiKey: () => anthropicApiKey,
+    anthropicBaseUrl: () => anthropicBaseUrl,
+    configHomeDir: () => null,
+  };
 
   beforeEach(() => {
     originalSpawn = Bun.spawn;
     spawnMock = mock();
     Bun.spawn = spawnMock;
-    getAnthropicApiKey.mockReset();
-    getAnthropicBaseUrl.mockReset();
-    getClaudeBinary.mockReset();
-    getAnthropicApiKey.mockImplementation(() => process.env.ANTHROPIC_API_KEY?.trim() || null);
-    getAnthropicBaseUrl.mockImplementation(() => process.env.ANTHROPIC_BASE_URL?.trim() || null);
-    getClaudeBinary.mockReturnValue('/tmp/custom-claude');
-
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_BASE_URL;
+    anthropicApiKey = null;
+    anthropicBaseUrl = null;
   });
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
-    if (originalAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-    else process.env.ANTHROPIC_API_KEY = originalAnthropicApiKey;
-    if (originalAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
-    else process.env.ANTHROPIC_BASE_URL = originalAnthropicBaseUrl;
   });
 
   it('uses the configured Claude binary and returns the OAuth email from auth status', async () => {
@@ -59,7 +43,7 @@ describe('getClaudeAuthStatus', () => {
       }),
     }));
 
-    expect(await getClaudeAuthStatus()).toEqual({
+    expect(await getClaudeAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: true,
       label: 'person@example.com',
@@ -78,7 +62,7 @@ describe('getClaudeAuthStatus', () => {
       stderr: `warning: using fallback\n${JSON.stringify({ loggedIn: true, authMethod: 'api_key' })}`,
     }));
 
-    expect(await getClaudeAuthStatus()).toEqual({
+    expect(await getClaudeAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: false,
       label: '',
@@ -86,9 +70,9 @@ describe('getClaudeAuthStatus', () => {
   });
 
   it('short-circuits ANTHROPIC_API_KEY without spawning the CLI', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
+    anthropicApiKey = 'test-key';
 
-    expect(await getClaudeAuthStatus()).toEqual({
+    expect(await getClaudeAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: false,
       label: '',
@@ -97,10 +81,9 @@ describe('getClaudeAuthStatus', () => {
   });
 
   it('short-circuits ANTHROPIC_BASE_URL without spawning the CLI', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_BASE_URL = 'http://localhost:11434';
+    anthropicBaseUrl = 'http://localhost:11434';
 
-    expect(await getClaudeAuthStatus()).toEqual({
+    expect(await getClaudeAuthStatus(config)).toEqual({
       authenticated: true,
       canReauth: false,
       label: '',

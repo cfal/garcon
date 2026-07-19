@@ -2,8 +2,18 @@ import { describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { createClaudeAgent } from '../index.ts';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { ClaudeExecution } from '../execution.ts';
+
+function createLogger() {
+  return {
+    debug: mock(() => undefined),
+    info: mock(() => undefined),
+    warn: mock(() => undefined),
+    error: mock(() => undefined),
+  };
+}
 
 function createClaudeStub(startError) {
   const claude = new AgentEventEmitterRuntime();
@@ -13,7 +23,6 @@ function createClaudeStub(startError) {
   claude.isClaudeInternalSessionRunning = mock(() => false);
   claude.getRunningClaudeInternalSessions = mock(() => []);
   claude.resolveInternalToolApproval = mock(() => undefined);
-  claude.startPurgeTimer = mock(() => setInterval(() => {}, 1000));
   claude.setInternalPermissionMode = mock(() => undefined);
   claude.setInternalThinkingMode = mock(() => undefined);
   claude.setInternalClaudeThinkingMode = mock(() => undefined);
@@ -24,62 +33,87 @@ function createClaudeStub(startError) {
   return claude;
 }
 
-describe('createClaudeAgent', () => {
+function createExecution(runtime, configHomeDir) {
+  const logger = createLogger();
+  return new ClaudeExecution({
+    apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },
+  }, runtime, createPathNativeSessionCodec('claude'), logger, {
+    binary: () => 'claude',
+    anthropicApiKey: () => null,
+    anthropicBaseUrl: () => null,
+    configHomeDir: () => configHomeDir,
+  });
+}
+
+function startRequest(projectPath, signal = new AbortController().signal) {
+  return {
+    chatId: 'chat-1',
+    projectPath,
+    model: 'sonnet',
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    settings: {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      values: { claudeThinkingMode: 'auto' },
+    },
+    endpoint: null,
+    operation: {
+      clientRequestId: 'req-1',
+      clientMessageId: null,
+      commandType: 'chat-start',
+      turnId: 'turn-1',
+    },
+    admission: {
+      signal,
+      markStarted: mock(() => undefined),
+      markAbortable: mock(() => undefined),
+    },
+    prompt: 'hello',
+    attachments: [],
+    carryOver: [],
+  };
+}
+
+describe('ClaudeExecution', () => {
   it('emits a failed event when fire-and-forget startup rejects', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-'));
-    const startError = new Error('missing claude binary');
-    const claude = createClaudeStub(startError);
-    const agent = createClaudeAgent(claude);
-    const processingEvents = [];
-    const failed = new Promise((resolve) => {
-      agent.runtime.onFailed((chatId, errorMessage, metadata) => resolve({
-        chatId,
-        errorMessage,
-        metadata,
+    try {
+      const startError = new Error('missing claude binary');
+      const claude = createClaudeStub(startError);
+      const execution = createExecution(claude, projectPath);
+      const failed = new Promise((resolve) => {
+        execution.subscribe((event) => {
+          if (event.type === 'failed') resolve(event);
+        });
+      });
+
+      const started = await execution.start(startRequest(projectPath));
+      const failure = await failed;
+
+      expect(claude.startClaudeCliSession).toHaveBeenCalledWith(expect.objectContaining({
+        agentSessionId: started.agentSessionId,
+        chatId: 'chat-1',
       }));
-    });
-    agent.runtime.onProcessing((chatId, isProcessing) => {
-      processingEvents.push({ chatId, isProcessing });
-    });
-
-    const started = await agent.runtime.startSession({
-      chatId: 'chat-1',
-      command: 'hello',
-      projectPath,
-      model: 'sonnet',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-      clientRequestId: 'req-1',
-      turnId: 'turn-1',
-    });
-    const failure = await failed;
-
-    expect(claude.startClaudeCliSession).toHaveBeenCalledWith(expect.objectContaining({
-      agentSessionId: started.agentSessionId,
-      chatId: 'chat-1',
-    }));
-    expect(claude.failClaudeInternalSession).toHaveBeenCalledWith(
-      started.agentSessionId,
-      'chat-1',
-      'missing claude binary',
-      {
-        clientRequestId: 'req-1',
-        commandType: 'chat-start',
-        turnId: 'turn-1',
-      },
-    );
-    expect(failure).toEqual({
-      chatId: 'chat-1',
-      errorMessage: 'missing claude binary',
-      metadata: {
-        clientRequestId: 'req-1',
-        commandType: 'chat-start',
-        turnId: 'turn-1',
-      },
-    });
-    expect(processingEvents).toContainEqual({ chatId: 'chat-1', isProcessing: false });
-
-    await fs.rm(projectPath, { recursive: true, force: true });
+      expect(claude.failClaudeInternalSession).toHaveBeenCalledWith(
+        started.agentSessionId,
+        'chat-1',
+        'missing claude binary',
+        {
+          clientRequestId: 'req-1',
+          commandType: 'chat-start',
+          turnId: 'turn-1',
+        },
+      );
+      expect(failure).toMatchObject({
+        type: 'failed',
+        chatId: 'chat-1',
+        error: { code: 'PROVIDER_FAILURE', message: 'missing claude binary' },
+        operation: startRequest(projectPath).operation,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
   });
 
   it('emits an exact terminal when startup admission is aborted after detachment', async () => {
@@ -90,42 +124,24 @@ describe('createClaudeAgent', () => {
       claude.startClaudeCliSession = mock(() => new Promise((_resolve, reject) => {
         rejectStart = reject;
       }));
-      const agent = createClaudeAgent(claude);
+      const execution = createExecution(claude, projectPath);
       const controller = new AbortController();
       const failed = new Promise((resolve) => {
-        agent.runtime.onFailed((chatId, errorMessage, metadata) => resolve({
-          chatId,
-          errorMessage,
-          metadata,
-        }));
+        execution.subscribe((event) => {
+          if (event.type === 'failed') resolve(event);
+        });
       });
 
-      await agent.runtime.startSession({
-        chatId: 'chat-1',
-        command: 'hello',
-        projectPath,
-        model: 'sonnet',
-        permissionMode: 'default',
-        thinkingMode: 'none',
-        clientRequestId: 'req-abort',
-        turnId: 'turn-abort',
-        executionAdmission: {
-          signal: controller.signal,
-          markStarted: mock(() => undefined),
-        },
-      });
+      await execution.start(startRequest(projectPath, controller.signal));
       const reason = new Error('server is shutting down');
       controller.abort(reason);
       rejectStart(reason);
 
-      await expect(failed).resolves.toEqual({
+      await expect(failed).resolves.toMatchObject({
+        type: 'failed',
         chatId: 'chat-1',
-        errorMessage: 'server is shutting down',
-        metadata: {
-          clientRequestId: 'req-abort',
-          commandType: 'chat-start',
-          turnId: 'turn-abort',
-        },
+        error: { code: 'PROVIDER_FAILURE', message: 'server is shutting down' },
+        operation: startRequest(projectPath).operation,
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });

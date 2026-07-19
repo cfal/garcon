@@ -1,4 +1,4 @@
-import { getAnthropicApiKey, getAnthropicBaseUrl, getClaudeBinary } from "../../config.js";
+import type { ClaudeConfig } from '../../config.js';
 
 interface AgentAuthStatus {
   authenticated: boolean;
@@ -16,9 +16,9 @@ async function responseText(stream: ReadableStream<Uint8Array> | null): Promise<
   return stream ? new Response(stream).text() : '';
 }
 
-async function runClaudeAuthStatus(): Promise<{ exitCode: number; output: string }> {
+async function runClaudeAuthStatus(config: ClaudeConfig): Promise<{ exitCode: number; output: string }> {
   // Uses the CLI itself so Garcon follows CLAUDE_CONFIG_DIR and other auth storage rules.
-  const proc = Bun.spawn([getClaudeBinary(), 'auth', 'status'], {
+  const proc = Bun.spawn([config.binary(), 'auth', 'status'], {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -53,17 +53,17 @@ function parseClaudeAuthStatus(output: string): ClaudeAuthStatusPayload | null {
   }
 }
 
-export async function getClaudeAuthStatus(): Promise<AgentAuthStatus> {
+export async function getClaudeAuthStatus(config: ClaudeConfig): Promise<AgentAuthStatus> {
   // bypass claude auth check if custom ANTHROPIC_BASE_URL is set
-  if (getAnthropicBaseUrl()) {
+  if (config.anthropicBaseUrl()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
-  if (getAnthropicApiKey()) {
+  if (config.anthropicApiKey()) {
     return { authenticated: true, canReauth: false, label: '' };
   }
 
   try {
-    const { exitCode, output } = await runClaudeAuthStatus();
+    const { exitCode, output } = await runClaudeAuthStatus(config);
     if (exitCode !== 0) {
       return { authenticated: false, canReauth: true, label: '' };
     }

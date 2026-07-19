@@ -1,14 +1,20 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 
-const logger = createLogger('agents:claude:native-path');
+const NOOP_LOGGER: AgentLogger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
 
 const MAX_SANITIZED_LENGTH = 200;
 
 export interface ClaudeNativePathOptions {
   configHomeDir?: string;
+  logger?: AgentLogger;
 }
 
 export interface ClaudeNativePathSession {
@@ -28,7 +34,6 @@ function simpleHash(value: string): string {
 function claudeConfigHomeDir(options: ClaudeNativePathOptions): string {
   return (
     options.configHomeDir
-    ?? process.env.CLAUDE_CONFIG_DIR
     ?? path.join(os.homedir(), '.claude')
   ).normalize('NFC');
 }
@@ -101,10 +106,10 @@ async function searchClaudeProjects(
   try {
     projectDirectories = await fs.readdir(projectsDir);
   } catch (error) {
-    logger.warn(
-      `claude: transcript search could not read ${projectsDir}:`,
-      (error as Error).message,
-    );
+    (options.logger ?? NOOP_LOGGER).warn('Claude transcript search directory is unavailable', {
+      projectsDir,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return [];
   }
 
@@ -121,6 +126,7 @@ export async function resolveClaudeNativePath(
   session: ClaudeNativePathSession,
   options: ClaudeNativePathOptions = {},
 ): Promise<string | null> {
+  const logger = options.logger ?? NOOP_LOGGER;
   const agentSessionId = session.agentSessionId;
   if (!agentSessionId) return null;
 
@@ -144,9 +150,10 @@ export async function resolveClaudeNativePath(
     );
     if (derivedPath && await isFile(derivedPath)) {
       if (session.nativePath && session.nativePath !== derivedPath) {
-        logger.warn(
-          `claude: stored transcript path is unavailable for session ${agentSessionId}; using ${derivedPath}`,
-        );
+        logger.warn('Claude stored transcript path is unavailable; using derived path', {
+          agentSessionId,
+          derivedPath,
+        });
       }
       return derivedPath;
     }
@@ -155,25 +162,27 @@ export async function resolveClaudeNativePath(
   const searchDirectories = uniqueConfigHomeDirs.map((configHomeDir) =>
     claudeProjectsDir({ configHomeDir })
   );
-  logger.warn(
-    `claude: expected transcript path is unavailable for session ${agentSessionId}; searching ${searchDirectories.join(', ')}`,
-  );
+  logger.warn('Claude expected transcript path is unavailable; searching projects', {
+    agentSessionId,
+    searchDirectories,
+  });
   const matches = [...new Set((await Promise.all(
     uniqueConfigHomeDirs.map((configHomeDir) =>
-      searchClaudeProjects(agentSessionId, { configHomeDir })
+      searchClaudeProjects(agentSessionId, { configHomeDir, logger })
     ),
   )).flat())];
   if (matches.length === 1) {
-    logger.warn(
-      `claude: recovered transcript path by session search for ${agentSessionId}: ${matches[0]}`,
-    );
+    logger.warn('Claude transcript path recovered by session search', {
+      agentSessionId,
+      nativePath: matches[0]!,
+    });
     return matches[0];
   }
   if (matches.length > 1) {
-    logger.error(
-      `claude: transcript search found multiple files for session ${agentSessionId}; refusing to choose:`,
+    logger.error('Claude transcript search found multiple files and refused to choose', {
+      agentSessionId,
       matches,
-    );
+    });
   }
   return null;
 }
