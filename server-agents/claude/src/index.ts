@@ -91,7 +91,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       command: () => [config.binary(), 'auth', 'login'],
       mode: 'browser-code',
       logger,
-      environment: claudeLoginEnvironment,
+      environment: () => claudeLoginEnvironment(config),
     });
     const commandDiscovery = new ClaudeSlashCommandDiscovery(config.binary, logger);
 
@@ -301,13 +301,14 @@ function createClaudeTranscript(options: {
   };
 }
 
-function claudeLoginEnvironment(): Record<string, string> {
+function claudeLoginEnvironment(config: ReturnType<typeof createClaudeConfig>): Record<string, string> {
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && key !== 'CLAUDECODE') environment[key] = value;
   }
   return {
     ...environment,
+    ...buildClaudeHostEnvironment(config),
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
     FORCE_COLOR: '3',

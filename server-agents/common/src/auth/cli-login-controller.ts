@@ -342,15 +342,18 @@ function readDeviceAuth(
   return new Promise((resolve) => {
     let output = '';
     let settled = false;
+    let parsedDeviceAuth = false;
     const timeout = setTimeout(() => {
       settled = true;
       resolve(null);
     }, timeoutMs);
     timeout.unref?.();
     proc.onData((chunk) => {
+      if (parsedDeviceAuth) return;
       output += chunk;
       const parsed = parseDeviceAuth(output);
       if (!parsed) return;
+      parsedDeviceAuth = true;
       onDeviceAuth(parsed);
       if (settled) return;
       settled = true;
