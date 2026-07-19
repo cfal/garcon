@@ -26,6 +26,8 @@ export interface PreparedAcceptedInput<T> {
 	submit(): Promise<T>;
 }
 
+type InputFactory<T> = T | (() => T);
+
 export interface AcceptedInputTransport {
 	start(request: StartChatParams): Promise<StartChatCommandResponse>;
 	run(request: AgentRunCommandRequest): Promise<CommandAcceptedResponse>;
@@ -48,19 +50,16 @@ export class AcceptedInputSubmissionService {
 		private readonly createId: () => string = createClientCommandId,
 	) {}
 
-	start(input: Omit<StartChatParams, 'clientRequestId' | 'clientMessageId'>) {
-		const request = this.#withMessageIdentity(input);
-		return this.#prepared(request, () => this.transport.start(request));
+	start(input: InputFactory<Omit<StartChatParams, 'clientRequestId' | 'clientMessageId'>>) {
+		return this.#messageSubmission(input, (request) => this.transport.start(request));
 	}
 
 	run(input: Omit<AgentRunCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
-		const request = this.#withMessageIdentity(input);
-		return this.#prepared(request, () => this.transport.run(request));
+		return this.#messageSubmission(input, (request) => this.transport.run(request));
 	}
 
 	fork(input: Omit<ForkRunCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
-		const request = this.#withMessageIdentity(input);
-		return this.#prepared(request, () => this.transport.fork(request));
+		return this.#messageSubmission(input, (request) => this.transport.fork(request));
 	}
 
 	enqueue(input: Omit<QueueEntryCreateCommandRequest, 'clientRequestId'>) {
@@ -73,14 +72,24 @@ export class AcceptedInputSubmissionService {
 		return this.#prepared(request, () => this.transport.active(request));
 	}
 
-	#withMessageIdentity<T extends object>(input: T): T & {
-		clientRequestId: string;
-		clientMessageId: string;
-	} {
+	#messageSubmission<T extends object, R>(
+		input: InputFactory<T>,
+		submit: (request: T & { clientRequestId: string; clientMessageId: string }) => Promise<R>,
+	): PreparedAcceptedInput<R> & { clientMessageId: string } {
+		const clientRequestId = this.createId();
+		const clientMessageId = this.createId();
+		let request: T & { clientRequestId: string; clientMessageId: string } | undefined;
 		return {
-			...input,
-			clientRequestId: this.createId(),
-			clientMessageId: this.createId(),
+			clientRequestId,
+			clientMessageId,
+			submit: () => submitIdempotentCommand(() => {
+				request ??= {
+					...(typeof input === 'function' ? input() : input),
+					clientRequestId,
+					clientMessageId,
+				};
+				return submit(request);
+			}),
 		};
 	}
 

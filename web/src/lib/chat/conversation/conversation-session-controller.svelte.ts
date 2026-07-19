@@ -710,32 +710,28 @@ export class ConversationSessionController {
 		}
 
 		if (route === 'draft') {
-			const agentId = startup?.agentId ?? selected.agentId;
-			const model = startup?.model ?? selected.model ?? deps.agentState.model;
-			const apiProviderId =
-				startup?.apiProviderId ?? selected.apiProviderId ?? deps.agentState.apiProviderId;
-			const modelEndpointId =
-				startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.agentState.modelEndpointId;
-			const modelProtocol =
-				startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol;
-			const permissionMode = startup?.permissionMode ?? deps.agentState.permissionMode;
-			const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
-			const agentSettings = startup?.agentSettings ?? deps.agentState.agentSettings;
-
-			const submission = this.#acceptedInputs.start({
-				chatId,
-				agentId: agentId as typeof deps.agentState.agentId,
-				projectPath: selected.projectPath,
-				model,
-				apiProviderId,
-				modelEndpointId,
-				modelProtocol,
-				permissionMode,
-				thinkingMode,
-				agentSettings,
-				command: text,
-				images: imagePayload.length > 0 ? imagePayload : undefined,
-				tags: startup?.tags,
+			const submission = this.#acceptedInputs.start(() => {
+				const agentId = startup?.agentId ?? selected.agentId;
+				return {
+					chatId,
+					agentId: agentId as typeof deps.agentState.agentId,
+					projectPath: selected.projectPath,
+					model: startup?.model ?? selected.model ?? deps.agentState.model,
+					apiProviderId:
+						startup?.apiProviderId ?? selected.apiProviderId ?? deps.agentState.apiProviderId,
+					modelEndpointId:
+						startup?.modelEndpointId ??
+						selected.modelEndpointId ??
+						deps.agentState.modelEndpointId,
+					modelProtocol:
+						startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol,
+					permissionMode: startup?.permissionMode ?? deps.agentState.permissionMode,
+					thinkingMode: startup?.thinkingMode ?? deps.agentState.thinkingMode,
+					agentSettings: startup?.agentSettings ?? deps.agentState.agentSettings,
+					command: text,
+					images: imagePayload.length > 0 ? imagePayload : undefined,
+					tags: startup?.tags,
+				};
 			});
 			this.#beginOptimisticInput(
 				chatId,

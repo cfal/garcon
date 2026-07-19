@@ -14,6 +14,38 @@ function transport(overrides: Partial<AcceptedInputTransport> = {}): AcceptedInp
 }
 
 describe('AcceptedInputSubmissionService', () => {
+	it('materializes a draft request once after startup state is installed', async () => {
+		let agentSettings = { owner: 'before-startup' };
+		const start = vi
+			.fn()
+			.mockRejectedValueOnce(new TypeError('connection closed'))
+			.mockResolvedValueOnce({ success: true, status: 'duplicate' });
+		const createInput = vi.fn(() => ({
+			chatId: 'chat-1',
+			agentId: 'direct',
+			projectPath: '/project',
+			model: 'model-1',
+			permissionMode: 'default' as const,
+			thinkingMode: 'default' as const,
+			agentSettings,
+			command: 'hello',
+		}));
+		const service = new AcceptedInputSubmissionService(
+			transport({ start }),
+			vi.fn().mockReturnValueOnce('request-1').mockReturnValueOnce('message-1'),
+		);
+
+		const submission = service.start(createInput);
+		expect(createInput).not.toHaveBeenCalled();
+		agentSettings = { owner: 'direct' };
+		await submission.submit();
+
+		expect(createInput).toHaveBeenCalledOnce();
+		expect(start).toHaveBeenCalledTimes(2);
+		expect(start.mock.calls[0]?.[0]).toBe(start.mock.calls[1]?.[0]);
+		expect(start.mock.calls[0]?.[0]).toMatchObject({ agentSettings: { owner: 'direct' } });
+	});
+
 	it('creates direct identities before submission and preserves them across retry', async () => {
 		const requests: unknown[] = [];
 		const run = vi
