@@ -1,5 +1,5 @@
 // WebSocket chat handler. Thin request dispatcher that delegates
-// orchestration to QueueManager and state queries to other services.
+// orchestration to ChatExecutionCoordinator and state queries to other services.
 // All dependencies are injected via the constructor.
 
 import { sendWebSocketJson } from './utils.js';
@@ -28,7 +28,7 @@ import { isDomainError } from '../lib/domain-error.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
-import type { ChatQueueService } from '../queue.js';
+import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import { toClientChatExecutionControlState } from '../chat-execution-control-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
@@ -44,7 +44,7 @@ type AgentRegistryDep = Pick<
 >;
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
-type QueueDep = Pick<ChatQueueService, 'readChatExecutionControl'>;
+type QueueDep = Pick<ChatExecutionService, 'readChatExecutionControl'>;
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;

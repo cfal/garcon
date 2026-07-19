@@ -43,8 +43,8 @@ import {
   QueuePauseChangedError,
   RecoveredInputContinuationChangedError,
   RecoveredInputContinuationRequiresQueueError,
-  type ChatQueueService,
-} from '../queue.js';
+  type ChatExecutionService,
+} from '../chat-execution/chat-execution-coordinator.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
@@ -126,7 +126,7 @@ interface MetadataDep {
   addNewChatMetadata(chatId: string, command: string): void;
 }
 
-type QueueDep = ChatQueueService;
+type QueueDep = ChatExecutionService;
 type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;

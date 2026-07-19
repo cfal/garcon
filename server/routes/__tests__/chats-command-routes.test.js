@@ -46,7 +46,7 @@ import {
   QueuePauseChangedError,
   RecoveredInputContinuationChangedError,
   RecoveredInputContinuationRequiresQueueError,
-} from '../../queue.js';
+} from '../../chat-execution/chat-execution-coordinator.js';
 import {
   createRouteChatListProjector,
   createRouteCommandLedger,

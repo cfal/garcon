@@ -10,7 +10,7 @@ import type { ChatNativeReloader } from './chats/chat-native-reload.js';
 import type { PendingUserInputService } from './chats/pending-user-input-service.js';
 import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
-import type { QueueManager } from './queue.js';
+import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import { commandLedgerKey, type CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
@@ -63,7 +63,7 @@ export interface ServerEventWiringDeps {
   agentRegistry: AgentRegistry;
   chatRegistry: ChatRegistry;
   settings: SettingsStore;
-  queue: QueueManager;
+  queue: ChatExecutionCoordinator;
   metadata: MetadataIndex;
   chatViews: ChatViewStore;
   chatNativeReloader: NativeReloaderDep;

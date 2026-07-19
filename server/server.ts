@@ -25,7 +25,10 @@ import { migrateWorkspaceChatIds } from './chats/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
-import { QueueManager, queueDrainOptions } from './queue.js';
+import {
+  ChatExecutionCoordinator,
+  queueDrainOptions,
+} from './chat-execution/chat-execution-coordinator.js';
 import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
@@ -364,7 +367,7 @@ export async function startServer(): Promise<void> {
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
 
-    const queue = new QueueManager(
+    const queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
       pendingInputs,

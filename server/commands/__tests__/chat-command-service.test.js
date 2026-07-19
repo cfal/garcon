@@ -13,7 +13,10 @@ import {
   ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
   ActiveInputDeliveryError,
 } from '../../lib/domain-error.js';
-import { QueueEntryMutationError, QueueManager } from '../../queue.js';
+import {
+  QueueEntryMutationError,
+  ChatExecutionCoordinator,
+} from '../../chat-execution/chat-execution-coordinator.js';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 
@@ -319,7 +322,7 @@ function makeService(overrides = {}) {
 }
 
 function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
-  return new QueueManager(
+  return new ChatExecutionCoordinator(
     workspaceDir,
     {
       runAgentTurn: mock(async () => undefined),

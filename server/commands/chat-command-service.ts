@@ -47,9 +47,9 @@ import {
 } from './command-ledger.js';
 import {
   QueueEntryMutationError,
-  type ChatQueueService,
+  type ChatExecutionService,
   type DirectTurnReservation,
-} from '../queue.js';
+} from '../chat-execution/chat-execution-coordinator.js';
 import {
   normalizeStoredChatExecutionControlState,
   toClientChatExecutionControlState,
@@ -72,7 +72,7 @@ import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js'
 const logger = createLogger('commands:chat-command-service');
 
 type QueueDep = Pick<
-  ChatQueueService,
+  ChatExecutionService,
   | 'registerPendingUserInput'
   | 'reserveDirectTurn'
   | 'releaseDirectTurn'

@@ -10,7 +10,7 @@ import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexR
 import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
-import { QueueManager } from '../../../../../../../server/queue.ts';
+import { ChatExecutionCoordinator } from '../../../../../../../server/chat-execution/chat-execution-coordinator.ts';
 import { PendingUserInputService } from '../../../../../../../server/chats/pending-user-input-service.ts';
 import {
   buildThreadForkParams,
@@ -1149,7 +1149,7 @@ describe('CodexAppServerRuntime', () => {
   });
 
   function createActiveGoalQueue(provider, codexGoalCommand, markUnconfirmed) {
-    return new QueueManager(
+    return new ChatExecutionCoordinator(
       tmpDir,
       {
         runAgentTurn: async () => { throw new Error('must use active delivery'); },
@@ -3700,7 +3700,7 @@ describe('CodexAppServerRuntime', () => {
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
-    const queue = new QueueManager(
+    const queue = new ChatExecutionCoordinator(
       tmpDir,
       {
         runAgentTurn: async () => { throw new Error('must use active delivery'); },

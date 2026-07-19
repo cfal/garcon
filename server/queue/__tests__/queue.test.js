@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
-import { QueueManager } from '../../queue.js';
+import { ChatExecutionCoordinator } from '../../chat-execution/chat-execution-coordinator.js';
 import { normalizeStoredChatExecutionControlState } from '../../chat-execution-control-state.js';
 import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
 
@@ -87,7 +87,7 @@ function queueEntryFixture(id, content) {
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
-  queue = new QueueManager(
+  queue = new ChatExecutionCoordinator(
     workspaceDir,
     createStateOnlyAgents(),
     createPendingInputs(),
@@ -542,7 +542,7 @@ describe('queue invariants', () => {
       'utf8',
     );
     const turnRunner = createStateOnlyAgents();
-    const recoveringQueue = new QueueManager(
+    const recoveringQueue = new ChatExecutionCoordinator(
       workspaceDir,
       turnRunner,
       createPendingInputs(),
@@ -617,7 +617,7 @@ describe('queue invariants', () => {
       isChatRunning: mock(() => false),
       waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
     };
-    const recoveringQueue = new QueueManager(
+    const recoveringQueue = new ChatExecutionCoordinator(
       workspaceDir,
       turnRunner,
       createPendingInputs(),
@@ -688,7 +688,7 @@ describe('queue invariants', () => {
       isChatRunning: mock(() => false),
       waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
     };
-    const recoveringQueue = new QueueManager(
+    const recoveringQueue = new ChatExecutionCoordinator(
       workspaceDir,
       turnRunner,
       createPendingInputs(),
@@ -716,7 +716,7 @@ describe('queue invariants', () => {
     await fs.mkdir(queuesDir, { recursive: true });
     const queuePath = path.join(queuesDir, 'uncertain-corrupt.queue.json');
     await fs.writeFile(queuePath, '{corrupt queue state', 'utf8');
-    const recoveringQueue = new QueueManager(
+    const recoveringQueue = new ChatExecutionCoordinator(
       workspaceDir,
       createStateOnlyAgents(),
       createPendingInputs(),
@@ -765,7 +765,7 @@ describe('queue invariants', () => {
       isChatRunning: mock(() => false),
       waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
     };
-    const recoveredQueue = new QueueManager(
+    const recoveredQueue = new ChatExecutionCoordinator(
       workspaceDir,
       turnRunner,
       createPendingInputs(),
@@ -806,7 +806,7 @@ describe('queue invariants', () => {
       })),
       'utf8',
     );
-    const recoveringQueue = new QueueManager(
+    const recoveringQueue = new ChatExecutionCoordinator(
       workspaceDir,
       createStateOnlyAgents(),
       createPendingInputs(),
@@ -821,7 +821,7 @@ describe('queue invariants', () => {
   });
 
   it('requires execution dependencies at construction', () => {
-    expect(() => new QueueManager(workspaceDir)).toThrow('QueueManager requires an agent turn runner');
+    expect(() => new ChatExecutionCoordinator(workspaceDir)).toThrow('ChatExecutionCoordinator requires an agent turn runner');
   });
 });
 
@@ -907,7 +907,7 @@ describe('orchestration', () => {
       ampAgentMode: 'deep',
       model: 'persisted-model',
     }));
-    orchQueue = new QueueManager(
+    orchQueue = new ChatExecutionCoordinator(
       workspaceDir,
       mockAgents,
       mockPendingInputs,
@@ -1003,7 +1003,7 @@ describe('orchestration', () => {
       let chatExists = true;
       const turnStarted = deferred();
       const finishTurn = deferred();
-      const deletingQueue = new QueueManager(
+      const deletingQueue = new ChatExecutionCoordinator(
         workspaceDir,
         {
           runAgentTurn: mock(async () => {
@@ -2357,7 +2357,7 @@ describe('orchestration', () => {
         isChatRunning: mock(() => false),
         waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
       };
-      const deletingQueue = new QueueManager(
+      const deletingQueue = new ChatExecutionCoordinator(
         workspaceDir,
         turnRunner,
         createPendingInputs(),
@@ -2489,7 +2489,7 @@ describe('orchestration', () => {
     });
 
     it('pauses and requeues when queued turn option resolution fails', async () => {
-      const failingQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, () => {
+      const failingQueue = new ChatExecutionCoordinator(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, () => {
         throw new Error('settings unavailable');
       }, () => true);
       await failingQueue.createChatQueueEntry('c1', 'will fail before registration');

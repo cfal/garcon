@@ -8,7 +8,7 @@ import { UserMessage } from '../../common/chat-types.js';
 import { PendingUserInputRecoveryCoordinator } from '../chats/pending-user-input-recovery.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
 import { CommandLedger } from '../commands/command-ledger.js';
-import { QueueManager } from '../queue.js';
+import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
 
 let workspaceDir;
 
@@ -56,7 +56,7 @@ async function restorePendingInputs(ledger, pendingInputs, onRecoveredChatSettle
 }
 
 function createQueue(pendingInputs) {
-  return new QueueManager(
+  return new ChatExecutionCoordinator(
     workspaceDir,
     {
       runAgentTurn: mock(async () => undefined),
