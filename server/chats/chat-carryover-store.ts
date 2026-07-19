@@ -83,6 +83,10 @@ export class ChatCarryOverStore {
     return messages;
   }
 
+  getRevision(chatId: string): string {
+    return `carry-v1:${this.#entriesByChatId.get(String(chatId))?.revision ?? 0}`;
+  }
+
   appendSegment(chatId: string, segment: { agentId: string; model: string; messages: ChatMessage[] }): void {
     const key = String(chatId);
     const current = this.#entriesByChatId.get(key);

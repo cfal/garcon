@@ -1,0 +1,25 @@
+{
+  "name": "@garcon/server-agent-pi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "bunx tsc -p tsconfig.json" },
+  "dependencies": {
+    "@garcon/common": "workspace:*",
+    "@garcon/server-agent-common": "workspace:*",
+    "@garcon/server-agent-interface": "workspace:*",
+    "@earendil-works/pi-agent-core": "0.80.2",
+    "@earendil-works/pi-ai": "0.80.2",
+    "@earendil-works/pi-coding-agent": "0.80.2",
+    "@earendil-works/pi-tui": "0.80.2"
+  },
+  "devDependencies": { "@types/bun": "^1.3.14", "typescript": "^6.0.3" },
+  "garconBuild": {
+    "apiVersion": 1,
+    "integrationId": "pi",
+    "standaloneEntrypoints": [],
+    "preMainModules": ["./src/build/prepare-compiled-runtime.ts"],
+    "embeddedDependencyMetadata": ["@earendil-works/pi-coding-agent/package.json"]
+  }
+}

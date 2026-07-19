@@ -28,7 +28,7 @@ import { assertExecutionAdmissionOpen } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus } from './event-bus.js';
 import { createLogger } from '../lib/log.js';
-import { parseCodexGoalCommand, type CodexGoalCommand } from './codex/goal-command.js';
+import { parseCodexGoalCommand, type CodexGoalCommand } from './goal-command.js';
 import {
   endpointRuntimeConfig,
   mergeRuntimeConfig,

@@ -15,7 +15,8 @@ import {
 import type { AgentCommandImage } from "../../common/ws-requests.js";
 import type { AgentId } from "../../common/agents.js";
 import type { ApiProtocol } from "../../common/api-providers.js";
-import type { CodexGoalCommand } from './codex/goal-command.js';
+import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
+import type { CodexGoalCommand } from './goal-command.js';
 
 export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
 export type AgentName = AgentId;
@@ -75,6 +76,9 @@ export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
   clientMessageId?: string;
   turnId?: string;
   executionAdmission?: AgentExecutionAdmission;
+  commandType?: AgentExecutionCommandType;
+  integrationEndpoint?: AgentEndpointSelection | null;
+  onAbortable?: () => void;
 }
 
 export interface AgentEventMetadata {
@@ -124,8 +128,6 @@ export interface StartSessionRequest extends AgentExecutionConfig {
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
-  /** Reports when abort() can prevent or cancel this exact turn. */
-  onAbortable?: () => void;
 }
 
 export interface StartedAgentSession {
@@ -147,8 +149,6 @@ export interface ResumeTurnRequest extends AgentExecutionConfig {
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
   nativePath?: string | null;
-  /** Reports when abort() can prevent or cancel this exact turn. */
-  onAbortable?: () => void;
 }
 
 export interface PrepareProjectPathUpdateRequest {

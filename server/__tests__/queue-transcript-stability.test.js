@@ -10,7 +10,7 @@ import { ChatRunningError } from '../chats/errors.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
 import { UserAbortLifecycleCoordinator } from '../chats/user-abort-lifecycle-coordinator.js';
-import { DirectChatRuntimeBase } from '../agents/direct/direct-chat-runtime-base.js';
+import { DirectChatRuntimeBase } from '../../server-agents/common/src/direct/direct-chat-runtime-base.ts';
 import {
   CommandLedger,
   SERVER_RESTART_INTERRUPTED_ERROR_CODE,

@@ -19,7 +19,7 @@ import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-reso
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { AgentDirectory } from './directory.js';
 import { permissionModeForAgent } from './permission-modes.js';
-import { renderTranscriptSeed } from './shared/transcript-seed.js';
+import { renderTranscriptSeed } from './transcript-seed.js';
 
 export type AgentSwitchErrorCode = 'SESSION_BUSY';
 

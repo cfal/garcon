@@ -12,6 +12,17 @@ COPY common/package.json common/
 COPY server/package.json server/
 COPY web/package.json web/
 COPY server-agents/interface/package.json server-agents/interface/
+COPY server-agents/common/package.json server-agents/common/
+COPY server-agents/amp/package.json server-agents/amp/
+COPY server-agents/claude/package.json server-agents/claude/
+COPY server-agents/codex/package.json server-agents/codex/
+COPY server-agents/cursor/package.json server-agents/cursor/
+COPY server-agents/direct-anthropic-compatible/package.json server-agents/direct-anthropic-compatible/
+COPY server-agents/direct-openai-compatible/package.json server-agents/direct-openai-compatible/
+COPY server-agents/direct-openai-responses-compatible/package.json server-agents/direct-openai-responses-compatible/
+COPY server-agents/factory/package.json server-agents/factory/
+COPY server-agents/opencode/package.json server-agents/opencode/
+COPY server-agents/pi/package.json server-agents/pi/
 
 RUN bun install --frozen-lockfile
 

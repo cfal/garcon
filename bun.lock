@@ -13,14 +13,18 @@
       "name": "@garcon/server",
       "version": "0.1.0",
       "dependencies": {
-        "@earendil-works/pi-agent-core": "0.80.2",
-        "@earendil-works/pi-ai": "0.80.2",
-        "@earendil-works/pi-coding-agent": "0.80.2",
-        "@earendil-works/pi-tui": "0.80.2",
         "@garcon/common": "workspace:*",
+        "@garcon/server-agent-amp": "workspace:*",
+        "@garcon/server-agent-claude": "workspace:*",
+        "@garcon/server-agent-codex": "workspace:*",
+        "@garcon/server-agent-cursor": "workspace:*",
+        "@garcon/server-agent-direct-anthropic-compatible": "workspace:*",
+        "@garcon/server-agent-direct-openai-compatible": "workspace:*",
+        "@garcon/server-agent-direct-openai-responses-compatible": "workspace:*",
+        "@garcon/server-agent-factory": "workspace:*",
         "@garcon/server-agent-interface": "workspace:*",
-        "@openai/codex": "0.142.2",
-        "@opencode-ai/sdk": "1.17.11",
+        "@garcon/server-agent-opencode": "workspace:*",
+        "@garcon/server-agent-pi": "workspace:*",
         "bun-pty": "^0.4.10",
         "jsonwebtoken": "^9.0.3",
         "mime-types": "^3.0.2",
@@ -34,11 +38,161 @@
         "bun-types": "^1.3.14",
       },
     },
+    "server-agents/amp": {
+      "name": "@garcon/server-agent-amp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/claude": {
+      "name": "@garcon/server-agent-claude",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+        "bun-pty": "^0.4.10",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/codex": {
+      "name": "@garcon/server-agent-codex",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+        "@openai/codex": "0.142.2",
+        "bun-pty": "^0.4.10",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/common": {
+      "name": "@garcon/server-agent-common",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/cursor": {
+      "name": "@garcon/server-agent-cursor",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/direct-anthropic-compatible": {
+      "name": "@garcon/server-agent-direct-anthropic-compatible",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/direct-openai-compatible": {
+      "name": "@garcon/server-agent-direct-openai-compatible",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/direct-openai-responses-compatible": {
+      "name": "@garcon/server-agent-direct-openai-responses-compatible",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/factory": {
+      "name": "@garcon/server-agent-factory",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "server-agents/interface": {
       "name": "@garcon/server-agent-interface",
       "version": "0.1.0",
       "dependencies": {
         "@garcon/common": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/opencode": {
+      "name": "@garcon/server-agent-opencode",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
+        "@opencode-ai/sdk": "1.17.11",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "server-agents/pi": {
+      "name": "@garcon/server-agent-pi",
+      "version": "0.1.0",
+      "dependencies": {
+        "@earendil-works/pi-agent-core": "0.80.2",
+        "@earendil-works/pi-ai": "0.80.2",
+        "@earendil-works/pi-coding-agent": "0.80.2",
+        "@earendil-works/pi-tui": "0.80.2",
+        "@garcon/common": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
+        "@garcon/server-agent-interface": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -290,7 +444,29 @@
 
     "@garcon/server": ["@garcon/server@workspace:server"],
 
+    "@garcon/server-agent-amp": ["@garcon/server-agent-amp@workspace:server-agents/amp"],
+
+    "@garcon/server-agent-claude": ["@garcon/server-agent-claude@workspace:server-agents/claude"],
+
+    "@garcon/server-agent-codex": ["@garcon/server-agent-codex@workspace:server-agents/codex"],
+
+    "@garcon/server-agent-common": ["@garcon/server-agent-common@workspace:server-agents/common"],
+
+    "@garcon/server-agent-cursor": ["@garcon/server-agent-cursor@workspace:server-agents/cursor"],
+
+    "@garcon/server-agent-direct-anthropic-compatible": ["@garcon/server-agent-direct-anthropic-compatible@workspace:server-agents/direct-anthropic-compatible"],
+
+    "@garcon/server-agent-direct-openai-compatible": ["@garcon/server-agent-direct-openai-compatible@workspace:server-agents/direct-openai-compatible"],
+
+    "@garcon/server-agent-direct-openai-responses-compatible": ["@garcon/server-agent-direct-openai-responses-compatible@workspace:server-agents/direct-openai-responses-compatible"],
+
+    "@garcon/server-agent-factory": ["@garcon/server-agent-factory@workspace:server-agents/factory"],
+
     "@garcon/server-agent-interface": ["@garcon/server-agent-interface@workspace:server-agents/interface"],
+
+    "@garcon/server-agent-opencode": ["@garcon/server-agent-opencode@workspace:server-agents/opencode"],
+
+    "@garcon/server-agent-pi": ["@garcon/server-agent-pi@workspace:server-agents/pi"],
 
     "@google/genai": ["@google/genai@1.52.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-gwSvbpiN/17O9TbsqSsE/OzZcpv5Fo4RQjdngGgogtuB9RsyJ8ZHhX5KjHj1bp5N9snN2eK8LDGXSaWW2hof8Q=="],
 

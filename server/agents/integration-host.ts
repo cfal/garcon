@@ -66,19 +66,19 @@ class BoundEnvironmentReader implements AgentEnvironmentReader {
 }
 
 class ScopedStorage implements AgentScopedStorage {
-  readonly #agentRoot: string;
+  readonly rootDirectory: string;
 
   constructor(workspaceDir: string, agentId: string) {
-    this.#agentRoot = path.resolve(workspaceDir, 'agent-data', agentId);
+    this.rootDirectory = path.resolve(workspaceDir, 'agent-data', agentId);
   }
 
   async directory(namespace: string): Promise<string> {
     assertNamespace(namespace);
-    const parent = path.dirname(this.#agentRoot);
+    const parent = path.dirname(this.rootDirectory);
     await mkdir(parent, { recursive: true });
-    await ensureDirectoryWithoutSymlink(this.#agentRoot);
+    await ensureDirectoryWithoutSymlink(this.rootDirectory);
 
-    const root = await realpath(this.#agentRoot);
+    const root = await realpath(this.rootDirectory);
     const candidate = path.join(root, namespace);
     await ensureDirectoryWithoutSymlink(candidate);
     const resolved = await realpath(candidate);

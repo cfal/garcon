@@ -13,16 +13,13 @@ import type {
   StartedAgentSession,
 } from './session-types.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
+import type { AgentEndpointSelection as IntegrationEndpointSelection } from '@garcon/common/agent-execution';
 import type { StoredApiProvider, StoredApiProviderEndpoint } from '../api-providers/store.js';
 import type {
   AgentAuthLoginCompleteResult,
   AgentAuthLoginLaunchResult,
   AgentAuthLoginStatus,
 } from '../../common/agent-auth.js';
-import type {
-  SearchTranscriptLoadContext,
-  SearchTranscriptLoadPlan,
-} from '../chats/search/source-types.js';
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
@@ -63,10 +60,6 @@ export interface AgentTranscriptSource {
   ): Promise<AgentTranscriptPage | null>;
   getPreview?(session: AgentChatEntry): Promise<unknown>;
   resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
-  resolveSearchLoadPlan(
-    session: AgentChatEntry,
-    context: SearchTranscriptLoadContext,
-  ): Promise<SearchTranscriptLoadPlan>;
   rewriteForkTranscriptEntry?(
     entry: unknown,
     context: ForkTranscriptEntryContext,
@@ -134,6 +127,7 @@ export interface AgentEndpointSelection {
 export interface AgentEndpointRuntimeConfig {
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
+  integrationEndpoint?: IntegrationEndpointSelection;
 }
 
 export interface ForkAgentSessionArgs {
@@ -142,6 +136,7 @@ export interface ForkAgentSessionArgs {
   targetChatId: string;
   envOverrides?: StartSessionRequest['envOverrides'];
   codexConfig?: StartSessionRequest['codexConfig'];
+  integrationEndpoint?: IntegrationEndpointSelection;
 }
 
 export interface Agent {

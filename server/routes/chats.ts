@@ -128,6 +128,7 @@ interface ChatSearchDep {
   }): Promise<{
     results: ChatSearchResponse['results'];
     index: ChatSearchResponse['index'];
+    partialFailures?: ChatSearchResponse['partialFailures'];
   }>;
 }
 
@@ -573,6 +574,7 @@ export default function createChatRoutes({
         results: result.results,
         total: result.results.length,
         index: result.index,
+        ...(result.partialFailures ? { partialFailures: result.partialFailures } : {}),
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
       if (

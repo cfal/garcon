@@ -42,10 +42,16 @@ import {
   ChatCarryOverStore,
   renderCarriedTranscript,
 } from './chats/chat-carryover-store.js';
-import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
+import { AgentRegistry } from './agents/index.js';
 import { AgentDirectory } from './agents/directory.js';
 import { AgentSwitchService } from './agents/agent-switch-service.js';
-import { stripFirstUserSeed } from './agents/shared/transcript-seed.js';
+import { stripFirstUserSeed } from './agents/transcript-seed.js';
+import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
+import { IntegrationHostFactory } from './agents/integration-host.js';
+import { IntegrationRegistry } from './agents/integration-registry.js';
+import { createIntegrationAgentAdapters } from './agents/integration-agent-adapter.js';
+import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
+import { toAgentChatReference } from './agents/integration-chat-reference.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
@@ -62,8 +68,6 @@ import {
   waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
-import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
-import { migrateDirectNativePaths } from './agents/direct/native-path-migration.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -135,7 +139,6 @@ export async function startServer(): Promise<void> {
 
     await initAuthStore();
     await chatRegistry.init();
-    await migrateCursorStreamJsonSessionsToAcp(chatRegistry);
     await settings.init();
 
     // User-managed API provider store and resolver.
@@ -146,10 +149,42 @@ export async function startServer(): Promise<void> {
       apiProviderStore.list(),
     );
 
-    const agentSuite = createDefaultAgentSuite({
-      workspaceDir,
-      apiProviderReader: apiProviderStore,
+    const carryOver = new ChatCarryOverStore({
+      filePath: path.join(workspaceDir, 'chat-carryover.json'),
     });
+    await carryOver.init();
+    carryOver.bindRegistry(chatRegistry);
+
+    const integrationHostFactory = new IntegrationHostFactory({
+      workspaceDir,
+      async resolveCredential({ reference, signal }) {
+        signal.throwIfAborted();
+        const resolved = apiProviderStore.getEndpoint(reference.endpointId);
+        if (!resolved || resolved.apiProvider.id !== reference.apiProviderId) return null;
+        return { kind: 'api-key', value: resolved.endpoint.apiKey };
+      },
+      async loadCarryOver(request) {
+        request.signal.throwIfAborted();
+        const revision = carryOver.getRevision(request.chatId);
+        if (revision !== request.expectedRevision) {
+          throw new Error(`Carry-over revision changed for chat ${request.chatId}`);
+        }
+        return {
+          revision,
+          messages: renderCarriedTranscript(carryOver.getSegments(request.chatId), {
+            agentId: request.currentAgentId,
+            model: request.currentModel,
+          }),
+        };
+      },
+    });
+    const integrationRegistry = new IntegrationRegistry({
+      integrations: defaultAgentIntegrations,
+      hostFactory: integrationHostFactory,
+      migrationStoreFor: (agentId) => new FileAgentMigrationStore(workspaceDir, agentId),
+    });
+    await integrationRegistry.start();
+    const integratedAgents = createIntegrationAgentAdapters(integrationRegistry);
 
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
@@ -164,14 +199,10 @@ export async function startServer(): Promise<void> {
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     const agentRegistry = new AgentRegistry({
       registry: chatRegistry,
-      agents: agentSuite.agents,
+      agents: integratedAgents,
       endpointResolver,
     });
 
-    await migrateDirectNativePaths(
-      chatRegistry,
-      (session) => agentRegistry.resolveNativePath(session),
-    );
     await chatRegistry.reconcileSessions((session) =>
       agentRegistry.resolveNativePath(session),
     );
@@ -183,13 +214,6 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
-    // Durable prior-agent transcript snapshots for cross-agent continuation.
-    const carryOver = new ChatCarryOverStore({
-      filePath: path.join(workspaceDir, 'chat-carryover.json'),
-    });
-    await carryOver.init();
-    carryOver.bindRegistry(chatRegistry);
-
     // Single per-chat mutation lock shared by every chat mutator so send/fork/
     // compaction/delete and agent switches serialize on the same `chat:<id>` key
     // and cannot race one another.
@@ -198,7 +222,7 @@ export async function startServer(): Promise<void> {
     // Agent-switch coordinator: snapshots the outgoing transcript and stages a
     // fresh session under the new agent. Uses a directory built from the same
     // agent suite the registry wraps.
-    const agentDirectory = new AgentDirectory(agentSuite.agents);
+    const agentDirectory = new AgentDirectory(integratedAgents);
     const agentSwitch = new AgentSwitchService({
       registry: chatRegistry,
       directory: agentDirectory,
@@ -239,21 +263,21 @@ export async function startServer(): Promise<void> {
       chatExecutionActivity.isActive,
     );
     const chatSearch = new TranscriptSearchController({
-      workspaceDir,
-      listChats: () => Object.entries(chatRegistry.listAllChats()).map(([chatId, session]) => ({
-        chatId,
-        lastActivityAt: metadata.getChatMetadata(chatId)?.lastActivity ?? null,
-        agentId: session.agentId,
-        model: session.model,
-      })),
-      async resolveSearchLoadPlan(chatId) {
-        const session = chatRegistry.getChat(chatId);
-        if (!session) return { kind: 'live-only', reasonCode: 'chat-not-found' };
-        const agent = agentDirectory.get(session.agentId);
-        if (!agent) return { kind: 'live-only', reasonCode: 'agent-unsupported' };
-        return agent.transcript.resolveSearchLoadPlan(session, { chatId });
-      },
-      getCarryOverDescriptor: (chatId) => carryOver.getSearchDescriptor(chatId),
+      integrations: integrationRegistry,
+      listChats: () => Object.entries(chatRegistry.listAllChats()).flatMap(([chatId, session]) => {
+        const integration = integrationRegistry.get(session.agentId);
+        if (!integration) return [];
+        return [{
+          agentId: session.agentId,
+          reference: toAgentChatReference(
+            integration,
+            chatId,
+            session,
+            carryOver.getRevision(chatId),
+          ),
+          updatedAt: metadata.getChatMetadata(chatId)?.lastActivity ?? null,
+        }];
+      }),
     });
     await chatSearch.initialize(
       settings.getFeatureSettings().transcriptSearch.enabled,
@@ -683,6 +707,7 @@ export async function startServer(): Promise<void> {
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
         agentRegistry.shutdown();
+        await integrationRegistry.stop();
         terminalManager.shutdown();
         await metadata.flush();
         await carryOver.flush();

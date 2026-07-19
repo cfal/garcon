@@ -1,0 +1,26 @@
+{
+  "name": "@garcon/server-agent-common",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./legacy/*": "./src/legacy/*.ts",
+    "./shared/*": "./src/shared/*.ts",
+    "./lib/*": "./src/lib/*.ts",
+    "./chats/*": "./src/chats/*.ts",
+    "./direct/*": "./src/direct/*.ts",
+    "./search/*": "./src/search/*.ts"
+  },
+  "scripts": {
+    "typecheck": "bunx tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@garcon/common": "workspace:*",
+    "@garcon/server-agent-interface": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^6.0.3"
+  }
+}

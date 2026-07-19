@@ -16,6 +16,7 @@ export interface AgentHostFactory {
 }
 
 export interface AgentScopedStorage {
+  readonly rootDirectory: string;
   directory(namespace: string): Promise<string>;
 }
 

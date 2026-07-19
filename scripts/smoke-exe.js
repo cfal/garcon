@@ -189,8 +189,15 @@ async function run() {
   let child = spawnServer();
   try {
     let started = await waitForServerUrl(child);
+    const claudeSearchDatabase = path.join(
+      workspaceDir,
+      'agent-data',
+      'claude',
+      'transcript-search',
+      'index.sqlite',
+    );
 
-    if (await Bun.file(path.join(workspaceDir, 'chat-search-v3.sqlite')).exists()) {
+    if (await Bun.file(claudeSearchDatabase).exists()) {
       throw new Error('Default-off executable unexpectedly created a transcript search database.');
     }
     await stopProcess(child);
@@ -242,8 +249,8 @@ async function run() {
       throw new Error(`Expected GET ${appAssetMatch[0]} to succeed, received ${assetResponse.status}`);
     }
 
-    if (!(await Bun.file(path.join(workspaceDir, 'chat-search-v3.sqlite')).exists())) {
-      throw new Error('Enabled executable did not start the embedded transcript search worker.');
+    if (!(await Bun.file(claudeSearchDatabase).exists())) {
+      throw new Error('Enabled executable did not create the Claude transcript search index.');
     }
 
     await waitForTranscriptResult(
