@@ -15,7 +15,7 @@ describe('Lightpanda interrupt and send', () => {
       await app.sendComposer('ui-interrupt-b');
       await app.waitForQueuedPreview('ui-interrupt-b');
       const activeAborted = active.expectAbort();
-      await app.clickButton('Interrupt and send');
+      await app.clickResponsiveAction('Send now');
       await activeAborted;
       await fixture.integration.fakeOpenAi.waitForRequest({ lastUserText: 'ui-interrupt-b' });
       await app.waitForText('echo:ui-interrupt-b');
