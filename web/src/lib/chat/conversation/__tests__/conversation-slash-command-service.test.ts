@@ -10,8 +10,12 @@ import {
 
 vi.mock('$lib/api/chats.js', () => ({
 	compactChat: vi.fn(),
+	createQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
+	runChat: vi.fn(),
+	sendActiveInput: vi.fn(),
+	startChat: vi.fn(),
 }));
 
 vi.mock('$lib/api/scheduled-prompts.js', () => ({

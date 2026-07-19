@@ -12,6 +12,7 @@ import type { ChatViewMessage } from '$shared/chat-view';
 import type { ChatTranscriptCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import { getChatExecutionControl } from '$lib/api/chats.js';
 
 export interface ReconnectWsPort {
 	isConnected: boolean;
@@ -39,7 +40,7 @@ export interface ChatReconnectCoordinatorOptions {
 	chatState: ReconnectTranscriptState;
 	conversationUi: ReconnectConversationUiState;
 	getSelectedChatId: () => string | null;
-	getExecutionControl: (chatId: string) => Promise<{ control: ChatExecutionControlState }>;
+	getExecutionControl?: (chatId: string) => Promise<{ control: ChatExecutionControlState }>;
 	reconcileProcessing: (activeChatIds: Set<string>) => void;
 	invalidateProcessingAuthority: () => void;
 	quietRefreshChats: () => Promise<void> | void;
@@ -205,7 +206,7 @@ export class ChatReconnectCoordinator {
 
 	async #refreshControl(chatId: string, expectedEpoch?: number): Promise<void> {
 		try {
-			const result = await this.options.getExecutionControl(chatId);
+			const result = await (this.options.getExecutionControl ?? getChatExecutionControl)(chatId);
 			if (expectedEpoch !== undefined && expectedEpoch !== this.#reconnectEpoch) return;
 			this.options.conversationUi.setExecutionControlFromRefresh(chatId, result.control);
 		} catch {

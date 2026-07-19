@@ -21,7 +21,6 @@
 	import type { SplitPanePreviewCursor } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
-	import { getChatExecutionControl } from '$lib/api/chats.js';
 	import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
@@ -147,7 +146,6 @@
 		chatState,
 		conversationUi,
 		getSelectedChatId: () => sessions.selectedChatId,
-		getExecutionControl: getChatExecutionControl,
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
 		invalidateProcessingAuthority: () => sessions.invalidateProcessingAuthority(),
 		quietRefreshChats: () => sessions.quietRefreshChats(),
