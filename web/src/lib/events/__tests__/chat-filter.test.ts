@@ -40,13 +40,13 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'process' });
 	});
 
-	it('processes queue-state-updated as a global event regardless of chat ID', () => {
+	it('processes chat-execution-control-updated as a global event regardless of chat ID', () => {
 		const result = filterByChat(
-			'queue-state-updated',
+			'chat-execution-control-updated',
 			{
-				type: 'queue-state-updated',
+				type: 'chat-execution-control-updated',
 				chatId: 'chat-b',
-				queue: { entries: [], pause: null },
+				control: {},
 			} as never,
 			ctx,
 		);

@@ -1,33 +1,31 @@
 import { describe, expect, it, vi } from 'vitest';
-import { QueueStateUpdatedMessage } from '$shared/ws-events';
-import type { QueueState } from '$lib/types/chat';
+import { ChatExecutionControlUpdatedMessage } from '$shared/ws-events';
+import type { ChatExecutionControlState } from '$lib/types/chat';
 import { filterByChat } from '../chat-filter';
-import { handleQueueUpdated, type QueueContext } from '../handlers/queue';
+import { handleExecutionControlUpdated, type QueueContext } from '../handlers/queue';
 
 function makeContext(
-	setMessageQueue: (chatId: string, queue: QueueState | null) => void,
+	setExecutionControl: (chatId: string, control: ChatExecutionControlState | null) => void,
 ): QueueContext {
 	return {
 		getCurrentChatId: () => 'chat-a',
 		getSelectedChatId: () => 'chat-a',
-		conversationUi: { setMessageQueue },
+		conversationUi: { setExecutionControl },
 		markTurnRunning: vi.fn(),
 		onChatProcessing: vi.fn(),
 	};
 }
 
 describe('queue routing integration', () => {
-	it('applies queue updates for background chats through filter + handler path', () => {
-		const setMessageQueue = vi.fn();
-		const queue = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: null,
+	it('applies execution-control updates for background chats through filter + handler path', () => {
+		const setExecutionControl = vi.fn();
+		const control = {
+			queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+			recoveredInputContinuation: null,
 			version: 3,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};
-		const message = new QueueStateUpdatedMessage('chat-b', queue);
+		const message = new ChatExecutionControlUpdatedMessage('chat-b', control);
 		const filterResult = filterByChat(message.type, message, {
 			selectedChatId: 'chat-a',
 			currentChatId: 'chat-a',
@@ -35,10 +33,10 @@ describe('queue routing integration', () => {
 		});
 
 		if (filterResult.action === 'process') {
-			handleQueueUpdated(message, makeContext(setMessageQueue));
+			handleExecutionControlUpdated(message, makeContext(setExecutionControl));
 		}
 
 		expect(filterResult).toEqual({ action: 'process' });
-		expect(setMessageQueue).toHaveBeenCalledWith('chat-b', queue);
+		expect(setExecutionControl).toHaveBeenCalledWith('chat-b', control);
 	});
 });

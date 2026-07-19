@@ -1,11 +1,11 @@
 import { QueuedInputEditorState } from '../queued-input-editor-state.svelte';
-import type { QueueState } from '$lib/types/chat';
+import type { ChatQueueState } from '$lib/types/chat';
 
 export class QueuedInputEditorTestHost {
-	queue = $state<QueueState | null>(null);
+	queue = $state<ChatQueueState | null>(null);
 	readonly editor: QueuedInputEditorState;
 
-	constructor(queue: QueueState) {
+	constructor(queue: ChatQueueState) {
 		this.queue = queue;
 		const getQueue = () => this.queue;
 		this.editor = new QueuedInputEditorState({

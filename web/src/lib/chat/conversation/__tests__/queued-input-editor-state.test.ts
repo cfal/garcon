@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { QueueEntry, QueueState } from '$lib/types/chat';
+import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 import { QueuedInputEditorTestHost } from './queued-input-editor-test-host.svelte';
 
 function entry(revision = 1, content = 'Original message'): QueueEntry {
@@ -12,14 +12,12 @@ function entry(revision = 1, content = 'Original message'): QueueEntry {
 	};
 }
 
-function queue(entries: QueueEntry[], overrides: Partial<QueueState> = {}): QueueState {
+function queue(entries: QueueEntry[], overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
 		entries,
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
-		version: 1,
-		updatedAt: '2026-07-16T00:00:00.000Z',
 		...overrides,
 	};
 }
@@ -31,7 +29,7 @@ describe('QueuedInputEditorState', () => {
 		editor.begin(host.queue!.entries[0]);
 		editor.draft = 'My unsaved draft';
 
-		host.queue = queue([entry(2, 'Edited elsewhere')], { version: 2 });
+		host.queue = queue([entry(2, 'Edited elsewhere')]);
 
 		expect(editor.phase).toBe('conflict');
 		expect(editor.draft).toBe('My unsaved draft');
@@ -43,14 +41,14 @@ describe('QueuedInputEditorState', () => {
 		const editor = host.editor;
 		editor.begin(host.queue!.entries[0]);
 		editor.draft = 'Local draft';
-		host.queue = queue([entry(2, 'Latest content')], { version: 2 });
+		host.queue = queue([entry(2, 'Latest content')]);
 
 		editor.rebaseOnLatest();
 		expect(editor.phase).toBe('editable');
 		expect(editor.draft).toBe('Local draft');
 		expect(editor.baseRevision).toBe(2);
 
-		host.queue = queue([entry(3, 'Newest content')], { version: 3 });
+		host.queue = queue([entry(3, 'Newest content')]);
 		editor.reloadLatest();
 		expect(editor.phase).toBe('editable');
 		expect(editor.draft).toBe('Newest content');
@@ -63,19 +61,16 @@ describe('QueuedInputEditorState', () => {
 		editor.begin(host.queue!.entries[0]);
 		editor.draft = 'Recover this draft';
 
-		host.queue = queue([], { dispatchingEntryId: 'entry-1', version: 2 });
+		host.queue = queue([], { dispatchingEntryId: 'entry-1' });
 		expect(editor.phase).toBe('dispatching');
 
 		host.queue = queue([], {
-			recentlyDispatched: [
-				{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:01:00.000Z' },
-			],
-			version: 3,
+			recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
 		});
 		expect(editor.phase).toBe('sent');
 		expect(editor.draft).toBe('Recover this draft');
 
-		host.queue = queue([], { version: 4 });
+		host.queue = queue([]);
 		expect(editor.phase).toBe('removed');
 		expect(editor.draft).toBe('Recover this draft');
 	});

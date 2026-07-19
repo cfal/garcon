@@ -1,4 +1,4 @@
-import type { QueueEntry, QueueState } from '$lib/types/chat';
+import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 
 export type QueuedInputEditPhase =
 	| 'closed'
@@ -11,7 +11,7 @@ export type QueuedInputEditPhase =
 export type QueuedInputMutation = 'idle' | 'saving' | 'queueing-draft';
 
 interface QueuedInputEditorOptions {
-	get queue(): QueueState | null;
+	get queue(): ChatQueueState | null;
 }
 
 export class QueuedInputEditorState {

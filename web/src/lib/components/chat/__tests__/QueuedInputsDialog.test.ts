@@ -1,7 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import QueuedInputsDialogTestHost from './QueuedInputsDialogTestHost.svelte';
-import type { QueueEntry, QueuePause, QueueState } from '$lib/types/chat';
+import type {
+	ChatQueueState,
+	QueueEntry,
+	QueuePause,
+	RecoveredInputContinuation,
+} from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 
 function entry(index: number, revision = 1, content = `Queued message ${index}`): QueueEntry {
@@ -14,14 +19,12 @@ function entry(index: number, revision = 1, content = `Queued message ${index}`)
 	};
 }
 
-function queue(entries: QueueEntry[], overrides: Partial<QueueState> = {}): QueueState {
+function queue(entries: QueueEntry[], overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
 		entries,
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
-		version: 1,
-		updatedAt: '2026-07-16T00:00:00.000Z',
 		...overrides,
 	};
 }
@@ -40,21 +43,34 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function renderDialog(initialQueue: QueueState) {
+function continuation(): RecoveredInputContinuation {
+	return {
+		id: '19e6da82-7978-4cb1-b481-b71142fca0c4',
+		installedAt: '2026-07-18T00:00:00.000Z',
+	};
+}
+
+function renderDialog(
+	initialQueue: ChatQueueState,
+	initialContinuation: RecoveredInputContinuation | null = null,
+) {
 	const onCreate = vi.fn().mockResolvedValue(undefined);
 	const onReplace = vi.fn().mockResolvedValue(undefined);
 	const onDelete = vi.fn().mockResolvedValue(undefined);
 	const onPause = vi.fn().mockResolvedValue(undefined);
 	const onResume = vi.fn().mockResolvedValue(undefined);
+	const onContinue = vi.fn().mockResolvedValue(undefined);
 	const result = render(QueuedInputsDialogTestHost, {
 		initialQueue,
+		initialContinuation,
 		onCreate,
 		onReplace,
 		onDelete,
 		onPause,
 		onResume,
+		onContinue,
 	});
-	return { ...result, onCreate, onReplace, onDelete, onPause, onResume };
+	return { ...result, onCreate, onReplace, onDelete, onPause, onResume, onContinue };
 }
 
 afterEach(() => {
@@ -76,13 +92,13 @@ describe('QueuedInputsDialog', () => {
 	it('updates live, removes popped rows, and stays open when the queue becomes empty', async () => {
 		const { component } = renderDialog(queue([entry(0), entry(1)]));
 
-		component.setQueue(queue([entry(0), entry(1), entry(2)], { version: 2 }));
+		component.setQueue(queue([entry(0), entry(1), entry(2)]));
 		await waitFor(() => expect(screen.getByText('Queued message 2')).toBeTruthy());
 
-		component.setQueue(queue([entry(1), entry(2)], { version: 3 }));
+		component.setQueue(queue([entry(1), entry(2)]));
 		await waitFor(() => expect(screen.queryByText('Queued message 0')).toBeNull());
 
-		component.setQueue(queue([], { version: 4 }));
+		component.setQueue(queue([]));
 		await waitFor(() => expect(screen.getByText(m.chat_queue_empty())).toBeTruthy());
 		expect(screen.getByRole('dialog')).toBeTruthy();
 	});
@@ -96,7 +112,6 @@ describe('QueuedInputsDialog', () => {
 		component.setQueue(
 			queue([], {
 				recentlyDispatched: [{ entryId: 'entry-0', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
-				version: 2,
 			}),
 		);
 
@@ -116,7 +131,6 @@ describe('QueuedInputsDialog', () => {
 		component.setQueue(
 			queue([], {
 				recentlyDispatched: [{ entryId: 'entry-0', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
-				version: 2,
 			}),
 		);
 		const queueAsNew = await screen.findByRole('button', {
@@ -137,7 +151,7 @@ describe('QueuedInputsDialog', () => {
 		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
 		await fireEvent.input(textarea, { target: { value: 'My draft' } });
 
-		component.setQueue(queue([entry(0, 2, 'Edited elsewhere')], { version: 2 }));
+		component.setQueue(queue([entry(0, 2, 'Edited elsewhere')]));
 
 		await waitFor(() => expect(screen.getByText(m.chat_queue_changed_elsewhere())).toBeTruthy());
 		expect((textarea as HTMLTextAreaElement).value).toBe('My draft');
@@ -147,7 +161,7 @@ describe('QueuedInputsDialog', () => {
 
 	it('deletes the selected stable ID after an earlier row disappears', async () => {
 		const { component, onDelete } = renderDialog(queue([entry(0), entry(1), entry(2)]));
-		component.setQueue(queue([entry(1), entry(2)], { version: 2 }));
+		component.setQueue(queue([entry(1), entry(2)]));
 		await waitFor(() => expect(screen.queryByText('Queued message 0')).toBeNull());
 
 		const deleteButtons = screen.getAllByRole('button', {
@@ -248,7 +262,7 @@ describe('QueuedInputsDialog', () => {
 	it('waits for dispatch completion before offering queue draft as new', async () => {
 		const { component } = renderDialog(queue([entry(0)]));
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
-		component.setQueue(queue([], { dispatchingEntryId: 'entry-0', version: 2 }));
+		component.setQueue(queue([], { dispatchingEntryId: 'entry-0' }));
 
 		await waitFor(() => expect(screen.getByText(m.chat_queue_agent_processing())).toBeTruthy());
 		expect(screen.queryByRole('button', { name: m.chat_queue_queue_draft_as_new() })).toBeNull();
@@ -256,7 +270,6 @@ describe('QueuedInputsDialog', () => {
 		component.setQueue(
 			queue([], {
 				recentlyDispatched: [{ entryId: 'entry-0', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
-				version: 3,
 			}),
 		);
 		await waitFor(() => {
@@ -268,7 +281,7 @@ describe('QueuedInputsDialog', () => {
 		const { component } = renderDialog(queue([entry(0), entry(1)]));
 		await fireEvent.click(screen.getAllByRole('button', { name: m.chat_queue_edit_message() })[0]);
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: 'Keep this draft' } });
-		component.setQueue(queue([entry(1)], { version: 2 }));
+		component.setQueue(queue([entry(1)]));
 
 		await waitFor(() => expect(screen.getByText(m.chat_queue_no_longer_queued())).toBeTruthy());
 		const remainingEdit = screen.getByRole('button', { name: m.chat_queue_edit_message() });
@@ -286,7 +299,7 @@ describe('QueuedInputsDialog', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
 		expect(onResume).toHaveBeenCalledWith('pause-1');
 
-		component.setQueue(queue([entry(0)], { pause: null, version: 2 }));
+		component.setQueue(queue([entry(0)], { pause: null }));
 		await waitFor(() => expect(screen.queryByText(m.chat_queue_paused())).toBeNull());
 	});
 
@@ -301,62 +314,87 @@ describe('QueuedInputsDialog', () => {
 	it.each([
 		['queued-turn-failed', m.chat_queue_pause_failed_detail()],
 		['recovered-inflight', m.chat_queue_pause_recovered_detail()],
-		['recovered-unconfirmed-input', m.chat_queue_pause_recovered_input_detail()],
 		['completion-uncertain', m.chat_queue_pause_completion_uncertain_detail()],
 		['unknown', m.chat_queue_pause_unknown_detail()],
 	] as const)('renders the %s automatic pause reason', (kind, detail) => {
-		const pause: QueuePause = kind === 'unknown'
-			? { id: 'pause-1', kind, entryId: 'entry-0', pausedAt: null }
-			: kind === 'recovered-unconfirmed-input'
-				? { id: 'pause-1', kind, pausedAt: '2026-07-16T00:00:00.000Z' }
-			: {
-					id: 'pause-1',
-					kind,
-					entryId: 'entry-0',
-					pausedAt: '2026-07-16T00:00:00.000Z',
-				};
+		const pause: QueuePause =
+			kind === 'unknown'
+				? { id: 'pause-1', kind, entryId: 'entry-0', pausedAt: null }
+				: {
+						id: 'pause-1',
+						kind,
+						entryId: 'entry-0',
+						pausedAt: '2026-07-16T00:00:00.000Z',
+					};
 		renderDialog(queue([entry(0)], { pause }));
 
 		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
 		expect(screen.getByText(detail)).toBeTruthy();
 	});
 
+	it('continues recovered input independently from a real queue pause', async () => {
+		const recovered = continuation();
+		const { component, onContinue, onResume } = renderDialog(
+			queue([entry(0)], { pause: manualPause() }),
+			recovered,
+		);
+
+		expect(screen.getByText(m.chat_queue_recovered_input_continuation_detail())).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_continue() })).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_continue() }));
+		expect(onContinue).toHaveBeenCalledWith(recovered.id);
+		expect(onResume).not.toHaveBeenCalled();
+
+		component.setContinuation(null);
+		await waitFor(() => {
+			expect(screen.queryByText(m.chat_queue_recovered_input_continuation_detail())).toBeNull();
+		});
+		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
+	});
+
 	it('keeps a live superseding pause when an earlier resume is still pending', async () => {
 		const pendingResume = deferred<void>();
-		const { component, onResume } = renderDialog(queue([entry(0)], {
-			pause: manualPause('pause-old'),
-		}));
+		const { component, onResume } = renderDialog(
+			queue([entry(0)], {
+				pause: manualPause('pause-old'),
+			}),
+		);
 		onResume.mockReturnValueOnce(pendingResume.promise);
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
 
-		component.setQueue(queue([entry(0)], {
-			pause: {
-				id: 'pause-new',
-				kind: 'queued-turn-failed',
-				entryId: 'entry-0',
-				pausedAt: '2026-07-16T00:01:00.000Z',
-			},
-			version: 2,
-		}));
+		component.setQueue(
+			queue([entry(0)], {
+				pause: {
+					id: 'pause-new',
+					kind: 'queued-turn-failed',
+					entryId: 'entry-0',
+					pausedAt: '2026-07-16T00:01:00.000Z',
+				},
+			}),
+		);
 		await waitFor(() => expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy());
 
 		pendingResume.reject(new Error('The queue pause changed before it could be resumed'));
-		await waitFor(() => expect(screen.getByText(
-			'The queue pause changed before it could be resumed',
-		)).toBeTruthy());
+		await waitFor(() =>
+			expect(screen.getByText('The queue pause changed before it could be resumed')).toBeTruthy(),
+		);
 		expect(onResume).toHaveBeenCalledWith('pause-old');
 		expect(screen.getByText(m.chat_queue_pause_failed_detail())).toBeTruthy();
 	});
 
 	it('explains when the entry associated with an automatic pause was removed', () => {
-		renderDialog(queue([entry(1)], {
-			pause: {
-				id: 'pause-1',
-				kind: 'completion-uncertain',
-				entryId: 'entry-0',
-				pausedAt: '2026-07-16T00:00:00.000Z',
-			},
-		}));
+		renderDialog(
+			queue([entry(1)], {
+				pause: {
+					id: 'pause-1',
+					kind: 'completion-uncertain',
+					entryId: 'entry-0',
+					pausedAt: '2026-07-16T00:00:00.000Z',
+				},
+			}),
+		);
 
 		expect(screen.getByText(m.chat_queue_pause_affected_removed())).toBeTruthy();
 	});

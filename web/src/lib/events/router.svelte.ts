@@ -13,7 +13,7 @@ import {
 	ChatSessionCreatedMessage,
 	ChatSessionStoppedMessage,
 	ChatProcessingUpdatedMessage,
-	QueueStateUpdatedMessage,
+	ChatExecutionControlUpdatedMessage,
 	QueueDispatchingMessage,
 	PendingUserInputUpdatedMessage,
 	PendingUserInputStatusUpdatedMessage,
@@ -50,7 +50,11 @@ import {
 	handlePermissionLifecycleFromBatch,
 	type PermissionLifecycleContext,
 } from './handlers/permissions';
-import { handleQueueUpdated, handleQueueSending, type QueueContext } from './handlers/queue';
+import {
+	handleExecutionControlUpdated,
+	handleQueueSending,
+	type QueueContext,
+} from './handlers/queue';
 import {
 	handleChatCreated,
 	handleChatAborted,
@@ -380,8 +384,10 @@ function buildDispatch(
 			if (msg instanceof ChatProcessingUpdatedMessage) handleChatStatus(msg, chatEventCtx);
 		},
 
-		'queue-state-updated': (msg) => {
-			if (msg instanceof QueueStateUpdatedMessage) handleQueueUpdated(msg, queueCtx);
+		'chat-execution-control-updated': (msg) => {
+			if (msg instanceof ChatExecutionControlUpdatedMessage) {
+				handleExecutionControlUpdated(msg, queueCtx);
+			}
 		},
 		'queue-dispatching': (msg) => {
 			if (!(msg instanceof QueueDispatchingMessage)) return;

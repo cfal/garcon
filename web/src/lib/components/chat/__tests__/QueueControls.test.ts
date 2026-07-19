@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import QueueControls from '../QueueControls.svelte';
-import type { QueueEntry, QueuePause, QueueState } from '$lib/types/chat';
+import type {
+	ChatQueueState,
+	QueueEntry,
+	QueuePause,
+	RecoveredInputContinuation,
+} from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	installResizeObserverHarness,
@@ -32,18 +37,16 @@ function manualPause(id = 'pause-1'): QueuePause {
 	return { id, kind: 'manual', pausedAt: '2026-02-27T00:00:00.000Z' };
 }
 
-function makeQueue(count: number, pause: QueuePause | null = null): QueueState {
+function makeQueue(count: number, pause: QueuePause | null = null): ChatQueueState {
 	return {
 		entries: Array.from({ length: count }, (_, index) => makeEntry(index)),
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: count > 0 ? pause : null,
-		version: 1,
-		updatedAt: '2026-02-27T00:00:00.000Z',
 	};
 }
 
-function makeQueueWithIds(ids: string[], pause: QueuePause | null = null): QueueState {
+function makeQueueWithIds(ids: string[], pause: QueuePause | null = null): ChatQueueState {
 	return {
 		...makeQueue(ids.length, pause),
 		entries: ids.map((id, index) => ({
@@ -55,14 +58,16 @@ function makeQueueWithIds(ids: string[], pause: QueuePause | null = null): Queue
 }
 
 function renderControls(
-	queue: QueueState,
+	queue: ChatQueueState,
 	props: Partial<{
 		chatId: string | null;
+		continuation: RecoveredInputContinuation | null;
 		canInterrupt: boolean;
 		onInterrupt: () => void | Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
-		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
+		onContinue: (continuationId: string) => Promise<void>;
+		onQueueControlError: (action: 'pause' | 'resume' | 'continue', error: unknown) => void;
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
@@ -71,8 +76,10 @@ function renderControls(
 	return render(QueueControls, {
 		chatId: 'chat-1',
 		queue,
+		continuation: null,
 		onPause: vi.fn().mockResolvedValue(undefined),
 		onResume: vi.fn().mockResolvedValue(undefined),
+		onContinue: vi.fn().mockResolvedValue(undefined),
 		onQueueControlError: vi.fn(),
 		onEdit: vi.fn(),
 		onOpenManager: vi.fn(),
@@ -165,6 +172,30 @@ describe('QueueControls', () => {
 		);
 
 		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+	});
+
+	it('continues a recovered predecessor by ID without resuming a real pause', async () => {
+		const recovered: RecoveredInputContinuation = {
+			id: 'fbab5c41-a8c7-48a9-b1f4-c8cab503a686',
+			installedAt: '2026-07-18T00:00:00.000Z',
+		};
+		const onContinue = vi.fn().mockResolvedValue(undefined);
+		const onResume = vi.fn().mockResolvedValue(undefined);
+		renderControls(makeQueue(1, manualPause()), {
+			continuation: recovered,
+			onContinue,
+			onResume,
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+		});
+
+		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_continue() }));
+
+		expect(onContinue).toHaveBeenCalledWith(recovered.id);
+		expect(onResume).not.toHaveBeenCalled();
+		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
 	});
 
 	it.each(['pause', 'resume'] as const)(

@@ -20,10 +20,11 @@ import {
 	replaceQueuedInput,
 	deleteQueuedInput,
 	sendActiveInput,
-	getChatQueue,
+	getChatExecutionControl,
 	clearChatQueue,
 	pauseChatQueue,
 	resumeChatQueue,
+	continueRecoveredInput,
 	updateExecutionSettings,
 	updateChatModel,
 	updateChatProjectPath,
@@ -53,6 +54,20 @@ describe('chats API contract', () => {
 			status,
 			headers: { 'Content-Type': 'application/json' },
 		});
+	}
+
+	function emptyControl() {
+		return {
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: null,
+			},
+			recoveredInputContinuation: null,
+			version: 0,
+			updatedAt: null,
+		};
 	}
 
 	beforeEach(() => {
@@ -319,14 +334,7 @@ describe('chats API contract', () => {
 				status: 'accepted',
 				acceptedAt: 't',
 				stopped: true,
-				queue: {
-					entries: [],
-					dispatchingEntryId: null,
-					recentlyDispatched: [],
-					pause: null,
-					version: 0,
-					updatedAt: null,
-				},
+				control: emptyControl(),
 			}),
 		);
 
@@ -367,17 +375,20 @@ describe('chats API contract', () => {
 			alwaysAllow: false,
 			response: { outcome: { outcome: 'accepted' } },
 		});
-		});
+	});
 
 	it('interruptAndSendChat uses a distinct command endpoint', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({
-			success: true,
-			commandType: 'agent-interrupt-and-send',
-			clientRequestId: 'req-interrupt',
-			status: 'accepted',
-			acceptedAt: 't',
-			stopped: true,
-		}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				commandType: 'agent-interrupt-and-send',
+				clientRequestId: 'req-interrupt',
+				status: 'accepted',
+				acceptedAt: 't',
+				stopped: true,
+				control: emptyControl(),
+			}),
+		);
 
 		await interruptAndSendChat({
 			clientRequestId: 'req-interrupt',
@@ -394,21 +405,12 @@ describe('chats API contract', () => {
 	});
 
 	it('queue helpers use REST endpoints and encode identifiers', async () => {
-		const queue = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: null,
-			version: 0,
-			updatedAt: null,
-		};
+		const control = emptyControl();
 		fetchMock.mockImplementation(() =>
-			Promise.resolve(
-				jsonResponse({ success: true, chatId: 'c/1', queue }),
-			),
+			Promise.resolve(jsonResponse({ success: true, chatId: 'c/1', control })),
 		);
 
-		await getChatQueue('c/1');
+		await getChatExecutionControl('c/1');
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue?chatId=c%2F1');
 		expect(fetchMock.mock.calls[0][1].method ?? 'GET').toBe('GET');
 
@@ -466,6 +468,7 @@ describe('chats API contract', () => {
 		await clearChatQueue('c/1');
 		await pauseChatQueue('c/1');
 		await resumeChatQueue('c/1', 'pause/1');
+		await continueRecoveredInput('c/1', '3283b76e-aa29-4f94-8d9e-1ec7d408f10b');
 
 		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/clear');
 		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/pause');
@@ -473,6 +476,11 @@ describe('chats API contract', () => {
 		expect(JSON.parse(fetchMock.mock.calls[7][1].body)).toEqual({
 			chatId: 'c/1',
 			pauseId: 'pause/1',
+		});
+		expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/chats/recovered-input/continue');
+		expect(JSON.parse(fetchMock.mock.calls[8][1].body)).toEqual({
+			chatId: 'c/1',
+			continuationId: '3283b76e-aa29-4f94-8d9e-1ec7d408f10b',
 		});
 	});
 

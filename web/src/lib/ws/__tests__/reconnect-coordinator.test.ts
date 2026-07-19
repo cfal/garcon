@@ -5,24 +5,29 @@ import {
 	type ChatReconnectCoordinatorOptions,
 	type ReconnectTranscriptState,
 } from '../reconnect-coordinator.svelte';
-import type { QueueState } from '$shared/queue-state';
+import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
-function queueState(paused: boolean): QueueState {
+function controlState(paused: boolean): ChatExecutionControlState {
 	return {
-		entries: paused
-			? [{
-					id: 'queued-1',
-					content: 'queued',
-					revision: 1,
-					createdAt: TS,
-					updatedAt: TS,
-				}]
-			: [],
-		dispatchingEntryId: null,
-		recentlyDispatched: [],
-		pause: paused ? { id: 'pause-1', kind: 'manual', pausedAt: TS } : null,
+		queue: {
+			entries: paused
+				? [
+						{
+							id: 'queued-1',
+							content: 'queued',
+							revision: 1,
+							createdAt: TS,
+							updatedAt: TS,
+						},
+					]
+				: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: paused ? { id: 'pause-1', kind: 'manual', pausedAt: TS } : null,
+		},
+		recoveredInputContinuation: null,
 		version: paused ? 2 : 1,
 		updatedAt: TS,
 	};
@@ -38,16 +43,16 @@ function messageJson(seq: number, content: string) {
 function reconnectStateResponse(
 	runningIds: string[] = [],
 	chatIds: string[] = [],
-	queueStates: Record<string, QueueState> | undefined = {},
+	controlStates: Record<string, ChatExecutionControlState> | undefined = {},
 ) {
 	return {
 		type: 'reconnect-state',
 		clientRequestId: 'req-reconnect',
 		processing: { outcome: 'snapshot', runningChatIds: runningIds },
-		queueResults: chatIds.map((chatId) => ({
+		controlResults: chatIds.map((chatId) => ({
 			chatId,
 			outcome: 'snapshot',
-			queue: queueStates?.[chatId] ?? queueState(false),
+			control: controlStates?.[chatId] ?? controlState(false),
 		})),
 	};
 }
@@ -110,8 +115,8 @@ function createReconnectDeps(
 		subscribeResponses?: Record<string, Record<string, unknown>>;
 		backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
 		visibleChatIds?: string[];
-		queueChatIds?: string[];
-		queueStates?: Record<string, QueueState>;
+		controlChatIds?: string[];
+		controlStates?: Record<string, ChatExecutionControlState>;
 		visibleCursors?: Record<
 			string,
 			{ chatId: string; generationId: string; lastSeq: number } | null
@@ -123,10 +128,11 @@ function createReconnectDeps(
 	const sendRequest = vi.fn(async (request: object) => {
 		if (!('type' in request)) throw new Error('Request is missing a type');
 		if (request.type === 'reconnect-state-query') {
-			const chatIds = 'queueChatIds' in request && Array.isArray(request.queueChatIds)
-				? request.queueChatIds.filter((chatId): chatId is string => typeof chatId === 'string')
-				: [];
-			return reconnectStateResponse(options.runningIds ?? [], chatIds, options.queueStates);
+			const chatIds =
+				'controlChatIds' in request && Array.isArray(request.controlChatIds)
+					? request.controlChatIds.filter((chatId): chatId is string => typeof chatId === 'string')
+					: [];
+			return reconnectStateResponse(options.runningIds ?? [], chatIds, options.controlStates);
 		}
 		if (request.type === 'chat-subscribe') {
 			const chatId = 'chatId' in request ? String(request.chatId) : '';
@@ -153,9 +159,9 @@ function createReconnectDeps(
 		},
 	} satisfies ReconnectTranscriptState;
 	const conversationUi = {
-		queueChatIds: options.queueChatIds ?? [],
-		removeMessageQueue: vi.fn(),
-		setMessageQueueFromRefresh: vi.fn(),
+		executionControlChatIds: options.controlChatIds ?? [],
+		removeExecutionControl: vi.fn(),
+		setExecutionControlFromRefresh: vi.fn(),
 	};
 
 	return {
@@ -163,9 +169,11 @@ function createReconnectDeps(
 		chatState,
 		conversationUi,
 		getSelectedChatId: vi.fn(() => selectedChatId),
-		getQueue: vi.fn(async (_chatId: string): Promise<{ queue: QueueState }> => ({
-			queue: queueState(false),
-		})),
+		getExecutionControl: vi.fn(
+			async (_chatId: string): Promise<{ control: ChatExecutionControlState }> => ({
+				control: controlState(false),
+			}),
+		),
 		reconcileProcessing: vi.fn(),
 		invalidateProcessingAuthority: vi.fn(),
 		quietRefreshChats: vi.fn(async () => undefined),
@@ -188,10 +196,10 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.chatState.loadMessages,
 		deps.chatState.transcriptCache.markStale,
 		deps.chatState.transcriptCache.markValidated,
-		deps.conversationUi.removeMessageQueue,
-		deps.conversationUi.setMessageQueueFromRefresh,
+		deps.conversationUi.removeExecutionControl,
+		deps.conversationUi.setExecutionControlFromRefresh,
 		deps.getSelectedChatId,
-		deps.getQueue,
+		deps.getExecutionControl,
 		deps.reconcileProcessing,
 		deps.invalidateProcessingAuthority,
 		deps.quietRefreshChats,
@@ -227,12 +235,12 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.ws.sendRequest).toHaveBeenCalledOnce();
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
 			type: 'reconnect-state-query',
-			queueChatIds: ['chat-1'],
+			controlChatIds: ['chat-1'],
 		});
 		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
-			queueState(false),
+			controlState(false),
 		);
 		expect(deps.quietRefreshChats).toHaveBeenCalledOnce();
 		expect(deps.ws.sendRequest).not.toHaveBeenCalledWith(
@@ -250,9 +258,9 @@ describe('ChatReconnectCoordinator', () => {
 			await expect(coordinator.handleConnectionState(true)).resolves.toBeUndefined();
 
 			expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
-			expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+			expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 				'chat-1',
-				queueState(false),
+				controlState(false),
 			);
 			expect(warn).toHaveBeenCalled();
 		} finally {
@@ -299,13 +307,13 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.quietRefreshChats).toHaveBeenCalled();
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
 			type: 'reconnect-state-query',
-			queueChatIds: ['chat-1'],
+			controlChatIds: ['chat-1'],
 		});
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
-			queueState(false),
+			controlState(false),
 		);
-		expect(deps.getQueue).not.toHaveBeenCalled();
+		expect(deps.getExecutionControl).not.toHaveBeenCalled();
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: 'chat-subscribe',
@@ -373,12 +381,12 @@ describe('ChatReconnectCoordinator', () => {
 
 		await flushUntil(
 			() =>
-				deps.conversationUi.setMessageQueueFromRefresh.mock.calls.length === 1 &&
+				deps.conversationUi.setExecutionControlFromRefresh.mock.calls.length === 1 &&
 				deps.reconcileProcessing.mock.calls.length === 1,
 		);
 		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 		expect(deps.quietRefreshChats).toHaveBeenCalledOnce();
-		expect(deps.getQueue).not.toHaveBeenCalled();
+		expect(deps.getExecutionControl).not.toHaveBeenCalled();
 		expect(deps.getVisibleChatIds).toHaveBeenCalled();
 
 		selectedSubscribe.resolve(deltaResponse('chat-1'));
@@ -393,9 +401,9 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set());
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
 			type: 'reconnect-state-query',
-			queueChatIds: ['chat-1'],
+			controlChatIds: ['chat-1'],
 		});
-		expect(deps.getQueue).not.toHaveBeenCalled();
+		expect(deps.getExecutionControl).not.toHaveBeenCalled();
 	});
 
 	it('reconciles an authoritative empty processing snapshot', async () => {
@@ -410,23 +418,23 @@ describe('ChatReconnectCoordinator', () => {
 	it('refreshes cached background queues after reconnect', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			queueChatIds: ['chat-1', 'chat-2', 'chat-3'],
+			controlChatIds: ['chat-1', 'chat-2', 'chat-3'],
 		});
 
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
 			type: 'reconnect-state-query',
-			queueChatIds: ['chat-1', 'chat-2', 'chat-3'],
+			controlChatIds: ['chat-1', 'chat-2', 'chat-3'],
 		});
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledTimes(3);
-		expect(deps.getQueue).not.toHaveBeenCalled();
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledTimes(3);
+		expect(deps.getExecutionControl).not.toHaveBeenCalled();
 	});
 
 	it('falls back to HTTP only for a reconnect snapshot omitted by the server', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			queueChatIds: ['chat-1', 'chat-2'],
+			controlChatIds: ['chat-1', 'chat-2'],
 		});
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
@@ -442,22 +450,22 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.getQueue).toHaveBeenCalledTimes(1);
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-2');
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.getExecutionControl).toHaveBeenCalledTimes(1);
+		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-2');
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
-			queueState(false),
+			controlState(false),
 		);
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-2',
-			queueState(false),
+			controlState(false),
 		);
 	});
 
 	it('applies explicit reconnect queue outcomes without treating deletion as an outage', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			queueChatIds: ['chat-2', 'chat-3'],
+			controlChatIds: ['chat-2', 'chat-3'],
 		});
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
@@ -466,11 +474,11 @@ describe('ChatReconnectCoordinator', () => {
 						type: 'reconnect-state',
 						clientRequestId: 'req-reconnect',
 						processing: { outcome: 'snapshot', runningChatIds: [] },
-						queueResults: [
-							{ chatId: 'chat-1', outcome: 'snapshot', queue: queueState(true) },
+						controlResults: [
+							{ chatId: 'chat-1', outcome: 'snapshot', control: controlState(true) },
 							{ chatId: 'chat-2', outcome: 'not-found' },
 							{ chatId: 'chat-3', outcome: 'unavailable' },
-							{ chatId: 'not-requested', outcome: 'snapshot', queue: queueState(true) },
+							{ chatId: 'not-requested', outcome: 'snapshot', control: controlState(true) },
 						],
 					};
 				}
@@ -483,14 +491,14 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
-			queueState(true),
+			controlState(true),
 		);
-		expect(deps.conversationUi.removeMessageQueue).toHaveBeenCalledWith('chat-2');
-		expect(deps.getQueue).toHaveBeenCalledTimes(1);
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-3');
-		expect(deps.conversationUi.setMessageQueueFromRefresh).not.toHaveBeenCalledWith(
+		expect(deps.conversationUi.removeExecutionControl).toHaveBeenCalledWith('chat-2');
+		expect(deps.getExecutionControl).toHaveBeenCalledTimes(1);
+		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-3');
+		expect(deps.conversationUi.setExecutionControlFromRefresh).not.toHaveBeenCalledWith(
 			'not-requested',
 			expect.anything(),
 		);
@@ -499,7 +507,7 @@ describe('ChatReconnectCoordinator', () => {
 	it('invalidates stale processing authority while applying queues when processing is unavailable', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			queueChatIds: ['chat-2', 'chat-3'],
+			controlChatIds: ['chat-2', 'chat-3'],
 		});
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
@@ -508,8 +516,8 @@ describe('ChatReconnectCoordinator', () => {
 						type: 'reconnect-state',
 						clientRequestId: 'req-reconnect',
 						processing: { outcome: 'unavailable' },
-						queueResults: [
-							{ chatId: 'chat-1', outcome: 'snapshot', queue: queueState(true) },
+						controlResults: [
+							{ chatId: 'chat-1', outcome: 'snapshot', control: controlState(true) },
 							{ chatId: 'chat-2', outcome: 'not-found' },
 							{ chatId: 'chat-3', outcome: 'unavailable' },
 						],
@@ -526,13 +534,13 @@ describe('ChatReconnectCoordinator', () => {
 
 		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
 		expect(deps.invalidateProcessingAuthority).toHaveBeenCalledTimes(2);
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
-			queueState(true),
+			controlState(true),
 		);
-		expect(deps.conversationUi.removeMessageQueue).toHaveBeenCalledWith('chat-2');
-		expect(deps.getQueue).toHaveBeenCalledOnce();
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-3');
+		expect(deps.conversationUi.removeExecutionControl).toHaveBeenCalledWith('chat-2');
+		expect(deps.getExecutionControl).toHaveBeenCalledOnce();
+		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-3');
 	});
 
 	it('invalidates processing authority when the reconnect-state request fails', async () => {
@@ -560,7 +568,7 @@ describe('ChatReconnectCoordinator', () => {
 	it('falls back queue reads but preserves processing state when reconnect control data is malformed', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			queueChatIds: ['chat-2'],
+			controlChatIds: ['chat-2'],
 		});
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
@@ -568,9 +576,9 @@ describe('ChatReconnectCoordinator', () => {
 					return {
 						type: 'reconnect-state',
 						processing: { outcome: 'snapshot', runningChatIds: [42] },
-						queueResults: [
-							{ chatId: 'chat-1', outcome: 'snapshot', queue: queueState(true) },
-							{ chatId: 'chat-2', outcome: 'snapshot', queue: queueState(true) },
+						controlResults: [
+							{ chatId: 'chat-1', outcome: 'snapshot', control: controlState(true) },
+							{ chatId: 'chat-2', outcome: 'snapshot', control: controlState(true) },
 						],
 					};
 				}
@@ -583,12 +591,12 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-2');
+		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-1');
+		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-2');
 		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
-		expect(deps.conversationUi.setMessageQueueFromRefresh).not.toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).not.toHaveBeenCalledWith(
 			'chat-1',
-			queueState(true),
+			controlState(true),
 		);
 	});
 
@@ -596,14 +604,12 @@ describe('ChatReconnectCoordinator', () => {
 		const heldControlState = deferred<Record<string, unknown>>();
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
-			queueChatIds: ['chat-2'],
+			controlChatIds: ['chat-2'],
 			visibleChatIds: ['chat-3'],
 			visibleCursors: {
 				'chat-3': { chatId: 'chat-3', generationId: 'generation-3', lastSeq: 1 },
 			},
-			backgroundCursors: [
-				{ chatId: 'chat-4', generationId: 'generation-4', lastSeq: 1 },
-			],
+			backgroundCursors: [{ chatId: 'chat-4', generationId: 'generation-4', lastSeq: 1 }],
 			subscribeResponses: {
 				'chat-1': deltaResponse('chat-1', 'generation-selected'),
 				'chat-3': deltaResponse('chat-3', 'generation-3', [messageJson(2, 'visible')]),
@@ -715,12 +721,7 @@ describe('ChatReconnectCoordinator', () => {
 		};
 		const deps = createReconnectDeps({
 			subscribeResponses: {
-				'chat-1': deltaResponse(
-					'chat-1',
-					'generation-selected',
-					[],
-					[unconfirmedInput],
-				),
+				'chat-1': deltaResponse('chat-1', 'generation-selected', [], [unconfirmedInput]),
 			},
 		});
 
@@ -932,11 +933,7 @@ describe('ChatReconnectCoordinator', () => {
 					queueQueryCount += 1;
 					return queueQueryCount === 1
 						? firstQueue.promise
-						: reconnectStateResponse(
-								['chat-1'],
-								['chat-1'],
-								{ 'chat-1': queueState(true) },
-							);
+						: reconnectStateResponse(['chat-1'], ['chat-1'], { 'chat-1': controlState(true) });
 				}
 				if (request.type === 'chat-subscribe') {
 					return deltaResponse('chat-1', 'generation-selected');
@@ -953,10 +950,10 @@ describe('ChatReconnectCoordinator', () => {
 		const second = coordinator.handleConnectionState(true);
 		await second;
 
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledTimes(1);
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledTimes(1);
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
-			queueState(true),
+			controlState(true),
 		);
 		expect(deps.reconcileProcessing).toHaveBeenCalledOnce();
 		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
@@ -964,10 +961,10 @@ describe('ChatReconnectCoordinator', () => {
 		firstQueue.resolve(reconnectStateResponse(['chat-1'], ['chat-1']));
 		await first;
 
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledTimes(1);
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledTimes(1);
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
-			queueState(true),
+			controlState(true),
 		);
 		expect(deps.reconcileProcessing).toHaveBeenCalledOnce();
 	});

@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	createQueuedInput,
+	continueRecoveredInput,
 	deleteQueuedInput,
 	forkChat,
 	forkRunChat,
-	getChatQueue,
+	getChatExecutionControl,
 	interruptAndSendChat,
 	pauseChatQueue,
 	resumeChatQueue,
@@ -27,16 +28,22 @@ import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-s
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { PendingPermissionRequest, PermissionMode, QueueState } from '$lib/types/chat';
+import type {
+	ChatQueueState,
+	PendingPermissionRequest,
+	PermissionMode,
+	ChatExecutionControlState,
+} from '$lib/types/chat';
 import type { LoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
+	continueRecoveredInput: vi.fn(),
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
-	getChatQueue: vi.fn(),
+	getChatExecutionControl: vi.fn(),
 	interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
@@ -57,7 +64,8 @@ vi.mock('$lib/api/scheduled-prompts.js', () => ({
 
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
-const mockGetChatQueue = vi.mocked(getChatQueue);
+const mockContinueRecoveredInput = vi.mocked(continueRecoveredInput);
+const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
 const mockInterruptAndSendChat = vi.mocked(interruptAndSendChat);
 const mockPauseChatQueue = vi.mocked(pauseChatQueue);
 const mockResumeChatQueue = vi.mocked(resumeChatQueue);
@@ -116,14 +124,29 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 	};
 }
 
-function emptyQueue(): QueueState {
+function emptyControl(): ChatExecutionControlState {
 	return {
-		entries: [],
-		dispatchingEntryId: null,
-		recentlyDispatched: [],
-		pause: null,
+		queue: {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+		},
+		recoveredInputContinuation: null,
 		version: 0,
 		updatedAt: null,
+	};
+}
+
+function controlWithQueue(
+	queue: Partial<ChatQueueState> = {},
+	control: Partial<Omit<ChatExecutionControlState, 'queue'>> = {},
+): ChatExecutionControlState {
+	const empty = emptyControl();
+	return {
+		...empty,
+		...control,
+		queue: { ...empty.queue, ...queue },
 	};
 }
 
@@ -191,6 +214,11 @@ function createDeps(chat = createRunningChat()) {
 			}
 			chatState.pendingUserInputs = [...chatState.pendingUserInputs, input];
 		}),
+		clearPendingUserInput: vi.fn((clientRequestId: string) => {
+			chatState.pendingUserInputs = chatState.pendingUserInputs.filter(
+				(input) => input.clientRequestId !== clientRequestId,
+			);
+		}),
 		updatePendingUserInputDeliveryStatus: vi.fn(
 			(
 				clientRequestId: string,
@@ -224,9 +252,9 @@ function createDeps(chat = createRunningChat()) {
 		setPreviousPermissionMode: vi.fn((mode: PermissionMode | null) => {
 			conversationUi.previousPermissionMode = mode;
 		}),
-		getQueue: vi.fn((): QueueState | null => null),
-		setMessageQueue: vi.fn(),
-		setMessageQueueFromRefresh: vi.fn(),
+		getExecutionControl: vi.fn((): ChatExecutionControlState | null => null),
+		setExecutionControl: vi.fn(),
+		setExecutionControlFromRefresh: vi.fn(),
 	};
 	const deps = {
 		sessions: {
@@ -266,9 +294,9 @@ function createDeps(chat = createRunningChat()) {
 			setModelSelection: vi.fn(),
 			agentId: 'claude',
 			model: '',
-			apiProviderId: null,
-			modelEndpointId: null,
-			modelProtocol: null,
+			apiProviderId: null as string | null,
+			modelEndpointId: null as string | null,
+			modelProtocol: null as SessionControllerDeps['agentState']['modelProtocol'],
 			permissionMode: 'default',
 			thinkingMode: 'none',
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
@@ -351,7 +379,8 @@ describe('ConversationSessionController', () => {
 	beforeEach(() => {
 		mockForkChat.mockReset();
 		mockForkRunChat.mockReset();
-		mockGetChatQueue.mockReset();
+		mockContinueRecoveredInput.mockReset();
+		mockGetChatExecutionControl.mockReset();
 		mockInterruptAndSendChat.mockReset();
 		mockPauseChatQueue.mockReset();
 		mockResumeChatQueue.mockReset();
@@ -385,17 +414,10 @@ describe('ConversationSessionController', () => {
 			modelProtocol: null,
 		});
 		mockScheduleChatPrompt.mockReset();
-		mockGetChatQueue.mockResolvedValue({
+		mockGetChatExecutionControl.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
-			queue: {
-				entries: [],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				pause: null,
-				version: 0,
-				updatedAt: null,
-			},
+			control: emptyControl(),
 		});
 	});
 
@@ -659,29 +681,32 @@ describe('ConversationSessionController', () => {
 		expect(deps.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
 		expect(deps.setIsViewportPinnedToBottom).toHaveBeenCalledWith(true);
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
-		expect(mockGetChatQueue).not.toHaveBeenCalled();
+		expect(mockGetChatExecutionControl).not.toHaveBeenCalled();
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 	});
 
 	it('applies the paused queue snapshot returned by Stop', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const queue = {
-			entries: [
-				{
-					id: 'entry-1',
-					content: 'queued',
-					revision: 1,
-					createdAt: '2026-07-17T00:00:00.000Z',
-					updatedAt: '2026-07-17T00:00:00.000Z',
+		const control: ChatExecutionControlState = {
+			queue: {
+				entries: [
+					{
+						id: 'entry-1',
+						content: 'queued',
+						revision: 1,
+						createdAt: '2026-07-17T00:00:00.000Z',
+						updatedAt: '2026-07-17T00:00:00.000Z',
+					},
+				],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: {
+					id: 'pause-1',
+					kind: 'manual' as const,
+					pausedAt: '2026-07-17T00:00:00.000Z',
 				},
-			],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: {
-				id: 'pause-1',
-				kind: 'manual' as const,
-				pausedAt: '2026-07-17T00:00:00.000Z',
 			},
+			recoveredInputContinuation: null,
 			version: 2,
 			updatedAt: '2026-07-17T00:00:00.000Z',
 		};
@@ -692,13 +717,13 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
 			stopped: true,
-			queue,
+			control,
 		});
 		const controller = new ConversationSessionController(deps);
 
 		await controller.handleAbort();
 
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', queue);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', control);
 		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
 	});
 
@@ -711,6 +736,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
 			stopped: true,
+			control: emptyControl(),
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -743,7 +769,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
 			stopped: false,
-			queue: emptyQueue(),
+			control: emptyControl(),
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -776,6 +802,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
 			stopped: false,
+			control: emptyControl(),
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -1094,6 +1121,36 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('retains the loaded endpoint when catalog lookup is incomplete after restart', async () => {
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+		const { deps } = createDeps();
+		deps.agentState.agentId = 'direct-openai-compatible';
+		deps.agentState.model = 'integration-echo';
+		deps.agentState.apiProviderId = 'provider-1';
+		deps.agentState.modelEndpointId = 'endpoint-1';
+		deps.agentState.modelProtocol = 'openai-compatible';
+		deps.composerState.inputText = 'continue recovered chat';
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: 'integration-echo',
+				apiProviderId: 'provider-1',
+				modelEndpointId: 'endpoint-1',
+				modelProtocol: 'openai-compatible',
+			}),
+		);
+	});
+
 	it('starts draft chats with the draft integration settings', async () => {
 		const draft = createRunningChat({
 			id: 'draft-1',
@@ -1320,6 +1377,26 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('removes the optimistic row and refreshes control once on direct admission conflict', async () => {
+		mockRunChat.mockRejectedValueOnce(
+			new ApiError(409, 'Another turn acquired execution first', 'SESSION_BUSY', undefined, true),
+		);
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.composerState.inputText = 'preserve this message';
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(deps.chatState.clearPendingUserInput).toHaveBeenCalledOnce();
+		expect(deps.chatState.pendingUserInputs).toEqual([]);
+		expect(mockGetChatExecutionControl).toHaveBeenCalledTimes(1);
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
+			'chat-1',
+			emptyControl(),
+		);
+		expect(deps.composerState.inputText).toBe('preserve this message');
+	});
+
 	it('queues text while a turn is processing without adding a transcript user message', async () => {
 		const chat = createRunningChat({ isProcessing: true, status: 'running' });
 		const { deps } = createDeps(chat);
@@ -1332,22 +1409,25 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:00.000Z',
 			entryId: 'entry-1',
-			queue: {
-				entries: [
-					{
-						id: 'entry-1',
-						content: 'queue this',
-						revision: 1,
-						createdAt: '2026-05-14T00:00:00.000Z',
-						updatedAt: '2026-05-14T00:00:00.000Z',
-					},
-				],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				pause: null,
-				version: 1,
-				updatedAt: '2026-05-14T00:00:00.000Z',
-			},
+			control: controlWithQueue(
+				{
+					entries: [
+						{
+							id: 'entry-1',
+							content: 'queue this',
+							revision: 1,
+							createdAt: '2026-05-14T00:00:00.000Z',
+							updatedAt: '2026-05-14T00:00:00.000Z',
+						},
+					],
+					dispatchingEntryId: null,
+					recentlyDispatched: [],
+				},
+				{
+					version: 1,
+					updatedAt: '2026-05-14T00:00:00.000Z',
+				},
+			),
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -1361,74 +1441,80 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
 		expect(deps.chatState.clearLocalNotices).toHaveBeenCalledOnce();
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith(
 			'chat-1',
 			expect.objectContaining({
-				entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
+				queue: expect.objectContaining({
+					entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
+				}),
 			}),
 		);
 	});
 
-	it('queues text behind restart uncertainty even when the visible queue is empty', async () => {
+	it('sends directly through an empty recovered-input continuation boundary', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
-		deps.composerState.inputText = 'wait for explicit review';
-		const recoveryQueue: QueueState = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: {
-				id: 'pause-recovery',
-				kind: 'recovered-unconfirmed-input',
-				pausedAt: '2026-07-18T00:00:00.000Z',
+		deps.composerState.inputText = 'continue with a successor';
+		const recoveredControl = controlWithQueue(
+			{},
+			{
+				recoveredInputContinuation: {
+					id: 'db66b8f9-38e2-4cd4-bbf8-9f409c8b9a96',
+					installedAt: '2026-07-18T00:00:00.000Z',
+				},
+				version: 1,
+				updatedAt: '2026-07-18T00:00:00.000Z',
 			},
-			version: 1,
-			updatedAt: '2026-07-18T00:00:00.000Z',
-		};
-		deps.conversationUi.getQueue.mockReturnValue(recoveryQueue);
-		mockCreateQueuedInput.mockResolvedValueOnce({
+		);
+		deps.conversationUi.getExecutionControl.mockReturnValue(recoveredControl);
+		mockRunChat.mockResolvedValueOnce({
 			success: true,
-			commandType: 'queue-entry-create',
-			clientRequestId: 'req-recovery-queue',
+			commandType: 'agent-run',
+			clientRequestId: 'req-successor',
 			chatId: 'chat-1',
 			status: 'accepted',
 			acceptedAt: '2026-07-18T00:00:01.000Z',
-			entryId: 'entry-recovery',
-			queue: recoveryQueue,
+			turnId: 'turn-successor',
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+		expect(mockRunChat).toHaveBeenCalledWith(
 			expect.objectContaining({
 				chatId: 'chat-1',
-				content: 'wait for explicit review',
+				command: 'continue with a successor',
 			}),
 		);
-		expect(mockRunChat).not.toHaveBeenCalled();
-		expect(deps.chatState.pendingUserInputs).toEqual([]);
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
 	});
 
 	it('creates a distinct entry when an idle chat already has queued input', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = 'second queued message';
-		deps.conversationUi.getQueue.mockReturnValue({
-			entries: [
+		deps.conversationUi.getExecutionControl.mockReturnValue(
+			controlWithQueue(
 				{
-					id: 'entry-1',
-					content: 'first queued message',
-					revision: 1,
-					createdAt: '2026-05-14T00:00:00.000Z',
+					entries: [
+						{
+							id: 'entry-1',
+							content: 'first queued message',
+							revision: 1,
+							createdAt: '2026-05-14T00:00:00.000Z',
+							updatedAt: '2026-05-14T00:00:00.000Z',
+						},
+					],
+					dispatchingEntryId: null,
+					recentlyDispatched: [],
+					pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
+				},
+				{
+					version: 1,
 					updatedAt: '2026-05-14T00:00:00.000Z',
 				},
-			],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
-			version: 1,
-			updatedAt: '2026-05-14T00:00:00.000Z',
-		});
+			),
+		);
 		mockCreateQueuedInput.mockResolvedValueOnce({
 			success: true,
 			commandType: 'queue-entry-create',
@@ -1437,29 +1523,33 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:01.000Z',
 			entryId: 'entry-2',
-			queue: {
-				entries: [
-					{
-						id: 'entry-1',
-						content: 'first queued message',
-						revision: 1,
-						createdAt: '2026-05-14T00:00:00.000Z',
-						updatedAt: '2026-05-14T00:00:00.000Z',
-					},
-					{
-						id: 'entry-2',
-						content: 'second queued message',
-						revision: 1,
-						createdAt: '2026-05-14T00:00:01.000Z',
-						updatedAt: '2026-05-14T00:00:01.000Z',
-					},
-				],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				pause: null,
-				version: 2,
-				updatedAt: '2026-05-14T00:00:01.000Z',
-			},
+			control: controlWithQueue(
+				{
+					entries: [
+						{
+							id: 'entry-1',
+							content: 'first queued message',
+							revision: 1,
+							createdAt: '2026-05-14T00:00:00.000Z',
+							updatedAt: '2026-05-14T00:00:00.000Z',
+						},
+						{
+							id: 'entry-2',
+							content: 'second queued message',
+							revision: 1,
+							createdAt: '2026-05-14T00:00:01.000Z',
+							updatedAt: '2026-05-14T00:00:01.000Z',
+						},
+					],
+					dispatchingEntryId: null,
+					recentlyDispatched: [],
+					pause: null,
+				},
+				{
+					version: 2,
+					updatedAt: '2026-05-14T00:00:01.000Z',
+				},
+			),
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
@@ -1477,22 +1567,28 @@ describe('ConversationSessionController', () => {
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = 'queue with attachment';
 		deps.composerState.images = [new File(['image'], 'test.png', { type: 'image/png' })];
-		deps.conversationUi.getQueue.mockReturnValue({
-			entries: [
+		deps.conversationUi.getExecutionControl.mockReturnValue(
+			controlWithQueue(
 				{
-					id: 'entry-1',
-					content: 'first queued message',
-					revision: 1,
-					createdAt: '2026-05-14T00:00:00.000Z',
+					entries: [
+						{
+							id: 'entry-1',
+							content: 'first queued message',
+							revision: 1,
+							createdAt: '2026-05-14T00:00:00.000Z',
+							updatedAt: '2026-05-14T00:00:00.000Z',
+						},
+					],
+					dispatchingEntryId: null,
+					recentlyDispatched: [],
+					pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
+				},
+				{
+					version: 1,
 					updatedAt: '2026-05-14T00:00:00.000Z',
 				},
-			],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
-			version: 1,
-			updatedAt: '2026-05-14T00:00:00.000Z',
-		});
+			),
+		);
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
@@ -1508,15 +1604,21 @@ describe('ConversationSessionController', () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = 'wait behind the in-flight entry';
-		const dispatchingQueue: QueueState = {
-			entries: [],
-			dispatchingEntryId: 'entry-sending',
-			recentlyDispatched: [{ entryId: 'entry-sending', dispatchedAt: '2026-05-14T00:00:00.000Z' }],
-			pause: null,
-			version: 2,
-			updatedAt: '2026-05-14T00:00:00.000Z',
-		};
-		deps.conversationUi.getQueue.mockReturnValue(dispatchingQueue);
+		const dispatchingControl: ChatExecutionControlState = controlWithQueue(
+			{
+				entries: [],
+				dispatchingEntryId: 'entry-sending',
+				recentlyDispatched: [
+					{ entryId: 'entry-sending', dispatchedAt: '2026-05-14T00:00:00.000Z' },
+				],
+				pause: null,
+			},
+			{
+				version: 2,
+				updatedAt: '2026-05-14T00:00:00.000Z',
+			},
+		);
+		deps.conversationUi.getExecutionControl.mockReturnValue(dispatchingControl);
 		mockCreateQueuedInput.mockResolvedValueOnce({
 			success: true,
 			commandType: 'queue-entry-create',
@@ -1525,7 +1627,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:01.000Z',
 			entryId: 'entry-next',
-			queue: dispatchingQueue,
+			control: dispatchingControl,
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
@@ -1537,8 +1639,8 @@ describe('ConversationSessionController', () => {
 	});
 
 	it('waits for chat-switch queue reconciliation before choosing run or queue', async () => {
-		const queueRefresh = deferred<Awaited<ReturnType<typeof getChatQueue>>>();
-		mockGetChatQueue.mockReturnValueOnce(queueRefresh.promise);
+		const queueRefresh = deferred<Awaited<ReturnType<typeof getChatExecutionControl>>>();
+		mockGetChatExecutionControl.mockReturnValueOnce(queueRefresh.promise);
 		const { deps } = createDeps(createRunningChat({ isProcessing: false, status: 'running' }));
 		const controller = new ConversationSessionController(deps);
 		controller.handleChatSwitch('chat-1');
@@ -1549,24 +1651,28 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 
-		const pausedQueue: QueueState = {
-			entries: [
-				{
-					id: 'entry-1',
-					content: 'first',
-					revision: 1,
-					createdAt: '2026-05-14T00:00:00.000Z',
-					updatedAt: '2026-05-14T00:00:00.000Z',
-				},
-			],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
-			version: 1,
-			updatedAt: '2026-05-14T00:00:00.000Z',
-		};
-		queueRefresh.resolve({ success: true, chatId: 'chat-1', queue: pausedQueue });
-		deps.conversationUi.getQueue.mockReturnValue(pausedQueue);
+		const pausedControl: ChatExecutionControlState = controlWithQueue(
+			{
+				entries: [
+					{
+						id: 'entry-1',
+						content: 'first',
+						revision: 1,
+						createdAt: '2026-05-14T00:00:00.000Z',
+						updatedAt: '2026-05-14T00:00:00.000Z',
+					},
+				],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
+			},
+			{
+				version: 1,
+				updatedAt: '2026-05-14T00:00:00.000Z',
+			},
+		);
+		queueRefresh.resolve({ success: true, chatId: 'chat-1', control: pausedControl });
+		deps.conversationUi.getExecutionControl.mockReturnValue(pausedControl);
 		mockCreateQueuedInput.mockResolvedValueOnce({
 			success: true,
 			commandType: 'queue-entry-create',
@@ -1575,7 +1681,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:01.000Z',
 			entryId: 'entry-2',
-			queue: pausedQueue,
+			control: pausedControl,
 		});
 		await submission;
 
@@ -1644,14 +1750,13 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:01.000Z',
 			entryId: 'entry-second',
-			queue: {
-				entries: [],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				pause: null,
-				version: 2,
-				updatedAt: '2026-05-14T00:00:01.000Z',
-			},
+			control: controlWithQueue(
+				{},
+				{
+					version: 2,
+					updatedAt: '2026-05-14T00:00:01.000Z',
+				},
+			),
 		});
 		await secondSubmission;
 
@@ -1666,14 +1771,13 @@ describe('ConversationSessionController', () => {
 
 	it('replaces and deletes queued entries by ID through separate commands', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const nextQueue = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: null,
-			version: 3,
-			updatedAt: '2026-05-14T00:00:02.000Z',
-		};
+		const nextControl = controlWithQueue(
+			{},
+			{
+				version: 3,
+				updatedAt: '2026-05-14T00:00:02.000Z',
+			},
+		);
 		mockReplaceQueuedInput.mockResolvedValueOnce({
 			success: true,
 			commandType: 'queue-entry-replace',
@@ -1682,7 +1786,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:02.000Z',
 			entryId: 'entry-2',
-			queue: nextQueue,
+			control: nextControl,
 		});
 		mockDeleteQueuedInput.mockResolvedValueOnce({
 			success: true,
@@ -1692,7 +1796,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:03.000Z',
 			entryId: 'entry-3',
-			queue: nextQueue,
+			control: nextControl,
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -1711,27 +1815,31 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			entryId: 'entry-3',
 		});
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledTimes(2);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledTimes(2);
 	});
 
 	it('applies a conflict queue snapshot before rethrowing the edit error', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const conflictQueue = {
-			entries: [
-				{
-					id: 'entry-1',
-					content: 'edited elsewhere',
-					revision: 2,
-					createdAt: '2026-05-14T00:00:00.000Z',
-					updatedAt: '2026-05-14T00:00:01.000Z',
-				},
-			],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: null,
-			version: 2,
-			updatedAt: '2026-05-14T00:00:01.000Z',
-		};
+		const conflictControl = controlWithQueue(
+			{
+				entries: [
+					{
+						id: 'entry-1',
+						content: 'edited elsewhere',
+						revision: 2,
+						createdAt: '2026-05-14T00:00:00.000Z',
+						updatedAt: '2026-05-14T00:00:01.000Z',
+					},
+				],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: null,
+			},
+			{
+				version: 2,
+				updatedAt: '2026-05-14T00:00:01.000Z',
+			},
+		);
 		const error = new ApiError(
 			409,
 			'This queued message changed before it could be saved',
@@ -1743,7 +1851,7 @@ describe('ConversationSessionController', () => {
 				error: 'This queued message changed before it could be saved',
 				errorCode: 'QUEUE_ENTRY_REVISION_CONFLICT',
 				retryable: false,
-				queue: conflictQueue,
+				control: conflictControl,
 			},
 		);
 		mockReplaceQueuedInput.mockRejectedValueOnce(error);
@@ -1752,19 +1860,23 @@ describe('ConversationSessionController', () => {
 		await expect(
 			controller.replaceQueueEntryForChat('chat-1', 'entry-1', 'local draft', 1),
 		).rejects.toBe(error);
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', conflictQueue);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', conflictControl);
 	});
 
 	it('reconciles a departed inline delete without showing a failure notice', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const latestQueue: QueueState = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' }],
-			pause: null,
-			version: 2,
-			updatedAt: '2026-07-16T00:00:00.000Z',
-		};
+		const latestControl: ChatExecutionControlState = controlWithQueue(
+			{
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' }],
+				pause: null,
+			},
+			{
+				version: 2,
+				updatedAt: '2026-07-16T00:00:00.000Z',
+			},
+		);
 		mockDeleteQueuedInput.mockRejectedValueOnce(
 			new ApiError(
 				409,
@@ -1777,7 +1889,7 @@ describe('ConversationSessionController', () => {
 					error: 'This queued message has already been sent',
 					errorCode: 'QUEUE_ENTRY_ALREADY_SENT',
 					retryable: false,
-					queue: latestQueue,
+					control: latestControl,
 				},
 			),
 		);
@@ -1785,29 +1897,28 @@ describe('ConversationSessionController', () => {
 
 		await controller.handleDeleteQueuedInput('entry-1');
 
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', latestQueue);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', latestControl);
 		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 
 	it('applies authoritative pause and resume snapshots using the rendered pause ID', async () => {
 		const { deps } = createDeps();
-		const pausedQueue: QueueState = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: null,
-			version: 2,
-			updatedAt: '2026-07-16T00:00:00.000Z',
-		};
+		const pausedControl: ChatExecutionControlState = controlWithQueue(
+			{},
+			{
+				version: 2,
+				updatedAt: '2026-07-16T00:00:00.000Z',
+			},
+		);
 		mockPauseChatQueue.mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
-			queue: pausedQueue,
+			control: pausedControl,
 		});
 		mockResumeChatQueue.mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
-			queue: { ...pausedQueue, version: 3 },
+			control: { ...pausedControl, version: 3 },
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -1816,24 +1927,64 @@ describe('ConversationSessionController', () => {
 
 		expect(mockPauseChatQueue).toHaveBeenCalledWith('chat-1');
 		expect(mockResumeChatQueue).toHaveBeenCalledWith('chat-1', 'pause-rendered');
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenNthCalledWith(1, 'chat-1', pausedQueue);
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenNthCalledWith(
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenNthCalledWith(
+			1,
+			'chat-1',
+			pausedControl,
+		);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenNthCalledWith(
 			2,
 			'chat-1',
 			expect.objectContaining({ version: 3 }),
 		);
 	});
 
+	it('continues recovered input by exact ID and applies the authoritative control', async () => {
+		const { deps } = createDeps();
+		const continuedControl = controlWithQueue(
+			{
+				entries: [
+					{
+						id: 'entry-1',
+						content: 'next',
+						revision: 1,
+						createdAt: '2026-07-18T00:00:00.000Z',
+						updatedAt: '2026-07-18T00:00:00.000Z',
+					},
+				],
+			},
+			{ version: 5 },
+		);
+		mockContinueRecoveredInput.mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			control: continuedControl,
+		});
+
+		await new ConversationSessionController(deps).continueRecoveredInputForChat(
+			'chat-1',
+			'88776c02-82f3-45bd-8b26-af0918e143b6',
+		);
+
+		expect(mockContinueRecoveredInput).toHaveBeenCalledWith(
+			'chat-1',
+			'88776c02-82f3-45bd-8b26-af0918e143b6',
+		);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith(
+			'chat-1',
+			continuedControl,
+		);
+	});
+
 	it('applies the latest queue snapshot before rethrowing a pause conflict', async () => {
 		const { deps } = createDeps();
-		const latestQueue: QueueState = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: null,
-			version: 4,
-			updatedAt: '2026-07-16T00:00:00.000Z',
-		};
+		const latestControl: ChatExecutionControlState = controlWithQueue(
+			{},
+			{
+				version: 4,
+				updatedAt: '2026-07-16T00:00:00.000Z',
+			},
+		);
 		const error = new ApiError(
 			409,
 			'The queue pause changed before it could be resumed',
@@ -1845,7 +1996,7 @@ describe('ConversationSessionController', () => {
 				error: 'The queue pause changed before it could be resumed',
 				errorCode: 'QUEUE_PAUSE_CHANGED',
 				retryable: false,
-				queue: latestQueue,
+				control: latestControl,
 			},
 		);
 		mockResumeChatQueue.mockRejectedValueOnce(error);
@@ -1853,7 +2004,7 @@ describe('ConversationSessionController', () => {
 
 		await expect(controller.handleQueueResume('pause-stale')).rejects.toBe(error);
 
-		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', latestQueue);
+		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', latestControl);
 	});
 
 	it('steers an active Codex turn without queuing the slash command', async () => {
@@ -1872,14 +2023,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-07-11T00:00:00.000Z',
 			delivery: 'active',
-			queue: {
-				entries: [],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				pause: null,
-				version: 0,
-				updatedAt: null,
-			},
+			control: emptyControl(),
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
@@ -1891,7 +2035,7 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
-	it('queues Codex steer behind an empty recovered-input pause', async () => {
+	it('queues Codex steer behind recovered-input continuation', async () => {
 		const chat = createRunningChat({
 			agentId: 'codex',
 			model: 'gpt-5.5',
@@ -1899,19 +2043,18 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = '/steer Wait behind the uncertain input';
-		const recoveryQueue: QueueState = {
-			entries: [],
-			dispatchingEntryId: null,
-			recentlyDispatched: [],
-			pause: {
-				id: 'pause-recovery',
-				kind: 'recovered-unconfirmed-input',
-				pausedAt: '2026-07-18T00:00:00.000Z',
+		const recoveredControl: ChatExecutionControlState = controlWithQueue(
+			{},
+			{
+				recoveredInputContinuation: {
+					id: '699b711d-e4d6-41bd-905f-093ee902dd38',
+					installedAt: '2026-07-18T00:00:00.000Z',
+				},
+				version: 1,
+				updatedAt: '2026-07-18T00:00:00.000Z',
 			},
-			version: 1,
-			updatedAt: '2026-07-18T00:00:00.000Z',
-		};
-		deps.conversationUi.getQueue.mockReturnValue(recoveryQueue);
+		);
+		deps.conversationUi.getExecutionControl.mockReturnValue(recoveredControl);
 		mockCreateQueuedInput.mockResolvedValueOnce({
 			success: true,
 			commandType: 'queue-entry-create',
@@ -1920,7 +2063,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-07-18T00:00:01.000Z',
 			entryId: 'entry-steer',
-			queue: recoveryQueue,
+			control: recoveredControl,
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
