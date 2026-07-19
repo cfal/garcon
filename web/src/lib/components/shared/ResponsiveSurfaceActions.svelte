@@ -22,6 +22,7 @@
 		showLabel?: boolean;
 		variant?: 'ghost' | 'primary' | 'destructive';
 		iconClass?: string;
+		buttonClass?: string;
 	}
 
 	let {
@@ -65,6 +66,7 @@
 				'text-destructive hover:bg-destructive/10 hover:text-destructive',
 			(!action.variant || action.variant === 'ghost') &&
 				'text-muted-foreground hover:bg-accent hover:text-foreground',
+			action.buttonClass,
 		);
 	}
 
@@ -111,8 +113,19 @@
 	$effect(() => {
 		actions
 			.map(
-				({ id, label, title, disabled, busy, priority, showLabel, variant, iconClass }) =>
-					`${id}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}`,
+				({
+					id,
+					label,
+					title,
+					disabled,
+					busy,
+					priority,
+					showLabel,
+					variant,
+					iconClass,
+					buttonClass,
+				}) =>
+					`${id}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}:${buttonClass}`,
 			)
 			.join('|');
 		untrack(() => queueMicrotask(recompute));
@@ -129,7 +142,7 @@
 		aria-disabled={action.busy || undefined}
 		aria-busy={action.busy || undefined}
 		tabindex={measurement ? -1 : undefined}
-		aria-label={action.title ?? action.label}
+		aria-label={action.label}
 		title={action.title ?? action.label}
 		data-surface-action-id={measurement ? undefined : action.id}
 		data-surface-action-measure={measurement ? action.id : undefined}
