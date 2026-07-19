@@ -540,12 +540,6 @@
 				{/if}
 			</div>
 
-			<AgentSettingsControls
-				descriptors={form.agentSettingDescriptors}
-				envelope={form.agentSettings}
-				onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
-			/>
-
 			<div
 				class="relative min-h-[120px] border border-border rounded-lg"
 				aria-busy={snippetExpansion.pending}
@@ -595,6 +589,13 @@
 					{sendButtonClass}
 					mobileRightGroupFullRow={true}
 				>
+					{#snippet agentSettings()}
+						<AgentSettingsControls
+							descriptors={form.agentSettingDescriptors}
+							envelope={form.agentSettings}
+							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
+						/>
+					{/snippet}
 					{#snippet modelSelector()}
 						<ComposerModelSelector
 							value={modelSelectorValue}

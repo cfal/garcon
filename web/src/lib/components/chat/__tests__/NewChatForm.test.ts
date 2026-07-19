@@ -209,6 +209,24 @@ describe('NewChatForm', () => {
 		expect(messageInput.parentElement?.className).not.toContain('pb-1.5');
 	});
 
+	it('renders agent thinking as a toolbar button instead of a combobox', async () => {
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+
+		render(NewChatFormTestHost);
+
+		const thinkingButton = await screen.findByRole('button', { name: 'Thinking: Auto' });
+		expect(screen.queryByRole('combobox', { name: 'Thinking' })).toBeNull();
+		expect(thinkingButton.closest('[data-slot="composer-bottom-bar"]')).toBeTruthy();
+
+		await fireEvent.click(thinkingButton);
+		const options = await screen.findAllByRole('menuitemradio');
+		expect(options.map((option) => option.textContent?.trim())).toEqual(['Auto', 'On', 'Off']);
+		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'On' }));
+		expect(screen.getByRole('button', { name: 'Thinking: On' })).toBeTruthy();
+	});
+
 	it('shows a spinner while pinned project path persistence is pending', async () => {
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');

@@ -109,10 +109,22 @@
 			return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
 		},
 		getAgentSettingsDescriptors() {
-			return [];
+			return [
+				{
+					key: 'thinking',
+					type: 'enum',
+					label: 'Thinking',
+					labelKey: 'thinking',
+					options: [
+						{ value: 'auto', label: 'Auto', labelKey: 'automatic' },
+						{ value: 'on', label: 'On', labelKey: 'enabled' },
+						{ value: 'off', label: 'Off', labelKey: 'disabled' },
+					],
+				},
+			];
 		},
 		getDefaultAgentSettings(agentId: string) {
-			return { ownerId: agentId, schemaVersion: 1, values: {} };
+			return { ownerId: agentId, schemaVersion: 1, values: { thinking: 'auto' } };
 		},
 		getModels(agentId: string) {
 			if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
