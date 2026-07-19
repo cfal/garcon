@@ -49,7 +49,7 @@ describe('Lightpanda queue workflow', () => {
       await fixture.integration.fakeProviders.openAi.waitForRequest({ lastUserText: 'ui-queue-b-edited' });
       await app.waitForText('echo:ui-queue-b-edited');
 
-      const queue = await fixture.integration.client.getQueue(chat.id);
+      const queue = (await fixture.integration.client.getExecutionControl(chat.id)).queue;
       expect(queue.entries).toHaveLength(0);
       expect(queue.pause).toBeNull();
       expect(fixture.integration.fakeProviders.openAi.requests().some((request) =>

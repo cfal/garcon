@@ -41,8 +41,8 @@ describe('reconnect and transcript stability', () => {
       const reconnectCursor = fixture.client.markEvents();
       const state = await fixture.client.reconnectState([chatId]);
       expect(state.processing).toEqual({ outcome: 'snapshot', runningChatIds: [chatId] });
-      expect(state.queueResults).toHaveLength(1);
-      expect(state.queueResults[0]).toMatchObject({ chatId, outcome: 'snapshot' });
+      expect(state.controlResults).toHaveLength(1);
+      expect(state.controlResults[0]).toMatchObject({ chatId, outcome: 'snapshot' });
 
       const subscription = await fixture.client.subscribe(
         chatId,
@@ -165,7 +165,6 @@ describe('reconnect and transcript stability', () => {
       expect(subscribed.messages).toEqual([]);
     });
   });
-
   test('scopes manual reload responses and preserves a paged transcript across generations', async () => {
     await withIntegrationFixture('manual-reload-contract', async (fixture) => {
       const chatId = fixture.newChatId();

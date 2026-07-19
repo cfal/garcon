@@ -62,7 +62,7 @@ describe('queue lifecycle', () => {
         status: 'duplicate',
         entryId: queuedB.entryId,
       });
-      expect(duplicateB.queue.entries.map((entry) => entry.id)).toEqual([queuedB.entryId]);
+      expect(duplicateB.control.queue.entries.map((entry) => entry.id)).toEqual([queuedB.entryId]);
       let queueConflict: unknown;
       try {
         await fixture.client.enqueue({ ...queueRequest, content: 'fifo-conflict' });
@@ -76,7 +76,7 @@ describe('queue lifecycle', () => {
       });
       const queuedC = await fixture.client.enqueueNew(chatId, 'fifo-c');
       expect(queuedB.entryId).not.toBe(queuedC.entryId);
-      expect(queuedC.queue.entries.map((entry) => [entry.id, entry.content])).toEqual([
+      expect(queuedC.control.queue.entries.map((entry) => [entry.id, entry.content])).toEqual([
         [queuedB.entryId, 'fifo-b'],
         [queuedC.entryId, 'fifo-c'],
       ]);
@@ -97,7 +97,7 @@ describe('queue lifecycle', () => {
         'fifo-b',
         'fifo-c',
       ]);
-      expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual(['fifo-a', 'fifo-b', 'fifo-c']);
       expect(assistantContents(transcript.messages)).toEqual([
@@ -124,7 +124,7 @@ describe('queue lifecycle', () => {
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'original-b');
       const queuedC = await fixture.client.enqueueNew(chatId, 'delete-c');
-      const entryB = queuedB.queue.entries.find((entry) => entry.id === queuedB.entryId)!;
+      const entryB = queuedB.control.queue.entries.find((entry) => entry.id === queuedB.entryId)!;
 
       const replaced = await fixture.client.replaceQueued({
         clientRequestId: crypto.randomUUID(),
@@ -133,7 +133,7 @@ describe('queue lifecycle', () => {
         content: 'edited-b',
         expectedRevision: entryB.revision,
       });
-      const editedEntry = replaced.queue.entries.find((entry) => entry.id === entryB.id)!;
+      const editedEntry = replaced.control.queue.entries.find((entry) => entry.id === entryB.id)!;
       expect(editedEntry.revision).toBe(entryB.revision + 1);
       expect(editedEntry.content).toBe('edited-b');
 
@@ -159,7 +159,7 @@ describe('queue lifecycle', () => {
         chatId,
         entryId: queuedC.entryId,
       });
-      expect(deleted.queue.entries.map((entry) => entry.id)).toEqual([entryB.id]);
+      expect(deleted.control.queue.entries.map((entry) => entry.id)).toEqual([entryB.id]);
 
       const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'edited-b' });
       heldA.releaseEcho();
@@ -193,14 +193,14 @@ describe('queue lifecycle', () => {
       await fixture.client.enqueueNew(chatId, 'pause-b');
 
       const firstPause = await fixture.client.pauseQueue(chatId);
-      expect(firstPause.queue.pause?.kind).toBe('manual');
-      await fixture.client.resumeQueue(chatId, firstPause.queue.pause!.id);
+      expect(firstPause.control.queue.pause?.kind).toBe('manual');
+      await fixture.client.resumeQueue(chatId, firstPause.control.queue.pause!.id);
       const secondPause = await fixture.client.pauseQueue(chatId);
-      expect(secondPause.queue.pause?.id).not.toBe(firstPause.queue.pause?.id);
+      expect(secondPause.control.queue.pause?.id).not.toBe(firstPause.control.queue.pause?.id);
 
       let staleResume: unknown;
       try {
-        await fixture.client.resumeQueue(chatId, firstPause.queue.pause!.id);
+        await fixture.client.resumeQueue(chatId, firstPause.control.queue.pause!.id);
       } catch (error) {
         staleResume = error;
       }
@@ -209,18 +209,18 @@ describe('queue lifecycle', () => {
 
       heldA.releaseEcho();
       expect((await fixture.client.waitForTurnTerminal(chatId, acceptedA.turnId)).type).toBe('agent-run-finished');
-      const pausedQueue = await fixture.client.getQueue(chatId);
+      const pausedQueue = (await fixture.client.getExecutionControl(chatId)).queue;
       expect(pausedQueue.entries.map((entry) => entry.content)).toEqual(['pause-b']);
       expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['pause-a']);
 
-      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'pause-b' });
-      await fixture.client.resumeQueue(chatId, secondPause.queue.pause!.id);
+		const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'pause-b' });
+		await fixture.client.resumeQueue(chatId, secondPause.control.queue.pause!.id);
       await heldB.received;
       const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'pause-b');
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, queuedTurnB.turnId, { afterIndex: cursor });
-      expect((await fixture.client.getQueue(chatId)).pause).toBeNull();
+      expect((await fixture.client.getExecutionControl(chatId)).queue.pause).toBeNull();
     });
   });
 
@@ -250,19 +250,19 @@ describe('queue lifecycle', () => {
       expect(duplicateStop).toMatchObject({
         status: 'duplicate',
         stopped: true,
-        queue: stopped.queue,
+        control: stopped.control,
       });
       await fixture.client.ping();
       expect(fixture.client.eventsSince(stopCursor).filter((event) =>
         event.type === 'chat-session-stopped'
         && event.chatId === chatId
         && event.intent === 'stop')).toHaveLength(1);
-      expect(stopped.queue.pause).not.toBeNull();
-      expect(stopped.queue.entries.map((entry) => entry.content)).toEqual(['stop-b']);
-      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['stop-a']);
+		expect(stopped.control.queue.pause).not.toBeNull();
+		expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['stop-b']);
+		expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['stop-a']);
 
-      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-b' });
-      await fixture.client.resumeQueue(chatId, stopped.queue.pause!.id);
+		const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-b' });
+		await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
       await heldB.received;
       const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'stop-b');
       const cursor = fixture.client.markEvents();
@@ -310,9 +310,9 @@ describe('queue lifecycle', () => {
       });
       await activeAborted;
       expect(stopped.stopped).toBe(true);
-      expect(stopped.queue.pause?.kind).toBe('manual');
-      expect(stopped.queue.entries.map((entry) => entry.content)).toEqual(['drain-stop-c']);
-      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+		expect(stopped.control.queue.pause?.kind).toBe('manual');
+		expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['drain-stop-c']);
+		expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'drain-stop-seed',
         'drain-stop-active',
         'drain-stop-b',
@@ -327,8 +327,8 @@ describe('queue lifecycle', () => {
         { afterIndex: stopCursor },
       );
 
-      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-c' });
-      await fixture.client.resumeQueue(chatId, stopped.queue.pause!.id);
+		const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-c' });
+		await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
       await heldC.received;
       const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'drain-stop-c');
       const completionCursor = fixture.client.markEvents();
@@ -343,7 +343,7 @@ describe('queue lifecycle', () => {
         'drain-stop-b',
         'drain-stop-c',
       ]);
-      expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
       const transcript = await fixture.client.getMessages(chatId);
       expect(countUserContent(transcript.messages, 'drain-stop-b')).toBe(1);
       expect(countUserContent(transcript.messages, 'drain-stop-c')).toBe(1);

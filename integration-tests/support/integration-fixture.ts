@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -203,6 +203,67 @@ export class IntegrationFixture {
     this.#archiveCurrentRun();
     this.#clients.clear();
     await this.#startReplacementGarcon();
+  }
+
+  async crashAndRestartBeforeNativeUserPersistence(input: {
+    chatId: string;
+    clientRequestId: string;
+  }): Promise<void> {
+    await this.client.close();
+    await this.garcon.crash();
+    const expiredAt = new Date(Date.now() - 60_000);
+    await utimes(
+      join(this.dirs.workspace, '.garcon-workspace.lock'),
+      expiredAt,
+      expiredAt,
+    );
+    await this.#removeFinalNativeUserRow(input);
+    this.#archiveCurrentRun();
+    await this.#startReplacementGarcon();
+  }
+
+  async #removeFinalNativeUserRow(input: { chatId: string; clientRequestId: string }): Promise<void> {
+    const registry = JSON.parse(
+      await readFile(join(this.dirs.workspace, 'chats.json'), 'utf8'),
+    ) as { sessions?: Record<string, Record<string, unknown>> };
+    const chat = registry.sessions?.[input.chatId];
+    if (!chat) throw new Error(`Chat ${input.chatId} was not persisted before crash.`);
+    if (chat.agentId !== DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
+      throw new Error(`Chat ${input.chatId} is not a direct OpenAI-compatible chat.`);
+    }
+    const nativePath = typeof chat.nativePath === 'string' ? chat.nativePath : '';
+    const endpointId = typeof chat.modelEndpointId === 'string' ? chat.modelEndpointId : '';
+    const sessionId = typeof chat.agentSessionId === 'string' ? chat.agentSessionId : '';
+    const expectedPath = resolve(
+      this.dirs.workspace,
+      'openai-compatible-sessions',
+      endpointId,
+      `${sessionId}.jsonl`,
+    );
+    if (!nativePath || resolve(nativePath) !== expectedPath) {
+      throw new Error(`Chat ${input.chatId} has an unexpected native transcript path.`);
+    }
+
+    const raw = await readFile(expectedPath, 'utf8');
+    if (!raw.endsWith('\n')) throw new Error('Direct native transcript has an incomplete tail.');
+    const lines = raw.split('\n').filter((line) => line.length > 0);
+    const rows = lines.map((line, index) => {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+        return parsed as Record<string, unknown>;
+      } catch {
+        throw new Error(`Direct native transcript has malformed JSON at line ${index + 1}.`);
+      }
+    });
+    const matchingIndexes = rows.flatMap((row, index) => (
+      row.role === 'user' && row.clientRequestId === input.clientRequestId ? [index] : []
+    ));
+    if (matchingIndexes.length !== 1 || matchingIndexes[0] !== rows.length - 1) {
+      throw new Error('Expected exactly one final native user row with the accepted request identity.');
+    }
+    const retained = lines.slice(0, -1);
+    await writeFile(expectedPath, retained.length > 0 ? `${retained.join('\n')}\n` : '', 'utf8');
   }
 
   diagnostics(): IntegrationDiagnostics {
