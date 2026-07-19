@@ -11,6 +11,7 @@ import {
 } from '@garcon/common/chat-types';
 import { findPiSessionFileBySessionId } from './pi-session-paths.js';
 import { convertPiMessage } from './message-converter.js';
+import type { PiConfig } from '../../config.js';
 
 export interface PiPreview {
   createdAt: string | null;
@@ -65,8 +66,9 @@ export async function loadPiChatMessages(sessionPath: string): Promise<ChatMessa
 export async function loadPiChatMessagesBySessionId(
   sessionId: string,
   projectPath: string,
+  config: PiConfig,
 ): Promise<ChatMessage[]> {
-  const sessionPath = await findPiSessionFileBySessionId(sessionId, projectPath);
+  const sessionPath = await findPiSessionFileBySessionId(sessionId, projectPath, config);
   if (!sessionPath) return [];
   return loadPiChatMessages(sessionPath);
 }
@@ -108,8 +110,9 @@ export async function getPiPreviewFromSessionPath(sessionPath: string): Promise<
 export async function getPiPreviewFromSessionId(
   sessionId: string,
   projectPath: string,
+  config: PiConfig,
 ): Promise<PiPreview | null> {
-  const sessionPath = await findPiSessionFileBySessionId(sessionId, projectPath);
+  const sessionPath = await findPiSessionFileBySessionId(sessionId, projectPath, config);
   if (!sessionPath) return null;
   return getPiPreviewFromSessionPath(sessionPath);
 }

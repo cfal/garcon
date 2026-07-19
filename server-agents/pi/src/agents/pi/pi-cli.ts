@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
-import { getPiBinary } from "../../config.js";
+import type { PiConfig } from '../../config.js';
 import {
   ErrorMessage,
   ToolResultMessage,
@@ -18,23 +18,23 @@ import {
   piSessionPathFromHeader,
   resolvePiConfiguredSessionDir,
 } from './pi-session-paths.js';
-import { getPiModels } from './pi-models.js';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
-
-const logger = createLogger('agents:pi:pi-cli');
 import {
-  assertExecutionAdmissionOpen,
-  executionEventMetadata,
-  markExecutionStarted,
-  type AgentCommandImage,
-  type AgentEventMetadata,
-  type PermissionMode,
-  type ResumeTurnRequest,
-  type StartSessionRequest,
-  type StartedAgentSession,
-  type ThinkingMode,
-} from '@garcon/server-agent-common/legacy/session-types';
+  assertPiExecutionOpen,
+  markPiExecutionStarted,
+  piEventMetadata,
+  type PiResumeRequest,
+  type PiStartedSession,
+  type PiStartRequest,
+} from './runtime-types.js';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
+import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
+import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+
+export interface PiModelReader {
+  getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
+}
 
 interface PiSessionHeader {
   type: 'session';
@@ -60,13 +60,13 @@ interface PiSession {
   startTime: number;
   lastActivityAt: number;
   startedSession: {
-    promise: Promise<StartedAgentSession>;
+    promise: Promise<PiStartedSession>;
     reject: (error: unknown) => void;
-    resolve: (value: StartedAgentSession) => void;
+    resolve: (value: PiStartedSession) => void;
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
 }
 
 interface BuildPiPromptResult {
@@ -124,7 +124,7 @@ function parseImageData(data: string): { buffer: Buffer; extension: string } | n
   };
 }
 
-async function writeImagesToTempFiles(images: AgentCommandImage[] | undefined): Promise<{
+async function writeImagesToTempFiles(images: readonly AgentAttachment[] | undefined): Promise<{
   cleanup?: () => Promise<void>;
   fileArgs: string[];
 }> {
@@ -169,7 +169,9 @@ function requireExplicitPiModel(model: unknown): string {
   return normalized;
 }
 
-function buildPiCliEnv(envOverrides?: Record<string, string>): Record<string, string | undefined> {
+function buildPiCliEnv(
+  envOverrides?: Readonly<Record<string, string>>,
+): Record<string, string | undefined> {
   const env = { ...process.env, ...envOverrides };
   // Disables Pi startup network operations, including package update work.
   env[PI_OFFLINE_ENV] = '1';
@@ -184,7 +186,10 @@ function buildPiCliEnv(envOverrides?: Record<string, string>): Record<string, st
   return env;
 }
 
-async function resolveSessionArgument(request: ResumeTurnRequest): Promise<string> {
+async function resolveSessionArgument(
+  request: PiResumeRequest,
+  config: PiConfig,
+): Promise<string> {
   if (request.nativePath && !isArtificialNativePath(request.nativePath)) {
     try {
       await fs.access(request.nativePath);
@@ -194,15 +199,20 @@ async function resolveSessionArgument(request: ResumeTurnRequest): Promise<strin
     }
   }
 
-  const sessionPath = await findPiSessionFileBySessionId(request.agentSessionId, request.projectPath);
+  const sessionPath = await findPiSessionFileBySessionId(
+    request.agentSessionId,
+    request.projectPath,
+    config,
+  );
   return sessionPath || request.agentSessionId;
 }
 
 async function buildPiRun(
-  request: StartSessionRequest | ResumeTurnRequest,
+  request: PiStartRequest | PiResumeRequest,
+  config: PiConfig,
 ): Promise<BuildPiPromptResult> {
   const args = ['--mode', 'json'];
-  const configuredSessionDir = resolvePiConfiguredSessionDir(request.projectPath);
+  const configuredSessionDir = resolvePiConfiguredSessionDir(request.projectPath, config);
   const thinking = mapThinkingMode(request.thinkingMode);
   const model = requireExplicitPiModel(request.model);
   const { cleanup, fileArgs } = await writeImagesToTempFiles(request.images);
@@ -219,7 +229,7 @@ async function buildPiRun(
     args.push('--session-dir', configuredSessionDir);
   }
   if ('agentSessionId' in request) {
-    args.push('--session', await resolveSessionArgument(request));
+    args.push('--session', await resolveSessionArgument(request, config));
   }
   args.push(...fileArgs);
 
@@ -228,9 +238,10 @@ async function buildPiRun(
 
 async function runPiCommand(
   args: string[],
+  config: PiConfig,
   { cwd, input }: { cwd?: string; input?: string } = {},
 ): Promise<string> {
-  const proc = Bun.spawn([getPiBinary(), ...args], {
+  const proc = Bun.spawn([config.binary(), ...args], {
     cwd: cwd || process.cwd(),
     env: buildPiCliEnv(),
     stdin: input == null ? 'ignore' : 'pipe',
@@ -257,7 +268,11 @@ async function runPiCommand(
   return stdout;
 }
 
-export async function runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
+export async function runSingleQuery(
+  prompt: string,
+  options: Record<string, unknown>,
+  config: PiConfig,
+): Promise<string> {
   const model = requireExplicitPiModel(options.model);
   const cwd = typeof options.cwd === 'string'
     ? options.cwd
@@ -268,13 +283,13 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
   args.push('--model', model);
   const thinkingMode = normalizeThinkingMode(options.thinkingMode);
   if (thinkingMode !== 'none') args.push('--thinking', thinkingMode);
-  return (await runPiCommand(args, { cwd, input: prompt })).trim();
+  return (await runPiCommand(args, config, { cwd, input: prompt })).trim();
 }
 
 function createSession(
   chatId: string,
   startedSession: PiSession['startedSession'] = null,
-  eventMetadata: AgentEventMetadata = {},
+  eventMetadata: RuntimeEventMetadata = {},
 ): PiSession {
   const now = Date.now();
   return {
@@ -295,10 +310,10 @@ function createSession(
   };
 }
 
-function createStartTracker(): PiSession['startedSession'] & { promise: Promise<StartedAgentSession> } {
-  let resolveRef: ((value: StartedAgentSession) => void) | null = null;
+function createStartTracker(): PiSession['startedSession'] & { promise: Promise<PiStartedSession> } {
+  let resolveRef: ((value: PiStartedSession) => void) | null = null;
   let rejectRef: ((error: unknown) => void) | null = null;
-  const promise = new Promise<StartedAgentSession>((resolve, reject) => {
+  const promise = new Promise<PiStartedSession>((resolve, reject) => {
     resolveRef = resolve;
     rejectRef = reject;
   });
@@ -315,6 +330,9 @@ function createStartTracker(): PiSession['startedSession'] & { promise: Promise<
 }
 
 export class PiCliRuntime extends AgentEventEmitterRuntime {
+  readonly #config: PiConfig;
+  readonly #logger: AgentLogger;
+  readonly #models: PiModelReader;
   #runningSessions = new Map<string, PiSession>();
   #idlePurger = new IdleSessionPurger<PiSession>({
     sessions: () => this.#runningSessions.entries(),
@@ -326,8 +344,19 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     },
   });
 
+  constructor(options: {
+    readonly config: PiConfig;
+    readonly logger: AgentLogger;
+    readonly models: PiModelReader;
+  }) {
+    super();
+    this.#config = options.config;
+    this.#logger = options.logger;
+    this.#models = options.models;
+  }
+
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
-    return getPiModels();
+    return this.#models.getModels();
   }
 
   #emitSessionCreated(session: PiSession): void {
@@ -439,7 +468,10 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     try {
       this.#routeEvent(session, JSON.parse(line) as PiCliEvent);
     } catch {
-      logger.warn(`pi(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+      this.#logger.warn('Pi emitted malformed JSON', {
+        sessionId: session.id,
+        line: line.slice(0, 120),
+      });
     }
   }
 
@@ -464,7 +496,10 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       this.#parseStdoutLine(session, buffer);
     } catch (error) {
       if (!proc.killed) {
-        logger.error(`pi(${session.id.slice(0, 8)}): stdout read error:`, (error as Error).message);
+        this.#logger.error('Pi stdout read failed', {
+          sessionId: session.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     } finally {
       const exitCode = await proc.exited;
@@ -483,7 +518,12 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
         if (done) break;
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
-          if (line.trim()) logger.info(`pi(${session.id.slice(0, 8)}): stderr: ${line}`);
+          if (line.trim()) {
+            this.#logger.info('Pi stderr output', {
+              sessionId: session.id,
+              line,
+            });
+          }
         }
       }
     } catch {
@@ -529,7 +569,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
 
   #spawnPi(
     session: PiSession,
-    request: StartSessionRequest | ResumeTurnRequest,
+    request: PiStartRequest | PiResumeRequest,
     run: BuildPiPromptResult,
   ): ReturnType<typeof Bun.spawn> {
     const spawnOptions: Parameters<typeof Bun.spawn>[1] = {
@@ -540,7 +580,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       stderr: 'pipe',
     };
 
-    const proc = Bun.spawn([getPiBinary(), ...run.args], spawnOptions);
+    const proc = Bun.spawn([this.#config.binary(), ...run.args], spawnOptions);
     session.process = proc;
     session.cleanup = run.cleanup;
     session.configuredSessionDir = run.configuredSessionDir;
@@ -596,19 +636,19 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     session.turnResolve = null;
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    assertExecutionAdmissionOpen(request);
+  async startSession(request: PiStartRequest): Promise<PiStartedSession> {
+    assertPiExecutionOpen(request);
     const startedSession = createStartTracker();
     const session = createSession(
       request.chatId,
       startedSession,
-      executionEventMetadata(request, 'chat-start'),
+      piEventMetadata(request, 'chat-start'),
     );
     this.#runningSessions.set(session.id, session);
 
     try {
-      const run = await buildPiRun(request);
-      markExecutionStarted(request);
+      const run = await buildPiRun(request, this.#config);
+      markPiExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnPi(session, request, run);
       request.onAbortable?.();
@@ -619,8 +659,8 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async runTurn(request: PiResumeRequest): Promise<void> {
+    assertPiExecutionOpen(request);
     const existingSession = this.#runningSessions.get(request.agentSessionId);
     if (existingSession?.isRunning) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
@@ -633,15 +673,15 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
       sessionCreatedEmitted: true,
     };
     this.#resetSessionForTurn(session, request.chatId);
-    session.eventMetadata = executionEventMetadata(request);
+    session.eventMetadata = piEventMetadata(request);
     session.id = request.agentSessionId;
     session.nativePath = request.nativePath ?? session.nativePath;
     session.sessionCreatedEmitted = true;
     this.#runningSessions.set(session.id, session);
 
     try {
-      const run = await buildPiRun(request);
-      markExecutionStarted(request);
+      const run = await buildPiRun(request, this.#config);
+      markPiExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnPi(session, request, run);
       request.onAbortable?.();

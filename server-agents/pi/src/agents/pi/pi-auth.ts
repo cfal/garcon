@@ -1,14 +1,16 @@
-import { getPiModels } from './pi-models.js';
+interface PiModelReader {
+  getModels(): Promise<readonly unknown[]>;
+}
 
-export async function getPiAuthStatus(): Promise<{
+export async function getPiAuthStatus(models: PiModelReader): Promise<{
   authenticated: boolean;
   canReauth: false;
   label: string;
 }> {
   try {
-    const models = await getPiModels();
+    const availableModels = await models.getModels();
     return {
-      authenticated: models.length > 0,
+      authenticated: availableModels.length > 0,
       canReauth: false,
       label: '',
     };

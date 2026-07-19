@@ -1,15 +1,9 @@
 import { AuthStorage, createAgentSessionServices, getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { SharedModelOption } from '@garcon/common/models';
-import { isTestEnvironment } from '../../config.js';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import type { PiConfig } from '../../config.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-const DISCOVERY_RETRY_DELAYS_MS = isTestEnvironment() ? [0, 0] : [75, 250];
-
-let cachedModels: SharedModelOption[] | null = null;
-let cachedAt = 0;
-let lastKnownGoodModels: SharedModelOption[] | null = null;
-let inflight: Promise<SharedModelOption[]> | null = null;
 
 class PiModelDiscoveryTransientError extends Error {
   constructor(message: string) {
@@ -127,64 +121,78 @@ async function readPiModelsFromSdk(): Promise<SharedModelOption[]> {
 
 export const getPiAvailableModels = readPiModelsFromSdk;
 
-function cacheDiscoveredModels(models: SharedModelOption[]): SharedModelOption[] {
-  cachedModels = models;
-  cachedAt = Date.now();
-  lastKnownGoodModels = models.length > 0 ? models : null;
-  return models;
-}
+export class PiModelCatalogService {
+  #cachedModels: SharedModelOption[] | null = null;
+  #cachedAt = 0;
+  #lastKnownGoodModels: SharedModelOption[] | null = null;
+  #inflight: Promise<SharedModelOption[]> | null = null;
 
-async function discoverPiModelsWithRetry(): Promise<SharedModelOption[]> {
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt <= DISCOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
+  constructor(
+    private readonly config: PiConfig,
+    private readonly discover: () => Promise<SharedModelOption[]> = getPiAvailableModels,
+  ) {}
+
+  async getModelsStrict(): Promise<SharedModelOption[]> {
+    const now = Date.now();
+    if (this.#cachedModels && now - this.#cachedAt < MODEL_CACHE_TTL_MS) {
+      return this.#cachedModels;
+    }
+    if (this.#inflight) return this.#inflight;
+
+    this.#inflight = this.#discoverWithRetry().finally(() => {
+      this.#inflight = null;
+    });
+    return this.#inflight;
+  }
+
+  async getModels(): Promise<SharedModelOption[]> {
     try {
-      return cacheDiscoveredModels(await getPiAvailableModels());
+      return await this.getModelsStrict();
     } catch (error) {
-      lastError = error;
-      const retryDelay = DISCOVERY_RETRY_DELAYS_MS[attempt];
-      if (retryDelay === undefined) break;
-      await delay(retryDelay);
+      if (isPiModelDiscoveryUnavailableError(error)) return error.staleModels;
+      return this.#lastKnownGoodModels ?? [];
     }
   }
-  throw new PiModelDiscoveryUnavailableError(errorMessage(lastError), lastKnownGoodModels ?? []);
-}
 
-export async function getPiModelsStrict(): Promise<SharedModelOption[]> {
-  const now = Date.now();
-  if (cachedModels && now - cachedAt < MODEL_CACHE_TTL_MS) return cachedModels;
-  if (inflight) return inflight;
+  clearForTests(): void {
+    this.#cachedModels = null;
+    this.#cachedAt = 0;
+    this.#lastKnownGoodModels = null;
+    this.#inflight = null;
+  }
 
-  inflight = discoverPiModelsWithRetry()
-    .finally(() => {
-      inflight = null;
-    });
+  expireForTests(): void {
+    this.#cachedAt = 0;
+  }
 
-  return inflight;
-}
+  #cache(models: SharedModelOption[]): SharedModelOption[] {
+    this.#cachedModels = models;
+    this.#cachedAt = Date.now();
+    this.#lastKnownGoodModels = models.length > 0 ? models : null;
+    return models;
+  }
 
-export async function getPiModels(): Promise<SharedModelOption[]> {
-  try {
-    return await getPiModelsStrict();
-  } catch (error) {
-    if (isPiModelDiscoveryUnavailableError(error)) {
-      return error.staleModels;
+  async #discoverWithRetry(): Promise<SharedModelOption[]> {
+    const retryDelays = this.config.isTestEnvironment() ? [0, 0] : [75, 250];
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+      try {
+        return this.#cache(await this.discover());
+      } catch (error) {
+        lastError = error;
+        const retryDelay = retryDelays[attempt];
+        if (retryDelay === undefined) break;
+        await delay(retryDelay);
+      }
     }
-    return lastKnownGoodModels ?? [];
+    throw new PiModelDiscoveryUnavailableError(
+      errorMessage(lastError),
+      this.#lastKnownGoodModels ?? [],
+    );
   }
 }
 
 export function isPiModelDiscoveryUnavailableError(error: unknown): error is PiModelDiscoveryUnavailableError {
   return error instanceof PiModelDiscoveryUnavailableError
     || Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'PI_MODEL_DISCOVERY_UNAVAILABLE');
-}
-
-export function clearPiModelCacheForTests(): void {
-  cachedModels = null;
-  cachedAt = 0;
-  lastKnownGoodModels = null;
-  inflight = null;
-}
-
-export function expirePiModelCacheForTests(): void {
-  cachedAt = 0;
 }

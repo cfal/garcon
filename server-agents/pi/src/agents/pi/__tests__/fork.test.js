@@ -5,6 +5,7 @@ import path from 'path';
 
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { forkPiSession, resolvePiForkSourcePath } from '../pi-fork.js';
+import { testPiConfig } from './test-fixtures.js';
 
 const originalEnv = { ...process.env };
 let tempRoot;
@@ -79,7 +80,7 @@ describe('Pi native session fork', () => {
       nativePath: sessionPath,
       projectPath,
       model: 'github-copilot/gpt-5.4',
-    });
+    }, testPiConfig);
 
     expect(forked.agentSessionId).not.toBe('source-session');
     expect(forked.nativePath.startsWith(process.env.PI_CODING_AGENT_SESSION_DIR)).toBe(true);
@@ -111,7 +112,7 @@ describe('Pi native session fork', () => {
       nativePath: createArtificialNativePath('pi', 'source-session'),
       projectPath,
       model: 'github-copilot/gpt-5.4',
-    });
+    }, testPiConfig);
 
     expect(sourcePath).toBe(sessionPath);
   });
@@ -126,6 +127,6 @@ describe('Pi native session fork', () => {
       nativePath: createArtificialNativePath('pi', 'missing-session'),
       projectPath,
       model: 'github-copilot/gpt-5.4',
-    })).rejects.toThrow('Cannot fork Pi session missing-session: native session file was not found.');
+    }, testPiConfig)).rejects.toThrow('Cannot fork Pi session missing-session: native session file was not found.');
   });
 });
