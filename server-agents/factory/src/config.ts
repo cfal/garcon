@@ -1,9 +1,16 @@
-import type { AgentHost } from '@garcon/server-agent-interface';
-import { AgentHostEnvironment } from '@garcon/server-agent-common/legacy/host-environment';
+import type { AgentEnvironmentReader } from '@garcon/server-agent-interface';
+import { readEnvironment } from '@garcon/server-agent-common/environment/read-environment';
 
-const environment = new AgentHostEnvironment();
+export interface FactoryConfig {
+  readonly binary: () => string;
+  readonly apiKey: () => string | null;
+  readonly homeOverride: () => string | null;
+}
 
-export function bindAgentHost(host: AgentHost): void { environment.bind(host); }
-export function getFactoryBinary(): string { return environment.valueOr('FACTORY_BINARY', 'droid'); }
-export function getFactoryApiKey(): string | null { return environment.value('FACTORY_API_KEY'); }
-export function resetServerConfigForTests(): void {}
+export function createFactoryConfig(environment: AgentEnvironmentReader): FactoryConfig {
+  return Object.freeze({
+    binary: () => readEnvironment(environment, 'FACTORY_BINARY') ?? 'droid',
+    apiKey: () => readEnvironment(environment, 'FACTORY_API_KEY'),
+    homeOverride: () => readEnvironment(environment, 'FACTORY_HOME_OVERRIDE'),
+  });
+}

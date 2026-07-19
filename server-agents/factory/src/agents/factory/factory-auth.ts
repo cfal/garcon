@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { getFactoryApiKey } from '../../config.js';
+import type { FactoryConfig } from '../../config.js';
 import { getFactoryAuthPaths } from './factory-paths.js';
 
 async function hasAuthArtifact(filePath: string): Promise<boolean> {
@@ -11,12 +11,14 @@ async function hasAuthArtifact(filePath: string): Promise<boolean> {
   }
 }
 
-export async function getFactoryAuthStatus() {
-  if (getFactoryApiKey()) {
+export async function getFactoryAuthStatus(config: FactoryConfig) {
+  if (config.apiKey()) {
     return { authenticated: true, canReauth: false as const, label: '' };
   }
 
-  const authArtifacts = await Promise.all(getFactoryAuthPaths().map((filePath) => hasAuthArtifact(filePath)));
+  const authArtifacts = await Promise.all(getFactoryAuthPaths({
+    FACTORY_HOME_OVERRIDE: config.homeOverride() ?? undefined,
+  }).map((filePath) => hasAuthArtifact(filePath)));
   if (authArtifacts.some(Boolean)) {
     return { authenticated: true, canReauth: false as const, label: '' };
   }

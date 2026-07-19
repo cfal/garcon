@@ -1,36 +1,189 @@
-import type { AgentHost } from '@garcon/server-agent-interface';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { FACTORY_MODELS } from '@garcon/common/models';
-import { LegacyAgentIntegrationBase } from '@garcon/server-agent-common';
-import { bindAgentHost } from './config.js';
-import { FactoryCliRuntime } from './agents/factory/factory-cli.js';
-import { createFactoryAgent } from './agents/factory/index.js';
+import {
+  AgentIntegrationError,
+  computeAgentTranscriptRevision,
+  type AgentHost,
+  type AgentIntegration,
+  type AgentTranscript,
+  type AgentTranscriptPreview,
+} from '@garcon/server-agent-interface';
+import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
+import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
+import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
+import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { createFactoryConfig } from './config.js';
+import { getFactoryAuthStatus } from './agents/factory/factory-auth.js';
+import { FactoryCliRuntime, runSingleQuery } from './agents/factory/factory-cli.js';
+import { FactoryExecution } from './agents/factory/execution.js';
+import { FactoryModelCatalogService } from './agents/factory/factory-models.js';
+import { createFactoryTranscriptSource } from './agents/factory/factory-transcript-source.js';
 
-export default class FactoryAgentIntegration extends LegacyAgentIntegrationBase {
+const FACTORY_DESCRIPTOR = {
+  id: 'factory',
+  label: 'Factory',
+  icon: null,
+  supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
+  supportedThinkingModes: THINKING_MODE_VALUES,
+  supportsImages: false,
+  supportsProjectPathUpdate: false,
+  requiresNativePathForProjectPathUpdate: false,
+  supportedEndpointProtocols: [],
+  configuration: [
+    { key: 'FACTORY_BINARY', source: 'environment' as const, description: 'Factory Droid CLI binary.' },
+    { key: 'FACTORY_API_KEY', source: 'environment' as const, description: 'Factory API key.' },
+    { key: 'FACTORY_HOME_OVERRIDE', source: 'environment' as const, description: 'Factory home override.' },
+  ],
+} as const;
+
+export default class FactoryAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'factory';
   static readonly apiVersion = 1 as const;
 
+  readonly descriptor = FACTORY_DESCRIPTOR;
+  readonly execution;
+  readonly transcript: AgentTranscript;
+  readonly transcriptSearch;
+  readonly catalog;
+  readonly settings;
+  readonly lifecycle;
+  readonly migration;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly commands = null;
+  readonly forking = null;
+  readonly endpoints = null;
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+
   constructor(host: AgentHost) {
-    bindAgentHost(host);
-    super({
+    const config = createFactoryConfig(host.environment);
+    const logger = createScopedAgentLogger(host.logger, 'factory');
+    const models = new FactoryModelCatalogService(config);
+    const nativeSessions = createPathNativeSessionCodec('factory');
+    const runtime = new FactoryCliRuntime({ config, logger, models });
+    const transcriptReader = createFactoryTranscriptSource({}, logger);
+
+    this.settings = createVersionedSettings({
+      ownerId: 'factory',
+      schemaVersion: 1,
+      defaults: {},
+      descriptors: [],
+    });
+    this.execution = new FactoryExecution(runtime, nativeSessions);
+    this.transcript = createFactoryTranscript(transcriptReader, nativeSessions);
+    const search = createTranscriptSearch({
       host,
-      agent: createFactoryAgent(new FactoryCliRuntime()),
-      descriptor: {
-        id: 'factory', label: 'Factory', icon: null,
-        supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-        supportedThinkingModes: THINKING_MODE_VALUES,
-        supportsImages: false,
-        supportsProjectPathUpdate: false,
-        requiresNativePathForProjectPathUpdate: false,
-        supportedEndpointProtocols: [],
-        configuration: [
-          { key: 'FACTORY_BINARY', source: 'environment', description: 'Factory Droid CLI binary.' },
-          { key: 'FACTORY_API_KEY', source: 'environment', description: 'Factory API key.' },
-        ],
+      agentId: 'factory',
+      loadTranscript: async ({ chat, signal }) => {
+        signal.throwIfAborted();
+        const nativePath = nativeSessions.decode(chat.nativeSession).path;
+        return nativePath ? transcriptReader.loadMessages({ nativePath }) : [];
       },
+    });
+    this.transcriptSearch = search;
+    this.catalog = createModelCatalog({
       defaultModel: FACTORY_MODELS.DEFAULT,
+      fallbackModels: FACTORY_MODELS.OPTIONS,
+      requiresStrictModelDiscovery: false,
       generation: { priority: 80, model: FACTORY_MODELS.DEFAULT },
-      models: FACTORY_MODELS.OPTIONS,
+      discover: () => models.getModels(),
+    });
+    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
+    this.auth = {
+      async status(signal) {
+        signal.throwIfAborted();
+        const status = await getFactoryAuthStatus(config);
+        return {
+          authenticated: status.authenticated,
+          canReauth: false,
+          label: status.label || 'Factory',
+          source: status.authenticated ? 'cli' : 'none',
+        };
+      },
+    };
+    this.singleQuery = {
+      async run(request) {
+        request.signal.throwIfAborted();
+        try {
+          return await runSingleQuery(request.prompt, {
+            cwd: request.projectPath,
+            model: request.model,
+            ...request.settings.values,
+          }, config, models);
+        } catch (error) {
+          if (error instanceof AgentIntegrationError) throw error;
+          throw new AgentIntegrationError(
+            'PROVIDER_FAILURE',
+            error instanceof Error ? error.message : String(error),
+            false,
+          );
+        }
+      },
+    };
+    this.lifecycle = createIntegrationLifecycle({
+      start: () => runtime.startPurgeTimer(),
+      stop: async () => {
+        runtime.shutdown();
+        await search.close();
+      },
     });
   }
+}
+
+function createFactoryTranscript(
+  reader: ReturnType<typeof createFactoryTranscriptSource>,
+  nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
+): AgentTranscript {
+  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => ({
+    agentSessionId: chat.agentSessionId,
+    nativePath: nativeSessions.decode(chat.nativeSession).path,
+  });
+  const loadMessages = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
+    reader.loadMessages(reference(chat))
+  );
+  return {
+    async resolveNativeSession({ chat, signal }) {
+      signal.throwIfAborted();
+      const current = nativeSessions.decode(chat.nativeSession);
+      if (current.path) return chat.nativeSession;
+      const path = await reader.resolveNativePath(reference(chat));
+      return nativeSessions.encode({
+        path,
+        agentSessionId: chat.agentSessionId,
+        modelEndpointId: current.modelEndpointId,
+      });
+    },
+    async load({ chat, signal }) {
+      signal.throwIfAborted();
+      const messages = await loadMessages(chat);
+      return { messages, revision: computeAgentTranscriptRevision(messages) };
+    },
+    async preview({ chat, signal }) {
+      signal.throwIfAborted();
+      return normalizePreview(await reader.getPreview(reference(chat)));
+    },
+    async revision({ chat, signal }) {
+      signal.throwIfAborted();
+      return computeAgentTranscriptRevision(await loadMessages(chat));
+    },
+    async release({ signal }) {
+      signal.throwIfAborted();
+    },
+  };
+}
+
+function normalizePreview(value: unknown): AgentTranscriptPreview | null {
+  if (!value || typeof value !== 'object' || !('firstMessage' in value)) return null;
+  const preview = value as Record<string, unknown>;
+  if (typeof preview.firstMessage !== 'string') return null;
+  return {
+    firstMessage: preview.firstMessage,
+    lastMessage: typeof preview.lastMessage === 'string'
+      ? preview.lastMessage
+      : preview.firstMessage,
+    createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
+    lastActivity: typeof preview.lastActivity === 'string' ? preview.lastActivity : null,
+  };
 }

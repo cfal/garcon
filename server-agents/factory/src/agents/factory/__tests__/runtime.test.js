@@ -6,8 +6,10 @@ const getFactoryModelMetadata = mock(async () => ({
 }));
 
 mock.module('../factory-models.js', () => ({
-  getFactoryModelMetadata,
-  getFactoryModels: mock(async () => []),
+  FactoryModelCatalogService: class {
+    getModelMetadata = getFactoryModelMetadata;
+    getModels = mock(async () => []);
+  },
 }));
 
 const findFactorySessionFileBySessionId = mock(async () => null);

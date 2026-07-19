@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { getFactoryBinary } from "../../config.js";
+import type { FactoryConfig } from '../../config.js';
 import {
   ThinkingMessage,
   ToolResultMessage,
@@ -12,26 +12,32 @@ import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import {
-  assertExecutionAdmissionOpen,
-  executionEventMetadata,
-  markExecutionStarted,
-  type AgentCommandImage,
-  type AgentEventMetadata,
-  type PermissionMode,
-  type ResumeTurnRequest,
-  type StartSessionRequest,
-  type StartedAgentSession,
-  type ThinkingMode,
-} from '@garcon/server-agent-common/legacy/session-types';
-import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
+  assertFactoryExecutionOpen,
+  factoryEventMetadata,
+  markFactoryExecutionStarted,
+  type FactoryCommandImage,
+  type FactoryResumeRequest,
+  type FactoryStartRequest,
+  type FactoryStartedSession,
+} from './runtime-types.js';
+import { FactoryModelCatalogService } from './factory-models.js';
 import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory-model-id.js';
 import { buildFactoryCliEnv } from './factory-env.js';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { findFactorySessionFileBySessionId } from './history-loader.js';
 import { convertFactoryAssistantText, visibleFactoryAssistantText } from './factory-text.js';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
+import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 
-const logger = createLogger('agents:factory:factory-cli');
+const DEFAULT_CONFIG: FactoryConfig = {
+  binary: () => 'droid',
+  apiKey: () => null,
+  homeOverride: () => null,
+};
+const SILENT_LOGGER: AgentLogger = {
+  debug() {}, info() {}, warn() {}, error() {},
+};
 
 interface FactorySession {
   aborted: boolean;
@@ -46,18 +52,18 @@ interface FactorySession {
   startTime: number;
   lastActivityAt: number;
   startedSession: {
-    promise: Promise<StartedAgentSession>;
+    promise: Promise<FactoryStartedSession>;
     reject: (error: unknown) => void;
-    resolve: (value: StartedAgentSession) => void;
+    resolve: (value: FactoryStartedSession) => void;
     resolved: boolean;
   } | null;
   turnResolve: (() => void) | null;
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
   turnGeneration: number;
 }
 
 interface FactoryTurnContext {
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
   generation: number;
 }
 
@@ -164,7 +170,7 @@ function mapFactoryReasoningEffort(thinkingMode: ThinkingMode, supportedReasonin
   return undefined;
 }
 
-async function writeImagesToTempFiles(images: AgentCommandImage[]): Promise<{ cleanup: () => Promise<void>; paths: string[] }> {
+async function writeImagesToTempFiles(images: FactoryCommandImage[]): Promise<{ cleanup: () => Promise<void>; paths: string[] }> {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'factory-images-'));
   const filePaths: string[] = [];
 
@@ -195,7 +201,7 @@ async function writeImagesToTempFiles(images: AgentCommandImage[]): Promise<{ cl
 
 async function buildFactoryPrompt(
   command: string,
-  images: AgentCommandImage[] | undefined,
+  images: FactoryCommandImage[] | undefined,
   modelSupportsImages: boolean,
   permissionMode: PermissionMode,
 ): Promise<{ cleanup?: () => Promise<void>; prompt: string }> {
@@ -227,7 +233,7 @@ async function buildFactoryPrompt(
 }
 
 function buildFactoryArgs(
-  request: Pick<ResumeTurnRequest, 'model' | 'permissionMode' | 'projectPath' | 'thinkingMode'> & { agentSessionId?: string | null },
+  request: Pick<FactoryResumeRequest, 'model' | 'permissionMode' | 'projectPath' | 'thinkingMode'> & { agentSessionId?: string | null },
   reasoningEffort: string | undefined,
 ): string[] {
   const args = [
@@ -266,14 +272,25 @@ function shouldAirgapFactoryInvocation(model: string, options: { resume: boolean
   return isFactoryCustomModel(model);
 }
 
+function buildFactoryEnvironment(config: FactoryConfig, airgap: boolean) {
+  const apiKey = config.apiKey();
+  return buildFactoryCliEnv({
+    airgap,
+    baseEnv: {
+      ...process.env,
+      ...(apiKey ? { FACTORY_API_KEY: apiKey } : {}),
+    },
+  });
+}
+
 async function runFactoryExec(
   args: string[],
   prompt: string,
-  options: { airgap: boolean },
+  options: { airgap: boolean; config?: FactoryConfig },
 ): Promise<{ stderr: string; stdout: string }> {
-  const factoryBinary = getFactoryBinary();
+  const factoryBinary = (options.config ?? DEFAULT_CONFIG).binary();
   const proc = Bun.spawn([factoryBinary, ...args], {
-    env: buildFactoryCliEnv({ airgap: options.airgap }),
+    env: buildFactoryEnvironment(options.config ?? DEFAULT_CONFIG, options.airgap),
     stdin: new Blob([prompt]),
     stdout: 'pipe',
     stderr: 'pipe',
@@ -301,7 +318,12 @@ async function resolveFactoryStartedNativePath(sessionId: string): Promise<strin
   return found;
 }
 
-export async function runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
+export async function runSingleQuery(
+  prompt: string,
+  options: Record<string, unknown> = {},
+  config: FactoryConfig = DEFAULT_CONFIG,
+  models: FactoryModelCatalogService = new FactoryModelCatalogService(config),
+): Promise<string> {
   const request = {
     model: typeof options.model === 'string' ? options.model : '',
     permissionMode: typeof options.permissionMode === 'string' ? options.permissionMode as PermissionMode : 'default',
@@ -312,7 +334,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
         : process.cwd(),
     thinkingMode: normalizeThinkingMode(options.thinkingMode),
   };
-  const metadata = request.model ? await getFactoryModelMetadata(request.model) : null;
+  const metadata = request.model ? await models.getModelMetadata(request.model) : null;
   const reasoningEffort = request.thinkingMode === 'none' ? undefined : request.thinkingMode;
   const supportsImages = metadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
   const args = buildFactoryArgs(request, reasoningEffort).map((entry) => entry);
@@ -323,6 +345,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
   try {
     const { stdout } = await runFactoryExec(args, nextPrompt, {
       airgap: shouldAirgapFactoryInvocation(request.model, { resume: false }),
+      config,
     });
     const parsed = JSON.parse(stdout) as { result?: string };
     return typeof parsed.result === 'string' ? visibleFactoryAssistantText(parsed.result) : '';
@@ -343,6 +366,9 @@ function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {
 }
 
 export class FactoryCliRuntime extends AgentEventEmitterRuntime {
+  readonly #config: FactoryConfig;
+  readonly #logger: AgentLogger;
+  readonly #models: FactoryModelCatalogService;
   #runningSessions = new Map<string, FactorySession>();
   #idlePurger = new IdleSessionPurger<FactorySession>({
     sessions: () => this.#runningSessions.entries(),
@@ -354,8 +380,19 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     },
   });
 
+  constructor(options: {
+    readonly config?: FactoryConfig;
+    readonly logger?: AgentLogger;
+    readonly models?: FactoryModelCatalogService;
+  } = {}) {
+    super();
+    this.#config = options.config ?? DEFAULT_CONFIG;
+    this.#logger = options.logger ?? SILENT_LOGGER;
+    this.#models = options.models ?? new FactoryModelCatalogService(this.#config);
+  }
+
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
-    return getFactoryModels();
+    return this.#models.getModels();
   }
 
   #finalizeTurn(
@@ -402,7 +439,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            logger.info(`factory(${sessionId.slice(0, 8)}): stderr: ${line}`);
+            this.#logger.info('Factory stderr output.', { sessionId, line });
           }
         }
       }
@@ -446,7 +483,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
               startedSession.resolve({ agentSessionId, nativePath });
             })
             .catch((error) => {
-              logger.warn(`factory(${agentSessionId.slice(0, 8)}): could not resolve native path:`, error);
+              this.#logger.warn('Factory native path resolution failed.', {
+                sessionId: agentSessionId,
+                error: error instanceof Error ? error.message : String(error),
+              });
               session.aborted = true;
               if (session.process && !session.process.killed) {
                 session.process.kill();
@@ -529,7 +569,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           try {
             this.#routeEvent(session, turn, JSON.parse(line) as FactoryCliEvent);
           } catch {
-            logger.warn(`factory(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+            this.#logger.warn('Factory emitted invalid JSON.', {
+              sessionId: session.id,
+              line: line.slice(0, 120),
+            });
           }
         }
       }
@@ -549,10 +592,10 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     cwd: string,
     airgap: boolean,
   ): ReturnType<typeof Bun.spawn> {
-    const factoryBinary = getFactoryBinary();
+    const factoryBinary = this.#config.binary();
     const proc = Bun.spawn([factoryBinary, ...args], {
       cwd,
-      env: buildFactoryCliEnv({ airgap }),
+      env: buildFactoryEnvironment(this.#config, airgap),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -581,9 +624,9 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   }
 
   async #createSessionTracker(): Promise<FactorySession['startedSession']> {
-    let resolveRef: ((value: StartedAgentSession) => void) | null = null;
+    let resolveRef: ((value: FactoryStartedSession) => void) | null = null;
     let rejectRef: ((error: unknown) => void) | null = null;
-    const promise = new Promise<StartedAgentSession>((resolve, reject) => {
+    const promise = new Promise<FactoryStartedSession>((resolve, reject) => {
       resolveRef = resolve;
       rejectRef = reject;
     });
@@ -601,14 +644,14 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     };
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    assertExecutionAdmissionOpen(request);
-    const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
+  async startSession(request: FactoryStartRequest): Promise<FactoryStartedSession> {
+    assertFactoryExecutionOpen(request);
+    const modelMetadata = request.model ? await this.#models.getModelMetadata(request.model) : null;
     const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
     const supportsImages = modelMetadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
     const args = buildFactoryArgs(request, reasoningEffort);
     const { cleanup, prompt } = await buildFactoryPrompt(request.command, request.images, supportsImages, request.permissionMode);
-    const startedSession = await this.#createSessionTracker() as FactorySession['startedSession'] & { promise: Promise<StartedAgentSession> };
+    const startedSession = await this.#createSessionTracker() as FactorySession['startedSession'] & { promise: Promise<FactoryStartedSession> };
     const session: FactorySession = {
       aborted: false,
       chatId: request.chatId,
@@ -623,12 +666,12 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       lastActivityAt: Date.now(),
       startedSession,
       turnResolve: null,
-      eventMetadata: executionEventMetadata(request, 'chat-start'),
+      eventMetadata: factoryEventMetadata(request, 'chat-start'),
       turnGeneration: 0,
     };
 
     try {
-      markExecutionStarted(request);
+      markFactoryExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: false }));
       request.onAbortable?.();
@@ -640,14 +683,14 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async runTurn(request: FactoryResumeRequest): Promise<void> {
+    assertFactoryExecutionOpen(request);
     const existingSession = this.#runningSessions.get(request.agentSessionId);
     if (existingSession?.isRunning) {
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
 
-    const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
+    const modelMetadata = request.model ? await this.#models.getModelMetadata(request.model) : null;
     const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
     const supportsImages = modelMetadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
     const args = buildFactoryArgs(request, reasoningEffort);
@@ -665,7 +708,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       lastActivityAt: Date.now(),
       startedSession: null,
       turnResolve: null,
-      eventMetadata: executionEventMetadata(request),
+      eventMetadata: factoryEventMetadata(request),
       turnGeneration: 0,
     };
     if (existingSession) session.turnGeneration += 1;
@@ -679,11 +722,11 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     session.resultSeen = false;
     session.startTime = Date.now();
     session.lastActivityAt = Date.now();
-    session.eventMetadata = executionEventMetadata(request);
+    session.eventMetadata = factoryEventMetadata(request);
     this.#runningSessions.set(session.id, session);
 
     try {
-      markExecutionStarted(request);
+      markFactoryExecutionStarted(request);
       this.emitProcessing(request.chatId, true);
       this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: true }));
       request.onAbortable?.();
