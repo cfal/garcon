@@ -199,7 +199,12 @@ export function createLegacyAgentIntegration(
         }
         return {
           agentSessionId: result.agentSessionId,
-          nativeSession: nativeSession(options.descriptor.id, result.nativePath, result.agentSessionId),
+          nativeSession: nativeSession(
+            options.descriptor.id,
+            result.nativePath,
+            result.agentSessionId,
+            request.endpoint?.endpointId,
+          ),
         };
       },
     } : null,
@@ -214,13 +219,21 @@ export function createLegacyAgentIntegration(
       },
     } : null,
     singleQuery: options.agent.runSingleQuery ? {
-      async run({ prompt, projectPath, model, settings: envelope, signal }) {
+      async run({ prompt, projectPath, model, settings: envelope, endpoint, signal }) {
         signal.throwIfAborted();
         try {
+          const endpointRuntime = await resolveLegacyEndpointRuntime(
+            options.host,
+            options.agent,
+            options.onEndpointSelection,
+            endpoint,
+            signal,
+          );
           return await options.agent.runSingleQuery!(prompt, {
             projectPath,
             model,
             ...envelope.values,
+            ...endpointRuntime,
           });
         } catch (error) {
           if (error instanceof AgentIntegrationError) throw error;
@@ -300,7 +313,12 @@ class LegacyExecution implements AgentExecution {
     );
     const session = {
       agentSessionId: result.agentSessionId,
-      nativeSession: nativeSession(this.#agentId, result.nativePath, result.agentSessionId),
+      nativeSession: nativeSession(
+        this.#agentId,
+        result.nativePath,
+        result.agentSessionId,
+        request.endpoint?.endpointId,
+      ),
     };
     this.#emit({ type: 'session-created', chatId: request.chatId, session, operation: request.operation });
     return session;
@@ -421,39 +439,60 @@ class LegacyExecution implements AgentExecution {
   }
 
   async #endpointRuntime(endpoint: AgentEndpointSelection | null, signal: AbortSignal) {
-    if (!endpoint || !this.#agent.prepareEndpointRuntime) return {};
-    const resolved = endpoint.credential
-      ? await this.#host.apiProviders.resolveCredential({ reference: endpoint.credential, signal })
-      : null;
-    const storedEndpoint: StoredApiProviderEndpoint = {
-      id: endpoint.endpointId,
-      protocol: endpoint.protocol,
-      baseUrl: endpoint.baseUrl,
-      apiKey: resolved?.value ?? '',
-      defaultModel: endpoint.model,
-      models: [{ value: endpoint.model, label: endpoint.model }],
-      supportsImages: false,
-      modelDiscovery: 'none',
-    };
-    const apiProvider: StoredApiProvider = {
-      id: endpoint.apiProviderId,
-      label: endpoint.apiProviderId,
-      endpoints: [storedEndpoint],
-      createdAt: '',
-      updatedAt: '',
-    };
-    this.#options.onEndpointSelection?.(endpoint, resolved?.value ?? '');
-    const legacySelection: LegacyEndpointSelection = {
-      model: endpoint.model,
-      apiProviderId: endpoint.apiProviderId,
-      modelEndpointId: endpoint.endpointId,
-      modelProtocol: endpoint.protocol,
-      isLocal: endpoint.isLocal,
-      apiProvider,
-      endpoint: storedEndpoint,
-    };
-    return this.#agent.prepareEndpointRuntime(legacySelection) ?? {};
+    return resolveLegacyEndpointRuntime(
+      this.#host,
+      this.#agent,
+      this.#options.onEndpointSelection,
+      endpoint,
+      signal,
+    );
   }
+}
+
+async function resolveLegacyEndpointRuntime(
+  host: AgentHost,
+  agent: Agent,
+  onEndpointSelection: LegacyIntegrationOptions['onEndpointSelection'],
+  endpoint: AgentEndpointSelection | null,
+  signal: AbortSignal,
+) {
+  if (!endpoint) return {};
+  const resolved = endpoint.credential
+    ? await host.apiProviders.resolveCredential({ reference: endpoint.credential, signal })
+    : null;
+  const storedEndpoint: StoredApiProviderEndpoint = {
+    id: endpoint.endpointId,
+    protocol: endpoint.protocol,
+    baseUrl: endpoint.baseUrl,
+    apiKey: resolved?.value ?? '',
+    defaultModel: endpoint.model,
+    models: [{ value: endpoint.model, label: endpoint.model }],
+    supportsImages: false,
+    modelDiscovery: 'none',
+  };
+  const apiProvider: StoredApiProvider = {
+    id: endpoint.apiProviderId,
+    label: endpoint.apiProviderId,
+    endpoints: [storedEndpoint],
+    createdAt: '',
+    updatedAt: '',
+  };
+  onEndpointSelection?.(endpoint, resolved?.value ?? '');
+  const legacySelection: LegacyEndpointSelection = {
+    model: endpoint.model,
+    apiProviderId: endpoint.apiProviderId,
+    modelEndpointId: endpoint.endpointId,
+    modelProtocol: endpoint.protocol,
+    isLocal: endpoint.isLocal,
+    apiProvider,
+    endpoint: storedEndpoint,
+  };
+  return {
+    apiProviderId: endpoint.apiProviderId,
+    modelEndpointId: endpoint.endpointId,
+    modelProtocol: endpoint.protocol,
+    ...(agent.prepareEndpointRuntime?.(legacySelection) ?? {}),
+  };
 }
 
 function createTranscript(
@@ -473,7 +512,12 @@ function createTranscript(
       signal.throwIfAborted();
       if (!agent.transcript.resolveNativePath) return chat.nativeSession;
       const resolved = await agent.transcript.resolveNativePath(toLegacyChat(chat, toLegacySettings));
-      return nativeSession(agentId, resolved);
+      return nativeSession(
+        agentId,
+        resolved,
+        chat.agentSessionId,
+        nativeModelEndpointId(chat.nativeSession),
+      );
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
@@ -759,7 +803,14 @@ function createLifecycle(agent: Agent, transcriptSearch: AgentTranscriptSearch):
 function createMigration(agentId: string, settings: AgentSettings): AgentMigration {
   return {
     async translateLegacyNativeSession(request) {
-      return nativeSession(agentId, request.legacyNativePath);
+      return nativeSession(
+        agentId,
+        request.legacyNativePath,
+        request.agentSessionId,
+        typeof request.legacyValues.modelEndpointId === 'string'
+          ? request.legacyValues.modelEndpointId
+          : null,
+      );
     },
     async translateLegacySettings({ legacyValues }) {
       const defaults = settings.defaults();
@@ -813,6 +864,7 @@ function toLegacyChat(
     projectPath: chat.projectPath,
     agentSessionId: chat.agentSessionId,
     model: chat.model,
+    modelEndpointId: nativeModelEndpointId(chat.nativeSession),
     nativePath: nativePath(chat.nativeSession),
     ...mapLegacySettings(chat.settings, toLegacySettings),
   };
@@ -822,20 +874,28 @@ export function nativeSession(
   agentId: string,
   path: string | null | undefined,
   agentSessionId?: string | null,
+  modelEndpointId?: string | null,
 ): AgentNativeSessionRef | null {
-  if (!path && !agentSessionId) return null;
+  if (!path && !agentSessionId && !modelEndpointId) return null;
   return {
     ownerId: agentId,
     schemaVersion: 1,
     value: {
       ...(path ? { path } : {}),
       ...(agentSessionId ? { agentSessionId } : {}),
+      ...(modelEndpointId ? { modelEndpointId } : {}),
     },
   };
 }
 
 export function nativePath(reference: AgentNativeSessionRef | null): string | null {
   return typeof reference?.value.path === 'string' ? reference.value.path : null;
+}
+
+function nativeModelEndpointId(reference: AgentNativeSessionRef | null): string | null {
+  return typeof reference?.value.modelEndpointId === 'string'
+    ? reference.value.modelEndpointId
+    : null;
 }
 
 function normalizePreview(value: unknown): AgentTranscriptPreview | null {
@@ -856,6 +916,7 @@ function searchChatEntry(agentId: string, chat: AgentSearchChat): AgentChatEntry
     agentSessionId: typeof chat.nativeSession?.value.agentSessionId === 'string'
       ? chat.nativeSession.value.agentSessionId
       : null,
+    modelEndpointId: nativeModelEndpointId(chat.nativeSession),
     nativePath: nativePath(chat.nativeSession),
   };
 }

@@ -9,7 +9,7 @@ export default class DirectOpenAiCompatibleIntegration extends LegacyAgentIntegr
   static readonly apiVersion = 1 as const;
 
   constructor(host: AgentHost) {
-    const reader = new MutableApiProviderReader();
+    const reader = new MutableApiProviderReader({ chatCompletions: true, responses: false });
     super({
       host,
       agent: createDirectOpenAiChatAgent(reader, host.storage.rootDirectory),

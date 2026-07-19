@@ -1,9 +1,12 @@
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
+import type { OpenAiEndpointCapabilities } from '@garcon/common/api-providers';
 import type { ApiProviderReader } from './api-providers.js';
 import type { StoredApiProvider, StoredApiProviderEndpoint } from './types.js';
 
 export class MutableApiProviderReader implements ApiProviderReader {
   readonly #providers = new Map<string, StoredApiProvider>();
+
+  constructor(private readonly capabilities?: OpenAiEndpointCapabilities) {}
 
   list(): StoredApiProvider[] {
     return [...this.#providers.values()];
@@ -23,6 +26,7 @@ export class MutableApiProviderReader implements ApiProviderReader {
       protocol: selection.protocol,
       baseUrl: selection.baseUrl,
       apiKey: credential,
+      ...(this.capabilities ? { capabilities: { ...this.capabilities } } : {}),
       defaultModel: selection.model,
       models: [{ value: selection.model, label: selection.model }],
       supportsImages: false,
