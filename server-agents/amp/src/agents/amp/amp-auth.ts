@@ -1,8 +1,8 @@
-import { getAmpBinary } from "../../config.js";
+import type { AmpConfig } from '../../config.js';
 
-export async function getAmpAuthStatus() {
+export async function getAmpAuthStatus(config: AmpConfig) {
   try {
-    const ampBinary = getAmpBinary();
+    const ampBinary = config.binary();
     const proc = Bun.spawn([ampBinary, 'usage'], {
       stdin: 'ignore',
       stdout: 'pipe',

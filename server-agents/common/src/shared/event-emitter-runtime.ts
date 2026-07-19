@@ -7,22 +7,28 @@
 
 import { EventEmitter } from 'events';
 import type { ChatMessage } from '@garcon/common/chat-types';
-import type { AgentEventMetadata } from '../legacy/session-types.js';
 
-export type MessagesCallback = (chatId: string, messages: ChatMessage[], metadata?: AgentEventMetadata) => void;
+export interface RuntimeEventMetadata {
+  readonly clientRequestId?: string;
+  readonly commandType?: 'chat-start' | 'agent-run' | 'fork-run' | 'agent-compact';
+  readonly turnId?: string;
+  readonly upstreamRequestId?: string;
+}
+
+export type MessagesCallback = (chatId: string, messages: ChatMessage[], metadata?: RuntimeEventMetadata) => void;
 export type ProcessingCallback = (chatId: string, isProcessing: boolean) => void;
 export type SessionCreatedCallback = (chatId: string) => void;
-export type FinishedCallback = (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void;
+export type FinishedCallback = (chatId: string, exitCode: number, metadata?: RuntimeEventMetadata) => void;
 export type FailedCallback = (
   chatId: string,
   errorMessage: string,
-  metadata?: AgentEventMetadata,
+  metadata?: RuntimeEventMetadata,
 ) => void;
 
 export class AgentEventEmitterRuntime extends EventEmitter {
   // Emit helpers (used by subclasses)
 
-  emitMessages(chatId: string, messages: ChatMessage[], metadata?: AgentEventMetadata): void {
+  emitMessages(chatId: string, messages: ChatMessage[], metadata?: RuntimeEventMetadata): void {
     if (messages.length > 0) {
       if (metadata) {
         this.emit('messages', chatId, messages, metadata);
@@ -40,7 +46,7 @@ export class AgentEventEmitterRuntime extends EventEmitter {
     this.emit('session-created', chatId);
   }
 
-  emitFinished(chatId: string, exitCode: number = 0, metadata?: AgentEventMetadata): void {
+  emitFinished(chatId: string, exitCode: number = 0, metadata?: RuntimeEventMetadata): void {
     if (metadata) {
       this.emit('finished', chatId, exitCode, metadata);
     } else {
@@ -48,7 +54,7 @@ export class AgentEventEmitterRuntime extends EventEmitter {
     }
   }
 
-  emitFailed(chatId: string, errorMessage: string, metadata?: AgentEventMetadata): void {
+  emitFailed(chatId: string, errorMessage: string, metadata?: RuntimeEventMetadata): void {
     this.emit('failed', chatId, errorMessage, metadata);
   }
 

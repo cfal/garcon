@@ -6,7 +6,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
-import { getAmpBinary } from "../../config.js";
+import type { AmpConfig } from '../../config.js';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { convertAmpToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
@@ -14,19 +14,25 @@ import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-sessi
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
 import {
-  assertExecutionAdmissionOpen,
-  executionEventMetadata,
-  markExecutionStarted,
-  type AgentEventMetadata,
-  type StartSessionRequest,
-  type ResumeTurnRequest,
-  type StartedAgentSession,
-} from '@garcon/server-agent-common/legacy/session-types';
-import { createLogger } from '@garcon/server-agent-common/lib/log';
+  ampEventMetadata,
+  assertAmpExecutionOpen,
+  markAmpExecutionStarted,
+  type AmpResumeRequest,
+  type AmpStartRequest,
+  type AmpStartedSession,
+} from './runtime-types.js';
+import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
-import { UnsupportedSingleQueryEffortError } from '@garcon/server-agent-common/legacy/single-query-errors';
+import {
+  AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+  AgentIntegrationError,
+  type AgentLogger,
+} from '@garcon/server-agent-interface';
 
-const logger = createLogger('agents:amp:amp-cli');
+const DEFAULT_CONFIG: AmpConfig = { binary: () => 'amp' };
+const SILENT_LOGGER: AgentLogger = {
+  debug() {}, info() {}, warn() {}, error() {},
+};
 
 interface AmpSession {
   id: string;
@@ -41,11 +47,11 @@ interface AmpSession {
   lastActivityAt: number;
   process: ReturnType<typeof Bun.spawn> | null;
   turnGeneration: number;
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
 }
 
 interface AmpTurnContext {
-  eventMetadata: AgentEventMetadata;
+  eventMetadata: RuntimeEventMetadata;
   generation: number;
 }
 
@@ -126,8 +132,12 @@ async function readAmpStdout(proc: ReturnType<typeof Bun.spawn>): Promise<string
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
 }
 
-async function runAmpCommand(args: string[], { cwd, input }: { cwd?: string; input?: string } = {}): Promise<string> {
-  const ampBinary = getAmpBinary();
+async function runAmpCommand(
+  args: string[],
+  { cwd, input }: { cwd?: string; input?: string } = {},
+  config: AmpConfig = DEFAULT_CONFIG,
+): Promise<string> {
+  const ampBinary = config.binary();
   const proc = Bun.spawn([ampBinary, ...args], {
     cwd: cwd || process.cwd(),
     stdin: input == null ? 'ignore' : 'pipe',
@@ -155,7 +165,11 @@ async function runAmpCommand(args: string[], { cwd, input }: { cwd?: string; inp
   return stdout;
 }
 
-async function exportThread(threadId: string, { cwd }: { cwd?: string } = {}): Promise<AmpThreadExport> {
+async function exportThread(
+  threadId: string,
+  { cwd }: { cwd?: string } = {},
+  config: AmpConfig = DEFAULT_CONFIG,
+): Promise<AmpThreadExport> {
   if (!threadId) throw new Error('threadId is required');
 
   const raw = await runAmpCommandToTempFile([
@@ -163,7 +177,7 @@ async function exportThread(threadId: string, { cwd }: { cwd?: string } = {}): P
     'export',
     ...AMP_DEFAULT_FLAGS,
     threadId,
-  ], { cwd });
+  ], { cwd }, config);
 
   try {
     return JSON.parse(raw) as AmpThreadExport;
@@ -175,8 +189,12 @@ async function exportThread(threadId: string, { cwd }: { cwd?: string } = {}): P
 // Works around a Bun async stdout pipe truncation bug seen with
 // `amp threads export`.
 // TODO: Retry the normal pipe path after Bun fixes it.
-async function runAmpCommandToTempFile(args: string[], { cwd }: { cwd?: string } = {}): Promise<string> {
-  const ampBinary = getAmpBinary();
+async function runAmpCommandToTempFile(
+  args: string[],
+  { cwd }: { cwd?: string } = {},
+  config: AmpConfig = DEFAULT_CONFIG,
+): Promise<string> {
+  const ampBinary = config.binary();
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-amp-export-'));
   const outputPath = path.join(tmpDir, 'stdout.json');
   const handle = await fs.open(outputPath, 'w');
@@ -213,12 +231,15 @@ async function runAmpCommandToTempFile(args: string[], { cwd }: { cwd?: string }
   }
 }
 
-async function createThread({ cwd }: { cwd?: string } = {}): Promise<string> {
+async function createThread(
+  { cwd }: { cwd?: string } = {},
+  config: AmpConfig = DEFAULT_CONFIG,
+): Promise<string> {
   const raw = await runAmpCommand([
     'threads',
     'new',
     ...AMP_DEFAULT_FLAGS,
-  ], { cwd });
+  ], { cwd }, config);
 
   const threadId = parseAmpThreadId(raw);
   if (!threadId) {
@@ -237,10 +258,17 @@ function parseAmpThreadId(raw: string): string | null {
 async function runSingleQuery(
   prompt: string,
   options: Record<string, unknown> = {},
+  config: AmpConfig = DEFAULT_CONFIG,
+  logger: AgentLogger = SILENT_LOGGER,
 ): Promise<string> {
   const thinkingMode = normalizeThinkingMode(options.thinkingMode);
   if (thinkingMode !== 'none') {
-    throw new UnsupportedSingleQueryEffortError('amp', thinkingMode);
+    throw new AgentIntegrationError(
+      'OPERATION_UNSUPPORTED',
+      `amp does not support explicit one-shot effort ${thinkingMode}.`,
+      false,
+      AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+    );
   }
   const cwd = typeof options.cwd === 'string' ? options.cwd : undefined;
   const args = [
@@ -252,9 +280,11 @@ async function runSingleQuery(
   let raw = '';
 
   try {
-    raw = await runAmpCommand(args, { cwd, input: prompt });
+    raw = await runAmpCommand(args, { cwd, input: prompt }, config);
   } catch (err) {
-    logger.error('amp: one-shot stdout read error:', (err as Error).message);
+    logger.error('Amp one-shot stdout read failed.', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 
@@ -282,7 +312,7 @@ async function runSingleQuery(
 function createSession(
   threadId: string,
   chatId: string,
-  eventMetadata: AgentEventMetadata,
+  eventMetadata: RuntimeEventMetadata,
 ): AmpSession {
   const now = Date.now();
   return {
@@ -317,6 +347,8 @@ function buildContinueArgs(threadId: string, model?: string): string[] {
 }
 
 class AmpCliRuntime extends AgentEventEmitterRuntime {
+  readonly #config: AmpConfig;
+  readonly #logger: AgentLogger;
   #runningSessions = new Map<string, AmpSession>();
   #idlePurger = new IdleSessionPurger<AmpSession>({
     sessions: () => this.#runningSessions.entries(),
@@ -328,8 +360,10 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     },
   });
 
-  constructor() {
+  constructor(options: { config?: AmpConfig; logger?: AgentLogger } = {}) {
     super();
+    this.#config = options.config ?? DEFAULT_CONFIG;
+    this.#logger = options.logger ?? SILENT_LOGGER;
   }
 
   #routeMessage(session: AmpSession, turn: AmpTurnContext, msg: AmpCliMessage): void {
@@ -338,7 +372,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       case 'system':
         if (msg.subtype === 'init') {
           const threadId = msg.thread_id || msg.session_id;
-          logger.info(`amp(${session.id.slice(0, 8)}): init, thread_id=${threadId}`);
+          this.#logger.info('Amp session initialized.', { sessionId: session.id, threadId: threadId ?? null });
           if (threadId) {
             session.threadId = threadId;
           }
@@ -368,7 +402,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         break;
 
       default:
-        logger.info(`amp(${session.id.slice(0, 8)}): unrecognized message type: ${msg.type}`);
+        this.#logger.info('Amp emitted an unrecognized message type.', { sessionId: session.id, type: msg.type });
         break;
     }
   }
@@ -397,7 +431,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
           try {
             msg = JSON.parse(line) as AmpCliMessage;
           } catch {
-            logger.warn(`amp(${session.id.slice(0, 8)}): bad JSON: ${line.slice(0, 120)}`);
+            this.#logger.warn('Amp emitted invalid JSON.', { sessionId: session.id, line: line.slice(0, 120) });
             continue;
           }
           this.#routeMessage(session, turn, msg);
@@ -405,7 +439,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       }
     } catch (err) {
       if (!proc.killed) {
-        logger.error(`amp(${session.id.slice(0, 8)}): stdout read error:`, (err as Error).message);
+        this.#logger.error('Amp stdout read failed.', { sessionId: session.id, error: (err as Error).message });
       }
     } finally {
       const exitCode = await proc.exited;
@@ -449,7 +483,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.trim()) {
-            logger.info(`amp(${sessionId.slice(0, 8)}): stderr: ${line}`);
+            this.#logger.info('Amp stderr output.', { sessionId, line });
           }
         }
       }
@@ -457,9 +491,9 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #spawnAmp(session: AmpSession, cwd: string, args: string[], prompt?: string): ReturnType<typeof Bun.spawn> {
-    const ampBinary = getAmpBinary();
+    const ampBinary = this.#config.binary();
 
-    logger.info(`amp: spawning: ${ampBinary} ${args.join(' ')}`);
+    this.#logger.info('Spawning Amp.', { binary: ampBinary, arguments: args });
 
     const proc = Bun.spawn([ampBinary, ...args], {
       cwd: cwd || process.cwd(),
@@ -482,7 +516,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     this.#pipeStderr(session.id, proc);
 
     proc.exited.then(exitCode => {
-      logger.info(`amp(${session.id.slice(0, 8)}): process exited (code=${exitCode})`);
+      this.#logger.info('Amp process exited.', { sessionId: session.id, exitCode });
       if (session.process === proc) {
         session.process = null;
       }
@@ -515,17 +549,17 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    assertExecutionAdmissionOpen(request);
+  async startSession(request: AmpStartRequest): Promise<AmpStartedSession> {
+    assertAmpExecutionOpen(request);
     const { command, chatId, projectPath, model, onAbortable, clientRequestId, turnId } = request;
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
-    const threadId = await createThread({ cwd: projectPath });
-    assertExecutionAdmissionOpen(request);
+    const threadId = await createThread({ cwd: projectPath }, this.#config);
+    assertAmpExecutionOpen(request);
 
     const session = createSession(
       threadId,
       chatId,
-      executionEventMetadata({ clientRequestId, turnId }, 'chat-start'),
+      ampEventMetadata({ clientRequestId, turnId }, 'chat-start'),
     );
     this.#runningSessions.set(threadId, session);
     this.emitSessionCreated(chatId);
@@ -533,7 +567,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     const args = buildContinueArgs(threadId, model);
 
     try {
-      markExecutionStarted(request);
+      markAmpExecutionStarted(request);
       this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
       onAbortable?.();
@@ -551,8 +585,8 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     };
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
-    assertExecutionAdmissionOpen(request);
+  async runTurn(request: AmpResumeRequest): Promise<void> {
+    assertAmpExecutionOpen(request);
     const { command, agentSessionId: threadId, chatId, projectPath, model, onAbortable, clientRequestId, turnId } = request;
     if (!threadId) throw new Error('Cannot resume without thread ID');
     if (!chatId) throw new Error('Cannot resume without chat ID');
@@ -562,7 +596,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       session = createSession(
         threadId,
         chatId,
-        executionEventMetadata({ clientRequestId, turnId }),
+        ampEventMetadata({ clientRequestId, turnId }),
       );
       this.#runningSessions.set(threadId, session);
     } else {
@@ -578,13 +612,13 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       session.resultSeen = false;
       session.finalized = false;
       session.aborted = false;
-      session.eventMetadata = executionEventMetadata({ clientRequestId, turnId });
+      session.eventMetadata = ampEventMetadata({ clientRequestId, turnId });
     }
 
     const args = buildContinueArgs(threadId, model);
 
     try {
-      markExecutionStarted(request);
+      markAmpExecutionStarted(request);
       this.emitProcessing(chatId, true);
       this.#spawnAmp(session, projectPath, args, command);
       onAbortable?.();
@@ -600,7 +634,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
   }
 
   async exportThread(threadId: string, { cwd }: { cwd?: string } = {}): Promise<AmpThreadExport> {
-    return exportThread(threadId, { cwd });
+    return exportThread(threadId, { cwd }, this.#config);
   }
 
   abort(agentSessionId: string): boolean {
