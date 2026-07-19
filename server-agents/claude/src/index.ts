@@ -103,10 +103,11 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         key: 'claudeThinkingMode',
         type: 'enum',
         label: 'Thinking',
+        labelKey: 'thinking',
         options: [
-          { value: 'auto', label: 'Auto' },
-          { value: 'on', label: 'On' },
-          { value: 'off', label: 'Off' },
+          { value: 'auto', label: 'Auto', labelKey: 'automatic' },
+          { value: 'on', label: 'On', labelKey: 'enabled' },
+          { value: 'off', label: 'Off', labelKey: 'disabled' },
         ],
       }],
     });

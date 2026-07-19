@@ -27,17 +27,45 @@ export interface AgentSettingsEnvelope {
   readonly values: JsonObject;
 }
 
+export const AGENT_SETTING_LABEL_KEYS = ['thinking', 'mode'] as const;
+export type AgentSettingLabelKey = (typeof AGENT_SETTING_LABEL_KEYS)[number];
+
+export const AGENT_SETTING_OPTION_LABEL_KEYS = [
+  'automatic',
+  'enabled',
+  'disabled',
+  'smart',
+  'deep',
+] as const;
+export type AgentSettingOptionLabelKey = (typeof AGENT_SETTING_OPTION_LABEL_KEYS)[number];
+
 export interface AgentOption {
   readonly value: string;
   readonly label: string;
+  readonly labelKey?: AgentSettingOptionLabelKey;
 }
 
-export type AgentSettingDescriptor =
-  | { readonly key: string; readonly type: 'boolean'; readonly label: string }
-  | { readonly key: string; readonly type: 'enum'; readonly label: string; readonly options: readonly AgentOption[] }
-  | { readonly key: string; readonly type: 'number'; readonly label: string; readonly min: number; readonly max: number; readonly step: number }
-  | { readonly key: string; readonly type: 'string'; readonly label: string }
-  | { readonly key: string; readonly type: 'credential-ref'; readonly label: string; readonly credentialKind: string };
+interface AgentSettingDescriptorBase {
+  readonly key: string;
+  readonly label: string;
+  readonly labelKey?: AgentSettingLabelKey;
+}
+
+export type AgentSettingDescriptor = AgentSettingDescriptorBase & (
+  | { readonly type: 'boolean' }
+  | { readonly type: 'enum'; readonly options: readonly AgentOption[] }
+  | { readonly type: 'number'; readonly min: number; readonly max: number; readonly step: number }
+  | { readonly type: 'string' }
+  | { readonly type: 'credential-ref'; readonly credentialKind: string }
+);
+
+export function isAgentSettingLabelKey(value: unknown): value is AgentSettingLabelKey {
+  return AGENT_SETTING_LABEL_KEYS.includes(value as AgentSettingLabelKey);
+}
+
+export function isAgentSettingOptionLabelKey(value: unknown): value is AgentSettingOptionLabelKey {
+  return AGENT_SETTING_OPTION_LABEL_KEYS.includes(value as AgentSettingOptionLabelKey);
+}
 
 export interface AgentCatalogDescriptor {
   readonly descriptor: AgentDescriptor;

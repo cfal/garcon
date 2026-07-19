@@ -34,7 +34,8 @@ function createIntegration() {
           key: "effort",
           type: "enum",
           label: "Effort",
-          options: [{ value: "high", label: "High" }],
+          labelKey: "thinking",
+          options: [{ value: "high", label: "High", labelKey: "deep" }],
         },
       ],
       defaults: () => ({
@@ -83,7 +84,16 @@ describe("AgentCatalogService", () => {
       authLoginSupported: true,
       supportedPermissionModes: ["default", "manualBypass"],
       supportedThinkingModes: ["none", "ultra"],
-      settings: [expect.objectContaining({ key: "effort", type: "enum" })],
+      settings: [
+        expect.objectContaining({
+          key: "effort",
+          type: "enum",
+          labelKey: "thinking",
+          options: [
+            expect.objectContaining({ value: "high", labelKey: "deep" }),
+          ],
+        }),
+      ],
       defaultSettings: {
         ownerId: "sample-agent",
         schemaVersion: 2,
