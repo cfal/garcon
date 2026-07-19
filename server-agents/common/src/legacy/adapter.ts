@@ -1,5 +1,4 @@
 import type {
-  AgentCatalog,
   AgentChatReference,
   AgentExecution,
   AgentExecutionContext,
@@ -7,10 +6,7 @@ import type {
   AgentForkRequest,
   AgentHost,
   AgentIntegration,
-  AgentLifecycle,
-  AgentMigration,
   AgentNativeSessionRef,
-  AgentSettings,
   AgentTranscript,
   AgentTranscriptPreview,
   AgentTranscriptSearch,
@@ -41,9 +37,14 @@ import type {
   StartedAgentSession,
 } from './session-types.js';
 import { createTranscriptSearch } from '../search/transcript-search.js';
-import { renderTranscriptSeed } from '../shared/transcript-seed.js';
+import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
 import { forkJsonlTranscript } from './fork-jsonl.js';
 import { promises as fs } from 'node:fs';
+import { createModelCatalog } from '../catalog/model-catalog.js';
+import { createIntegrationLifecycle } from '../lifecycle/integration-lifecycle.js';
+import { createVersion1RecordMigration } from '../migration/version-1-record-migration.js';
+import { createPathNativeSessionCodec } from '../native-session/path-native-session.js';
+import { createVersionedSettings } from '../settings/versioned-settings.js';
 
 export interface LegacyIntegrationOptions {
   readonly host: AgentHost;
@@ -128,11 +129,12 @@ export function createLegacyTranscriptSearch(
 export function createLegacyAgentIntegration(
   options: LegacyIntegrationOptions,
 ): AgentIntegration {
-  const settings = createSettings(
-    options.descriptor.id,
-    options.defaultSettings ?? {},
-    options.settingDescriptors ?? [],
-  );
+  const settings = createVersionedSettings({
+    ownerId: options.descriptor.id,
+    schemaVersion: 1,
+    defaults: options.defaultSettings ?? {},
+    descriptors: options.settingDescriptors ?? [],
+  });
   const execution = new LegacyExecution(
     options.host,
     options.agent,
@@ -144,14 +146,33 @@ export function createLegacyAgentIntegration(
     options.descriptor.id,
     options.toLegacySettings,
   );
-  const catalog = createCatalog(
-    options.agent,
-    options.defaultModel,
-    options.models ?? [],
-    options.generation ?? null,
-  );
-  const lifecycle = createLifecycle(options.agent, options.transcriptSearch);
-  const migration = createMigration(options.descriptor.id, settings);
+  const catalog = createModelCatalog({
+    defaultModel: options.defaultModel,
+    fallbackModels: options.models ?? [],
+    requiresStrictModelDiscovery: options.agent.capabilities.requiresStrictModelDiscovery,
+    generation: options.agent.runSingleQuery && options.generation
+      ? {
+        priority: options.generation.priority,
+        model: options.generation.model || options.defaultModel,
+      }
+      : null,
+    discover: options.agent.capabilities.getModels
+      ? ({ strict }) => options.agent.capabilities.getModels!({ strict })
+      : undefined,
+  });
+  const lifecycle = createIntegrationLifecycle({
+    start: () => options.agent.runtime.startPurgeTimer?.(),
+    stop: async () => {
+      options.agent.runtime.shutdown?.();
+      if ('close' in options.transcriptSearch && typeof options.transcriptSearch.close === 'function') {
+        await options.transcriptSearch.close();
+      }
+    },
+  });
+  const migration = createVersion1RecordMigration({
+    settings,
+    nativeSessions: createPathNativeSessionCodec(options.descriptor.id),
+  });
 
   return {
     descriptor: options.descriptor,
@@ -696,131 +717,6 @@ function classifyLegacySingleQueryError(error: unknown): AgentIntegrationError {
           ? 'UNAVAILABLE'
           : 'PROVIDER_FAILURE';
   return new AgentIntegrationError(code, message, code !== 'AUTH_REQUIRED');
-}
-
-function createCatalog(
-  agent: Agent,
-  defaultModel: string,
-  fallbackModels: readonly AgentModelOption[],
-  generation: { readonly priority: number; readonly model?: string } | null,
-): AgentCatalog {
-  return {
-    async snapshot({ strict, signal }) {
-      signal.throwIfAborted();
-      const discovered = await agent.capabilities.getModels?.({ strict }) ?? [];
-      const models = [...discovered, ...fallbackModels].filter((model, index, all) => (
-        all.findIndex((candidate) => candidate.value === model.value) === index
-      ));
-      return {
-        models,
-        defaultModel,
-        requiresStrictModelDiscovery: agent.capabilities.requiresStrictModelDiscovery,
-        generation: agent.runSingleQuery && generation
-          ? { priority: generation.priority, model: generation.model || defaultModel || models[0]?.value || '' }
-          : null,
-      };
-    },
-  };
-}
-
-function createSettings(
-  agentId: string,
-  defaults: JsonObject,
-  descriptors: readonly AgentSettingDescriptor[],
-): AgentSettings {
-  const envelope = (values: JsonObject): AgentSettingsEnvelope => ({
-    ownerId: agentId,
-    schemaVersion: 1,
-    values,
-  });
-  const parse = (input: AgentSettingsEnvelope): AgentSettingsEnvelope => {
-    if (input.ownerId !== agentId || input.schemaVersion !== 1 || !isRecord(input.values)) {
-      throw new AgentIntegrationError('INVALID_SETTINGS', `Invalid settings for ${agentId}`, false);
-    }
-    const values = validateSettingValues(input.values, descriptors);
-    return envelope(values);
-  };
-  return {
-    describe: () => descriptors,
-    defaults: () => envelope(defaults),
-    parse,
-    migrate: async (input) => parse(input),
-    applyPatch(current, patch) {
-      const parsed = parse(current);
-      return envelope(validateSettingValues({ ...parsed.values, ...patch }, descriptors));
-    },
-  };
-}
-
-function validateSettingValues(
-  values: JsonObject,
-  descriptors: readonly AgentSettingDescriptor[],
-): JsonObject {
-  const byKey = new Map(descriptors.map((descriptor) => [descriptor.key, descriptor]));
-  for (const [key, value] of Object.entries(values)) {
-    const descriptor = byKey.get(key);
-    if (!descriptor) {
-      throw new AgentIntegrationError('INVALID_SETTINGS', `Unknown setting ${key}`, false);
-    }
-    const valid = descriptor.type === 'boolean'
-      ? typeof value === 'boolean'
-      : descriptor.type === 'number'
-        ? typeof value === 'number' && value >= descriptor.min && value <= descriptor.max
-        : descriptor.type === 'enum'
-          ? typeof value === 'string' && descriptor.options.some((option) => option.value === value)
-          : typeof value === 'string';
-    if (!valid) {
-      throw new AgentIntegrationError('INVALID_SETTINGS', `Invalid value for setting ${key}`, false);
-    }
-  }
-  return values;
-}
-
-function createLifecycle(agent: Agent, transcriptSearch: AgentTranscriptSearch): AgentLifecycle {
-  let started = false;
-  return {
-    async start() {
-      if (started) return;
-      started = true;
-      agent.runtime.startPurgeTimer?.();
-    },
-    async stop() {
-      if (!started) return;
-      started = false;
-      agent.runtime.shutdown?.();
-      if ('close' in transcriptSearch && typeof transcriptSearch.close === 'function') {
-        await transcriptSearch.close();
-      }
-    },
-    async migrateOwnedStorage() {},
-  };
-}
-
-function createMigration(agentId: string, settings: AgentSettings): AgentMigration {
-  return {
-    async translateLegacyNativeSession(request) {
-      return nativeSession(
-        agentId,
-        request.legacyNativePath,
-        request.agentSessionId,
-        typeof request.legacyValues.modelEndpointId === 'string'
-          ? request.legacyValues.modelEndpointId
-          : null,
-      );
-    },
-    async translateLegacySettings({ legacyValues }) {
-      const defaults = settings.defaults();
-      const known = Object.fromEntries(
-        settings.describe().flatMap((descriptor) => (
-          Object.hasOwn(legacyValues, descriptor.key)
-            ? [[descriptor.key, legacyValues[descriptor.key]]]
-            : []
-        )),
-      ) as JsonObject;
-      if (Object.keys(defaults.values).length === 0 && Object.keys(known).length === 0) return null;
-      return settings.applyPatch(defaults, known);
-    },
-  };
 }
 
 function legacyExecutionConfig(

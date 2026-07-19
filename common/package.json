@@ -36,6 +36,7 @@
     "./snippets": "./snippets.ts",
     "./tags": "./tags.ts",
     "./terminal": "./terminal.ts",
+    "./transcript-seed": "./transcript-seed.ts",
     "./workspace-layout": "./workspace-layout.ts",
     "./ws-auth": "./ws-auth.ts",
     "./ws-events": "./ws-events.ts",

@@ -6,7 +6,7 @@ import { bindAgentHost } from './config.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { createCodexAgent } from './agents/codex/index.js';
 import { parseCodexGoalCommand, type CodexGoalCommand } from './agents/codex/goal-command.js';
-import { renderTranscriptSeed } from '@garcon/server-agent-common/shared/transcript-seed';
+import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
 
 export default class CodexAgentIntegration extends LegacyAgentIntegrationBase {
   static readonly integrationId = 'codex';
