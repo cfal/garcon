@@ -1,7 +1,8 @@
 // OpenAI-compatible chat-completions protocol adapter for direct runtimes.
 
 import type { SharedModelOption } from '@garcon/common/models';
-import type { AgentCommandImage } from '@garcon/server-agent-common/legacy/session-types';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import {
   DirectChatRuntimeBase,
@@ -9,7 +10,6 @@ import {
   type DirectUserTurn,
 } from "./direct-chat-runtime-base.js";
 import type { DirectConversationMessage } from "./session-store.js";
-import { createLogger } from '@garcon/server-agent-common/lib/log';
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
   DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
@@ -18,7 +18,12 @@ import {
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 
-const logger = createLogger('agents:direct:openai-compatible-chat-runtime');
+const SILENT_LOGGER: AgentLogger = Object.freeze({
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+});
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
@@ -50,6 +55,7 @@ export interface OpenAiCompatibleChatRuntimeConfig {
   getBaseUrl: () => string;
   getSessionDir: () => string;
   getSessionFilePath: (sessionId: string) => string;
+  logger?: AgentLogger;
   buildHeaders?: (apiKey: string) => Record<string, string>;
   fetchModels?: (ctx: ModelFetchContext) => Promise<SharedModelOption[]>;
 }
@@ -79,7 +85,7 @@ function appendDeltaText(accumulated: string, delta: unknown): string {
 
 export function buildOpenAiCompatibleUserContent(
   text: string,
-  images?: AgentCommandImage[],
+  images?: readonly AgentAttachment[],
 ): string | OpenAiCompatibleContentPart[] {
   const prompt = appendTextAttachmentContext(text, images);
   const imageParts = imageAttachments(images);
@@ -223,7 +229,7 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
 
   protected buildUserTurn(
     command: string,
-    images?: AgentCommandImage[],
+    images?: readonly AgentAttachment[],
   ): DirectUserTurn<ConversationMessage> {
     const content = buildOpenAiCompatibleUserContent(command, images);
     return {
@@ -312,7 +318,10 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
         return models;
       }
     } catch (error) {
-      logger.warn(`${this.config.runtimeId}: model fetch failed:`, error instanceof Error ? error.message : error);
+      (this.config.logger ?? SILENT_LOGGER).warn('Direct model fetch failed', {
+        runtimeId: this.config.runtimeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     return this.config.fallbackModels;

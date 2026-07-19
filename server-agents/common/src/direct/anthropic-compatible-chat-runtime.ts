@@ -1,7 +1,7 @@
 // Anthropic-compatible Messages protocol adapter for direct runtimes.
 
 import type { SharedModelOption } from '@garcon/common/models';
-import type { AgentCommandImage } from '@garcon/server-agent-common/legacy/session-types';
+import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   DirectChatRuntimeBase,
   type DirectRuntimeSession,
@@ -74,7 +74,7 @@ export function buildAnthropicCompatibleHeaders(apiKey: string): Record<string, 
 
 export function buildAnthropicCompatibleUserContent(
   text: string,
-  images?: AgentCommandImage[],
+  images?: readonly AgentAttachment[],
 ): AnthropicContent {
   const prompt = appendTextAttachmentContext(text, images);
   const imageParts = imageAttachments(images);
@@ -207,7 +207,7 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
 
   protected buildUserTurn(
     command: string,
-    images?: AgentCommandImage[],
+    images?: readonly AgentAttachment[],
   ): DirectUserTurn<AnthropicConversationMessage> {
     const content = buildAnthropicCompatibleUserContent(command, images);
     return {

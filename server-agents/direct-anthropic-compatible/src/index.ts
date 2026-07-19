@@ -1,29 +1,156 @@
-import type { AgentHost } from '@garcon/server-agent-interface';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
-import { LegacyAgentIntegrationBase } from '@garcon/server-agent-common';
-import { MutableApiProviderReader } from '@garcon/server-agent-common/legacy/mutable-api-provider-reader';
-import { createDirectAnthropicAgent } from './legacy-agent.js';
+import {
+  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+} from '@garcon/common/agents';
+import {
+  AgentIntegrationError,
+  type AgentHost,
+  type AgentIntegration,
+} from '@garcon/server-agent-interface';
+import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { classifyDirectIntegrationError } from '@garcon/server-agent-common/direct/errors';
+import { DirectExecution } from '@garcon/server-agent-common/direct/execution';
+import { createDirectAnthropicRuntime } from '@garcon/server-agent-common/direct/router';
+import { createDirectSessionPaths } from '@garcon/server-agent-common/direct/session-paths';
+import {
+  createDirectTranscript,
+  directTranscriptReference,
+} from '@garcon/server-agent-common/direct/transcript';
+import { createDirectCompatibleTranscriptSource } from '@garcon/server-agent-common/direct/transcript-source';
+import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
+import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
+import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
+import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
+import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
+import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 
-export default class DirectAnthropicCompatibleIntegration extends LegacyAgentIntegrationBase {
-  static readonly integrationId = 'direct-anthropic-compatible';
+const DESCRIPTOR = {
+  id: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+  label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+  icon: null,
+  supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
+  supportedThinkingModes: THINKING_MODE_VALUES,
+  supportsImages: true,
+  supportsProjectPathUpdate: true,
+  requiresNativePathForProjectPathUpdate: false,
+  supportedEndpointProtocols: ['anthropic-messages'],
+  configuration: [],
+} as const;
+
+export default class DirectAnthropicCompatibleIntegration implements AgentIntegration {
+  static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
   static readonly apiVersion = 1 as const;
 
+  readonly descriptor = DESCRIPTOR;
+  readonly execution;
+  readonly transcript;
+  readonly transcriptSearch;
+  readonly catalog;
+  readonly settings;
+  readonly lifecycle;
+  readonly migration;
+  readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly commands = null;
+  readonly forking;
+  readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
+  readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
+
   constructor(host: AgentHost) {
-    const reader = new MutableApiProviderReader();
-    super({
+    const nativeSessions = createPathNativeSessionCodec(
+      DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+    );
+    const sessionPaths = createDirectSessionPaths(
+      host.storage.rootDirectory,
+      'anthropic-compatible-sessions',
+    );
+    const runtime = createDirectAnthropicRuntime({
+      runtimeId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      runtimeLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+      sessionPaths,
+      logger: host.logger,
+    });
+    const reader = createDirectCompatibleTranscriptSource({
+      agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      sessionLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+      findSessionFilePath: sessionPaths.findSessionFilePath,
+    });
+
+    this.settings = createVersionedSettings({
+      ownerId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      schemaVersion: 1,
+      defaults: {},
+      descriptors: [],
+    });
+    this.execution = new DirectExecution(host, runtime, nativeSessions);
+    this.transcript = createDirectTranscript({ reader, nativeSessions });
+    const search = createTranscriptSearch({
       host,
-      agent: createDirectAnthropicAgent(reader, host.storage.rootDirectory),
-      descriptor: {
-        id: 'direct-anthropic-compatible', label: 'Anthropic Compatible', icon: null,
-        supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-        supportedThinkingModes: THINKING_MODE_VALUES,
-        supportsImages: true, supportsProjectPathUpdate: true,
-        requiresNativePathForProjectPathUpdate: false,
-        supportedEndpointProtocols: ['anthropic-messages'], configuration: [],
+      agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      loadTranscript: async ({ chat, signal }) => {
+        signal.throwIfAborted();
+        return reader.loadMessages(directTranscriptReference(chat, nativeSessions));
       },
+    });
+    this.transcriptSearch = search;
+    this.catalog = createModelCatalog({
       defaultModel: '',
-      generation: { priority: 20 },
-      onEndpointSelection: (selection, credential) => reader.register(selection, credential),
+      fallbackModels: [],
+      requiresStrictModelDiscovery: false,
+      generation: { priority: 20, model: '' },
+    });
+    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
+    this.auth = {
+      async status(signal) {
+        signal.throwIfAborted();
+        return { authenticated: false, canReauth: false, label: '', source: 'none' };
+      },
+    };
+    this.forking = createJsonlForking({
+      host,
+      supportsWhileRunning: false,
+      transcript: this.transcript,
+      nativeSessions,
+    });
+    this.endpoints = {
+      async validate(selection) {
+        if (selection.protocol !== 'anthropic-messages') {
+          throw new AgentIntegrationError(
+            'INVALID_ENDPOINT',
+            'Anthropic Compatible requires an Anthropic Messages endpoint',
+            false,
+          );
+        }
+      },
+    };
+    this.singleQuery = {
+      async run(request) {
+        const endpoint = await resolveAgentEndpoint(host, request.endpoint, request.signal);
+        if (!endpoint) {
+          throw new AgentIntegrationError(
+            'INVALID_ENDPOINT',
+            'Anthropic Compatible requires an API provider endpoint',
+            false,
+          );
+        }
+        try {
+          return await runtime.runSingleQuery(request.prompt, endpoint, {
+            projectPath: request.projectPath,
+            model: request.model,
+            ...request.settings.values,
+          });
+        } catch (error) {
+          throw classifyDirectIntegrationError(error);
+        }
+      },
+    };
+    this.lifecycle = createIntegrationLifecycle({
+      start: () => runtime.startPurgeTimer(),
+      stop: async () => {
+        runtime.shutdown();
+        await search.close();
+      },
     });
   }
 }

@@ -3,24 +3,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { createDirectSessionPaths } from '../session-paths.ts';
 import { createDirectCompatibleTranscriptSource } from '../transcript-source.ts';
 
 const createdDirs = [];
-
-function endpoint(overrides = {}) {
-  return {
-    id: 'chat_endpoint',
-    protocol: 'openai-compatible',
-    baseUrl: 'https://api.example.test/v1',
-    apiKey: '',
-    capabilities: { chatCompletions: true, responses: false },
-    defaultModel: 'example-model',
-    models: [{ value: 'example-model', label: 'Example Model' }],
-    supportsImages: false,
-    modelDiscovery: 'openai-models',
-    ...overrides,
-  };
-}
 
 async function tempDir() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-direct-transcript-'));
@@ -28,33 +14,17 @@ async function tempDir() {
   return dir;
 }
 
-function apiProviders(endpoints) {
-  return {
-    list: () => [{
-      id: 'acme',
-      label: 'Acme',
-      endpoints,
-    }],
-    getEndpoint: (endpointId) => {
-      const found = endpoints.find((entry) => entry.id === endpointId);
-      return found ? { apiProvider: { id: 'acme', label: 'Acme', endpoints }, endpoint: found } : null;
-    },
-  };
-}
-
-function source(root, endpoints = [endpoint()]) {
+function source(root) {
+  const paths = createDirectSessionPaths(root, 'sessions');
   return createDirectCompatibleTranscriptSource({
     agentId: 'direct-openai-compatible',
-    protocol: 'openai-compatible',
-    requiredCapability: 'chatCompletions',
     sessionLabel: 'Direct (Chat Completions)',
-    apiProviders: apiProviders(endpoints),
-    getSessionFilePath: (endpointId, sessionId) => path.join(root, endpointId, `${sessionId}.jsonl`),
+    findSessionFilePath: paths.findSessionFilePath,
   });
 }
 
 async function writeTranscript(root, endpointId, sessionId, entries) {
-  const dir = path.join(root, endpointId);
+  const dir = path.join(root, 'sessions', endpointId);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(
     path.join(dir, `${sessionId}.jsonl`),
@@ -96,7 +66,7 @@ describe('Direct compatible transcript source', () => {
 
   it('releases the integration-owned transcript file', async () => {
     const root = await tempDir();
-    const transcriptPath = path.join(root, 'chat_endpoint', 'session-1.jsonl');
+    const transcriptPath = path.join(root, 'sessions', 'chat_endpoint', 'session-1.jsonl');
     await writeTranscript(root, 'chat_endpoint', 'session-1', [
       { role: 'user', content: 'hello' },
     ]);
@@ -114,7 +84,7 @@ describe('Direct compatible transcript source', () => {
 
   it('attaches one-based physical JSONL lines to rendered messages', async () => {
     const root = await tempDir();
-    const dir = path.join(root, 'chat_endpoint');
+    const dir = path.join(root, 'sessions', 'chat_endpoint');
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, 'session-1.jsonl'), [
       JSON.stringify({ role: 'user', content: 'one' }),
@@ -204,7 +174,7 @@ describe('Direct compatible transcript source', () => {
       { role: 'user', content: 'old row' },
     ]);
 
-    const transcript = source(root, []);
+    const transcript = source(root);
     const resolved = await transcript.resolveNativePath({
       agentId: 'direct-openai-compatible',
       projectPath: '/tmp/project',
@@ -213,7 +183,7 @@ describe('Direct compatible transcript source', () => {
       nativePath: '!direct-openai-compatible:recovered-session',
     });
 
-    expect(resolved).toBe(path.join(root, 'removed_endpoint', 'recovered-session.jsonl'));
+    expect(resolved).toBe(path.join(root, 'sessions', 'removed_endpoint', 'recovered-session.jsonl'));
   });
 
   it('returns null when no Direct transcript file exists', async () => {
@@ -231,11 +201,10 @@ describe('Direct compatible transcript source', () => {
 
   it('scans later compatible endpoints when the recorded endpoint has no transcript', async () => {
     const root = await tempDir();
-    const fallbackEndpoint = endpoint({ id: 'fallback_endpoint' });
-    await writeTranscript(root, fallbackEndpoint.id, 'session-1', [
+    await writeTranscript(root, 'fallback_endpoint', 'session-1', [
       { role: 'user', content: 'found on fallback' },
     ]);
-    const transcript = source(root, [endpoint(), fallbackEndpoint]);
+    const transcript = source(root);
     const session = {
       agentId: 'direct-openai-compatible',
       projectPath: '/tmp/project',
@@ -246,23 +215,21 @@ describe('Direct compatible transcript source', () => {
     };
 
     await expect(transcript.resolveNativePath(session)).resolves.toBe(
-      path.join(root, fallbackEndpoint.id, 'session-1.jsonl'),
+      path.join(root, 'sessions', 'fallback_endpoint', 'session-1.jsonl'),
     );
     const messages = await transcript.loadMessages(session);
     expect(messages.map((message) => message.content)).toEqual(['found on fallback']);
   });
 
-  it('falls back only to compatible endpoints when endpoint metadata is missing', async () => {
+  it('does not scan outside the integration storage namespace', async () => {
     const root = await tempDir();
-    const responsesEndpoint = endpoint({
-      id: 'responses_endpoint',
-      capabilities: { chatCompletions: false, responses: true },
-    });
-    await writeTranscript(root, 'responses_endpoint', 'session-1', [
+    const outsideDir = path.join(root, 'other-sessions', 'responses_endpoint');
+    await fs.mkdir(outsideDir, { recursive: true });
+    await fs.writeFile(path.join(outsideDir, 'session-1.jsonl'), `${JSON.stringify(
       { role: 'user', content: 'wrong protocol family' },
-    ]);
+    )}\n`);
 
-    const transcript = source(root, [responsesEndpoint]);
+    const transcript = source(root);
     const messages = await transcript.loadMessages({
       agentId: 'direct-openai-compatible',
       projectPath: '/tmp/project',

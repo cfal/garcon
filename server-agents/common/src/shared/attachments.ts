@@ -1,4 +1,8 @@
-import type { AgentCommandImage } from '@garcon/common/ws-requests';
+export interface AttachmentInput {
+  readonly data: string;
+  readonly name?: string | null;
+  readonly mimeType?: string;
+}
 
 const MAX_INLINE_ATTACHMENT_CHARS = 120_000;
 const TEXT_ATTACHMENT_MIMES = new Set(['text/markdown', 'text/plain']);
@@ -21,33 +25,33 @@ export function parseAttachmentDataUrl(data: string | undefined): DataUrlParts |
   return { mimeType: match[1].toLowerCase(), base64: match[2] };
 }
 
-export function attachmentMimeType(attachment: AgentCommandImage): string {
+export function attachmentMimeType(attachment: AttachmentInput): string {
   return attachment.mimeType?.toLowerCase()
     ?? parseAttachmentDataUrl(attachment.data)?.mimeType
     ?? '';
 }
 
-export function isImageAttachment(attachment: AgentCommandImage): boolean {
+export function isImageAttachment(attachment: AttachmentInput): boolean {
   return attachmentMimeType(attachment).startsWith('image/');
 }
 
-export function imageAttachments(attachments: AgentCommandImage[] | undefined): AgentCommandImage[] {
+export function imageAttachments(attachments: readonly AttachmentInput[] | undefined): AttachmentInput[] {
   return attachments?.filter(isImageAttachment) ?? [];
 }
 
-export function nonImageAttachments(attachments: AgentCommandImage[] | undefined): AgentCommandImage[] {
+export function nonImageAttachments(attachments: readonly AttachmentInput[] | undefined): AttachmentInput[] {
   return attachments?.filter((attachment) => !isImageAttachment(attachment)) ?? [];
 }
 
 // Attachments that map to native document content blocks (PDFs). Providers that
 // support the Anthropic document block send these as base64 rather than inlining.
-export function documentAttachments(attachments: AgentCommandImage[] | undefined): AgentCommandImage[] {
+export function documentAttachments(attachments: readonly AttachmentInput[] | undefined): AttachmentInput[] {
   return attachments?.filter((attachment) => DOCUMENT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment))) ?? [];
 }
 
 // Builds an Anthropic document content block for a PDF attachment, or null when
 // the data URL cannot be parsed.
-export function attachmentDocumentBlock(attachment: AgentCommandImage): AttachmentDocumentBlock | null {
+export function attachmentDocumentBlock(attachment: AttachmentInput): AttachmentDocumentBlock | null {
   const parts = parseAttachmentDataUrl(attachment.data);
   if (!parts) return null;
   return {
@@ -57,7 +61,10 @@ export function attachmentDocumentBlock(attachment: AgentCommandImage): Attachme
   };
 }
 
-export function appendTextAttachmentContext(command: string, attachments: AgentCommandImage[] | undefined): string {
+export function appendTextAttachmentContext(
+  command: string,
+  attachments: readonly AttachmentInput[] | undefined,
+): string {
   const sections: string[] = [];
   for (const attachment of nonImageAttachments(attachments)) {
     const parts = parseAttachmentDataUrl(attachment.data);

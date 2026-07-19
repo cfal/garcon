@@ -14,6 +14,7 @@
     "./catalog/*": "./src/catalog/*.ts",
     "./environment/*": "./src/environment/*.ts",
     "./execution/*": "./src/execution/*.ts",
+    "./forking/*": "./src/forking/*.ts",
     "./lifecycle/*": "./src/lifecycle/*.ts",
     "./logging/*": "./src/logging/*.ts",
     "./migration/*": "./src/migration/*.ts",

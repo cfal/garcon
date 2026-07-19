@@ -1,73 +1,95 @@
-import {
-  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-  DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
-  type AgentId,
-} from '@garcon/common/agents';
 import type { ApiProtocol } from '@garcon/common/api-providers';
-import { AnthropicCompatibleChatRuntime, type AnthropicCompatibleChatRuntimeConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-runtime.js';
-import type { ApiProviderReader } from '@garcon/server-agent-common/legacy/api-providers';
-import type { StoredApiProvider, StoredApiProviderEndpoint } from '@garcon/server-agent-common/legacy/types';
-import { OpenAiCompatibleChatRuntime, type OpenAiCompatibleChatRuntimeConfig, runOpenAiCompatibleSingleQuery } from './openai-compatible-chat-runtime.js';
+import type { ChatMessage } from '@garcon/common/chat-types';
+import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
+import type { AgentLogger } from '@garcon/server-agent-interface';
+import {
+  AnthropicCompatibleChatRuntime,
+  runAnthropicCompatibleSingleQuery,
+  type AnthropicCompatibleChatRuntimeConfig,
+} from './anthropic-compatible-chat-runtime.js';
+import {
+  OpenAiCompatibleChatRuntime,
+  runOpenAiCompatibleSingleQuery,
+  type OpenAiCompatibleChatRuntimeConfig,
+} from './openai-compatible-chat-runtime.js';
 import {
   OpenAiCompatibleResponsesRuntime,
-  type OpenAiCompatibleResponsesRuntimeConfig,
   runOpenAiResponsesSingleQuery,
+  type OpenAiCompatibleResponsesRuntimeConfig,
 } from './openai-compatible-responses-runtime.js';
-import type { AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '@garcon/server-agent-common/legacy/session-types';
-import type { AgentRuntime } from '@garcon/server-agent-common/legacy/types';
-import type { ChatMessage } from '@garcon/common/chat-types';
+import type {
+  DirectEndpointRuntime,
+  DirectResumeRequest,
+  DirectStartedSession,
+  DirectStartRequest,
+} from './runtime-types.js';
 import type { DirectSessionPaths } from './session-paths.js';
 
 type DirectEventCallbacks = {
-  messages: Set<(chatId: string, messages: ChatMessage[], metadata?: AgentEventMetadata) => void>;
+  messages: Set<(
+    chatId: string,
+    messages: ChatMessage[],
+    metadata?: RuntimeEventMetadata,
+  ) => void>;
   processing: Set<(chatId: string, isProcessing: boolean) => void>;
   sessionCreated: Set<(chatId: string) => void>;
-  finished: Set<(chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void>;
-  failed: Set<(chatId: string, errorMessage: string, metadata?: AgentEventMetadata) => void>;
+  finished: Set<(
+    chatId: string,
+    exitCode: number,
+    metadata?: RuntimeEventMetadata,
+  ) => void>;
+  failed: Set<(
+    chatId: string,
+    errorMessage: string,
+    metadata?: RuntimeEventMetadata,
+  ) => void>;
 };
 
-export type DirectCompatibleRuntime = {
-  startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
-  runTurn(request: ResumeTurnRequest): Promise<void>;
+export interface DirectCompatibleRuntime {
+  startSession(request: DirectStartRequest): Promise<DirectStartedSession>;
+  runTurn(request: DirectResumeRequest): Promise<void>;
   abort(agentSessionId: string): boolean;
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
-  getModels?(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
   startPurgeTimer(): void;
   shutdown?(): void;
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: AgentEventMetadata) => void): void;
-  onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void;
-  onSessionCreated(cb: (chatId: string) => void): void;
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void): void;
-  onFailed(cb: (chatId: string, errorMessage: string, metadata?: AgentEventMetadata) => void): void;
-};
-
-interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRuntime> {
-  agentId: AgentId;
-  label: string;
-  protocol: ApiProtocol;
-  requiredCapability: 'chatCompletions' | 'responses' | null;
-  noEndpointMessage: string;
-  apiProviders: ApiProviderReader;
-  createRuntime(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TRuntime;
-  runSingleQuery(
-    prompt: string,
-    endpoint: StoredApiProviderEndpoint,
-    apiProvider: StoredApiProvider,
-    options: Record<string, unknown>,
-  ): Promise<string>;
+  onMessages(callback: (
+    chatId: string,
+    messages: ChatMessage[],
+    metadata?: RuntimeEventMetadata,
+  ) => void): void;
+  onProcessing(callback: (chatId: string, isProcessing: boolean) => void): void;
+  onSessionCreated(callback: (chatId: string) => void): void;
+  onFinished(callback: (
+    chatId: string,
+    exitCode: number,
+    metadata?: RuntimeEventMetadata,
+  ) => void): void;
+  onFailed(callback: (
+    chatId: string,
+    errorMessage: string,
+    metadata?: RuntimeEventMetadata,
+  ) => void): void;
 }
 
-export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntime> implements AgentRuntime {
-  #runtimes = new Map<string, TRuntime>();
-  #sessionEndpointIds = new Map<string, string>();
+export interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRuntime> {
+  readonly label: string;
+  readonly protocol: ApiProtocol;
+  readonly createRuntime: (endpoint: DirectEndpointRuntime) => TRuntime;
+  readonly runSingleQuery: (
+    prompt: string,
+    endpoint: DirectEndpointRuntime,
+    options: Record<string, unknown>,
+  ) => Promise<string>;
+}
+
+export class DirectEndpointRouterRuntime<
+  TRuntime extends DirectCompatibleRuntime,
+> {
+  readonly #runtimes = new Map<string, TRuntime>();
+  readonly #sessionEndpointIds = new Map<string, string>();
   #purgeTimersStarted = false;
-  #runtimeDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
-  #callbacks: DirectEventCallbacks = {
+  readonly #callbacks: DirectEventCallbacks = {
     messages: new Set(),
     processing: new Set(),
     sessionCreated: new Set(),
@@ -77,23 +99,24 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
 
   constructor(private readonly config: DirectEndpointRouterConfig<TRuntime>) {}
 
-  async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
-    const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
-    const runtime = this.#runtimeFor(endpoint, apiProvider);
+  async startSession(request: DirectStartRequest): Promise<DirectStartedSession> {
+    const runtime = this.#runtimeFor(request.endpoint);
     const started = await runtime.startSession(request);
-    this.#sessionEndpointIds.set(started.agentSessionId, endpoint.id);
+    this.#sessionEndpointIds.set(
+      started.agentSessionId,
+      request.endpoint.selection.endpointId,
+    );
     return started;
   }
 
-  async runTurn(request: ResumeTurnRequest): Promise<void> {
+  async runTurn(request: DirectResumeRequest): Promise<void> {
     let runtime = this.#runtimeForSession(request.agentSessionId);
-    if (!runtime && request.modelEndpointId) {
-      const { apiProvider, endpoint } = this.#resolveEndpoint(request.modelEndpointId);
-      runtime = this.#runtimeFor(endpoint, apiProvider);
-      this.#sessionEndpointIds.set(request.agentSessionId, endpoint.id);
-    }
     if (!runtime) {
-      throw new Error(`Unknown ${this.config.label} session: ${request.agentSessionId}`);
+      runtime = this.#runtimeFor(request.endpoint);
+      this.#sessionEndpointIds.set(
+        request.agentSessionId,
+        request.endpoint.selection.endpointId,
+      );
     }
     await runtime.runTurn(request);
   }
@@ -107,73 +130,63 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
   }
 
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }> {
-    return Array.from(this.#runtimes.values()).flatMap((runtime) => runtime.getRunningSessions());
+    return Array.from(this.#runtimes.values()).flatMap(
+      (runtime) => runtime.getRunningSessions(),
+    );
   }
 
-  async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
-    const models: Array<{ value: string; label: string; supportsImages?: boolean }> = [];
-    for (const apiProvider of this.config.apiProviders.list()) {
-      for (const endpoint of apiProvider.endpoints) {
-        if (!this.#isDirectEndpoint(endpoint)) continue;
-        for (const model of endpoint.models) {
-          models.push({
-            value: model.value,
-            label: `${apiProvider.label}: ${model.label}`,
-            supportsImages: model.supportsImages ?? endpoint.supportsImages,
-          });
-        }
-      }
-    }
-    return models;
-  }
-
-  runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
-    const endpointId = typeof options.modelEndpointId === 'string' ? options.modelEndpointId : undefined;
-    const { apiProvider, endpoint } = this.#resolveEndpoint(endpointId);
-    return this.config.runSingleQuery(prompt, endpoint, apiProvider, options);
+  runSingleQuery(
+    prompt: string,
+    endpoint: DirectEndpointRuntime,
+    options: Record<string, unknown> = {},
+  ): Promise<string> {
+    this.#validateEndpoint(endpoint);
+    return this.config.runSingleQuery(prompt, endpoint, options);
   }
 
   startPurgeTimer(): void {
-    if (this.#runtimeDiscoveryTimer) return;
+    if (this.#purgeTimersStarted) return;
     this.#purgeTimersStarted = true;
-    for (const runtime of this.#runtimes.values()) {
-      runtime.startPurgeTimer();
-    }
-    this.#runtimeDiscoveryTimer = setInterval(() => {
-      for (const runtime of this.#runtimes.values()) {
-        runtime.startPurgeTimer();
-      }
-    }, 5 * 60 * 1000);
+    for (const runtime of this.#runtimes.values()) runtime.startPurgeTimer();
   }
 
   shutdown(): void {
-    if (this.#runtimeDiscoveryTimer) {
-      clearInterval(this.#runtimeDiscoveryTimer);
-      this.#runtimeDiscoveryTimer = null;
-    }
-    for (const runtime of this.#runtimes.values()) {
-      runtime.shutdown?.();
-    }
+    this.#purgeTimersStarted = false;
+    for (const runtime of this.#runtimes.values()) runtime.shutdown?.();
+    this.#runtimes.clear();
+    this.#sessionEndpointIds.clear();
   }
 
-  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: AgentEventMetadata) => void): void {
-    this.#callbacks.messages.add(cb);
+  onMessages(callback: (
+    chatId: string,
+    messages: ChatMessage[],
+    metadata?: RuntimeEventMetadata,
+  ) => void): void {
+    this.#callbacks.messages.add(callback);
   }
 
-  onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
-    this.#callbacks.processing.add(cb);
+  onProcessing(callback: (chatId: string, isProcessing: boolean) => void): void {
+    this.#callbacks.processing.add(callback);
   }
 
-  onSessionCreated(cb: (chatId: string) => void): void {
-    this.#callbacks.sessionCreated.add(cb);
+  onSessionCreated(callback: (chatId: string) => void): void {
+    this.#callbacks.sessionCreated.add(callback);
   }
 
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void): void {
-    this.#callbacks.finished.add(cb);
+  onFinished(callback: (
+    chatId: string,
+    exitCode: number,
+    metadata?: RuntimeEventMetadata,
+  ) => void): void {
+    this.#callbacks.finished.add(callback);
   }
 
-  onFailed(cb: (chatId: string, errorMessage: string, metadata?: AgentEventMetadata) => void): void {
-    this.#callbacks.failed.add(cb);
+  onFailed(callback: (
+    chatId: string,
+    errorMessage: string,
+    metadata?: RuntimeEventMetadata,
+  ) => void): void {
+    this.#callbacks.failed.add(callback);
   }
 
   #runtimeForSession(agentSessionId: string): TRuntime | null {
@@ -188,210 +201,175 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
     return null;
   }
 
-  #runtimeFor(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TRuntime {
-    const existing = this.#runtimes.get(endpoint.id);
+  #runtimeFor(endpoint: DirectEndpointRuntime): TRuntime {
+    this.#validateEndpoint(endpoint);
+    const endpointId = endpoint.selection.endpointId;
+    const existing = this.#runtimes.get(endpointId);
     if (existing) return existing;
-
-    const runtime = this.config.createRuntime(endpoint, apiProvider);
+    const runtime = this.config.createRuntime(endpoint);
     this.#attachForwarders(runtime);
-    this.#runtimes.set(endpoint.id, runtime);
-
-    if (this.#purgeTimersStarted) {
-      runtime.startPurgeTimer();
-    }
+    this.#runtimes.set(endpointId, runtime);
+    if (this.#purgeTimersStarted) runtime.startPurgeTimer();
     return runtime;
+  }
+
+  #validateEndpoint(endpoint: DirectEndpointRuntime): void {
+    if (endpoint.selection.protocol !== this.config.protocol) {
+      throw new Error(
+        `${this.config.label} does not support ${endpoint.selection.protocol} endpoints`,
+      );
+    }
   }
 
   #attachForwarders(runtime: TRuntime): void {
     runtime.onMessages((chatId, messages, metadata) => {
-      for (const cb of this.#callbacks.messages) cb(chatId, messages, metadata);
+      for (const callback of this.#callbacks.messages) {
+        callback(chatId, messages, metadata);
+      }
     });
-    runtime.onProcessing((chatId, isProcessing) => {
-      for (const cb of this.#callbacks.processing) cb(chatId, isProcessing);
+    runtime.onProcessing((chatId, processing) => {
+      for (const callback of this.#callbacks.processing) callback(chatId, processing);
     });
     runtime.onSessionCreated((chatId) => {
-      for (const cb of this.#callbacks.sessionCreated) cb(chatId);
+      for (const callback of this.#callbacks.sessionCreated) callback(chatId);
     });
     runtime.onFinished((chatId, exitCode, metadata) => {
-      for (const cb of this.#callbacks.finished) cb(chatId, exitCode, metadata);
-    });
-    runtime.onFailed((chatId, errorMessage, metadata) => {
-      for (const cb of this.#callbacks.failed) cb(chatId, errorMessage, metadata);
-    });
-  }
-
-  #resolveEndpoint(endpointId?: string | null): { apiProvider: StoredApiProvider; endpoint: StoredApiProviderEndpoint } {
-    if (endpointId) {
-      const resolved = this.config.apiProviders.getEndpoint(endpointId);
-      if (resolved && this.#isDirectEndpoint(resolved.endpoint)) {
-        return resolved;
+      for (const callback of this.#callbacks.finished) {
+        callback(chatId, exitCode, metadata);
       }
-    }
-
-    for (const apiProvider of this.config.apiProviders.list()) {
-      const endpoint = apiProvider.endpoints.find((entry) => this.#isDirectEndpoint(entry));
-      if (endpoint) return { apiProvider, endpoint };
-    }
-
-    throw new Error(this.config.noEndpointMessage);
-  }
-
-  #isDirectEndpoint(endpoint: StoredApiProviderEndpoint): boolean {
-    return endpoint.protocol === this.config.protocol
-      && (!this.config.requiredCapability || endpoint.capabilities?.[this.config.requiredCapability] === true);
+    });
+    runtime.onFailed((chatId, message, metadata) => {
+      for (const callback of this.#callbacks.failed) {
+        callback(chatId, message, metadata);
+      }
+    });
   }
 }
 
+export interface DirectRuntimeFamilyOptions {
+  readonly runtimeId: string;
+  readonly runtimeLabel: string;
+  readonly sessionPaths: DirectSessionPaths;
+  readonly logger?: AgentLogger;
+}
+
 export function createDirectOpenAiChatRuntime(
-  apiProviders: ApiProviderReader,
-  sessionPaths: DirectSessionPaths,
+  options: DirectRuntimeFamilyOptions,
 ): DirectEndpointRouterRuntime<OpenAiCompatibleChatRuntime> {
-  return new DirectEndpointRouterRuntime<OpenAiCompatibleChatRuntime>({
-    agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-    label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
+  return new DirectEndpointRouterRuntime({
+    label: options.runtimeLabel,
     protocol: 'openai-compatible',
-    requiredCapability: 'chatCompletions',
-    noEndpointMessage: `No OpenAI-compatible Chat Completions endpoint is configured for ${DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL}.`,
-    apiProviders,
-    createRuntime(endpoint) {
-      return new OpenAiCompatibleChatRuntime(buildDirectOpenAiConfig({
-        runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-        runtimeLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
-        endpoint,
-        sessionPaths,
-      }));
-    },
-    runSingleQuery(prompt, endpoint, apiProvider, options) {
-      return runOpenAiCompatibleSingleQuery(buildDirectOpenAiConfig({
-        runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-        runtimeLabel: apiProvider.label,
-        endpoint,
-        sessionPaths,
-      }), prompt, options);
-    },
+    createRuntime: (endpoint) => new OpenAiCompatibleChatRuntime(
+      buildDirectOpenAiConfig({ ...options, endpoint }),
+    ),
+    runSingleQuery: (prompt, endpoint, query) => runOpenAiCompatibleSingleQuery(
+      buildDirectOpenAiConfig({ ...options, endpoint }),
+      prompt,
+      query,
+    ),
   });
 }
 
 export function createDirectOpenAiResponsesRuntime(
-  apiProviders: ApiProviderReader,
-  sessionPaths: DirectSessionPaths,
+  options: DirectRuntimeFamilyOptions,
 ): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesRuntime> {
-  return new DirectEndpointRouterRuntime<OpenAiCompatibleResponsesRuntime>({
-    agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-    label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
+  return new DirectEndpointRouterRuntime({
+    label: options.runtimeLabel,
     protocol: 'openai-compatible',
-    requiredCapability: 'responses',
-    noEndpointMessage: `No OpenAI-compatible Responses endpoint is configured for ${DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL}.`,
-    apiProviders,
-    createRuntime(endpoint) {
-      return new OpenAiCompatibleResponsesRuntime(buildDirectOpenAiResponsesConfig({
-        runtimeId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-        runtimeLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
-        endpoint,
-        sessionPaths,
-      }));
-    },
-    runSingleQuery(prompt, endpoint, apiProvider, options) {
-      return runOpenAiResponsesSingleQuery(buildDirectOpenAiResponsesConfig({
-        runtimeId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-        runtimeLabel: apiProvider.label,
-        endpoint,
-        sessionPaths,
-      }), prompt, options);
-    },
+    createRuntime: (endpoint) => new OpenAiCompatibleResponsesRuntime(
+      buildDirectOpenAiResponsesConfig({ ...options, endpoint }),
+    ),
+    runSingleQuery: (prompt, endpoint, query) => runOpenAiResponsesSingleQuery(
+      buildDirectOpenAiResponsesConfig({ ...options, endpoint }),
+      prompt,
+      query,
+    ),
   });
 }
 
 export function createDirectAnthropicRuntime(
-  apiProviders: ApiProviderReader,
-  sessionPaths: DirectSessionPaths,
+  options: DirectRuntimeFamilyOptions,
 ): DirectEndpointRouterRuntime<AnthropicCompatibleChatRuntime> {
-  return new DirectEndpointRouterRuntime<AnthropicCompatibleChatRuntime>({
-    agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-    label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
+  return new DirectEndpointRouterRuntime({
+    label: options.runtimeLabel,
     protocol: 'anthropic-messages',
-    requiredCapability: null,
-    noEndpointMessage: `No Anthropic-compatible endpoint is configured for ${DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL}.`,
-    apiProviders,
-    createRuntime(endpoint) {
-      return new AnthropicCompatibleChatRuntime(buildDirectAnthropicConfig({
-        runtimeId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-        runtimeLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
-        endpoint,
-        sessionPaths,
-      }));
-    },
-    runSingleQuery(prompt, endpoint, apiProvider, options) {
-      return runAnthropicCompatibleSingleQuery(buildDirectAnthropicConfig({
-        runtimeId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-        runtimeLabel: apiProvider.label,
-        endpoint,
-        sessionPaths,
-      }), prompt, options);
-    },
+    createRuntime: (endpoint) => new AnthropicCompatibleChatRuntime(
+      buildDirectAnthropicConfig({ ...options, endpoint }),
+    ),
+    runSingleQuery: (prompt, endpoint, query) => runAnthropicCompatibleSingleQuery(
+      buildDirectAnthropicConfig({ ...options, endpoint }),
+      prompt,
+      query,
+    ),
   });
 }
 
-export function buildDirectOpenAiConfig(args: {
-  runtimeId: string;
-  runtimeLabel: string;
-  endpoint: StoredApiProviderEndpoint;
-  sessionPaths: DirectSessionPaths;
+function endpointModels(endpoint: DirectEndpointRuntime) {
+  return [{
+    value: endpoint.selection.model,
+    label: endpoint.selection.model,
+  }];
+}
+
+export function buildDirectOpenAiConfig(args: DirectRuntimeFamilyOptions & {
+  readonly endpoint: DirectEndpointRuntime;
 }): OpenAiCompatibleChatRuntimeConfig {
   return {
     runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
-    defaultModel: args.endpoint.defaultModel,
-    fallbackModels: args.endpoint.models,
-    getApiKey: () => args.endpoint.apiKey,
-    getBaseUrl: () => args.endpoint.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.id),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(args.endpoint.id, sessionId),
+    defaultModel: args.endpoint.selection.model,
+    fallbackModels: endpointModels(args.endpoint),
+    getApiKey: () => args.endpoint.credential ?? '',
+    getBaseUrl: () => args.endpoint.selection.baseUrl,
+    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
+    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
+      args.endpoint.selection.endpointId,
+      sessionId,
+    ),
+    logger: args.logger,
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
-      ...(args.endpoint.headers ?? {}),
     }),
   };
 }
 
-export function buildDirectOpenAiResponsesConfig(args: {
-  runtimeId: string;
-  runtimeLabel: string;
-  endpoint: StoredApiProviderEndpoint;
-  sessionPaths: DirectSessionPaths;
+export function buildDirectOpenAiResponsesConfig(args: DirectRuntimeFamilyOptions & {
+  readonly endpoint: DirectEndpointRuntime;
 }): OpenAiCompatibleResponsesRuntimeConfig {
   return {
     runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
-    defaultModel: args.endpoint.defaultModel,
-    fallbackModels: args.endpoint.models,
-    getApiKey: () => args.endpoint.apiKey,
-    getBaseUrl: () => args.endpoint.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.id),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(args.endpoint.id, sessionId),
+    defaultModel: args.endpoint.selection.model,
+    fallbackModels: endpointModels(args.endpoint),
+    getApiKey: () => args.endpoint.credential ?? '',
+    getBaseUrl: () => args.endpoint.selection.baseUrl,
+    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
+    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
+      args.endpoint.selection.endpointId,
+      sessionId,
+    ),
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
-      ...(args.endpoint.headers ?? {}),
     }),
   };
 }
 
-export function buildDirectAnthropicConfig(args: {
-  runtimeId: string;
-  runtimeLabel: string;
-  endpoint: StoredApiProviderEndpoint;
-  sessionPaths: DirectSessionPaths;
+export function buildDirectAnthropicConfig(args: DirectRuntimeFamilyOptions & {
+  readonly endpoint: DirectEndpointRuntime;
 }): AnthropicCompatibleChatRuntimeConfig {
   return {
     runtimeId: args.runtimeId,
     runtimeLabel: args.runtimeLabel,
-    defaultModel: args.endpoint.defaultModel,
-    fallbackModels: args.endpoint.models,
-    getApiKey: () => args.endpoint.apiKey,
-    getBaseUrl: () => args.endpoint.baseUrl,
-    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.id),
-    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(args.endpoint.id, sessionId),
+    defaultModel: args.endpoint.selection.model,
+    fallbackModels: endpointModels(args.endpoint),
+    getApiKey: () => args.endpoint.credential ?? '',
+    getBaseUrl: () => args.endpoint.selection.baseUrl,
+    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.selection.endpointId),
+    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(
+      args.endpoint.selection.endpointId,
+      sessionId,
+    ),
   };
 }
