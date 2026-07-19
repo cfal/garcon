@@ -20,7 +20,7 @@ export function isWorktreeSortOrder(value: string): value is WorktreeSortOrder {
 interface GitWorktreePickerStateOptions {
 	get worktrees(): GitWorktreeItem[];
 	get locale(): string;
-	get repositoryRoot(): string;
+	get repositoryWorktreePath(): string;
 }
 
 function displayName(worktree: GitWorktreeItem): string {
@@ -34,6 +34,10 @@ function worktreePathBasename(worktreePath: string): string {
 function timestampValue(value: string | null | undefined): number | null {
 	const timestamp = canonicalIsoTimestamp(value);
 	return timestamp ? Date.parse(timestamp) : null;
+}
+
+export function findRepositoryWorktreePath(worktrees: readonly GitWorktreeItem[]): string {
+	return worktrees.find((worktree) => worktree.isMain)?.path.trim() ?? '';
 }
 
 export function filterAndSortWorktrees(
@@ -120,7 +124,6 @@ export class GitWorktreePickerState {
 				)
 			: -1,
 	);
-
 	constructor(options: GitWorktreePickerStateOptions) {
 		this.#options = options;
 	}
@@ -157,8 +160,12 @@ export class GitWorktreePickerState {
 		return this.visibleWorktrees.length;
 	}
 
+	get repositoryWorktreePath(): string {
+		return this.#options.repositoryWorktreePath;
+	}
+
 	get derivedPath(): string {
-		return deriveWorktreePath(this.#options.repositoryRoot, this.branchName);
+		return deriveWorktreePath(this.repositoryWorktreePath, this.branchName);
 	}
 
 	get effectivePath(): string {

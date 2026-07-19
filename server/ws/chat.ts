@@ -3,6 +3,7 @@
 // All dependencies are injected via the constructor.
 
 import { sendWebSocketJson } from './utils.js';
+import { publishWebSocketPayload } from './transport.js';
 import {
   ReconnectStateMessage,
   WsFaultMessage,
@@ -89,7 +90,7 @@ class WebSocketWriter {
     sendWebSocketJson(this.#ws, data);
   }
   publish(data: unknown): void {
-    this.#ws.publish('chat', JSON.stringify(data));
+    publishWebSocketPayload(this.#ws, 'chat', JSON.stringify(data));
   }
 }
 

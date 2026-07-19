@@ -24,7 +24,6 @@ function worktree(
 
 function renderPicker(worktrees: GitWorktreeItem[], overrides: Record<string, unknown> = {}) {
 	return render(GitWorktreePickerModal, {
-		repositoryRoot: '/workspace/repo',
 		worktrees,
 		isLoading: false,
 		isCreating: false,
@@ -522,11 +521,19 @@ describe('GitWorktreePickerModal', () => {
 		const onCreate = vi.fn();
 		const onSelect = vi.fn();
 		const onClose = vi.fn();
-		renderPicker([worktree('main', '2026-07-15T10:00:00.000Z')], {
-			onCreate,
-			onSelect,
-			onClose,
-		});
+		renderPicker(
+			[
+				worktree('main', '2026-07-15T10:00:00.000Z', {
+					path: '/workspace/repo',
+					isMain: true,
+				}),
+			],
+			{
+				onCreate,
+				onSelect,
+				onClose,
+			},
+		);
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
 		const branchInput = screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)');
@@ -548,6 +555,61 @@ describe('GitWorktreePickerModal', () => {
 				screen.getByRole('combobox', { name: 'Filter worktrees' }),
 			),
 		);
+	});
+
+	it('derives new worktrees from the repository worktree when opened from a linked worktree', async () => {
+		const onCreate = vi.fn();
+		renderPicker(
+			[
+				worktree('repo', '2026-07-15T10:00:00.000Z', {
+					path: '/repo',
+					branch: 'main',
+					isMain: true,
+				}),
+				worktree('example', '2026-07-16T10:00:00.000Z', {
+					path: '/repo/.worktrees/example',
+					isCurrent: true,
+				}),
+			],
+			{ onCreate },
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
+			target: { value: 'example2' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+		expect(onCreate).toHaveBeenCalledWith('/repo/.worktrees/example2', 'example2', undefined);
+	});
+
+	it('requires repository metadata for a default path but permits an explicit override', async () => {
+		const onCreate = vi.fn();
+		renderPicker(
+			[
+				worktree('example', '2026-07-16T10:00:00.000Z', {
+					path: '/repo/.worktrees/example',
+					isCurrent: true,
+				}),
+			],
+			{ onCreate },
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
+			target: { value: 'example2' },
+		});
+		expect((screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
+		await fireEvent.input(screen.getByPlaceholderText('Path override'), {
+			target: { value: '/tmp/example2' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+		expect(onCreate).toHaveBeenCalledWith('/tmp/example2', 'example2', undefined);
 	});
 
 	it('gives the create form first refusal on app-level capture-phase Escape', async () => {

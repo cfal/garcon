@@ -28,10 +28,12 @@
 	import { getOptionalTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import GitWorktreePickerList from './GitWorktreePickerList.svelte';
-	import { GitWorktreePickerState } from './git-worktree-picker-state.svelte.js';
+	import {
+		findRepositoryWorktreePath,
+		GitWorktreePickerState,
+	} from './git-worktree-picker-state.svelte.js';
 
 	interface Props {
-		repositoryRoot: string;
 		worktrees: GitWorktreeItem[];
 		isLoading: boolean;
 		isCreating: boolean;
@@ -43,7 +45,6 @@
 	}
 
 	let {
-		repositoryRoot,
 		worktrees,
 		isLoading,
 		isCreating,
@@ -53,6 +54,7 @@
 		onRefresh,
 		onClose,
 	}: Props = $props();
+	let repositoryWorktreePath = $derived(findRepositoryWorktreePath(worktrees));
 
 	const picker = new GitWorktreePickerState({
 		get worktrees() {
@@ -61,8 +63,8 @@
 		get locale() {
 			return getLocale();
 		},
-		get repositoryRoot() {
-			return repositoryRoot;
+		get repositoryWorktreePath() {
+			return repositoryWorktreePath;
 		},
 	});
 	const componentId = $props.id();
@@ -280,9 +282,11 @@
 						}}
 					/>
 
-					{#if picker.derivedPath}
+					{#if picker.branchName.trim()}
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<span class="truncate font-mono text-[11px]">{picker.effectivePath}</span>
+							{#if picker.effectivePath}
+								<span class="truncate font-mono text-[11px]">{picker.effectivePath}</span>
+							{/if}
 							<button
 								type="button"
 								onclick={() => {

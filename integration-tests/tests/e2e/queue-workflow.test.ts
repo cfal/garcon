@@ -20,23 +20,23 @@ describe('Lightpanda queue workflow', () => {
       await app.waitForQueuedPreview('ui-queue-b');
       await app.sendComposer('ui-queue-c');
       await app.waitForText('1 of 2');
-      expect(await app.hasButton('Interrupt and send')).toBe(true);
+      expect(await app.hasResponsiveAction('Send now')).toBe(true);
 
       await app.clickButton('Next queued message');
       await app.waitForQueuedPreview('ui-queue-c');
       await app.waitForText('2 of 2');
-      expect(await app.hasButton('Interrupt and send')).toBe(false);
+      expect(await app.hasResponsiveAction('Send now')).toBe(false);
       await app.clickButton('Previous queued message');
       await app.waitForQueuedPreview('ui-queue-b');
 
-      await app.clickButton('Edit queue');
+      await app.clickResponsiveAction('Edit');
       await app.clickQueuedRowAction('ui-queue-b', 'Edit queued message');
       await app.fillQueuedEditor('ui-queue-b-edited');
       await app.clickDialogButton('Save edit');
       await app.waitForText('ui-queue-b-edited');
       await app.clickQueuedRowAction('ui-queue-c', 'Remove from queue');
       await app.waitForTextAbsent('ui-queue-c');
-      await app.clickDialogButton('Pause queue');
+      await app.clickDialogButton('Pause');
       await app.waitForText('Resume queue');
       await app.clickDialogButton('Close');
 

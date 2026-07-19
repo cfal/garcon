@@ -195,6 +195,7 @@ export class SpaDriver {
     try {
       await this.#page.evaluate(({ name, contains, last }) => {
         const buttons = [...document.querySelectorAll('button')].filter((element) => {
+          if (element.closest('[aria-hidden="true"]')) return false;
           const accessibleName = element.getAttribute('aria-label') || element.textContent?.trim() || '';
           return contains ? accessibleName.includes(name) : accessibleName === name;
         });
@@ -208,6 +209,42 @@ export class SpaDriver {
       // the document. The next positive product milestone still verifies it.
       if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
     }
+  }
+
+  async clickResponsiveAction(name: string): Promise<void> {
+    const result = await this.#page.evaluate((expected) => {
+      const roots = [...document.querySelectorAll<HTMLElement>('[data-responsive-surface-actions]')];
+      const root = roots.find((element) =>
+        [...element.querySelectorAll<HTMLButtonElement>('[data-surface-action-measure]')].some(
+          (button) =>
+            (button.getAttribute('aria-label') || button.textContent?.trim()) === expected,
+        ));
+      if (!root) return 'missing';
+
+      const button = [...root.querySelectorAll<HTMLButtonElement>('[data-surface-action-id]')].find(
+        (element) =>
+          (element.getAttribute('aria-label') || element.textContent?.trim()) === expected,
+      );
+      if (button) {
+        if (button.disabled || button.getAttribute('aria-disabled') === 'true') return 'disabled';
+        button.click();
+        return 'clicked';
+      }
+
+      const menuTrigger = root.querySelector<HTMLButtonElement>(
+        '[data-responsive-surface-menu-trigger]',
+      );
+      if (!menuTrigger) return 'missing-menu';
+      menuTrigger.click();
+      return 'menu';
+    }, name);
+
+    if (result === 'clicked') return;
+    if (result === 'disabled') throw new Error(`Responsive action is disabled: ${name}`);
+    if (result === 'missing') throw new Error(`Missing responsive action: ${name}`);
+    if (result === 'missing-menu') throw new Error(`Missing responsive action menu: ${name}`);
+    await this.waitForMenuItemEnabled(name);
+    await this.clickMenuItem(name);
   }
 
   async clickMenuItem(name: string): Promise<void> {
@@ -405,7 +442,16 @@ export class SpaDriver {
   async hasButton(name: string): Promise<boolean> {
     return this.#page.evaluate((expected) =>
       [...document.querySelectorAll('button')].some((element) =>
-        (element.getAttribute('aria-label') || element.textContent?.trim()) === expected), name);
+        !element.closest('[aria-hidden="true"]')
+        && (element.getAttribute('aria-label') || element.textContent?.trim()) === expected), name);
+  }
+
+  async hasResponsiveAction(name: string): Promise<boolean> {
+    return this.#page.evaluate((expected) =>
+      [...document.querySelectorAll<HTMLButtonElement>('[data-surface-action-measure]')].some(
+        (element) =>
+          (element.getAttribute('aria-label') || element.textContent?.trim()) === expected,
+      ), name);
   }
 
   async exactTextCount(text: string): Promise<number> {

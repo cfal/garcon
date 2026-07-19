@@ -4,14 +4,17 @@
 	import {
 		ChevronLeft,
 		ChevronRight,
+		FastForward,
 		ListTodo,
 		Loader2,
 		Pause,
 		Pencil,
 		Play,
-		Square,
 		Trash2,
 	} from '@lucide/svelte';
+	import ResponsiveSurfaceActions, {
+		type ResponsiveSurfaceAction,
+	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
 	import { cn } from '$lib/utils/cn';
 
@@ -65,6 +68,72 @@
 	);
 	let deletingEntryIds = $state<Set<string>>(new Set());
 	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting'>('idle');
+	const queueActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
+		const actions: ResponsiveSurfaceAction[] = [];
+		const neutralButtonClass =
+			'rounded-lg px-2.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground';
+
+		if (showInterruptAction && onInterrupt) {
+			actions.push({
+				id: 'send-now',
+				label: m.chat_queue_interrupt_and_send(),
+				title: m.chat_queue_interrupt_and_send_queue(),
+				icon: dispatchMutation === 'interrupting' ? Loader2 : FastForward,
+				iconClass: dispatchMutation === 'interrupting' ? 'animate-spin' : undefined,
+				onclick: () => void mutateDispatch('interrupting', onInterrupt),
+				disabled: dispatchMutation !== 'idle',
+				busy: dispatchMutation === 'interrupting',
+				priority: 0,
+				showLabel: true,
+				buttonClass: neutralButtonClass,
+			});
+		}
+
+		if (showQueueManager) {
+			actions.push({
+				id: 'edit-queue',
+				label: m.chat_queue_edit_queue(),
+				icon: ListTodo,
+				onclick: onOpenManager,
+				priority: 2,
+				showLabel: true,
+				buttonClass: neutralButtonClass,
+			});
+		}
+
+		if (queue?.pause) {
+			actions.push({
+				id: 'resume-queue',
+				label: m.chat_queue_resume(),
+				title: m.chat_queue_resume_queue(),
+				icon: dispatchMutation === 'resuming' ? Loader2 : Play,
+				iconClass: dispatchMutation === 'resuming' ? 'animate-spin' : undefined,
+				onclick: () => void mutateDispatch('resuming', () => onResume(queue.pause!.id)),
+				disabled: dispatchMutation !== 'idle',
+				busy: dispatchMutation === 'resuming',
+				priority: 1,
+				showLabel: true,
+				buttonClass:
+					'rounded-lg bg-queue-action-bg px-2.5 text-sm text-queue-foreground hover:bg-queue-action-hover-bg hover:text-queue-foreground',
+			});
+		} else {
+			actions.push({
+				id: 'pause-queue',
+				label: m.chat_queue_pause(),
+				title: m.chat_queue_pause_queue(),
+				icon: dispatchMutation === 'pausing' ? Loader2 : Pause,
+				iconClass: dispatchMutation === 'pausing' ? 'animate-spin' : undefined,
+				onclick: () => void mutateDispatch('pausing', onPause),
+				disabled: dispatchMutation !== 'idle',
+				busy: dispatchMutation === 'pausing',
+				priority: 1,
+				showLabel: true,
+				buttonClass: neutralButtonClass,
+			});
+		}
+
+		return actions;
+	});
 
 	function selectPreview(index: number): void {
 		if (!chatId) return;
@@ -145,9 +214,7 @@
 			</div>
 		</div>
 
-		<footer
-			class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-3 py-2"
-		>
+		<footer class="flex items-center gap-3 border-t border-border px-3 py-2">
 			<div class="flex min-w-0 flex-wrap items-center gap-2">
 				{#if showQueueManager}
 					<div
@@ -203,67 +270,11 @@
 				{/if}
 			</div>
 
-			<div class="ml-auto flex flex-wrap items-center justify-end gap-1">
-				{#if showInterruptAction && onInterrupt}
-					<button
-						type="button"
-						onclick={() => void mutateDispatch('interrupting', onInterrupt)}
-						disabled={dispatchMutation !== 'idle'}
-						class="flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-						title={m.chat_queue_interrupt_and_send_queue()}
-					>
-						{#if dispatchMutation === 'interrupting'}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Square class="h-4 w-4" />
-						{/if}
-						{m.chat_queue_interrupt_and_send()}
-					</button>
-				{/if}
-
-				{#if showQueueManager}
-					<button
-						type="button"
-						onclick={onOpenManager}
-						class="flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-					>
-						<ListTodo class="h-4 w-4" />
-						<span>{m.chat_queue_edit_queue()}</span>
-					</button>
-				{/if}
-
-				{#if queue?.pause}
-					<button
-						type="button"
-						onclick={() => void mutateDispatch('resuming', () => onResume(queue.pause!.id))}
-						disabled={dispatchMutation !== 'idle'}
-						class="flex min-h-8 items-center gap-2 rounded-lg bg-queue-action-bg px-2.5 text-sm font-medium text-queue-foreground transition-colors hover:bg-queue-action-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						title={m.chat_queue_resume_queue()}
-					>
-						{#if dispatchMutation === 'resuming'}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Play class="h-4 w-4" />
-						{/if}
-						{m.chat_queue_resume()}
-					</button>
-				{:else}
-					<button
-						type="button"
-						onclick={() => void mutateDispatch('pausing', onPause)}
-						disabled={dispatchMutation !== 'idle'}
-						class="flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-						title={m.chat_queue_pause_queue()}
-					>
-						{#if dispatchMutation === 'pausing'}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Pause class="h-4 w-4" />
-						{/if}
-						{m.chat_queue_pause()}
-					</button>
-				{/if}
-			</div>
+			<ResponsiveSurfaceActions
+				actions={queueActions}
+				menuLabel={m.chat_queue_actions()}
+				class="ml-auto"
+			/>
 		</footer>
 	</section>
 {/if}

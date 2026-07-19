@@ -13,6 +13,7 @@ import {
   serializeTerminalMessage,
   TerminalOutputQueue,
 } from "./terminal-output-queue.js";
+import { sendWebSocketPayload } from "./transport.js";
 
 export {
   TERMINAL_STREAM_MAX_PENDING_BYTES,
@@ -255,7 +256,7 @@ export class TerminalStreamHandler {
     }
     let status: number;
     try {
-      status = socket.send(payload);
+      status = sendWebSocketPayload(socket, payload);
     } catch {
       this.#closeForDeliveryFailure(
         socket,
