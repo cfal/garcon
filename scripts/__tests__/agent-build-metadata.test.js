@@ -53,6 +53,11 @@ async function createFixture(options = {}) {
 }
 
 describe('collectAgentBuildContributions', () => {
+  test('resolves every contribution declared by the repository packages', async () => {
+    const contributions = await collectAgentBuildContributions();
+    expect(contributions.length).toBeGreaterThan(0);
+  });
+
   test('resolves validated package-owned contributions', async () => {
     const fixture = await createFixture();
     const [contribution] = await collectAgentBuildContributions({
