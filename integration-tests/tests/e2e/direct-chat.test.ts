@@ -8,12 +8,12 @@ describe('Lightpanda direct chat', () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startDirectChat('ui-direct-hello');
+      await app.startOpenAiDirectChat('ui-direct-hello');
       await app.waitForText('echo:ui-direct-hello');
 
       expect(await app.exactTextCount('ui-direct-hello')).toBe(1);
       expect(await app.exactTextCount('echo:ui-direct-hello')).toBe(1);
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) =>
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) =>
         request.lastUserText === 'ui-direct-hello')).toHaveLength(1);
       fixture.assertNoBrowserErrors();
     });

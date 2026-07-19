@@ -6,10 +6,10 @@ describe('Lightpanda queue workflow', () => {
   test('browses, edits, deletes, pauses, and resumes queued messages', async () => {
     await withE2eFixture('queue-workflow', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
-      const active = fixture.integration.fakeOpenAi.holdNext({ lastUserText: 'ui-queue-a' });
+      const active = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-queue-a' });
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startDirectChat('ui-queue-a');
+      await app.startOpenAiDirectChat('ui-queue-a');
       await active.received;
 
       const chat = (await fixture.integration.client.listChats()).sessions.find((entry) =>
@@ -42,17 +42,17 @@ describe('Lightpanda queue workflow', () => {
 
       active.releaseEcho();
       await app.waitForText('echo:ui-queue-a');
-      expect(fixture.integration.fakeOpenAi.requests().some((request) =>
+      expect(fixture.integration.fakeProviders.openAi.requests().some((request) =>
         request.lastUserText === 'ui-queue-b-edited')).toBe(false);
 
       await app.clickButton('Resume queue');
-      await fixture.integration.fakeOpenAi.waitForRequest({ lastUserText: 'ui-queue-b-edited' });
+      await fixture.integration.fakeProviders.openAi.waitForRequest({ lastUserText: 'ui-queue-b-edited' });
       await app.waitForText('echo:ui-queue-b-edited');
 
       const queue = await fixture.integration.client.getQueue(chat.id);
       expect(queue.entries).toHaveLength(0);
       expect(queue.pause).toBeNull();
-      expect(fixture.integration.fakeOpenAi.requests().some((request) =>
+      expect(fixture.integration.fakeProviders.openAi.requests().some((request) =>
         request.lastUserText === 'ui-queue-c')).toBe(false);
       fixture.assertNoBrowserErrors();
     });

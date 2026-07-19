@@ -7,14 +7,14 @@ describe('Lightpanda multi-chat isolation', () => {
   test('keeps concurrent direct chats isolated while switching in the sidebar', async () => {
     await withE2eFixture('multi-chat', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
-      const first = fixture.integration.fakeOpenAi.holdNext({ lastUserText: 'ui-multi-a' });
-      const second = fixture.integration.fakeOpenAi.holdNext({ lastUserText: 'ui-multi-b' });
+      const first = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-multi-a' });
+      const second = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-multi-b' });
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startDirectChat('ui-multi-a');
+      await app.startOpenAiDirectChat('ui-multi-a');
       await first.received;
       const initialReadCursor = fixture.integration.client.markEvents();
-      await app.startDirectChat('ui-multi-b');
+      await app.startOpenAiDirectChat('ui-multi-b');
       await second.received;
 
       const chats = (await fixture.integration.client.listChats()).sessions;
@@ -66,9 +66,9 @@ describe('Lightpanda multi-chat isolation', () => {
       await app.waitForExactTextCount('ui-multi-b', 1);
       await app.waitForExactTextCount('echo:ui-multi-b', 1);
 
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) =>
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) =>
         request.lastUserText === 'ui-multi-a')).toHaveLength(1);
-      expect(fixture.integration.fakeOpenAi.requests().filter((request) =>
+      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) =>
         request.lastUserText === 'ui-multi-b')).toHaveLength(1);
       fixture.assertNoBrowserErrors();
     });

@@ -19,23 +19,23 @@ describe('persistence lifecycle', () => {
         chatId,
         content: 'restart-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, first.turnId);
       const second = await fixture.client.runDirectChat({
         chatId,
         content: 'restart-b',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, second.turnId);
       const before = await fixture.client.getMessages(chatId);
 
       await fixture.restartGarcon();
       const catalog = await fixture.client.listAgentCatalog();
-      const persistedProvider = catalog.apiProviders.find((provider) => provider.id === fixture.provider.providerId);
+      const persistedProvider = catalog.apiProviders.find((provider) => provider.id === fixture.directAgents.openAi.provider.providerId);
       expect(persistedProvider).toBeDefined();
       expect(persistedProvider?.endpoints[0]).toMatchObject({
-        id: fixture.provider.endpointId,
+        id: fixture.directAgents.openAi.provider.endpointId,
         hasApiKey: true,
       });
       expect(JSON.stringify(persistedProvider)).not.toContain('sk-integration-test');
@@ -52,10 +52,10 @@ describe('persistence lifecycle', () => {
       const third = await fixture.client.runDirectChat({
         chatId,
         content: 'restart-c',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, third.turnId);
-      const request = fixture.fakeOpenAi.requests().at(-1)!;
+      const request = fixture.fakeProviders.openAi.requests().at(-1)!;
       expect(request.body.messages.map((message) => message.content)).toEqual([
         'restart-a',
         'echo:restart-a',
@@ -69,19 +69,19 @@ describe('persistence lifecycle', () => {
   test('resumes queued successors without transferring direct-turn shutdown uncertainty', async () => {
     await withIntegrationFixture('queue-restart', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'durable-a' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'durable-a' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'durable-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'durable-b');
       const queuedC = await fixture.client.enqueueNew(chatId, 'durable-c');
       const before = queuedC.queue;
-      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'durable-b' });
-      const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'durable-c' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'durable-b' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'durable-c' });
 
       const activeAborted = heldA.expectAbort();
       await fixture.restartGarcon();
@@ -92,7 +92,7 @@ describe('persistence lifecycle', () => {
       expect(restored.pause).toBeNull();
       expect(restored.dispatchingEntryId).toBe(queuedB.entryId);
       expect(restored.entries).toEqual([before.entries[1]]);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'durable-a',
         'durable-b',
       ]);
@@ -102,7 +102,7 @@ describe('persistence lifecycle', () => {
       const cursor = fixture.client.markEvents();
       heldC.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'durable-a',
         'durable-b',
         'durable-c',
@@ -116,12 +116,12 @@ describe('persistence lifecycle', () => {
   test('recovers accepted input after abrupt process loss without duplicate execution ownership', async () => {
     await withIntegrationFixture('abrupt-restart', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'crash-a' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'crash-a' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'crash-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
       expect(countUserContent((await fixture.client.getMessages(chatId)).messages, 'crash-a')).toBe(1);
@@ -148,12 +148,12 @@ describe('persistence lifecycle', () => {
       await expect(fixture.client.runDirectChat({
         chatId,
         content: 'must-not-bypass-recovery',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       })).rejects.toMatchObject({
         status: 409,
         body: { errorCode: 'SESSION_BUSY' },
       });
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'crash-a',
       ]);
       await fixture.client.resumeQueue(chatId, recoveryPause.pause!.id);
@@ -161,7 +161,7 @@ describe('persistence lifecycle', () => {
       const next = await fixture.client.runDirectChat({
         chatId,
         content: 'crash-b',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, next.turnId)).type).toBe('agent-run-finished');
       const completed = await fixture.client.getMessages(chatId);
@@ -178,19 +178,19 @@ describe('persistence lifecycle', () => {
         chatId,
         content: 'crash-proof-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, first.turnId);
 
-      const heldActive = fixture.fakeOpenAi.holdNext({ lastUserText: 'hold-active' });
+      const heldActive = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'hold-active' });
       const active = await fixture.client.runDirectChat({
         chatId,
         content: 'hold-active',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldActive.received;
       const queued = await fixture.client.enqueueNew(chatId, 'crash-proof-b');
-      const heldQueued = fixture.fakeOpenAi.holdNext({ lastUserText: 'crash-proof-b' });
+      const heldQueued = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'crash-proof-b' });
       heldActive.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, active.turnId);
       await heldQueued.received;
@@ -221,7 +221,7 @@ describe('persistence lifecycle', () => {
         { afterIndex: cursor },
       );
 
-      const retry = fixture.fakeOpenAi.requests().at(-1)!;
+      const retry = fixture.fakeProviders.openAi.requests().at(-1)!;
       expect(retry.lastUserText).toBe('crash-proof-b');
       expect(retry.body.messages.map((message) => message.content)).toEqual([
         'crash-proof-a',
@@ -239,7 +239,7 @@ describe('persistence lifecycle', () => {
         'agent-data',
         DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
         'openai-compatible-sessions',
-        fixture.provider.endpointId,
+        fixture.directAgents.openAi.provider.endpointId,
       );
       const sessionFiles = (await readdir(sessionDir)).filter((name) => name.endsWith('.jsonl'));
       expect(sessionFiles).toHaveLength(1);
@@ -260,24 +260,24 @@ describe('persistence lifecycle', () => {
         chatId,
         content: 'shutdown-seed',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
 
-      const heldActive = fixture.fakeOpenAi.holdNext({ lastUserText: 'shutdown-active' });
+      const heldActive = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'shutdown-active' });
       await fixture.client.runDirectChat({
         chatId,
         content: 'shutdown-active',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldActive.received;
       await fixture.client.enqueueNew(chatId, 'shutdown-successor');
-      const heldSuccessor = fixture.fakeOpenAi.holdNext({ lastUserText: 'shutdown-successor' });
+      const heldSuccessor = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'shutdown-successor' });
 
       const activeAborted = heldActive.expectAbort();
       await fixture.restartGarcon();
       await activeAborted;
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'shutdown-seed',
         'shutdown-active',
       ]);
@@ -297,7 +297,7 @@ describe('persistence lifecycle', () => {
         { afterIndex: cursor },
       );
 
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'shutdown-seed',
         'shutdown-active',
         'shutdown-successor',
@@ -316,20 +316,20 @@ describe('persistence lifecycle', () => {
         chatId,
         content: 'queue-shutdown-seed',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
 
-      const blocker = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-blocker' });
+      const blocker = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'queue-shutdown-blocker' });
       const blockerTurn = await fixture.client.runDirectChat({
         chatId,
         content: 'queue-shutdown-blocker',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await blocker.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'queue-shutdown-b');
       await fixture.client.enqueueNew(chatId, 'queue-shutdown-c');
-      const activeQueued = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-b' });
+      const activeQueued = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'queue-shutdown-b' });
       blocker.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, blockerTurn.turnId);
       const firstBRequest = await activeQueued.received;
@@ -348,8 +348,8 @@ describe('persistence lifecycle', () => {
         'queue-shutdown-b',
         'queue-shutdown-c',
       ]);
-      const retryB = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-b' });
-      const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-c' });
+      const retryB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'queue-shutdown-b' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'queue-shutdown-c' });
       await fixture.client.resumeQueue(chatId, recovered.pause!.id);
       const retryBRequest = await retryB.received;
       expect(retryBRequest.id).toBeGreaterThan(firstBRequest.id);
@@ -372,12 +372,12 @@ describe('persistence lifecycle', () => {
   test('deletes a running chat without stale provider resurrection', async () => {
     await withIntegrationFixture('delete-running-chat', async (fixture) => {
       const chatId = fixture.newChatId();
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'delete-running' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'delete-running' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'delete-running',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
       const requestAborted = held.expectAbort();
@@ -405,12 +405,12 @@ describe('persistence lifecycle', () => {
   test('fails restart without replacing structurally invalid durable queue state', async () => {
     await withIntegrationFixture('invalid-queue-startup', async (fixture) => {
       const chatId = fixture.newChatId();
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'invalid-queue-active' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'invalid-queue-active' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'invalid-queue-active',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
       await fixture.client.enqueueNew(chatId, 'must not be erased');
@@ -437,13 +437,13 @@ describe('persistence lifecycle', () => {
         chatId: sourceChatId,
         content: 'fork-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, first.turnId);
       const second = await fixture.client.runDirectChat({
         chatId: sourceChatId,
         content: 'fork-b',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, second.turnId);
       const sourceBefore = await fixture.client.getMessages(sourceChatId);
@@ -462,17 +462,17 @@ describe('persistence lifecycle', () => {
       const fullRun = await fixture.client.runDirectChat({
         chatId: fullChatId,
         content: 'full-fork-turn',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(fullChatId, fullRun.turnId);
       const boundedRun = await fixture.client.runDirectChat({
         chatId: boundedChatId,
         content: 'bounded-fork-turn',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(boundedChatId, boundedRun.turnId);
 
-      const fullRequest = fixture.fakeOpenAi.requests().find((request) =>
+      const fullRequest = fixture.fakeProviders.openAi.requests().find((request) =>
         request.lastUserText === 'full-fork-turn')!;
       expect(fullRequest.body.messages.map((message) => message.content)).toEqual([
         'fork-a',
@@ -481,7 +481,7 @@ describe('persistence lifecycle', () => {
         'echo:fork-b',
         'full-fork-turn',
       ]);
-      const boundedRequest = fixture.fakeOpenAi.requests().find((request) =>
+      const boundedRequest = fixture.fakeProviders.openAi.requests().find((request) =>
         request.lastUserText === 'bounded-fork-turn')!;
       expect(boundedRequest.body.messages.map((message) => message.content)).toEqual([
         'fork-a',

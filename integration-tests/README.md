@@ -1,6 +1,6 @@
 # Integration Tests
 
-This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses a deterministic OpenAI-compatible fake provider. The E2E lane adds the production SPA and Lightpanda.
+This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses deterministic OpenAI-compatible and Anthropic Messages fake providers. The E2E lane adds the production SPA and Lightpanda.
 
 Integration coverage is required, not optional, when a change can fail only after multiple owners interact. Queueing, transcript stability, reconnect, restart recovery, command idempotency, concurrent chats, provider failures, forks, and deletion all belong here. A focused unit test should still cover the underlying component behavior.
 
@@ -22,7 +22,8 @@ integration-tests/
     integration-fixture.ts   Isolated server, provider, directories, restart, and diagnostics
     garcon-process.ts        Garcon child-process lifecycle
     garcon-client.ts         Typed HTTP and WebSocket test client
-    fake-openai-server.ts    Strict deterministic provider double and response plans
+    fake-openai-server.ts    Strict OpenAI-compatible provider double and response plans
+    fake-anthropic-server.ts Strict Anthropic Messages provider double and response plans
     chat-assertions.ts       Shared transcript assertions
     e2e-fixture.ts           Server fixture plus Lightpanda and production SPA
     spa-driver.ts            Reusable user-level SPA actions and waits
@@ -37,20 +38,20 @@ Keep scenario policy in the test and reusable mechanics in `support/`. Extend `G
 
 ## Server Test Pattern
 
-Use `withIntegrationFixture` so every test receives fresh config, workspace, project, home, server, WebSocket client, and fake provider state.
+Use `withIntegrationFixture` so every test receives fresh config, workspace, project, home, server, WebSocket client, and both fake-provider states. Direct helpers take an explicit agent configuration; use `fixture.directAgents.openAi` or `fixture.directAgents.anthropic` so protocol selection is visible at each call site.
 
 ```ts
 test('preserves the invariant', async () => {
   await withIntegrationFixture('descriptive-artifact-name', async (fixture) => {
     const chatId = fixture.newChatId();
-    const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'unique-input' });
+    const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'unique-input' });
     const eventCursor = fixture.client.markEvents();
 
     const accepted = await fixture.client.startDirectChat({
       chatId,
       content: 'unique-input',
       projectPath: fixture.dirs.project,
-      provider: fixture.provider,
+      agent: fixture.directAgents.openAi,
     });
     await held.received;
     held.releaseEcho();
@@ -76,7 +77,7 @@ await withE2eFixture('descriptive-e2e-name', async (fixture) => {
   await app.open();
   await fixture.waitForSpaWebSocket();
 
-  await app.startDirectChat('unique-ui-input');
+  await app.startOpenAiDirectChat('unique-ui-input');
   await app.waitForText('echo:unique-ui-input');
   fixture.assertNoBrowserErrors();
 });
@@ -129,7 +130,7 @@ Keep the configured single-test concurrency. The suites exercise process lifecyc
 
 ## Provider Scope
 
-The deterministic lane currently exercises Direct chats through the fake OpenAI-compatible server. It proves Garcon's transport, lifecycle, queue, transcript, persistence, and SPA behavior without spending credentials or depending on external availability. It does not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.
+The deterministic lane exercises `direct-openai-compatible` and `direct-anthropic-compatible` through separate protocol fakes. Both providers are present in every fixture and remain alive across Garcon restarts. The Anthropic fake covers the Messages HTTP and SSE contract; it is not a fake Claude Code process or Claude Agent SDK. Together the fakes prove Garcon's multi-agent routing, lifecycle, queue, transcript, persistence, search, and SPA behavior without spending credentials or depending on external availability. They do not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.
 
 Future credential-backed provider suites should be opt-in, isolated from the deterministic required lane, and explicit about cost, rate limits, cleanup, and supported environments. Add them when test API keys are available; do not weaken or replace fake-provider coverage with live-provider tests.
 

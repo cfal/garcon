@@ -1,8 +1,9 @@
 import {
-  DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
   type AgentCatalog,
+  type AgentId,
 } from '../../common/agents.js';
-import type { ApiProviderCatalogEntry } from '../../common/api-providers.js';
+import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
+import type { ApiProtocol, ApiProviderCatalogEntry } from '../../common/api-providers.js';
 import type {
   AgentInterruptAndSendCommandRequest,
   AgentInterruptAndSendResponse,
@@ -55,6 +56,7 @@ import {
   type ClientWsMessage,
 } from '../../common/ws-requests.js';
 import { Deferred, withTimeout } from './deferred.js';
+import { INTEGRATION_ANTHROPIC_API_KEY } from './anthropic-test-contract.js';
 import { INTEGRATION_OPENAI_API_KEY } from './openai-test-contract.js';
 
 export interface HttpExchange {
@@ -69,7 +71,35 @@ export interface ConfiguredTestProvider {
   providerId: string;
   endpointId: string;
   model: string;
-  protocol: 'openai-compatible';
+  protocol: ApiProtocol;
+}
+
+export interface ConfiguredDirectTestAgent {
+  agentId: AgentId;
+  agentSettings: AgentSettingsEnvelope;
+  provider: ConfiguredTestProvider;
+}
+
+export interface DirectTestAgents {
+  openAi: ConfiguredDirectTestAgent;
+  anthropic: ConfiguredDirectTestAgent;
+}
+
+export interface DirectStartInput {
+  chatId: string;
+  content: string;
+  projectPath: string;
+  agent: ConfiguredDirectTestAgent;
+  clientRequestId?: string;
+  clientMessageId?: string;
+}
+
+export interface DirectRunInput {
+  chatId: string;
+  content: string;
+  agent: ConfiguredDirectTestAgent;
+  clientRequestId?: string;
+  clientMessageId?: string;
 }
 
 export interface ChatMessagesPage {
@@ -113,11 +143,6 @@ export interface GarconTestClientOptions {
 
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSED = 3;
-const DIRECT_OPENAI_SETTINGS = {
-  ownerId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-  schemaVersion: 1,
-  values: {},
-} as const;
 
 export class GarconApiError extends Error {
   constructor(
@@ -305,6 +330,31 @@ export class GarconTestClient {
     };
   }
 
+  async createAnthropicProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
+    const model = 'integration-anthropic-echo';
+    const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+      templateId: 'custom',
+      label: 'Integration Fake Anthropic',
+      endpoint: {
+        protocol: 'anthropic-messages',
+        baseUrl: `${providerBaseUrl.replace(/\/$/, '')}/v1`,
+        apiKey: INTEGRATION_ANTHROPIC_API_KEY,
+        defaultModel: model,
+        models: [{ value: model, label: 'Integration Anthropic Echo' }],
+        supportsImages: true,
+        modelDiscovery: 'anthropic-models',
+      },
+    });
+    const endpoint = created.endpoints[0];
+    if (!endpoint) throw new Error('Created Anthropic provider did not contain an endpoint');
+    return {
+      providerId: created.id,
+      endpointId: endpoint.id,
+      model,
+      protocol: 'anthropic-messages',
+    };
+  }
+
   listAgentCatalog(): Promise<AgentCatalog> {
     return this.get<AgentCatalog>('/api/v1/agents');
   }
@@ -324,38 +374,24 @@ export class GarconTestClient {
     return this.post<StartChatCommandResponse>('/api/v1/chats/start', request);
   }
 
-  startDirectChat(input: {
-    chatId: string;
-    content: string;
-    projectPath: string;
-    provider: ConfiguredTestProvider;
-    clientRequestId?: string;
-    clientMessageId?: string;
-  }): Promise<StartChatCommandResponse> {
+  startDirectChat(input: DirectStartInput): Promise<StartChatCommandResponse> {
     return this.startChat(this.directStartRequest(input));
   }
 
-  directStartRequest(input: {
-    chatId: string;
-    content: string;
-    projectPath: string;
-    provider: ConfiguredTestProvider;
-    clientRequestId?: string;
-    clientMessageId?: string;
-  }): StartChatCommandRequest {
+  directStartRequest(input: DirectStartInput): StartChatCommandRequest {
     return {
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
       chatId: input.chatId,
-      agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+      agentId: input.agent.agentId,
       projectPath: input.projectPath,
-      model: input.provider.model,
-      apiProviderId: input.provider.providerId,
-      modelEndpointId: input.provider.endpointId,
-      modelProtocol: input.provider.protocol,
+      model: input.agent.provider.model,
+      apiProviderId: input.agent.provider.providerId,
+      modelEndpointId: input.agent.provider.endpointId,
+      modelProtocol: input.agent.provider.protocol,
       permissionMode: 'default',
       thinkingMode: 'none',
-      agentSettings: DIRECT_OPENAI_SETTINGS,
+      agentSettings: input.agent.agentSettings,
       command: input.content,
     };
   }
@@ -364,23 +400,11 @@ export class GarconTestClient {
     return this.post<CommandAcceptedResponse>('/api/v1/chats/run', request);
   }
 
-  runDirectChat(input: {
-    chatId: string;
-    content: string;
-    provider: ConfiguredTestProvider;
-    clientRequestId?: string;
-    clientMessageId?: string;
-  }): Promise<CommandAcceptedResponse> {
+  runDirectChat(input: DirectRunInput): Promise<CommandAcceptedResponse> {
     return this.runChat(this.directRunRequest(input));
   }
 
-  directRunRequest(input: {
-    chatId: string;
-    content: string;
-    provider: ConfiguredTestProvider;
-    clientRequestId?: string;
-    clientMessageId?: string;
-  }): AgentRunCommandRequest {
+  directRunRequest(input: DirectRunInput): AgentRunCommandRequest {
     return {
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
@@ -388,11 +412,11 @@ export class GarconTestClient {
       command: input.content,
       permissionMode: 'default',
       thinkingMode: 'none',
-      agentSettings: DIRECT_OPENAI_SETTINGS,
-      model: input.provider.model,
-      apiProviderId: input.provider.providerId,
-      modelEndpointId: input.provider.endpointId,
-      modelProtocol: input.provider.protocol,
+      agentSettings: input.agent.agentSettings,
+      model: input.agent.provider.model,
+      apiProviderId: input.agent.provider.providerId,
+      modelEndpointId: input.agent.provider.endpointId,
+      modelProtocol: input.agent.provider.protocol,
     };
   }
 

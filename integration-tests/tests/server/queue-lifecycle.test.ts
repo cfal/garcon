@@ -39,14 +39,14 @@ describe('queue lifecycle', () => {
   test('dispatches queued entries in FIFO order', async () => {
     await withIntegrationFixture('queue-fifo', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'fifo-a' });
-      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'fifo-b' });
-      const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'fifo-c' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'fifo-a' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'fifo-b' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'fifo-c' });
       const acceptedA = await fixture.client.startDirectChat({
         chatId,
         content: 'fifo-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
 
@@ -80,7 +80,7 @@ describe('queue lifecycle', () => {
         [queuedB.entryId, 'fifo-b'],
         [queuedC.entryId, 'fifo-c'],
       ]);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual(['fifo-a']);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['fifo-a']);
 
       heldA.releaseEcho();
       expect((await fixture.client.waitForTurnTerminal(chatId, acceptedA.turnId)).type).toBe('agent-run-finished');
@@ -92,7 +92,7 @@ describe('queue lifecycle', () => {
       heldC.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, queuedTurnC.turnId, { afterIndex: finalCursor });
 
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'fifo-a',
         'fifo-b',
         'fifo-c',
@@ -114,12 +114,12 @@ describe('queue lifecycle', () => {
   test('edits and deletes queued inputs by stable identity', async () => {
     await withIntegrationFixture('queue-edit-delete', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'edit-a' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'edit-a' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'edit-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
       const queuedB = await fixture.client.enqueueNew(chatId, 'original-b');
@@ -161,14 +161,14 @@ describe('queue lifecycle', () => {
       });
       expect(deleted.queue.entries.map((entry) => entry.id)).toEqual([entryB.id]);
 
-      const heldEdited = fixture.fakeOpenAi.holdNext({ lastUserText: 'edited-b' });
+      const heldEdited = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'edited-b' });
       heldA.releaseEcho();
       await heldEdited.received;
       const editedTurn = await waitForQueuedTurnIdentity(fixture.client, chatId, 'edited-b');
       const cursor = fixture.client.markEvents();
       heldEdited.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, editedTurn.turnId, { afterIndex: cursor });
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'edit-a',
         'edited-b',
       ]);
@@ -182,12 +182,12 @@ describe('queue lifecycle', () => {
   test('uses pause identities and resumes without aborting the active turn', async () => {
     await withIntegrationFixture('queue-pause-resume', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'pause-a' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'pause-a' });
       const acceptedA = await fixture.client.startDirectChat({
         chatId,
         content: 'pause-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
       await fixture.client.enqueueNew(chatId, 'pause-b');
@@ -211,9 +211,9 @@ describe('queue lifecycle', () => {
       expect((await fixture.client.waitForTurnTerminal(chatId, acceptedA.turnId)).type).toBe('agent-run-finished');
       const pausedQueue = await fixture.client.getQueue(chatId);
       expect(pausedQueue.entries.map((entry) => entry.content)).toEqual(['pause-b']);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual(['pause-a']);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['pause-a']);
 
-      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'pause-b' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'pause-b' });
       await fixture.client.resumeQueue(chatId, secondPause.queue.pause!.id);
       await heldB.received;
       const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'pause-b');
@@ -227,12 +227,12 @@ describe('queue lifecycle', () => {
   test('stops active work and leaves queued input paused until resume', async () => {
     await withIntegrationFixture('queue-stop-resume', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'stop-a' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-a' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'stop-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
       await fixture.client.enqueueNew(chatId, 'stop-b');
@@ -259,16 +259,16 @@ describe('queue lifecycle', () => {
         && event.intent === 'stop')).toHaveLength(1);
       expect(stopped.queue.pause).not.toBeNull();
       expect(stopped.queue.entries.map((entry) => entry.content)).toEqual(['stop-b']);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual(['stop-a']);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['stop-a']);
 
-      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'stop-b' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-b' });
       await fixture.client.resumeQueue(chatId, stopped.queue.pause!.id);
       await heldB.received;
       const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'stop-b');
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
       await fixture.client.waitForTurnTerminal(chatId, queuedTurnB.turnId, { afterIndex: cursor });
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'stop-a',
         'stop-b',
       ]);
@@ -282,20 +282,20 @@ describe('queue lifecycle', () => {
         chatId,
         content: 'drain-stop-seed',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
 
-      const heldActive = fixture.fakeOpenAi.holdNext({ lastUserText: 'drain-stop-active' });
+      const heldActive = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-active' });
       await fixture.client.runDirectChat({
         chatId,
         content: 'drain-stop-active',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldActive.received;
       await fixture.client.enqueueNew(chatId, 'drain-stop-b');
       await fixture.client.enqueueNew(chatId, 'drain-stop-c');
-      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'drain-stop-b' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-b' });
       heldActive.releaseEcho();
       await heldB.received;
 
@@ -312,7 +312,7 @@ describe('queue lifecycle', () => {
       expect(stopped.stopped).toBe(true);
       expect(stopped.queue.pause?.kind).toBe('manual');
       expect(stopped.queue.entries.map((entry) => entry.content)).toEqual(['drain-stop-c']);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'drain-stop-seed',
         'drain-stop-active',
         'drain-stop-b',
@@ -327,7 +327,7 @@ describe('queue lifecycle', () => {
         { afterIndex: stopCursor },
       );
 
-      const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'drain-stop-c' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'drain-stop-c' });
       await fixture.client.resumeQueue(chatId, stopped.queue.pause!.id);
       await heldC.received;
       const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'drain-stop-c');
@@ -337,7 +337,7 @@ describe('queue lifecycle', () => {
         afterIndex: completionCursor,
       });
 
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
         'drain-stop-seed',
         'drain-stop-active',
         'drain-stop-b',
@@ -354,17 +354,17 @@ describe('queue lifecycle', () => {
   test('interrupts and sends without assigning a false failure to the successor', async () => {
     await withIntegrationFixture('interrupt-and-send-delivery', async (fixture) => {
       const chatId = fixture.newChatId();
-      const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'interrupt-a' });
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'interrupt-a' });
       await fixture.client.startDirectChat({
         chatId,
         content: 'interrupt-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await heldA.received;
       await fixture.client.enqueueNew(chatId, 'interrupt-b');
       const eventCursor = fixture.client.markEvents();
-      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'interrupt-b' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'interrupt-b' });
 
       const activeAborted = heldA.expectAbort();
       const interruptRequest = {

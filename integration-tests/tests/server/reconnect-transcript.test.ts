@@ -23,12 +23,12 @@ describe('reconnect and transcript stability', () => {
   test('reconnects while processing with correlated processing, queue, and pending snapshots', async () => {
     await withIntegrationFixture('reconnect-while-processing', async (fixture) => {
       const chatId = fixture.newChatId();
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'reconnect-a' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reconnect-a' });
       const accepted = await fixture.client.startDirectChat({
         chatId,
         content: 'reconnect-a',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
       const beforeReconnect = await fixture.client.getMessages(chatId);
@@ -69,12 +69,12 @@ describe('reconnect and transcript stability', () => {
   test('repeated message reads do not reload generations or duplicate optimistic users', async () => {
     await withIntegrationFixture('repeated-messages-while-processing', async (fixture) => {
       const chatId = fixture.newChatId();
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'repeated-read' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'repeated-read' });
       const accepted = await fixture.client.startDirectChat({
         chatId,
         content: 'repeated-read',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
       const eventCursor = fixture.client.markEvents();
@@ -86,7 +86,7 @@ describe('reconnect and transcript stability', () => {
         expect(page.pendingUserInputs).toHaveLength(1);
         expect(page.pendingUserInputs[0].deliveryStatus).toBe('accepted');
       }
-      expect(fixture.fakeOpenAi.requests()).toHaveLength(1);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
       await fixture.client.ping();
       expect(fixture.client.events().slice(eventCursor).filter((event) =>
         event.type === 'chat-generation-reset' && event.chatId === chatId)).toEqual([]);
@@ -105,12 +105,12 @@ describe('reconnect and transcript stability', () => {
   test('replays missed same-generation messages after a socket disconnect', async () => {
     await withIntegrationFixture('reconnect-replay-delta', async (fixture) => {
       const chatId = fixture.newChatId();
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'missed-delta' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'missed-delta' });
       const accepted = await fixture.client.startDirectChat({
         chatId,
         content: 'missed-delta',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
       const initial = await fixture.client.getMessages(chatId);
@@ -136,10 +136,10 @@ describe('reconnect and transcript stability', () => {
       expect(applied.status).toBe('applied');
       const canonical = await fixture.client.getMessages(chatId);
       expect(applied.messages).toEqual(canonical.messages);
-      const requestCount = fixture.fakeOpenAi.requests().length;
+      const requestCount = fixture.fakeProviders.openAi.requests().length;
       const repeatedReplay = await fixture.client.subscribe(chatId, initial.generationId, initial.lastSeq);
       expect(repeatedReplay.messages).toEqual(replay.messages);
-      expect(fixture.fakeOpenAi.requests()).toHaveLength(requestCount);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
     });
   });
 
@@ -150,7 +150,7 @@ describe('reconnect and transcript stability', () => {
         chatId,
         content: 'stale-cursor',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
       const snapshotRequired = await fixture.client.subscribe(chatId, crypto.randomUUID(), 99_999);
@@ -174,21 +174,21 @@ describe('reconnect and transcript stability', () => {
         chatId,
         content: 'reload-first',
         projectPath: fixture.dirs.project,
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, first.turnId);
       const second = await fixture.client.runDirectChat({
         chatId,
         content: 'reload-second',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(chatId, second.turnId);
 
-      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'reload-third' });
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reload-third' });
       const third = await fixture.client.runDirectChat({
         chatId,
         content: 'reload-third',
-        provider: fixture.provider,
+        agent: fixture.directAgents.openAi,
       });
       await held.received;
       const failedObserverCursor = observer.markEvents();

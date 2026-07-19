@@ -28,7 +28,7 @@ export class SpaDriver {
     await this.#page.waitForFunction(() => document.querySelector('button') !== null);
   }
 
-  async startDirectChat(content: string): Promise<RecordedCompletionRequest> {
+  async startOpenAiDirectChat(content: string): Promise<RecordedCompletionRequest> {
     await this.clickButton('New Chat');
     await this.#page.waitForFunction(
       () => {
@@ -74,7 +74,7 @@ export class SpaDriver {
     await this.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', content);
     await this.waitForDialogButtonEnabled('Start session');
     await this.clickButton('Start session');
-    const request = await this.#integration.fakeOpenAi.waitForRequest(
+    const request = await this.#integration.fakeProviders.openAi.waitForRequest(
       { lastUserText: content },
       { timeoutMs: 20_000 },
     );
