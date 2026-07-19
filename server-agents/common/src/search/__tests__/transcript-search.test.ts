@@ -124,6 +124,108 @@ describe('common transcript search', () => {
       query: query('cleanup'), chats: [chat('one')], limit: 10, signal: signal(),
     })).toThrow('Transcript search is disabled');
   });
+
+  it('reports pending and failed chats while preserving successful status', async () => {
+    let release: (() => void) | null = null;
+    let started: (() => void) | null = null;
+    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+    const fixture = await createFixture({
+      load: async (candidate) => {
+        if (candidate.chatId === 'pending') {
+          started?.();
+          await releasePromise;
+          return [new UserMessage(timestamp, 'indexed later')];
+        }
+        throw new Error('unreadable transcript');
+      },
+    });
+    const reconcile = fixture.search.reconcile({
+      chats: [chat('pending'), chat('failed')],
+      generation: generation(1),
+      signal: signal(),
+    });
+    await startedPromise;
+    expect(await fixture.search.status({
+      chats: [chat('pending'), chat('failed')],
+      signal: signal(),
+    })).toMatchObject({ pendingChatCount: 2, indexedChatCount: 0 });
+    release?.();
+    await reconcile;
+    expect(await fixture.search.status({
+      chats: [chat('pending'), chat('failed')],
+      signal: signal(),
+    })).toEqual({
+      indexedChatCount: 1,
+      pendingChatCount: 0,
+      failedChatCount: 1,
+      unsupportedChatCount: 0,
+    });
+    await fixture.search.close();
+  });
+
+  it('rebases generations after restart and reuses the durable index', async () => {
+    let body = 'before restart';
+    const fixture = await createFixture({
+      load: async () => [new UserMessage(timestamp, body)],
+    });
+    await fixture.search.reconcile({
+      chats: [chat('one')],
+      generation: { epoch: 'first-process', sequence: 50 },
+      signal: signal(),
+    });
+    await fixture.search.close();
+
+    body = 'after restart';
+    const restarted = createTranscriptSearch({
+      agentId: 'fixture',
+      host: fixture.host,
+      loadTranscript: async () => [new UserMessage(timestamp, body)],
+    });
+    await restarted.reconcile({
+      chats: [chat('one')],
+      generation: { epoch: 'second-process', sequence: 1 },
+      signal: signal(),
+    });
+    expect((await restarted.search({
+      query: query('after'),
+      chats: [chat('one')],
+      limit: 10,
+      signal: signal(),
+    })).hits).toHaveLength(1);
+    expect((await restarted.search({
+      query: query('before'),
+      chats: [chat('one')],
+      limit: 10,
+      signal: signal(),
+    })).hits).toHaveLength(0);
+    await restarted.close();
+  });
+
+  it('keeps cleanup idempotent and rejects generations from a retired epoch', async () => {
+    const fixture = await createFixture({
+      native: { one: [new UserMessage(timestamp, 'retired token')] },
+    });
+    await fixture.search.reconcile({
+      chats: [chat('one')],
+      generation: { epoch: 'old', sequence: 1 },
+      signal: signal(),
+    });
+    await fixture.search.disableAndDelete({
+      generation: { epoch: 'new', sequence: 1 },
+      signal: signal(),
+    });
+    await fixture.search.reconcile({
+      chats: [chat('one')],
+      generation: { epoch: 'old', sequence: 2 },
+      signal: signal(),
+    });
+    await fixture.search.disableAndDelete({
+      generation: { epoch: 'new', sequence: 2 },
+      signal: signal(),
+    });
+    expect(await Bun.file(path.join(fixture.root, 'transcript-search', 'index.sqlite')).exists()).toBe(false);
+  });
 });
 
 async function createFixture(options: {
@@ -160,7 +262,7 @@ async function createFixture(options: {
     host,
     loadTranscript: ({ chat }) => options.load?.(chat) ?? Promise.resolve(options.native?.[chat.chatId] ?? []),
   });
-  return { root, search };
+  return { root, host, search };
 }
 
 function chat(chatId: string, carryOverRevision = 'carry-v1:0'): AgentSearchChat {

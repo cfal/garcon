@@ -82,15 +82,6 @@ export function normalizeThinkingMode(
   return coerceThinkingMode(value) ?? fallback;
 }
 
-export function normalizeThinkingModeForAgent(
-  agentId: string,
-  value: unknown,
-  fallback: ThinkingMode = DEFAULT_THINKING_MODE,
-): ThinkingMode {
-  const normalized = normalizeThinkingMode(value, fallback);
-  return normalized === 'ultra' && agentId !== 'codex' ? DEFAULT_THINKING_MODE : normalized;
-}
-
 export function normalizeClaudeThinkingMode(
   value: unknown,
   fallback: ClaudeThinkingMode = DEFAULT_CLAUDE_THINKING_MODE,

@@ -21,8 +21,7 @@ function defaultExecutionDefaults() {
   return {
     permissionMode: 'default',
     thinkingMode: 'none',
-    claudeThinkingMode: 'auto',
-    ampAgentMode: 'smart',
+    agentSettingsById: {},
   };
 }
 
@@ -581,46 +580,6 @@ describe('settings store', () => {
       });
     });
 
-    it('migrates legacy startup settings on load', async () => {
-      await writeRaw({
-        ui: {}, paths: {}, chatNames: {},
-        pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
-        chatFolders: [],
-        lastAgentId: 'codex',
-        lastProjectPath: '/workspace/project',
-        lastModel: 'gpt-5.4',
-        lastApiProviderId: null,
-        lastModelEndpointId: null,
-        lastModelProtocol: null,
-        lastPermissionMode: 'acceptEdits',
-        lastThinkingMode: 'medium',
-        lastClaudeThinkingMode: 'off',
-        lastAmpAgentMode: 'deep',
-      });
-
-      const settings = await store.loadSettings();
-      expect(settings.recentAgentSettings).toEqual([{
-        agentId: 'codex',
-        model: 'gpt-5.4',
-        apiProviderId: null,
-        modelEndpointId: null,
-        modelProtocol: null,
-      }]);
-      expect(settings.paths.recentProjectPaths).toEqual(['/workspace/project']);
-      expect(settings.executionDefaults.global).toEqual({
-        permissionMode: 'acceptEdits',
-        thinkingMode: 'medium',
-        claudeThinkingMode: 'off',
-        ampAgentMode: 'deep',
-      });
-      expect(settings.executionDefaults.byAgent.codex).toEqual(settings.executionDefaults.global);
-
-      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
-      for (const key of ['last' + 'AgentId', 'last' + 'ProjectPath', 'last' + 'Model', 'last' + 'PermissionMode']) {
-        expect(persisted[key]).toBeUndefined();
-      }
-    });
-
     it('normalizes invalid execution defaults on load', async () => {
       await writeRaw({
         ui: {}, paths: {}, chatNames: {},
@@ -629,14 +588,13 @@ describe('settings store', () => {
           global: {
             permissionMode: 'bogus',
             thinkingMode: 'very-hard',
-            claudeThinkingMode: 'sometimes',
-            ampAgentMode: 'unreal',
+            agentSettingsById: { invalid: true },
           },
           byAgent: {
             codex: {
               permissionMode: 'manualBypass',
               thinkingMode: 'medium',
-              claudeThinkingMode: 'sometimes',
+              agentSettingsById: { codex: { ownerId: 'wrong', schemaVersion: 1, values: {} } },
             },
           },
         },
@@ -647,7 +605,6 @@ describe('settings store', () => {
       expect(settings.executionDefaults.byAgent.codex).toEqual({
         permissionMode: 'manualBypass',
         thinkingMode: 'medium',
-        claudeThinkingMode: 'auto',
       });
     });
 
@@ -916,7 +873,7 @@ describe('settings store', () => {
           model: 'gpt-5.4',
           permissionMode: 'bypassPermissions',
           thinkingMode: 'medium',
-          claudeThinkingMode: 'off',
+          agentSettingsById: {},
         }),
         store.ensureInNormal('chat-2'),
       ]);
@@ -935,8 +892,7 @@ describe('settings store', () => {
       expect(settings.executionDefaults.byAgent.codex).toEqual({
         permissionMode: 'bypassPermissions',
         thinkingMode: 'medium',
-        claudeThinkingMode: 'off',
-        ampAgentMode: 'smart',
+        agentSettingsById: {},
       });
     });
   });
@@ -958,8 +914,7 @@ describe('settings store', () => {
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
         thinkingMode: 'medium',
-        claudeThinkingMode: 'on',
-        ampAgentMode: 'deep',
+        agentSettingsById: {},
       });
 
       expect(store.getRecentAgentSettings()).toEqual([{
@@ -973,8 +928,7 @@ describe('settings store', () => {
       expect(store.getExecutionDefaults().byAgent.codex).toEqual({
         permissionMode: 'bypassPermissions',
         thinkingMode: 'medium',
-        claudeThinkingMode: 'on',
-        ampAgentMode: 'deep',
+        agentSettingsById: {},
       });
       expect(await store.getRemoteSettingsVersion()).toBe(1);
     });
@@ -1028,8 +982,7 @@ describe('settings store', () => {
         model: 'opus',
         permissionMode: 'bogus',
         thinkingMode: 'very-hard',
-        claudeThinkingMode: 'sometimes',
-        ampAgentMode: 'bogus',
+        agentSettingsById: { invalid: true },
       });
 
       expect(store.getExecutionDefaults().byAgent.claude).toEqual(defaultExecutionDefaults());
@@ -1050,8 +1003,7 @@ describe('settings store', () => {
       expect(store.getExecutionDefaults().byAgent.codex).toEqual({
         permissionMode: 'manualBypass',
         thinkingMode: 'medium',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
+        agentSettingsById: {},
       });
     });
   });

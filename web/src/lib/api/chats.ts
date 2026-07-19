@@ -3,15 +3,12 @@
 import { apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
-	normalizeAmpAgentMode,
-	normalizeClaudeThinkingMode,
 	normalizePermissionMode,
 	normalizeThinkingMode,
-	type AmpAgentMode,
-	type ClaudeThinkingMode,
 	type PermissionMode,
 	type ThinkingMode,
 } from '$shared/chat-modes';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import type {
@@ -79,8 +76,7 @@ export interface StartChatParams {
 	modelProtocol?: ApiProtocol | null;
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
-	claudeThinkingMode: ClaudeThinkingMode;
-	ampAgentMode: AmpAgentMode;
+	agentSettings: AgentSettingsEnvelope;
 	command: string;
 	images?: AgentCommandImage[];
 	tags?: string[];
@@ -92,7 +88,6 @@ export interface ChatDetailsResponse {
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	agentSessionId: string | null;
-	nativePath: string | null;
 }
 
 export type ListChatsResponse = ChatListResponse;
@@ -111,19 +106,11 @@ export async function setLastSelectedChat(
 
 /** Starts a new chat session. */
 export async function startChat(params: StartChatParams): Promise<StartChatCommandResponse> {
-	const {
-		permissionMode,
-		thinkingMode,
-		claudeThinkingMode,
-		ampAgentMode,
-		...rest
-	} = params;
+	const { permissionMode, thinkingMode, ...rest } = params;
 	return apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
 		...rest,
 		permissionMode: normalizePermissionMode(permissionMode),
 		thinkingMode: normalizeThinkingMode(thinkingMode),
-		claudeThinkingMode: normalizeClaudeThinkingMode(claudeThinkingMode),
-		ampAgentMode: normalizeAmpAgentMode(ampAgentMode),
 	});
 }
 

@@ -180,8 +180,7 @@ export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunA
   return {
     permissionMode: entry.permissionMode,
     thinkingMode: entry.thinkingMode,
-    claudeThinkingMode: entry.claudeThinkingMode,
-    ampAgentMode: entry.ampAgentMode,
+    agentSettings: chat ? entry.agentSettingsById[chat.agentId] : undefined,
     model: entry.model,
     apiProviderId: chat?.apiProviderId,
     modelEndpointId: chat?.modelEndpointId,

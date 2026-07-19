@@ -28,10 +28,6 @@ mock.module('../../lib/http-request.js', () => ({
   MalformedJsonError,
 }));
 
-mock.module('../../agents/claude/history-loader.js', () => ({
-  getClaudeSessionMessagesFromNativePath: mock(() => undefined),
-}));
-
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
   generateChatTitleFromMessage,
@@ -47,6 +43,25 @@ const CHAT_ID_3 = '1783725900000902';
 const CHAT_ID_4 = '1783725900000903';
 const CHAT_ID_5 = '1783725900000904';
 const CHAT_ID_6 = '1783725900000905';
+
+function chatEntry(overrides = {}) {
+  return {
+    agentId: 'test-agent',
+    agentSessionId: null,
+    nativeSession: null,
+    agentOwnershipEpoch: 'epoch-1',
+    agentSettingsById: {
+      'test-agent': {
+        ownerId: 'test-agent',
+        schemaVersion: 1,
+        values: {},
+      },
+    },
+    projectPath: '/proj',
+    tags: [],
+    ...overrides,
+  };
+}
 
 const registry = {
   getChat: mock(() => undefined),
@@ -151,7 +166,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('uses override title when session name exists', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: chatEntry(),
     }));
     const metaMap = new Map();
     metaMap.set(CHAT_ID, { firstMessage: 'fallback message', createdAt: null, lastActivity: null, lastMessage: '' });
@@ -169,7 +184,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('falls back to firstMessage when no override exists', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      [CHAT_ID_2]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_2]: chatEntry(),
     }));
     const metaMap = new Map();
     metaMap.set(CHAT_ID_2, { firstMessage: 'Hello world', createdAt: null, lastActivity: null, lastMessage: '' });
@@ -186,7 +201,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('falls back to "New Session" when no override or metadata', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      [CHAT_ID_3]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_3]: chatEntry(),
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -201,7 +216,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('returns orphaned chats without repairing order lists during a read', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      [CHAT_ID_4]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_4]: chatEntry(),
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getPinnedChatIds.mockImplementation(() => []);
@@ -223,8 +238,8 @@ describe('GET /api/chats title resolution', () => {
     let fastCalled = false;
 
     registry.listAllChats.mockImplementation(() => ({
-      [CHAT_ID_5]: { agentId: 'claude', projectPath: '/slow', tags: [] },
-      [CHAT_ID_6]: { agentId: 'claude', projectPath: '/fast', tags: [] },
+      [CHAT_ID_5]: chatEntry({ projectPath: '/slow' }),
+      [CHAT_ID_6]: chatEntry({ projectPath: '/fast' }),
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getPinnedChatIds.mockImplementation(() => []);
@@ -264,7 +279,7 @@ describe('DELETE /api/chats session name cleanup', () => {
   });
 
   it('removes session name when deleting a chat', async () => {
-    registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => chatEntry());
     parseJsonBody.mockImplementationOnce(() => ({ chatId: CHAT_ID_5 }));
 
     const url = new URL('http://localhost/api/chats');
@@ -281,7 +296,7 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   it('aborts the running session before removing the chat from the registry', async () => {
     const calls = [];
-    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => chatEntry());
     queue.abortForChatDeletion.mockImplementation(async () => {
       calls.push('abort');
       return true;
@@ -309,9 +324,12 @@ describe('DELETE /api/chats session name cleanup', () => {
 
     try {
       registry.getChat.mockImplementation(() => ({
-        agentId: 'claude',
-        projectPath: '/proj',
-        nativePath,
+        ...chatEntry(),
+        nativeSession: {
+          ownerId: 'test-agent',
+          schemaVersion: 1,
+          value: { path: nativePath },
+        },
       }));
       parseJsonBody.mockImplementationOnce(() => ({ chatId: CHAT_ID_5 }));
 
@@ -332,7 +350,7 @@ describe('DELETE /api/chats session name cleanup', () => {
   });
 
   it('keeps query chatId compatibility when deleting a chat', async () => {
-    registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
+    registry.getChat.mockImplementation(() => chatEntry());
 
     const url = new URL(`http://localhost/api/chats?chatId=${CHAT_ID_5}`);
     const request = new Request(url, { method: 'DELETE' });

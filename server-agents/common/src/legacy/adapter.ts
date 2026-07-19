@@ -4,6 +4,7 @@ import type {
   AgentExecution,
   AgentExecutionContext,
   AgentExecutionEvent,
+  AgentForkRequest,
   AgentHost,
   AgentIntegration,
   AgentLifecycle,
@@ -18,9 +19,10 @@ import type {
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevision,
+  getNativeMessageRevisionSource,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
-import type { AgentDescriptor } from '@garcon/common/agent-integration';
+import type { AgentDescriptor, AgentSettingDescriptor } from '@garcon/common/agent-integration';
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentModelOption } from '@garcon/common/agents';
 import type { JsonObject, JsonValue } from '@garcon/common/json';
@@ -36,8 +38,12 @@ import type {
   AgentSessionSettingsPatch,
   ResumeTurnRequest,
   StartSessionRequest,
+  StartedAgentSession,
 } from './session-types.js';
 import { createTranscriptSearch } from '../search/transcript-search.js';
+import { renderTranscriptSeed } from '../shared/transcript-seed.js';
+import { forkJsonlTranscript } from './fork-jsonl.js';
+import { promises as fs } from 'node:fs';
 
 export interface LegacyIntegrationOptions {
   readonly host: AgentHost;
@@ -46,7 +52,20 @@ export interface LegacyIntegrationOptions {
   readonly transcriptSearch: AgentTranscriptSearch;
   readonly defaultModel: string;
   readonly models?: readonly AgentModelOption[];
+  readonly generation?: { readonly priority: number; readonly model?: string } | null;
   readonly defaultSettings?: JsonObject;
+  readonly settingDescriptors?: readonly AgentSettingDescriptor[];
+  readonly toLegacySettings?: (
+    settings: AgentSettingsEnvelope,
+  ) => AgentSessionSettingsPatch;
+  readonly prepareStart?: (
+    request: Parameters<AgentExecution['start']>[0],
+    legacy: StartSessionRequest,
+  ) => StartSessionRequest;
+  readonly prepareResume?: (
+    request: Parameters<AgentExecution['resume']>[0],
+    legacy: ResumeTurnRequest,
+  ) => ResumeTurnRequest;
   readonly onEndpointSelection?: (
     selection: AgentEndpointSelection,
     credential: string,
@@ -109,17 +128,30 @@ export function createLegacyTranscriptSearch(
 export function createLegacyAgentIntegration(
   options: LegacyIntegrationOptions,
 ): AgentIntegration {
-  const settings = createSettings(options.descriptor.id, options.defaultSettings ?? {});
+  const settings = createSettings(
+    options.descriptor.id,
+    options.defaultSettings ?? {},
+    options.settingDescriptors ?? [],
+  );
   const execution = new LegacyExecution(
     options.host,
     options.agent,
     options.descriptor.id,
-    options.onEndpointSelection,
+    options,
   );
-  const transcript = createTranscript(options.agent, options.descriptor.id);
-  const catalog = createCatalog(options.agent, options.defaultModel, options.models ?? []);
+  const transcript = createTranscript(
+    options.agent,
+    options.descriptor.id,
+    options.toLegacySettings,
+  );
+  const catalog = createCatalog(
+    options.agent,
+    options.defaultModel,
+    options.models ?? [],
+    options.generation ?? null,
+  );
   const lifecycle = createLifecycle(options.agent, options.transcriptSearch);
-  const migration = createMigration(options.descriptor.id);
+  const migration = createMigration(options.descriptor.id, settings);
 
   return {
     descriptor: options.descriptor,
@@ -156,17 +188,12 @@ export function createLegacyAgentIntegration(
         return options.agent.discoverSlashCommands!(projectPath);
       },
     } : null,
-    forking: options.agent.forkSession ? {
+    forking: options.agent.capabilities.supportsFork ? {
       supportsAtMessage: options.agent.capabilities.supportsForkAtMessage,
       supportsWhileRunning: options.agent.capabilities.supportsForkWhileRunning,
       async fork(request) {
         request.admission.signal.throwIfAborted();
-        const source = toLegacyChat(request.source);
-        const result = await options.agent.forkSession!({
-          sourceSession: source,
-          sourceChatId: request.source.chatId,
-          targetChatId: request.chatId,
-        });
+        const result = await forkLegacySession(options, request);
         if (!result) {
           throw new AgentIntegrationError('OPERATION_UNSUPPORTED', 'Agent fork did not create a session', false);
         }
@@ -187,13 +214,18 @@ export function createLegacyAgentIntegration(
       },
     } : null,
     singleQuery: options.agent.runSingleQuery ? {
-      run: ({ prompt, projectPath, model, settings: envelope, signal }) => {
+      async run({ prompt, projectPath, model, settings: envelope, signal }) {
         signal.throwIfAborted();
-        return options.agent.runSingleQuery!(prompt, {
-          projectPath,
-          model,
-          ...envelope.values,
-        });
+        try {
+          return await options.agent.runSingleQuery!(prompt, {
+            projectPath,
+            model,
+            ...envelope.values,
+          });
+        } catch (error) {
+          if (error instanceof AgentIntegrationError) throw error;
+          throw classifyLegacySingleQueryError(error);
+        }
       },
     } : null,
   };
@@ -203,7 +235,7 @@ class LegacyExecution implements AgentExecution {
   readonly #host: AgentHost;
   readonly #agent: Agent;
   readonly #agentId: string;
-  readonly #onEndpointSelection: LegacyIntegrationOptions['onEndpointSelection'];
+  readonly #options: LegacyIntegrationOptions;
   readonly #listeners = new Set<(event: AgentExecutionEvent) => void>();
   readonly #operations = new Map<string, AgentExecutionContext['operation']>();
 
@@ -211,12 +243,12 @@ class LegacyExecution implements AgentExecution {
     host: AgentHost,
     agent: Agent,
     agentId: string,
-    onEndpointSelection: LegacyIntegrationOptions['onEndpointSelection'],
+    options: LegacyIntegrationOptions,
   ) {
     this.#host = host;
     this.#agent = agent;
     this.#agentId = agentId;
-    this.#onEndpointSelection = onEndpointSelection;
+    this.#options = options;
     agent.runtime.onMessages((chatId, messages, metadata) => {
       const operation = this.#operation(chatId, metadata);
       if (operation) this.#emit({ type: 'messages', chatId, messages, operation });
@@ -249,9 +281,12 @@ class LegacyExecution implements AgentExecution {
     this.#operations.set(request.chatId, request.operation);
     request.admission.signal.throwIfAborted();
     const endpoint = await this.#endpointRuntime(request.endpoint, request.admission.signal);
-    const result = await this.#agent.runtime.startSession({
-      ...legacyExecutionConfig(request),
-      command: request.prompt,
+    const carryOver = request.carryOver.length > 0
+      ? `${renderTranscriptSeed([...request.carryOver])}\n\n`
+      : '';
+    const legacy = {
+      ...legacyExecutionConfig(request, this.#options.toLegacySettings),
+      command: `${carryOver}${request.prompt}`,
       images: request.attachments.map((attachment) => ({
         data: attachment.data,
         ...(attachment.name ? { name: attachment.name } : {}),
@@ -259,7 +294,10 @@ class LegacyExecution implements AgentExecution {
       })),
       ...endpoint,
       onAbortable: () => request.admission.markAbortable(),
-    });
+    } satisfies StartSessionRequest;
+    const result = await this.#agent.runtime.startSession(
+      this.#options.prepareStart?.(request, legacy) ?? legacy,
+    );
     const session = {
       agentSessionId: result.agentSessionId,
       nativeSession: nativeSession(this.#agentId, result.nativePath, result.agentSessionId),
@@ -272,8 +310,8 @@ class LegacyExecution implements AgentExecution {
     this.#operations.set(request.chatId, request.operation);
     request.admission.signal.throwIfAborted();
     const endpoint = await this.#endpointRuntime(request.endpoint, request.admission.signal);
-    await this.#agent.runtime.runTurn({
-      ...legacyExecutionConfig(request),
+    const legacy = {
+      ...legacyExecutionConfig(request, this.#options.toLegacySettings),
       agentSessionId: request.agentSessionId,
       command: request.prompt,
       images: request.attachments.map((attachment) => ({
@@ -284,7 +322,8 @@ class LegacyExecution implements AgentExecution {
       nativePath: nativePath(request.nativeSession),
       ...endpoint,
       onAbortable: () => request.admission.markAbortable(),
-    });
+    } satisfies ResumeTurnRequest;
+    await this.#agent.runtime.runTurn(this.#options.prepareResume?.(request, legacy) ?? legacy);
   }
 
   async abort(agentSessionId: string): Promise<boolean> {
@@ -307,21 +346,25 @@ class LegacyExecution implements AgentExecution {
     if (!this.#agent.runtime.submitActiveInput) return false;
     this.#operations.set(request.chatId, request.operation);
     const endpoint = await this.#endpointRuntime(request.endpoint, request.admission.signal);
-    return this.#agent.runtime.submitActiveInput({
-      ...legacyExecutionConfig(request),
+    const legacy = {
+      ...legacyExecutionConfig(request, this.#options.toLegacySettings),
       agentSessionId: request.agentSessionId,
       command: request.prompt,
       nativePath: nativePath(request.nativeSession),
       ...endpoint,
       onAbortable: () => request.admission.markAbortable(),
-    }, request.beforeDelivery);
+    } satisfies ResumeTurnRequest;
+    return this.#agent.runtime.submitActiveInput(
+      this.#options.prepareResume?.(request, legacy) ?? legacy,
+      request.beforeDelivery,
+    );
   }
 
   async compact(request: Parameters<NonNullable<AgentExecution['compact']>>[0]): Promise<void> {
     this.#operations.set(request.chatId, request.operation);
     const endpoint = await this.#endpointRuntime(request.endpoint, request.admission.signal);
     const legacy = {
-      ...legacyExecutionConfig(request),
+      ...legacyExecutionConfig(request, this.#options.toLegacySettings),
       agentSessionId: request.agentSessionId,
       command: request.prompt,
       nativePath: nativePath(request.nativeSession),
@@ -338,7 +381,7 @@ class LegacyExecution implements AgentExecution {
       model: configuration.model,
       permissionMode: configuration.permissionMode,
       thinkingMode: configuration.thinkingMode,
-      ...settingsPatch(configuration.settings),
+      ...mapLegacySettings(configuration.settings, this.#options.toLegacySettings),
     });
   }
 
@@ -399,7 +442,7 @@ class LegacyExecution implements AgentExecution {
       createdAt: '',
       updatedAt: '',
     };
-    this.#onEndpointSelection?.(endpoint, resolved?.value ?? '');
+    this.#options.onEndpointSelection?.(endpoint, resolved?.value ?? '');
     const legacySelection: LegacyEndpointSelection = {
       model: endpoint.model,
       apiProviderId: endpoint.apiProviderId,
@@ -413,16 +456,23 @@ class LegacyExecution implements AgentExecution {
   }
 }
 
-function createTranscript(agent: Agent, agentId: string): AgentTranscript {
+function createTranscript(
+  agent: Agent,
+  agentId: string,
+  toLegacySettings?: LegacyIntegrationOptions['toLegacySettings'],
+): AgentTranscript {
   const load = async (chat: AgentChatReference) => {
-    const messages = await agent.transcript.loadMessages(toLegacyChat(chat), { chatId: chat.chatId });
+    const messages = await agent.transcript.loadMessages(
+      toLegacyChat(chat, toLegacySettings),
+      { chatId: chat.chatId },
+    );
     return { messages, revision: computeAgentTranscriptRevision(messages) };
   };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
       if (!agent.transcript.resolveNativePath) return chat.nativeSession;
-      const resolved = await agent.transcript.resolveNativePath(toLegacyChat(chat));
+      const resolved = await agent.transcript.resolveNativePath(toLegacyChat(chat, toLegacySettings));
       return nativeSession(agentId, resolved);
     },
     async load({ chat, signal }) {
@@ -433,7 +483,7 @@ function createTranscript(agent: Agent, agentId: string): AgentTranscript {
       async loadPage({ chat, page, signal }) {
         signal.throwIfAborted();
         const result = await agent.transcript.loadMessagePage!(
-          toLegacyChat(chat),
+          toLegacyChat(chat, toLegacySettings),
           page,
           { chatId: chat.chatId },
         );
@@ -447,20 +497,171 @@ function createTranscript(agent: Agent, agentId: string): AgentTranscript {
     async preview({ chat, signal }) {
       signal.throwIfAborted();
       if (!agent.transcript.getPreview) return null;
-      return normalizePreview(await agent.transcript.getPreview(toLegacyChat(chat)));
+      return normalizePreview(await agent.transcript.getPreview(toLegacyChat(chat, toLegacySettings)));
     },
     async revision({ chat, signal }) {
       signal.throwIfAborted();
       return (await load(chat)).revision;
     },
-    async release() {},
+    async release({ chat, reason, signal }) {
+      signal.throwIfAborted();
+      await agent.transcript.release?.(toLegacyChat(chat, toLegacySettings), reason);
+    },
   };
+}
+
+async function forkLegacySession(
+  options: LegacyIntegrationOptions,
+  request: AgentForkRequest,
+): Promise<StartedAgentSession | null> {
+  const source = toLegacyChat(request.source, options.toLegacySettings);
+  if (!request.point && options.agent.forkSession) {
+    return options.agent.forkSession({
+      sourceSession: source,
+      sourceChatId: request.source.chatId,
+      targetChatId: request.chatId,
+    });
+  }
+
+  const sourceAgentSessionId = source.agentSessionId;
+  const sourcePath = source.nativePath ?? await options.agent.transcript.resolveNativePath?.(source);
+  if (!sourceAgentSessionId || !sourcePath) {
+    throw new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', 'Source native transcript is unavailable', false);
+  }
+
+  let cutoffLine: number | null = null;
+  let leadingLineCount = 0;
+  let retainedMessageCounts: ReadonlyMap<number, number> | undefined;
+  let expectedForkRevision: string | null = null;
+  if (request.point) {
+    if (!options.agent.capabilities.supportsForkAtMessage) {
+      throw new AgentIntegrationError('OPERATION_UNSUPPORTED', 'Message-point fork is unsupported', false);
+    }
+    if (request.point.sourceRevision.carryOver !== request.source.carryOverRevision) {
+      throw sourceRevisionChanged();
+    }
+    const carryOver = await options.host.carryOver.load({
+      chatId: request.source.chatId,
+      expectedRevision: request.point.sourceRevision.carryOver,
+      currentAgentId: request.source.agentId,
+      currentModel: request.source.model,
+      signal: request.admission.signal,
+    }).catch(() => { throw sourceRevisionChanged(); });
+    const nativeMessages = await options.agent.transcript.loadMessages(source, {
+      chatId: request.source.chatId,
+    });
+    if (computeAgentTranscriptRevision(nativeMessages) !== request.point.sourceRevision.native) {
+      throw sourceRevisionChanged();
+    }
+    const nativeSequence = Math.max(0, request.point.messageSequence - carryOver.messages.length);
+    if (nativeSequence > nativeMessages.length) {
+      throw new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', 'Fork message is outside the source transcript', false);
+    }
+    const sourceLines = nativeMessages
+      .map((message) => getNativeMessageRevisionSource(message)?.lineNumber)
+      .filter((line): line is number => line !== undefined);
+    leadingLineCount = sourceLines.length > 0 ? Math.max(0, Math.min(...sourceLines) - 1) : 0;
+    const retainedNativeMessages = nativeMessages.slice(0, nativeSequence);
+    expectedForkRevision = computeAgentTranscriptRevision(retainedNativeMessages);
+    const retainedCounts = new Map<number, number>();
+    for (const message of retainedNativeMessages) {
+      const sourcePosition = getNativeMessageRevisionSource(message);
+      if (!sourcePosition?.lineNumber) {
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'The selected transcript prefix has no provider-native fork position',
+          false,
+        );
+      }
+      retainedCounts.set(
+        sourcePosition.lineNumber,
+        (retainedCounts.get(sourcePosition.lineNumber) ?? 0) + 1,
+      );
+    }
+    retainedMessageCounts = retainedCounts;
+    if (nativeSequence === 0) {
+      cutoffLine = 0;
+    } else {
+      cutoffLine = Math.max(...retainedCounts.keys());
+    }
+  }
+
+  const result = await forkJsonlTranscript({
+    sourcePath,
+    sourceAgentSessionId,
+    cutoffLine,
+    leadingLineCount,
+    retainedMessageCounts,
+    rewriteEntry: options.agent.transcript.rewriteForkTranscriptEntry,
+  });
+  if (request.point) {
+    const currentMessages = await options.agent.transcript.loadMessages(source, {
+      chatId: request.source.chatId,
+    });
+    if (computeAgentTranscriptRevision(currentMessages) !== request.point.sourceRevision.native) {
+      await fs.rm(result.nativePath, { force: true }).catch(() => undefined);
+      throw sourceRevisionChanged();
+    }
+    const forkedMessages = await options.agent.transcript.loadMessages({
+      ...source,
+      agentSessionId: result.agentSessionId,
+      nativePath: result.nativePath,
+    }, { chatId: request.chatId });
+    if (computeAgentTranscriptRevision(forkedMessages) !== expectedForkRevision) {
+      await fs.rm(result.nativePath, { force: true }).catch(() => undefined);
+      throw new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'The provider-native fork did not preserve the selected message prefix',
+        false,
+      );
+    }
+  }
+  return result;
+}
+
+function sourceRevisionChanged(): AgentIntegrationError {
+  return new AgentIntegrationError(
+    'SOURCE_REVISION_CHANGED',
+    'Source transcript changed while the fork was being created',
+    true,
+  );
+}
+
+function classifyLegacySingleQueryError(error: unknown): AgentIntegrationError {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  const code = normalized.includes('401')
+    || normalized.includes('unauthorized')
+    || normalized.includes('forbidden')
+    || normalized.includes('auth')
+    || normalized.includes('login')
+    || normalized.includes('api key')
+    ? 'AUTH_REQUIRED'
+    : normalized.includes('429')
+      || normalized.includes('rate limit')
+      || normalized.includes('quota')
+      || normalized.includes('too many requests')
+      ? 'RATE_LIMITED'
+      : normalized.includes('timed out')
+        || normalized.includes('timeout')
+        || normalized.includes('deadline')
+        || normalized.includes('etimedout')
+        ? 'TIMEOUT'
+        : normalized.includes('service unavailable')
+          || normalized.includes('unavailable')
+          || normalized.includes('econnrefused')
+          || normalized.includes('enotfound')
+          || normalized.includes('network')
+          ? 'UNAVAILABLE'
+          : 'PROVIDER_FAILURE';
+  return new AgentIntegrationError(code, message, code !== 'AUTH_REQUIRED');
 }
 
 function createCatalog(
   agent: Agent,
   defaultModel: string,
   fallbackModels: readonly AgentModelOption[],
+  generation: { readonly priority: number; readonly model?: string } | null,
 ): AgentCatalog {
   return {
     async snapshot({ strict, signal }) {
@@ -473,14 +674,20 @@ function createCatalog(
         models,
         defaultModel,
         requiresStrictModelDiscovery: agent.capabilities.requiresStrictModelDiscovery,
-        generation: agent.runSingleQuery ? { priority: 0, model: defaultModel } : null,
+        generation: agent.runSingleQuery && generation
+          ? { priority: generation.priority, model: generation.model || defaultModel || models[0]?.value || '' }
+          : null,
         availability: { state: 'ready', reason: 'Integration is registered.' },
       };
     },
   };
 }
 
-function createSettings(agentId: string, defaults: JsonObject): AgentSettings {
+function createSettings(
+  agentId: string,
+  defaults: JsonObject,
+  descriptors: readonly AgentSettingDescriptor[],
+): AgentSettings {
   const envelope = (values: JsonObject): AgentSettingsEnvelope => ({
     ownerId: agentId,
     schemaVersion: 1,
@@ -490,18 +697,43 @@ function createSettings(agentId: string, defaults: JsonObject): AgentSettings {
     if (input.ownerId !== agentId || input.schemaVersion !== 1 || !isRecord(input.values)) {
       throw new AgentIntegrationError('INVALID_SETTINGS', `Invalid settings for ${agentId}`, false);
     }
-    return envelope(input.values);
+    const values = validateSettingValues(input.values, descriptors);
+    return envelope(values);
   };
   return {
-    describe: () => [],
+    describe: () => descriptors,
     defaults: () => envelope(defaults),
     parse,
     migrate: async (input) => parse(input),
     applyPatch(current, patch) {
       const parsed = parse(current);
-      return envelope({ ...parsed.values, ...patch });
+      return envelope(validateSettingValues({ ...parsed.values, ...patch }, descriptors));
     },
   };
+}
+
+function validateSettingValues(
+  values: JsonObject,
+  descriptors: readonly AgentSettingDescriptor[],
+): JsonObject {
+  const byKey = new Map(descriptors.map((descriptor) => [descriptor.key, descriptor]));
+  for (const [key, value] of Object.entries(values)) {
+    const descriptor = byKey.get(key);
+    if (!descriptor) {
+      throw new AgentIntegrationError('INVALID_SETTINGS', `Unknown setting ${key}`, false);
+    }
+    const valid = descriptor.type === 'boolean'
+      ? typeof value === 'boolean'
+      : descriptor.type === 'number'
+        ? typeof value === 'number' && value >= descriptor.min && value <= descriptor.max
+        : descriptor.type === 'enum'
+          ? typeof value === 'string' && descriptor.options.some((option) => option.value === value)
+          : typeof value === 'string';
+    if (!valid) {
+      throw new AgentIntegrationError('INVALID_SETTINGS', `Invalid value for setting ${key}`, false);
+    }
+  }
+  return values;
 }
 
 function createLifecycle(agent: Agent, transcriptSearch: AgentTranscriptSearch): AgentLifecycle {
@@ -524,18 +756,30 @@ function createLifecycle(agent: Agent, transcriptSearch: AgentTranscriptSearch):
   };
 }
 
-function createMigration(agentId: string): AgentMigration {
+function createMigration(agentId: string, settings: AgentSettings): AgentMigration {
   return {
     async translateLegacyNativeSession(request) {
       return nativeSession(agentId, request.legacyNativePath);
     },
     async translateLegacySettings({ legacyValues }) {
-      return { ownerId: agentId, schemaVersion: 1, values: legacyValues };
+      const defaults = settings.defaults();
+      const known = Object.fromEntries(
+        settings.describe().flatMap((descriptor) => (
+          Object.hasOwn(legacyValues, descriptor.key)
+            ? [[descriptor.key, legacyValues[descriptor.key]]]
+            : []
+        )),
+      ) as JsonObject;
+      if (Object.keys(defaults.values).length === 0 && Object.keys(known).length === 0) return null;
+      return settings.applyPatch(defaults, known);
     },
   };
 }
 
-function legacyExecutionConfig(request: AgentExecutionContext) {
+function legacyExecutionConfig(
+  request: AgentExecutionContext,
+  toLegacySettings?: LegacyIntegrationOptions['toLegacySettings'],
+) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
@@ -549,30 +793,28 @@ function legacyExecutionConfig(request: AgentExecutionContext) {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    ...settingsPatch(request.settings),
+    ...mapLegacySettings(request.settings, toLegacySettings),
   };
 }
 
-function settingsPatch(settings: AgentSettingsEnvelope): AgentSessionSettingsPatch {
-  const values = settings.values;
-  return {
-    ...(typeof values.claudeThinkingMode === 'string'
-      ? { claudeThinkingMode: values.claudeThinkingMode as AgentSessionSettingsPatch['claudeThinkingMode'] }
-      : {}),
-    ...(typeof values.ampAgentMode === 'string'
-      ? { ampAgentMode: values.ampAgentMode as AgentSessionSettingsPatch['ampAgentMode'] }
-      : {}),
-  };
+function mapLegacySettings(
+  settings: AgentSettingsEnvelope,
+  mapper?: LegacyIntegrationOptions['toLegacySettings'],
+): AgentSessionSettingsPatch {
+  return mapper?.(settings) ?? {};
 }
 
-function toLegacyChat(chat: AgentChatReference): AgentChatEntry {
+function toLegacyChat(
+  chat: AgentChatReference,
+  toLegacySettings?: LegacyIntegrationOptions['toLegacySettings'],
+): AgentChatEntry {
   return {
     agentId: chat.agentId as AgentChatEntry['agentId'],
     projectPath: chat.projectPath,
     agentSessionId: chat.agentSessionId,
     model: chat.model,
     nativePath: nativePath(chat.nativeSession),
-    ...settingsPatch(chat.settings),
+    ...mapLegacySettings(chat.settings, toLegacySettings),
   };
 }
 

@@ -107,6 +107,11 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
         customPrompt: 'Summarize {{files}}',
       },
     }));
+    agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([{
+      id: 'amp',
+      models: [{ value: 'smart', label: 'Smart' }],
+      generation: { priority: 20, model: 'smart' },
+    }]));
 
     const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
     const body = await response.json();

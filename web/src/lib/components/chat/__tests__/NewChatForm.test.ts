@@ -61,8 +61,7 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 			global: {
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettingsById: {},
 			},
 			byAgent: {},
 		},

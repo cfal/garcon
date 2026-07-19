@@ -36,8 +36,7 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		createdAt: null,
 		lastActivityAt: null,
 		lastReadAt: null,
@@ -58,8 +57,7 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		title: 'Fork',
 		projectPath: '/workspace/repo',
 		effectiveProjectKey: '/workspace/repo',
@@ -218,7 +216,6 @@ describe('ChatActionController', () => {
 			createdAt: '2026-07-14T00:00:00.000Z',
 			lastActivityAt: null,
 			agentSessionId: 'session-1',
-			nativePath: '/native/chat-1',
 		});
 
 		await controller.loadDetails('chat-1', dialogs);
@@ -248,7 +245,6 @@ describe('ChatActionController', () => {
 			effectiveProjectKey: '/workspace/canonical',
 			previousProjectPath: '/workspace/repo',
 			previousEffectiveProjectKey: '/workspace/repo',
-			nativePath: null,
 		});
 		const { controller, callbacks } = createHarness();
 

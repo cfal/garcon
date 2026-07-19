@@ -58,7 +58,11 @@ function makeResolver() {
         },
       ],
     },
-  ]);
+  ], (agentId) => (
+    agentId === 'claude' || agentId === 'direct-anthropic-compatible'
+      ? ['anthropic-messages']
+      : ['openai-compatible']
+  ));
 }
 
 describe('ApiProviderEndpointResolver', () => {
@@ -95,7 +99,7 @@ describe('ApiProviderEndpointResolver', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_openai',
     })).toBe(false);
-    expect(resolver.getModelOptions('direct-openai-compatible')).toHaveLength(1);
+    expect(resolver.getModelOptions('direct-openai-compatible')).toHaveLength(2);
     expect(resolver.getModelOptions('direct-openai-responses-compatible')).toHaveLength(2);
   });
 

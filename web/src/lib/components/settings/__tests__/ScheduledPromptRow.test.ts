@@ -41,8 +41,9 @@ describe('ScheduledPromptRow', () => {
 				modelProtocol: null,
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'high',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettingsById: {
+					codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
+				},
 				tags: ['qa', 'review-needed', 'frontend'],
 			},
 		};

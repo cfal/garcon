@@ -28,4 +28,68 @@ describe('rewriteClaudeForkTranscriptEntry', () => {
     const entry = { sessionId: 'another-session', content: 'unchanged' };
     expect(rewriteClaudeForkTranscriptEntry(entry, context)).toBe(entry);
   });
+
+  it('truncates a multi-message assistant entry at the exact canonical prefix', () => {
+    const entry = {
+      sessionId: context.sourceAgentSessionId,
+      type: 'assistant',
+      timestamp: '2026-07-18T10:00:00.000Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'inspect' },
+          { type: 'text', text: 'first answer' },
+          { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/repo/a.ts' } },
+        ],
+      },
+    };
+
+    expect(rewriteClaudeForkTranscriptEntry(entry, {
+      ...context,
+      retainedMessageCount: 2,
+    })).toEqual({
+      ...entry,
+      sessionId: context.targetAgentSessionId,
+      message: {
+        ...entry.message,
+        content: entry.message.content.slice(0, 2),
+      },
+    });
+  });
+
+  it('retains only selected tool results before an aggregate user message', () => {
+    const entry = {
+      sessionId: context.sourceAgentSessionId,
+      type: 'user',
+      timestamp: '2026-07-18T10:00:00.000Z',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tool-1', content: 'done' },
+          { type: 'text', text: 'follow up' },
+        ],
+      },
+    };
+
+    const rewritten = rewriteClaudeForkTranscriptEntry(entry, {
+      ...context,
+      retainedMessageCount: 1,
+    });
+    expect(rewritten.message.content).toEqual([entry.message.content[0]]);
+  });
+
+  it('neutralizes an unselected provider entry before the physical cutoff', () => {
+    const entry = {
+      sessionId: context.sourceAgentSessionId,
+      type: 'user',
+      message: { role: 'user', content: 'not selected' },
+    };
+    expect(rewriteClaudeForkTranscriptEntry(entry, {
+      ...context,
+      retainedMessageCount: 0,
+    })).toEqual({
+      sessionId: context.targetAgentSessionId,
+      type: 'garcon-fork-filtered',
+    });
+  });
 });

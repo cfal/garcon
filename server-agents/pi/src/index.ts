@@ -32,6 +32,7 @@ export default class PiAgentIntegration extends LegacyAgentIntegrationBase {
         ],
       },
       defaultModel: PI_MODELS.DEFAULT,
+      generation: null,
       models: PI_MODELS.OPTIONS,
     });
   }

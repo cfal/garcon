@@ -1,10 +1,12 @@
-import type { AgentHost } from '@garcon/server-agent-interface';
+import { AgentIntegrationError, type AgentHost } from '@garcon/server-agent-interface';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { CODEX_MODELS } from '@garcon/common/models';
 import { LegacyAgentIntegrationBase } from '@garcon/server-agent-common';
 import { bindAgentHost } from './config.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { createCodexAgent } from './agents/codex/index.js';
+import { parseCodexGoalCommand, type CodexGoalCommand } from './agents/codex/goal-command.js';
+import { renderTranscriptSeed } from '@garcon/server-agent-common/shared/transcript-seed';
 
 export default class CodexAgentIntegration extends LegacyAgentIntegrationBase {
   static readonly integrationId = 'codex';
@@ -35,7 +37,40 @@ export default class CodexAgentIntegration extends LegacyAgentIntegrationBase {
         ],
       },
       defaultModel: CODEX_MODELS.DEFAULT,
+      generation: { priority: 30, model: CODEX_MODELS.DEFAULT },
       models: CODEX_MODELS.OPTIONS,
+      prepareStart(request, legacy) {
+        const goal = parseCodexGoalCommand(request.prompt);
+        if (!goal) return legacy;
+        if (goal.kind !== 'set') {
+          throw new AgentIntegrationError(
+            'INVALID_SETTINGS',
+            'Start a Codex session with /goal <objective> before using goal controls.',
+            false,
+          );
+        }
+        return {
+          ...legacy,
+          command: goal.objective,
+          codexGoalCommand: goal,
+          ...(request.carryOver.length > 0
+            ? { codexSeedContext: renderTranscriptSeed([...request.carryOver]) }
+            : {}),
+        };
+      },
+      prepareResume(request, legacy) {
+        const goal = parseCodexGoalCommand(request.prompt);
+        if (!goal) return legacy;
+        return {
+          ...legacy,
+          command: goalObjective(goal) ?? request.prompt,
+          codexGoalCommand: goal,
+        };
+      },
     });
   }
+}
+
+function goalObjective(goal: CodexGoalCommand): string | null {
+  return 'objective' in goal && typeof goal.objective === 'string' ? goal.objective : null;
 }

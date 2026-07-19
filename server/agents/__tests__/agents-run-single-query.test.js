@@ -1,827 +1,114 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 
-const claudeQuery = mock(async () => 'claude-response');
-const codexQuery = mock(async () => 'codex-response');
-const ampQuery = mock(async () => 'amp-response');
-const cursorQuery = mock(async () => 'cursor-response');
-const factoryQuery = mock(async () => 'factory-response');
-const piQuery = mock(async () => 'pi-response');
-const originalFetch = globalThis.fetch;
+import { AgentRuntimeRouter } from '../runtime-router.ts';
 
-mock.module('../claude/claude-cli.js', () => ({
-  runSingleQuery: claudeQuery,
-}));
+const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 
-mock.module('../codex/app-server/run-single-query.js', () => ({
-  runSingleQuery: codexQuery,
-}));
-
-mock.module('../amp/amp-cli.js', () => ({
-  runSingleQuery: ampQuery,
-}));
-
-mock.module('../cursor/run-single-query.js', () => ({
-  runSingleQuery: cursorQuery,
-}));
-
-mock.module('../factory/factory-cli.js', () => ({
-  runSingleQuery: factoryQuery,
-}));
-
-mock.module('../pi/pi-cli.js', () => ({
-  runSingleQuery: piQuery,
-}));
-
-mock.module('../claude/history-loader.js', () => ({
-  getClaudePreviewFromNativePath: mock(() => Promise.resolve(null)),
-  loadClaudeChatMessages: mock(() => Promise.resolve([])),
-  loadClaudeChatMessagePage: mock(() => Promise.resolve(null)),
-}));
-
-mock.module('../codex/history-loader.js', () => ({
-  getCodexPreviewFromNativePath: mock(() => Promise.resolve(null)),
-  loadCodexChatMessages: mock(() => Promise.resolve([])),
-  loadCodexChatMessagePage: mock(() => Promise.resolve(null)),
-}));
-
-mock.module('../opencode/history-loader.js', () => ({
-  getOpenCodePreviewFromSessionId: mock(() => Promise.resolve(null)),
-  loadOpenCodeChatMessages: mock(() => Promise.resolve([])),
-}));
-
-mock.module('../factory/history-loader.js', () => ({
-  getFactoryPreviewFromSessionId: mock(() => Promise.resolve(null)),
-  loadFactoryChatMessagesBySessionId: mock(() => Promise.resolve([])),
-}));
-
-mock.module('../direct/history-loader.js', () => ({
-  getDirectCompatiblePreviewFromSessionId: mock(() => Promise.resolve(null)),
-  loadDirectCompatibleChatMessages: mock(() => Promise.resolve([])),
-}));
-
-import { AgentRegistry } from '../registry.js';
-import { createAgentCapabilities } from '../../agents/capabilities.js';
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
-
-function makeEndpointResolver(endpointOptions = {}) {
-  return {
-    getModelOptions: mock((agentId) => endpointOptions[agentId] ?? []),
-    resolveSelection: mock(({ model, apiProviderId = null, modelEndpointId = null }) => ({
-      model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
-      apiProviderId,
-      endpointId: modelEndpointId,
-      protocol: modelEndpointId ? 'openai-compatible' : null,
+function makeRouter(overrides = {}) {
+  const run = mock(async () => 'response');
+  const integration = {
+    descriptor: { id: 'test' },
+    settings: {
+      defaults: mock(() => envelope('test', { defaulted: true })),
+      parse: mock((input) => input),
+    },
+    endpoints: { validate: mock(async () => {}) },
+    singleQuery: overrides.singleQuery === null ? null : { run },
+  };
+  const endpointResolver = {
+    resolveSelection: mock((request) => ({
+      model: request.model.startsWith('endpoint:') ? request.model.slice('endpoint:'.length) : request.model,
+      apiProviderId: request.apiProviderId,
+      endpointId: request.modelEndpointId,
+      protocol: request.modelEndpointId ? 'openai-compatible' : null,
       isLocal: false,
     })),
-    resolveEndpointReference: mock(() => null),
-    modelSupportsImages: mock(() => false),
+    resolveEndpointReference: mock((selection) => selection.endpointId ? ({
+      apiProvider: { id: selection.apiProviderId },
+      endpoint: { id: selection.endpointId, baseUrl: 'https://example.test/v1' },
+    }) : null),
   };
-}
-
-function makeApiProviderStore(apiProviders = []) {
-  return {
-    list: () => apiProviders,
-    redactedList: () => apiProviders,
-    getApiProvider: mock((apiProviderId) => apiProviders.find((apiProvider) => apiProvider.id === apiProviderId) ?? null),
-    getEndpoint: mock((endpointId) => {
-      for (const apiProvider of apiProviders) {
-        const endpoint = apiProvider.endpoints?.find((entry) => entry.id === endpointId);
-        if (endpoint) return { apiProvider, endpoint };
-      }
-      return null;
-    }),
-    createApiProvider: mock((input) => Promise.resolve({
-      id: 'custom_acme',
-      label: input.label,
-      templateId: input.templateId,
-      createdAt: '2026-05-04T00:00:00.000Z',
-      updatedAt: '2026-05-04T00:00:00.000Z',
-      endpoints: [{
-        id: 'custom_acme_openai',
-        protocol: input.protocol,
-        baseUrl: input.baseUrl,
-        apiKey: input.apiKey ?? '',
-        capabilities: input.capabilities,
-        defaultModel: input.defaultModel,
-        models: input.models,
-        supportsImages: input.supportsImages ?? false,
-        modelDiscovery: input.modelDiscovery,
-      }],
-    })),
-    updateApiProvider: mock(),
-    deleteApiProvider: mock(),
-  };
-}
-
-function baseRuntime(overrides = {}) {
-  return {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'session', nativePath: null })),
-    runTurn: mock(() => Promise.resolve()),
-    abort: mock(() => false),
-    isRunning: mock(() => false),
-    getRunningSessions: mock(() => []),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-    ...overrides,
-  };
-}
-
-function agentFromRuntime(
-  id,
-  label,
-  runtime,
-  capabilities,
-  runSingleQuery,
-  prepareEndpointRuntime,
-  transcript = {},
-) {
-  return {
-    id,
-    label,
-    runtime,
-    transcript: {
-      async loadMessages() { return []; },
-      async getPreview() { return null; },
-      ...transcript,
-    },
-    auth: {
-      getAuthStatus: async () => ({
-        authenticated: false,
-        canReauth: false,
-        label: '',
-        source: 'none',
+  const router = new AgentRuntimeRouter({
+    registry: { getChat: mock(() => null) },
+    directory: {
+      require: mock((id) => {
+        if (id !== 'test') throw new Error(`Unknown integration: ${id}`);
+        return integration;
       }),
+      get: mock((id) => id === 'test' ? integration : null),
+      list: mock(() => [integration]),
     },
-    capabilities: createAgentCapabilities({
-      ...capabilities,
-      ...(runtime.getModels ? { getModels: () => runtime.getModels() } : {}),
-    }),
-    ...(prepareEndpointRuntime ? { prepareEndpointRuntime } : {}),
-    ...(runSingleQuery ? { runSingleQuery } : {}),
-  };
+    endpointResolver,
+    events: {},
+    getCarryOverRevision: () => 'carry-1',
+    loadCarryOver: () => [],
+  });
+  return { router, integration, endpointResolver, run };
 }
 
-function makeRegistry(args = {}) {
-  const mockRegistry = {
-    getChat: mock(() => null),
-    getChatByAgentSessionId: mock(() => null),
-    listAllChats: mock(() => ({})),
-    updateChat: mock((chatId, patch) => ({ id: chatId, ...patch })),
-    onChatRemoved: mock(() => undefined),
-    ...args.registry,
-  };
-  const opencode = {
-    startSession: mock(() => Promise.resolve('opencode-session')),
-    runTurn: mock(() => Promise.resolve()),
-    isRunning: mock(() => false),
-    abort: mock(() => false),
-    getRunningSessions: mock(() => []),
-    runSingleQuery: mock(async () => 'opencode-response'),
-    getModels: mock(() => []),
-    getClient: mock(() => null),
-    getClientIfInitialized: mock(() => null),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-  };
-  const claude = {
-    startClaudeCliSession: mock(() => Promise.resolve()),
-    runClaudeTurn: mock(() => Promise.resolve()),
-    isClaudeInternalSessionRunning: mock(() => false),
-    abortClaudeInternalSession: mock(() => false),
-    getRunningClaudeInternalSessions: mock(() => []),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-  };
-  const codex = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'codex-session', nativePath: null })),
-    runTurn: mock(() => Promise.resolve()),
-    isRunning: mock(() => false),
-    abort: mock(() => false),
-    getRunningSessions: mock(() => []),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-  };
-  const amp = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'amp-session', nativePath: 'amp:amp-session' })),
-    runTurn: mock(() => Promise.resolve()),
-    isRunning: mock(() => false),
-    abort: mock(() => false),
-    getRunningSessions: mock(() => []),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-  };
-  const cursor = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'cursor-session', nativePath: '!cursor-acp:cursor-session' })),
-    runTurn: mock(() => Promise.resolve()),
-    isRunning: mock(() => false),
-    abort: mock(() => false),
-    getRunningSessions: mock(() => []),
-    getModels: mock(() => []),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-  };
-  const factory = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'factory-session', nativePath: 'factory:factory-session' })),
-    runTurn: mock(() => Promise.resolve()),
-    getRunningSessions: mock(() => []),
-    isRunning: mock(() => false),
-    abort: mock(() => false),
-    getModels: mock(() => []),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-  };
-  const pi = {
-    startSession: mock(() => Promise.resolve({ agentSessionId: 'pi-session', nativePath: '/tmp/pi-session.jsonl' })),
-    runTurn: mock(() => Promise.resolve()),
-    getRunningSessions: mock(() => []),
-    isRunning: mock(() => false),
-    abort: mock(() => false),
-    getModels: mock(() => [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }]),
-    startPurgeTimer: mock(() => {}),
-    onMessages: mock(() => {}),
-    onProcessing: mock(() => {}),
-    onSessionCreated: mock(() => {}),
-    onFinished: mock(() => {}),
-    onFailed: mock(() => {}),
-  };
+describe('AgentRuntimeRouter.runSingleQuery', () => {
+  it('routes through the selected integration with parsed defaults', async () => {
+    const { router, integration, run } = makeRouter();
 
-  return {
-    registry: new AgentRegistry({
-      registry: mockRegistry,
-      agents: [
-        agentFromRuntime('claude', 'Claude', baseRuntime(), {
-          supportsFork: true,
-          supportsForkAtMessage: true,
-          supportsUpdateProjectPath: true,
-          supportsImages: true,
-          acceptsApiProviderEndpoints: true,
-          supportedProtocols: ['anthropic-messages'],
-          authLoginSupported: true,
-        }, claudeQuery, args.prepareEndpointRuntimeByAgentId?.claude),
-        agentFromRuntime('codex', 'Codex', baseRuntime({
-          startSession: codex.startSession,
-          runTurn: codex.runTurn,
-          abort: codex.abort,
-          isRunning: codex.isRunning,
-          getRunningSessions: codex.getRunningSessions,
-        }), {
-          supportsFork: true,
-          supportsForkAtMessage: true,
-          supportsForkWhileRunning: true,
-          supportsUpdateProjectPath: true,
-          supportsImages: true,
-          acceptsApiProviderEndpoints: true,
-          supportedProtocols: ['openai-compatible'],
-          authLoginSupported: true,
-        }, codexQuery, args.prepareEndpointRuntimeByAgentId?.codex),
-        agentFromRuntime('opencode', 'OpenCode', baseRuntime({
-          async startSession(request) {
-            const agentSessionId = await opencode.startSession(request);
-            return { agentSessionId, nativePath: `opencode:${agentSessionId}` };
-          },
-          runTurn: opencode.runTurn,
-          abort: opencode.abort,
-          isRunning: opencode.isRunning,
-          getRunningSessions: opencode.getRunningSessions,
-          getModels: opencode.getModels,
-        }), {
-          supportsFork: false,
-          supportsImages: false,
-          acceptsApiProviderEndpoints: false,
-          supportedProtocols: [],
-          authLoginSupported: false,
-        }, opencode.runSingleQuery, args.prepareEndpointRuntimeByAgentId?.opencode),
-        agentFromRuntime('amp', 'Amp', amp, {
-          supportsFork: false,
-          supportsImages: false,
-          acceptsApiProviderEndpoints: false,
-          supportedProtocols: [],
-          authLoginSupported: false,
-        }, ampQuery, args.prepareEndpointRuntimeByAgentId?.amp),
-        agentFromRuntime('cursor', 'Cursor', cursor, {
-          supportsFork: true,
-          supportsForkAtMessage: false,
-          supportsUpdateProjectPath: true,
-          supportsImages: false,
-          acceptsApiProviderEndpoints: false,
-          supportedProtocols: [],
-          authLoginSupported: false,
-        }, cursorQuery, args.prepareEndpointRuntimeByAgentId?.cursor),
-        agentFromRuntime('factory', 'Factory', factory, {
-          supportsFork: false,
-          supportsImages: false,
-          acceptsApiProviderEndpoints: false,
-          supportedProtocols: [],
-          authLoginSupported: false,
-        }, factoryQuery, args.prepareEndpointRuntimeByAgentId?.factory),
-        agentFromRuntime('pi', 'Pi', pi, {
-          supportsFork: true,
-          supportsForkAtMessage: false,
-          supportsUpdateProjectPath: true,
-          supportsImages: false,
-          acceptsApiProviderEndpoints: false,
-          supportedProtocols: [],
-          authLoginSupported: false,
-        }, piQuery, args.prepareEndpointRuntimeByAgentId?.pi),
-        ...(args.agents ?? []),
-      ],
-      endpointResolver: args.endpointResolver ?? makeEndpointResolver(),
-      apiProviderStore: args.apiProviderStore ?? makeApiProviderStore(),
-    }),
-    mockRegistry,
-    claude,
-    codex,
-    opencode,
-    amp,
-    cursor,
-    factory,
-    pi,
-  };
-}
+    await expect(router.runSingleQuery('prompt', { agentId: 'test', model: 'model-a', projectPath: '/repo' }))
+      .resolves.toBe('response');
 
-describe('AgentRegistry fork transcript rewriting', () => {
-  it('delegates structured entries to the owning transcript source', () => {
-    const rewritten = { sessionId: 'target' };
-    const rewriteForkTranscriptEntry = mock(() => rewritten);
-    const owner = agentFromRuntime(
-      'fork-test',
-      'Fork Test',
-      baseRuntime(),
-      {
-        supportsFork: true,
-        supportsImages: false,
-        acceptsApiProviderEndpoints: false,
-        supportedProtocols: [],
-        authLoginSupported: false,
-      },
-      undefined,
-      undefined,
-      { rewriteForkTranscriptEntry },
-    );
-    const { registry } = makeRegistry({ agents: [owner] });
-    const entry = { sessionId: 'source' };
-    const context = {
-      sourceAgentSessionId: 'source',
-      targetAgentSessionId: 'target',
-    };
-
-    expect(registry.rewriteForkTranscriptEntry('fork-test', entry, context)).toBe(rewritten);
-    expect(rewriteForkTranscriptEntry).toHaveBeenCalledWith(entry, context);
-    expect(registry.rewriteForkTranscriptEntry('missing-agent', entry, context)).toBe(entry);
-  });
-});
-
-describe('AgentRegistry.runSingleQuery', () => {
-  beforeEach(() => {
-    claudeQuery.mockClear();
-    codexQuery.mockClear();
-    ampQuery.mockClear();
-    cursorQuery.mockClear();
-    factoryQuery.mockClear();
-    piQuery.mockClear();
-  });
-
-  it('routes one-shot prompts to native agents', async () => {
-    const { registry, opencode } = makeRegistry();
-
-    expect(await registry.runSingleQuery('prompt', {})).toBe('claude-response');
-    expect(await registry.runSingleQuery('prompt', { agentId: 'codex' })).toBe('codex-response');
-    expect(await registry.runSingleQuery('prompt', { agentId: 'opencode' })).toBe('opencode-response');
-    expect(await registry.runSingleQuery('prompt', { agentId: 'amp' })).toBe('amp-response');
-    expect(await registry.runSingleQuery('prompt', { agentId: 'cursor' })).toBe('cursor-response');
-    expect(await registry.runSingleQuery('prompt', { agentId: 'factory' })).toBe('factory-response');
-    expect(await registry.runSingleQuery('prompt', { agentId: 'pi' })).toBe('pi-response');
-    expect(opencode.runSingleQuery).toHaveBeenCalled();
-  });
-
-  it('resolves API-provider model selections before one-shot execution', async () => {
-    const endpointResolver = makeEndpointResolver();
-    const codexConfig = {
-      config: {
-        model_provider: 'garcon_acme_openai',
-        model_providers: {
-          garcon_acme_openai: {
-            name: 'Acme',
-            base_url: 'https://api.acme.test/v1',
-            wire_api: 'responses',
-            requires_openai_auth: false,
-            supports_websockets: false,
-          },
-        },
-      },
-    };
-    endpointResolver.resolveSelection.mockImplementation(({ model, apiProviderId = null, modelEndpointId = null }) => ({
-      model: modelEndpointId ? model.replace(`${modelEndpointId}:`, '') : model,
-      apiProviderId,
-      endpointId: modelEndpointId,
-      protocol: modelEndpointId ? 'openai-compatible' : null,
-      isLocal: false,
+    expect(integration.settings.parse).toHaveBeenCalledWith(envelope('test', { defaulted: true }));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'prompt',
+      projectPath: '/repo',
+      model: 'model-a',
+      settings: envelope('test', { defaulted: true }),
+      endpoint: null,
+      signal: expect.any(AbortSignal),
     }));
-    endpointResolver.resolveEndpointReference.mockReturnValue({
-      apiProvider: { id: 'acme', label: 'Acme', endpoints: [] },
-      endpoint: { id: 'acme_openai', protocol: 'openai-compatible' },
-    });
-    const prepareEndpointRuntime = mock(() => ({ codexConfig }));
-    const { registry } = makeRegistry({
-      endpointResolver,
-      prepareEndpointRuntimeByAgentId: { codex: prepareEndpointRuntime },
-    });
+  });
 
-    await registry.runSingleQuery('hello', {
-      agentId: 'codex',
-      model: 'acme_openai:acme-code',
-      apiProviderId: 'acme',
-      modelEndpointId: 'acme_openai',
+  it('passes an owner-bound settings envelope and provider-neutral endpoint selection', async () => {
+    const { router, integration, endpointResolver, run } = makeRouter();
+    const settings = envelope('test', { effort: 'high' });
+
+    await router.runSingleQuery('prompt', {
+      agentId: 'test',
+      model: 'endpoint:model-a',
+      apiProviderId: 'provider-a',
+      modelEndpointId: 'endpoint-a',
+      agentSettings: settings,
     });
 
     expect(endpointResolver.resolveSelection).toHaveBeenCalledWith({
-      agentId: 'codex',
-      model: 'acme_openai:acme-code',
-      apiProviderId: 'acme',
-      modelEndpointId: 'acme_openai',
+      agentId: 'test',
+      model: 'endpoint:model-a',
+      apiProviderId: 'provider-a',
+      modelEndpointId: 'endpoint-a',
     });
-    expect(codexQuery).toHaveBeenCalledWith('hello', {
-      model: 'acme-code',
-      apiProviderId: 'acme',
-      modelEndpointId: 'acme_openai',
-      modelProtocol: 'openai-compatible',
-      codexConfig,
-    });
-    expect(prepareEndpointRuntime).toHaveBeenCalled();
-  });
-});
-
-describe('AgentRegistry.updateSessionSettings', () => {
-  it('applies one typed patch to the live runtime and chat registry', async () => {
-    const runtime = baseRuntime({
-      updateSessionSettings: mock(() => Promise.resolve()),
-    });
-    const { registry, mockRegistry } = makeRegistry({
-      registry: {
-        getChat: mock(() => ({
-          agentId: 'test-agent',
-          agentSessionId: 'native-1',
-          projectPath: '/repo',
-          model: 'model-a',
-        })),
-        updateChat: mock((_chatId, patch) => ({ id: '1', ...patch })),
-      },
-      agents: [
-        agentFromRuntime('test-agent', 'Test Agent', runtime, {
-          supportsFork: false,
-          supportsImages: false,
-          acceptsApiProviderEndpoints: false,
-          supportedProtocols: [],
-          authLoginSupported: false,
-        }),
-      ],
-    });
-
-    await registry.updateSessionSettings('1', {
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'medium',
-      model: 'model-b',
-    });
-
-    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('native-1', {
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'medium',
-    });
-    expect(mockRegistry.updateChat).toHaveBeenCalledWith('1', {
-      permissionMode: 'acceptEdits',
-      thinkingMode: 'medium',
-      model: 'model-b',
-    });
-  });
-});
-
-describe('AgentRegistry catalog', () => {
-  it('returns agent catalog entries', async () => {
-    const endpointOption = {
-      value: 'acme_openai:acme-code',
-      label: 'Acme: Acme Code',
-      apiProviderId: 'acme',
-      endpointId: 'acme_openai',
-      rawModel: 'acme-code',
+    expect(integration.endpoints.validate).toHaveBeenCalledWith(expect.objectContaining({
+      endpointId: 'endpoint-a',
       protocol: 'openai-compatible',
-    };
-    const anthropicEndpointOption = {
-      value: 'acme_anthropic:acme-sonnet',
-      label: 'Acme: Acme Sonnet',
-      apiProviderId: 'acme',
-      endpointId: 'acme_anthropic',
-      rawModel: 'acme-sonnet',
-      protocol: 'anthropic-messages',
-    };
-    const { registry } = makeRegistry({
-      endpointResolver: makeEndpointResolver({
-        codex: [endpointOption],
-        'direct-openai-compatible': [endpointOption],
-        'direct-openai-responses-compatible': [endpointOption],
-        'direct-anthropic-compatible': [anthropicEndpointOption],
-      }),
-      agents: [
-        agentFromRuntime('direct-openai-compatible', 'Direct (Chat Completions)', baseRuntime({
-          getModels: mock(() => [{ value: 'raw-openai', label: 'Raw OpenAI' }]),
-        }), {
-          supportsFork: false,
-          supportsImages: true,
-          acceptsApiProviderEndpoints: true,
-          supportedProtocols: ['openai-compatible'],
-          authLoginSupported: false,
-        }),
-        agentFromRuntime('direct-openai-responses-compatible', 'Direct (Responses)', baseRuntime({
-          getModels: mock(() => [{ value: 'raw-openai-response', label: 'Raw OpenAI Response' }]),
-        }), {
-          supportsFork: false,
-          supportsImages: true,
-          acceptsApiProviderEndpoints: true,
-          supportedProtocols: ['openai-compatible'],
-          authLoginSupported: false,
-        }),
-        agentFromRuntime('direct-anthropic-compatible', 'Direct (Anthropic)', baseRuntime({
-          getModels: mock(() => [{ value: 'raw-anthropic', label: 'Raw Anthropic' }]),
-        }), {
-          supportsFork: false,
-          supportsImages: true,
-          acceptsApiProviderEndpoints: true,
-          supportedProtocols: ['anthropic-messages'],
-          authLoginSupported: false,
-        }),
-      ],
-    });
-
-    const catalog = await registry.getAgentCatalogEntries();
-    expect(catalog.find((entry) => entry.id === 'claude')?.supportsForkAtMessage).toBe(true);
-    expect(catalog.find((entry) => entry.id === 'codex')?.supportsForkAtMessage).toBe(true);
-    expect(catalog.find((entry) => entry.id === 'codex')?.supportsForkWhileRunning).toBe(true);
-    expect(catalog.find((entry) => entry.id === 'cursor')?.supportsForkAtMessage).toBe(false);
-    expect(catalog.find((entry) => entry.id === 'pi')?.supportsForkAtMessage).toBe(false);
-    expect(catalog.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
-    expect(catalog.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
-    expect(catalog.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);
-    expect(catalog.find((entry) => entry.id === 'direct-anthropic-compatible')?.models).toEqual([anthropicEndpointOption]);
-  });
-
-  it('uses Cursor discovered models without static fallbacks', async () => {
-    const { registry, cursor } = makeRegistry();
-    cursor.getModels.mockReturnValueOnce([{ value: 'auto', label: 'Auto', supportsImages: false }]);
-
-    const catalog = await registry.getAgentCatalogEntries();
-    const cursorEntry = catalog.find((entry) => entry.id === 'cursor');
-
-    expect(cursorEntry?.models).toEqual([{ value: 'auto', label: 'Auto', supportsImages: false }]);
-    expect(cursorEntry?.defaultModel).toBe('auto');
-  });
-
-});
-
-describe('AgentRegistry session option hydration', () => {
-  it('hydrates execution modes from the registry on new-session startup', async () => {
-    const { registry, opencode } = makeRegistry({
-      registry: {
-        getChat: mock(() => ({
-          agentId: 'opencode',
-          projectPath: '/proj',
-          model: 'openai/gpt-5',
-          permissionMode: 'bypassPermissions',
-          thinkingMode: 'medium',
-        })),
+    }));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'model-a',
+      settings,
+      endpoint: {
+        apiProviderId: 'provider-a',
+        endpointId: 'endpoint-a',
+        protocol: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        model: 'model-a',
+        isLocal: false,
+        credential: {
+          kind: 'api-provider-endpoint',
+          apiProviderId: 'provider-a',
+          endpointId: 'endpoint-a',
+        },
       },
-    });
-
-    await registry.startSession('123', 'hello', {});
-
-    expect(opencode.startSession).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'hello',
-      projectPath: '/proj',
-      model: 'openai/gpt-5',
-      permissionMode: 'bypassPermissions',
-      thinkingMode: 'medium',
-      claudeThinkingMode: 'auto',
-      images: undefined,
-      chatId: '123',
-      onAbortable: expect.any(Function),
     }));
   });
 
-  it('publishes new-session abortability only after the session abort route is durable', async () => {
-    const providerReady = deferred();
-    const releaseStartup = deferred();
-    let entry = {
-      agentId: 'abortable-start',
-      projectPath: '/proj',
-      model: 'test-model',
-      permissionMode: 'default',
-      thinkingMode: 'none',
-    };
-    const runtime = baseRuntime({
-      startSession: mock(async (request) => {
-        request.onAbortable();
-        providerReady.resolve();
-        await releaseStartup.promise;
-        return { agentSessionId: 'started-session', nativePath: null };
-      }),
-      isRunning: mock((agentSessionId) => agentSessionId === 'started-session'),
-      abort: mock(() => true),
-    });
-    const owner = agentFromRuntime(
-      'abortable-start',
-      'Abortable Start',
-      runtime,
-      {
-        supportsFork: false,
-        supportsImages: false,
-        acceptsApiProviderEndpoints: false,
-        supportedProtocols: [],
-        authLoginSupported: false,
-      },
-    );
-    const { registry } = makeRegistry({
-      registry: {
-        getChat: mock(() => entry),
-        updateChat: mock(async (_chatId, patch) => {
-          entry = { ...entry, ...patch };
-          return entry;
-        }),
-      },
-      agents: [owner],
-    });
-    const turn = { clientRequestId: 'req-start', turnId: 'turn-start' };
+  it('rejects integrations without the optional one-shot facet', async () => {
+    const { router } = makeRouter({ singleQuery: null });
 
-    const startup = registry.startSession('chat-start', 'hello', turn);
-    await providerReady.promise;
-    let abortabilityPublished = false;
-    const abortable = registry.waitUntilTurnAbortable('chat-start', turn).then((value) => {
-      abortabilityPublished = true;
-      return value;
-    });
-    await Promise.resolve();
-
-    expect(abortabilityPublished).toBe(false);
-    await expect(registry.abortSession('chat-start')).resolves.toBe(false);
-
-    releaseStartup.resolve();
-    await startup;
-
-    await expect(abortable).resolves.toBe(true);
-    await expect(registry.abortSession('chat-start')).resolves.toBe(true);
-    expect(runtime.abort).toHaveBeenCalledWith('started-session');
-  });
-
-  it('forwards current Direct effort through start, resume, overrides, and compact fallback', async () => {
-    let entry = {
-      agentId: 'direct-openai-compatible',
-      projectPath: '/proj',
-      model: 'reasoning-model',
-      permissionMode: 'default',
-      thinkingMode: 'high',
-    };
-    const getChat = mock(() => entry);
-    const updateChat = mock((_chatId, patch) => {
-      entry = { ...entry, ...patch };
-      return entry;
-    });
-    const directRuntime = baseRuntime({
-      startSession: mock(() => Promise.resolve({
-        agentSessionId: 'direct-session',
-        nativePath: '/tmp/direct-session.jsonl',
-      })),
-    });
-    const directAgent = agentFromRuntime(
-      'direct-openai-compatible',
-      'Direct (Chat Completions)',
-      directRuntime,
-      {
-        supportsFork: false,
-        supportsImages: true,
-        acceptsApiProviderEndpoints: true,
-        supportedProtocols: ['openai-compatible'],
-        authLoginSupported: false,
-      },
-    );
-    const { registry } = makeRegistry({
-      registry: { getChat, updateChat },
-      agents: [directAgent],
-    });
-
-    await registry.startSession('chat-1', 'first', {});
-    expect(directRuntime.startSession).toHaveBeenCalledWith(expect.objectContaining({
-      thinkingMode: 'high',
-    }));
-
-    await registry.updateSessionSettings('chat-1', { thinkingMode: 'low' });
-    expect(updateChat).toHaveBeenCalledWith('chat-1', { thinkingMode: 'low' });
-
-    await registry.runAgentTurn('chat-1', 'second', {});
-    await registry.runAgentTurn('chat-1', 'third', { thinkingMode: 'medium' });
-    await registry.compactSession('chat-1');
-    await registry.runAgentTurn('chat-1', 'fourth', { thinkingMode: 'ultra' });
-
-    expect(directRuntime.runTurn.mock.calls.map((call) => ({
-      command: call[0].command,
-      thinkingMode: call[0].thinkingMode,
-    }))).toEqual([
-      { command: 'second', thinkingMode: 'low' },
-      { command: 'third', thinkingMode: 'medium' },
-      { command: '/compact', thinkingMode: 'low' },
-      { command: 'fourth', thinkingMode: 'none' },
-    ]);
-  });
-
-  it('stores API provider selection metadata after session startup', async () => {
-    const endpointResolver = makeEndpointResolver();
-    const { registry, mockRegistry } = makeRegistry({
-      endpointResolver,
-      registry: {
-        getChat: mock(() => ({
-          agentId: 'codex',
-          projectPath: '/proj',
-          model: 'acme_openai:acme-code',
-          apiProviderId: 'acme',
-          modelEndpointId: 'acme_openai',
-          permissionMode: 'default',
-          thinkingMode: 'none',
-        })),
-      },
-    });
-
-    await registry.startSession('123', 'hello', {});
-
-    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
-      agentSessionId: 'codex-session',
-      nativePath: null,
-      apiProviderId: 'acme',
-      modelEndpointId: 'acme_openai',
-      modelProtocol: 'openai-compatible',
-    }, { flush: true });
-  });
-
-  it('aborts a newly started runtime when session binding cannot be flushed', async () => {
-    const bindError = new Error('disk full');
-    const { registry, mockRegistry, codex } = makeRegistry({
-      registry: {
-        getChat: mock(() => ({
-          agentId: 'codex',
-          projectPath: '/proj',
-          model: 'gpt-5',
-          permissionMode: 'default',
-          thinkingMode: 'none',
-        })),
-        updateChat: mock(() => Promise.reject(bindError)),
-      },
-    });
-
-    await expect(registry.startSession('123', 'hello', {})).rejects.toThrow('disk full');
-
-    expect(mockRegistry.updateChat).toHaveBeenCalledWith('123', {
-      agentSessionId: 'codex-session',
-      nativePath: null,
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-    }, { flush: true });
-    expect(codex.abort).toHaveBeenCalledWith('codex-session');
+    await expect(router.runSingleQuery('prompt', { agentId: 'test' }))
+      .rejects.toThrow('Single query unsupported for agent: test');
   });
 });

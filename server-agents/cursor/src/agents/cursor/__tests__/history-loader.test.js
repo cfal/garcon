@@ -14,10 +14,6 @@ import {
   normalizeCursorBlobs,
   readCursorBlobs,
 } from '../history-loader.js';
-import {
-  loadCursorSearchTranscriptFromPath,
-  probeCursorDatabase,
-} from '../search-transcript-source.js';
 
 let tempRoot;
 
@@ -319,7 +315,7 @@ describe('Cursor history loader', () => {
     });
   });
 
-  it('keeps search ordering equivalent to the binary conversation graph', async () => {
+  it('keeps binary conversation graph ordering stable', async () => {
     const storeDbPath = path.join(tempRoot, 'graph.db');
     const db = new Database(storeDbPath);
     const firstMessageId = 'aa'.repeat(32);
@@ -361,36 +357,7 @@ describe('Cursor history loader', () => {
     }
 
     const display = normalizeCursorBlobs(readCursorBlobs(storeDbPath));
-    const search = [];
-    for await (const batch of loadCursorSearchTranscriptFromPath(storeDbPath, {
-      signal: new AbortController().signal,
-      batchSize: 1,
-      scratchDirectory: path.join(tempRoot, 'scratch'),
-    })) search.push(...batch);
-
-    expect(search).toEqual(display);
-    expect(search.map((message) => message.content)).toEqual(['first in graph', 'second in graph']);
-  });
-
-  it('changes the Cursor source probe for committed WAL-only updates', async () => {
-    const storeDbPath = path.join(tempRoot, 'wal-probe.db');
-    const db = new Database(storeDbPath);
-    try {
-      db.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)');
-      db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-      const mainBefore = await fs.stat(storeDbPath, { bigint: true });
-      const probeBefore = await probeCursorDatabase(storeDbPath);
-
-      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run('wal-entry', Buffer.from('{}'));
-
-      const mainAfter = await fs.stat(storeDbPath, { bigint: true });
-      const probeAfter = await probeCursorDatabase(storeDbPath);
-      expect(mainAfter.size).toBe(mainBefore.size);
-      expect(mainAfter.mtimeNs).toBe(mainBefore.mtimeNs);
-      expect(probeAfter).not.toBe(probeBefore);
-    } finally {
-      db.close();
-    }
+    expect(display.map((message) => message.content)).toEqual(['first in graph', 'second in graph']);
   });
 
 });

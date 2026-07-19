@@ -32,6 +32,7 @@ export function createDirectAnthropicAgent(
     transcript: createDirectCompatibleTranscriptSource({
       agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
       protocol: 'anthropic-messages',
+      requiredCapability: null,
       sessionLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
       apiProviders,
       getSessionFilePath: sessionPaths.sessionFilePath,

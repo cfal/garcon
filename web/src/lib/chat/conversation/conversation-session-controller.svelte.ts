@@ -41,8 +41,14 @@ import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
-import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
-import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
+import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
+import type { JsonObject, JsonValue } from '$shared/json';
+import { withAgentSetting } from '$lib/agents/agent-settings.js';
+import {
+	normalizeSupportedPermissionMode,
+	normalizeSupportedThinkingMode,
+} from '$lib/agents/agent-modes.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
@@ -98,9 +104,9 @@ type SessionAgentState = Pick<
 	| 'modelProtocol'
 	| 'permissionMode'
 	| 'thinkingMode'
-	| 'claudeThinkingMode'
-	| 'ampAgentMode'
+	| 'agentSettings'
 	| 'setAgentId'
+	| 'setAgentSettings'
 	| 'setModelSelection'
 >;
 
@@ -172,6 +178,9 @@ export interface SessionControllerDeps {
 			modelEndpointId?: string | null,
 		) => string;
 		getAgentLabel: (agentId: SessionAgentId) => string;
+		getDefaultAgentSettings: (agentId: SessionAgentId) => AgentSettingsEnvelope;
+		getPermissionModes: (agentId: SessionAgentId) => readonly PermissionMode[];
+		getThinkingModes: (agentId: SessionAgentId) => readonly ThinkingMode[];
 		supportsFork: (agentId: SessionAgentId) => boolean;
 		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
 	};
@@ -222,6 +231,7 @@ export class ConversationSessionController {
 	#queueSubmissionSequence = 0;
 	#pendingQueueSubmissionsByChatId = new Map<string, number>();
 	#failedQueueSubmissionsByChatId = new Map<string, FailedQueueSubmission[]>();
+	#latestAgentSettingsMutationByChatId = new Map<string, symbol>();
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
 
@@ -386,18 +396,16 @@ export class ConversationSessionController {
 					modelEndpointId: startup.modelEndpointId ?? null,
 					modelProtocol: startup.modelProtocol ?? null,
 				});
-				if (startup.permissionMode) {
-					deps.agentState.permissionMode = startup.permissionMode;
-				}
-				if (startup.thinkingMode) {
-					deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
-						startup.agentId as SessionAgentId,
-						startup.thinkingMode,
-					);
-				}
-				if (startup.ampAgentMode) {
-					deps.agentState.ampAgentMode = startup.ampAgentMode;
-				}
+				const startupAgentId = startup.agentId as SessionAgentId;
+				deps.agentState.permissionMode = normalizeSupportedPermissionMode(
+					startup.permissionMode,
+					deps.modelCatalog.getPermissionModes(startupAgentId),
+				);
+				deps.agentState.thinkingMode = normalizeSupportedThinkingMode(
+					startup.thinkingMode,
+					deps.modelCatalog.getThinkingModes(startupAgentId),
+				);
+				deps.agentState.setAgentSettings(startup.agentSettings);
 				if (startup.firstMessage?.trim() || (startup.initialImages?.length ?? 0) > 0) {
 					const startupText = startup.firstMessage.trim();
 					const startupImages = startup.initialImages ?? [];
@@ -423,12 +431,15 @@ export class ConversationSessionController {
 			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
 		}
 
-		deps.agentState.permissionMode = selected.permissionMode ?? 'default';
-		deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
-			selected.agentId,
-			selected.thinkingMode ?? 'none',
+		deps.agentState.permissionMode = normalizeSupportedPermissionMode(
+			selected.permissionMode,
+			deps.modelCatalog.getPermissionModes(selected.agentId),
 		);
-		deps.agentState.ampAgentMode = selected.ampAgentMode ?? 'smart';
+		deps.agentState.thinkingMode = normalizeSupportedThinkingMode(
+			selected.thinkingMode,
+			deps.modelCatalog.getThinkingModes(selected.agentId),
+		);
+		deps.agentState.setAgentSettings(selected.agentSettings);
 
 		this.loadChat(chatId, { minimumMessageLimit: restored?.count ?? 0 });
 	}
@@ -572,10 +583,7 @@ export class ConversationSessionController {
 			currentQueue?.dispatchingEntryId != null ||
 			currentQueue?.pause != null;
 		if (shouldQueueInput && submissionImages.length > 0) {
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_queue_attachments_unavailable(),
-			);
+			deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
 			return;
 		}
 
@@ -602,15 +610,15 @@ export class ConversationSessionController {
 			}
 		}
 
-			if (shouldQueueInput) {
-				const queueAllowsActiveDelivery =
-					(currentQueue?.entries.length ?? 0) === 0 &&
-					currentQueue?.dispatchingEntryId == null &&
-					currentQueue?.pause == null;
-				const activeDelivery =
-					activeTurn &&
-					queueAllowsActiveDelivery &&
-					(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
+		if (shouldQueueInput) {
+			const queueAllowsActiveDelivery =
+				(currentQueue?.entries.length ?? 0) === 0 &&
+				currentQueue?.dispatchingEntryId == null &&
+				currentQueue?.pause == null;
+			const activeDelivery =
+				activeTurn &&
+				queueAllowsActiveDelivery &&
+				(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
 			const submissionSequence = this.#beginQueueSubmission(chatId);
 			// Clear optimistically before awaiting the network, matching the
@@ -625,25 +633,25 @@ export class ConversationSessionController {
 					chatId,
 					content,
 				});
-					deps.conversationUi.setMessageQueue(chatId, result.queue);
-				} catch (err) {
-					if (restoreComposerOnFailure) {
-						this.#recordQueueSubmissionFailure(chatId, {
-							sequence: submissionSequence,
-							text: previousText,
-							images: previousImages,
-						});
-					}
-					deps.chatState.appendLocalNotice(
-						'error',
-						m.chat_notice_failed_queue_message({
-							detail: errorDetail(err),
-							content: restoreComposerOnFailure ? previousText : text,
-						}),
-					);
-				} finally {
-					this.#finishQueueSubmission(chatId);
+				deps.conversationUi.setMessageQueue(chatId, result.queue);
+			} catch (err) {
+				if (restoreComposerOnFailure) {
+					this.#recordQueueSubmissionFailure(chatId, {
+						sequence: submissionSequence,
+						text: previousText,
+						images: previousImages,
+					});
 				}
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_queue_message({
+						detail: errorDetail(err),
+						content: restoreComposerOnFailure ? previousText : text,
+					}),
+				);
+			} finally {
+				this.#finishQueueSubmission(chatId);
+			}
 			return;
 		}
 
@@ -672,8 +680,7 @@ export class ConversationSessionController {
 				startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol;
 			const permissionMode = startup?.permissionMode ?? deps.agentState.permissionMode;
 			const thinkingMode = startup?.thinkingMode ?? deps.agentState.thinkingMode;
-			const claudeThinkingMode = startup?.claudeThinkingMode ?? deps.agentState.claudeThinkingMode;
-			const ampAgentMode = startup?.ampAgentMode ?? deps.agentState.ampAgentMode;
+			const agentSettings = startup?.agentSettings ?? deps.agentState.agentSettings;
 
 			try {
 				const response = await startChat({
@@ -688,8 +695,7 @@ export class ConversationSessionController {
 					modelProtocol,
 					permissionMode,
 					thinkingMode,
-					claudeThinkingMode,
-					ampAgentMode,
+					agentSettings,
 					command: text,
 					images: imagePayload.length > 0 ? imagePayload : undefined,
 					tags: startup?.tags,
@@ -733,8 +739,7 @@ export class ConversationSessionController {
 					images: imagePayload.length > 0 ? imagePayload : undefined,
 					permissionMode: deps.agentState.permissionMode,
 					thinkingMode: deps.agentState.thinkingMode,
-					claudeThinkingMode: deps.agentState.claudeThinkingMode,
-					ampAgentMode: deps.agentState.ampAgentMode,
+					agentSettings: deps.agentState.agentSettings,
 					model: selection.model,
 					apiProviderId: selection.apiProviderId,
 					modelEndpointId: selection.modelEndpointId,
@@ -885,8 +890,7 @@ export class ConversationSessionController {
 				command: buildApprovalMessage(),
 				permissionMode: mode,
 				thinkingMode: deps.agentState.thinkingMode,
-				claudeThinkingMode: deps.agentState.claudeThinkingMode,
-				ampAgentMode: deps.agentState.ampAgentMode,
+				agentSettings: deps.agentState.agentSettings,
 				model: selection.model,
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
@@ -1160,7 +1164,10 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { permissionMode: mode });
 			return;
 		}
-		const previous = deps.sessions.selectedChat?.permissionMode ?? 'default';
+		const previous = normalizeSupportedPermissionMode(
+			deps.sessions.selectedChat?.permissionMode,
+			deps.modelCatalog.getPermissionModes(deps.agentState.agentId),
+		);
 		deps.sessions.patchChat(chatId, { permissionMode: mode });
 		void updateExecutionSettings({ chatId, permissionMode: mode }).catch((error) => {
 			deps.agentState.permissionMode = previous;
@@ -1181,13 +1188,13 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { thinkingMode: mode });
 			return;
 		}
-		const previous = deps.sessions.selectedChat?.thinkingMode ?? 'none';
+		const previous = normalizeSupportedThinkingMode(
+			deps.sessions.selectedChat?.thinkingMode,
+			deps.modelCatalog.getThinkingModes(deps.agentState.agentId),
+		);
 		deps.sessions.patchChat(chatId, { thinkingMode: mode });
 		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
-			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
-				deps.agentState.agentId,
-				previous,
-			);
+			deps.agentState.thinkingMode = previous;
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
 			deps.chatState.appendLocalNotice(
 				'error',
@@ -1196,24 +1203,46 @@ export class ConversationSessionController {
 		});
 	}
 
-	handleAmpAgentModeChange(mode: AmpAgentMode): void {
+	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId;
 		if (!chatId) return;
+		const previous = deps.agentState.agentSettings;
+		const next = withAgentSetting(previous, descriptor, value);
+		if (next === previous) return;
+		deps.agentState.setAgentSettings(next);
 		if (deps.sessions.isDraft(chatId)) {
-			deps.sessions.patchDraftStartup(chatId, { ampAgentMode: mode });
-			deps.sessions.patchChat(chatId, { ampAgentMode: mode });
+			deps.sessions.patchDraftStartup(chatId, { agentSettings: next });
+			deps.sessions.patchChat(chatId, { agentSettings: next });
 			return;
 		}
-		const previous = deps.sessions.selectedChat?.ampAgentMode ?? 'smart';
-		deps.sessions.patchChat(chatId, { ampAgentMode: mode });
-		void updateExecutionSettings({ chatId, ampAgentMode: mode }).catch((error) => {
-			deps.agentState.ampAgentMode = previous;
-			deps.sessions.patchChat(chatId, { ampAgentMode: previous });
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
-			);
-		});
+		deps.sessions.patchChat(chatId, { agentSettings: next });
+		const agentSettingsPatch: JsonObject = { [descriptor.key]: value };
+		const mutation = Symbol(chatId);
+		this.#latestAgentSettingsMutationByChatId.set(chatId, mutation);
+		void updateExecutionSettings({ chatId, agentSettingsPatch })
+			.then((response) => {
+				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
+				if (deps.sessions.selectedChatId === chatId) {
+					deps.agentState.setAgentSettings(response.agentSettings);
+				}
+				deps.sessions.patchChat(chatId, { agentSettings: response.agentSettings });
+			})
+			.catch((error) => {
+				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
+				if (deps.sessions.selectedChatId === chatId) {
+					deps.agentState.setAgentSettings(previous);
+				}
+				deps.sessions.patchChat(chatId, { agentSettings: previous });
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
+				);
+			})
+			.finally(() => {
+				if (this.#latestAgentSettingsMutationByChatId.get(chatId) === mutation) {
+					this.#latestAgentSettingsMutationByChatId.delete(chatId);
+				}
+			});
 	}
 }

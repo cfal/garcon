@@ -84,13 +84,19 @@ function createSession(overrides = {}) {
     id: CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'provider-session-123',
+    nativeSession: {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      value: { path: '/tmp/session.jsonl', agentSessionId: 'provider-session-123' },
+    },
+    agentOwnershipEpoch: 'epoch-1',
+    agentSettingsById: {
+      claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
+    },
     projectPath: '/workspace/project',
     model: 'opus',
     permissionMode: 'default',
     thinkingMode: 'none',
-    claudeThinkingMode: 'auto',
-    ampAgentMode: 'smart',
-    nativePath: '/tmp/session.jsonl',
     ...overrides,
   };
 }
@@ -117,7 +123,7 @@ function createRouteAgent(sessionOverrides = {}) {
       const next = {
         ...current,
         projectPath: update.projectPath,
-        ...('nativePath' in update ? { nativePath: update.nativePath } : {}),
+        ...('nativeSession' in update ? { nativeSession: update.nativeSession } : {}),
       };
       sessions.set(chatId, next);
       return Promise.resolve(next);
@@ -235,8 +241,9 @@ function createRouteAgent(sessionOverrides = {}) {
     startSession: mock(() => Promise.resolve(undefined)),
     modelSupportsImages: mock(() => Promise.resolve(true)),
     runSingleQuery: mock(() => Promise.resolve('title')),
+    forkAgentSession: mock(() => Promise.resolve({})),
     resolvePermission: mock(() => undefined),
-    resolveNativePath: mock((chat) => Promise.resolve(chat.nativePath ?? null)),
+    resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
@@ -251,8 +258,6 @@ function createRouteAgent(sessionOverrides = {}) {
           modelProtocol: req.modelProtocol ?? null,
           permissionMode: 'default',
           thinkingMode: 'none',
-          claudeThinkingMode: 'auto',
-          ampAgentMode: 'smart',
         }),
       ),
     ),
@@ -293,13 +298,20 @@ function createRouteAgent(sessionOverrides = {}) {
         registry.addChat({
           ...sourceSession,
           id: targetChatId,
-          agentSessionId: null,
+          agentSessionId: 'forked-session',
+          nativeSession: {
+            ownerId: sourceSession.agentId,
+            schemaVersion: 1,
+            value: { id: 'forked-session' },
+          },
+          agentOwnershipEpoch: 'forked-epoch',
         });
         await settings.ensureInNormal(targetChatId);
         return {
           sourceChatId: CHAT_ID,
           chatId: targetChatId,
           agentId: sourceSession.agentId,
+          agentSessionId: 'forked-session',
         };
       },
     }),
@@ -332,8 +344,7 @@ function agentRunBody(overrides = {}) {
     command: 'hello',
     permissionMode: 'default',
     thinkingMode: 'none',
-    claudeThinkingMode: 'auto',
-    ampAgentMode: 'smart',
+    agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
     model: 'opus',
     ...overrides,
   };
@@ -445,7 +456,6 @@ describe('REST chat command routes', () => {
         command: 'continue here',
       }),
     });
-
     expect(response.status).toBe(202);
     expect(body.commandType).toBe('fork-run');
     expect(body.chatId).toBe(TARGET_CHAT_ID);
@@ -735,8 +745,7 @@ describe('REST chat command routes', () => {
         chatId: CHAT_ID,
         permissionMode: 'bogus',
         thinkingMode: 'ultra',
-        claudeThinkingMode: 'sometimes',
-        ampAgentMode: 'unknown',
+        agentSettingsPatch: {},
       },
       'PATCH',
     );
@@ -746,17 +755,15 @@ describe('REST chat command routes', () => {
       success: true,
       chatId: CHAT_ID,
       permissionMode: 'default',
-      thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
+      thinkingMode: 'ultra',
+      agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
     });
     expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(
       CHAT_ID,
       expect.objectContaining({
         permissionMode: 'default',
-        thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
+        thinkingMode: 'ultra',
+        agentSettingsPatch: {},
       }),
     );
   });
@@ -902,7 +909,6 @@ describe('REST chat command routes', () => {
       effectiveProjectKey: realNextPath,
       previousProjectPath: '/workspace/project',
       previousEffectiveProjectKey: '/workspace/project',
-      nativePath: '/tmp/session.jsonl',
     });
     expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledWith(
       'claude',
@@ -911,7 +917,7 @@ describe('REST chat command routes', () => {
         agentSessionId: 'provider-session-123',
         previousProjectPath: '/workspace/project',
         nextProjectPath: realNextPath,
-        nativePath: '/tmp/session.jsonl',
+        nativeSession: expect.objectContaining({ ownerId: 'claude' }),
       }),
     );
     expect(agent.registry.updateProjectPath).toHaveBeenCalledWith(

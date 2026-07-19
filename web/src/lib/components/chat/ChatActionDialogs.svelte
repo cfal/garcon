@@ -38,7 +38,6 @@
 	let deleteButtonRef = $state<HTMLButtonElement | null>(null);
 	let firstMessageCopied = $state(false);
 	let agentSessionIdCopied = $state(false);
-	let nativePathCopied = $state(false);
 
 	let deleteOpen = $derived(chatDeleteConfirmation !== null);
 	let renameOpen = $derived(chatRenameConfirmation !== null);
@@ -184,35 +183,6 @@
 						<div class="text-sm text-muted-foreground">
 							{formatHumanDate(chatDetailsDialog?.lastActivityAt || null)}
 						</div>
-					</div>
-					<div class="space-y-1">
-						<div class="flex items-center justify-between gap-2">
-							<div class="text-sm font-medium">{m.sidebar_details_native_path()}</div>
-							<button
-								type="button"
-								class="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-								onclick={(e) =>
-									copyField(
-										e,
-										chatDetailsDialog?.nativePath || null,
-										(v) => (nativePathCopied = v),
-									)}
-								title={m.chat_tool_display_copy_to_clipboard()}
-								aria-label={m.chat_tool_display_copy_to_clipboard()}
-							>
-								{#if nativePathCopied}
-									<Check class="w-4 h-4 text-status-success-foreground" />
-								{:else}
-									<Copy class="w-4 h-4" />
-								{/if}
-							</button>
-						</div>
-						<pre
-							role="region"
-							aria-label={m.sidebar_details_native_path()}
-							class="{detailsTextSurfaceClass} min-h-12 max-h-24">{displayText(
-								chatDetailsDialog?.nativePath || null,
-							)}</pre>
 					</div>
 					<div class="space-y-1">
 						<div class="flex items-center justify-between gap-2">

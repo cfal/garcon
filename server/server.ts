@@ -49,8 +49,8 @@ import { stripFirstUserSeed } from './agents/transcript-seed.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
-import { createIntegrationAgentAdapters } from './agents/integration-agent-adapter.js';
 import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
+import { migrateAgentIntegrationCoreRecords } from './agents/core-record-migration.js';
 import { toAgentChatReference } from './agents/integration-chat-reference.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
@@ -69,11 +69,13 @@ import {
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
+import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import { SnippetStore } from './snippets/store.js';
 import {
   SnippetProjectPathService,
@@ -138,22 +140,15 @@ export async function startServer(): Promise<void> {
     const wsAdmission = new WebSocketAdmissionController(config.maxWsClients);
 
     await initAuthStore();
-    await chatRegistry.init();
-    await settings.init();
 
     // User-managed API provider store and resolver.
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
 
-    const endpointResolver = new ApiProviderEndpointResolver(() =>
-      apiProviderStore.list(),
-    );
-
     const carryOver = new ChatCarryOverStore({
       filePath: path.join(workspaceDir, 'chat-carryover.json'),
     });
     await carryOver.init();
-    carryOver.bindRegistry(chatRegistry);
 
     const integrationHostFactory = new IntegrationHostFactory({
       workspaceDir,
@@ -167,7 +162,11 @@ export async function startServer(): Promise<void> {
         request.signal.throwIfAborted();
         const revision = carryOver.getRevision(request.chatId);
         if (revision !== request.expectedRevision) {
-          throw new Error(`Carry-over revision changed for chat ${request.chatId}`);
+          throw new AgentIntegrationError(
+            'SOURCE_REVISION_CHANGED',
+            `Carry-over revision changed for chat ${request.chatId}`,
+            true,
+          );
         }
         return {
           revision,
@@ -183,9 +182,22 @@ export async function startServer(): Promise<void> {
       hostFactory: integrationHostFactory,
       migrationStoreFor: (agentId) => new FileAgentMigrationStore(workspaceDir, agentId),
     });
+    const endpointResolver = new ApiProviderEndpointResolver(
+      () => apiProviderStore.list(),
+      (agentId) => integrationRegistry.get(agentId)?.descriptor.supportedEndpointProtocols ?? [],
+    );
+    await migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry });
+    await chatRegistry.init();
+    await settings.init();
+    carryOver.bindRegistry(chatRegistry);
     await integrationRegistry.start();
-    const integratedAgents = createIntegrationAgentAdapters(integrationRegistry);
-
+    const agentOwnership = new AgentOwnershipJournal({
+      workspaceDir,
+      registry: chatRegistry,
+      carryOver,
+      integrations: integrationRegistry,
+    });
+    await agentOwnership.initialize();
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
       isApiProviderReferenced(apiProviderId) {
@@ -196,15 +208,24 @@ export async function startServer(): Promise<void> {
     });
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
 
+    // Every chat mutation shares one lock, including live settings changes.
+    const chatMutationLock = new KeyedPromiseLock();
+
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     const agentRegistry = new AgentRegistry({
       registry: chatRegistry,
-      agents: integratedAgents,
+      integrations: integrationRegistry,
       endpointResolver,
+      getCarryOverRevision: (chatId) => carryOver.getRevision(chatId),
+      loadCarryOver: (chatId, entry) => renderCarriedTranscript(carryOver.getSegments(chatId), {
+        agentId: entry.agentId,
+        model: entry.model ?? '',
+      }),
+      chatMutationLock,
     });
 
-    await chatRegistry.reconcileSessions((session) =>
-      agentRegistry.resolveNativePath(session),
+    await chatRegistry.reconcileSessions((session, chatId) =>
+      agentRegistry.resolveNativeSession(session, chatId),
     );
     await settings.reconcileWithRegistry(chatRegistry);
 
@@ -214,20 +235,16 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
-    // Single per-chat mutation lock shared by every chat mutator so send/fork/
-    // compaction/delete and agent switches serialize on the same `chat:<id>` key
-    // and cannot race one another.
-    const chatMutationLock = new KeyedPromiseLock();
-
     // Agent-switch coordinator: snapshots the outgoing transcript and stages a
     // fresh session under the new agent. Uses a directory built from the same
     // agent suite the registry wraps.
-    const agentDirectory = new AgentDirectory(integratedAgents);
+    const agentDirectory = new AgentDirectory(integrationRegistry);
     const agentSwitch = new AgentSwitchService({
       registry: chatRegistry,
       directory: agentDirectory,
       endpointResolver,
       carryOver,
+      ownership: agentOwnership,
       chatMutationLock,
     });
 
@@ -358,26 +375,14 @@ export async function startServer(): Promise<void> {
       const sourceChatId = preparation.sourceChatId;
       pendingInputs.clearChat(record.chatId, 'chat-removed');
       await queue.deleteChatQueueFile(record.chatId).catch(() => undefined);
-      const target = chatRegistry.getChat(record.chatId);
-      if (target && preparation.phase === 'creating') {
-        const recoveredPreparation = {
-          phase: 'created' as const,
-          sourceChatId,
-          ...(target.nativePath ? { nativePath: target.nativePath } : {}),
-        };
-        await commandLedger.update(record.key, { forkPreparation: recoveredPreparation });
-        record.forkPreparation = recoveredPreparation;
-      }
-      if (target || record.forkPreparation?.phase === 'created') {
-        await rollbackForkTarget({
-          sourceChatId,
-          targetChatId: record.chatId,
-          registry: chatRegistry,
-          settings,
-          nativePath: record.forkPreparation?.nativePath,
-          sourceNextForkOrdinal: record.forkPreparation?.sourceNextForkOrdinal,
-        });
-      }
+      await rollbackForkTarget({
+        sourceChatId,
+        targetChatId: record.chatId,
+        registry: chatRegistry,
+        settings,
+        ownership: agentOwnership,
+        sourceNextForkOrdinal: preparation.sourceNextForkOrdinal,
+      });
       await commandLedger.settleForkPreparationRecovery(record.key);
       logger.warn(`fork-run: removed interrupted pre-schedule target ${record.chatId}`);
     }
@@ -416,12 +421,12 @@ export async function startServer(): Promise<void> {
       metadata,
       agents: agentRegistry,
       pendingInputs,
-      nativeMessages: { loadNativeMessages },
       forkChatFileCopy,
       carryOver,
       chatIds,
       chatListProjector,
       pathCache,
+      ownership: agentOwnership,
       chatMutationLock,
     });
 

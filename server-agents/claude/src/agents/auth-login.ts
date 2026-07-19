@@ -6,8 +6,8 @@ import type {
   AgentAuthLoginStatus,
   AgentDeviceAuthInfo,
 } from '@garcon/common/agent-auth';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { getClaudeBinary, getCursorBinary } from '../config.js';
-import { DomainError } from '@garcon/server-agent-common/lib/domain-error';
 import { createLogger } from '@garcon/server-agent-common/lib/log';
 
 const logger = createLogger('agents:auth-login');
@@ -458,9 +458,9 @@ export class AgentAuthLoginManager {
 
 const agentAuthLogin = new AgentAuthLoginManager();
 
-export class AgentAuthLoginSessionError extends DomainError {
+export class AgentAuthLoginSessionError extends AgentIntegrationError {
   constructor(message: string) {
-    super('AUTH_LOGIN_SESSION_MISMATCH', message, 409);
+    super('AUTH_LOGIN_SESSION_MISMATCH', message, false);
     this.name = 'AgentAuthLoginSessionError';
   }
 }

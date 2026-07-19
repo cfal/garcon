@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { parseInitSlashCommands } from '../claude/slash-command-discovery.js';
+import { parseInitSlashCommands } from '../slash-command-discovery.js';
 
 describe('parseInitSlashCommands', () => {
   it('tags names present in skills as skills and others as commands', () => {
@@ -18,7 +18,7 @@ describe('parseInitSlashCommands', () => {
 
   it('sorts commands alphabetically', () => {
     const result = parseInitSlashCommands(['zeta', 'alpha', 'mike'], []);
-    expect(result.map((c) => c.name)).toEqual(['alpha', 'mike', 'zeta']);
+    expect(result.map((command) => command.name)).toEqual(['alpha', 'mike', 'zeta']);
   });
 
   it('ignores non-string and missing values', () => {

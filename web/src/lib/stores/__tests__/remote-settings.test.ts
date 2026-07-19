@@ -31,8 +31,7 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 			global: {
 				permissionMode: 'default',
 				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettingsById: {},
 			},
 			byAgent: {},
 		},

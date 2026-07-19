@@ -63,7 +63,11 @@ export class TranscriptSearchController {
   }
 
   async initialize(enabled: boolean): Promise<void> {
-    if (enabled) await this.start();
+    if (enabled) {
+      await this.start();
+      return;
+    }
+    await this.disableAndDelete();
   }
 
   async start(): Promise<void> {

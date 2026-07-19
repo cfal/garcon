@@ -109,7 +109,7 @@ describe('chat-carryover-store', () => {
     await store.flush();
 
     const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    expect(raw.version).toBe(2);
+    expect(raw.version).toBe(4);
     expect(raw.chats['chat-1'].revision).toBe(1);
     expect(raw.chats['chat-1'].segments[0].agentId).toBe('codex');
     expect(store.getSearchDescriptor('chat-1')).toEqual({ filePath, chatRevision: 1 });
@@ -141,6 +141,107 @@ describe('chat-carryover-store', () => {
     expect(store.getSearchDescriptor('first')?.chatRevision).toBe(2);
     expect(store.getSearchDescriptor('second')?.chatRevision).toBe(1);
     const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    expect(raw.version).toBe(2);
+    expect(raw.version).toBe(4);
+  });
+
+  it('keeps staged fork carry-over hidden until the target ownership epoch commits', async () => {
+    const store = new ChatCarryOverStore({ filePath: null });
+    await store.init();
+    const chats = new Map();
+    store.bindRegistry({
+      getChat: (chatId) => chats.get(chatId) ?? null,
+      onChatRemoved() {},
+    });
+    store.appendSegment('source', segment(
+      'alpha',
+      'model-a',
+      new UserMessage(ts, 'first'),
+      new AssistantMessage(ts, 'second'),
+    ));
+    store.appendSegment('source', segment('beta', 'model-b', new UserMessage(ts, 'third')));
+
+    await store.stageFork({
+      sourceChatId: 'source',
+      targetChatId: 'target',
+      targetEpoch: 'target-epoch',
+      ownerId: 'gamma',
+      ownerModel: 'model-c',
+      upToSequence: 3,
+    });
+    expect(store.getMessages('target')).toEqual([]);
+
+    chats.set('target', { agentId: 'gamma', agentOwnershipEpoch: 'target-epoch' });
+    const stagedRendered = renderCarriedTranscript(store.getSegments('target'), {
+      agentId: 'gamma',
+      model: 'model-c',
+    });
+    expect(stagedRendered.map((message) => message.type)).toEqual([
+      'user-message',
+      'assistant-message',
+      'agent-switch',
+    ]);
+    expect(stagedRendered[2]).toMatchObject({ fromAgentId: 'alpha', toAgentId: 'beta' });
+
+    await store.promoteStaged('target', 'target-epoch');
+    chats.delete('target');
+    expect(store.getMessages('target').map((message) => message.content)).toEqual(['first', 'second']);
+  });
+
+  it('preserves an exact message cutoff inside carry-over and discards abandoned staging', async () => {
+    const store = new ChatCarryOverStore({ filePath: null });
+    await store.init();
+    const chats = new Map();
+    store.bindRegistry({
+      getChat: (chatId) => chats.get(chatId) ?? null,
+      onChatRemoved() {},
+    });
+    store.appendSegment('source', segment(
+      'alpha',
+      'model-a',
+      new UserMessage(ts, 'first'),
+      new AssistantMessage(ts, 'second'),
+    ));
+
+    await store.stageFork({
+      sourceChatId: 'source',
+      targetChatId: 'target',
+      targetEpoch: 'target-epoch',
+      ownerId: 'alpha',
+      ownerModel: 'model-a',
+      upToSequence: 1,
+    });
+    chats.set('target', { agentId: 'alpha', agentOwnershipEpoch: 'target-epoch' });
+    expect(renderCarriedTranscript(store.getSegments('target'), {
+      agentId: 'alpha',
+      model: 'model-a',
+    }).map((message) => message.type)).toEqual(['user-message']);
+
+    await store.discardStaged('target', 'target-epoch');
+    expect(store.getMessages('target')).toEqual([]);
+  });
+
+  it('promotes committed staged forks during recovery', async () => {
+    const filePath = path.join(tmpDir, 'chat-carryover.json');
+    const store = new ChatCarryOverStore({ filePath, saveDelayMs: 0 });
+    await store.init();
+    store.appendSegment('source', segment('alpha', 'model-a', new UserMessage(ts, 'first')));
+    await store.stageFork({
+      sourceChatId: 'source',
+      targetChatId: 'target',
+      targetEpoch: 'target-epoch',
+      ownerId: 'alpha',
+      ownerModel: 'model-a',
+    });
+    store.bindRegistry({
+      getChat: (chatId) => chatId === 'target'
+        ? { agentId: 'alpha', agentOwnershipEpoch: 'target-epoch' }
+        : null,
+      onChatRemoved() {},
+    });
+
+    await store.promoteCommittedStaged();
+    const persisted = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(persisted.chats.target.staged).toBeUndefined();
+    expect(store.getMessages('target')).toHaveLength(1);
   });
 });

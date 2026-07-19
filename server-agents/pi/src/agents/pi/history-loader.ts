@@ -27,6 +27,22 @@ function findHeader(entries: FileEntry[]): SessionHeader | null {
   return entries.find((entry): entry is SessionHeader => entry.type === 'session') ?? null;
 }
 
+function assertAcyclicActivePath(entries: SessionEntry[]): void {
+  const byId = new Map(entries.flatMap((entry) => (
+    typeof entry.id === 'string' && entry.id ? [[entry.id, entry] as const] : []
+  )));
+  let current = entries.at(-1);
+  const visited = new Set<string>();
+  while (current && typeof current.id === 'string' && current.id) {
+    if (visited.has(current.id)) {
+      throw new Error('Pi transcript parent graph contains a cycle');
+    }
+    visited.add(current.id);
+    const parentId = typeof current.parentId === 'string' ? current.parentId : null;
+    current = parentId ? byId.get(parentId) : undefined;
+  }
+}
+
 async function readPiSessionFile(sessionPath: string): Promise<{
   entries: FileEntry[];
   header: SessionHeader | null;
@@ -36,6 +52,7 @@ async function readPiSessionFile(sessionPath: string): Promise<{
   const entries = parseSessionEntries(raw);
   const header = findHeader(entries);
   const sessionEntries = entries.filter(isSessionEntry);
+  assertAcyclicActivePath(sessionEntries);
   const context = buildSessionContext(sessionEntries);
   const messages = context.messages.flatMap((message) => convertPiMessage(message));
   return { entries, header, messages };

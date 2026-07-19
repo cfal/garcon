@@ -83,11 +83,10 @@ describe('ScheduledPromptFormState', () => {
 
 	it('hydrates and rebuilds new-chat tags when editing a scheduled prompt', async () => {
 		const form = createForm();
-		form.startup.selectAgent = vi.fn();
-		form.startup.setPermissionMode = vi.fn();
-		form.startup.setThinkingMode = vi.fn();
-		form.startup.setClaudeThinkingMode = vi.fn();
-		form.startup.setAmpAgentMode = vi.fn();
+	form.startup.selectAgent = vi.fn();
+	form.startup.setPermissionMode = vi.fn();
+	form.startup.setThinkingMode = vi.fn();
+	form.startup.replaceAgentSettingsById = vi.fn();
 		form.startup.validatePath = vi.fn();
 		const scheduledPrompt: ScheduledPrompt = {
 			id: 'tagged-prompt',
@@ -102,8 +101,9 @@ describe('ScheduledPromptFormState', () => {
 				modelProtocol: null,
 				permissionMode: 'acceptEdits',
 				thinkingMode: 'high',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
+				agentSettingsById: {
+					codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
+				},
 				tags: ['qa', 'review-needed'],
 			},
 			prompt: 'Review the project',

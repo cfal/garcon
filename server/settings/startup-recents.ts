@@ -1,14 +1,11 @@
 import type { ApiProtocol } from '../../common/api-providers.js';
 import {
-  DEFAULT_AMP_AGENT_MODE,
-  DEFAULT_CLAUDE_THINKING_MODE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_THINKING_MODE,
-  normalizeAmpAgentMode,
-  normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
+import { parseAgentSettingsById } from '../../common/agent-integration.js';
 import type {
   ExecutionDefaults,
   ExecutionDefaultsSettings,
@@ -21,8 +18,7 @@ export const RECENT_PROJECT_PATHS_LIMIT = 10;
 const EXECUTION_DEFAULT_KEYS = [
   'permissionMode',
   'thinkingMode',
-  'claudeThinkingMode',
-  'ampAgentMode',
+  'agentSettingsById',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -107,8 +103,7 @@ export function defaultExecutionDefaults(): ExecutionDefaults {
   return {
     permissionMode: DEFAULT_PERMISSION_MODE,
     thinkingMode: DEFAULT_THINKING_MODE,
-    claudeThinkingMode: DEFAULT_CLAUDE_THINKING_MODE,
-    ampAgentMode: DEFAULT_AMP_AGENT_MODE,
+    agentSettingsById: {},
   };
 }
 
@@ -117,8 +112,7 @@ export function sanitizeExecutionDefaults(raw: unknown): ExecutionDefaults {
   return {
     permissionMode: normalizePermissionMode(source.permissionMode),
     thinkingMode: normalizeThinkingMode(source.thinkingMode),
-    claudeThinkingMode: normalizeClaudeThinkingMode(source.claudeThinkingMode),
-    ampAgentMode: normalizeAmpAgentMode(source.ampAgentMode),
+    agentSettingsById: parseAgentSettingsById(source.agentSettingsById) ?? {},
   };
 }
 
@@ -131,11 +125,9 @@ export function sanitizeExecutionDefaultsPatch(raw: unknown): Partial<ExecutionD
   if (raw.thinkingMode !== undefined) {
     patch.thinkingMode = normalizeThinkingMode(raw.thinkingMode);
   }
-  if (raw.claudeThinkingMode !== undefined) {
-    patch.claudeThinkingMode = normalizeClaudeThinkingMode(raw.claudeThinkingMode);
-  }
-  if (raw.ampAgentMode !== undefined) {
-    patch.ampAgentMode = normalizeAmpAgentMode(raw.ampAgentMode);
+  if (raw.agentSettingsById !== undefined) {
+    const settings = parseAgentSettingsById(raw.agentSettingsById);
+    if (settings) patch.agentSettingsById = settings;
   }
   return patch;
 }
@@ -241,8 +233,7 @@ export function legacyExecutionDefaults(raw: Record<string, unknown>): Execution
   return sanitizeExecutionDefaults({
     permissionMode: raw.lastPermissionMode,
     thinkingMode: raw.lastThinkingMode,
-    claudeThinkingMode: raw.lastClaudeThinkingMode,
-    ampAgentMode: raw.lastAmpAgentMode,
+    agentSettingsById: {},
   });
 }
 

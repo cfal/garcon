@@ -118,8 +118,9 @@ describe('scheduled new-chat target normalization', () => {
 		modelProtocol: null,
 		permissionMode: 'acceptEdits',
 		thinkingMode: 'high',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettingsById: {
+			codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
+		},
 	};
 
 	it('normalizes tags and defaults legacy targets to an empty list', () => {

@@ -82,7 +82,7 @@ export interface AcpSessionConfigurationContext {
 
 export interface AcpAgentPolicy {
   agentId: string;
-  command: string;
+  command: string | (() => string);
   args?: string[];
   abortStrategy?: AcpAbortStrategy;
   authenticateMethodId?: string;
@@ -369,6 +369,9 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   async #connectClient(request: StartSessionRequest | ResumeTurnRequest): Promise<AcpClient> {
+    const command = typeof this.#policy.command === 'function'
+      ? this.#policy.command()
+      : this.#policy.command;
     const transport = this.#createTransport();
     const client = new AcpClient(transport, {
       initialize: {
@@ -380,13 +383,13 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       authenticateMethodId: this.#policy.authenticateMethodId,
     });
     await client.connect({
-      command: this.#policy.command,
+      command,
       args: this.#policy.args ?? ['acp'],
       cwd: request.projectPath,
       env: this.#buildEnv(request),
     });
     this.#capabilityCache.set({
-      command: this.#policy.command,
+      command,
       binaryVersion: this.#policy.binaryVersion ?? 'unknown',
     }, client.getAdvertisedCapabilities());
     return client;

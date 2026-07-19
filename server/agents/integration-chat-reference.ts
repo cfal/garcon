@@ -1,7 +1,6 @@
 import type {
   AgentChatReference,
   AgentIntegration,
-  AgentNativeSessionRef,
 } from '@garcon/server-agent-interface';
 import type { AgentChatEntry } from './session-types.js';
 
@@ -11,38 +10,20 @@ export function toAgentChatReference(
   entry: AgentChatEntry,
   carryOverRevision: string,
 ): AgentChatReference {
-  const settings = integration.settings.applyPatch(integration.settings.defaults(), {
-    ...(entry.claudeThinkingMode ? { claudeThinkingMode: entry.claudeThinkingMode } : {}),
-    ...(entry.ampAgentMode ? { ampAgentMode: entry.ampAgentMode } : {}),
-  });
+  const settings = integration.settings.parse(
+    entry.agentSettingsById?.[integration.descriptor.id] ?? integration.settings.defaults(),
+  );
+  if (entry.nativeSession?.ownerId !== integration.descriptor.id && entry.nativeSession !== null && entry.nativeSession !== undefined) {
+    throw new Error(`Native session owner mismatch for ${chatId}`);
+  }
   return {
     chatId,
     agentId: integration.descriptor.id,
     agentSessionId: entry.agentSessionId ?? null,
     projectPath: entry.projectPath,
     model: entry.model ?? '',
-    nativeSession: legacyNativeSession(
-      integration.descriptor.id,
-      entry.nativePath,
-      entry.agentSessionId,
-    ),
+    nativeSession: entry.nativeSession ?? null,
     carryOverRevision,
     settings,
-  };
-}
-
-export function legacyNativeSession(
-  agentId: string,
-  nativePath: string | null | undefined,
-  agentSessionId: string | null | undefined,
-): AgentNativeSessionRef | null {
-  if (!nativePath && !agentSessionId) return null;
-  return {
-    ownerId: agentId,
-    schemaVersion: 1,
-    value: {
-      ...(nativePath ? { path: nativePath } : {}),
-      ...(agentSessionId ? { agentSessionId } : {}),
-    },
   };
 }

@@ -46,6 +46,7 @@ function source(root, endpoints = [endpoint()]) {
   return createDirectCompatibleTranscriptSource({
     agentId: 'direct-openai-compatible',
     protocol: 'openai-compatible',
+    requiredCapability: 'chatCompletions',
     sessionLabel: 'Direct (Chat Completions)',
     apiProviders: apiProviders(endpoints),
     getSessionFilePath: (endpointId, sessionId) => path.join(root, endpointId, `${sessionId}.jsonl`),
@@ -91,6 +92,24 @@ describe('Direct compatible transcript source', () => {
       { lineNumber: 1 },
       { lineNumber: 2 },
     ]);
+  });
+
+  it('releases the integration-owned transcript file', async () => {
+    const root = await tempDir();
+    const transcriptPath = path.join(root, 'chat_endpoint', 'session-1.jsonl');
+    await writeTranscript(root, 'chat_endpoint', 'session-1', [
+      { role: 'user', content: 'hello' },
+    ]);
+
+    const transcript = source(root);
+    await transcript.release({
+      agentId: 'direct-openai-compatible',
+      projectPath: '/tmp/project',
+      agentSessionId: 'session-1',
+      modelEndpointId: 'chat_endpoint',
+    }, 'deleted');
+
+    await expect(fs.access(transcriptPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('attaches one-based physical JSONL lines to rendered messages', async () => {

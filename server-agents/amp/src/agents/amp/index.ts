@@ -25,9 +25,6 @@ function createAmpTranscriptSource(amp: AmpCliRuntime): AgentTranscriptSource {
       const id = threadId(session);
       return id ? `!amp:${id}` : null;
     },
-    async resolveSearchLoadPlan() {
-      return { kind: 'live-only', reasonCode: 'integration-owned-search' };
-    },
   };
 }
 

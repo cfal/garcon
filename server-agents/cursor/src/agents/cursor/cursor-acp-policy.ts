@@ -22,7 +22,7 @@ function buildEnv(request: StartSessionRequest | ResumeTurnRequest): Record<stri
 export function createCursorAcpPolicy(): AcpAgentPolicy {
   return {
     agentId: 'cursor',
-    command: getCursorBinary(),
+    command: getCursorBinary,
     args: ['acp'],
     abortStrategy: 'process-restart',
     authenticateMethodId: 'cursor_login',

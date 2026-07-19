@@ -1,14 +1,11 @@
 import type { ApiProtocol } from './api-providers.js';
 import {
-  isAmpAgentMode,
-  isClaudeThinkingMode,
   isPermissionMode,
   isThinkingMode,
-  type AmpAgentMode,
-  type ClaudeThinkingMode,
   type PermissionMode,
   type ThinkingMode,
 } from './chat-modes.js';
+import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-integration.js';
 import { normalizeTags } from './tags.js';
 
 export const SCHEDULED_PROMPT_INTERVAL_DAYS_MIN = 1;
@@ -43,8 +40,7 @@ export interface NewChatScheduledPromptTarget {
   modelProtocol: ApiProtocol | null;
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode: AmpAgentMode;
+  agentSettingsById: Record<string, AgentSettingsEnvelope>;
   tags: string[];
 }
 
@@ -201,8 +197,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
     tags === null ||
     !isPermissionMode(raw.permissionMode) ||
     !isThinkingMode(raw.thinkingMode) ||
-    !isClaudeThinkingMode(raw.claudeThinkingMode) ||
-    !isAmpAgentMode(raw.ampAgentMode)
+    !isAgentSettingsById(raw.agentSettingsById)
   )
     return null;
 
@@ -216,10 +211,13 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
     modelProtocol,
     permissionMode: raw.permissionMode,
     thinkingMode: raw.thinkingMode,
-    claudeThinkingMode: raw.claudeThinkingMode,
-    ampAgentMode: raw.ampAgentMode,
+    agentSettingsById: raw.agentSettingsById,
     tags,
   };
+}
+
+function isAgentSettingsById(value: unknown): value is Record<string, AgentSettingsEnvelope> {
+  return parseAgentSettingsById(value) !== null;
 }
 
 export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptTarget | null {

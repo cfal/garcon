@@ -2,26 +2,16 @@
 // returned by GET /api/v1/app/settings and broadcast via the
 // settings-changed WebSocket message.
 
-import type {
-  AmpAgentMode,
-  ClaudeThinkingMode,
-  PermissionMode,
-  ThinkingMode,
-} from './chat-modes';
+import type { PermissionMode, ThinkingMode } from './chat-modes';
 import {
-  DEFAULT_AMP_AGENT_MODE,
-  DEFAULT_CLAUDE_THINKING_MODE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_THINKING_MODE,
   coerceThinkingMode,
-  isAmpAgentMode,
-  isClaudeThinkingMode,
   isPermissionMode,
-  normalizeAmpAgentMode,
-  normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
 } from './chat-modes';
+import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-integration';
 import type { AgentId } from './agents';
 import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
@@ -117,8 +107,7 @@ export interface RecentAgentSetting {
 export interface ExecutionDefaults {
   permissionMode: PermissionMode;
   thinkingMode: ThinkingMode;
-  claudeThinkingMode: ClaudeThinkingMode;
-  ampAgentMode: AmpAgentMode;
+  agentSettingsById: Record<string, AgentSettingsEnvelope>;
 }
 
 export interface RemoteExecutionDefaults {
@@ -368,13 +357,12 @@ function normalizeExecutionDefaults(value: unknown): ExecutionDefaults | null {
   if (!isPermissionMode(raw.permissionMode)) return null;
   const thinkingMode = coerceThinkingMode(raw.thinkingMode);
   if (!thinkingMode) return null;
-  if (!isClaudeThinkingMode(raw.claudeThinkingMode)) return null;
-  if (!isAmpAgentMode(raw.ampAgentMode)) return null;
+  const agentSettingsById = normalizeAgentSettingsById(raw.agentSettingsById);
+  if (!agentSettingsById) return null;
   return {
     permissionMode: raw.permissionMode,
     thinkingMode,
-    claudeThinkingMode: raw.claudeThinkingMode,
-    ampAgentMode: raw.ampAgentMode,
+    agentSettingsById,
   };
 }
 
@@ -391,13 +379,10 @@ function normalizeExecutionDefaultsPatch(value: unknown): Partial<ExecutionDefau
     if (!thinkingMode) return null;
     patch.thinkingMode = thinkingMode;
   }
-  if (raw.claudeThinkingMode !== undefined) {
-    if (!isClaudeThinkingMode(raw.claudeThinkingMode)) return null;
-    patch.claudeThinkingMode = raw.claudeThinkingMode;
-  }
-  if (raw.ampAgentMode !== undefined) {
-    if (!isAmpAgentMode(raw.ampAgentMode)) return null;
-    patch.ampAgentMode = raw.ampAgentMode;
+  if (raw.agentSettingsById !== undefined) {
+    const agentSettingsById = normalizeAgentSettingsById(raw.agentSettingsById);
+    if (!agentSettingsById) return null;
+    patch.agentSettingsById = agentSettingsById;
   }
   return patch;
 }
@@ -424,9 +409,12 @@ export function defaultExecutionDefaults(): ExecutionDefaults {
   return {
     permissionMode: normalizePermissionMode(DEFAULT_PERMISSION_MODE),
     thinkingMode: normalizeThinkingMode(DEFAULT_THINKING_MODE),
-    claudeThinkingMode: normalizeClaudeThinkingMode(DEFAULT_CLAUDE_THINKING_MODE),
-    ampAgentMode: normalizeAmpAgentMode(DEFAULT_AMP_AGENT_MODE),
+    agentSettingsById: {},
   };
+}
+
+function normalizeAgentSettingsById(value: unknown): Record<string, AgentSettingsEnvelope> | null {
+  return parseAgentSettingsById(value);
 }
 
 function normalizeRemoteTelegramStatus(value: unknown): RemoteTelegramStatus | null {

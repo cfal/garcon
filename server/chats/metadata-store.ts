@@ -39,7 +39,7 @@ interface MetadataIndexOptions {
 }
 
 interface MetadataAgentSource {
-  getPreview(session: ChatRegistryEntry): Promise<unknown>;
+  getPreview(session: ChatRegistryEntry, chatId: string): Promise<unknown>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -168,7 +168,7 @@ export class MetadataIndex {
   }
 
   async #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): Promise<ChatMetadata> {
-    const preview = await this.#agents.getPreview(session);
+    const preview = await this.#agents.getPreview(session, chatId);
     if (!isAgentPreviewMetadata(preview)) {
       throw new Error(`Failed to build preview for chat: ${chatId}`);
     }

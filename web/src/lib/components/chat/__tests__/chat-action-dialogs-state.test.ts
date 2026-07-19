@@ -14,8 +14,7 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		model: 'sonnet',
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		claudeThinkingMode: 'auto',
-		ampAgentMode: 'smart',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		createdAt: null,
 		lastActivityAt: null,
 		lastReadAt: null,
@@ -78,7 +77,6 @@ describe('ChatActionDialogsState', () => {
 			createdAt: '2026-01-01',
 			lastActivityAt: '2026-01-02',
 			agentSessionId: 'stale-session',
-			nativePath: '/tmp/stale',
 		});
 
 		expect(dialogs.chatDetailsDialog?.chatId).toBe('c2');

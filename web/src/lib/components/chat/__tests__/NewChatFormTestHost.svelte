@@ -100,6 +100,20 @@
 			if (agentId === 'codex') return 'gpt-5.4';
 			return '';
 		},
+		getPermissionModes(agentId: string) {
+			return agentId === 'claude'
+				? ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan']
+				: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions'];
+		},
+		getThinkingModes() {
+			return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+		},
+		getAgentSettingsDescriptors() {
+			return [];
+		},
+		getDefaultAgentSettings(agentId: string) {
+			return { ownerId: agentId, schemaVersion: 1, values: {} };
+		},
 		getModels(agentId: string) {
 			if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
 			if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];

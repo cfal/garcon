@@ -35,8 +35,7 @@ function remoteSettingsSource(overrides = {}) {
       global: {
         permissionMode: 'default',
         thinkingMode: 'none',
-        claudeThinkingMode: 'auto',
-        ampAgentMode: 'smart',
+        agentSettingsById: {},
       },
       byAgent: {},
     },
@@ -235,19 +234,22 @@ describe('GET /api/app/settings', () => {
         global: {
           permissionMode: 'default',
           thinkingMode: 'none',
-          claudeThinkingMode: 'auto',
-          ampAgentMode: 'smart',
+          agentSettingsById: {},
         },
         byAgent: {
           codex: {
             permissionMode: 'acceptEdits',
             thinkingMode: 'medium',
-            claudeThinkingMode: 'on',
-            ampAgentMode: 'smart',
+            agentSettingsById: {
+              codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
+            },
           },
         },
       },
     }));
+    ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([
+      { id: 'claude', models: [], generation: { priority: 10, model: 'haiku' } },
+    ]));
 
     const response = await handler();
     const body = await response.json();
@@ -272,8 +274,9 @@ describe('GET /api/app/settings', () => {
     expect(body.executionDefaults.byAgent.codex).toEqual({
       permissionMode: 'acceptEdits',
       thinkingMode: 'medium',
-      claudeThinkingMode: 'on',
-      ampAgentMode: 'smart',
+      agentSettingsById: {
+        codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      },
     });
     for (const key of ['last' + 'AgentId', 'last' + 'ProjectPath', 'last' + 'Model', 'last' + 'PermissionMode']) {
       expect(body[key]).toBeUndefined();
@@ -296,9 +299,9 @@ describe('GET /api/app/settings', () => {
       codex: { authenticated: true },
       opencode: { authenticated: true },
     }));
-    ctx.agents.getModels.mockImplementation(() => Promise.resolve([
-      { value: 'deepseek-r1', label: 'DeepSeek R1' },
-      { value: 'openai/gpt-4.1', label: 'GPT-4.1' },
+    ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([
+      { id: 'codex', models: [], generation: { priority: 10, model: 'gpt-5.5' } },
+      { id: 'opencode', models: [], generation: { priority: 20, model: 'openai/gpt-4.1' } },
     ]));
 
     const response = await handler();

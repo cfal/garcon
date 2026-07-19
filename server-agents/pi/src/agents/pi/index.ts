@@ -31,15 +31,6 @@ export function createPiAgent(pi: AgentRuntime): Agent {
         const found = await findPiSessionFileBySessionId(session.agentSessionId, session.projectPath);
         return found || createArtificialNativePath(session.agentId, session.agentSessionId);
       },
-      async resolveSearchLoadPlan(session) {
-        let nativePath = hasRealPiNativePath(session) ? session.nativePath : null;
-        if (!nativePath && session.agentSessionId) {
-          const { findPiSessionFileBySessionId } = await import('./pi-session-paths.js');
-          nativePath = await findPiSessionFileBySessionId(session.agentSessionId, session.projectPath);
-        }
-        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
-        return { kind: 'detached', source: { kind: 'pi-jsonl', nativePath } };
-      },
     },
     auth: {
       async getAuthStatus() {

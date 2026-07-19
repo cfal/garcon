@@ -28,6 +28,7 @@ export default class CursorAgentIntegration extends LegacyAgentIntegrationBase {
         ],
       },
       defaultModel: '',
+      generation: null,
     });
   }
 }

@@ -18,6 +18,7 @@ import {
   openSearchDatabase,
   pruneMissingChats,
   replaceChatRows,
+  loadPersistedGenerations,
   type SearchDatabase,
 } from './schema.js';
 
@@ -45,6 +46,8 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
   #state: 'disabled' | 'enabled' | 'cleaning' = 'disabled';
   #tail: Promise<void> = Promise.resolve();
   #acceptedGeneration: AgentSearchGeneration | null = null;
+  #retiredEpochs = new Set<string>();
+  #generationBases = new Map<string, number>();
   #acceptance = 0;
 
   constructor(options: TranscriptSearchOptions) {
@@ -52,8 +55,7 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
   }
 
   reconcile(request: Parameters<AgentTranscriptSearch['reconcile']>[0]): Promise<void> {
-    if (this.#isStale(request.generation)) return Promise.resolve();
-    this.#acceptedGeneration = request.generation;
+    if (!this.#acceptGeneration(request.generation)) return Promise.resolve();
     this.#state = 'enabled';
     const acceptance = ++this.#acceptance;
     return this.#serialize(async () => {
@@ -64,7 +66,11 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
         return;
       }
       const database = await this.#open();
+      const generation = this.#databaseGeneration(database, request.generation);
       const currentIds = request.chats.map((chat) => chat.chatId);
+      for (const chat of request.chats) {
+        markChatStatus(database.db, chat.chatId, generation, 'pending');
+      }
       for (const chat of request.chats) {
         request.signal.throwIfAborted();
         if (!this.#accepts(acceptance)) return;
@@ -78,7 +84,7 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
           replaceChatRows(
             database.db,
             chat.chatId,
-            request.generation.sequence,
+            generation,
             `${chat.transcriptRevision}:${chat.carryOverRevision}`,
             rows,
           );
@@ -88,7 +94,7 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
           markChatStatus(
             database.db,
             chat.chatId,
-            request.generation.sequence,
+            generation,
             'failed',
             error instanceof AgentIntegrationError ? error.code : 'TRANSCRIPT_UNAVAILABLE',
           );
@@ -126,19 +132,15 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
     });
   }
 
-  status(request: Parameters<AgentTranscriptSearch['status']>[0]) {
+  async status(request: Parameters<AgentTranscriptSearch['status']>[0]) {
     request.signal.throwIfAborted();
-    if (this.#state !== 'enabled') return Promise.resolve(emptyStatus());
-    return this.#serialize(async () => {
-      request.signal.throwIfAborted();
-      if (request.chats.length === 0 || !this.#database) return emptyStatus();
-      return searchIndexStatus(this.#database.db, request.chats.map((chat) => chat.chatId));
-    });
+    if (this.#state !== 'enabled') return emptyStatus();
+    if (request.chats.length === 0 || !this.#database) return emptyStatus();
+    return searchIndexStatus(this.#database.db, request.chats.map((chat) => chat.chatId));
   }
 
   disableAndDelete(request: Parameters<AgentTranscriptSearch['disableAndDelete']>[0]): Promise<void> {
-    if (this.#isStale(request.generation)) return Promise.resolve();
-    this.#acceptedGeneration = request.generation;
+    if (!this.#acceptGeneration(request.generation)) return Promise.resolve();
     this.#state = 'cleaning';
     ++this.#acceptance;
     return this.#serialize(async () => {
@@ -149,7 +151,9 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
       request.signal.throwIfAborted();
       await rm(directory, { recursive: true, force: true });
       this.#databaseDirectory = null;
+      this.#generationBases.clear();
       this.#state = 'disabled';
+      request.signal.throwIfAborted();
     });
   }
 
@@ -186,11 +190,37 @@ class SqliteTranscriptSearch implements ClosableTranscriptSearch {
     return result.messages;
   }
 
-  #isStale(generation: AgentSearchGeneration): boolean {
+  #acceptGeneration(generation: AgentSearchGeneration): boolean {
     const accepted = this.#acceptedGeneration;
-    if (!accepted) return false;
-    if (accepted.epoch !== generation.epoch) return false;
-    return generation.sequence < accepted.sequence;
+    if (!accepted) {
+      this.#acceptedGeneration = generation;
+      return true;
+    }
+    if (accepted.epoch === generation.epoch) {
+      if (generation.sequence < accepted.sequence) return false;
+      this.#acceptedGeneration = generation;
+      return true;
+    }
+    if (this.#retiredEpochs.has(generation.epoch)) return false;
+    this.#retiredEpochs.add(accepted.epoch);
+    this.#acceptedGeneration = generation;
+    return true;
+  }
+
+  #databaseGeneration(
+    database: SearchDatabase,
+    generation: AgentSearchGeneration,
+  ): number {
+    let base = this.#generationBases.get(generation.epoch);
+    if (base === undefined) {
+      base = Math.max(0, ...loadPersistedGenerations(database.db).values());
+      this.#generationBases.set(generation.epoch, base);
+    }
+    const value = base + generation.sequence;
+    if (!Number.isSafeInteger(value)) {
+      throw new Error('Transcript search generation exceeded the safe integer range');
+    }
+    return value;
   }
 
   #accepts(acceptance: number): boolean {

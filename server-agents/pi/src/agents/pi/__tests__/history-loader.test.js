@@ -7,7 +7,6 @@ import {
   getPiPreviewFromSessionPath,
   loadPiChatMessages,
 } from '../history-loader.js';
-import { loadPiSearchTranscript } from '../search-transcript-source.js';
 import { createPiAgent } from '../index.ts';
 
 const originalPiSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
@@ -37,19 +36,6 @@ async function writeJsonl(fileName, entries) {
   const sessionPath = path.join(tempRoot, fileName);
   await fs.writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
   return sessionPath;
-}
-
-async function loadSearchMessages(sessionPath, batchSize = 2) {
-  const messages = [];
-  for await (const batch of loadPiSearchTranscript(
-    { kind: 'pi-jsonl', nativePath: sessionPath },
-    {
-      signal: new AbortController().signal,
-      batchSize,
-      scratchDirectory: path.join(tempRoot, 'search-scratch'),
-    },
-  )) messages.push(...batch);
-  return messages;
 }
 
 describe('Pi history loader', () => {
@@ -147,7 +133,6 @@ describe('Pi history loader', () => {
     const messages = await loadPiChatMessages(sessionPath);
 
     expect(messages.map((message) => message.content)).toEqual(['question', 'new branch']);
-    expect(await loadSearchMessages(sessionPath)).toEqual(messages);
   });
 
   it('rejects an active-path walk when malformed parent links form a cycle', async () => {
@@ -166,7 +151,7 @@ describe('Pi history loader', () => {
       },
     ]);
 
-    await expect(loadSearchMessages(sessionPath)).rejects.toThrow('parent graph contains a cycle');
+    await expect(loadPiChatMessages(sessionPath)).rejects.toThrow('parent graph contains a cycle');
   });
 
   it('matches the active leaf when malformed entries omit parent ids', async () => {
@@ -186,7 +171,8 @@ describe('Pi history loader', () => {
       },
     ]);
 
-    expect(await loadSearchMessages(sessionPath, 1)).toEqual(await loadPiChatMessages(sessionPath));
+    expect((await loadPiChatMessages(sessionPath)).map((message) => message.content))
+      .toEqual(['active content']);
   });
 
   it('builds previews from normalized Pi history', async () => {

@@ -2,7 +2,11 @@ import type { JsonObject } from '@garcon/common/json';
 
 export type AgentIntegrationErrorCode =
   | 'AUTH_REQUIRED'
+  | 'AUTH_LOGIN_SESSION_MISMATCH'
   | 'BINARY_NOT_FOUND'
+  | 'RATE_LIMITED'
+  | 'TIMEOUT'
+  | 'UNAVAILABLE'
   | 'INVALID_SETTINGS'
   | 'INVALID_ENDPOINT'
   | 'SESSION_NOT_FOUND'

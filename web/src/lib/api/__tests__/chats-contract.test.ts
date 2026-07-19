@@ -39,6 +39,12 @@ vi.stubGlobal('localStorage', {
 	removeItem: () => {},
 });
 
+const CLAUDE_SETTINGS = {
+	ownerId: 'claude',
+	schemaVersion: 1,
+	values: { thinkingMode: 'auto' },
+} as const;
+
 describe('chats API contract', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -67,8 +73,7 @@ describe('chats API contract', () => {
 					model: 'opus',
 					permissionMode: 'default',
 					thinkingMode: 'none',
-					claudeThinkingMode: 'auto',
-					ampAgentMode: 'smart',
+					agentSettings: CLAUDE_SETTINGS,
 					title: 'Chat 1',
 					projectPath: '/repo',
 					effectiveProjectKey: '/repo',
@@ -116,7 +121,6 @@ describe('chats API contract', () => {
 			createdAt: '2026-02-20T10:00:00.000Z',
 			lastActivityAt: '2026-02-21T11:00:00.000Z',
 			agentSessionId: 'thread-abc',
-			nativePath: '/tmp/session.jsonl',
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -139,8 +143,7 @@ describe('chats API contract', () => {
 			model: 'opus',
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: CLAUDE_SETTINGS,
 			command: 'hello',
 		});
 
@@ -158,8 +161,7 @@ describe('chats API contract', () => {
 			model: 'opus',
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: CLAUDE_SETTINGS,
 			command: 'hello',
 		});
 	});
@@ -177,8 +179,7 @@ describe('chats API contract', () => {
 			model: 'm',
 			permissionMode: 'acceptEdits',
 			thinkingMode: 'medium',
-			claudeThinkingMode: 'off',
-			ampAgentMode: 'smart',
+			agentSettings: { ...CLAUDE_SETTINGS, values: { thinkingMode: 'off' } },
 			command: 'test',
 			images,
 			tags: ['fast'],
@@ -187,7 +188,7 @@ describe('chats API contract', () => {
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.permissionMode).toBe('acceptEdits');
 		expect(body.thinkingMode).toBe('medium');
-		expect(body.claudeThinkingMode).toBe('off');
+		expect(body.agentSettings.values.thinkingMode).toBe('off');
 		expect(body.images).toEqual(images);
 		expect(body).not.toHaveProperty('options');
 		expect(body.tags).toEqual(['fast']);
@@ -226,15 +227,14 @@ describe('chats API contract', () => {
 			model: 'm',
 			permissionMode: 'bogus' as any,
 			thinkingMode: 'very-hard' as any,
-			claudeThinkingMode: 'sometimes' as any,
-			ampAgentMode: 'smart',
+			agentSettings: CLAUDE_SETTINGS,
 			command: 'test',
 		});
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.permissionMode).toBe('default');
 		expect(body.thinkingMode).toBe('none');
-		expect(body.claudeThinkingMode).toBe('auto');
+		expect(body.agentSettings).toEqual(CLAUDE_SETTINGS);
 	});
 
 	it('runChat sends POST /api/v1/chats/run with command identity', async () => {
@@ -256,8 +256,7 @@ describe('chats API contract', () => {
 			command: 'hello',
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: CLAUDE_SETTINGS,
 			model: 'opus',
 		});
 
@@ -295,8 +294,7 @@ describe('chats API contract', () => {
 			command: 'continue',
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: CLAUDE_SETTINGS,
 			model: 'opus',
 		});
 

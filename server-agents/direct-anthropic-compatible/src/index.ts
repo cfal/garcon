@@ -22,6 +22,7 @@ export default class DirectAnthropicCompatibleIntegration extends LegacyAgentInt
         supportedEndpointProtocols: ['anthropic-messages'], configuration: [],
       },
       defaultModel: '',
+      generation: { priority: 20 },
       onEndpointSelection: (selection, credential) => reader.register(selection, credential),
     });
   }

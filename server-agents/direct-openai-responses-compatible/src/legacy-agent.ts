@@ -32,6 +32,7 @@ export function createDirectOpenAiResponsesAgent(
     transcript: createDirectCompatibleTranscriptSource({
       agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
       protocol: 'openai-compatible',
+      requiredCapability: 'responses',
       sessionLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
       apiProviders,
       getSessionFilePath: sessionPaths.sessionFilePath,

@@ -29,6 +29,7 @@ export default class FactoryAgentIntegration extends LegacyAgentIntegrationBase 
         ],
       },
       defaultModel: FACTORY_MODELS.DEFAULT,
+      generation: { priority: 80, model: FACTORY_MODELS.DEFAULT },
       models: FACTORY_MODELS.OPTIONS,
     });
   }

@@ -22,6 +22,7 @@ export default class DirectOpenAiCompatibleIntegration extends LegacyAgentIntegr
         supportedEndpointProtocols: ['openai-compatible'], configuration: [],
       },
       defaultModel: '',
+      generation: { priority: 50 },
       onEndpointSelection: (selection, credential) => reader.register(selection, credential),
     });
   }

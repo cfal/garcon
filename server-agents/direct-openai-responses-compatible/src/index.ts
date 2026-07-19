@@ -22,6 +22,7 @@ export default class DirectOpenAiResponsesCompatibleIntegration extends LegacyAg
         supportedEndpointProtocols: ['openai-compatible'], configuration: [],
       },
       defaultModel: '',
+      generation: { priority: 40 },
       onEndpointSelection: (selection, credential) => reader.register(selection, credential),
     });
   }

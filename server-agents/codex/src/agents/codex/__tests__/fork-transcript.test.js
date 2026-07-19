@@ -68,4 +68,36 @@ describe('rewriteCodexForkTranscriptEntry', () => {
     });
     expect(rewritten.payload).not.toHaveProperty('session_id');
   });
+
+  it('truncates a completed web search entry before its synthetic result', () => {
+    const entry = {
+      type: 'response_item',
+      timestamp: '2026-07-18T10:00:00.000Z',
+      payload: {
+        type: 'web_search_call',
+        id: 'search-1',
+        status: 'completed',
+        action: { type: 'search', query: 'Garcon' },
+      },
+    };
+    expect(rewriteCodexForkTranscriptEntry(entry, {
+      ...context,
+      retainedMessageCount: 1,
+    })).toEqual({
+      ...entry,
+      payload: { ...entry.payload, status: 'in_progress' },
+    });
+  });
+
+  it('neutralizes an unselected fallback entry before the physical cutoff', () => {
+    const entry = {
+      type: 'event_msg',
+      timestamp: '2026-07-18T10:00:00.000Z',
+      payload: { type: 'user_message', message: 'not selected' },
+    };
+    expect(rewriteCodexForkTranscriptEntry(entry, {
+      ...context,
+      retainedMessageCount: 0,
+    })).toEqual({ type: 'garcon_fork_filtered' });
+  });
 });

@@ -25,6 +25,7 @@ export default class OpenCodeAgentIntegration extends LegacyAgentIntegrationBase
         configuration: [{ key: 'NODE_ENV', source: 'environment', description: 'Runtime environment.' }],
       },
       defaultModel: '',
+      generation: { priority: 60 },
     });
   }
 }

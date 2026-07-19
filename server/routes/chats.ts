@@ -5,11 +5,10 @@ import { promises as fs } from 'fs';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
 import {
-  normalizeAmpAgentMode,
-  normalizeClaudeThinkingMode,
   normalizePermissionMode,
-  normalizeThinkingModeForAgent,
+  normalizeThinkingMode,
 } from '../../common/chat-modes.js';
+import type { JsonObject } from '../../common/json.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
@@ -456,8 +455,7 @@ export default function createChatRoutes({
             : null,
         permissionMode: body.permissionMode,
         thinkingMode: body.thinkingMode,
-        claudeThinkingMode: body.claudeThinkingMode,
-        ampAgentMode: body.ampAgentMode,
+        agentSettings: body.agentSettings,
         tags: Array.isArray(body.tags) ? body.tags : undefined,
         images: body.images,
       });
@@ -618,7 +616,6 @@ export default function createChatRoutes({
         createdAt: meta?.createdAt || null,
         lastActivityAt: meta?.lastActivity || null,
         agentSessionId: session.agentSessionId || null,
-        nativePath: session.nativePath || null,
       });
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
@@ -1119,16 +1116,24 @@ export default function createChatRoutes({
         patch.permissionMode = normalizePermissionMode(body.permissionMode);
       }
       if (body.thinkingMode !== undefined) {
-        patch.thinkingMode = normalizeThinkingModeForAgent(chat.agentId, body.thinkingMode);
+        patch.thinkingMode = normalizeThinkingMode(body.thinkingMode);
       }
-      if (body.claudeThinkingMode !== undefined) {
-        patch.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);
+      if (body.agentSettingsPatch !== undefined) {
+        if (!body.agentSettingsPatch || typeof body.agentSettingsPatch !== 'object' || Array.isArray(body.agentSettingsPatch)) {
+          return jsonError('agentSettingsPatch must be an object', 400, 'VALIDATION_FAILED');
+        }
+        patch.agentSettingsPatch = body.agentSettingsPatch as JsonObject;
       }
-      if (body.ampAgentMode !== undefined) {
-        patch.ampAgentMode = normalizeAmpAgentMode(body.ampAgentMode);
-      }
-      if (Object.keys(patch).length > 0) await agents.updateSessionSettings(chatId, patch);
-      return Response.json({ success: true, chatId, ...patch });
+      const updated = Object.keys(patch).length > 0
+        ? await agents.updateSessionSettings(chatId, patch)
+        : chat;
+      return Response.json({
+        success: true,
+        chatId,
+        permissionMode: updated.permissionMode,
+        thinkingMode: updated.thinkingMode,
+        agentSettings: updated.agentSettingsById?.[updated.agentId] ?? chat.agentSettingsById[chat.agentId],
+      });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);
     }
@@ -1187,8 +1192,7 @@ export default function createChatRoutes({
         modelProtocol: updated.modelProtocol ?? null,
         permissionMode: updated.permissionMode,
         thinkingMode: updated.thinkingMode,
-        claudeThinkingMode: updated.claudeThinkingMode,
-        ampAgentMode: updated.ampAgentMode,
+        agentSettings: updated.agentSettingsById[updated.agentId],
       });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);

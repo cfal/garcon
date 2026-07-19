@@ -57,10 +57,10 @@
 			return {
 				id: agentId,
 				label: 'Claude',
-					description: '',
-					supportsFork: true,
-					supportsUpdateProjectPath: true,
-					supportsImages: true,
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: true,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: ['anthropic-messages'],
 				defaultModel: 'opus',
@@ -71,6 +71,18 @@
 		},
 		getDefaultModel() {
 			return 'opus';
+		},
+		getPermissionModes() {
+			return ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'];
+		},
+		getThinkingModes() {
+			return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+		},
+		getAgentSettingsDescriptors() {
+			return [];
+		},
+		getDefaultAgentSettings() {
+			return { ownerId: 'claude', schemaVersion: 1, values: {} };
 		},
 		getModels() {
 			return [{ value: 'opus', label: 'Opus' }];

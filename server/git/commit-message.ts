@@ -2,8 +2,8 @@ import { GitDomainError } from './git-types.js';
 import type { AgentId } from '../../common/agents.ts';
 import type { CommitMessageOptions, RunSingleQueryOptions } from './types.js';
 import { createLogger } from '../lib/log.js';
-import { errorMessage } from '../lib/errors.js';
 import { GENERATION_PROVIDER_TIMEOUT_MS } from '../settings/generation-limits.js';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 const logger = createLogger('git:commit-message');
 
@@ -50,41 +50,11 @@ export function isCommitMessageErrorCode(code: string): code is CommitMessageErr
 }
 
 function classifyCommitMessageAgentError(error: unknown): CommitMessageErrorCode {
-  const message = errorMessage(error).toLowerCase();
-  if (
-    message.includes('401')
-    || message.includes('unauthorized')
-    || message.includes('forbidden')
-    || message.includes('auth')
-    || message.includes('login')
-    || message.includes('api key')
-  ) {
-    return 'COMMIT_MESSAGE_AGENT_AUTH_REQUIRED';
-  }
-  if (
-    message.includes('429')
-    || message.includes('rate limit')
-    || message.includes('quota')
-    || message.includes('too many requests')
-  ) {
-    return 'COMMIT_MESSAGE_RATE_LIMITED';
-  }
-  if (
-    message.includes('timed out')
-    || message.includes('timeout')
-    || message.includes('deadline')
-    || message.includes('etimedout')
-  ) {
-    return 'COMMIT_MESSAGE_TIMEOUT';
-  }
-  if (
-    message.includes('service unavailable')
-    || message.includes('unavailable')
-    || message.includes('econnrefused')
-    || message.includes('enotfound')
-    || message.includes('network')
-    || message.includes('failed to create opencode session')
-  ) {
+  if (!(error instanceof AgentIntegrationError)) return 'COMMIT_MESSAGE_GENERATION_FAILED';
+  if (error.code === 'AUTH_REQUIRED') return 'COMMIT_MESSAGE_AGENT_AUTH_REQUIRED';
+  if (error.code === 'RATE_LIMITED') return 'COMMIT_MESSAGE_RATE_LIMITED';
+  if (error.code === 'TIMEOUT') return 'COMMIT_MESSAGE_TIMEOUT';
+  if (error.code === 'BINARY_NOT_FOUND' || error.code === 'UNAVAILABLE') {
     return 'COMMIT_MESSAGE_AGENT_UNAVAILABLE';
   }
   return 'COMMIT_MESSAGE_GENERATION_FAILED';

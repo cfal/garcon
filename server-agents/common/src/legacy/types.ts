@@ -23,10 +23,6 @@ import type {
   AgentAuthLoginLaunchResult,
   AgentAuthLoginStatus,
 } from '@garcon/common/agent-auth';
-import type {
-  SearchTranscriptLoadContext,
-  SearchTranscriptLoadPlan,
-} from '../search/source-types.js';
 
 export interface StoredApiProvider {
   id: string;
@@ -90,19 +86,19 @@ export interface AgentTranscriptSource {
   ): Promise<AgentTranscriptPage | null>;
   getPreview?(session: AgentChatEntry): Promise<unknown>;
   resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
-  resolveSearchLoadPlan(
-    session: AgentChatEntry,
-    context: SearchTranscriptLoadContext,
-  ): Promise<SearchTranscriptLoadPlan>;
   rewriteForkTranscriptEntry?(
     entry: unknown,
     context: ForkTranscriptEntryContext,
   ): unknown;
+  release?(session: AgentChatEntry, reason: 'deleted' | 'transferred'): Promise<void>;
 }
 
 export interface ForkTranscriptEntryContext {
   sourceAgentSessionId: string;
   targetAgentSessionId: string;
+  // Present for message-point forks and counts canonical messages retained
+  // from the current provider-native entry.
+  retainedMessageCount?: number;
 }
 
 export interface AgentTranscriptPage {

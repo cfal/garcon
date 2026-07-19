@@ -8,7 +8,6 @@ import {
   type AgentId,
 } from '@garcon/common/agents';
 import type { ApiProtocol } from '@garcon/common/api-providers';
-import { endpointSupportsAgent } from '@garcon/common/model-routing';
 import { AnthropicCompatibleChatRuntime, type AnthropicCompatibleChatRuntimeConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-runtime.js';
 import type { ApiProviderReader } from '@garcon/server-agent-common/legacy/api-providers';
 import type { StoredApiProvider, StoredApiProviderEndpoint } from '@garcon/server-agent-common/legacy/types';
@@ -51,6 +50,7 @@ interface DirectEndpointRouterConfig<TRuntime extends DirectCompatibleRuntime> {
   agentId: AgentId;
   label: string;
   protocol: ApiProtocol;
+  requiredCapability: 'chatCompletions' | 'responses' | null;
   noEndpointMessage: string;
   apiProviders: ApiProviderReader;
   createRuntime(endpoint: StoredApiProviderEndpoint, apiProvider: StoredApiProvider): TRuntime;
@@ -238,7 +238,7 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
 
   #isDirectEndpoint(endpoint: StoredApiProviderEndpoint): boolean {
     return endpoint.protocol === this.config.protocol
-      && endpointSupportsAgent(this.config.agentId, endpoint);
+      && (!this.config.requiredCapability || endpoint.capabilities?.[this.config.requiredCapability] === true);
   }
 }
 
@@ -250,6 +250,7 @@ export function createDirectOpenAiChatRuntime(
     agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
+    requiredCapability: 'chatCompletions',
     noEndpointMessage: `No OpenAI-compatible Chat Completions endpoint is configured for ${DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL}.`,
     apiProviders,
     createRuntime(endpoint) {
@@ -279,6 +280,7 @@ export function createDirectOpenAiResponsesRuntime(
     agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
     protocol: 'openai-compatible',
+    requiredCapability: 'responses',
     noEndpointMessage: `No OpenAI-compatible Responses endpoint is configured for ${DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL}.`,
     apiProviders,
     createRuntime(endpoint) {
@@ -308,6 +310,7 @@ export function createDirectAnthropicRuntime(
     agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
     label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
     protocol: 'anthropic-messages',
+    requiredCapability: null,
     noEndpointMessage: `No Anthropic-compatible endpoint is configured for ${DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL}.`,
     apiProviders,
     createRuntime(endpoint) {

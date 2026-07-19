@@ -6,6 +6,7 @@ function printHelp() {
 Usage:
   bun server/main.ts [options]
   bun run start -- [options]
+  bun server/main.ts restore-agent-integration-v1 [options]
 
 Options:
   --help, -h                     Show this help screen and exit.
@@ -34,9 +35,6 @@ Environment Variables:
   GARCON_WS_BACKPRESSURE_LIMIT     WebSocket backpressure limit (bytes). Default: 2097152
   GARCON_WS_MAX_PAYLOAD_LENGTH     WebSocket max payload length (bytes). Default: 16777216
   GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
-  CLAUDE_BINARY                    Claude CLI binary path. Default: claude
-  GARCON_CURSOR_BINARY             Cursor Agent CLI binary path. Default: cursor-agent
-  CURSOR_API_KEY                   Cursor Agent API key for native Cursor sessions.
   GARCON_HTTP_COMPRESSION          Enable streamed HTTP response compression. Default: true
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
@@ -49,6 +47,14 @@ Notes:
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
   printHelp();
+} else if (process.argv[2] === 'restore-agent-integration-v1') {
+  const [{ initializeServerConfig }, { restorePreAgentIntegrationCoreRecords }] = await Promise.all([
+    import('./config.js'),
+    import('./agents/core-record-migration.js'),
+  ]);
+  const config = initializeServerConfig();
+  await restorePreAgentIntegrationCoreRecords(config.workspaceDir);
+  process.stdout.write(`Restored pre-integration core records in ${config.workspaceDir}\n`);
 } else {
   const { startServer } = await import('./server.js');
   await startServer();

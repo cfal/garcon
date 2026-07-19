@@ -1,4 +1,9 @@
-import type { AgentEventMetadata, AgentExecutionCommandType } from './session-types.js';
+import type {
+  AgentExecutionEvent,
+  AgentOperationIdentity,
+} from '@garcon/server-agent-interface';
+import type { ChatMessage } from '@garcon/common/chat-types';
+import type { AgentExecutionCommandType } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import { createLogger } from '../lib/log.js';
 import { matchesTurnIdentity } from '../lib/turn-identity.js';
@@ -12,18 +17,6 @@ export interface TurnEventMetadata {
   turnId?: string;
 }
 
-function mergeTurnEventMetadata(
-  base: TurnEventMetadata | undefined,
-  event: AgentEventMetadata | undefined,
-): TurnEventMetadata | undefined {
-  const metadata = {
-    ...(base ?? {}),
-    ...(event ?? {}),
-    ...(base?.commandType ? { commandType: base.commandType } : {}),
-  };
-  return Object.keys(metadata).length > 0 ? metadata : undefined;
-}
-
 interface AbortableTurnWaiter {
   turn: TurnEventMetadata;
   resolve: (isAbortable: boolean) => void;
@@ -32,33 +25,39 @@ interface AbortableTurnWaiter {
 }
 
 export class AgentEventBus {
-  readonly #directory: AgentDirectory;
   readonly #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableTurnByChatId = new Map<string, TurnEventMetadata>();
   readonly #abortableWaiters = new Map<string, Set<AbortableTurnWaiter>>();
+  readonly #messageListeners = new Set<(chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void>();
+  readonly #processingListeners = new Set<(chatId: string, processing: boolean) => void>();
+  readonly #sessionListeners = new Set<(chatId: string) => void>();
+  readonly #finishedListeners = new Set<(chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void>();
+  readonly #failedListeners = new Set<(chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void>();
 
   constructor(directory: AgentDirectory) {
-    this.#directory = directory;
+    for (const integration of directory.list()) {
+      integration.execution.subscribe((event) => this.#dispatch(event));
+    }
   }
 
   trackTurn(chatId: string, opts: TurnEventMetadata): void {
-    if (opts.clientRequestId || opts.commandType || opts.turnId) {
-      if (this.#turnMetadataByChatId.has(chatId)) {
-        logger.warn('agents: overwriting in-flight turn metadata for chat', chatId);
-      }
-      const turn = {
-        ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
-        ...(opts.commandType ? { commandType: opts.commandType } : {}),
-        ...(opts.turnId ? { turnId: opts.turnId } : {}),
-      };
-      const abortable = this.#abortableTurnByChatId.get(chatId);
-      if (abortable && !matchesTurnIdentity(turn, abortable)) {
-        this.#abortableTurnByChatId.delete(chatId);
-      }
-      this.#turnMetadataByChatId.set(chatId, turn);
+    if (!opts.clientRequestId && !opts.commandType && !opts.turnId) {
+      this.clearTurn(chatId);
       return;
     }
-    this.clearTurn(chatId);
+    if (this.#turnMetadataByChatId.has(chatId)) {
+      logger.warn('agents: overwriting in-flight turn metadata for chat', chatId);
+    }
+    const turn = {
+      ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
+      ...(opts.commandType ? { commandType: opts.commandType } : {}),
+      ...(opts.turnId ? { turnId: opts.turnId } : {}),
+    };
+    const abortable = this.#abortableTurnByChatId.get(chatId);
+    if (abortable && !matchesTurnIdentity(turn, abortable)) {
+      this.#abortableTurnByChatId.delete(chatId);
+    }
+    this.#turnMetadataByChatId.set(chatId, turn);
   }
 
   clearTurn(chatId: string): void {
@@ -68,16 +67,7 @@ export class AgentEventBus {
 
   settleTurn(chatId: string, turn: TurnEventMetadata): void {
     const active = this.#turnMetadataByChatId.get(chatId);
-    if (!active || !matchesTurnIdentity(active, turn)) return;
-    this.clearTurn(chatId);
-  }
-
-  #clearAbortability(chatId: string): void {
-    this.#abortableTurnByChatId.delete(chatId);
-    const waiters = this.#abortableWaiters.get(chatId);
-    if (waiters) {
-      for (const waiter of [...waiters]) this.#settleAbortableWaiter(chatId, waiter, false);
-    }
+    if (active && matchesTurnIdentity(active, turn)) this.clearTurn(chatId);
   }
 
   getActiveTurn(chatId: string): TurnEventMetadata | undefined {
@@ -85,44 +75,22 @@ export class AgentEventBus {
     return metadata ? { ...metadata } : undefined;
   }
 
-  onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
-    for (const agent of this.#directory.list()) {
-      agent.runtime.onMessages((chatId, messages, eventMetadata) => {
-        const metadata = this.#identifiedEventMetadata(chatId, eventMetadata, 'messages');
-        if (metadata === null) return;
-        cb(chatId, messages, metadata);
-      });
-    }
-  }
-
-  onProcessing(cb: (chatId: string, isProcessing: boolean) => void): void {
-    for (const agent of this.#directory.list()) {
-      agent.runtime.onProcessing(cb);
-    }
-  }
-
   markTurnAbortable(chatId: string, turn: TurnEventMetadata): void {
     const active = this.#turnMetadataByChatId.get(chatId);
     if (!active || !matchesTurnIdentity(active, turn)) return;
     const abortable = { ...turn };
     this.#abortableTurnByChatId.set(chatId, abortable);
-    const waiters = this.#abortableWaiters.get(chatId);
-    if (!waiters) return;
-    for (const waiter of [...waiters]) {
+    for (const waiter of [...(this.#abortableWaiters.get(chatId) ?? [])]) {
       if (matchesTurnIdentity(waiter.turn, abortable)) this.#settleAbortableWaiter(chatId, waiter, true);
     }
   }
 
-  waitUntilTurnAbortable(
-    chatId: string,
-    turn: TurnEventMetadata,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
+  waitUntilTurnAbortable(chatId: string, turn: TurnEventMetadata, signal?: AbortSignal): Promise<boolean> {
     const abortable = this.#abortableTurnByChatId.get(chatId);
     if (abortable && matchesTurnIdentity(turn, abortable)) return Promise.resolve(true);
     if (signal?.aborted) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
-      const waiter = {
+      const waiter: AbortableTurnWaiter = {
         turn: { ...turn },
         resolve,
         signal,
@@ -135,69 +103,73 @@ export class AgentEventBus {
     });
   }
 
-  #settleAbortableWaiter(
-    chatId: string,
-    waiter: AbortableTurnWaiter,
-    isAbortable: boolean,
-  ): void {
+  onMessages(cb: (chatId: string, messages: ChatMessage[], metadata?: TurnEventMetadata) => void): void {
+    this.#messageListeners.add(cb);
+  }
+
+  onProcessing(cb: (chatId: string, processing: boolean) => void): void {
+    this.#processingListeners.add(cb);
+  }
+
+  onSessionCreated(cb: (chatId: string) => void): void {
+    this.#sessionListeners.add(cb);
+  }
+
+  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
+    this.#finishedListeners.add(cb);
+  }
+
+  onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
+    this.#failedListeners.add(cb);
+  }
+
+  #dispatch(event: AgentExecutionEvent): void {
+    const metadata = operationMetadata(event.operation);
+    const active = this.#turnMetadataByChatId.get(event.chatId);
+    if (!active || !matchesTurnIdentity(active, metadata)) {
+      logger.warn(`agents: ignored ${event.type} for a non-active turn`, event.chatId);
+      return;
+    }
+    switch (event.type) {
+      case 'messages':
+        for (const listener of this.#messageListeners) listener(event.chatId, [...event.messages], metadata);
+        return;
+      case 'processing':
+        for (const listener of this.#processingListeners) listener(event.chatId, event.processing);
+        return;
+      case 'session-created':
+        for (const listener of this.#sessionListeners) listener(event.chatId);
+        return;
+      case 'finished':
+        this.#clearAbortability(event.chatId);
+        for (const listener of this.#finishedListeners) listener(event.chatId, event.exitCode, metadata);
+        return;
+      case 'failed':
+        this.#clearAbortability(event.chatId);
+        for (const listener of this.#failedListeners) listener(event.chatId, event.error.message, metadata);
+    }
+  }
+
+  #clearAbortability(chatId: string): void {
+    this.#abortableTurnByChatId.delete(chatId);
+    for (const waiter of [...(this.#abortableWaiters.get(chatId) ?? [])]) {
+      this.#settleAbortableWaiter(chatId, waiter, false);
+    }
+  }
+
+  #settleAbortableWaiter(chatId: string, waiter: AbortableTurnWaiter, isAbortable: boolean): void {
     waiter.signal?.removeEventListener('abort', waiter.onAbort);
     const waiters = this.#abortableWaiters.get(chatId);
     waiters?.delete(waiter);
     if (waiters?.size === 0) this.#abortableWaiters.delete(chatId);
     waiter.resolve(isAbortable);
   }
+}
 
-  onSessionCreated(cb: (chatId: string) => void): void {
-    for (const agent of this.#directory.list()) {
-      agent.runtime.onSessionCreated(cb);
-    }
-  }
-
-  onFinished(cb: (chatId: string, exitCode: number, metadata?: TurnEventMetadata) => void): void {
-    for (const agent of this.#directory.list()) {
-      agent.runtime.onFinished((chatId, exitCode, eventMetadata) => {
-        const metadata = this.#terminalMetadata(chatId, eventMetadata);
-        if (metadata === null) return;
-        this.#clearAbortability(chatId);
-        cb(chatId, exitCode, metadata);
-      });
-    }
-  }
-
-  onFailed(cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void): void {
-    for (const agent of this.#directory.list()) {
-      agent.runtime.onFailed((chatId, errorMessage, eventMetadata) => {
-        const metadata = this.#terminalMetadata(chatId, eventMetadata);
-        if (metadata === null) return;
-        this.#clearAbortability(chatId);
-        cb(chatId, errorMessage, metadata);
-      });
-    }
-  }
-
-  #terminalMetadata(
-    chatId: string,
-    eventMetadata: AgentEventMetadata | undefined,
-  ): TurnEventMetadata | null | undefined {
-    return this.#identifiedEventMetadata(chatId, eventMetadata, 'terminal');
-  }
-
-  #identifiedEventMetadata(
-    chatId: string,
-    eventMetadata: AgentEventMetadata | undefined,
-    eventKind: 'messages' | 'terminal',
-  ): TurnEventMetadata | null | undefined {
-    const active = this.#turnMetadataByChatId.get(chatId);
-    const activeHasIdentity = Boolean(active?.turnId || active?.clientRequestId);
-    const eventHasIdentity = Boolean(eventMetadata?.turnId || eventMetadata?.clientRequestId);
-    if (eventKind === 'terminal' && activeHasIdentity && !eventHasIdentity) {
-      logger.warn('agents: ignored identityless terminal for an identified active turn', chatId);
-      return null;
-    }
-    if (eventHasIdentity && (!active || !matchesTurnIdentity(active, eventMetadata))) {
-      logger.warn(`agents: ignored ${eventKind} for a non-active turn`, chatId);
-      return null;
-    }
-    return mergeTurnEventMetadata(active, eventMetadata);
-  }
+function operationMetadata(operation: AgentOperationIdentity): TurnEventMetadata {
+  return {
+    commandType: operation.commandType,
+    ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
+    turnId: operation.turnId,
+  };
 }

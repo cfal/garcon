@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import ComposerBottomBar from '$lib/components/chat/ComposerBottomBar.svelte';
+	import AgentSettingsControls from '$lib/components/chat/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
@@ -13,10 +14,6 @@
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
-	import {
-		CLAUDE_PERMISSION_MODES,
-		NON_CLAUDE_PERMISSION_MODES,
-	} from '$lib/chat/composer/chat-ui-constants.js';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
 	import type {
 		ModelSelectorChange,
@@ -55,12 +52,8 @@
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let resizeFrame: number | null = null;
 
-	const permissionOptions = $derived(
-		buildPermissionOptions(
-			startup.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
-		),
-	);
-	const thinkingOptions = $derived(buildThinkingOptions(startup.agentId, startup.modelValue));
+	const permissionOptions = $derived(buildPermissionOptions(startup.permissionModes));
+	const thinkingOptions = $derived(buildThinkingOptions(startup.thinkingModes, startup.modelValue));
 	const modelSelectorMode: ModelSelectorMode = {
 		agent: 'select',
 		source: 'select',
@@ -219,8 +212,13 @@
 	</div>
 
 	<div>
+		<AgentSettingsControls
+			descriptors={startup.agentSettingDescriptors}
+			envelope={startup.agentSettings}
+			onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
+		/>
 		<div
-			class="relative min-h-[120px] rounded-lg border border-border"
+			class="relative mt-3 min-h-[120px] rounded-lg border border-border"
 			data-slot="scheduled-new-chat-composer"
 		>
 			<textarea

@@ -19,7 +19,6 @@
     "./chat-types": "./chat-types.ts",
     "./chat-view": "./chat-view.ts",
     "./file-contracts": "./file-contracts.ts",
-    "./generation-defaults": "./generation-defaults.ts",
     "./generation-test-contracts": "./generation-test-contracts.ts",
     "./gh": "./gh.ts",
     "./http-error": "./http-error.ts",

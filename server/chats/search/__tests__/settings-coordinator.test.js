@@ -49,4 +49,20 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     expect(harness.settings.getFeatureSettings().transcriptSearch.enabled).toBe(false);
     expect(harness.events).toEqual(['start', 'persist:true', 'persist:false', 'delete']);
   });
+
+  it('retries cleanup while the durable setting is already disabled', async () => {
+    const harness = createHarness(false);
+    harness.controller.disableAndDelete.mockImplementationOnce(async () => {
+      harness.events.push('delete');
+      throw new Error('busy');
+    });
+
+    await expect(harness.coordinator.setEnabled(false)).rejects.toMatchObject({
+      code: 'TRANSCRIPT_SEARCH_CLEANUP_FAILED',
+    });
+    await harness.coordinator.setEnabled(false);
+
+    expect(harness.events).toEqual(['delete', 'delete']);
+    expect(harness.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
+  });
 });

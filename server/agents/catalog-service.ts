@@ -1,117 +1,163 @@
-import {
-  isEndpointOnlyAgentId,
-  isVisibleAgentId,
-  type AgentId,
-  type AgentCatalogEntry,
-  type AgentModelOption,
-} from '../../common/agents.js';
-import { AMP_MODELS, CLAUDE_MODELS, CODEX_MODELS, FACTORY_MODELS, PI_MODELS } from '../../common/models.js';
-import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
-import type { Agent, AgentModelQuery } from './types.js';
-import type { AgentDirectory } from './directory.js';
-import { createLogger } from '../lib/log.js';
+import type {
+  AgentCatalogEntry,
+  AgentModelOption,
+} from "../../common/agents.js";
+import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-resolver.js";
+import type { AgentDirectory } from "./directory.js";
+import { createLogger } from "../lib/log.js";
+import { isPermissionMode, isThinkingMode } from "../../common/chat-modes.js";
 
-const logger = createLogger('agents:catalog-service');
+const logger = createLogger("agents:catalog-service");
 
-const STATIC_AGENT_MODELS: Record<string, { defaultModel: string; models: AgentModelOption[] }> = {
-  claude: { defaultModel: CLAUDE_MODELS.DEFAULT, models: CLAUDE_MODELS.OPTIONS },
-  codex: { defaultModel: CODEX_MODELS.DEFAULT, models: CODEX_MODELS.OPTIONS },
-  amp: { defaultModel: AMP_MODELS.DEFAULT, models: AMP_MODELS.OPTIONS },
-  factory: { defaultModel: FACTORY_MODELS.DEFAULT, models: FACTORY_MODELS.OPTIONS },
-  pi: { defaultModel: PI_MODELS.DEFAULT, models: PI_MODELS.OPTIONS },
-};
+export interface AgentModelQuery {
+  strict?: boolean;
+}
 
-function dedupeModels(models: AgentModelOption[]): AgentModelOption[] {
+function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
   const seen = new Set<string>();
-  const result: AgentModelOption[] = [];
-  for (const model of models) {
-    if (!model.value || seen.has(model.value)) continue;
+  return models.filter((model) => {
+    if (!model.value || seen.has(model.value)) return false;
     seen.add(model.value);
-    result.push(model);
-  }
-  return result;
-}
-
-async function nativeModelsForAgent(id: string, agent: Agent, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
-  let fetched: AgentModelOption[] = [];
-  const getModels = agent.capabilities.getModels;
-  if (!isEndpointOnlyAgentId(id) && getModels) {
-    try {
-      fetched = await getModels(query);
-    } catch (error) {
-      if (query.strict) throw error;
-      logger.warn(`agents: failed to fetch ${id} models:`, error instanceof Error ? error.message : String(error));
-    }
-  }
-  const fallback = STATIC_AGENT_MODELS[id]?.models ?? [];
-  return dedupeModels([...fetched, ...fallback]);
-}
-
-function defaultModelForAgent(id: string, nativeModels: AgentModelOption[], endpointModels: AgentModelOption[]): string {
-  const fallbackDefault = STATIC_AGENT_MODELS[id]?.defaultModel;
-  if (fallbackDefault && nativeModels.some((model) => model.value === fallbackDefault)) {
-    return fallbackDefault;
-  }
-  return nativeModels[0]?.value ?? endpointModels[0]?.value ?? fallbackDefault ?? '';
+    return true;
+  });
 }
 
 export class AgentCatalogService {
-  constructor(private readonly deps: {
-    directory: AgentDirectory;
-    endpointResolver: ApiProviderEndpointResolver;
-  }) {}
+  readonly #requiresStrictByAgent = new Map<string, boolean>();
 
-  async getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
-    const getModels = this.deps.directory.get(agentId)?.capabilities.getModels;
-    if (getModels) return getModels(query);
-    return [];
+  constructor(
+    private readonly deps: {
+      directory: AgentDirectory;
+      endpointResolver: ApiProviderEndpointResolver;
+    },
+  ) {}
+
+  async getModels(
+    agentId: string,
+    query: AgentModelQuery = {},
+  ): Promise<AgentModelOption[]> {
+    const integration = this.deps.directory.get(agentId);
+    if (!integration) return [];
+    return [...(await this.#snapshot(agentId, query)).models];
   }
 
-  modelSupportsImages(input: {
+  async modelSupportsImages(input: {
     agentId: string;
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
-  }): boolean {
-    return this.deps.endpointResolver.modelSupportsImages({
-      agentId: input.agentId as AgentId,
-      model: input.model,
-      apiProviderId: input.apiProviderId,
-      modelEndpointId: input.modelEndpointId,
-    });
+  }): Promise<boolean> {
+    const integration = this.deps.directory.get(input.agentId);
+    if (!integration) return false;
+    if (!input.apiProviderId || !input.modelEndpointId)
+      return integration.descriptor.supportsImages;
+    return this.deps.endpointResolver.modelSupportsImages(input);
   }
 
   hasEndpointModels(agentId: string): boolean {
-    return this.deps.endpointResolver.getModelOptions(agentId as AgentId).length > 0;
+    return this.deps.endpointResolver.getModelOptions(agentId).length > 0;
   }
 
-  async getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}): Promise<AgentCatalogEntry | null> {
-    const agent = this.deps.directory.get(agentId);
-    if (!agent || !isVisibleAgentId(agentId)) return null;
-    const endpointModels = this.deps.endpointResolver.getModelOptions(agentId as AgentId);
-    const nativeModels = await nativeModelsForAgent(agentId, agent, query);
-    const models = isEndpointOnlyAgentId(agentId)
-      ? dedupeModels(endpointModels)
-      : dedupeModels([...nativeModels, ...endpointModels]);
+  requiresStrictModelDiscovery(agentId: string): boolean {
+    return this.#requiresStrictByAgent.get(agentId) ?? false;
+  }
+
+  async getAgentCatalogEntry(
+    agentId: string,
+    query: AgentModelQuery = {},
+  ): Promise<AgentCatalogEntry | null> {
+    const integration = this.deps.directory.get(agentId);
+    if (!integration) return null;
+    const snapshot = await this.#snapshot(agentId, query);
+    const endpointModels = integration.endpoints
+      ? this.deps.endpointResolver.getModelOptions(agentId)
+      : [];
+    const models = dedupeModels([...snapshot.models, ...endpointModels]);
     return {
-      id: agentId as AgentId,
-      label: agent.label,
-      kind: 'agent',
-      supportsFork: agent.capabilities.supportsFork,
-      supportsForkAtMessage: agent.capabilities.supportsForkAtMessage,
-      supportsForkWhileRunning: agent.capabilities.supportsForkWhileRunning,
-      supportsUpdateProjectPath: agent.capabilities.supportsUpdateProjectPath,
-      supportsImages: agent.capabilities.supportsImages,
-      acceptsApiProviderEndpoints: agent.capabilities.acceptsApiProviderEndpoints,
-      supportedProtocols: agent.capabilities.supportedProtocols,
-      authLoginSupported: agent.capabilities.authLoginSupported,
-      defaultModel: defaultModelForAgent(agentId, nativeModels, endpointModels),
+      id: integration.descriptor.id,
+      label: integration.descriptor.label,
+      kind: "agent",
+      supportsFork: integration.forking !== null,
+      supportsForkAtMessage: integration.forking?.supportsAtMessage ?? false,
+      supportsForkWhileRunning:
+        integration.forking?.supportsWhileRunning ?? false,
+      supportsUpdateProjectPath:
+        integration.descriptor.supportsProjectPathUpdate,
+      supportsImages: integration.descriptor.supportsImages,
+      acceptsApiProviderEndpoints: integration.endpoints !== null,
+      supportedProtocols:
+        integration.descriptor.supportedEndpointProtocols.filter(
+          (protocol): protocol is "anthropic-messages" | "openai-compatible" =>
+            protocol === "anthropic-messages" ||
+            protocol === "openai-compatible",
+        ),
+      authLoginSupported: Boolean(integration.auth?.launchLogin),
+      supportedPermissionModes:
+        integration.descriptor.supportedPermissionModes.filter(
+          isPermissionMode,
+        ),
+      supportedThinkingModes:
+        integration.descriptor.supportedThinkingModes.filter(isThinkingMode),
+      settings: [...integration.settings.describe()],
+      defaultSettings: integration.settings.defaults(),
+      requiresStrictModelDiscovery: snapshot.requiresStrictModelDiscovery,
+      generation: snapshot.generation,
+      defaultModel: snapshot.defaultModel || models[0]?.value || "",
       models,
     };
   }
 
   async getAgentCatalogEntries(): Promise<AgentCatalogEntry[]> {
-    return (await Promise.all(this.deps.directory.list().map((agent) => this.getAgentCatalogEntry(agent.id))))
-      .filter((entry): entry is AgentCatalogEntry => Boolean(entry));
+    const entries = (
+      await Promise.all(
+        this.deps.directory
+          .list()
+          .map((integration) =>
+            this.getAgentCatalogEntry(integration.descriptor.id),
+          ),
+      )
+    ).filter((entry): entry is AgentCatalogEntry => entry !== null);
+    const priorities = new Set<number>();
+    for (const entry of entries) {
+      if (!entry.generation) continue;
+      if (priorities.has(entry.generation.priority)) {
+        throw new Error(
+          `Duplicate generation priority: ${entry.generation.priority}`,
+        );
+      }
+      priorities.add(entry.generation.priority);
+    }
+    return entries;
+  }
+
+  async #snapshot(agentId: string, query: AgentModelQuery) {
+    const integration = this.deps.directory.require(agentId);
+    try {
+      const snapshot = await integration.catalog.snapshot({
+        strict: query.strict ?? false,
+        signal: new AbortController().signal,
+      });
+      this.#requiresStrictByAgent.set(
+        agentId,
+        snapshot.requiresStrictModelDiscovery,
+      );
+      return snapshot;
+    } catch (error) {
+      if (query.strict) throw error;
+      logger.warn(
+        `agents: failed to fetch ${agentId} catalog:`,
+        error instanceof Error ? error.message : String(error),
+      );
+      return {
+        models: [] as AgentModelOption[],
+        defaultModel: "",
+        requiresStrictModelDiscovery: false,
+        generation: null,
+        availability: {
+          state: "unavailable" as const,
+          reason: "Catalog unavailable.",
+        },
+      };
+    }
   }
 }

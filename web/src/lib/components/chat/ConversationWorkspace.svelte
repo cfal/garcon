@@ -650,6 +650,8 @@
 		onModelChange={(next) => controller.handleModelSelectionChange(next)}
 		onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 		onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
+		onAgentSettingChange={(descriptor, value) =>
+			controller.handleAgentSettingChange(descriptor, value)}
 		onAbort={() => controller.handleAbort()}
 		quickCommitTrayVisible={quickGitTrayVisible}
 		quickCommitSummary={quickGitSummaryForProject}

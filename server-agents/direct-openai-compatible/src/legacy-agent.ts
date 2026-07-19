@@ -32,6 +32,7 @@ export function createDirectOpenAiChatAgent(
     transcript: createDirectCompatibleTranscriptSource({
       agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
       protocol: 'openai-compatible',
+      requiredCapability: 'chatCompletions',
       sessionLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
       apiProviders,
       getSessionFilePath: sessionPaths.sessionFilePath,

@@ -49,8 +49,7 @@
 			model: 'opus',
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			claudeThinkingMode: 'auto',
-			ampAgentMode: 'smart',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 			firstMessage: '',
 		},
 	});

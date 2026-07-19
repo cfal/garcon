@@ -8,7 +8,4 @@ export const EMPTY_TRANSCRIPT_SOURCE: AgentTranscriptSource = {
   async getPreview(): Promise<unknown> {
     return null;
   },
-  async resolveSearchLoadPlan() {
-    return { kind: 'live-only', reasonCode: 'authoritative-source-unavailable' };
-  },
 };

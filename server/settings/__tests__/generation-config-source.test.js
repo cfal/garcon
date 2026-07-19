@@ -18,7 +18,7 @@ describe('generation config source', () => {
       model: 'configured-model',
     });
 
-    expect(context).toEqual({ authByAgent: {}, readinessByAgent: {}, modelsByAgent: {} });
+    expect(context).toEqual({ authByAgent: {}, readinessByAgent: {}, modelsByAgent: {}, generationByAgent: {} });
     expect(source.getAgentAuthStatusMap).not.toHaveBeenCalled();
     expect(source.getAgentReadinessMap).not.toHaveBeenCalled();
     expect(source.getAgentCatalogEntries).not.toHaveBeenCalled();
@@ -31,7 +31,7 @@ describe('generation config source', () => {
       getAgentAuthStatusMap: mock(() => Promise.resolve(auth)),
       getAgentReadinessMap,
       getAgentCatalogEntries: mock(() => Promise.resolve([
-        { id: 'claude', models: [{ value: 'opus', label: 'Opus' }] },
+        { id: 'claude', models: [{ value: 'opus', label: 'Opus' }], generation: { priority: 10, model: 'opus' } },
       ])),
     };
 
@@ -42,6 +42,7 @@ describe('generation config source', () => {
       authByAgent: { claude: { authenticated: true } },
       readinessByAgent: { claude: { ready: true } },
       modelsByAgent: { claude: [{ value: 'opus', label: 'Opus' }] },
+      generationByAgent: { claude: { priority: 10, model: 'opus' } },
     });
   });
 
@@ -50,7 +51,7 @@ describe('generation config source', () => {
       getAgentAuthStatusMap: mock(() => Promise.resolve({ codex: { authenticated: true } })),
       getAgentReadinessMap: mock(() => Promise.resolve({ codex: { ready: true } })),
       getAgentCatalogEntries: mock(() => Promise.resolve([
-        { id: 'codex', models: [{ value: 'gpt-5.5', label: 'GPT-5.5' }] },
+        { id: 'codex', models: [{ value: 'gpt-5.5', label: 'GPT-5.5' }], generation: { priority: 10, model: 'gpt-5.5' } },
       ])),
     };
 
@@ -60,12 +61,13 @@ describe('generation config source', () => {
       null,
     ]);
 
-    expect(contexts[0]).toEqual({ authByAgent: {}, readinessByAgent: {}, modelsByAgent: {} });
+    expect(contexts[0]).toEqual({ authByAgent: {}, readinessByAgent: {}, modelsByAgent: {}, generationByAgent: {} });
     expect(contexts[1]).toEqual(contexts[2]);
     expect(contexts[1]).toEqual({
       authByAgent: { codex: { authenticated: true } },
       readinessByAgent: { codex: { ready: true } },
       modelsByAgent: { codex: [{ value: 'gpt-5.5', label: 'GPT-5.5' }] },
+      generationByAgent: { codex: { priority: 10, model: 'gpt-5.5' } },
     });
     expect(source.getAgentAuthStatusMap).toHaveBeenCalledTimes(1);
     expect(source.getAgentReadinessMap).toHaveBeenCalledTimes(1);
@@ -106,6 +108,7 @@ describe('generation config source', () => {
       authByAgent: {},
       readinessByAgent: {},
       modelsByAgent: {},
+      generationByAgent: {},
     });
     expect(source.getAgentReadinessMap).toHaveBeenCalledWith({});
   });

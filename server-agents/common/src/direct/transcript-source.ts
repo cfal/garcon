@@ -1,7 +1,6 @@
 import { constants, promises as fs } from 'fs';
 import type { AgentId } from '@garcon/common/agents';
 import type { ApiProtocol } from '@garcon/common/api-providers';
-import { endpointSupportsAgent } from '@garcon/common/model-routing';
 import type { ApiProviderReader } from '@garcon/server-agent-common/legacy/api-providers';
 import type { StoredApiProviderEndpoint } from '@garcon/server-agent-common/legacy/types';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
@@ -17,6 +16,7 @@ import { isSafeDirectPathSegment } from './session-paths.js';
 export interface DirectCompatibleTranscriptSourceConfig {
   agentId: AgentId;
   protocol: ApiProtocol;
+  requiredCapability: 'chatCompletions' | 'responses' | null;
   sessionLabel: string;
   apiProviders: ApiProviderReader;
   getSessionFilePath(endpointId: string, sessionId: string): string;
@@ -71,10 +71,9 @@ export function createDirectCompatibleTranscriptSource(
     async resolveNativePath(session) {
       return resolvePath(session);
     },
-    async resolveSearchLoadPlan(session) {
+    async release(session) {
       const nativePath = await resolvePath(session);
-      if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
-      return { kind: 'detached', source: { kind: 'direct-jsonl', nativePath } };
+      if (nativePath) await fs.rm(nativePath, { force: true });
     },
   };
 }
@@ -122,7 +121,8 @@ function isMatchingEndpoint(
   endpoint: StoredApiProviderEndpoint,
   config: DirectCompatibleTranscriptSourceConfig,
 ): boolean {
-  return endpoint.protocol === config.protocol && endpointSupportsAgent(config.agentId, endpoint);
+  return endpoint.protocol === config.protocol
+    && (!config.requiredCapability || endpoint.capabilities?.[config.requiredCapability] === true);
 }
 
 async function existingPath(candidate: string): Promise<string | null> {

@@ -2,6 +2,18 @@ import { describe, expect, it } from 'bun:test';
 import { ScheduledPromptDispatcher } from '../dispatcher.ts';
 
 const CREATED_CHAT_ID = '1783725900000000';
+const AGENT_SETTINGS_BY_ID = {
+  claude: {
+    ownerId: 'claude',
+    schemaVersion: 1,
+    values: { claudeThinkingMode: 'auto' },
+  },
+  amp: {
+    ownerId: 'amp',
+    schemaVersion: 1,
+    values: { ampAgentMode: 'smart' },
+  },
+};
 
 function prompt(target) {
   return {
@@ -38,8 +50,7 @@ describe('scheduled prompt dispatcher', () => {
       modelProtocol: null,
       permissionMode: 'acceptEdits',
       thinkingMode: 'high',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
+      agentSettingsById: AGENT_SETTINGS_BY_ID,
       tags: ['qa', 'review-needed'],
     };
 
@@ -52,6 +63,8 @@ describe('scheduled prompt dispatcher', () => {
       command: 'Review the current work',
     });
     expect(calls[0]).not.toHaveProperty('chatId');
+    expect(calls[0].clientRequestId).toBe('scheduled:prompt-a:2030-01-01T09:00:00.000Z');
+    expect(calls[0].clientMessageId).toBe('scheduled-message:prompt-a:2030-01-01T09:00:00.000Z');
     expect(calls[0].tags).toEqual(['qa', 'review-needed']);
     expect(calls[0]).not.toHaveProperty('images');
     expect(outcome.message).toContain(CREATED_CHAT_ID);
@@ -79,8 +92,7 @@ describe('scheduled prompt dispatcher', () => {
       modelProtocol: null,
       permissionMode: 'acceptEdits',
       thinkingMode: 'high',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
+      agentSettingsById: AGENT_SETTINGS_BY_ID,
       tags: [],
     };
 

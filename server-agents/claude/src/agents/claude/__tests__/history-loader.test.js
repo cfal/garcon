@@ -9,7 +9,6 @@ import {
   loadClaudeChatMessagePage,
 } from '../history-loader.js';
 import { PendingUserInputService } from '../../../../../../server/chats/pending-user-input-service.js';
-import { loadClaudeSearchTranscript } from '../search-transcript-source.js';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 
@@ -22,12 +21,6 @@ async function withTempJsonl(lines, fn) {
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true });
   }
-}
-
-async function collectSearchBatches(source, options) {
-  const messages = [];
-  for await (const batch of loadClaudeSearchTranscript(source, options)) messages.push(...batch);
-  return messages;
 }
 
 describe('Claude pending-input evidence', () => {
@@ -47,80 +40,6 @@ describe('Claude pending-input evidence', () => {
     expect(nativeMessages).toMatchObject([{ type: 'user-message', content }]);
     await service.reconcileNativeHistory('chat-1');
     expect(service.listForChat('chat-1')).toEqual([]);
-  });
-});
-
-describe('loadClaudeSearchTranscript', () => {
-  it('matches full loading across sort and compaction batch boundaries', async () => {
-    const lines = [
-      JSON.stringify({
-        sessionId: 'session-1',
-        type: 'user',
-        timestamp: '2026-02-21T10:00:04.000Z',
-        message: { role: 'user', content: 'later prompt' },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1',
-        type: 'system',
-        subtype: 'compact_boundary',
-        timestamp: '2026-02-21T10:00:02.000Z',
-        compactMetadata: { trigger: 'auto', preTokens: 200, postTokens: 20 },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1',
-        type: 'user',
-        isCompactSummary: true,
-        timestamp: '2026-02-21T10:00:03.000Z',
-        message: { role: 'user', content: 'Summary: retained context' },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1',
-        type: 'assistant',
-        timestamp: '2026-02-21T10:00:01.000Z',
-        message: { role: 'assistant', content: 'earlier answer' },
-      }),
-    ];
-    await withTempJsonl(lines, async (filePath) => {
-      const expected = await loadClaudeChatMessages(filePath);
-      const actual = await collectSearchBatches(
-        { kind: 'claude-jsonl', nativePath: filePath },
-        {
-          signal: new AbortController().signal,
-          batchSize: 2,
-          scratchDirectory: path.join(path.dirname(filePath), 'scratch'),
-        },
-      );
-      expect(actual).toEqual(expected);
-    });
-  });
-
-  it('matches full loading when malformed timestamps cross batch boundaries', async () => {
-    const lines = [
-      JSON.stringify({
-        sessionId: 'session-1',
-        type: 'user',
-        timestamp: 'invalid',
-        message: { role: 'user', content: 'malformed timestamp' },
-      }),
-      JSON.stringify({
-        sessionId: 'session-1',
-        type: 'assistant',
-        timestamp: '2026-02-21T10:00:01.000Z',
-        message: { role: 'assistant', content: 'valid timestamp' },
-      }),
-    ];
-    await withTempJsonl(lines, async (filePath) => {
-      const expected = await loadClaudeChatMessages(filePath);
-      const actual = await collectSearchBatches(
-        { kind: 'claude-jsonl', nativePath: filePath },
-        {
-          signal: new AbortController().signal,
-          batchSize: 1,
-          scratchDirectory: path.join(path.dirname(filePath), 'scratch'),
-        },
-      );
-      expect(actual).toEqual(expected);
-    });
   });
 });
 

@@ -33,8 +33,25 @@ export default class ClaudeAgentIntegration extends LegacyAgentIntegrationBase {
         ],
       },
       defaultModel: CLAUDE_MODELS.DEFAULT,
+      generation: { priority: 10, model: 'haiku' },
       models: CLAUDE_MODELS.OPTIONS,
       defaultSettings: { claudeThinkingMode: 'auto' },
+      settingDescriptors: [{
+        key: 'claudeThinkingMode',
+        type: 'enum',
+        label: 'Thinking',
+        options: [
+          { value: 'auto', label: 'Auto' },
+          { value: 'on', label: 'On' },
+          { value: 'off', label: 'Off' },
+        ],
+      }],
+      toLegacySettings(settings) {
+        const value = settings.values.claudeThinkingMode;
+        return value === 'auto' || value === 'on' || value === 'off'
+          ? { claudeThinkingMode: value }
+          : {};
+      },
     });
   }
 }

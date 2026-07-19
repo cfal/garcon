@@ -26,8 +26,24 @@ export default class AmpAgentIntegration extends LegacyAgentIntegrationBase {
         configuration: [{ key: 'AMP_BINARY', source: 'environment', description: 'Amp CLI binary.' }],
       },
       defaultModel: AMP_MODELS.DEFAULT,
+      generation: { priority: 70, model: AMP_MODELS.DEFAULT },
       models: AMP_MODELS.OPTIONS,
       defaultSettings: { ampAgentMode: 'smart' },
+      settingDescriptors: [{
+        key: 'ampAgentMode',
+        type: 'enum',
+        label: 'Mode',
+        options: [
+          { value: 'smart', label: 'Smart' },
+          { value: 'deep', label: 'Deep' },
+        ],
+      }],
+      toLegacySettings(settings) {
+        const value = settings.values.ampAgentMode;
+        return value === 'smart' || value === 'deep'
+          ? { ampAgentMode: value }
+          : {};
+      },
     });
   }
 }
