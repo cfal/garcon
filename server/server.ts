@@ -30,6 +30,11 @@ import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
+import {
+  PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS,
+  publishWebSocketPayload,
+  type WebSocketMessagePublisher,
+} from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatExecutionActivity } from './chats/chat-execution-activity.js';
@@ -467,14 +472,15 @@ export async function startServer(): Promise<void> {
       telegramSettings,
     );
 
-    let webSocketPublisher: { publish(topic: string, payload: string): unknown } | null = null;
+    let webSocketPublisher: WebSocketMessagePublisher | null = null;
     // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
     const eventWiring = await startExecutionControlPlane({
       wireEvents: () => wireServerEvents({
         server: {
           publish(topic, payload) {
-            return webSocketPublisher?.publish(topic, payload);
+            if (!webSocketPublisher) return;
+            return publishWebSocketPayload(webSocketPublisher, topic, payload);
           },
         },
         agentRegistry,
@@ -620,12 +626,12 @@ export async function startServer(): Promise<void> {
         return new Response('Not found', { status: 404 });
       },
       websocket: {
+        ...PRIMARY_WEBSOCKET_TRANSPORT_OPTIONS,
         idleTimeout: config.wsIdleTimeoutSeconds,
         sendPings: true,
         backpressureLimit: config.wsBackpressureLimit,
         closeOnBackpressureLimit: true,
         maxPayloadLength: config.wsMaxPayloadLength,
-        perMessageDeflate: true,
         open(ws) {
           const admission = wsAdmission.confirm(ws.data.connectionId);
           if (!admission.ok) {
