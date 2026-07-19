@@ -30,6 +30,7 @@ RUN bun install --frozen-lockfile
 COPY common/ common/
 COPY server/ server/
 COPY server-agents/ server-agents/
+COPY scripts/ scripts/
 COPY web/ web/
 
 # Build the SvelteKit frontend
