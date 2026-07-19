@@ -1148,7 +1148,7 @@ describe('CodexAppServerRuntime', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  function createActiveGoalQueue(provider, codexGoalCommand, markFailed) {
+  function createActiveGoalQueue(provider, codexGoalCommand, markUnconfirmed) {
     return new QueueManager(
       tmpDir,
       {
@@ -1167,7 +1167,8 @@ describe('CodexAppServerRuntime', () => {
       {
         register: async () => {},
         discard: () => true,
-        markFailed,
+        markFailed: () => true,
+        markUnconfirmed,
       },
       { appendMessages: async () => ({ generationId: 'generation-1', messages: [] }) },
       () => ({
@@ -3760,14 +3761,14 @@ describe('CodexAppServerRuntime', () => {
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
     const emitted = [];
-    const markFailed = mock(() => true);
+    const markUnconfirmed = mock(() => true);
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
     }));
-    const queue = createActiveGoalQueue(provider, { kind: 'pause' }, markFailed);
+    const queue = createActiveGoalQueue(provider, { kind: 'pause' }, markUnconfirmed);
 
 	    await expect(queue.deliverActiveInput('chat-1', '/goal pause', {
 	      clientRequestId: 'request-goal-failure',
@@ -3777,7 +3778,7 @@ describe('CodexAppServerRuntime', () => {
       cause: expect.objectContaining({ message: 'goal status unavailable' }),
     });
 
-    expect(markFailed).toHaveBeenCalledWith('chat-1', 'request-goal-failure');
+    expect(markUnconfirmed).toHaveBeenCalledWith('chat-1', 'request-goal-failure');
     expect(emitted.at(-1)?.content).toBe('Codex error: goal status unavailable');
   });
 
@@ -3800,7 +3801,7 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
-    const markFailed = mock(() => true);
+    const markUnconfirmed = mock(() => true);
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
@@ -3810,7 +3811,7 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
-    const queue = createActiveGoalQueue(provider, { kind: 'resume' }, markFailed);
+    const queue = createActiveGoalQueue(provider, { kind: 'resume' }, markUnconfirmed);
 
 	    const delivery = queue.deliverActiveInput('chat-1', '/goal resume', {
 	      clientRequestId: 'request-goal-cancelled',
@@ -3824,7 +3825,7 @@ describe('CodexAppServerRuntime', () => {
       retryable: false,
       cause: expect.any(Error),
     });
-    expect(markFailed).toHaveBeenCalledWith('chat-1', 'request-goal-cancelled');
+    expect(markUnconfirmed).toHaveBeenCalledWith('chat-1', 'request-goal-cancelled');
   });
 
   it('declines active input without accepting its user row after the Codex session ends', async () => {
