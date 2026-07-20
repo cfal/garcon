@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 export const ISOLATED_TEST_FILES = new Set([
+  'server-agents/pi/src/agents/pi/__tests__/models.test.js',
   'server/lib/__tests__/http-request.test.js',
   'server/routes/__tests__/chats-last-selected.test.js',
   'server/routes/__tests__/chats-search.test.js',
