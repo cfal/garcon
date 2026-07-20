@@ -159,7 +159,6 @@ export class AgentRuntimeRouter {
         nativeSession: entry.nativeSession ?? null,
         prompt: resolvedPrompt,
         attachments: attachments(opts.images),
-        directHistoryRecovery: opts.directHistoryRecovery,
       });
     } catch (error) {
       this.#events.clearTurn(chatId);

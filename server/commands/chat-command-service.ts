@@ -4,7 +4,6 @@ import type {
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryReplaceCommandRequest,
-  RecoveredInputContinueRequest,
 } from '../../common/chat-command-contracts.js';
 import {
   CommandSupport,
@@ -102,10 +101,6 @@ export class ChatCommandService {
 
   mutateQueue(input: QueueMutationInput) {
     return this.#queue.mutateQueue(input);
-  }
-
-  continueRecoveredInput(input: RecoveredInputContinueRequest) {
-    return this.#queue.continueRecoveredInput(input);
   }
 
   submitPermissionDecision(input: PermissionDecisionInput) {

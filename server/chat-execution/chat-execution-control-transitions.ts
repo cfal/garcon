@@ -1,4 +1,4 @@
-import type { AutomaticQueuePauseKind, QueueEntry, QueuePause } from '../../common/queue-state.ts';
+import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
   MAX_STORED_APPLIED_QUEUE_COMMANDS,
@@ -11,10 +11,7 @@ import {
 export interface TransitionContext {
   now: string;
   newId(): string;
-}
-
-export interface ReceiptRetention {
-  protectedKeys: ReadonlySet<string>;
+  unsettledQueueReceiptKeys(): ReadonlySet<string>;
 }
 
 export interface QueueCommandIdentity {
@@ -26,9 +23,7 @@ export type TransitionRejection =
   | { code: 'QUEUE_ENTRY_NOT_FOUND'; entryId: string }
   | { code: 'QUEUE_ENTRY_ALREADY_SENT'; entryId: string }
   | { code: 'QUEUE_ENTRY_REVISION_CONFLICT'; entryId: string; actualRevision: number }
-  | { code: 'QUEUE_PAUSE_CHANGED' }
-  | { code: 'RECOVERED_INPUT_CONTINUATION_CHANGED' }
-  | { code: 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE' };
+  | { code: 'QUEUE_PAUSE_CHANGED' };
 
 export type TransitionOutcome<T> =
   | { status: 'ok'; value: T }
@@ -91,9 +86,8 @@ function recordAppliedCommand(
   command: QueueCommandIdentity,
   operation: StoredAppliedQueueCommand['operation'],
   context: TransitionContext,
-  receipts: ReceiptRetention,
 ): void {
-  const protectedKeys = new Set(receipts.protectedKeys);
+  const protectedKeys = new Set(context.unsettledQueueReceiptKeys());
   protectedKeys.add(command.key);
   const candidates = [
     ...control.appliedCommands.filter((candidate) => candidate.key !== command.key),
@@ -105,9 +99,14 @@ function recordAppliedCommand(
     },
   ];
   const protectedReceipts = candidates.filter((candidate) => protectedKeys.has(candidate.key));
-  const terminalReceipts = candidates
-    .filter((candidate) => !protectedKeys.has(candidate.key))
-    .slice(-MAX_STORED_APPLIED_QUEUE_COMMANDS);
+  const terminalReceiptLimit = Math.max(
+    0,
+    MAX_STORED_APPLIED_QUEUE_COMMANDS - protectedReceipts.length,
+  );
+  const terminalCandidates = candidates.filter((candidate) => !protectedKeys.has(candidate.key));
+  const terminalReceipts = terminalReceiptLimit === 0
+    ? []
+    : terminalCandidates.slice(-terminalReceiptLimit);
   const retainedKeys = new Set([
     ...protectedReceipts.map((candidate) => candidate.key),
     ...terminalReceipts.map((candidate) => candidate.key),
@@ -128,7 +127,6 @@ export function createQueueEntry(
   current: StoredChatExecutionControlState,
   input: { content: string; command?: QueueCommandIdentity },
   context: TransitionContext,
-  receipts: ReceiptRetention,
 ): ControlTransition<QueueMutationValue> {
   const next = cloneStoredChatExecutionControl(current);
   if (input.command) {
@@ -152,7 +150,7 @@ export function createQueueEntry(
     updatedAt: context.now,
   };
   next.entries.push(entry);
-  if (input.command) recordAppliedCommand(next, input.command, 'create', context, receipts);
+  if (input.command) recordAppliedCommand(next, input.command, 'create', context);
   bump(next, context.now);
   return accepted(next, { entryId: entry.id, entry: toQueueEntry(entry), duplicate: false }, true);
 }
@@ -166,7 +164,6 @@ export function replaceQueueEntry(
     command?: QueueCommandIdentity;
   },
   context: TransitionContext,
-  receipts: ReceiptRetention,
 ): ControlTransition<QueueMutationValue> {
   const next = cloneStoredChatExecutionControl(current);
   if (input.command) {
@@ -198,7 +195,7 @@ export function replaceQueueEntry(
   entry.revision += 1;
   entry.updatedAt = context.now;
   delete entry.delivery;
-  if (input.command) recordAppliedCommand(next, input.command, 'replace', context, receipts);
+  if (input.command) recordAppliedCommand(next, input.command, 'replace', context);
   bump(next, context.now);
   return accepted(next, { entryId: entry.id, entry: toQueueEntry(entry), duplicate: false }, true);
 }
@@ -207,7 +204,6 @@ export function deleteQueueEntry(
   current: StoredChatExecutionControlState,
   input: { entryId: string; command?: QueueCommandIdentity },
   context: TransitionContext,
-  receipts: ReceiptRetention,
 ): ControlTransition<QueueMutationValue> {
   const next = cloneStoredChatExecutionControl(current);
   if (input.command) {
@@ -232,7 +228,7 @@ export function deleteQueueEntry(
     next.pause = null;
     delete next.resumePauses;
   }
-  if (input.command) recordAppliedCommand(next, input.command, 'delete', context, receipts);
+  if (input.command) recordAppliedCommand(next, input.command, 'delete', context);
   bump(next, context.now);
   return accepted(next, { entryId: input.entryId, entry: null, duplicate: false }, true);
 }
@@ -278,53 +274,12 @@ export function resumeQueue(
   return accepted(next, undefined, true);
 }
 
-export function continueRecoveredInput(
-  current: StoredChatExecutionControlState,
-  continuationId: string,
-  context: TransitionContext,
-): ControlTransition<void> {
-  const next = cloneStoredChatExecutionControl(current);
-  if (next.recoveredInputContinuation?.id !== continuationId) {
-    return rejected(current, { code: 'RECOVERED_INPUT_CONTINUATION_CHANGED' });
-  }
-  if (!next.entries.some((entry) => entry.status === 'queued')) {
-    return rejected(current, { code: 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE' });
-  }
-  next.recoveredInputContinuation = null;
-  bump(next, context.now);
-  return accepted(next, undefined, true);
-}
-
-export function dropRecoveredInputContinuation(
-  current: StoredChatExecutionControlState,
-  context: TransitionContext,
-): ControlTransition<void> {
-  const next = cloneStoredChatExecutionControl(current);
-  if (!next.recoveredInputContinuation) return accepted(next, undefined, false);
-  next.recoveredInputContinuation = null;
-  bump(next, context.now);
-  return accepted(next, undefined, true);
-}
-
-export function consumeEmptyRecoveredInputContinuation(
-  current: StoredChatExecutionControlState,
-  context: TransitionContext,
-): ControlTransition<void> {
-  const next = cloneStoredChatExecutionControl(current);
-  if (next.entries.length > 0 || next.pause || !next.recoveredInputContinuation) {
-    return accepted(next, undefined, false);
-  }
-  next.recoveredInputContinuation = null;
-  bump(next, context.now);
-  return accepted(next, undefined, true);
-}
-
 export function popNextQueueEntry(
   current: StoredChatExecutionControlState,
   context: TransitionContext,
 ): ControlTransition<PoppedQueueEntry | null> {
   const next = cloneStoredChatExecutionControl(current);
-  if (next.pause || next.recoveredInputContinuation) return accepted(next, null, false);
+  if (next.pause) return accepted(next, null, false);
   if (next.entries.some((entry) => entry.status === 'sending')) return accepted(next, null, false);
   const entry = next.entries.find((candidate) => candidate.status === 'queued');
   if (!entry) return accepted(next, null, false);
@@ -406,14 +361,4 @@ export function restoreStoppedQueueEntry(
   next.pause ??= { id: context.newId(), kind: 'manual', pausedAt: context.now };
   bump(next, context.now);
   return accepted(next, undefined, true);
-}
-
-export function installRecoveryPause(
-  control: StoredChatExecutionControlState,
-  pause: QueuePause,
-): boolean {
-  if (control.pause?.kind === pause.kind) return false;
-  if (control.pause) control.resumePauses = [control.pause, ...(control.resumePauses ?? [])];
-  control.pause = pause;
-  return true;
 }

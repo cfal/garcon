@@ -48,8 +48,6 @@ import type {
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
-	RecoveredInputContinueRequest,
-	RecoveredInputContinueResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type {
@@ -222,19 +220,6 @@ export async function resumeChatQueue(
 	const request: QueueResumeRequest = { chatId, pauseId };
 	return withParsedControl(
 		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request),
-	);
-}
-
-export async function continueRecoveredInput(
-	chatId: string,
-	continuationId: string,
-): Promise<RecoveredInputContinueResponse> {
-	const request: RecoveredInputContinueRequest = { chatId, continuationId };
-	return withParsedControl(
-		await apiPost<RecoveredInputContinueResponse>(
-			'/api/v1/chats/recovered-input/continue',
-			request,
-		),
 	);
 }
 

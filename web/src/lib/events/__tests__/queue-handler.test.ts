@@ -32,7 +32,6 @@ describe('queue handler', () => {
 		});
 		const control = {
 			queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
-			recoveredInputContinuation: null,
 			version: 2,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};

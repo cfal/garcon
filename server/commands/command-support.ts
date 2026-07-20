@@ -33,11 +33,7 @@ import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import { DomainError } from '../lib/domain-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
-import {
-  SERVER_RESTART_INTERRUPTED_ERROR_CODE,
-  type CommandLedger,
-  type CommandLedgerRecord,
-} from './command-ledger.js';
+import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
 
 export interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
@@ -216,11 +212,6 @@ export interface AcceptedRunPreparation {
   compensate(): Promise<void>;
 }
 
-export type DirectRunOrigin =
-  | 'interactive-existing-chat'
-  | 'scheduled-existing-chat'
-  | 'fork-created-chat';
-
 export class CommandValidationError extends Error {
   constructor(
     readonly code: CommandErrorCode,
@@ -344,9 +335,8 @@ export class CommandSupport {
 
   throwRecordedExecutionFailure(record: CommandLedgerRecord): void {
     if (record.status !== 'failed' && record.status !== 'rejected') return;
-    const restarted = record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE;
     throw new CommandValidationError(
-      restarted ? 'SERVER_RESTART_INTERRUPTED' : 'INTERNAL_ERROR',
+      'INTERNAL_ERROR',
       record.error ?? 'The previous execution did not complete',
       409,
       false,
@@ -366,7 +356,6 @@ export class CommandSupport {
 
   async submitHttpRun(
     input: NormalizedSubmitRunInput,
-    origin: Extract<DirectRunOrigin, 'interactive-existing-chat' | 'scheduled-existing-chat'>,
   ): Promise<CommandAcceptedResponse> {
     const clientRequestId = this.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.requireClientRequestId(input.clientMessageId, 'clientMessageId');
@@ -383,7 +372,6 @@ export class CommandSupport {
       input,
       { clientRequestId, clientMessageId, turnId },
       'agent-run',
-      origin,
     );
   }
 
@@ -392,7 +380,6 @@ export class CommandSupport {
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
     commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
-    origin: DirectRunOrigin,
     preparation?: AcceptedRunPreparation,
   ): Promise<CommandAcceptedResponse> {
     if (ledger.kind === 'conflict') {
@@ -429,7 +416,6 @@ export class CommandSupport {
         content: input.command,
         options,
         settlement: this.settlement,
-        continueRecoveredInput: origin === 'interactive-existing-chat',
         preparation,
       });
     } catch (error) {

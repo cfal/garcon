@@ -135,7 +135,6 @@ export class QueueDispatchSaga {
 
     try {
       options = optionsForQueuedTurn(this.#getDrainOptions(chatId), entry);
-      if (this.#ownership.usesRecoveredHistory(chatId)) options.directHistoryRecovery = 'allow-empty';
       options.executionAdmission = Object.freeze({
         signal: admissionController.signal,
         markStarted: () => { executionStarted = true; },

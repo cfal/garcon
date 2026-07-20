@@ -4,7 +4,6 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
-import { normalizeStoredChatExecutionControlState } from '../control-state.js';
 import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
 
 let workspaceDir = '';
@@ -61,29 +60,6 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function storedQueueFixture(overrides = {}) {
-  return {
-    entries: [],
-    recentlyDispatched: [],
-    appliedCommands: [],
-    pause: null,
-    version: 0,
-    updatedAt: null,
-    ...overrides,
-  };
-}
-
-function queueEntryFixture(id, content) {
-  return {
-    id,
-    content,
-    status: 'queued',
-    revision: 1,
-    createdAt: '2026-07-16T00:00:00.000Z',
-    updatedAt: '2026-07-16T00:00:00.000Z',
-  };
-}
-
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
@@ -117,74 +93,6 @@ describe('queue invariants', () => {
     expect(result.control.pause).toBeNull();
   });
 
-  it('normalizes stale queue files where paused=true but entries are empty', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(path.join(queuesDir, '123.queue.json'), JSON.stringify({ entries: [], paused: true }), 'utf8');
-
-    const result = await queue.readChatExecutionControl('123');
-    expect(result.entries).toEqual([]);
-    expect(result.pause).toBeNull();
-  });
-
-  it('derives a stable fail-closed pause for legacy and malformed persisted state', () => {
-    const entry = {
-      id: 'entry-1',
-      content: 'queued',
-      status: 'queued',
-      revision: 1,
-      createdAt: '2026-07-16T00:00:00.000Z',
-      updatedAt: '2026-07-16T00:00:00.000Z',
-    };
-    const legacy = {
-      entries: [entry],
-      paused: true,
-      version: 4,
-      updatedAt: '2026-07-16T00:01:00.000Z',
-    };
-
-    const first = normalizeStoredChatExecutionControlState(legacy);
-    const second = normalizeStoredChatExecutionControlState(legacy);
-    const malformed = normalizeStoredChatExecutionControlState({
-      ...legacy,
-      paused: undefined,
-      pause: { id: '', kind: 'manual', pausedAt: 'not-a-timestamp' },
-    });
-
-    expect(first.pause).toMatchObject({ kind: 'unknown', entryId: entry.id });
-    expect(second.pause.id).toBe(first.pause.id);
-    expect(malformed.pause).toMatchObject({ kind: 'unknown', entryId: entry.id });
-    expect(malformed.pause.id).not.toBe(first.pause.id);
-  });
-
-  it('canonicalizes legacy paused queue files during startup recovery', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    const queuePath = path.join(queuesDir, 'legacy.queue.json');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      queuePath,
-      JSON.stringify({
-        entries: [{
-          id: 'legacy-entry',
-          content: 'queued',
-          status: 'queued',
-          createdAt: '2026-07-16T00:00:00.000Z',
-        }],
-        paused: true,
-        version: 2,
-        updatedAt: '2026-07-16T00:01:00.000Z',
-      }),
-      'utf8',
-    );
-
-    await queue.recoverChatExecutionControls();
-
-    const persisted = JSON.parse(await fs.readFile(queuePath, 'utf8'));
-    expect(persisted).not.toHaveProperty('paused');
-    expect(persisted.pause).toMatchObject({ kind: 'unknown', entryId: 'legacy-entry' });
-    expect(persisted.version).toBe(3);
-  });
-
   it('returns defensive queue copies from reads', async () => {
     await queue.createChatQueueEntry('123', 'hello');
 
@@ -195,38 +103,7 @@ describe('queue invariants', () => {
     expect(secondRead.entries[0].content).toBe('hello');
   });
 
-  it('uses cached queue state for later mutations', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      path.join(queuesDir, 'cached.queue.json'),
-      JSON.stringify({
-        entries: [
-          {
-            id: 'entry-1',
-            content: 'persisted',
-            status: 'queued',
-            createdAt: '2026-01-01T00:00:00.000Z',
-          },
-        ],
-        pause: null,
-      }),
-      'utf8',
-    );
-
-    await queue.readChatExecutionControl('cached');
-    await fs.writeFile(
-      path.join(queuesDir, 'cached.queue.json'),
-      JSON.stringify({ entries: [], pause: null }),
-      'utf8',
-    );
-
-    const result = await queue.pauseChatQueue('cached');
-    expect(result.entries.map((entry) => entry.content)).toEqual(['persisted']);
-    expect(result.pause).not.toBeNull();
-  });
-
-  it('clears cached state when deleting a queue file', async () => {
+  it('clears in-memory state when deleting queue control', async () => {
     await queue.createChatQueueEntry('123', 'hello');
 
     await queue.deleteChatQueueFile('123');
@@ -323,7 +200,7 @@ describe('queue invariants', () => {
     expect(second.control.entries.map((entry) => entry.revision)).toEqual([1, 1]);
   });
 
-  it('replays durable queue command receipts without applying mutations twice', async () => {
+  it('replays queue command receipts without applying mutations twice', async () => {
     const createCommand = {
       key: 'queue-entry-create:123:req-create',
       entryId: 'stable-entry-id',
@@ -484,340 +361,6 @@ describe('queue invariants', () => {
     });
     expect(reset.recentlyDispatched).toEqual([]);
     expect(reset.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: entry.id });
-  });
-
-  it('recovers persisted sending entries and removes their dispatch markers', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      path.join(queuesDir, 'stale.queue.json'),
-      JSON.stringify(
-        storedQueueFixture({
-          entries: [
-            {
-              id: 'entry-stale',
-              content: 'retry after restart',
-              status: 'sending',
-              revision: 3,
-              createdAt: '2026-07-16T00:00:00.000Z',
-              updatedAt: '2026-07-16T00:01:00.000Z',
-            },
-          ],
-          recentlyDispatched: [
-            {
-              entryId: 'entry-stale',
-              dispatchedAt: '2026-07-16T00:02:00.000Z',
-            },
-          ],
-          version: 5,
-        }),
-      ),
-      'utf8',
-    );
-
-    await queue.recoverChatExecutionControls();
-    const recovered = await queue.readChatExecutionControl('stale');
-
-    expect(recovered.entries[0]).toMatchObject({
-      id: 'entry-stale',
-      status: 'queued',
-      revision: 3,
-    });
-    expect(recovered.recentlyDispatched).toEqual([]);
-    expect(recovered.pause).toMatchObject({ kind: 'recovered-inflight', entryId: 'entry-stale' });
-    expect(recovered.version).toBe(6);
-  });
-
-  it('holds queued successors when an earlier accepted input is unconfirmed after restart', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      path.join(queuesDir, 'uncertain.queue.json'),
-      JSON.stringify(
-        storedQueueFixture({
-          entries: [queueEntryFixture('entry-successor', 'wait for prior input')],
-          version: 1,
-        }),
-      ),
-      'utf8',
-    );
-    const turnRunner = createStateOnlyAgents();
-    const recoveringQueue = new ChatExecutionCoordinator(
-      workspaceDir,
-      turnRunner,
-      createPendingInputs(),
-      createChatMessages(),
-      emptyDrainOptions,
-      () => true,
-    );
-
-    await recoveringQueue.recoverChatExecutionControls(new Set(['uncertain']));
-    const recovered = await recoveringQueue.readChatExecutionControl('uncertain');
-
-    expect(recovered.entries).toEqual([
-      expect.objectContaining({ id: 'entry-successor', content: 'wait for prior input' }),
-    ]);
-    expect(recovered.pause).toBeNull();
-    expect(recovered.recoveredInputContinuation).toMatchObject({
-      id: expect.any(String),
-      installedAt: expect.any(String),
-    });
-    expect(await recoveringQueue.popNextChat('uncertain')).toBeNull();
-    expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
-  });
-
-  it('keeps recovered continuation independent from a pre-existing manual pause', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    const queuePath = path.join(queuesDir, 'layered-pause.queue.json');
-    const manualPause = {
-      id: 'manual-pause',
-      kind: 'manual',
-      pausedAt: '2026-07-16T00:01:00.000Z',
-    };
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      queuePath,
-      JSON.stringify(storedQueueFixture({
-        entries: [queueEntryFixture('entry-successor', 'remain manually paused')],
-        pause: manualPause,
-        version: 1,
-      })),
-      'utf8',
-    );
-
-    await queue.recoverChatExecutionControls(new Set(['layered-pause']));
-    const recovered = await queue.readChatExecutionControl('layered-pause');
-    expect(recovered.pause).toEqual(manualPause);
-    expect(recovered.recoveredInputContinuation).toMatchObject({ id: expect.any(String) });
-
-    await queue.recoverChatExecutionControls(new Set(['layered-pause']));
-    const recoveredAgain = await queue.readChatExecutionControl('layered-pause');
-    expect(recoveredAgain.pause).toEqual(manualPause);
-    expect(recoveredAgain.recoveredInputContinuation.id).not.toBe(
-      recovered.recoveredInputContinuation.id,
-    );
-
-    const reviewed = await queue.continuePastRecoveredInput(
-      'layered-pause',
-      recoveredAgain.recoveredInputContinuation.id,
-    );
-    expect(reviewed.pause).toEqual(manualPause);
-    expect(reviewed.recoveredInputContinuation).toBeNull();
-    expect(await queue.popNextChat('layered-pause')).toBeNull();
-
-    await queue.resumeChatQueue('layered-pause', manualPause.id);
-    const popped = await queue.popNextChat('layered-pause');
-    expect(popped.entry.id).toBe('entry-successor');
-  });
-
-  it('persists restart uncertainty without a queue file and gates later entries', async () => {
-    const turnRunner = {
-      runAgentTurn: mock(() => Promise.resolve()),
-      abortSession: mock(() => Promise.resolve(false)),
-      isChatRunning: mock(() => false),
-      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
-    };
-    const recoveringQueue = new ChatExecutionCoordinator(
-      workspaceDir,
-      turnRunner,
-      createPendingInputs(),
-      createChatMessages(),
-      emptyDrainOptions,
-      () => true,
-    );
-
-    await recoveringQueue.recoverChatExecutionControls(new Set(['uncertain-empty']));
-    const recovered = await recoveringQueue.readChatExecutionControl('uncertain-empty');
-    expect(recovered.entries).toEqual([]);
-    expect(recovered.pause).toBeNull();
-    expect(recovered.recoveredInputContinuation).toMatchObject({ id: expect.any(String) });
-
-    const created = await recoveringQueue.createChatQueueEntry(
-      'uncertain-empty',
-      'wait for explicit review',
-    );
-    await recoveringQueue.triggerDrain('uncertain-empty');
-    expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
-
-    await recoveringQueue.deleteChatQueueEntry('uncertain-empty', created.entryId);
-    const emptyAgain = await recoveringQueue.readChatExecutionControl('uncertain-empty');
-    expect(emptyAgain.entries).toEqual([]);
-    expect(emptyAgain.pause).toBeNull();
-    expect(emptyAgain.recoveredInputContinuation).toEqual(recovered.recoveredInputContinuation);
-
-    const reservation = recoveringQueue.reserveDirectTurn('uncertain-empty');
-    await recoveringQueue.consumeRecoveredInputContinuationForDirectTurn(reservation);
-    await recoveringQueue.releaseDirectTurn(reservation);
-    await recoveringQueue.createChatQueueEntry('uncertain-empty', 'send after review');
-    await recoveringQueue.triggerDrain('uncertain-empty');
-    expect(turnRunner.runAgentTurn).toHaveBeenCalledWith(
-      'uncertain-empty',
-      'send after review',
-      expect.objectContaining({ directHistoryRecovery: 'allow-empty' }),
-    );
-  });
-
-  it('does not consume a stale explicit continuation after the final queued entry is deleted', async () => {
-    await queue.createChatQueueEntry('stale-continue', 'queued successor');
-    await queue.recoverChatExecutionControls(new Set(['stale-continue']));
-    const recovered = await queue.readChatExecutionControl('stale-continue');
-    const entryId = recovered.entries[0].id;
-    const continuationId = recovered.recoveredInputContinuation.id;
-
-    await queue.deleteChatQueueEntry('stale-continue', entryId);
-
-    await expect(queue.continuePastRecoveredInput('stale-continue', continuationId)).rejects.toMatchObject({
-      code: 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE',
-      control: expect.objectContaining({
-        entries: [],
-        recoveredInputContinuation: expect.objectContaining({ id: continuationId }),
-      }),
-    });
-    expect((await queue.readChatExecutionControl('stale-continue')).recoveredInputContinuation).toMatchObject({
-      id: continuationId,
-    });
-  });
-
-  it('fails closed when an empty recovered-input continuation cannot be persisted', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.chmod(queuesDir, 0o500);
-    const turnRunner = {
-      runAgentTurn: mock(() => Promise.resolve()),
-      abortSession: mock(() => Promise.resolve(false)),
-      isChatRunning: mock(() => false),
-      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
-    };
-    const recoveringQueue = new ChatExecutionCoordinator(
-      workspaceDir,
-      turnRunner,
-      createPendingInputs(),
-      createChatMessages(),
-      emptyDrainOptions,
-      () => true,
-    );
-
-    try {
-      await expect(
-        recoveringQueue.recoverChatExecutionControls(new Set(['uncertain-write-failure'])),
-      ).rejects.toThrow('Could not persist recovered-input continuation');
-    } finally {
-      await fs.chmod(queuesDir, 0o700);
-    }
-
-    await expect(
-      recoveringQueue.createChatQueueEntry('uncertain-write-failure', 'later input'),
-    ).rejects.toThrow('Could not persist recovered-input continuation');
-    expect(turnRunner.runAgentTurn).not.toHaveBeenCalled();
-  });
-
-  it('fails recovery instead of replacing unreadable queue state with an empty pause', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    await fs.mkdir(queuesDir, { recursive: true });
-    const queuePath = path.join(queuesDir, 'uncertain-corrupt.queue.json');
-    await fs.writeFile(queuePath, '{corrupt queue state', 'utf8');
-    const recoveringQueue = new ChatExecutionCoordinator(
-      workspaceDir,
-      createStateOnlyAgents(),
-      createPendingInputs(),
-      createChatMessages(),
-      emptyDrainOptions,
-      () => true,
-    );
-
-    await expect(
-      recoveringQueue.recoverChatExecutionControls(new Set(['uncertain-corrupt'])),
-    ).rejects.toThrow('Could not recover chat queue uncertain-corrupt');
-    await expect(recoveringQueue.readChatExecutionControl('uncertain-corrupt')).rejects.toThrow(
-      'Could not recover chat queue uncertain-corrupt',
-    );
-    expect(() => recoveringQueue.reserveDirectTurn('uncertain-corrupt')).toThrow(
-      'Could not recover chat queue uncertain-corrupt',
-    );
-    await expect(fs.readFile(queuePath, 'utf8')).resolves.toBe('{corrupt queue state');
-  });
-
-  it('resumes unpaused persisted queue work after restart', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      path.join(queuesDir, 'ready.queue.json'),
-      JSON.stringify(
-        storedQueueFixture({
-          entries: [
-            {
-              id: 'entry-ready',
-              content: 'continue after restart',
-              status: 'queued',
-              revision: 1,
-              createdAt: '2026-07-16T00:00:00.000Z',
-              updatedAt: '2026-07-16T00:00:00.000Z',
-            },
-          ],
-          version: 1,
-        }),
-      ),
-      'utf8',
-    );
-    const turnRunner = {
-      runAgentTurn: mock(() => Promise.resolve()),
-      abortSession: mock(() => Promise.resolve(false)),
-      isChatRunning: mock(() => false),
-      waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
-    };
-    const recoveredQueue = new ChatExecutionCoordinator(
-      workspaceDir,
-      turnRunner,
-      createPendingInputs(),
-      createChatMessages(),
-      emptyDrainOptions,
-      () => true,
-    );
-    const becameIdle = new Promise((resolve) => {
-      recoveredQueue.onChatIdle((chatId) => {
-        if (chatId === 'ready') resolve();
-      });
-    });
-
-    await recoveredQueue.recoverChatExecutionControls();
-    await becameIdle;
-
-    expect(turnRunner.runAgentTurn).toHaveBeenCalledWith(
-      'ready',
-      'continue after restart',
-      expect.objectContaining({
-        clientRequestId: expect.any(String),
-        clientMessageId: expect.any(String),
-        turnId: expect.any(String),
-      }),
-    );
-    expect((await recoveredQueue.readChatExecutionControl('ready')).entries).toEqual([]);
-  });
-
-  it('removes persisted queues whose owning chat was deleted', async () => {
-    const queuesDir = path.join(workspaceDir, 'queues');
-    const queueFile = path.join(queuesDir, 'orphan.queue.json');
-    await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      queueFile,
-      JSON.stringify(storedQueueFixture({
-        entries: [queueEntryFixture('orphan-entry', 'orphaned')],
-        version: 1,
-      })),
-      'utf8',
-    );
-    const recoveringQueue = new ChatExecutionCoordinator(
-      workspaceDir,
-      createStateOnlyAgents(),
-      createPendingInputs(),
-      createChatMessages(),
-      emptyDrainOptions,
-      (chatId) => chatId !== 'orphan',
-    );
-
-    await recoveringQueue.recoverChatExecutionControls();
-
-    await expect(fs.stat(queueFile)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('requires execution dependencies at construction', () => {
@@ -1556,22 +1099,6 @@ describe('orchestration', () => {
         }),
         expect.objectContaining({ status: 'queued', content: 'newer input' }),
       ]);
-    });
-
-    it('does not deliver active input across recovered-input continuation', async () => {
-      await orchQueue.recoverChatExecutionControls(new Set(['c1']));
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => true);
-
-      const delivered = await orchQueue.deliverActiveInput('c1', 'newer active input');
-
-      expect(delivered).toBe(false);
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-      expect(await orchQueue.readChatExecutionControl('c1')).toMatchObject({
-        entries: [],
-        pause: null,
-        recoveredInputContinuation: { id: expect.any(String) },
-      });
     });
 
     it('serializes concurrent creates into distinct FIFO entries', async () => {
@@ -2513,7 +2040,7 @@ describe('orchestration', () => {
       );
     });
 
-    it('clears deletion suppression when a queue file is deleted', async () => {
+    it('clears deletion suppression when queue control is deleted', async () => {
       const stopped = [];
       orchQueue.onSessionStopped((chatId, success, intent) => stopped.push({ chatId, success, intent }));
       await orchQueue.createChatQueueEntry('c1', 'old pending');
@@ -2531,7 +2058,7 @@ describe('orchestration', () => {
   });
 
   describe('triggerDrain', () => {
-    it('does not recreate a queue file when its chat is deleted mid-drain', async () => {
+    it('does not recreate queue control when its chat is deleted mid-drain', async () => {
       let chatExists = true;
       const turnStarted = deferred();
       const finishTurn = deferred();
@@ -2552,7 +2079,6 @@ describe('orchestration', () => {
         emptyDrainOptions,
         () => chatExists,
       );
-      const queueFile = path.join(workspaceDir, 'queues', 'deleted.queue.json');
       await deletingQueue.createChatQueueEntry('deleted', 'queued');
 
       const drain = deletingQueue.triggerDrain('deleted');
@@ -2562,7 +2088,7 @@ describe('orchestration', () => {
       finishTurn.reject(new Error('aborted for deletion'));
       await drain;
 
-      await expect(fs.stat(queueFile)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await deletingQueue.readChatExecutionControl('deleted')).entries).toEqual([]);
     });
 
     it('is a no-op when agent is running', async () => {

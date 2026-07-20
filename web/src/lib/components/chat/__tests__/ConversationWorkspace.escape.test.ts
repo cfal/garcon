@@ -7,7 +7,6 @@ import { getChatExecutionControl, getChatMessages, stopChat } from '$lib/api/cha
 vi.mock('$lib/api/chats.js', () => ({
 	compactChat: vi.fn(),
 	createQueuedInput: vi.fn(),
-	continueRecoveredInput: vi.fn(),
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
@@ -81,7 +80,6 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			chatId: 'chat-1',
 			control: {
 				queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
-				recoveredInputContinuation: null,
 				version: 0,
 				updatedAt: null,
 			},
@@ -95,7 +93,6 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			acceptedAt: '2026-01-01T00:00:00.000Z',
 			control: {
 				queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
-				recoveredInputContinuation: null,
 				version: 0,
 				updatedAt: null,
 			},

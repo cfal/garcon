@@ -14,7 +14,7 @@ import {
   webSocketUpgradeHeaders,
 } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
-import { forkChatFileCopy, rollbackForkTarget } from './chats/fork-chat.js';
+import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireServerEvents } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
@@ -45,7 +45,6 @@ import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   ChatCarryOverStore,
   renderCarriedTranscript,
@@ -383,6 +382,7 @@ export async function startServer(): Promise<void> {
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
 
+    const commandLedger = new CommandLedger(workspaceDir);
     const queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
@@ -390,59 +390,10 @@ export async function startServer(): Promise<void> {
       chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
       (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      undefined,
+      (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
     chatExecutionActivity.attachReservedExecutions(queue);
-    const commandLedger = new CommandLedger(workspaceDir);
-    const interruptedSessionControls = await commandLedger.listRestartInterruptedSessionControls();
-    for (const record of interruptedSessionControls) {
-      if (record.commandType === 'agent-stop' && chatRegistry.getChat(record.chatId)) {
-        await queue.pauseChatQueue(record.chatId);
-      }
-      const settled = await commandLedger.settleRestartInterruptedSessionControl(record.key);
-      if (!settled) {
-        throw new Error(`Could not settle interrupted ${record.commandType} for ${record.chatId}`);
-      }
-      logger.warn(`${record.commandType}: recovered interrupted command for ${record.chatId}`);
-    }
-    const forkPreparations = await commandLedger.listForkPreparationsPendingRecovery();
-    for (const record of forkPreparations) {
-      const preparation = record.forkPreparation!;
-      const sourceChatId = preparation.sourceChatId;
-      pendingInputs.clearChat(record.chatId, 'chat-removed');
-      await queue.deleteChatQueueFile(record.chatId).catch(() => undefined);
-      await rollbackForkTarget({
-        sourceChatId,
-        targetChatId: record.chatId,
-        registry: chatRegistry,
-        settings,
-        ownership: agentOwnership,
-        sourceNextForkOrdinal: preparation.sourceNextForkOrdinal,
-      });
-      await commandLedger.settleForkPreparationRecovery(record.key);
-      logger.warn(`fork-run: removed interrupted pre-schedule target ${record.chatId}`);
-    }
-    const pendingRecovery = new PendingUserInputRecoveryCoordinator(
-      {
-        ledger: commandLedger,
-        pendingInputs,
-        nativeSnapshots: chatViewPages,
-        queuedInputHandoffs: queue,
-        chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
-        onRecoveredChatSettled: async (chatId) => {
-          await queue.dropRecoveredInputContinuation(chatId);
-        },
-      },
-      (error) => {
-        logger.warn('pending-inputs: failed to settle durable recovery:', errorMessage(error));
-      },
-    );
-    pendingRecovery.start();
-    const pendingRecoveryResult = await pendingRecovery.restore();
-    if (pendingRecoveryResult.restored > 0 || pendingRecoveryResult.discardedMissingChat > 0) {
-      logger.warn(
-        `pending-inputs: restart recovery restored=${pendingRecoveryResult.restored} missingChats=${pendingRecoveryResult.discardedMissingChat}`,
-      );
-    }
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
@@ -523,7 +474,6 @@ export async function startServer(): Promise<void> {
         chatViews,
         chatNativeReloader: indexedNativeReloader,
         pendingInputs,
-        pendingRecovery,
         commandLedger,
         shareStore,
         telegramNotifier,
@@ -533,10 +483,6 @@ export async function startServer(): Promise<void> {
         loadNativeMessages,
         searchIndex: chatSearch,
       }),
-      recoverControls: () => queue.recoverChatExecutionControls(
-        new Set(pendingRecoveryResult.restoredChatIds),
-      ),
-      activateRecoveredSettlement: () => pendingRecovery.activateRecoveredChatSettlement(),
       startScheduledPrompts: () => scheduledPrompts.start(),
     });
 
@@ -550,7 +496,6 @@ export async function startServer(): Promise<void> {
       chatViews: chatViewPages,
       agents: agentRegistry,
       pendingInputs,
-      pendingInputRecovery: pendingRecovery,
       telegramNotifier,
       telegramSettings,
       shareStore,
@@ -715,7 +660,6 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
-        pendingRecovery.beginShutdown();
         await server.stop(true);
         clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
@@ -740,7 +684,6 @@ export async function startServer(): Promise<void> {
           () => chatCommands.waitForBackgroundTasks(),
           () => queue.waitForExecutionOwners(),
           () => eventWiring.waitForIdle(),
-          () => pendingRecovery.waitForBackgroundTasks(),
         ]);
         if (!backgroundTasks.completed) {
           cleanupFailed = true;

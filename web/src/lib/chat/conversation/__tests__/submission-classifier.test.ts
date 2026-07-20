@@ -10,7 +10,6 @@ function input(
 		isProcessing: false,
 		control: emptyChatExecutionControlState(),
 		isActiveDeliveryInput: false,
-		isRecoveredContinuationEligible: true,
 		hasAttachments: false,
 		...overrides,
 	};
@@ -20,33 +19,6 @@ describe('classifySubmission', () => {
 	it.each([
 		['draft chat', input({ isDraft: true }), 'draft'],
 		['idle chat', input(), 'direct'],
-		[
-			'empty recovered continuation',
-			input({
-				control: {
-					...emptyChatExecutionControlState(),
-					recoveredInputContinuation: {
-						id: 'continuation-1',
-						installedAt: '2026-07-19T00:00:00.000Z',
-					},
-				},
-			}),
-			'direct',
-		],
-		[
-			'ineligible recovered continuation',
-			input({
-				isRecoveredContinuationEligible: false,
-				control: {
-					...emptyChatExecutionControlState(),
-					recoveredInputContinuation: {
-						id: 'continuation-1',
-						installedAt: '2026-07-19T00:00:00.000Z',
-					},
-				},
-			}),
-			'queue',
-		],
 		[
 			'active steering input',
 			input({ isProcessing: true, isActiveDeliveryInput: true }),

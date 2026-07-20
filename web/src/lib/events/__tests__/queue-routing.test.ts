@@ -21,7 +21,6 @@ describe('queue routing integration', () => {
 		const setExecutionControl = vi.fn();
 		const control = {
 			queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
-			recoveredInputContinuation: null,
 			version: 3,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};

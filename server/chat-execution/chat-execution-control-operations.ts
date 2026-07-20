@@ -1,10 +1,6 @@
-import crypto from 'crypto';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import {
-  bumpStoredChatExecutionControl,
   cloneStoredChatExecutionControl,
-  emptyStoredChatExecutionControl,
-  normalizeStoredChatExecutionControlState,
   type StoredChatExecutionControlState,
   type StoredQueueEntry,
 } from './control-state.ts';
@@ -13,12 +9,8 @@ import { createLogger } from '../lib/log.ts';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
 import {
   clearQueue,
-  consumeEmptyRecoveredInputContinuation,
-  continueRecoveredInput,
   createQueueEntry,
   deleteQueueEntry,
-  dropRecoveredInputContinuation,
-  installRecoveryPause,
   pauseQueue,
   popNextQueueEntry,
   removeSentQueueEntry,
@@ -29,10 +21,8 @@ import {
   returnUnsentQueueEntry,
   type ControlTransition,
   type QueueCommandIdentity,
-  type ReceiptRetention,
 } from './chat-execution-control-transitions.ts';
 import {
-  EMPTY_RECEIPT_RETENTION,
   transitionContext,
   transitionError,
   type QueueCommandMutationResult,
@@ -42,13 +32,9 @@ const logger = createLogger('chat-execution-control');
 
 export interface ChatExecutionControlOperationsHost {
   runExclusive<T>(chatId: string, operation: () => Promise<T>): Promise<T>;
-  assertRecoveryReady(): void;
   chatExists(chatId: string): boolean;
+  unsettledQueueReceiptKeys(chatId: string): ReadonlySet<string>;
   publish(chatId: string, control: StoredChatExecutionControlState): void;
-}
-
-export interface ControlRecoveryResult {
-  queuesToDrain: ReadonlySet<string>;
 }
 
 export class ChatExecutionControlOperations {
@@ -67,14 +53,13 @@ export class ChatExecutionControlOperations {
     chatId: string,
     content: string,
     command?: QueueCommandIdentity,
-    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const committed = await this.#commitTransition(
         chatId,
         current,
-        createQueueEntry(current, { content, command }, transitionContext(), receipts),
+        createQueueEntry(current, { content, command }, this.#transitionContext(chatId)),
       );
       const result = committed.value;
       if (!result.duplicate) {
@@ -90,7 +75,6 @@ export class ChatExecutionControlOperations {
     content: string,
     expectedRevision: number,
     command?: QueueCommandIdentity,
-    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
@@ -99,7 +83,7 @@ export class ChatExecutionControlOperations {
         content,
         expectedRevision,
         command,
-      }, transitionContext(), receipts);
+      }, this.#transitionContext(chatId));
       if (transition.outcome.status === 'rejected') {
         this.#logMutation(
           'replace',
@@ -123,15 +107,13 @@ export class ChatExecutionControlOperations {
     chatId: string,
     entryId: string,
     command?: QueueCommandIdentity,
-    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const transition = deleteQueueEntry(
         current,
         { entryId, command },
-        transitionContext(),
-        receipts,
+        this.#transitionContext(chatId),
       );
       if (transition.outcome.status === 'rejected') {
         this.#logMutation(
@@ -190,66 +172,6 @@ export class ChatExecutionControlOperations {
       );
       if (committed.changed) this.#logPauseMutation('resume', chatId, committed.control);
       return { control: committed.control, changed: committed.changed };
-    });
-  }
-
-  async continueRecoveredInput(
-    chatId: string,
-    continuationId: string,
-  ): Promise<StoredChatExecutionControlState> {
-    return this.host.runExclusive(chatId, async () => {
-      const current = await this.#load(chatId);
-      const transition = continueRecoveredInput(current, continuationId, transitionContext());
-      if (transition.outcome.status === 'rejected') {
-        this.#logRecoveredInputContinuation(
-          transition.outcome.rejection.code === 'RECOVERED_INPUT_CONTINUATION_CHANGED'
-            ? 'stale-reject'
-            : 'empty-queue-reject',
-          chatId,
-          current,
-        );
-      }
-      const committed = (await this.#commitTransition(chatId, current, transition)).control;
-      this.#logRecoveredInputContinuation('explicit-continue', chatId, committed);
-      return committed;
-    });
-  }
-
-  async consumeEmptyContinuation(
-    chatId: string,
-    checkpoint: () => void,
-  ): Promise<{ control: StoredChatExecutionControlState; changed: boolean }> {
-    return this.host.runExclusive(chatId, async () => {
-      checkpoint();
-      const current = await this.#load(chatId);
-      checkpoint();
-      const result = await this.#commitTransition(
-        chatId,
-        current,
-        consumeEmptyRecoveredInputContinuation(current, transitionContext()),
-      );
-      if (result.changed) {
-        this.#logRecoveredInputContinuation('interactive-continue', chatId, result.control);
-      }
-      checkpoint();
-      return { control: result.control, changed: result.changed };
-    });
-  }
-
-  async dropRecoveredInputContinuation(
-    chatId: string,
-  ): Promise<{ control: StoredChatExecutionControlState; changed: boolean }> {
-    return this.host.runExclusive(chatId, async () => {
-      const current = await this.#load(chatId);
-      const result = await this.#commitTransition(
-        chatId,
-        current,
-        dropRecoveredInputContinuation(current, transitionContext()),
-      );
-      if (result.changed) {
-        this.#logRecoveredInputContinuation('native-settlement', chatId, result.control);
-      }
-      return { control: result.control, changed: result.changed };
     });
   }
 
@@ -352,113 +274,12 @@ export class ChatExecutionControlOperations {
     return this.repository.delete(chatId);
   }
 
-  async recover(
-    chatsWithRecoveredInput: ReadonlySet<string>,
-  ): Promise<ControlRecoveryResult> {
-    const storedChatIds = await this.repository.listStoredChatIds();
-    const queuesToDrain = new Set<string>();
-    const storedChatIdSet = new Set(storedChatIds);
-    for (const chatId of storedChatIds) {
-      try {
-        if (!this.host.chatExists(chatId)) {
-          await this.repository.delete(chatId);
-          logger.warn('queue: removed state for a deleted chat', { chatId });
-          continue;
-        }
-        const snapshot = await this.repository.loadFresh(chatId);
-        const control = snapshot.control;
-        let modified = snapshot.needsCanonicalization;
-        const recoveredIds = new Set<string>();
-        for (const entry of control.entries) {
-          if (entry.status !== 'sending') continue;
-          entry.status = 'queued';
-          recoveredIds.add(entry.id);
-          modified = true;
-        }
-        if (recoveredIds.size > 0) {
-          control.recentlyDispatched = control.recentlyDispatched.filter(
-            (entry) => !recoveredIds.has(entry.entryId),
-          );
-          installRecoveryPause(control, {
-            id: crypto.randomUUID(),
-            kind: 'recovered-inflight',
-            entryId: control.entries.find((entry) => recoveredIds.has(entry.id))!.id,
-            pausedAt: new Date().toISOString(),
-          });
-        }
-        const shouldInstallContinuation = chatsWithRecoveredInput.has(chatId);
-        if (shouldInstallContinuation) {
-          control.recoveredInputContinuation = {
-            id: crypto.randomUUID(),
-            installedAt: new Date().toISOString(),
-          };
-          modified = true;
-        } else if (control.recoveredInputContinuation) {
-          control.recoveredInputContinuation = null;
-          modified = true;
-        }
-        const committed = modified
-          ? await this.repository.save(
-              chatId,
-              normalizeStoredChatExecutionControlState(bumpStoredChatExecutionControl(control)),
-            )
-          : control;
-        if (shouldInstallContinuation) {
-          this.#logRecoveredInputContinuation('startup-install', chatId, committed);
-        }
-        if (recoveredIds.size > 0) {
-          logger.info('queue: recovered stale chat queue', { chatId, recoveredCount: recoveredIds.size });
-          this.#logPauseMutation(
-            'recover',
-            chatId,
-            committed,
-            committed.pause && 'entryId' in committed.pause ? committed.pause.entryId : undefined,
-          );
-        }
-        if (
-          !committed.pause
-          && !committed.recoveredInputContinuation
-          && committed.entries.some((entry) => entry.status === 'queued')
-        ) {
-          queuesToDrain.add(chatId);
-        }
-      } catch (error: unknown) {
-        logger.warn(`queue: could not recover chat queue ${chatId}.queue.json:`, (error as Error).message);
-        throw new Error(
-          `Could not recover chat queue ${chatId}: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
-        );
-      }
-    }
-
-    for (const chatId of chatsWithRecoveredInput) {
-      if (storedChatIdSet.has(chatId) || !this.host.chatExists(chatId)) continue;
-      try {
-        const control = bumpStoredChatExecutionControl(emptyStoredChatExecutionControl());
-        control.recoveredInputContinuation = {
-          id: crypto.randomUUID(),
-          installedAt: new Date().toISOString(),
-        };
-        const committed = await this.repository.save(
-          chatId,
-          normalizeStoredChatExecutionControlState(control),
-        );
-        this.#logRecoveredInputContinuation('startup-install', chatId, committed);
-      } catch (error: unknown) {
-        throw new Error(
-          `Could not persist recovered-input continuation for ${chatId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          { cause: error },
-        );
-      }
-    }
-    return { queuesToDrain };
+  async #load(chatId: string): Promise<StoredChatExecutionControlState> {
+    return this.repository.load(chatId);
   }
 
-  async #load(chatId: string): Promise<StoredChatExecutionControlState> {
-    this.host.assertRecoveryReady();
-    return this.repository.load(chatId);
+  #transitionContext(chatId: string) {
+    return transitionContext(() => this.host.unsettledQueueReceiptKeys(chatId));
   }
 
   async #commit(
@@ -468,10 +289,7 @@ export class ChatExecutionControlOperations {
     if (!this.host.chatExists(chatId)) {
       throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
     }
-    const result = await this.repository.save(
-      chatId,
-      normalizeStoredChatExecutionControlState(control),
-    );
+    const result = await this.repository.save(chatId, control);
     this.host.publish(chatId, result);
     return result;
   }
@@ -518,7 +336,7 @@ export class ChatExecutionControlOperations {
   }
 
   #logPauseMutation(
-    operation: 'pause' | 'resume' | 'recover',
+    operation: 'pause' | 'resume',
     chatId: string,
     control: StoredChatExecutionControlState,
     entryId?: string,
@@ -533,24 +351,4 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  #logRecoveredInputContinuation(
-    operation: 'startup-install'
-      | 'interactive-continue'
-      | 'explicit-continue'
-      | 'native-settlement'
-      | 'stale-reject'
-      | 'empty-queue-reject',
-    chatId: string,
-    control: StoredChatExecutionControlState,
-  ): void {
-    logger.debug('recovered-input continuation', {
-      chatId,
-      operation,
-      ...(control.recoveredInputContinuation
-        ? { continuationId: control.recoveredInputContinuation.id }
-        : {}),
-      controlVersion: control.version,
-      queuedCount: control.entries.filter((entry) => entry.status === 'queued').length,
-    });
-  }
 }

@@ -5,7 +5,6 @@ import type {
 	ChatQueueState,
 	QueueEntry,
 	QueuePause,
-	RecoveredInputContinuation,
 } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 import {
@@ -61,13 +60,11 @@ function renderControls(
 	queue: ChatQueueState,
 	props: Partial<{
 		chatId: string | null;
-		continuation: RecoveredInputContinuation | null;
 		canInterrupt: boolean;
 		onInterrupt: () => void | Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
-		onContinue: (continuationId: string) => Promise<void>;
-		onQueueControlError: (action: 'pause' | 'resume' | 'continue', error: unknown) => void;
+		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
@@ -76,10 +73,8 @@ function renderControls(
 	return render(QueueControls, {
 		chatId: 'chat-1',
 		queue,
-		continuation: null,
 		onPause: vi.fn().mockResolvedValue(undefined),
 		onResume: vi.fn().mockResolvedValue(undefined),
-		onContinue: vi.fn().mockResolvedValue(undefined),
 		onQueueControlError: vi.fn(),
 		onEdit: vi.fn(),
 		onOpenManager: vi.fn(),
@@ -172,30 +167,6 @@ describe('QueueControls', () => {
 		);
 
 		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
-	});
-
-	it('continues a recovered predecessor by ID without resuming a real pause', async () => {
-		const recovered: RecoveredInputContinuation = {
-			id: 'fbab5c41-a8c7-48a9-b1f4-c8cab503a686',
-			installedAt: '2026-07-18T00:00:00.000Z',
-		};
-		const onContinue = vi.fn().mockResolvedValue(undefined);
-		const onResume = vi.fn().mockResolvedValue(undefined);
-		renderControls(makeQueue(1, manualPause()), {
-			continuation: recovered,
-			onContinue,
-			onResume,
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
-		});
-
-		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
-		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_continue() }));
-
-		expect(onContinue).toHaveBeenCalledWith(recovered.id);
-		expect(onResume).not.toHaveBeenCalled();
-		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
 	});
 
 	it.each(['pause', 'resume'] as const)(

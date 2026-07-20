@@ -24,7 +24,6 @@ import {
 	clearChatQueue,
 	pauseChatQueue,
 	resumeChatQueue,
-	continueRecoveredInput,
 	updateExecutionSettings,
 	updateChatModel,
 	updateChatProjectPath,
@@ -64,7 +63,6 @@ describe('chats API contract', () => {
 				recentlyDispatched: [],
 				pause: null,
 			},
-			recoveredInputContinuation: null,
 			version: 0,
 			updatedAt: null,
 		};
@@ -469,7 +467,6 @@ describe('chats API contract', () => {
 		await clearChatQueue('c/1');
 		await pauseChatQueue('c/1');
 		await resumeChatQueue('c/1', 'pause/1');
-		await continueRecoveredInput('c/1', '3283b76e-aa29-4f94-8d9e-1ec7d408f10b');
 
 		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/clear');
 		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/pause');
@@ -477,11 +474,6 @@ describe('chats API contract', () => {
 		expect(JSON.parse(fetchMock.mock.calls[7][1].body)).toEqual({
 			chatId: 'c/1',
 			pauseId: 'pause/1',
-		});
-		expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/chats/recovered-input/continue');
-		expect(JSON.parse(fetchMock.mock.calls[8][1].body)).toEqual({
-			chatId: 'c/1',
-			continuationId: '3283b76e-aa29-4f94-8d9e-1ec7d408f10b',
 		});
 	});
 

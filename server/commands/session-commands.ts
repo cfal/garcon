@@ -8,12 +8,10 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import {
-  normalizeStoredChatExecutionControlState,
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
 import { createLogger } from '../lib/log.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
-import { SERVER_RESTART_INTERRUPTED_ERROR_CODE } from './command-ledger.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -47,7 +45,7 @@ export class SessionCommands {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         options: runOptionsForCommand(input),
-      }, 'interactive-existing-chat'),
+      }),
     );
   }
 
@@ -74,11 +72,6 @@ export class SessionCommands {
       },
     });
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
-    if (
-      ledger.kind === 'duplicate'
-      && ledger.record.status === 'failed'
-      && ledger.record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
-    ) this.support.throwRecordedExecutionFailure(ledger.record);
     if (ledger.kind !== 'duplicate') {
       this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
         allow: input.allow,
@@ -170,10 +163,6 @@ export class SessionCommands {
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
 
     if (ledger.kind === 'duplicate') {
-      if (
-        ledger.record.status === 'failed'
-        && ledger.record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
-      ) this.support.throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         stopped: ledger.record.status === 'finished',
@@ -212,10 +201,6 @@ export class SessionCommands {
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
 
     if (ledger.kind === 'duplicate') {
-      if (
-        ledger.record.status === 'failed'
-        && ledger.record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
-      ) this.support.throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         stopped: ledger.record.status === 'finished',
@@ -415,9 +400,7 @@ export class SessionCommands {
       );
     }
 
-    const queue = normalizeStoredChatExecutionControlState(
-      await this.deps.queue.readChatExecutionControl(chatId),
-    );
+    const queue = await this.deps.queue.readChatExecutionControl(chatId);
     const sendingEntry = queue.entries.find((entry) => entry.status === 'sending');
     if (sendingEntry) {
       throw new CommandValidationError(

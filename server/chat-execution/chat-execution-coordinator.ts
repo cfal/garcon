@@ -24,15 +24,13 @@ import {
   type StoredQueueEntry,
 } from './control-state.ts';
 import {
-  JsonChatExecutionControlRepository,
+  InMemoryChatExecutionControlRepository,
   type ChatExecutionControlRepository,
 } from './chat-execution-control-repository.ts';
 import {
   type QueueCommandIdentity,
-  type ReceiptRetention,
 } from './chat-execution-control-transitions.ts';
 import {
-  EMPTY_RECEIPT_RETENTION,
   executionTurnIdentity,
   type AcceptedActiveInput,
   type AcceptedActiveInputOutcome,
@@ -72,8 +70,6 @@ export type { QueueCommandIdentity } from './chat-execution-control-transitions.
 export {
   QueueEntryMutationError,
   QueuePauseChangedError,
-  RecoveredInputContinuationChangedError,
-  RecoveredInputContinuationRequiresQueueError,
   type ChatExecutionService,
   type ChatExecutionCommands,
   type ChatExecutionLifecycle,
@@ -103,7 +99,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   #shuttingDown = false;
   #ownership = new ExecutionOwnership();
   #dispatchTasks = new Set<Promise<void>>();
-  #recoveryFailure: unknown = undefined;
   #turnRunner: AgentTurnRunnerPort;
   #pendingInputs: PendingInputsPort;
   #getDrainOptions: QueueDrainOptionsResolver;
@@ -114,13 +109,14 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   #acceptedInputTranscript: AcceptedInputTranscript;
 
   constructor(
-    workspaceDir: string,
+    _workspaceDir: string,
     turnRunner: AgentTurnRunnerPort,
     pendingInputs: PendingInputsPort,
     chatMessages: ChatMessagesPort,
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
-    controls: ChatExecutionControlRepository = new JsonChatExecutionControlRepository(workspaceDir),
+    controls: ChatExecutionControlRepository = new InMemoryChatExecutionControlRepository(),
+    unsettledQueueReceiptKeys: (chatId: string) => ReadonlySet<string> = () => new Set(),
   ) {
     super();
     if (!turnRunner) throw new Error('ChatExecutionCoordinator requires an agent turn runner');
@@ -146,8 +142,8 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     );
     this.#controlOperations = new ChatExecutionControlOperations(controls, {
       runExclusive: (chatId, operation) => this.#locks.runExclusive(`chat:${chatId}`, operation),
-      assertRecoveryReady: () => this.#assertRecoveryReady(),
       chatExists: (chatId) => this.#chatExists(chatId),
+      unsettledQueueReceiptKeys,
       publish: (chatId, control) => {
         this.emit('execution-control-updated', chatId, control);
       },
@@ -161,9 +157,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
         checkpoint: (reservation) => {
           this.#checkpointDirect(reservation);
           reservation.executionAdmission.signal.throwIfAborted();
-        },
-        consumeRecoveredInput: async (reservation) => {
-          await this.#consumeRecoveredInputDirect(reservation);
         },
         registerPending: (chatId, content, options) => (
           this.registerPendingUserInput(chatId, content, options)
@@ -291,9 +284,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       }
       return;
     }
-    const hasQueued = !queue.pause
-      && !queue.recoveredInputContinuation
-      && queue.entries.some((e) => e.status === 'queued');
+    const hasQueued = !queue.pause && queue.entries.some((e) => e.status === 'queued');
     if (hasQueued) {
       await this.triggerDrain(chatId);
       return;
@@ -313,9 +304,8 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     chatId: string,
     content: string,
     command?: QueueCommandIdentity,
-    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
-    return this.#controlOperations.create(chatId, content, command, receipts);
+    return this.#controlOperations.create(chatId, content, command);
   }
 
   async replaceChatQueueEntry(
@@ -324,7 +314,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     content: string,
     expectedRevision: number,
     command?: QueueCommandIdentity,
-    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.#controlOperations.replace(
       chatId,
@@ -332,7 +321,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       content,
       expectedRevision,
       command,
-      receipts,
     );
   }
 
@@ -340,9 +328,8 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     chatId: string,
     entryId: string,
     command?: QueueCommandIdentity,
-    receipts: ReceiptRetention = EMPTY_RECEIPT_RETENTION,
   ): Promise<QueueCommandMutationResult> {
-    return this.#controlOperations.delete(chatId, entryId, command, receipts);
+    return this.#controlOperations.delete(chatId, entryId, command);
   }
 
   async enqueueAccepted(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult> {
@@ -382,7 +369,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       !supportsActiveInput
       || currentQueue?.entries.length !== 0
       || currentQueue.pause !== null
-      || currentQueue.recoveredInputContinuation !== null
     ) return false;
 
     const activeOptions = {
@@ -447,29 +433,12 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     return control;
   }
 
-  async continuePastRecoveredInput(
-    chatId: string,
-    continuationId: string,
-  ): Promise<StoredChatExecutionControlState> {
-    const result = await this.#controlOperations.continueRecoveredInput(chatId, continuationId);
-    this.#ownership.continueRecoveredInput(chatId);
-    this.#requestDrain(chatId, 'recovered-input continuation');
-    return result;
-  }
-
   async hasAppliedQueueCreateCommand(
     chatId: string,
     commandKey: string,
     entryId: string,
   ): Promise<boolean> {
     return this.#controlOperations.hasAppliedCreate(chatId, commandKey, entryId);
-  }
-
-  async dropRecoveredInputContinuation(chatId: string): Promise<StoredChatExecutionControlState> {
-    this.#ownership.settleRecoveredInput(chatId);
-    const result = (await this.#controlOperations.dropRecoveredInputContinuation(chatId)).control;
-    this.#requestDrain(chatId, 'recovered-input settlement');
-    return result;
   }
 
   async popNextChat(
@@ -504,12 +473,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
 
   assertDirectTurnReservationActive(reservation: DirectTurnReservation): void {
     this.#checkpointDirect(reservation);
-  }
-
-  async consumeRecoveredInputContinuationForDirectTurn(
-    reservation: DirectTurnReservation,
-  ): Promise<StoredChatExecutionControlState> {
-    return this.#consumeRecoveredInputDirect(reservation);
   }
 
   async releaseDirectTurn(reservation: DirectTurnReservation): Promise<void> {
@@ -610,27 +573,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     });
   }
 
-  async recoverChatExecutionControls(
-    chatsWithRecoveredInput: ReadonlySet<string> = new Set(),
-  ): Promise<void> {
-    this.#recoveryFailure = undefined;
-    try {
-      const { queuesToDrain } = await this.#controlOperations.recover(chatsWithRecoveredInput);
-      for (const chatId of queuesToDrain) {
-        void this.triggerDrain(chatId).catch((error: Error) => {
-          logger.warn(`queue: could not resume recovered chat queue ${chatId}:`, error.message);
-        });
-      }
-    } catch (error: unknown) {
-      this.#recoveryFailure = error;
-      throw error;
-    }
-  }
-
-  #assertRecoveryReady(): void {
-    if (this.#recoveryFailure !== undefined) throw this.#recoveryFailure;
-  }
-
   #isDrainSuppressed(chatId: string): boolean {
     return this.#hasDrainSuppression(chatId, 'abort')
       || this.#hasDrainSuppression(chatId, 'deletion');
@@ -641,7 +583,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   #reserveDirect(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {
-    this.#assertRecoveryReady();
     if (this.#shuttingDown) {
       throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
     }
@@ -652,23 +593,9 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   #checkpointDirect(reservation: DirectTurnReservation): void {
-    this.#assertRecoveryReady();
     if (!this.#ownership.isDirectCurrent(reservation)) {
       throw new DomainError('SESSION_BUSY', 'Direct turn reservation is no longer active', 409, true);
     }
-  }
-
-  async #consumeRecoveredInputDirect(
-    reservation: DirectTurnReservation,
-  ): Promise<StoredChatExecutionControlState> {
-    const checkpoint = () => {
-      this.#checkpointDirect(reservation);
-      reservation.executionAdmission.signal.throwIfAborted();
-    };
-    checkpoint();
-    const result = await this.#controlOperations.consumeEmptyContinuation(reservation.chatId, checkpoint);
-    if (result.changed) this.#ownership.continueRecoveredInput(reservation.chatId);
-    return result.control;
   }
 
   async #runDirect(
@@ -678,7 +605,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     dispatch?: (admission: AgentExecutionAdmission) => Promise<void>,
     beforeFailureRelease?: (error: unknown) => Promise<void>,
   ): Promise<void> {
-    this.#assertRecoveryReady();
     this.#checkpointDirect(reservation);
     const identity = executionTurnIdentity(options);
     const attempt = this.#ownership.attempt(reservation.chatId);
@@ -693,9 +619,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       } else {
         await this.#turnRunner.runAgentTurn(reservation.chatId, content, {
           ...options,
-          ...(this.#ownership.usesRecoveredHistory(reservation.chatId)
-            ? { directHistoryRecovery: 'allow-empty' as const }
-            : {}),
           executionAdmission: reservation.executionAdmission,
         });
       }

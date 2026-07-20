@@ -48,7 +48,6 @@ function emptyExecutionControl(version = 4) {
 			recentlyDispatched: [],
 			pause: null,
 		},
-		recoveredInputContinuation: null,
 		version,
 		updatedAt: '2026-07-18T00:00:00.000Z',
 	};

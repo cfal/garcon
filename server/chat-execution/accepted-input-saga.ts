@@ -3,7 +3,6 @@ import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/ses
 import { ActiveInputDeliveryError, DomainError } from '../lib/domain-error.ts';
 import { createLogger } from '../lib/log.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
-import type { ReceiptRetention } from './chat-execution-control-transitions.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type {
   AcceptedActiveInput,
@@ -29,7 +28,6 @@ export interface AcceptedInputCoordinator {
   requestDrain(chatId: string, context: string): void;
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation;
   checkpoint(reservation: DirectTurnReservation): void;
-  consumeRecoveredInput(reservation: DirectTurnReservation): Promise<void>;
   registerPending(
     chatId: string,
     content: string,
@@ -72,12 +70,10 @@ export class AcceptedInputSaga {
 
   async enqueue(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult> {
     try {
-      const receipts = await this.#receipts(input.command.chatId, input.settlement);
       const result = await this.#controls.create(
         input.command.chatId,
         input.content,
         { key: input.command.key, entryId: input.command.entryId },
-        receipts,
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);
       this.#coordinator.requestDrain(input.command.chatId, 'accepted enqueue');
@@ -90,14 +86,12 @@ export class AcceptedInputSaga {
 
   async replace(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult> {
     try {
-      const receipts = await this.#receipts(input.command.chatId, input.settlement);
       const result = await this.#controls.replace(
         input.command.chatId,
         input.command.entryId,
         input.content,
         input.expectedRevision,
         { key: input.command.key, entryId: input.command.entryId },
-        receipts,
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);
       return result;
@@ -109,12 +103,10 @@ export class AcceptedInputSaga {
 
   async delete(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult> {
     try {
-      const receipts = await this.#receipts(input.command.chatId, input.settlement);
       const result = await this.#controls.delete(
         input.command.chatId,
         input.command.entryId,
         { key: input.command.key, entryId: input.command.entryId },
-        receipts,
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);
       return result;
@@ -159,7 +151,7 @@ export class AcceptedInputSaga {
       assertDirectControlAvailable(control);
       await this.#checkpointAfter(
         reservation,
-        input.settlement.markScheduled(input.command, options.turnId!, false),
+        input.settlement.markScheduled(input.command, options.turnId!),
       );
     } catch (error) {
       let failure = error;
@@ -205,7 +197,7 @@ export class AcceptedInputSaga {
         input.command.chatId,
         input.content,
         { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
-        () => input.settlement.markScheduled(input.command, input.command.turnId!, true),
+        () => input.settlement.markScheduled(input.command, input.command.turnId!),
       );
       if (delivered) {
         deliveryAccepted = true;
@@ -234,7 +226,7 @@ export class AcceptedInputSaga {
     if (!applied) {
       throw new DomainError(
         'INTERNAL_ERROR',
-        'The previous active-input delivery did not reach a durable outcome',
+        'The previous active-input delivery did not reach a recorded outcome',
         409,
       );
     }
@@ -257,9 +249,6 @@ export class AcceptedInputSaga {
     }
     try {
       this.#checkpoint(reservation);
-      if (input.continueRecoveredInput) {
-        await this.#checkpointAfter(reservation, this.#coordinator.consumeRecoveredInput(reservation));
-      }
       const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
       await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare()));
@@ -269,11 +258,11 @@ export class AcceptedInputSaga {
       );
       await this.#checkpointAfter(
         reservation,
-        input.settlement.markScheduled(input.command, input.options.turnId!, true),
+        input.settlement.markScheduled(input.command, input.options.turnId!),
       );
       return reservation;
     } catch (error) {
-      const pendingInputRecovery = this.#pendingInputs.markFailed(
+      this.#pendingInputs.markFailed(
         input.command.chatId,
         input.options.clientRequestId!,
       );
@@ -305,7 +294,6 @@ export class AcceptedInputSaga {
       try {
         await input.settlement.markPreScheduleFailure(input.command, {
           error: failure,
-          pendingInputRecovery,
           retryable,
           preserveForkPreparation,
         });
@@ -345,13 +333,6 @@ export class AcceptedInputSaga {
     if (failure !== error) throw failure;
   }
 
-  #receipts(
-    chatId: string,
-    settlement: AcceptedQueueCreate['settlement'],
-  ): Promise<ReceiptRetention> {
-    return settlement.listUnsettledQueueReceiptKeys(chatId).then((protectedKeys) => ({ protectedKeys }));
-  }
-
   #checkpoint(reservation: DirectTurnReservation): void {
     this.#coordinator.checkpoint(reservation);
   }
@@ -371,14 +352,13 @@ export class AcceptedInputSaga {
   ): Promise<void> {
     await input.settlement.markPreScheduleFailure(input.command, {
       error,
-      pendingInputRecovery: false,
       retryable: true,
     });
   }
 }
 
 function assertDirectControlAvailable(control: StoredChatExecutionControlState): void {
-  if (control.entries.length === 0 && !control.pause && !control.recoveredInputContinuation) return;
+  if (control.entries.length === 0 && !control.pause) return;
   throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
 }
 

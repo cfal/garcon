@@ -31,7 +31,6 @@ interface ChatExecutionState {
   attempt: QueueExecutionAttempt | null;
   sessionStop: SessionStopInFlight | null;
   drainStop: SessionStopInFlight | null;
-  recoveredInputContinued: boolean;
 }
 
 function emptyChatExecutionState(): ChatExecutionState {
@@ -47,7 +46,6 @@ function emptyChatExecutionState(): ChatExecutionState {
     attempt: null,
     sessionStop: null,
     drainStop: null,
-    recoveredInputContinued: false,
   };
 }
 
@@ -62,8 +60,7 @@ function isIdle(state: ChatExecutionState): boolean {
     && state.suppressions.size === 0
     && state.attempt === null
     && state.sessionStop === null
-    && state.drainStop === null
-    && !state.recoveredInputContinued;
+    && state.drainStop === null;
 }
 
 export class ExecutionOwnership {
@@ -326,7 +323,6 @@ export class ExecutionOwnership {
       state.attempt?.markSettled();
       state.attempt = null;
       state.drainStop = null;
-      state.recoveredInputContinued = false;
     }
     this.#turnFinalizations.clearChat(chatId);
     this.#gc(chatId);
@@ -377,21 +373,6 @@ export class ExecutionOwnership {
     if (!state || state.drainStop !== operation) return;
     state.drainStop = null;
     this.#gc(chatId);
-  }
-
-  continueRecoveredInput(chatId: string): void {
-    this.#state(chatId).recoveredInputContinued = true;
-  }
-
-  settleRecoveredInput(chatId: string): void {
-    const state = this.#chats.get(chatId);
-    if (!state) return;
-    state.recoveredInputContinued = false;
-    this.#gc(chatId);
-  }
-
-  usesRecoveredHistory(chatId: string): boolean {
-    return this.#chats.get(chatId)?.recoveredInputContinued === true;
   }
 
   beginFinalization(chatId: string, turnId: string): QueuedTurnFinalizationHandle {

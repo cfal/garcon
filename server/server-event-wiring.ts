@@ -21,7 +21,6 @@ import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ChatProcessErrorRecovery } from './chats/chat-process-error-recovery.js';
 import { UserAbortLifecycleCoordinator } from './chats/user-abort-lifecycle-coordinator.js';
-import type { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
@@ -68,7 +67,6 @@ export interface ServerEventWiringDeps {
   chatViews: ChatViewStore;
   chatNativeReloader: NativeReloaderDep;
   pendingInputs: PendingUserInputService;
-  pendingRecovery: Pick<PendingUserInputRecoveryCoordinator, 'waitForSettlements'>;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
   telegramNotifier: TelegramNotifier;
@@ -93,7 +91,6 @@ export function wireServerEvents({
   chatViews,
   chatNativeReloader,
   pendingInputs,
-  pendingRecovery,
   commandLedger,
   shareStore,
   telegramNotifier,
@@ -347,7 +344,6 @@ export function wireServerEvents({
   ): Promise<void> {
     await settleExecutionCommand(chatId, turnMetadata, 'failed', agentErrorMessage);
     await reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
-    await pendingRecovery.waitForSettlements(chatId);
     broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
   }
 
@@ -362,7 +358,6 @@ export function wireServerEvents({
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }
     await pendingInputs.reconcileNativeHistory(chatId);
-    await pendingRecovery.waitForSettlements(chatId);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
   }
 
@@ -440,7 +435,6 @@ export function wireServerEvents({
       if (queuedFinalization && await queuedFinalization !== 'committed') return;
       await settleExecutionCommand(chatId, turnMetadata, 'finished');
       if (!expectedAbort) await pendingInputs.reconcileNativeHistory(chatId);
-      await pendingRecovery.waitForSettlements(chatId);
       if (!chatExists(chatId)) return;
       broadcast(
         new AgentRunFinishedMessage(

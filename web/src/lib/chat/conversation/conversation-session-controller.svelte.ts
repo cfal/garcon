@@ -4,7 +4,6 @@
 // callback functions supplied through the deps interface.
 
 import {
-	continueRecoveredInput,
 	deleteQueuedInput,
 	getChatExecutionControl,
 	pauseChatQueue,
@@ -229,8 +228,7 @@ function isExecutionControlAdmissionConflict(error: unknown): boolean {
 	return (
 		error instanceof ApiError &&
 		error.retryable &&
-		(error.errorCode === 'SESSION_BUSY' ||
-			error.errorCode === 'RECOVERED_INPUT_CONTINUATION_CHANGED')
+		error.errorCode === 'SESSION_BUSY'
 	);
 }
 
@@ -370,7 +368,7 @@ export class ConversationSessionController {
 		try {
 			await refresh;
 		} catch {
-			// The server rejects a direct run while durable queued inputs are pending.
+			// The server rejects a direct run while queued inputs are pending.
 		}
 	}
 
@@ -627,15 +625,12 @@ export class ConversationSessionController {
 			await this.#settleControlRefresh(pendingControlRefresh);
 		}
 		const currentControl = deps.conversationUi.getExecutionControl(chatId);
-		const continuationEligibleInput =
-			steerCommand.kind !== 'valid' && !(agentId === 'codex' && isCodexGoalCommand(text));
 		const route = classifySubmission({
 			isDraft,
 			isProcessing: activeTurn,
 			control: currentControl,
 			isActiveDeliveryInput:
 				steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)),
-			isRecoveredContinuationEligible: continuationEligibleInput,
 			hasAttachments: submissionImages.length > 0,
 		});
 		if (route === 'queue-attachments-unsupported') {
@@ -1028,14 +1023,12 @@ export class ConversationSessionController {
 		return this.resumeQueueForChat(chatId, pauseId);
 	}
 
-	handleQueueControlError(action: 'pause' | 'resume' | 'continue', error: unknown): void {
+	handleQueueControlError(action: 'pause' | 'resume', error: unknown): void {
 		this.deps.chatState.appendLocalNotice(
 			'error',
 			action === 'pause'
 				? m.chat_notice_failed_pause_queue({ detail: errorDetail(error) })
-				: action === 'resume'
-					? m.chat_notice_failed_resume_queue({ detail: errorDetail(error) })
-					: m.chat_notice_failed_continue_queue({ detail: errorDetail(error) }),
+				: m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
 		);
 	}
 
@@ -1047,17 +1040,6 @@ export class ConversationSessionController {
 	async resumeQueueForChat(chatId: string, pauseId: string): Promise<void> {
 		try {
 			const result = await resumeChatQueue(chatId, pauseId);
-			this.deps.conversationUi.setExecutionControl(chatId, result.control);
-		} catch (error) {
-			const control = controlFromMutationError(error);
-			if (control) this.deps.conversationUi.setExecutionControl(chatId, control);
-			throw error;
-		}
-	}
-
-	async continueRecoveredInputForChat(chatId: string, continuationId: string): Promise<void> {
-		try {
-			const result = await continueRecoveredInput(chatId, continuationId);
 			this.deps.conversationUi.setExecutionControl(chatId, result.control);
 		} catch (error) {
 			const control = controlFromMutationError(error);

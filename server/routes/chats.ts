@@ -17,7 +17,6 @@ import {
 } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import {
-  normalizeStoredChatExecutionControlState,
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
@@ -42,14 +41,11 @@ import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../ch
 import {
   QueueEntryMutationError,
   QueuePauseChangedError,
-  RecoveredInputContinuationChangedError,
-  RecoveredInputContinuationRequiresQueueError,
   type ChatExecutionService,
 } from '../chat-execution/chat-execution-coordinator.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
-import type { PendingUserInputRecoveryCoordinator } from '../chats/pending-user-input-recovery.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
@@ -85,7 +81,6 @@ import {
   parseQueueEntryReplaceCommandRequest,
   parseQueueMutationRequest,
   parseQueueResumeRequest,
-  parseRecoveredInputContinueRequest,
   parseStartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
 import type {
@@ -136,7 +131,6 @@ type QueueDep = ChatExecutionService;
 type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
-type PendingInputRecoveryDep = Pick<PendingUserInputRecoveryCoordinator, 'reconcileChat'>;
 
 interface ChatSearchDep {
   catalogMayHaveChanged(chatId?: string): void;
@@ -354,7 +348,6 @@ interface ChatRouteDeps {
   chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
-  pendingInputRecovery: PendingInputRecoveryDep;
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   agentSwitch: AgentSwitchService;
@@ -371,7 +364,6 @@ export default function createChatRoutes({
   chatViews,
   agents,
   pendingInputs,
-  pendingInputRecovery,
   commandService,
   chatListProjector,
   agentSwitch,
@@ -541,12 +533,8 @@ export default function createChatRoutes({
       const beforeSeq = parseBeforeSeq(beforeSeqRaw);
       if (beforeSeq instanceof Response) return beforeSeq;
 
-      let page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
+      const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
       await pendingInputs.reconcileRetainedHistory(chatId);
-      const recovery = await pendingInputRecovery.reconcileChat(chatId);
-      if (recovery.nativeSnapshotApplied) {
-        page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
-      }
       return Response.json({
         chatId,
         generationId: page.generationId,
@@ -867,17 +855,13 @@ export default function createChatRoutes({
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
     if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-    const control = toClientChatExecutionControlState(
-      normalizeStoredChatExecutionControlState(await queue.readChatExecutionControl(chatId)),
-    );
+    const control = toClientChatExecutionControlState(await queue.readChatExecutionControl(chatId));
     return Response.json({ success: true, chatId, control });
   }
 
   function queueControlErrorResponse(
     error: QueueEntryMutationError
-      | QueuePauseChangedError
-      | RecoveredInputContinuationChangedError
-      | RecoveredInputContinuationRequiresQueueError,
+      | QueuePauseChangedError,
   ): Response {
     const body: QueueCommandErrorResponse = {
       success: false,
@@ -959,24 +943,6 @@ export default function createChatRoutes({
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
       if (error instanceof QueuePauseChangedError) return queueControlErrorResponse(error);
-      return jsonErrorFromUnknown(error);
-    }
-  }
-
-  async function postRecoveredInputContinue(body: unknown): Promise<Response> {
-    try {
-      const input = parseCommandRequest(parseRecoveredInputContinueRequest, body);
-      return Response.json(await commands.continueRecoveredInput(input));
-    } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (
-        error instanceof RecoveredInputContinuationChangedError
-        || error instanceof RecoveredInputContinuationRequiresQueueError
-      ) {
-        return queueControlErrorResponse(error);
-      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -1177,9 +1143,6 @@ export default function createChatRoutes({
     },
     '/api/v1/chats/queue/resume': {
       POST: withJsonBody((body: unknown) => postQueueMutation(body, 'resume')),
-    },
-    '/api/v1/chats/recovered-input/continue': {
-      POST: withJsonBody(postRecoveredInputContinue),
     },
     '/api/v1/chats/permissions/decision': {
       POST: withJsonBody(postPermissionDecision),

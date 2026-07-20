@@ -55,7 +55,6 @@ function storedQueue() {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
-    recoveredInputContinuation: null,
     version: 3,
     updatedAt: '2024-01-01T00:00:00.000Z',
   };
@@ -177,10 +176,6 @@ describe('chat WebSocket handler', () => {
         errorCode: 'PROVIDER_FAILED',
         message: 'provider failed',
       }],
-      recoveredInputContinuation: {
-        id: '1a0c7d35-d084-4b91-8275-7d2ce806707b',
-        installedAt: '2024-01-01T00:00:00.000Z',
-      },
     });
 
     await chatHandler.message(ws, {
@@ -195,9 +190,6 @@ describe('chat WebSocket handler', () => {
       id: 'pause-manual',
     });
     expect(control.queue).not.toHaveProperty('resumePauses');
-    expect(control.recoveredInputContinuation).toMatchObject({
-      id: '1a0c7d35-d084-4b91-8275-7d2ce806707b',
-    });
   });
 
   it('returns an authoritative empty processing snapshot', async () => {

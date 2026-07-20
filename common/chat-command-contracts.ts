@@ -26,8 +26,6 @@ export type CommandErrorCode = Extract<
   | 'QUEUE_ENTRY_ALREADY_SENT'
   | 'QUEUE_ENTRY_REVISION_CONFLICT'
   | 'QUEUE_PAUSE_CHANGED'
-  | 'RECOVERED_INPUT_CONTINUATION_CHANGED'
-  | 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE'
   | 'ACTIVE_INPUT_NOT_DELIVERED'
   | 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
@@ -39,7 +37,6 @@ export type CommandErrorCode = Extract<
   | 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
-  | 'SERVER_RESTART_INTERRUPTED'
   | 'INTERNAL_ERROR'
 >;
 
@@ -190,13 +187,6 @@ export interface QueueMutationResponse {
   chatId: string;
   control: ChatExecutionControlState;
 }
-
-export interface RecoveredInputContinueRequest {
-  chatId: string;
-  continuationId: string;
-}
-
-export type RecoveredInputContinueResponse = QueueMutationResponse;
 
 export interface AskUserQuestionAnswerPayload {
   questionId: string;
@@ -485,14 +475,6 @@ export function parseQueueResumeRequest(value: unknown): QueueResumeRequest {
   return {
     chatId: requiredChatId(body, 'chatId'),
     pauseId: requiredString(body, 'pauseId'),
-  };
-}
-
-export function parseRecoveredInputContinueRequest(value: unknown): RecoveredInputContinueRequest {
-  const body = requestRecord(value);
-  return {
-    chatId: requiredChatId(body, 'chatId'),
-    continuationId: requiredString(body, 'continuationId'),
   };
 }
 

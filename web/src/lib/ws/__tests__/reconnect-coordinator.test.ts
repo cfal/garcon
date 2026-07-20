@@ -27,7 +27,6 @@ function controlState(paused: boolean): ChatExecutionControlState {
 			recentlyDispatched: [],
 			pause: paused ? { id: 'pause-1', kind: 'manual', pausedAt: TS } : null,
 		},
-		recoveredInputContinuation: null,
 		version: paused ? 2 : 1,
 		updatedAt: TS,
 	};

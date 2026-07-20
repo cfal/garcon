@@ -18,9 +18,8 @@ function control(overrides = {}) {
     version: 0,
     entries: [],
     pause: null,
-    recoveredInputContinuation: null,
     appliedCommands: [],
-    recentlyDispatchedEntryIds: [],
+    recentlyDispatched: [],
     ...overrides,
   };
 }
@@ -34,7 +33,6 @@ function settlement(overrides = {}) {
     settleActiveInput: mock(async () => undefined),
     settleActiveInputFailure: mock(async () => undefined),
     settleOperationFailure: mock(async () => undefined),
-    listUnsettledQueueReceiptKeys: mock(async () => new Set()),
     ...overrides,
   };
 }
@@ -57,7 +55,6 @@ function scaffold(overrides = {}) {
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
     checkpoint: mock(() => undefined),
-    consumeRecoveredInput: mock(async () => undefined),
     registerPending: mock(async () => undefined),
     releaseDirect: mock(async () => undefined),
     runDirect: mock(async () => undefined),
@@ -73,7 +70,6 @@ function scaffold(overrides = {}) {
       requestDrain: m.requestDrain,
       reserveDirect: m.reserveDirect,
       checkpoint: m.checkpoint,
-      consumeRecoveredInput: m.consumeRecoveredInput,
       registerPending: m.registerPending,
       releaseDirect: m.releaseDirect,
       runDirect: m.runDirect,
@@ -86,18 +82,14 @@ function scaffold(overrides = {}) {
 }
 
 describe('AcceptedInputSaga', () => {
-  test('settles a durable enqueue before requesting dispatch', async () => {
+  test('settles an enqueue before requesting dispatch', async () => {
     const events = [];
     const settle = settlement({
-      listUnsettledQueueReceiptKeys: mock(async () => {
-        events.push('receipts');
-        return new Set(['protected']);
-      }),
       settleQueueMutation: mock(async () => { events.push('settled'); }),
     });
     const { saga, m } = scaffold({
-      create: mock(async (_chatId, _content, _command, receipts) => {
-        events.push(`created:${[...receipts.protectedKeys].join(',')}`);
+      create: mock(async () => {
+        events.push('created');
         return { entryId: 'entry-1', control: control(), duplicate: false };
       }),
       requestDrain: mock(() => { events.push('drain'); }),
@@ -109,7 +101,7 @@ describe('AcceptedInputSaga', () => {
       settlement: settle,
     });
 
-    expect(events).toEqual(['receipts', 'created:protected', 'settled', 'drain']);
+    expect(events).toEqual(['created', 'settled', 'drain']);
     expect(m.create).toHaveBeenCalled();
   });
 
@@ -128,7 +120,6 @@ describe('AcceptedInputSaga', () => {
     expect(m.registerPending).not.toHaveBeenCalled();
     expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
       error: busy,
-      pendingInputRecovery: false,
       retryable: true,
     });
   });
@@ -160,7 +151,6 @@ describe('AcceptedInputSaga', () => {
     expect(events).toEqual(['prepared', 'compensated', 'released', 'settled']);
     expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
       error: registrationError,
-      pendingInputRecovery: true,
       retryable: true,
       preserveForkPreparation: false,
     });

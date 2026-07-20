@@ -100,7 +100,7 @@ export class ForkCommands {
       clientRequestId,
       clientMessageId,
       turnId,
-    }, 'fork-run', 'fork-created-chat', {
+    }, 'fork-run', {
       operation: 'fork-run',
       prepare: async () => {
         await this.deps.ledger.update(ledger.record.key, {

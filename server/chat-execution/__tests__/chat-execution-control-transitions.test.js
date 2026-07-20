@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   clearQueue,
-  consumeEmptyRecoveredInputContinuation,
-  continueRecoveredInput,
   createQueueEntry,
   deleteQueueEntry,
-  dropRecoveredInputContinuation,
   pauseQueue,
   popNextQueueEntry,
   removeSentQueueEntry,
@@ -20,15 +17,14 @@ import {
   emptyStoredChatExecutionControl,
 } from '../control-state.ts';
 
-function context(start = 0) {
+function context(start = 0, protectedKeys = new Set()) {
   let nextId = start;
   return {
     now: `2026-07-19T00:00:${String(start).padStart(2, '0')}.000Z`,
     newId: () => `id-${++nextId}`,
+    unsettledQueueReceiptKeys: () => protectedKeys,
   };
 }
-
-const noReceipts = { protectedKeys: new Set() };
 
 function value(result) {
   expect(result.outcome.status).toBe('ok');
@@ -38,7 +34,7 @@ function value(result) {
 describe('chat execution control transitions', () => {
   it('creates, replaces, dispatches, returns, and removes one entry without mutating inputs', () => {
     const initial = emptyStoredChatExecutionControl();
-    const created = createQueueEntry(initial, { content: 'first' }, context(), noReceipts);
+    const created = createQueueEntry(initial, { content: 'first' }, context());
     expect(initial).toEqual(emptyStoredChatExecutionControl());
     expect(created.next).toMatchObject({ version: 1, entries: [{ content: 'first', revision: 1 }] });
 
@@ -47,7 +43,7 @@ describe('chat execution control transitions', () => {
       entryId,
       content: 'updated',
       expectedRevision: 1,
-    }, context(1), noReceipts);
+    }, context(1));
     expect(replaced.next.entries[0]).toMatchObject({ id: entryId, content: 'updated', revision: 2 });
 
     const popped = popNextQueueEntry(replaced.next, context(2));
@@ -74,14 +70,13 @@ describe('chat execution control transitions', () => {
       emptyStoredChatExecutionControl(),
       { content: 'first' },
       context(),
-      noReceipts,
     );
     const entryId = value(created).entryId;
     const stale = replaceQueueEntry(created.next, {
       entryId,
       content: 'updated',
       expectedRevision: 2,
-    }, context(1), noReceipts);
+    }, context(1));
     expect(stale).toMatchObject({
       changed: false,
       outcome: {
@@ -91,14 +86,14 @@ describe('chat execution control transitions', () => {
     });
     expect(stale.next).toEqual(created.next);
 
-    const missing = deleteQueueEntry(created.next, { entryId: 'missing' }, context(1), noReceipts);
+    const missing = deleteQueueEntry(created.next, { entryId: 'missing' }, context(1));
     expect(missing.outcome).toEqual({
       status: 'rejected',
       rejection: { code: 'QUEUE_ENTRY_NOT_FOUND', entryId: 'missing' },
     });
   });
 
-  it('retains unresolved receipts above the ordinary terminal receipt bound', () => {
+  it('retains unresolved receipts while enforcing the receipt bound', () => {
     const current = emptyStoredChatExecutionControl();
     current.appliedCommands = Array.from(
       { length: MAX_STORED_APPLIED_QUEUE_COMMANDS + 3 },
@@ -113,14 +108,14 @@ describe('chat execution control transitions', () => {
     const transition = createQueueEntry(current, {
       content: 'new',
       command: { key: 'current', entryId: 'current-entry' },
-    }, context(), { protectedKeys });
+    }, context(0, protectedKeys));
 
     const keys = new Set(transition.next.appliedCommands.map((receipt) => receipt.key));
     expect(keys).toContain('current');
     expect(keys).toContain('old-0');
     expect(keys).toContain('old-1');
     expect(keys).toContain('old-2');
-    expect(transition.next.appliedCommands.length).toBe(MAX_STORED_APPLIED_QUEUE_COMMANDS + 4);
+    expect(transition.next.appliedCommands.length).toBe(MAX_STORED_APPLIED_QUEUE_COMMANDS);
   });
 
   it('replays queue command receipts without applying a mutation twice', () => {
@@ -128,60 +123,16 @@ describe('chat execution control transitions', () => {
     const first = createQueueEntry(
       emptyStoredChatExecutionControl(),
       { content: 'first', command },
-      context(),
-      { protectedKeys: new Set([command.key]) },
+      context(0, new Set([command.key])),
     );
     const duplicate = createQueueEntry(
       first.next,
       { content: 'first', command },
-      context(1),
-      { protectedKeys: new Set([command.key]) },
+      context(1, new Set([command.key])),
     );
     expect(value(duplicate)).toMatchObject({ entryId: 'entry-1', duplicate: true });
     expect(duplicate.changed).toBe(false);
     expect(duplicate.next).toEqual(first.next);
-  });
-
-  it('keeps manual pauses and recovered continuation as independent blockers', () => {
-    const created = createQueueEntry(
-      emptyStoredChatExecutionControl(),
-      { content: 'first' },
-      context(),
-      noReceipts,
-    );
-    const withContinuation = {
-      ...created.next,
-      recoveredInputContinuation: {
-        id: 'continuation-1',
-        installedAt: '2026-07-19T00:00:00.000Z',
-      },
-    };
-    const paused = pauseQueue(withContinuation, context(1));
-    expect(paused.next.pause?.kind).toBe('manual');
-    expect(paused.next.recoveredInputContinuation?.id).toBe('continuation-1');
-
-    const continued = continueRecoveredInput(paused.next, 'continuation-1', context(2));
-    expect(continued.next.recoveredInputContinuation).toBeNull();
-    expect(continued.next.pause?.kind).toBe('manual');
-
-    const resumed = resumeQueue(continued.next, continued.next.pause.id, context(3));
-    expect(resumed.next.pause).toBeNull();
-  });
-
-  it('consumes only the empty continuation through interactive direct admission', () => {
-    const current = emptyStoredChatExecutionControl();
-    current.recoveredInputContinuation = {
-      id: 'continuation-1',
-      installedAt: '2026-07-19T00:00:00.000Z',
-    };
-    const consumed = consumeEmptyRecoveredInputContinuation(current, context());
-    expect(consumed.next.recoveredInputContinuation).toBeNull();
-    expect(consumed.changed).toBe(true);
-
-    const withQueue = createQueueEntry(current, { content: 'queued' }, context(), noReceipts);
-    const blocked = consumeEmptyRecoveredInputContinuation(withQueue.next, context(1));
-    expect(blocked.next.recoveredInputContinuation?.id).toBe('continuation-1');
-    expect(blocked.changed).toBe(false);
   });
 
   it('restores pause stacks and rejects stale pause identities', () => {
@@ -232,9 +183,6 @@ describe('chat execution control transitions', () => {
 
     const stopped = restoreStoppedQueueEntry(current, 'entry-1', context());
     expect(stopped.next.pause?.kind).toBe('manual');
-    const settled = dropRecoveredInputContinuation(stopped.next, context(1));
-    expect(settled.changed).toBe(false);
-
     const cleared = clearQueue(uncertain.next, context(2));
     expect(cleared.next.entries).toEqual([]);
     expect(cleared.next.pause).toBeNull();
@@ -254,11 +202,12 @@ describe('chat execution control transitions', () => {
       const ctx = {
         now: new Date(Date.UTC(2026, 6, 19, 0, 0, index)).toISOString(),
         newId: () => `generated-${++ordinal}`,
+        unsettledQueueReceiptKeys: () => new Set(),
       };
       const operation = random() % 8;
       let transition;
       if (operation <= 1 || knownIds.length === 0) {
-        transition = createQueueEntry(control, { content: `message-${index}` }, ctx, noReceipts);
+        transition = createQueueEntry(control, { content: `message-${index}` }, ctx);
         if (transition.outcome.status === 'ok') knownIds.push(transition.outcome.value.entryId);
       } else if (operation === 2) {
         transition = pauseQueue(control, ctx);
@@ -274,7 +223,7 @@ describe('chat execution control transitions', () => {
       } else if (operation === 6) {
         const queued = control.entries.find((entry) => entry.status === 'queued');
         transition = queued
-          ? deleteQueueEntry(control, { entryId: queued.id }, ctx, noReceipts)
+          ? deleteQueueEntry(control, { entryId: queued.id }, ctx)
           : pauseQueue(control, ctx);
       } else {
         const sending = control.entries.find((entry) => entry.status === 'sending');

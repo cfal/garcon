@@ -8,7 +8,6 @@ import type {
   QueueEntryDeleteResponse,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
-  RecoveredInputContinueRequest,
 } from '../../common/chat-command-contracts.js';
 import { QueueEntryMutationError } from '../chat-execution/chat-execution-coordinator.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
@@ -231,8 +230,7 @@ export class QueueCommands {
         || this.deps.queue.isChatExecutionReserved(chatId);
       const control = await this.deps.queue.readChatExecutionControl(chatId);
       const queueBlocksDirectRun = control.entries.length > 0
-        || control.pause !== null
-        || control.recoveredInputContinuation !== null;
+        || control.pause !== null;
       if ((busy || queueBlocksDirectRun) && input.busyBehavior === 'skip') {
         return { type: 'skipped-busy', chatId };
       }
@@ -250,7 +248,7 @@ export class QueueCommands {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         options: {},
-      }, 'scheduled-existing-chat');
+      });
       return { type: 'sent', chatId };
     });
   }
@@ -258,21 +256,6 @@ export class QueueCommands {
   async mutateQueue(input: QueueMutationInput): Promise<QueueMutationResponse> {
     this.support.requireChat(input.chatId);
     return this.support.withChatMutationLock(input.chatId, () => this.mutateQueueLocked(input));
-  }
-
-  async continueRecoveredInput(input: RecoveredInputContinueRequest): Promise<QueueMutationResponse> {
-    this.support.requireChat(input.chatId);
-    const continuationId = input.continuationId.trim();
-    if (!continuationId) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'continuationId is required', 400);
-    }
-    return this.support.withChatMutationLock(input.chatId, async () => ({
-      success: true,
-      chatId: input.chatId,
-      control: toClientChatExecutionControlState(
-        await this.deps.queue.continuePastRecoveredInput(input.chatId, continuationId),
-      ),
-    }));
   }
 
   private async submitQueueEntryCreateLocked(

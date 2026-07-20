@@ -223,7 +223,7 @@ export abstract class DirectChatRuntimeBase<
     request: DirectResumeRequest,
   ): Promise<DirectRuntimeSession<TMessage>> {
     const messages = await this.#sessionStore.read(sessionId);
-    if (!messages && request.directHistoryRecovery !== 'allow-empty') {
+    if (!messages) {
       throw new Error(`Cannot hydrate ${this.config.runtimeLabel} session without persisted messages: ${sessionId}`);
     }
 
@@ -235,7 +235,7 @@ export abstract class DirectChatRuntimeBase<
       id: sessionId,
       isFinalizing: false,
       isRunning: false,
-      messages: (messages ?? []).map((message) => this.persistedToMessage(message)),
+      messages: messages.map((message) => this.persistedToMessage(message)),
       model: request.model || this.config.defaultModel,
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,

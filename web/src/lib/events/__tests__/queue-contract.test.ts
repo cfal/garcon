@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { ChatExecutionControlUpdatedMessage, parseServerWsMessage } from '$shared/ws-events';
 
 const installedAt = '2026-07-18T00:00:00.000Z';
-const continuationId = '8c8c35c6-2189-49cf-a94b-b63e29b972ba';
 
 function control(overrides: Record<string, unknown> = {}) {
 	return {
@@ -12,7 +11,6 @@ function control(overrides: Record<string, unknown> = {}) {
 			recentlyDispatched: [],
 			pause: null,
 		},
-		recoveredInputContinuation: null,
 		version: 7,
 		updatedAt: installedAt,
 		...overrides,
@@ -24,9 +22,7 @@ describe('chat execution-control WS contract', () => {
 		const parsed = parseServerWsMessage({
 			type: 'chat-execution-control-updated',
 			chatId: '123',
-			control: control({
-				recoveredInputContinuation: { id: continuationId, installedAt },
-			}),
+			control: control(),
 		});
 
 		expect(parsed).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
@@ -34,13 +30,11 @@ describe('chat execution-control WS contract', () => {
 		expect(parsed.control.version).toBe(7);
 		expect(parsed.control.updatedAt).toBe(installedAt);
 		expect(parsed.control.queue.entries).toEqual([]);
-		expect(parsed.control.recoveredInputContinuation).toEqual({ id: continuationId, installedAt });
 	});
 
 	it.each([
 		{ id: 'manual', kind: 'manual', pausedAt: installedAt },
 		{ id: 'failed', kind: 'queued-turn-failed', entryId: 'ok', pausedAt: installedAt },
-		{ id: 'recovered', kind: 'recovered-inflight', entryId: 'ok', pausedAt: installedAt },
 		{ id: 'uncertain', kind: 'completion-uncertain', entryId: 'ok', pausedAt: installedAt },
 		{ id: 'unknown', kind: 'unknown', entryId: 'ok', pausedAt: null },
 	])('round-trips the $kind queue pause variant', (pause) => {
@@ -68,20 +62,6 @@ describe('chat execution-control WS contract', () => {
 		expect(parsed).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
 		if (!(parsed instanceof ChatExecutionControlUpdatedMessage)) return;
 		expect(parsed.control.queue.pause).toEqual(pause);
-	});
-
-	it.each([
-		{ id: 'not-a-uuid', installedAt },
-		{ id: continuationId, installedAt: 'invalid' },
-		undefined,
-	])('rejects malformed continuation state %#', (recoveredInputContinuation) => {
-		expect(
-			parseServerWsMessage({
-				type: 'chat-execution-control-updated',
-				chatId: '123',
-				control: control({ recoveredInputContinuation }),
-			}),
-		).toBeNull();
 	});
 
 	it('rejects malformed queue entries rather than partially applying a snapshot', () => {

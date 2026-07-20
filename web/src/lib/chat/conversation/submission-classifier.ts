@@ -12,7 +12,6 @@ export interface SubmissionClassificationInput {
 	isProcessing: boolean;
 	control: ChatExecutionControlState | null;
 	isActiveDeliveryInput: boolean;
-	isRecoveredContinuationEligible: boolean;
 	hasAttachments: boolean;
 }
 
@@ -22,17 +21,8 @@ export function classifySubmission(input: SubmissionClassificationInput): Accept
 	const queue = input.control?.queue ?? null;
 	const queueIsEmpty = (queue?.entries.length ?? 0) === 0 && queue?.dispatchingEntryId == null;
 	const queueIsUnpaused = queue?.pause == null;
-	const hasRecoveredContinuation = input.control?.recoveredInputContinuation != null;
-	const canConsumeEmptyContinuation = Boolean(
-		input.isRecoveredContinuationEligible &&
-			hasRecoveredContinuation &&
-			queue &&
-			queueIsEmpty &&
-			queueIsUnpaused,
-	);
 	const requiresQueue =
-		!canConsumeEmptyContinuation &&
-		(input.isProcessing || !queueIsEmpty || !queueIsUnpaused || hasRecoveredContinuation);
+		input.isProcessing || !queueIsEmpty || !queueIsUnpaused;
 
 	if (!requiresQueue) return 'direct';
 	if (input.hasAttachments) return 'queue-attachments-unsupported';
@@ -40,8 +30,7 @@ export function classifySubmission(input: SubmissionClassificationInput): Accept
 		input.isProcessing &&
 		input.isActiveDeliveryInput &&
 		queueIsEmpty &&
-		queueIsUnpaused &&
-		!hasRecoveredContinuation
+		queueIsUnpaused
 	) {
 		return 'active';
 	}
