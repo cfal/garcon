@@ -18,6 +18,12 @@ export interface AgentHostFactory {
 export interface AgentScopedStorage {
   readonly rootDirectory: string;
   directory(namespace: string): Promise<string>;
+  claimLegacyWorkspaceDirectory(name: string): Promise<AgentLegacyDirectoryClaim>;
+}
+
+export interface AgentLegacyDirectoryClaim {
+  readonly moved: number;
+  readonly skipped: number;
 }
 
 export interface AgentLogger {

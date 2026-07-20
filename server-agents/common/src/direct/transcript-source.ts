@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { ChatMessage } from '@garcon/common/chat-types';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import { getArtificialAgentSessionId } from '../chats/artificial-native-path.js';
 import {
   getDirectCompatiblePreviewFromSessionId,
@@ -24,6 +25,7 @@ export interface DirectCompatibleTranscriptReader {
 export interface DirectCompatibleTranscriptSourceConfig {
   readonly agentId: string;
   readonly sessionLabel: string;
+  readonly logger?: AgentLogger;
   readonly findSessionFilePath: (
     sessionId: string,
     preferredEndpointId?: string | null,
@@ -48,7 +50,12 @@ export function createDirectCompatibleTranscriptSource(
     const identity = sessionIdentity(reference);
     if (!identity.sessionId) return [];
     const nativePath = await resolve(reference);
-    if (!nativePath) return [];
+    if (!nativePath) {
+      config.logger?.warn(
+        `Direct transcript file missing for session ${identity.sessionId} (endpoint ${identity.endpointId ?? 'unknown'})`,
+      );
+      return [];
+    }
     return loadDirectCompatibleChatMessages(identity.sessionId, {
       getSessionFilePath: () => nativePath,
       isValidSessionId: isSafeDirectPathSegment,
