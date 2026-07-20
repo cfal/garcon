@@ -222,8 +222,15 @@ describe('NewChatForm', () => {
 
 		await fireEvent.click(thinkingButton);
 		const options = await screen.findAllByRole('menuitemradio');
-		expect(options.map((option) => option.textContent?.trim())).toEqual(['Auto', 'On', 'Off']);
-		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'On' }));
+		expect(options.map((option) => option.querySelector('.font-medium')?.textContent)).toEqual([
+			'Auto',
+			'On',
+			'Off',
+		]);
+		expect(screen.getByText('Lets Claude decide when extended thinking is useful.')).toBeTruthy();
+		expect(screen.getByText('Uses extended thinking for every response.')).toBeTruthy();
+		expect(screen.getByText('Answers without extended thinking.')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('menuitemradio', { name: /^On/ }));
 		expect(screen.getByRole('button', { name: 'Thinking: On' })).toBeTruthy();
 	});
 

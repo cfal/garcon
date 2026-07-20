@@ -15,8 +15,20 @@ describe('AgentSettingsControls', () => {
 					label: 'Server Thinking',
 					labelKey: 'thinking',
 					options: [
-						{ value: 'low', label: 'Server Auto', labelKey: 'automatic' },
-						{ value: 'high', label: 'Server On', labelKey: 'enabled' },
+						{
+							value: 'low',
+							label: 'Server Auto',
+							labelKey: 'automatic',
+							description: 'Server automatic description',
+							descriptionKey: 'thinkingAutomatic',
+						},
+						{
+							value: 'high',
+							label: 'Server On',
+							labelKey: 'enabled',
+							description: 'Server enabled description',
+							descriptionKey: 'thinkingEnabled',
+						},
 					],
 				},
 				{ key: 'review', type: 'boolean', label: 'Review changes' },
@@ -31,10 +43,13 @@ describe('AgentSettingsControls', () => {
 
 		const effortTrigger = screen.getByRole('button', { name: 'Thinking: Auto' });
 		expect(effortTrigger.className).toContain('bg-composer-agent-setting');
+		expect(effortTrigger.querySelector('[data-slot="agent-thinking-icon"]')).toBeTruthy();
 		expect(screen.queryByRole('combobox', { name: 'Thinking' })).toBeNull();
 
 		await fireEvent.click(effortTrigger);
-		await fireEvent.click(await screen.findByRole('menuitemradio', { name: 'On' }));
+		expect(screen.getByText('Lets Claude decide when extended thinking is useful.')).toBeTruthy();
+		expect(screen.getByText('Uses extended thinking for every response.')).toBeTruthy();
+		await fireEvent.click(await screen.findByRole('menuitemradio', { name: /^On/ }));
 		await fireEvent.click(screen.getByLabelText('Review changes'));
 
 		expect(onChange).toHaveBeenNthCalledWith(
