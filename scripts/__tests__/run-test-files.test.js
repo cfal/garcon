@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { createTestBatches, parseArguments } from '../run-test-files.js';
+import { resolve } from 'node:path';
+import {
+  createTestBatches,
+  ISOLATED_TEST_FILES,
+  parseArguments,
+} from '../run-test-files.js';
 
 describe('run-test-files', () => {
   test('keeps the one-file default and accepts an explicit batch size', () => {
@@ -31,5 +36,31 @@ describe('run-test-files', () => {
       ['c.test.js', 'd.test.js'],
       ['e.test.js'],
     ]);
+  });
+
+  test('isolates tests that install process-global module mocks', async () => {
+    const repositoryRoot = resolve(import.meta.dir, '../..');
+    const testFiles = [
+      ...new Bun.Glob('server/**/*.test.{js,ts}').scanSync({
+        cwd: repositoryRoot,
+        onlyFiles: true,
+      }),
+      ...new Bun.Glob('server-agents/**/*.test.{js,ts}').scanSync({
+        cwd: repositoryRoot,
+        onlyFiles: true,
+      }),
+    ].sort((left, right) => left.localeCompare(right));
+    const unisolatedModuleMocks = [];
+
+    for (const file of testFiles) {
+      if (
+        (await Bun.file(resolve(repositoryRoot, file)).text()).includes('mock.module')
+        && !ISOLATED_TEST_FILES.has(file)
+      ) {
+        unisolatedModuleMocks.push(file);
+      }
+    }
+
+    expect(unisolatedModuleMocks).toEqual([]);
   });
 });
