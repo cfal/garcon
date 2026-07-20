@@ -2,7 +2,7 @@
      are available; never renders guessed defaults. -->
 <script lang="ts">
 	import { getRemoteSettings } from '$lib/context';
-	import type { PinnedInsertPosition } from '$lib/types/session.js';
+	import { DEFAULT_PINNED_INSERT_POSITION, type PinnedInsertPosition } from '$shared/settings';
 	import * as m from '$lib/paraglide/messages.js';
 	import RemoteGenerationSettingsCard from './RemoteGenerationSettingsCard.svelte';
 	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
@@ -54,7 +54,7 @@
 				<select
 					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
 					aria-label={m.sidebar_chats_pinned_insert_position()}
-					value={remoteSettings.snapshot?.ui.pinnedInsertPosition ?? 'top'}
+					value={remoteSettings.snapshot?.ui.pinnedInsertPosition ?? DEFAULT_PINNED_INSERT_POSITION}
 					onchange={(e) =>
 						onPinnedInsertPositionChange(
 							(e.currentTarget as HTMLSelectElement).value as PinnedInsertPosition,

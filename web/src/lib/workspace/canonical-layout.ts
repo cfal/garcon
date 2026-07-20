@@ -49,7 +49,7 @@ export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
 			mru: [...CANONICAL_SIDEBAR_SURFACE_IDS],
 		},
 		surfaces: { ...CANONICAL_SURFACES },
-		sidebarOpen: false,
+		sidebarOpen: true,
 		desiredSidebarWidth: DEFAULT_RIGHT_SIDEBAR_WIDTH,
 		dialogFileSurfaceId: null,
 		manualFullscreen: false,
@@ -84,7 +84,7 @@ export function isCanonicalFirstRunLayout(snapshot: WorkspaceLayoutSnapshot): bo
 		snapshot.main.activeId === CHAT_SURFACE_ID &&
 		hasExactOrder(snapshot.sidebar.order, CANONICAL_SIDEBAR_SURFACE_IDS) &&
 		snapshot.sidebar.activeId === CANONICAL_SIDEBAR_SURFACE_IDS[0] &&
-		!snapshot.sidebarOpen &&
+		snapshot.sidebarOpen &&
 		!snapshot.dialogFileSurfaceId &&
 		snapshot.mobileOnlySurfaceIds.length === 0 &&
 		snapshot.unplacedTerminalIds.length === 0

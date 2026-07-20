@@ -17,6 +17,7 @@ import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
+export const DEFAULT_PINNED_INSERT_POSITION: PinnedInsertPosition = 'bottom';
 export const DEFAULT_APP_TITLE = 'Garcon';
 export const APP_TITLE_MAX_LENGTH = 120;
 

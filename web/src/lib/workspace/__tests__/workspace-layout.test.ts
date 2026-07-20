@@ -35,7 +35,7 @@ describe('workspace layout reducers', () => {
 			'singleton:pull-requests',
 		]);
 		expect(snapshot.sidebar.order).toEqual(['singleton:files', 'singleton:commit']);
-		expect(snapshot.sidebarOpen).toBe(false);
+		expect(snapshot.sidebarOpen).toBe(true);
 		expect(snapshot.desiredSidebarWidth).toBe(480);
 		expect(() => assertWorkspaceLayoutInvariants(snapshot)).not.toThrow();
 	});

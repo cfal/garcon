@@ -71,9 +71,12 @@ export class SpaDriver {
     waitForRequest: () => Promise<TRequest>;
   }): Promise<TRequest> {
     await this.clickButton('New Chat');
+    // Modal dialogs are matched by the shared Dialog component's data-slot rather
+    // than role="dialog": the workspace sidebar overlay is also a role="dialog"
+    // and, now open by default, would otherwise be selected instead of the modal.
     await this.#page.waitForFunction(
       () => {
-        const dialog = document.querySelector('[role="dialog"]');
+        const dialog = document.querySelector('[data-slot="dialog-content"]');
         return dialog !== null
           && dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]') === null;
       },
@@ -81,12 +84,12 @@ export class SpaDriver {
     );
     await this.#page.waitForFunction(
       () => document.activeElement?.matches(
-        '[role="dialog"] textarea[placeholder="How can I help you today?"]',
+        '[data-slot="dialog-content"] textarea[placeholder="How can I help you today?"]',
       ) === true,
       { timeout: 20_000 },
     );
     const directProviderSelected = await this.#page.evaluate(({ agentLabel, modelLabel }) => {
-      const dialog = document.querySelector('[role="dialog"]');
+      const dialog = document.querySelector('[data-slot="dialog-content"]');
       return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
         const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
         return name.includes(agentLabel) && name.includes(modelLabel);
@@ -104,21 +107,21 @@ export class SpaDriver {
     }
 
     const projectPath = await this.#page.$eval(
-      '[role="dialog"] input[aria-label="Project Path"]',
+      '[data-slot="dialog-content"] input[aria-label="Project Path"]',
       (element) => (element as HTMLInputElement).value,
     );
     if (projectPath !== this.#integration.dirs.project) {
       await this.fill(
-        '[role="dialog"] input[aria-label="Project Path"]',
+        '[data-slot="dialog-content"] input[aria-label="Project Path"]',
         this.#integration.dirs.project,
       );
     }
-    await this.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', input.content);
+    await this.fill('[data-slot="dialog-content"] textarea[placeholder="How can I help you today?"]', input.content);
     await this.waitForDialogButtonEnabled('Start session');
     await this.clickButton('Start session');
     const request = await input.waitForRequest();
     await this.#page.waitForFunction(
-      () => document.querySelector('[role="dialog"]') === null,
+      () => document.querySelector('[data-slot="dialog-content"]') === null,
       { timeout: 20_000 },
     );
     return request;
@@ -127,7 +130,7 @@ export class SpaDriver {
   async #clickNewChatModelSelector(): Promise<void> {
     await this.#page.waitForFunction(
       () => {
-        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+        const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
         const button = dialog
           ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
               (element.getAttribute('aria-label') ?? '').includes(' / '))
@@ -137,7 +140,7 @@ export class SpaDriver {
       { timeout: 20_000 },
     );
     await this.#page.evaluate(() => {
-      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
       const button = dialog
         ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
             (element.getAttribute('aria-label') ?? '').includes(' / '))
@@ -214,6 +217,20 @@ export class SpaDriver {
   }
 
   async clickButton(name: string, options: ClickOptions = {}): Promise<void> {
+    const params = { name, contains: options.contains === true, last: options.last === true };
+    // A button can render a beat after navigation or a WebSocket-driven update
+    // (the open sidebar adds initial render work), so wait for it before clicking
+    // rather than failing on the first probe.
+    await this.#page.waitForFunction(
+      ({ name, contains }) =>
+        [...document.querySelectorAll('button')].some((element) => {
+          if (element.closest('[aria-hidden="true"]')) return false;
+          const accessibleName = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+          return contains ? accessibleName.includes(name) : accessibleName === name;
+        }),
+      { timeout: 20_000 },
+      params,
+    );
     try {
       await this.#page.evaluate(({ name, contains, last }) => {
         const buttons = [...document.querySelectorAll('button')].filter((element) => {
@@ -225,7 +242,7 @@ export class SpaDriver {
         if (!button) throw new Error(`Missing button: ${name}`);
         if (button.disabled) throw new Error(`Button is disabled: ${name}`);
         button.click();
-      }, { name, contains: options.contains === true, last: options.last === true });
+      }, params);
     } catch (error) {
       // Lightpanda may collect the CDP evaluation promise when a click replaces
       // the document. The next positive product milestone still verifies it.
@@ -293,7 +310,7 @@ export class SpaDriver {
 
   async clickDialogButton(name: string): Promise<void> {
     await this.#page.evaluate((expected) => {
-      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
       const button = dialog
         ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
             (element.getAttribute('aria-label') || element.textContent?.trim()) === expected)
@@ -343,7 +360,7 @@ export class SpaDriver {
 
   async clickQueuedRowAction(content: string, action: QueueRowAction): Promise<void> {
     await this.#page.evaluate(({ content, action }) => {
-      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
       if (!dialog) throw new Error('Queued messages dialog is not open.');
       const message = [...dialog.querySelectorAll<HTMLElement>('p')].find((element) =>
         element.textContent?.trim() === content);
@@ -359,7 +376,7 @@ export class SpaDriver {
   }
 
   async fillQueuedEditor(value: string): Promise<void> {
-    await this.fill('[role="dialog"] textarea', value);
+    await this.fill('[data-slot="dialog-content"] textarea', value);
   }
 
   async waitForButton(name: string, options: { timeout?: number } = {}): Promise<void> {
@@ -385,7 +402,7 @@ export class SpaDriver {
 
   async waitForDialogButtonEnabled(name: string): Promise<void> {
     await this.#page.waitForFunction(
-      (expected) => [...document.querySelectorAll('[role="dialog"] button')].some((element) => {
+      (expected) => [...document.querySelectorAll('[data-slot="dialog-content"] button')].some((element) => {
         const button = element as HTMLButtonElement;
         return (button.getAttribute('aria-label') || button.textContent?.trim()) === expected
           && !button.disabled;

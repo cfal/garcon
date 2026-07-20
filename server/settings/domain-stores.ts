@@ -3,6 +3,7 @@ import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('settings:domain-stores');
 import {
+  DEFAULT_PINNED_INSERT_POSITION,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   normalizeRemoteFeatureSettings,
 } from '../../common/settings.js';
@@ -528,7 +529,7 @@ export class ChatOrderStore {
         s.pinnedChatIds = pinned.filter((id) => id !== chatId);
         s.normalChatIds = [chatId, ...(s.normalChatIds || []).filter((id) => id !== chatId)];
       } else {
-        const position = (s.ui?.pinnedInsertPosition === 'bottom') ? 'bottom' : 'top';
+        const position = s.ui?.pinnedInsertPosition ?? DEFAULT_PINNED_INSERT_POSITION;
         s.normalChatIds = (s.normalChatIds || []).filter((id) => id !== chatId);
         s.archivedChatIds = (s.archivedChatIds || []).filter((id) => id !== chatId);
         s.pinnedChatIds = position === 'bottom' ? [...pinned, chatId] : [chatId, ...pinned];

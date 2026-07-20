@@ -215,11 +215,11 @@ describe('settings store', () => {
       });
 
       const loaded = await store.getUiSettings();
-      expect(loaded.pinnedInsertPosition).toBe('top');
+      expect(loaded.pinnedInsertPosition).toBe('bottom');
 
-      await store.setUiSettings({ pinnedInsertPosition: 'bottom' });
+      await store.setUiSettings({ pinnedInsertPosition: 'top' });
       const saved = await store.getUiSettings();
-      expect(saved.pinnedInsertPosition).toBe('bottom');
+      expect(saved.pinnedInsertPosition).toBe('top');
     });
 
     it('getPathSettings returns empty object by default', async () => {
@@ -717,6 +717,24 @@ describe('settings store', () => {
 
       const settings = await store.loadSettings();
       expect(settings.pinnedChatIds).toEqual(['x', 'a']);
+    });
+
+    it('defaults to bottom insertion when pinnedInsertPosition is unset', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['x'], normalChatIds: ['a'], archivedChatIds: [] });
+
+      await store.togglePin('a');
+
+      const settings = await store.loadSettings();
+      expect(settings.pinnedChatIds).toEqual(['x', 'a']);
+    });
+
+    it('respects pinnedInsertPosition=top', async () => {
+      await writeRaw({ ui: { pinnedInsertPosition: 'top' }, paths: {}, chatNames: {}, pinnedChatIds: ['x'], normalChatIds: ['a'], archivedChatIds: [] });
+
+      await store.togglePin('a');
+
+      const settings = await store.loadSettings();
+      expect(settings.pinnedChatIds).toEqual(['a', 'x']);
     });
   });
 

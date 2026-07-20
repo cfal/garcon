@@ -45,12 +45,21 @@ function createHarness(
 		pendingGitSurfaceIds?: readonly string[];
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialMainSurfaceId?: string;
+		sidebarClosed?: boolean;
 		onLayoutChanged?: () => void;
 		onTerminalLauncherDismissed?: () => void;
 		failLayoutPublishAt?: number;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
+	// The canonical default opens the sidebar; tests exercising sidebar-reveal or
+	// hidden-sidebar behavior opt into a closed sidebar.
+	if (options.sidebarClosed) {
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [{ type: 'set-sidebar-open', open: false }]),
+		);
+	}
 	if (options.initialMainSurfaceId) {
 		layout.publish(
 			layout.revision,
@@ -147,7 +156,7 @@ function createHarness(
 
 describe('WorkspaceCoordinator', () => {
 	it('opens a new sidebar file through the overlay modality transition', async () => {
-		const { coordinator, layout, transientLayers } = createHarness();
+		const { coordinator, layout, transientLayers } = createHarness({ sidebarClosed: true });
 		const open = vi
 			.spyOn(transientLayers, 'open')
 			.mockImplementation((_modality, commitOpen) => commitOpen());
@@ -516,6 +525,7 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout } = createHarness({
 			surfaceFrames: frames,
 			initialMainSurfaceId: 'singleton:git',
+			sidebarClosed: true,
 		});
 		const gitAttachment = deferred<void>();
 		const attachGit = vi.fn(() => gitAttachment.promise);
@@ -598,7 +608,9 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('does not route shortcuts through a stale hidden surface owner', () => {
-		const { coordinator, transientLayers, appShell, files } = createHarness();
+		const { coordinator, transientLayers, appShell, files } = createHarness({
+			sidebarClosed: true,
+		});
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:files' };
 		const dispatcher = new WorkspaceShortcutDispatcher({
 			workspace: coordinator,
@@ -664,7 +676,7 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('focuses an existing sidebar surface by revealing its host', async () => {
-		const { coordinator, layout } = createHarness();
+		const { coordinator, layout } = createHarness({ sidebarClosed: true });
 		expect(layout.snapshot.sidebarOpen).toBe(false);
 
 		await coordinator.focusSurface('singleton:files');
@@ -707,7 +719,7 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('toggles focus between active main and sidebar surfaces only while the sidebar is open', async () => {
-		const { coordinator } = createHarness();
+		const { coordinator } = createHarness({ sidebarClosed: true });
 		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
 
 		coordinator.toggleFocusBetweenMainAndSidebar();
@@ -1129,6 +1141,7 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout, appShell } = createHarness({
 			surfaceFrames: frames,
 			fileEditor: editor,
+			sidebarClosed: true,
 		});
 		const surfaceId = fileSurfaceId('dialog');
 		const open = coordinator.placeFileSession('dialog', 'dialog');

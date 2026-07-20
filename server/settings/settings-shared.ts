@@ -1,5 +1,5 @@
 import type { FolderFilter, UiSettings } from './types.js';
-import { APP_TITLE_MAX_LENGTH } from '../../common/settings.js';
+import { APP_TITLE_MAX_LENGTH, DEFAULT_PINNED_INSERT_POSITION } from '../../common/settings.js';
 
 function normalizeAppIdentitySettings(value: unknown): { title: string } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -20,7 +20,10 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
     delete normalized.appIdentity;
   }
   if ('pinnedInsertPosition' in normalized) {
-    normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
+    normalized.pinnedInsertPosition =
+      normalized.pinnedInsertPosition === 'top' || normalized.pinnedInsertPosition === 'bottom'
+        ? normalized.pinnedInsertPosition
+        : DEFAULT_PINNED_INSERT_POSITION;
   }
   const commitMessage = normalized.commitMessage;
   if (commitMessage && typeof commitMessage === 'object' && !Array.isArray(commitMessage)) {
