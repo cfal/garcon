@@ -29,6 +29,18 @@ async function loadKatex(): Promise<Katex> {
 	return loadPromise;
 }
 
+/**
+ * Resolves once the lazy KaTeX module has settled, or immediately when no render
+ * has been requested yet. Lets tests await the real loader deterministically
+ * instead of polling wall-clock time.
+ */
+export function whenMathRendererReady(): Promise<void> {
+	return loadPromise ? loadPromise.then(
+		() => undefined,
+		() => undefined,
+	) : Promise.resolve();
+}
+
 /** Renders a bounded TeX expression to KaTeX HTML and MathML. */
 export async function renderMath(source: string, displayMode: boolean): Promise<string> {
 	if (source.length > MAX_MATH_SOURCE_LENGTH) {
