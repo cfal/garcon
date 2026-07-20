@@ -57,6 +57,36 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 }
 
 describe('Sidebar dialogs', () => {
+	it('constrains long chat titles in the project path dialog header', async () => {
+		const longTitle = 'A'.repeat(500);
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: longTitle,
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+		});
+
+		try {
+			const title = screen.getByText(longTitle);
+			const header = title.closest('[data-slot="dialog-header"]');
+			const content = title.closest('[data-slot="dialog-content"]');
+
+			expect(title.className).toContain('truncate');
+			expect(title.className).toContain('max-w-full');
+			expect(header?.className).toContain('min-w-0');
+			expect(header?.className).toContain('overflow-hidden');
+			expect(content?.className).toContain('overflow-hidden');
+			expect(screen.getByRole('textbox', { name: /new path/i })).toBeTruthy();
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
 	it('submits a validated project path and keeps server errors inline', async () => {
 		vi.useFakeTimers();
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });

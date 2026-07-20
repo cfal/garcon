@@ -150,13 +150,15 @@
 {:else}
 	<Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
 		<Dialog.Content
-			class="h-dvh w-full max-w-full rounded-none border-0 p-0 sm:h-auto sm:max-w-lg sm:rounded-lg sm:border"
+			class="h-dvh w-full max-w-full overflow-hidden rounded-none border-0 p-0 sm:h-auto sm:max-w-lg sm:rounded-lg sm:border"
 			onOpenAutoFocus={handleOpenAutoFocus}
 		>
-			<div class="flex h-full flex-col sm:h-auto">
-				<Dialog.Header class="border-b border-border px-5 py-4">
+			<div class="flex h-full min-w-0 max-w-full flex-col sm:h-auto">
+				<Dialog.Header
+					class="min-w-0 max-w-full overflow-hidden border-b border-border px-5 py-4"
+				>
 					<Dialog.Title>{m.sidebar_project_path_title()}</Dialog.Title>
-					<Dialog.Description class="min-w-0 truncate">
+					<Dialog.Description class="block w-full min-w-0 max-w-full truncate">
 						{projectPathDialog?.chatTitle || m.sidebar_chats_unnamed()}
 					</Dialog.Description>
 				</Dialog.Header>
