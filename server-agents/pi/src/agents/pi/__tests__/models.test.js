@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 const createAgentSessionServicesMock = mock(async () => ({
-  modelRegistry: { getAvailable: () => [], getError: () => undefined },
+  modelRuntime: { getAvailable: async () => [], getError: () => undefined },
 }));
-const authStorageCreateMock = mock(() => ({ drainErrors: () => [] }));
 const getAgentDirMock = mock(() => '/tmp/pi-agent');
 
 mock.module('@earendil-works/pi-coding-agent', () => ({
-  AuthStorage: { create: authStorageCreateMock },
   createAgentSessionServices: createAgentSessionServicesMock,
   getAgentDir: getAgentDirMock,
 }));
@@ -23,10 +21,8 @@ let models = new PiModelCatalogService(testPiConfig);
 afterEach(() => {
   createAgentSessionServicesMock.mockReset();
   createAgentSessionServicesMock.mockImplementation(async () => ({
-    modelRegistry: { getAvailable: () => [], getError: () => undefined },
+    modelRuntime: { getAvailable: async () => [], getError: () => undefined },
   }));
-  authStorageCreateMock.mockReset();
-  authStorageCreateMock.mockImplementation(() => ({ drainErrors: () => [] }));
   getAgentDirMock.mockReset();
   getAgentDirMock.mockImplementation(() => '/tmp/pi-agent');
   models = new PiModelCatalogService(testPiConfig);
@@ -35,9 +31,9 @@ afterEach(() => {
 describe('Pi model discovery', () => {
   it('returns dynamically discovered SDK models with concise labels', async () => {
     createAgentSessionServicesMock.mockResolvedValueOnce({
-      modelRegistry: {
+      modelRuntime: {
         getError: () => undefined,
-        getAvailable: () => [
+        getAvailable: async () => [
           {
             provider: 'openai',
             id: 'gpt-5.4',
@@ -64,9 +60,9 @@ describe('Pi model discovery', () => {
 
   it('returns SDK-discovered models without the static default option', async () => {
     createAgentSessionServicesMock.mockResolvedValueOnce({
-      modelRegistry: {
+      modelRuntime: {
         getError: () => undefined,
-        getAvailable: () => [
+        getAvailable: async () => [
           {
             provider: 'openai',
             id: 'gpt-5.4',
@@ -83,9 +79,9 @@ describe('Pi model discovery', () => {
 
   it('filters malformed SDK model records', async () => {
     createAgentSessionServicesMock.mockResolvedValueOnce({
-      modelRegistry: {
+      modelRuntime: {
         getError: () => undefined,
-        getAvailable: () => [
+        getAvailable: async () => [
           null,
           { provider: 'openai' },
           { id: 'gpt-5.4' },
@@ -104,28 +100,25 @@ describe('Pi model discovery', () => {
   });
 
   it('returns no models when SDK model discovery fails', async () => {
-    createAgentSessionServicesMock.mockRejectedValueOnce(new Error('model registry failed'));
+    createAgentSessionServicesMock.mockRejectedValueOnce(new Error('model runtime failed'));
 
     await expect(models.getModels()).resolves.toEqual([]);
   });
 
-  it('retries transient auth diagnostics before returning models', async () => {
-    authStorageCreateMock
-      .mockReturnValueOnce({ drainErrors: () => [new Error('auth.json is locked')] })
-      .mockReturnValueOnce({ drainErrors: () => [] });
+  it('retries transient discovery diagnostics before returning models', async () => {
     createAgentSessionServicesMock
       .mockResolvedValueOnce({
-        diagnostics: [],
-        modelRegistry: {
+        diagnostics: [{ type: 'error', message: 'auth.json is locked' }],
+        modelRuntime: {
           getError: () => undefined,
-          getAvailable: () => [],
+          getAvailable: async () => [],
         },
       })
       .mockResolvedValueOnce({
         diagnostics: [],
-        modelRegistry: {
+        modelRuntime: {
           getError: () => undefined,
-          getAvailable: () => [
+          getAvailable: async () => [
             {
               provider: 'openai',
               id: 'gpt-5.4',
@@ -142,12 +135,11 @@ describe('Pi model discovery', () => {
   });
 
   it('strict discovery rejects transient empty results when no cache exists', async () => {
-    authStorageCreateMock.mockImplementation(() => ({ drainErrors: () => [new Error('auth.json is locked')] }));
     createAgentSessionServicesMock.mockImplementation(async () => ({
-      diagnostics: [],
-      modelRegistry: {
+      diagnostics: [{ type: 'error', message: 'auth.json is locked' }],
+      modelRuntime: {
         getError: () => undefined,
-        getAvailable: () => [],
+        getAvailable: async () => [],
       },
     }));
 
@@ -157,12 +149,11 @@ describe('Pi model discovery', () => {
 
   it('returns last-known-good models when a stale refresh fails transiently', async () => {
     const expected = [{ value: 'openai/gpt-5.4', label: 'openai: gpt-5.4', supportsImages: false }];
-    authStorageCreateMock.mockReturnValueOnce({ drainErrors: () => [] });
     createAgentSessionServicesMock.mockResolvedValueOnce({
       diagnostics: [],
-      modelRegistry: {
+      modelRuntime: {
         getError: () => undefined,
-        getAvailable: () => [
+        getAvailable: async () => [
           {
             provider: 'openai',
             id: 'gpt-5.4',
@@ -175,12 +166,11 @@ describe('Pi model discovery', () => {
     await expect(models.getModels()).resolves.toEqual(expected);
     models.expireForTests();
 
-    authStorageCreateMock.mockImplementation(() => ({ drainErrors: () => [new Error('auth.json is locked')] }));
     createAgentSessionServicesMock.mockImplementation(async () => ({
-      diagnostics: [],
-      modelRegistry: {
+      diagnostics: [{ type: 'error', message: 'auth.json is locked' }],
+      modelRuntime: {
         getError: () => undefined,
-        getAvailable: () => [],
+        getAvailable: async () => [],
       },
     }));
 
