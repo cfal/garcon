@@ -74,6 +74,7 @@ export async function* yieldBoundedMessageBatches(
       || batchBytes + bytes > limits.maxBatchBytes
     )) {
       yield batch;
+      signal.throwIfAborted();
       batch = [];
       batchBytes = 0;
       await Promise.resolve();

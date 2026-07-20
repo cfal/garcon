@@ -191,7 +191,7 @@ function validateExistingSchema(db: Database): void {
 }
 
 function requireColumns(db: Database, table: string, expected: readonly string[]): void {
-  const actual = new Set(db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all()
+  const actual = new Set(db.query<{ name: string }, []>(`PRAGMA table_xinfo(${table})`).all()
     .map((column) => column.name));
   if (expected.some((column) => !actual.has(column))) {
     throw new Error(`Transcript search ${table} schema is incomplete`);

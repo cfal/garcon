@@ -207,7 +207,7 @@ function entry(chatId: string, revision: string, messages: ChatMessage[], carryO
       reference: {
         ownerId: 'fixture',
         schemaVersion: 1,
-        value: { revision, messages: messages.map((message) => ({ ...message })) },
+        value: { revision, messages: JSON.parse(JSON.stringify(messages)) },
       },
     },
     carryOverRevision,
