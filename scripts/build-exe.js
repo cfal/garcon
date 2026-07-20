@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectAgentBuildContributions } from './agent-build-metadata.js';
@@ -60,23 +59,33 @@ function createVirtualMainEntrypoint(
   preMainModules,
   searchAssets,
 ) {
-  const imports = searchAssets.entries.map((entry, index) => (
-    `import searchAsset${index} from '${toPosixPath(entry.filePath)}' with { type: 'file' };`
-  ));
+  const entrypointUrl = (entry) => {
+    const relativePath = toPosixPath(path.relative(repoRoot, entry.filePath));
+    if (relativePath.startsWith('../')) {
+      throw new Error(`Standalone entrypoint is outside the compile root: ${entry.filePath}`);
+    }
+    return `new URL(${JSON.stringify(`./${relativePath}`)}, import.meta.url).href`;
+  };
+  const workerUrl = (name) => {
+    const entry = searchAssets.entries.find((candidate) => (
+      candidate.kind === 'worker' && candidate.name === name
+    ));
+    if (!entry) throw new Error(`Missing transcript search ${name} Worker entrypoint.`);
+    return entrypointUrl(entry);
+  };
   const integrationEntries = searchAssets.entries
     .filter((entry) => entry.kind === 'integration')
-    .map((entry) => ({ entry, variable: `searchAsset${searchAssets.entries.indexOf(entry)}` }))
-    .reduce((byIntegration, { entry, variable }) => {
+    .reduce((byIntegration, entry) => {
       byIntegration[entry.integrationId] ??= {};
-      byIntegration[entry.integrationId][entry.name] = variable;
+      byIntegration[entry.integrationId][entry.name] = entrypointUrl(entry);
       return byIntegration;
     }, {});
   const manifestExpression = `{
     mode: 'compiled',
     apiVersion: 1,
     workers: {
-      indexer: searchAsset${searchAssets.entries.findIndex((entry) => entry.kind === 'worker' && entry.name === 'indexer')},
-      reader: searchAsset${searchAssets.entries.findIndex((entry) => entry.kind === 'worker' && entry.name === 'reader')},
+      indexer: ${workerUrl('indexer')},
+      reader: ${workerUrl('reader')},
     },
     integrations: {${Object.entries(integrationEntries).map(([integrationId, entries]) => (
       `${JSON.stringify(integrationId)}:{${Object.entries(entries).map(([name, variable]) => `${JSON.stringify(name)}:${variable}`).join(',')}}`
@@ -84,7 +93,6 @@ function createVirtualMainEntrypoint(
   }`;
   return [
     `import '${assetsEntrypoint}';`,
-    ...imports,
     ...preMainModules.map((modulePath) => `import '${toPosixPath(modulePath)}';`),
     `const deepFreeze = (value) => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const nested of Object.values(value)) deepFreeze(nested); } return value; };`,
     `Object.defineProperty(globalThis, Symbol.for('garcon.compiled-mode'), { value: true, writable: false, configurable: false });`,
@@ -95,7 +103,8 @@ function createVirtualMainEntrypoint(
 }
 
 async function bundleStandaloneEntrypoints(contributions) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-agent-entrypoints-'));
+  // Bun preserves paths relative to the compile root for standalone entrypoints.
+  const directory = await fs.mkdtemp(path.join(repoRoot, 'node_modules', '.garcon-agent-entrypoints-'));
   const files = [];
   const entries = [];
   try {
@@ -162,7 +171,10 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
   await fs.mkdir(path.dirname(outFile), { recursive: true });
 
   const result = await Bun.build({
-    entrypoints: [mainEntrypoint],
+    entrypoints: [
+      mainEntrypoint,
+      ...searchAssets.entries.map((entry) => entry.filePath),
+    ],
     compile: { target: target.bunTarget, outfile: outFile },
     naming: { asset: '[dir]/[name].[ext]' },
     files: {
@@ -188,9 +200,8 @@ async function run() {
   const contributions = await collectAgentBuildContributions({ repoRoot });
   const agentAssets = await bundleStandaloneEntrypoints(contributions);
   try {
-    const allEmbeddedFiles = [...embeddedFiles, ...agentAssets.files];
     for (const targetId of targetIds) {
-      await buildExecutable(targetId, allEmbeddedFiles, contributions, agentAssets);
+      await buildExecutable(targetId, embeddedFiles, contributions, agentAssets);
     }
   } finally {
     await fs.rm(agentAssets.directory, { recursive: true, force: true });

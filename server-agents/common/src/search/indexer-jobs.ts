@@ -10,6 +10,7 @@ import {
   type AgentTranscriptIndexerModule,
   type AgentTranscriptIndexSource,
 } from '@garcon/server-agent-interface';
+import { isEmbeddedStandaloneEntrypoint } from '../build/standalone-entrypoint.js';
 import { canonicalDigest } from './digest.js';
 import { TRANSCRIPT_SEARCH_PROJECTOR_VERSION } from './message-projector.js';
 import {
@@ -766,7 +767,7 @@ export async function handleIndexerRequest(request: IndexerRequest): Promise<voi
           const modulePath = registration.moduleUrl.startsWith('file:')
             ? fileURLToPath(registration.moduleUrl)
             : registration.moduleUrl;
-          await fs.access(modulePath);
+          if (!isEmbeddedStandaloneEntrypoint(modulePath)) await fs.access(modulePath);
           registrations.set(registration.agentId, registration);
         }
         for (const quarantine of request.quarantines) {

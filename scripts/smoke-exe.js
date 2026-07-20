@@ -200,7 +200,7 @@ async function run() {
       path.join(workspaceDir, 'project-settings.json'),
       JSON.stringify({ features: { transcriptSearch: { enabled: true } } }),
     );
-    const transcriptPath = path.join(workspaceDir, 'smoke-claude.jsonl');
+    const transcriptPath = path.join(workspaceDir, 'smoke-session.jsonl');
     await writeFile(transcriptPath, `${JSON.stringify({
       sessionId: 'smoke-session',
       uuid: 'smoke-user-message',
@@ -209,12 +209,24 @@ async function run() {
       message: { role: 'user', content: 'embeddedworkertoken' },
     })}\n`);
     await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
-      version: 2,
+      version: 3,
       sessions: {
         [SMOKE_CHAT_ID]: {
           agentId: 'claude',
+          nativeSession: {
+            ownerId: 'claude',
+            schemaVersion: 1,
+            value: {
+              path: transcriptPath,
+              agentSessionId: 'smoke-session',
+            },
+          },
+          agentOwnershipEpoch: 'smoke-ownership-epoch',
+          agentSettingsById: {
+            claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
+          },
+          tags: [],
           agentSessionId: 'smoke-session',
-          nativePath: transcriptPath,
           projectPath: workspaceDir,
           model: 'fable',
         },
@@ -244,7 +256,9 @@ async function run() {
     }
 
     if (!(await Bun.file(searchDatabase).exists())) {
-      throw new Error('Enabled executable did not create the shared transcript search index.');
+      throw new Error(
+        `Enabled executable did not create the shared transcript search index. Captured output:\n${started.getOutput()}`,
+      );
     }
 
     await waitForTranscriptResult(

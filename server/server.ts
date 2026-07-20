@@ -330,9 +330,10 @@ export async function startServer(): Promise<void> {
       await chatSearch.initialize(
         settings.getFeatureSettings().transcriptSearch.enabled,
       );
-    } catch {
+    } catch (error) {
       logger.warn('Transcript search admission failed; server startup will continue.', {
         code: 'SEARCH_INDEX_ADMISSION_FAILED',
+        reason: error instanceof Error ? error.message : String(error),
       });
     }
     const transcriptSearchSettings = new TranscriptSearchSettingsCoordinator(

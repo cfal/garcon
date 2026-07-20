@@ -68,3 +68,8 @@ export function resolveSearchWorkerEntrypoints(input: {
     reader: requiredPath(manifest.workers?.reader, 'workers/reader'),
   };
 }
+
+export function isEmbeddedStandaloneEntrypoint(moduleUrl: string): boolean {
+  // Bun exposes compiled JavaScript entrypoints to module loaders but not fs.access.
+  return /(?:^|[/\\])\$bunfs(?:[/\\]|$)/.test(moduleUrl);
+}

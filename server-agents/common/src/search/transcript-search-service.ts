@@ -9,7 +9,10 @@ import type {
   AgentTranscriptIndexModuleReference,
   AgentTranscriptIndexSourceRef,
 } from '@garcon/server-agent-interface';
-import { resolveSearchWorkerEntrypoints } from '../build/standalone-entrypoint.js';
+import {
+  isEmbeddedStandaloneEntrypoint,
+  resolveSearchWorkerEntrypoints,
+} from '../build/standalone-entrypoint.js';
 import type {
   IndexerEvent,
   IndexerRequest,
@@ -839,6 +842,7 @@ async function removeDirectoryWithRetry(directory: string, signal: AbortSignal):
 
 async function validateModuleAsset(moduleUrl: string): Promise<void> {
   const filePath = moduleUrl.startsWith('file:') ? fileURLToPath(moduleUrl) : moduleUrl;
+  if (isEmbeddedStandaloneEntrypoint(filePath)) return;
   await fs.access(filePath);
 }
 

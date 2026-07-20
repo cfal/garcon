@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
+  isEmbeddedStandaloneEntrypoint,
   resolveAgentStandaloneEntrypoint,
   resolveSearchWorkerEntrypoints,
 } from '../standalone-entrypoint.js';
@@ -47,5 +48,11 @@ describe('standalone entrypoint resolution', () => {
     ]);
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain('invalid workers/reader');
+  });
+
+  it('identifies Bun embedded entrypoints across path styles', () => {
+    expect(isEmbeddedStandaloneEntrypoint('file:///$bunfs/root/indexer.js')).toBe(true);
+    expect(isEmbeddedStandaloneEntrypoint('B:\\$bunfs\\root\\indexer.js')).toBe(true);
+    expect(isEmbeddedStandaloneEntrypoint('file:///tmp/indexer.js')).toBe(false);
   });
 });
