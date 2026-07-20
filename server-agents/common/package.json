@@ -9,6 +9,7 @@
     "./lib/*": "./src/lib/*.ts",
     "./chats/*": "./src/chats/*.ts",
     "./auth/*": "./src/auth/*.ts",
+    "./build/*": "./src/build/*.ts",
     "./direct/*": "./src/direct/*.ts",
     "./search/*": "./src/search/*.ts",
     "./catalog/*": "./src/catalog/*.ts",

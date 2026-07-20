@@ -1,7 +1,8 @@
 import type { AgentModelOption } from '@garcon/common/agents';
-import type { AgentCatalog } from '@garcon/server-agent-interface';
+import type { AgentCatalog, AgentLogger } from '@garcon/server-agent-interface';
 
 export interface ModelCatalogOptions {
+  readonly logger: AgentLogger;
   readonly defaultModel: string;
   readonly fallbackModels: readonly AgentModelOption[];
   readonly requiresStrictModelDiscovery: boolean;
@@ -19,7 +20,17 @@ export function createModelCatalog(options: ModelCatalogOptions): AgentCatalog {
   return {
     async snapshot(request) {
       request.signal.throwIfAborted();
-      const discovered = await options.discover?.(request) ?? [];
+      let discovered: readonly AgentModelOption[] = [];
+      try {
+        discovered = await options.discover?.(request) ?? [];
+      } catch (error) {
+        request.signal.throwIfAborted();
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+        if (request.strict) throw error;
+        options.logger.warn('Dynamic model discovery failed; using static models.', {
+          code: 'MODEL_DISCOVERY_FAILED',
+        });
+      }
       const models = [...discovered, ...options.fallbackModels].filter(
         (model, index, all) => all.findIndex(
           (candidate) => candidate.value === model.value,

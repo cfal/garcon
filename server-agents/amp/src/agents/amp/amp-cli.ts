@@ -167,7 +167,11 @@ async function runAmpCommand(
 
 async function exportThread(
   threadId: string,
-  { cwd }: { cwd?: string } = {},
+  { cwd, signal, tempDirectory }: {
+    cwd?: string;
+    signal?: AbortSignal;
+    tempDirectory?: string;
+  } = {},
   config: AmpConfig = DEFAULT_CONFIG,
 ): Promise<AmpThreadExport> {
   if (!threadId) throw new Error('threadId is required');
@@ -177,7 +181,7 @@ async function exportThread(
     'export',
     ...AMP_DEFAULT_FLAGS,
     threadId,
-  ], { cwd }, config);
+  ], { cwd, signal, tempDirectory }, config);
 
   try {
     return JSON.parse(raw) as AmpThreadExport;
@@ -191,11 +195,18 @@ async function exportThread(
 // TODO: Retry the normal pipe path after Bun fixes it.
 async function runAmpCommandToTempFile(
   args: string[],
-  { cwd }: { cwd?: string } = {},
+  { cwd, signal, tempDirectory }: {
+    cwd?: string;
+    signal?: AbortSignal;
+    tempDirectory?: string;
+  } = {},
   config: AmpConfig = DEFAULT_CONFIG,
 ): Promise<string> {
   const ampBinary = config.binary();
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-amp-export-'));
+  signal?.throwIfAborted();
+  const tempRoot = tempDirectory ?? os.tmpdir();
+  await fs.mkdir(tempRoot, { recursive: true, mode: 0o700 });
+  const tmpDir = await fs.mkdtemp(path.join(tempRoot, 'garcon-amp-export-'));
   const outputPath = path.join(tmpDir, 'stdout.json');
   const handle = await fs.open(outputPath, 'w');
   let closed = false;
@@ -207,11 +218,20 @@ async function runAmpCommandToTempFile(
       stdout: handle.fd,
       stderr: 'pipe',
     });
+    const abort = () => proc.kill();
+    signal?.addEventListener('abort', abort, { once: true });
 
-    const [stderr, exitCode] = await Promise.all([
-      proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
-      proc.exited,
-    ]);
+    let stderr: string;
+    let exitCode: number;
+    try {
+      [stderr, exitCode] = await Promise.all([
+        proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
+        proc.exited,
+      ]);
+    } finally {
+      signal?.removeEventListener('abort', abort);
+    }
+    signal?.throwIfAborted();
 
     await handle.close();
     closed = true;
@@ -633,8 +653,12 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
     await this.#waitForTurnComplete(session);
   }
 
-  async exportThread(threadId: string, { cwd }: { cwd?: string } = {}): Promise<AmpThreadExport> {
-    return exportThread(threadId, { cwd }, this.#config);
+  async exportThread(threadId: string, options: {
+    cwd?: string;
+    signal?: AbortSignal;
+    tempDirectory?: string;
+  } = {}): Promise<AmpThreadExport> {
+    return exportThread(threadId, options, this.#config);
   }
 
   abort(agentSessionId: string): boolean {

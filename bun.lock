@@ -17,6 +17,7 @@
         "@garcon/server-agent-amp": "workspace:*",
         "@garcon/server-agent-claude": "workspace:*",
         "@garcon/server-agent-codex": "workspace:*",
+        "@garcon/server-agent-common": "workspace:*",
         "@garcon/server-agent-cursor": "workspace:*",
         "@garcon/server-agent-direct-anthropic-compatible": "workspace:*",
         "@garcon/server-agent-direct-openai-compatible": "workspace:*",

@@ -26,13 +26,14 @@ describe('CodexAgentIntegration', () => {
     const integration = new CodexAgentIntegration(host);
 
     expect(CodexAgentIntegration.integrationId).toBe('codex');
-    expect(CodexAgentIntegration.apiVersion).toBe(1);
+    expect(CodexAgentIntegration.apiVersion).toBe(2);
+    expect(CodexAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('codex');
     expect(integration.execution.submitActiveInput).toBeDefined();
     expect(integration.execution.compact).toBeDefined();
     expect(integration.execution.respondToPermission).toBeDefined();
     expect(integration.execution.prepareProjectPathUpdate).toBeUndefined();
-    expect(integration.transcriptSearch).toBeDefined();
+    expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: true,
       supportsWhileRunning: true,

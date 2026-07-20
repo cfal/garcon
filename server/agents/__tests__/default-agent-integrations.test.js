@@ -19,6 +19,7 @@ describe('default agent integrations', () => {
   });
 
   it('uses the supported integration API version for every package', () => {
-    expect(defaultAgentIntegrations.every((integration) => integration.apiVersion === 1)).toBe(true);
+    expect(defaultAgentIntegrations.every((integration) => integration.apiVersion === 2)).toBe(true);
+    expect(defaultAgentIntegrations.every((integration) => integration.transcriptIndex.apiVersion === 1)).toBe(true);
   });
 });

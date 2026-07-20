@@ -16,6 +16,8 @@ export interface JsonlLineEntry {
 }
 
 export interface JsonlLineReadOptions {
+  completeLinesOnly?: boolean;
+  includeEmptyLines?: boolean;
   maxLineBytes?: number;
   signal?: AbortSignal;
 }
@@ -100,7 +102,7 @@ export async function* readJsonlLineEntries(
           : segment;
         const line = lineBuffer.toString('utf8');
 
-        if (line.trim()) {
+        if (line.trim() || options.includeEmptyLines) {
           yield { line, byteOffset: lineStartByteOffset, lineNumber };
         }
 
@@ -119,9 +121,9 @@ export async function* readJsonlLineEntries(
       }
     }
 
-    if (pendingLineLength > 0) {
+    if (pendingLineLength > 0 && options.completeLinesOnly !== true) {
       const line = Buffer.concat(pendingLineBuffers, pendingLineLength).toString('utf8');
-      if (line.trim()) {
+      if (line.trim() || options.includeEmptyLines) {
         yield { line, byteOffset: lineStartByteOffset, lineNumber };
       }
     }

@@ -12,14 +12,13 @@ import type {
   AgentSettings,
   AgentSingleQuery,
 } from './services.js';
-import type { AgentTranscriptSearch } from './transcript-search.js';
+import type { AgentTranscriptIndexModuleReference } from './transcript-index.js';
 import type { AgentTranscript } from './transcript.js';
 
 export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
   readonly execution: AgentExecution;
   readonly transcript: AgentTranscript;
-  readonly transcriptSearch: AgentTranscriptSearch;
   readonly catalog: AgentCatalog;
   readonly settings: AgentSettings;
   readonly lifecycle: AgentLifecycle;
@@ -34,5 +33,6 @@ export interface AgentIntegration {
 export interface AgentIntegrationClass {
   new (host: AgentHost): AgentIntegration;
   readonly integrationId: string;
-  readonly apiVersion: 1;
+  readonly apiVersion: 2;
+  readonly transcriptIndex: AgentTranscriptIndexModuleReference;
 }

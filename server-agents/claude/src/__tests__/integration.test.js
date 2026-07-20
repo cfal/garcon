@@ -26,10 +26,11 @@ describe('ClaudeAgentIntegration', () => {
     const integration = new ClaudeAgentIntegration(host);
 
     expect(ClaudeAgentIntegration.integrationId).toBe('claude');
-    expect(ClaudeAgentIntegration.apiVersion).toBe(1);
+    expect(ClaudeAgentIntegration.apiVersion).toBe(2);
+    expect(ClaudeAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('claude');
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
-    expect(integration.transcriptSearch).toBeDefined();
+    expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: true,
       supportsWhileRunning: true,

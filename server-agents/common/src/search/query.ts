@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
-import { Buffer } from 'node:buffer';
 import type {
   ChatSearchIndexStatus,
+  ChatSearchQueryV1,
   ChatSearchResult,
   ChatSearchSnippetRole,
 } from '@garcon/common/chat-search';
@@ -15,14 +15,13 @@ const DEFAULT_RESULT_LIMIT = 20;
 const MAX_RESULT_LIMIT = 100;
 const SNIPPETS_PER_CHAT = 3;
 const MAX_SNIPPET_CHARS = 512;
-const SEARCH_CANDIDATE_CHATS = 20;
-const CANDIDATE_SCOPE_BATCH = 20;
 
 interface CompiledTerm {
   query: string;
   words: string[];
   normalizedWords: string[];
   exactPhrase: boolean;
+  prefixWords: boolean[];
 }
 
 interface ResultRow {
@@ -47,15 +46,6 @@ interface SnippetToken {
 
 function escapeFtsWord(word: string): string {
   return `"${word.replaceAll('"', '""')}"`;
-}
-
-function chatScope(chatId: string): string {
-  return `c${Buffer.from(chatId, 'utf8').toString('hex')}`;
-}
-
-function scopedMatch(query: string, chatIds: string[]): string {
-  const scopes = chatIds.map((chatId) => escapeFtsWord(chatScope(chatId))).join(' OR ');
-  return `chat_scope:(${scopes}) AND body:(${query})`;
 }
 
 function wordsIn(value: string): string[] {
@@ -95,7 +85,7 @@ function matchSnippetTerm(
 
   let firstTokenIndex = Number.POSITIVE_INFINITY;
   for (let wordIndex = 0; wordIndex < term.words.length; wordIndex += 1) {
-    const prefix = [...term.words[wordIndex]].length >= CHAT_SEARCH_MIN_PREFIX_CHARS;
+    const prefix = term.prefixWords[wordIndex];
     const word = term.normalizedWords[wordIndex];
     let firstMatch = -1;
     for (let index = 0; index < tokens.length; index += 1) {
@@ -194,9 +184,50 @@ export function compileSearchTerms(query: string, textTokens?: string[]): Compil
       words,
       normalizedWords: words.map(normalizeFtsToken),
       exactPhrase: raw.quoted,
+      prefixWords: words.map((word) => !raw.quoted && [...word].length >= CHAT_SEARCH_MIN_PREFIX_CHARS),
     });
   }
   return terms;
+}
+
+function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
+  if (query.version !== 1 || !Array.isArray(query.clauses)
+      || query.clauses.length > CHAT_SEARCH_MAX_TERMS) {
+    throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_TERMS} terms`);
+  }
+  let wordCount = 0;
+  return query.clauses.map((clause) => {
+    if ((clause.kind !== 'phrase' && clause.kind !== 'all-words')
+        || !Array.isArray(clause.tokens) || clause.tokens.length === 0) {
+      throw new RangeError('Transcript search query is invalid');
+    }
+    wordCount += clause.tokens.length;
+    if (wordCount > CHAT_SEARCH_MAX_WORDS) {
+      throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_WORDS} words`);
+    }
+    const words = clause.tokens.map((token) => {
+      const parsed = wordsIn(token.text);
+      if (parsed.length !== 1
+          || normalizeFtsToken(parsed[0]) !== token.normalized
+          || (token.match !== 'exact' && token.match !== 'prefix')) {
+        throw new RangeError('Transcript search token is invalid');
+      }
+      return parsed[0];
+    });
+    const exactPhrase = clause.kind === 'phrase';
+    const prefixWords = clause.tokens.map((token) => !exactPhrase && token.match === 'prefix');
+    return {
+      query: exactPhrase
+        ? `"${words.join(' ').replaceAll('"', '""')}"`
+        : words.map((word, index) => prefixWords[index]
+          ? `${escapeFtsWord(word)}*`
+          : escapeFtsWord(word)).join(' AND '),
+      words,
+      normalizedWords: clause.tokens.map((token) => token.normalized),
+      exactPhrase,
+      prefixWords,
+    };
+  });
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -208,13 +239,8 @@ function clampLimit(limit: number | undefined): number {
   return Math.min(MAX_RESULT_LIMIT, Math.max(1, Number(limit)));
 }
 
-function prepareAllowed(db: Database, allowedChatIds: string[]): string[] {
-  const unique = uniqueStrings(allowedChatIds);
-  db.exec('CREATE TEMP TABLE IF NOT EXISTS temp_search_allowed (chat_id TEXT PRIMARY KEY) WITHOUT ROWID');
-  db.query('DELETE FROM temp_search_allowed').run();
-  const insert = db.query('INSERT OR IGNORE INTO temp_search_allowed (chat_id) VALUES (?)');
-  for (const chatId of unique) insert.run(chatId);
-  return unique;
+function prepareAllowed(allowedChatIds: string[]): string[] {
+  return uniqueStrings(allowedChatIds);
 }
 
 function searchIndexStatusForPreparedAllowed(
@@ -224,23 +250,21 @@ function searchIndexStatusForPreparedAllowed(
   if (allowed.length === 0) {
     return { indexedChatCount: 0, pendingChatCount: 0, failedChatCount: 0, unsupportedChatCount: 0 };
   }
-  const countStatement = db.prepare<{
+  const counts = db.query<{
     indexed: number;
     failed: number;
     unsupported: number;
-  }, []>(`
+  }, [string]>(`
+    WITH allowed(chat_id) AS (
+      SELECT CAST(value AS TEXT) FROM json_each(?)
+    )
     SELECT
-      COALESCE(SUM(CASE
-        WHEN state.status = 'sealed' OR (state.status = 'dirty' AND state.message_count > 0) THEN 1
-        ELSE 0
-      END), 0) AS indexed,
+      COALESCE(SUM(CASE WHEN state.status = 'sealed' THEN 1 ELSE 0 END), 0) AS indexed,
       COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
       COALESCE(SUM(CASE WHEN state.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
-    FROM temp_search_allowed allowed
+    FROM allowed
     LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
-  `);
-  const counts = countStatement.get() ?? { indexed: 0, failed: 0, unsupported: 0 };
-  countStatement.finalize();
+  `).get(JSON.stringify(allowed)) ?? { indexed: 0, failed: 0, unsupported: 0 };
   const indexedChatCount = Number(counts.indexed);
   const failedChatCount = Number(counts.failed);
   const unsupportedChatCount = Number(counts.unsupported);
@@ -256,7 +280,7 @@ function searchIndexStatusForPreparedAllowed(
 }
 
 export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatSearchIndexStatus {
-  return searchIndexStatusForPreparedAllowed(db, prepareAllowed(db, allowedChatIds));
+  return searchIndexStatusForPreparedAllowed(db, prepareAllowed(allowedChatIds));
 }
 
 function collectSnippets(
@@ -265,14 +289,13 @@ function collectSnippets(
   terms: CompiledTerm[],
 ): Map<string, { matchedMessageCount: number; snippets: ChatSearchResult['snippets'] }> {
   if (resultRows.length === 0) return new Map();
-  db.exec('CREATE TEMP TABLE IF NOT EXISTS temp_search_results (chat_id TEXT PRIMARY KEY) WITHOUT ROWID');
-  db.query('DELETE FROM temp_search_results').run();
-  const insert = db.query('INSERT INTO temp_search_results (chat_id) VALUES (?)');
-  for (const row of resultRows) insert.run(row.chatId);
   const snippetQuery = [...new Set(terms.map((term) => term.query))]
     .map((term) => `(${term})`)
     .join(' OR ');
-  const rows = db.query<FtsSnippetMatchRow, [string]>(`
+  const rows = db.query<FtsSnippetMatchRow, [string, string]>(`
+    WITH results(chat_id) AS (
+      SELECT CAST(value AS TEXT) FROM json_each(?)
+    )
     SELECT
       chunks.id AS rowId,
       chunks.chat_id AS chatId,
@@ -282,9 +305,9 @@ function collectSnippets(
       search_chunks_fts.rank AS rank
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN temp_search_results results ON results.chat_id = chunks.chat_id
+    JOIN results ON results.chat_id = chunks.chat_id
     WHERE search_chunks_fts MATCH ?
-  `).all(scopedMatch(snippetQuery, resultRows.map((row) => row.chatId)));
+  `).all(JSON.stringify(resultRows.map((row) => row.chatId)), `body:(${snippetQuery})`);
   const matches = new Map<string, {
     matchedMessageCount: number;
     ranked: FtsSnippetMatchRow[];
@@ -323,31 +346,21 @@ function collectSingleTermResults(
   allowed: string[],
   limit: number,
 ): ResultRow[] {
-  const statement = db.prepare<ResultRow, [string]>(`
+  return db.query<ResultRow, [string, string, number]>(`
+    WITH allowed(chat_id) AS (
+      SELECT CAST(value AS TEXT) FROM json_each(?)
+    )
     SELECT
       chunks.chat_id AS chatId,
       MIN(search_chunks_fts.rank) AS rank
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN temp_search_allowed allowed ON allowed.chat_id = chunks.chat_id
+    JOIN allowed ON allowed.chat_id = chunks.chat_id
     WHERE search_chunks_fts MATCH ?
     GROUP BY chunks.chat_id
-  `);
-  const candidates: ResultRow[] = [];
-  const target = Math.max(limit, SEARCH_CANDIDATE_CHATS);
-  try {
-    for (let offset = 0; offset < allowed.length && candidates.length < target; offset += CANDIDATE_SCOPE_BATCH) {
-      candidates.push(...statement.all(scopedMatch(
-        term.query,
-        allowed.slice(offset, offset + CANDIDATE_SCOPE_BATCH),
-      )));
-    }
-  } finally {
-    statement.finalize();
-  }
-  return candidates
-    .sort((left, right) => left.rank - right.rank || left.chatId.localeCompare(right.chatId))
-    .slice(0, limit);
+    ORDER BY rank ASC, chatId ASC
+    LIMIT ?
+  `).all(JSON.stringify(allowed), `body:(${term.query})`, limit);
 }
 
 export function searchTranscriptIndex(
@@ -359,11 +372,42 @@ export function searchTranscriptIndex(
     limit?: number;
   },
 ): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
-  const allowed = prepareAllowed(db, options.allowedChatIds);
+  const allowed = prepareAllowed(options.allowedChatIds);
   const index = searchIndexStatusForPreparedAllowed(db, allowed);
   const terms = compileSearchTerms(options.query, options.textTokens);
   if (allowed.length === 0 || terms.length === 0) return { results: [], index };
 
+  const limit = clampLimit(options.limit);
+  const resultRows = terms.length === 1
+    ? collectSingleTermResults(db, terms[0], allowed, limit)
+    : collectMultiTermResults(db, terms, allowed, limit);
+  const snippetByChat = collectSnippets(db, resultRows, terms);
+  return {
+    results: resultRows.map((row) => {
+      const snippets = snippetByChat.get(row.chatId) ?? { matchedMessageCount: 0, snippets: [] };
+      return {
+        chatId: row.chatId,
+        score: -Number(row.rank || 0),
+        matchedMessageCount: snippets.matchedMessageCount,
+        snippets: snippets.snippets,
+      };
+    }),
+    index,
+  };
+}
+
+export function searchTranscriptIndexV1(
+  db: Database,
+  options: {
+    query: ChatSearchQueryV1;
+    allowedChatIds: string[];
+    limit?: number;
+  },
+): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
+  const allowed = prepareAllowed(options.allowedChatIds);
+  const index = searchIndexStatusForPreparedAllowed(db, allowed);
+  const terms = compileStructuredTerms(options.query);
+  if (allowed.length === 0 || terms.length === 0) return { results: [], index };
   const limit = clampLimit(options.limit);
   const resultRows = terms.length === 1
     ? collectSingleTermResults(db, terms[0], allowed, limit)
@@ -389,42 +433,31 @@ function collectMultiTermResults(
   allowed: string[],
   limit: number,
 ): ResultRow[] {
-  db.exec(`
-    CREATE TEMP TABLE IF NOT EXISTS temp_search_term_matches (
-      chat_id TEXT NOT NULL,
-      term_ordinal INTEGER NOT NULL,
-      best_rank REAL NOT NULL,
-      PRIMARY KEY(chat_id, term_ordinal)
-    ) WITHOUT ROWID
-  `);
-  db.query('DELETE FROM temp_search_term_matches').run();
-  const termInsert = db.prepare(`
-    INSERT INTO temp_search_term_matches(chat_id, term_ordinal, best_rank)
-    SELECT chunks.chat_id, ?, MIN(search_chunks_fts.rank)
+  const selects = terms.map((_, index) => `
+    SELECT chunks.chat_id AS chat_id, ${index} AS term_ordinal,
+      MIN(search_chunks_fts.rank) AS best_rank
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-    JOIN temp_search_allowed allowed ON allowed.chat_id = chunks.chat_id
+    JOIN allowed ON allowed.chat_id = chunks.chat_id
     WHERE search_chunks_fts MATCH ?
     GROUP BY chunks.chat_id
-  `);
-  const resultStatement = db.prepare<ResultRow, [number]>(`
+  `).join(' UNION ALL ');
+  const sql = `
+    WITH allowed(chat_id) AS (
+      SELECT CAST(value AS TEXT) FROM json_each(?)
+    ), term_matches AS (${selects})
     SELECT chat_id AS chatId, SUM(best_rank) AS rank
-    FROM temp_search_term_matches
+    FROM term_matches
     GROUP BY chat_id
-    HAVING COUNT(*) = ?
+    HAVING COUNT(DISTINCT term_ordinal) = ?
     ORDER BY rank ASC, chat_id ASC
-  `);
-  const candidates: ResultRow[] = [];
-  const target = Math.max(limit, SEARCH_CANDIDATE_CHATS);
-  for (let offset = 0; offset < allowed.length && candidates.length < target; offset += CANDIDATE_SCOPE_BATCH) {
-    db.query('DELETE FROM temp_search_term_matches').run();
-    const batch = allowed.slice(offset, offset + CANDIDATE_SCOPE_BATCH);
-    terms.forEach((term, index) => termInsert.run(index, scopedMatch(term.query, batch)));
-    candidates.push(...resultStatement.all(terms.length));
-  }
-  termInsert.finalize();
-  resultStatement.finalize();
-  return candidates
-    .sort((left, right) => left.rank - right.rank || left.chatId.localeCompare(right.chatId))
-    .slice(0, limit);
+    LIMIT ?
+  `;
+  const parameters: Array<string | number> = [
+    JSON.stringify(allowed),
+    ...terms.map((term) => `body:(${term.query})`),
+    terms.length,
+    limit,
+  ];
+  return db.query<ResultRow, Array<string | number>>(sql).all(...parameters);
 }

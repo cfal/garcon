@@ -12,18 +12,16 @@ function walk(dir) {
   });
 }
 
-const providerIds = [
-  'amp',
-  'claude',
-  'codex',
-  'cursor',
-  'direct-anthropic-compatible',
-  'direct-openai-compatible',
-  'direct-openai-responses-compatible',
-  'factory',
-  'opencode',
-  'pi',
-];
+const serverPackage = JSON.parse(readFileSync('server/package.json', 'utf8'));
+const providerPackages = Object.keys(serverPackage.dependencies)
+  .filter((name) => name.startsWith('@garcon/server-agent-'))
+  .filter((name) => !name.endsWith('-interface') && !name.endsWith('-common'))
+  .sort();
+const providerIds = providerPackages.map((packageName) => {
+  const directory = packageName.slice('@garcon/server-agent-'.length);
+  const manifest = JSON.parse(readFileSync(`server-agents/${directory}/package.json`, 'utf8'));
+  return manifest.garconBuild.integrationId;
+});
 
 describe('agent architecture boundaries', () => {
   test('moves every provider implementation into an isolated package', () => {
@@ -53,8 +51,10 @@ describe('agent architecture boundaries', () => {
     for (const file of walk('server')) {
       if (file.includes('__tests__')) continue;
       const source = readFileSync(file, 'utf8');
-      if (source.includes('@garcon/server-agent-') && !source.includes('@garcon/server-agent-interface')) {
-        expect(relative('.', file)).toBe('server/agents/default-agent-integrations.ts');
+      for (const packageName of providerPackages) {
+        if (source.includes(packageName)) {
+          expect(relative('.', file), packageName).toBe('server/agents/default-agent-integrations.ts');
+        }
       }
     }
   });
@@ -62,7 +62,7 @@ describe('agent architecture boundaries', () => {
   test('keeps the public interface provider-free and runtime-light', () => {
     for (const file of walk('server-agents/interface/src')) {
       const source = readFileSync(file, 'utf8');
-      expect(source, file).not.toMatch(/server-agent-(?:amp|claude|codex|cursor|factory|opencode|pi)/);
+      for (const packageName of providerPackages) expect(source, file).not.toContain(packageName);
       expect(source, file).not.toMatch(/\b(?:Worker|SQLite|FTS5?|source-kind)\b/i);
     }
   });
@@ -70,7 +70,7 @@ describe('agent architecture boundaries', () => {
   test('keeps the common toolkit independent of providers and core', () => {
     for (const file of walk('server-agents/common/src')) {
       const source = readFileSync(file, 'utf8');
-      expect(source, file).not.toMatch(/@garcon\/server-agent-(?:amp|claude|codex|cursor|factory|opencode|pi)/);
+      for (const packageName of providerPackages) expect(source, file).not.toContain(packageName);
       expect(source, file).not.toMatch(/(?:^|['"])\.{1,2}\/.*server\//m);
     }
   });
@@ -80,8 +80,10 @@ describe('agent architecture boundaries', () => {
       for (const file of walk(root)) {
         if (file.includes('__tests__')) continue;
         const source = readFileSync(file, 'utf8');
-        expect(source, file).not.toMatch(/server-agents\/(?:amp|claude|codex|cursor|factory|opencode|pi)/);
-        expect(source, file).not.toMatch(/agents\/(?:amp|claude|codex|cursor|factory|opencode|pi)/);
+        for (const providerId of providerIds) {
+          expect(source, file).not.toContain(`server-agents/${providerId}`);
+          expect(source, file).not.toContain(`agents/${providerId}`);
+        }
       }
     }
   });

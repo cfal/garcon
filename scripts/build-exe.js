@@ -54,21 +54,53 @@ async function collectEmbeddedAssetInputs() {
   return files;
 }
 
-function createVirtualMainEntrypoint(assetsEntrypoint, serverMainPath, preMainModules) {
+function createVirtualMainEntrypoint(
+  assetsEntrypoint,
+  serverMainPath,
+  preMainModules,
+  searchAssets,
+) {
+  const imports = searchAssets.entries.map((entry, index) => (
+    `import searchAsset${index} from '${toPosixPath(entry.filePath)}' with { type: 'file' };`
+  ));
+  const integrationEntries = searchAssets.entries
+    .filter((entry) => entry.kind === 'integration')
+    .map((entry) => ({ entry, variable: `searchAsset${searchAssets.entries.indexOf(entry)}` }))
+    .reduce((byIntegration, { entry, variable }) => {
+      byIntegration[entry.integrationId] ??= {};
+      byIntegration[entry.integrationId][entry.name] = variable;
+      return byIntegration;
+    }, {});
+  const manifestExpression = `{
+    mode: 'compiled',
+    apiVersion: 1,
+    workers: {
+      indexer: searchAsset${searchAssets.entries.findIndex((entry) => entry.kind === 'worker' && entry.name === 'indexer')},
+      reader: searchAsset${searchAssets.entries.findIndex((entry) => entry.kind === 'worker' && entry.name === 'reader')},
+    },
+    integrations: {${Object.entries(integrationEntries).map(([integrationId, entries]) => (
+      `${JSON.stringify(integrationId)}:{${Object.entries(entries).map(([name, variable]) => `${JSON.stringify(name)}:${variable}`).join(',')}}`
+    )).join(',')}}
+  }`;
   return [
     `import '${assetsEntrypoint}';`,
+    ...imports,
     ...preMainModules.map((modulePath) => `import '${toPosixPath(modulePath)}';`),
+    `const deepFreeze = (value) => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const nested of Object.values(value)) deepFreeze(nested); } return value; };`,
+    `Object.defineProperty(globalThis, Symbol.for('garcon.compiled-mode'), { value: true, writable: false, configurable: false });`,
+    `Object.defineProperty(globalThis, Symbol.for('garcon.embedded-search-manifest.v1'), { value: deepFreeze(${manifestExpression}), writable: false, configurable: false });`,
     `await import('${serverMainPath}');`,
     '',
   ].join('\n');
 }
 
-async function bundleAgentStandaloneEntrypoints(contributions) {
+async function bundleStandaloneEntrypoints(contributions) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-agent-entrypoints-'));
   const files = [];
+  const entries = [];
   try {
     for (const contribution of contributions) {
-      for (const [index, entrypoint] of contribution.standaloneEntrypoints.entries()) {
+      for (const [name, entrypoint] of Object.entries(contribution.standaloneEntrypoints)) {
         const result = await Bun.build({
           entrypoints: [entrypoint],
           target: 'bun',
@@ -81,20 +113,40 @@ async function bundleAgentStandaloneEntrypoints(contributions) {
         }
         const filePath = path.join(
           directory,
-          `${contribution.integrationId}-${index}-${path.basename(entrypoint, path.extname(entrypoint))}.js`,
+          `${contribution.integrationId}-${name}.js`,
         );
         await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
         files.push(filePath);
+        entries.push({
+          kind: 'integration',
+          integrationId: contribution.integrationId,
+          name,
+          filePath,
+        });
       }
     }
-    return { directory, files };
+    for (const [name, entrypoint] of Object.entries({
+      indexer: path.join(repoRoot, 'server-agents/common/src/search/indexer-main.ts'),
+      reader: path.join(repoRoot, 'server-agents/common/src/search/reader-main.ts'),
+    })) {
+      const result = await Bun.build({ entrypoints: [entrypoint], target: 'bun', format: 'esm', minify: true });
+      if (!result.success || result.outputs.length !== 1) {
+        for (const log of result.logs) console.error(log);
+        throw new Error(`Transcript search Worker bundle failed: ${name}`);
+      }
+      const filePath = path.join(directory, `transcript-search-${name}.js`);
+      await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
+      files.push(filePath);
+      entries.push({ kind: 'worker', name, filePath });
+    }
+    return { directory, files, entries };
   } catch (error) {
     await fs.rm(directory, { recursive: true, force: true });
     throw error;
   }
 }
 
-async function buildExecutable(targetId, embeddedFiles, contributions) {
+async function buildExecutable(targetId, embeddedFiles, contributions, searchAssets) {
   const assetsEntrypoint = '__garcon_embed_static_assets__.js';
   const mainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
@@ -119,6 +171,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions) {
         assetsEntrypoint,
         serverMainPath,
         contributions.flatMap((contribution) => contribution.preMainModules),
+        searchAssets,
       ),
     },
   });
@@ -133,11 +186,11 @@ async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
   const embeddedFiles = await collectEmbeddedAssetInputs();
   const contributions = await collectAgentBuildContributions({ repoRoot });
-  const agentAssets = await bundleAgentStandaloneEntrypoints(contributions);
+  const agentAssets = await bundleStandaloneEntrypoints(contributions);
   try {
     const allEmbeddedFiles = [...embeddedFiles, ...agentAssets.files];
     for (const targetId of targetIds) {
-      await buildExecutable(targetId, allEmbeddedFiles, contributions);
+      await buildExecutable(targetId, allEmbeddedFiles, contributions, agentAssets);
     }
   } finally {
     await fs.rm(agentAssets.directory, { recursive: true, force: true });
