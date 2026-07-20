@@ -136,7 +136,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	hideChatListWhenGitInMain: false,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	sidebarGroupByProject: true,
+	sidebarGroupByProject: false,
 	sidebarGroupNestedProjectPaths: false,
 	sidebarCompactChatItems: false,
 	sidebarSortMode: 'manual',
