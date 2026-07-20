@@ -33,7 +33,7 @@
 	const VIEWPORT_PADDING = 24;
 
 	let zoom = $state(1);
-	let gestureZoomMin = ZOOM_MIN;
+	let gestureZoomMin = $state(ZOOM_MIN);
 	let viewportElement = $state<HTMLDivElement | null>(null);
 	let stageElement = $state<HTMLDivElement | null>(null);
 	let viewportSize = $state<ZoomSize>({ width: 1, height: 1 });
@@ -64,7 +64,7 @@
 	const canvasHeight = $derived(Math.max(viewportSize.height, stageHeight + VIEWPORT_PADDING * 2));
 	const stageLeft = $derived((canvasWidth - stageWidth) / 2);
 	const stageTop = $derived((canvasHeight - stageHeight) / 2);
-	const canPan = $derived(stageWidth > viewportSize.width || stageHeight > viewportSize.height);
+	const canPan = $derived(canvasWidth > viewportSize.width || canvasHeight > viewportSize.height);
 
 	function readContentSize(): ZoomSize {
 		const renderedSvg = stageElement?.querySelector('svg');
@@ -359,7 +359,7 @@
 					variant="ghost"
 					size="icon-sm"
 					onclick={zoomOut}
-					disabled={zoom <= ZOOM_MIN}
+					disabled={zoom <= gestureZoomMin}
 					title={m.image_zoom_out()}
 					aria-label={m.image_zoom_out()}
 				>

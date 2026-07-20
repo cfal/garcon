@@ -254,6 +254,48 @@ describe('MermaidBlock', () => {
 		expect((40 - stageRect.top) / stageRect.height).toBeCloseTo(0.5, 3);
 	});
 
+	it('allows touch panning when only the padded canvas overflows', async () => {
+		mockedRenderMermaid.mockResolvedValue(
+			'<svg viewBox="0 0 630 100" aria-label="Nearly full-width diagram"></svg>',
+		);
+		render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
+
+		const expandButton = await screen.findByRole('button', { name: 'Expand diagram' });
+		await waitFor(() => expect((expandButton as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(expandButton);
+		const viewport = screen.getByRole('region', {
+			name: 'Mermaid diagram viewport; drag to pan, pinch or Control- or Command-wheel to zoom',
+		});
+		const stage = viewport.querySelector<HTMLElement>('.mermaid-zoom-stage');
+		const canvas = viewport.querySelector<HTMLElement>('.mermaid-canvas');
+		expect(stage).toBeTruthy();
+		expect(canvas).toBeTruthy();
+		await waitFor(() => expect(Number.parseFloat(stage!.style.width)).toBe(630));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Zoom in (+)' }));
+		expect(Number.parseFloat(stage!.style.width)).toBeLessThan(viewport.clientWidth);
+		expect(Number.parseFloat(canvas!.style.width)).toBeGreaterThan(viewport.clientWidth);
+		expect(viewport.className).toContain('cursor-grab');
+
+		viewport.setPointerCapture = vi.fn();
+		viewport.hasPointerCapture = vi.fn().mockReturnValue(false);
+		const initialScrollLeft = viewport.scrollLeft;
+		await fireEvent.pointerDown(viewport, {
+			button: 0,
+			clientX: 100,
+			clientY: 100,
+			pointerId: 1,
+			pointerType: 'touch',
+		});
+		await fireEvent.pointerMove(viewport, {
+			clientX: 80,
+			clientY: 100,
+			pointerId: 1,
+			pointerType: 'touch',
+		});
+		expect(viewport.scrollLeft).toBe(initialScrollLeft + 20);
+	});
+
 	it('keeps outward zoom at an extreme fitted scale and labels it below one percent', async () => {
 		mockedRenderMermaid.mockResolvedValue(
 			'<svg viewBox="0 0 1000000 100" aria-label="Wide diagram"></svg>',
@@ -270,7 +312,24 @@ describe('MermaidBlock', () => {
 		const stage = viewport.querySelector<HTMLElement>('.mermaid-zoom-stage');
 		const fittedWidth = stage!.style.width;
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Zoom out (-)' }));
+		const zoomOutButton = screen.getByRole('button', { name: 'Zoom out (-)' });
+		expect((zoomOutButton as HTMLButtonElement).disabled).toBe(true);
+		const inwardWheelEvent = new Event('wheel', { bubbles: true, cancelable: true });
+		Object.defineProperties(inwardWheelEvent, {
+			ctrlKey: { value: true },
+			metaKey: { value: false },
+			deltaY: { value: -1500 },
+			clientX: { value: 400 },
+			clientY: { value: 300 },
+		});
+		await fireEvent(viewport, inwardWheelEvent);
+		await tick();
+		expect(screen.getByText('2%')).toBeTruthy();
+		expect((zoomOutButton as HTMLButtonElement).disabled).toBe(false);
+
+		await fireEvent.click(zoomOutButton);
+		expect(screen.getByText('<1%')).toBeTruthy();
+		expect((zoomOutButton as HTMLButtonElement).disabled).toBe(true);
 		const wheelEvent = new Event('wheel', { bubbles: true, cancelable: true });
 		Object.defineProperties(wheelEvent, {
 			ctrlKey: { value: true },
