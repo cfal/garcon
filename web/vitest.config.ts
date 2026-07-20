@@ -2,10 +2,16 @@ import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { CODEMIRROR_PACKAGES } from './codemirror-packages';
 
+// Excludes the CodeMirror package whose export map has no root entry for Vite to prebundle.
+const TEST_OPTIMIZED_DEPENDENCIES = [
+	...CODEMIRROR_PACKAGES.filter((packageName) => packageName !== '@codemirror/legacy-modes'),
+	'katex',
+];
+
 export default defineConfig({
 	plugins: [svelte()],
 	optimizeDeps: {
-		include: [...CODEMIRROR_PACKAGES],
+		include: TEST_OPTIMIZED_DEPENDENCIES,
 	},
 	test: {
 		environment: 'happy-dom',
