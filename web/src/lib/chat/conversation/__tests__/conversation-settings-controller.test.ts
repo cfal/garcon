@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { updateExecutionSettings } from '$lib/api/chats.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
+import type { ExecutionSettingsPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import {
 	ConversationSettingsController,
@@ -111,8 +112,8 @@ describe('ConversationSettingsController', () => {
 	});
 
 	it('ignores an older agent-settings response after a newer mutation settles', async () => {
-		const first = deferred<{ agentSettings: AgentSettingsEnvelope }>();
-		const second = deferred<{ agentSettings: AgentSettingsEnvelope }>();
+		const first = deferred<ExecutionSettingsPatchResponse>();
+		const second = deferred<ExecutionSettingsPatchResponse>();
 		vi.mocked(updateExecutionSettings)
 			.mockReturnValueOnce(first.promise)
 			.mockReturnValueOnce(second.promise);
@@ -121,10 +122,12 @@ describe('ConversationSettingsController', () => {
 		controller.handleAgentSettingChange(effort, 'high');
 		controller.handleAgentSettingChange(effort, 'low');
 		const latest = { ownerId: 'claude', schemaVersion: 1, values: { effort: 'low' } };
-		second.resolve({ agentSettings: latest });
+		second.resolve({ success: true, chatId: 'chat-1', agentSettings: latest });
 		await second.promise;
 		await Promise.resolve();
 		first.resolve({
+			success: true,
+			chatId: 'chat-1',
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'high' } },
 		});
 		await first.promise;

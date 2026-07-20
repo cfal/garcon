@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getChatExecutionControl } from '$lib/api/chats.js';
+import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import {
 	ConversationQueueController,
 	type ConversationQueueControllerOptions,
@@ -32,7 +33,17 @@ function createHarness() {
 	const acceptedInputs = {
 		enqueue: vi.fn(() => ({
 			clientRequestId: 'request-1',
-			submit: vi.fn(async () => ({ control: null })),
+			clientMessageId: undefined,
+			submit: vi.fn(async () => ({
+				success: true as const,
+				commandType: 'queue-entry-create',
+				clientRequestId: 'request-1',
+				chatId: 'chat-1',
+				status: 'accepted' as const,
+				acceptedAt: '2026-07-20T00:00:00.000Z',
+				entryId: 'entry-1',
+				control: emptyChatExecutionControlState(),
+			})),
 		})),
 	};
 	const options = {
@@ -95,11 +106,16 @@ describe('ConversationQueueController', () => {
 
 	it('applies refreshed execution control through the version-aware store method', async () => {
 		const { controller, conversationUi } = createHarness();
-		vi.mocked(getChatExecutionControl).mockResolvedValueOnce({ control: null });
+		const control = emptyChatExecutionControlState();
+		vi.mocked(getChatExecutionControl).mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			control,
+		});
 
 		await controller.startControlRefresh('chat-1');
 
-		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', null);
+		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
 		expect(controller.pendingControlRefresh('chat-1')).toBeUndefined();
 	});
 });
