@@ -28,6 +28,7 @@ describe('visiblePortablePresentations', () => {
 	it('omits a hidden sidebar and projects exactly one portable mobile surface', () => {
 		const desktop = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
+			{ type: 'set-sidebar-open', open: false },
 		]);
 		expect(visiblePortablePresentations(desktop, false)).toEqual([
 			{ surfaceId: 'singleton:git', presentation: 'main' },
