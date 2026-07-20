@@ -64,7 +64,7 @@ function createWiringFixture(overrides = {}) {
     deleteChat: mock(() => undefined),
   };
   const wiring = wireServerEvents({
-    server: { publish: mock(() => undefined) },
+    server: overrides.server ?? { publish: mock(() => undefined) },
     agentRegistry,
     chatRegistry: {
       getChat: mock(() => ({})),
@@ -111,6 +111,27 @@ function createWiringFixture(overrides = {}) {
 }
 
 describe('server event wiring', () => {
+  it('clears optimistic processing before publishing a queued launch failure', async () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.queueListeners.failed('chat-1', 'launch failed', { turnId: 'turn-1' });
+    await fixture.wiring.waitForIdle();
+
+    expect(published.map((message) => message.type)).toEqual([
+      'chat-processing-updated',
+      'agent-run-failed',
+    ]);
+    expect(published[0]).toMatchObject({
+      chatId: 'chat-1',
+      isProcessing: false,
+    });
+  });
+
   it('settles every direct execution command only at its exact terminal event', async () => {
     const fixture = createWiringFixture();
 

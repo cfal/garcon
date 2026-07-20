@@ -352,6 +352,8 @@ export function wireServerEvents({
     queueErrorMessage: string,
     options: TurnEventMetadata,
   ): Promise<void> {
+    // Clears queue-dispatching's optimistic state when launch fails before the provider starts.
+    broadcast(new ChatProcessingUpdatedMessage(chatId, false));
     if (consumeProcessFailure(chatId, options)) return;
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
     if (options.clientRequestId) {

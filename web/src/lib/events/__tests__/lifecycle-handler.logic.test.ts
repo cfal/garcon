@@ -17,7 +17,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 			clearPendingPermissionRequests: vi.fn(),
 		},
 		clearTurnStatus: vi.fn(),
-		markChatsAsCompleted: vi.fn(),
+		isChatProcessing: vi.fn(() => false),
 		onNavigateToChat: vi.fn(),
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
@@ -39,11 +39,19 @@ describe('handleAgentComplete', () => {
 		expect(ctx.markChatTranscriptValidated).not.toHaveBeenCalled();
 	});
 
-	it('clears selected-turn metadata and marks completed', () => {
+	it('clears selected-turn metadata', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
-		expect(ctx.markChatsAsCompleted).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('preserves successor-turn metadata and permission requests', () => {
+		const ctx = createCtx({ isChatProcessing: () => true });
+
+		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
+
+		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
+		expect(ctx.conversationUi.setPendingPermissionRequests).not.toHaveBeenCalled();
 	});
 
 	it('navigates to pending chat on success', () => {
@@ -93,8 +101,16 @@ describe('handleAgentError', () => {
 		handleAgentError(new AgentRunFailedMessage('chat-1', 'Something broke'), ctx);
 
 		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
-		expect(ctx.markChatsAsCompleted).toHaveBeenCalledWith('chat-1');
 		expect(ctx.appendLocalNotice).toHaveBeenCalledWith('error', 'Something broke');
 		expect(ctx.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
+	});
+
+	it('preserves successor-turn metadata and permission requests', () => {
+		const ctx = createCtx({ isChatProcessing: () => true });
+
+		handleAgentError(new AgentRunFailedMessage('chat-1', 'Previous turn failed'), ctx);
+
+		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
+		expect(ctx.conversationUi.clearPendingPermissionRequests).not.toHaveBeenCalled();
 	});
 });

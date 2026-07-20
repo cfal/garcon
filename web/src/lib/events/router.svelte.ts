@@ -83,6 +83,7 @@ export type EventRouterSessionsStore = Pick<
 	| 'removeChat'
 	| 'patchChat'
 	| 'reconcileProcessing'
+	| 'isChatProcessing'
 	| 'applyProcessingEvent'
 	| 'patchLastReadAt'
 >;
@@ -233,20 +234,11 @@ function createHelpers(stores: EventRouterStores) {
 		stores.lifecycle.markTurnRunning(chatId);
 	};
 
-	const clearTurnStatus = (_chatId?: string | null) => {
-		stores.lifecycle.clearTurnStatus();
-	};
+	const clearTurnStatus = (_chatId?: string | null) => stores.lifecycle.clearTurnStatus();
+	const isChatProcessing = (chatId?: string | null) =>
+		Boolean(chatId && stores.sessions.isChatProcessing(chatId));
 
-	const markChatsAsCompleted = (...chatIds: Array<string | null | undefined>) => {
-		const unique = new Set(
-			chatIds.filter((id): id is string => typeof id === 'string' && id.length > 0),
-		);
-		for (const id of unique) {
-			stores.sessions.applyProcessingEvent(id, false);
-		}
-	};
-
-	return { markTurnRunning, clearTurnStatus, markChatsAsCompleted };
+	return { markTurnRunning, clearTurnStatus, isChatProcessing };
 }
 
 // Builds the dispatch table mapping EventKey to handler functions.
@@ -254,7 +246,7 @@ function buildDispatch(
 	stores: EventRouterStores,
 	messagesAccumulator: ReturnType<typeof createChatMessagesAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
-	const { markTurnRunning, clearTurnStatus, markChatsAsCompleted } = createHelpers(stores);
+	const { markTurnRunning, clearTurnStatus, isChatProcessing } = createHelpers(stores);
 
 	const onNavigateToChat = (chatId: string) => stores.navigation.navigateToChat(chatId);
 	const onChatProcessing = (chatId?: string | null) => {
@@ -271,7 +263,7 @@ function buildDispatch(
 		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		clearTurnStatus,
-		markChatsAsCompleted,
+		isChatProcessing,
 		onNavigateToChat,
 		getPendingChatId,
 		clearPendingChatId,
@@ -286,7 +278,7 @@ function buildDispatch(
 		conversationUi: stores.conversationUi,
 		markTurnRunning,
 		clearTurnStatus,
-		markChatsAsCompleted,
+		isChatProcessing,
 		onChatProcessing,
 		onChatNotProcessing,
 		startupCoordinator: stores.startup.startupCoordinator,

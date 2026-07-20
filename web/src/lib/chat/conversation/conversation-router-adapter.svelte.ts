@@ -25,7 +25,6 @@ export interface ConversationRouterStoreDeps {
 		ChatSessionsPort,
 		| 'selectedChat'
 		| 'selectedChatId'
-		| 'byId'
 		| 'order'
 		| 'hasChat'
 		| 'patchPreview'
@@ -33,6 +32,7 @@ export interface ConversationRouterStoreDeps {
 		| 'patchLastReadAt'
 		| 'removeChat'
 		| 'setSelectedChatId'
+		| 'isChatProcessing'
 		| 'applyProcessingEvent'
 		| 'reconcileProcessing'
 		| 'quietRefreshChats'
