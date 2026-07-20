@@ -10,6 +10,11 @@ import { AgentSwitchMessage, parseChatMessages } from '../../common/chat-types.j
 import type { IChatRegistry } from './store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import {
+  TranscriptSearchCarryOverError,
+  type TranscriptSearchCarryOverRequest,
+  type TranscriptSearchCarryOverStream,
+} from '@garcon/server-agent-common/search/transcript-search-service';
 
 const logger = createLogger('chats:carryover-store');
 
@@ -97,19 +102,41 @@ export class ChatCarryOverStore {
     return `carry-v1:${this.#activeEntry(String(chatId))?.revision ?? 0}`;
   }
 
+  async openSearchStream(
+    request: TranscriptSearchCarryOverRequest,
+  ): Promise<TranscriptSearchCarryOverStream> {
+    request.signal.throwIfAborted();
+    const active = this.#activeEntry(String(request.chatId));
+    const revision = `carry-v1:${active?.revision ?? 0}`;
+    if (revision !== request.expectedRevision) {
+      throw new TranscriptSearchCarryOverError({
+        kind: 'transcript-search-carry-over-failure',
+        code: 'CARRY_OVER_REVISION_CHANGED',
+        retryable: true,
+      });
+    }
+    const segments = active?.segments ?? [];
+    return {
+      revision,
+      batches: streamRenderedSegments(segments, {
+        agentId: request.currentAgentId,
+        model: request.currentModel,
+      }, request.limits, request.signal),
+    };
+  }
+
   appendSegment(chatId: string, segment: { agentId: string; model: string; messages: ChatMessage[] }): void {
     const key = String(chatId);
     const current = this.#entriesByChatId.get(key);
     const existing = current?.segments ?? [];
-    existing.push({
-      agentId: segment.agentId,
-      model: segment.model,
-      messages: segment.messages,
-      at: new Date().toISOString(),
-    });
     this.#entriesByChatId.set(key, {
       revision: (current?.revision ?? 0) + 1,
-      segments: existing,
+      segments: immutableSegments([...existing, immutableSegment({
+        agentId: segment.agentId,
+        model: segment.model,
+        messages: segment.messages,
+        at: new Date().toISOString(),
+      })]),
     });
     this.#scheduleSave();
   }
@@ -127,20 +154,21 @@ export class ChatCarryOverStore {
     }
     const segments = current.segments.map(cloneSegment);
     if (input.segment) {
-      segments.push({
+      segments.push(immutableSegment({
         ...input.segment,
-        messages: [...input.segment.messages],
         at: new Date().toISOString(),
-      });
+      }));
     }
     const revision = current.revision + 1;
-    current.staged = {
-      targetEpoch: input.targetEpoch,
-      ownerId: input.ownerId,
-      revision,
-      segments,
-    };
-    this.#entriesByChatId.set(key, current);
+    this.#entriesByChatId.set(key, {
+      ...current,
+      staged: {
+        targetEpoch: input.targetEpoch,
+        ownerId: input.ownerId,
+        revision,
+        segments: immutableSegments(segments),
+      },
+    });
     await this.flush();
     return `carry-v1:${revision}`;
   }
@@ -166,13 +194,15 @@ export class ChatCarryOverStore {
       { agentId: input.ownerId, model: input.ownerModel },
     );
     if (segments.length === 0) return;
-    target.staged = {
-      targetEpoch: input.targetEpoch,
-      ownerId: input.ownerId,
-      revision: target.revision + 1,
-      segments,
-    };
-    this.#entriesByChatId.set(targetKey, target);
+    this.#entriesByChatId.set(targetKey, {
+      ...target,
+      staged: {
+        targetEpoch: input.targetEpoch,
+        ownerId: input.ownerId,
+        revision: target.revision + 1,
+        segments: immutableSegments(segments),
+      },
+    });
     await this.flush();
   }
 
@@ -183,17 +213,19 @@ export class ChatCarryOverStore {
     if (current.staged.targetEpoch !== targetEpoch) {
       throw new Error(`Carry-over epoch mismatch for ${key}`);
     }
-    current.revision = current.staged.revision;
-    current.segments = current.staged.segments;
-    delete current.staged;
+    this.#entriesByChatId.set(key, {
+      revision: current.staged.revision,
+      segments: current.staged.segments,
+    });
     await this.flush();
   }
 
   async discardStaged(chatId: string, targetEpoch: string): Promise<void> {
     const current = this.#entriesByChatId.get(String(chatId));
     if (!current?.staged || current.staged.targetEpoch !== targetEpoch) return;
-    delete current.staged;
-    if (current.segments.length === 0) this.#entriesByChatId.delete(String(chatId));
+    const key = String(chatId);
+    if (current.segments.length === 0) this.#entriesByChatId.delete(key);
+    else this.#entriesByChatId.set(key, { revision: current.revision, segments: current.segments });
     await this.flush();
   }
 
@@ -201,8 +233,8 @@ export class ChatCarryOverStore {
     let dirty = false;
     for (const [chatId, entry] of this.#entriesByChatId) {
       if (!entry.staged || referencedEpochs.has(entry.staged.targetEpoch)) continue;
-      delete entry.staged;
       if (entry.segments.length === 0) this.#entriesByChatId.delete(chatId);
+      else this.#entriesByChatId.set(chatId, { revision: entry.revision, segments: entry.segments });
       dirty = true;
     }
     if (dirty) await this.flush();
@@ -220,9 +252,10 @@ export class ChatCarryOverStore {
       ) {
         continue;
       }
-      entry.revision = entry.staged.revision;
-      entry.segments = entry.staged.segments;
-      delete entry.staged;
+      this.#entriesByChatId.set(chatId, {
+        revision: entry.staged.revision,
+        segments: entry.staged.segments,
+      });
       dirty = true;
     }
     if (dirty) await this.flush();
@@ -235,7 +268,7 @@ export class ChatCarryOverStore {
     const target = this.#entriesByChatId.get(targetKey);
     this.#entriesByChatId.set(targetKey, {
       revision: (target?.revision ?? 0) + 1,
-      segments: sliceRenderedSegments(source.segments, upToSequence),
+      segments: immutableSegments(sliceRenderedSegments(source.segments, upToSequence)),
     });
     this.#scheduleSave();
   }
@@ -318,7 +351,7 @@ export class ChatCarryOverStore {
 // agent. Each boundary's target is the next segment's producer, or the
 // current agent for the most recent switch.
 export function renderCarriedTranscript(
-  segments: CarryOverSegment[],
+  segments: readonly CarryOverSegment[],
   current: { agentId: string; model: string },
 ): ChatMessage[] {
   const messages: ChatMessage[] = [];
@@ -334,6 +367,61 @@ export function renderCarriedTranscript(
   return messages;
 }
 
+async function* streamRenderedSegments(
+  segments: readonly CarryOverSegment[],
+  current: { agentId: string; model: string },
+  limits: { readonly maxMessagesPerBatch: number; readonly maxBatchBytes: number },
+  signal: AbortSignal,
+): AsyncIterable<readonly ChatMessage[]> {
+  let segmentIndex = 0;
+  let messageIndex = 0;
+  let boundaryPending = false;
+  while (segmentIndex < segments.length) {
+    signal.throwIfAborted();
+    const batch: ChatMessage[] = [];
+    let batchBytes = 2;
+    while (segmentIndex < segments.length && batch.length < limits.maxMessagesPerBatch) {
+      const segment = segments[segmentIndex];
+      let message: ChatMessage | null = null;
+      if (messageIndex < segment.messages.length) {
+        message = segment.messages[messageIndex++];
+      } else if (!boundaryPending && segment.boundary !== false) {
+        const target = segment.boundaryTarget ?? segments[segmentIndex + 1] ?? current;
+        boundaryPending = true;
+        message = new AgentSwitchMessage(
+          segment.at,
+          segment.agentId,
+          target.agentId,
+          segment.model,
+          target.model,
+        );
+      } else {
+        segmentIndex += 1;
+        messageIndex = 0;
+        boundaryPending = false;
+        continue;
+      }
+      const encodedBytes = Buffer.byteLength(JSON.stringify(message)) + (batch.length > 0 ? 1 : 0);
+      if (encodedBytes + 2 > limits.maxBatchBytes) {
+        throw new TranscriptSearchCarryOverError({
+          kind: 'transcript-search-carry-over-failure',
+          code: 'CARRY_OVER_MESSAGE_TOO_LARGE',
+          retryable: false,
+        });
+      }
+      if (batch.length > 0 && batchBytes + encodedBytes > limits.maxBatchBytes) {
+        if (messageIndex > 0 && message === segment.messages[messageIndex - 1]) messageIndex -= 1;
+        else boundaryPending = false;
+        break;
+      }
+      batch.push(message);
+      batchBytes += encodedBytes;
+    }
+    if (batch.length > 0) yield batch;
+    signal.throwIfAborted();
+  }
+}
+
 function normalizePersistedSegments(value: unknown): CarryOverSegment[] {
   if (!Array.isArray(value)) return [];
   const segments: CarryOverSegment[] = [];
@@ -344,16 +432,16 @@ function normalizePersistedSegments(value: unknown): CarryOverSegment[] {
     const at = typeof entry.at === 'string' ? entry.at : new Date(0).toISOString();
     const boundaryTarget = normalizeBoundaryTarget(entry.boundaryTarget);
     if (!agentId) continue;
-    segments.push({
+    segments.push(immutableSegment({
       agentId,
       model,
       at,
       messages: parseChatMessages(entry.messages),
       ...(entry.boundary === false ? { boundary: false } : {}),
       ...(boundaryTarget ? { boundaryTarget } : {}),
-    });
+    }));
   }
-  return segments;
+  return immutableSegments(segments);
 }
 
 function normalizePersistedEntry(value: unknown): CarryOverChatEntry {
@@ -391,7 +479,22 @@ function normalizeStaged(value: unknown): CarryOverChatEntry['staged'] | null {
 }
 
 function cloneSegment(segment: CarryOverSegment): CarryOverSegment {
-  return { ...segment, messages: [...segment.messages] };
+  return immutableSegment(segment);
+}
+
+function immutableSegment(segment: CarryOverSegment): CarryOverSegment {
+  const boundaryTarget = segment.boundaryTarget
+    ? Object.freeze({ ...segment.boundaryTarget })
+    : undefined;
+  return Object.freeze({
+    ...segment,
+    messages: Object.freeze([...segment.messages]) as unknown as ChatMessage[],
+    ...(boundaryTarget ? { boundaryTarget } : {}),
+  });
+}
+
+function immutableSegments(segments: readonly CarryOverSegment[]): CarryOverSegment[] {
+  return Object.freeze([...segments]) as unknown as CarryOverSegment[];
 }
 
 function sliceRenderedSegments(
@@ -406,19 +509,19 @@ function sliceRenderedSegments(
     if (remaining <= 0) break;
     const messageCount = segment.messages.length;
     if (remaining <= messageCount) {
-      result.push({
-        ...cloneSegment(segment),
+      result.push(immutableSegment({
+        ...segment,
         messages: segment.messages.slice(0, remaining),
         boundary: false,
-      });
+      }));
       break;
     }
-    const cloned = cloneSegment(segment);
+    let boundaryTarget = segment.boundaryTarget;
     if (segment.boundary !== false) {
       const target = segment.boundaryTarget ?? source[index + 1] ?? current;
-      if (target) cloned.boundaryTarget = { agentId: target.agentId, model: target.model };
+      if (target) boundaryTarget = { agentId: target.agentId, model: target.model };
     }
-    result.push(cloned);
+    result.push(immutableSegment({ ...segment, ...(boundaryTarget ? { boundaryTarget } : {}) }));
     remaining -= messageCount;
     if (segment.boundary !== false) remaining -= 1;
   }

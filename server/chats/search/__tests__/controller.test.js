@@ -22,195 +22,164 @@ function registration(agentId, chatId) {
   };
 }
 
-function integration(agentId, search) {
+function integration(agentId, source = null) {
   return {
     descriptor: { id: agentId },
-    transcript: { revision: mock(async ({ chat }) => `revision:${chat.chatId}`) },
-    transcriptSearch: {
-      reconcile: mock(async () => undefined),
-      search,
-      disableAndDelete: mock(async () => undefined),
+    transcript: {
+      resolveIndexSource: mock(async () => source),
+      refreshIndexSource: mock(async () => source),
     },
   };
 }
 
-function controllerFixture(integrations, registrations) {
-  const byId = new Map(integrations.map((entry) => [entry.descriptor.id, entry]));
-  return new TranscriptSearchController({
-    integrations: {
-      list: () => integrations,
-      get: (agentId) => byId.get(agentId) ?? null,
-      require: (agentId) => {
-        const found = byId.get(agentId);
-        if (!found) throw new Error(`Missing integration: ${agentId}`);
-        return found;
-      },
-    },
-    listChats: () => registrations,
-  });
+function createService(overrides = {}) {
+  return {
+    operationEpoch: () => 'operation-epoch',
+    setSourceRefreshHandler: mock(() => {}),
+    setCatalogRefreshHandler: mock(() => {}),
+    enable: mock(async () => {}),
+    reconcile: mock(async () => {}),
+    sourceMayHaveChanged: mock(() => {}),
+    deleteChat: mock(() => {}),
+    search: mock(async () => ({ results: [], index: emptyStatus })),
+    disableAndDelete: mock(async () => {}),
+    close: mock(async () => {}),
+    ...overrides,
+  };
 }
 
-function hit(chatId) {
-  return { chatId, matchedMessageCount: 1, snippets: [] };
+function controllerFixture(integrations, registrations, service = createService()) {
+  const byId = new Map(integrations.map((entry) => [entry.descriptor.id, entry]));
+  const classes = integrations.map((entry) => ({
+    integrationId: entry.descriptor.id,
+    apiVersion: 2,
+    transcriptIndex: { apiVersion: 1, moduleUrl: import.meta.url },
+  }));
+  return {
+    controller: new TranscriptSearchController({
+      integrations: {
+        classes: () => classes,
+        get: (agentId) => byId.get(agentId) ?? null,
+      },
+      listChats: () => registrations,
+      service,
+    }),
+    service,
+  };
 }
 
 describe('TranscriptSearchController', () => {
-  it('retries integration-owned cleanup on startup while search is disabled', async () => {
-    const disableAndDelete = mock(async () => {});
-    const controller = new TranscriptSearchController({
-      integrations: {
-        list: () => [{ transcriptSearch: { disableAndDelete } }],
-      },
-      listChats: () => [],
-    });
+  it('cleans shared search storage while disabled', async () => {
+    const { controller, service } = controllerFixture([], []);
 
     await controller.initialize(false);
 
-    expect(disableAndDelete).toHaveBeenCalledWith({
-      generation: { epoch: expect.any(String), sequence: 1 },
+    expect(service.disableAndDelete).toHaveBeenCalledWith(expect.any(AbortSignal));
+  });
+
+  it('awaits Worker admission but resolves sources in a background catalog build', async () => {
+    let release;
+    const blockedSource = new Promise((resolve) => { release = resolve; });
+    const provider = integration('claude');
+    provider.transcript.resolveIndexSource = mock(() => blockedSource);
+    const { controller, service } = controllerFixture([provider], [registration('claude', 'chat-1')]);
+
+    await controller.start();
+
+    expect(service.enable).toHaveBeenCalledWith({
+      modules: [{
+        agentId: 'claude',
+        reference: { apiVersion: 1, moduleUrl: import.meta.url },
+      }],
       signal: expect.any(AbortSignal),
     });
+    expect(service.reconcile).not.toHaveBeenCalled();
+    release({ ownerId: 'claude', schemaVersion: 1, value: { nativePath: '/tmp/chat.jsonl' } });
+    await Bun.sleep(10);
+    expect(service.reconcile).toHaveBeenCalledWith({
+      generation: { epoch: 'operation-epoch', sequence: 1 },
+      chats: [expect.objectContaining({
+        chatId: 'chat-1',
+        source: { state: 'ready', reference: expect.objectContaining({ ownerId: 'claude' }) },
+      })],
+    });
+    await controller.close();
   });
 
-  it('partitions allowed chats by agent and returns only the actual integration hit', async () => {
-    const openAiSearch = mock(async () => ({
-      hits: [],
-      index: { ...emptyStatus, indexedChatCount: 2 },
-    }));
-    const anthropicSearch = mock(async () => ({
-      hits: [hit('anthropic-chat')],
-      index: { ...emptyStatus, indexedChatCount: 1 },
-    }));
-    const controller = controllerFixture([
-      integration('direct-openai-compatible', openAiSearch),
-      integration('direct-anthropic-compatible', anthropicSearch),
-    ], [
-      registration('direct-openai-compatible', 'openai-chat'),
-      registration('direct-openai-compatible', 'control-chat'),
-      registration('direct-anthropic-compatible', 'anthropic-chat'),
-    ]);
+  it('sends only a targeted payload-free dirty hint', async () => {
+    const { controller, service } = controllerFixture(
+      [integration('claude')],
+      [registration('claude', 'chat-1')],
+    );
     await controller.start();
 
-    const response = await controller.search({
-      query: 'anthropiconly',
-      allowedChatIds: ['openai-chat', 'anthropic-chat', 'control-chat'],
+    controller.sourceMayHaveChanged('chat-1');
+    controller.sourceMayHaveChanged('missing');
+
+    expect(service.sourceMayHaveChanged).toHaveBeenCalledTimes(1);
+    expect(service.sourceMayHaveChanged).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      generation: { epoch: 'operation-epoch', sequence: 1 },
+    });
+    await controller.close();
+  });
+
+  it('forwards one global search and defensively filters its result', async () => {
+    const service = createService({
+      search: mock(async () => ({
+        results: [
+          { chatId: 'allowed', score: 2, matchedMessageCount: 1, snippets: [] },
+          { chatId: 'outside', score: 1, matchedMessageCount: 1, snippets: [] },
+        ],
+        index: { ...emptyStatus, indexedChatCount: 1 },
+      })),
+    });
+    const { controller } = controllerFixture([], [], service);
+    await controller.start();
+
+    const response = await controller.search({ query: 'needle', allowedChatIds: ['allowed'] });
+
+    expect(response.results.map((result) => result.chatId)).toEqual(['allowed']);
+    expect(service.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChatIds: ['allowed'],
       limit: 20,
-    });
-
-    expect(response.results.map((result) => result.chatId)).toEqual(['anthropic-chat']);
-    expect(response.index.indexedChatCount).toBe(3);
-    expect(openAiSearch).toHaveBeenCalledWith(expect.objectContaining({
-      chats: [
-        expect.objectContaining({ chatId: 'control-chat' }),
-        expect.objectContaining({ chatId: 'openai-chat' }),
-      ],
-    }));
-    expect(anthropicSearch).toHaveBeenCalledWith(expect.objectContaining({
-      chats: [expect.objectContaining({ chatId: 'anthropic-chat' })],
+      query: expect.objectContaining({ version: 1 }),
     }));
     await controller.close();
   });
 
-  it('interleaves ranks deterministically and deduplicates defensive duplicate hits', async () => {
-    const anthropicSearch = mock(async () => ({
-      hits: [hit('shared'), hit('anthropic-two')],
-      index: { ...emptyStatus, indexedChatCount: 2 },
-    }));
-    const openAiSearch = mock(async () => ({
-      hits: [hit('shared'), hit('openai-two')],
-      index: { ...emptyStatus, indexedChatCount: 2 },
-    }));
-    const controller = controllerFixture([
-      integration('direct-openai-compatible', openAiSearch),
-      integration('direct-anthropic-compatible', anthropicSearch),
-    ], [
-      registration('direct-anthropic-compatible', 'shared'),
-      registration('direct-anthropic-compatible', 'anthropic-two'),
-      registration('direct-openai-compatible', 'shared'),
-      registration('direct-openai-compatible', 'openai-two'),
-    ]);
+  it('deletes immediately and follows with a complete catalog', async () => {
+    const { controller, service } = controllerFixture(
+      [integration('claude')],
+      [registration('claude', 'chat-1')],
+    );
     await controller.start();
 
-    const response = await controller.search({
-      query: 'shared',
-      allowedChatIds: ['shared', 'anthropic-two', 'openai-two'],
-    });
+    controller.deleteChat('chat-1');
 
-    expect(response.results.map((result) => result.chatId)).toEqual([
-      'shared',
-      'anthropic-two',
-      'openai-two',
-    ]);
-    expect(response.results.map((result) => result.score)).toEqual([1, 0.5, 1 / 3]);
+    expect(service.deleteChat).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      generation: { epoch: 'operation-epoch', sequence: 1 },
+    });
     await controller.close();
   });
 
-  it('rejects an integration hit outside its eligible scope', async () => {
-    const search = mock(async () => ({
-      hits: [hit('not-allowed')],
-      index: { ...emptyStatus, indexedChatCount: 1 },
-    }));
-    const controller = controllerFixture([
-      integration('direct-anthropic-compatible', search),
-    ], [registration('direct-anthropic-compatible', 'anthropic-chat')]);
+  it('reports failed admission as retryable and permits a later retry', async () => {
+    const service = createService();
+    service.enable.mockImplementationOnce(async () => {
+      throw new Error('reader unavailable');
+    });
+    const { controller } = controllerFixture([], [], service);
+
+    await expect(controller.start()).rejects.toThrow('reader unavailable');
+    await expect(controller.search({ query: 'needle', allowedChatIds: [] }))
+      .rejects.toMatchObject({
+        code: 'SEARCH_INDEX_UNAVAILABLE',
+        retryable: true,
+      });
     await controller.start();
 
-    const response = await controller.search({
-      query: 'needle',
-      allowedChatIds: ['anthropic-chat'],
-    });
-
-    expect(response.results).toEqual([]);
-    expect(response.index).toEqual(emptyStatus);
-    expect(response.partialFailures).toEqual([{
-      agentId: 'direct-anthropic-compatible',
-      code: 'INVALID_RESPONSE',
-      retryable: false,
-      eligibleChatCount: 1,
-    }]);
-    await controller.close();
-  });
-
-  it('preserves successful results and status when another integration fails', async () => {
-    const openAiSearch = mock(async () => ({
-      hits: [hit('openai-chat')],
-      index: {
-        indexedChatCount: 1,
-        pendingChatCount: 0,
-        failedChatCount: 1,
-        unsupportedChatCount: 0,
-      },
-    }));
-    const anthropicSearch = mock(async () => {
-      throw Object.assign(new Error('index unavailable'), { retryable: true });
-    });
-    const controller = controllerFixture([
-      integration('direct-openai-compatible', openAiSearch),
-      integration('direct-anthropic-compatible', anthropicSearch),
-    ], [
-      registration('direct-openai-compatible', 'openai-chat'),
-      registration('direct-anthropic-compatible', 'anthropic-chat'),
-    ]);
-    await controller.start();
-
-    const response = await controller.search({
-      query: 'needle',
-      allowedChatIds: ['openai-chat', 'anthropic-chat'],
-    });
-
-    expect(response.results.map((result) => result.chatId)).toEqual(['openai-chat']);
-    expect(response.index).toEqual({
-      indexedChatCount: 1,
-      pendingChatCount: 0,
-      failedChatCount: 1,
-      unsupportedChatCount: 0,
-    });
-    expect(response.partialFailures).toEqual([{
-      agentId: 'direct-anthropic-compatible',
-      code: 'SEARCH_UNAVAILABLE',
-      retryable: true,
-      eligibleChatCount: 1,
-    }]);
+    expect(service.enable).toHaveBeenCalledTimes(2);
     await controller.close();
   });
 });

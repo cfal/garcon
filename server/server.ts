@@ -78,6 +78,7 @@ import {
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
@@ -287,8 +288,14 @@ export async function startServer(): Promise<void> {
       { loadNativeMessages },
       chatExecutionActivity.isActive,
     );
+    const transcriptSearchService = new TranscriptSearchService({
+      workspaceDirectory: workspaceDir,
+      logger,
+      openCarryOverStream: (request) => carryOver.openSearchStream(request),
+    });
     const chatSearch = new TranscriptSearchController({
       integrations: integrationRegistry,
+      service: transcriptSearchService,
       listChats: () => Object.entries(chatRegistry.listAllChats()).flatMap(([chatId, session]) => {
         const integration = integrationRegistry.get(session.agentId);
         if (!integration) return [];
@@ -304,9 +311,15 @@ export async function startServer(): Promise<void> {
         }];
       }),
     });
-    await chatSearch.initialize(
-      settings.getFeatureSettings().transcriptSearch.enabled,
-    );
+    try {
+      await chatSearch.initialize(
+        settings.getFeatureSettings().transcriptSearch.enabled,
+      );
+    } catch {
+      logger.warn('Transcript search admission failed; server startup will continue.', {
+        code: 'SEARCH_INDEX_ADMISSION_FAILED',
+      });
+    }
     const transcriptSearchSettings = new TranscriptSearchSettingsCoordinator(
       settings,
       chatSearch,
@@ -737,12 +750,12 @@ export async function startServer(): Promise<void> {
           cleanupFailed = true;
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
+        await chatSearch.close();
         await integrationRegistry.stop();
         terminalManager.shutdown();
         await metadata.flush();
         await carryOver.flush();
         await chatRegistry.flush();
-        await chatSearch.close();
       } catch (err) {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));

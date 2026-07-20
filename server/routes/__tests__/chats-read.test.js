@@ -83,6 +83,7 @@ const chatViews = {
 const agents = {
   startSession: mock(() => undefined),
   isAgentSessionRunning: mock(() => false),
+  describeTranscriptSource: mock(async () => null),
 };
 
 const commandLedger = createRouteCommandLedger('chats-read');
@@ -129,6 +130,7 @@ describe('POST /api/chats/read', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    agents.describeTranscriptSource.mockResolvedValue(null);
   });
 
   it('processes multiple entries', async () => {
@@ -431,13 +433,19 @@ describe('GET /api/v1/chats/details', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
+    agents.describeTranscriptSource.mockResolvedValue(null);
   });
 
   it('returns provider-neutral chat metadata as a flat response', async () => {
+    agents.describeTranscriptSource.mockResolvedValue({
+      kind: 'filesystem-path',
+      value: '/tmp/transcript.jsonl',
+    });
     registry.getChat.mockReturnValue({
       agentId: 'test-agent',
       projectPath: '/proj',
       agentSessionId: 'agent-session-100',
+      transcriptSource: { kind: 'filesystem-path', value: '/tmp/transcript.jsonl' },
     });
     metadata.getChatMetadata.mockReturnValue({
       firstMessage: 'First line\nSecond line',
@@ -458,6 +466,7 @@ describe('GET /api/v1/chats/details', () => {
       createdAt: '2026-02-20T10:00:00.000Z',
       lastActivityAt: '2026-02-21T11:00:00.000Z',
       agentSessionId: 'agent-session-100',
+      transcriptSource: { kind: 'filesystem-path', value: '/tmp/transcript.jsonl' },
     });
   });
 
@@ -504,6 +513,7 @@ describe('GET /api/v1/chats/details', () => {
       createdAt: null,
       lastActivityAt: null,
       agentSessionId: null,
+      transcriptSource: null,
     });
   });
 });

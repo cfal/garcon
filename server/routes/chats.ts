@@ -91,6 +91,7 @@ import type {
   ChatSearchRequest,
   ChatSearchResponse,
 } from '../../common/chat-search.js';
+import type { ChatDetailsResponse } from '../../common/chat-details.js';
 import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
 import {
   generateChatTitleFromMessage,
@@ -133,6 +134,7 @@ type PendingInputsDep = PendingUserInputServiceContract;
 type PendingInputRecoveryDep = Pick<PendingUserInputRecoveryCoordinator, 'reconcileChat'>;
 
 interface ChatSearchDep {
+  catalogMayHaveChanged(chatId?: string): void;
   search(options: {
     query: string;
     textTokens?: string[];
@@ -141,7 +143,6 @@ interface ChatSearchDep {
   }): Promise<{
     results: ChatSearchResponse['results'];
     index: ChatSearchResponse['index'];
-    partialFailures?: ChatSearchResponse['partialFailures'];
   }>;
 }
 
@@ -586,7 +587,6 @@ export default function createChatRoutes({
         results: result.results,
         total: result.results.length,
         index: result.index,
-        ...(result.partialFailures ? { partialFailures: result.partialFailures } : {}),
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
       if (
@@ -624,13 +624,15 @@ export default function createChatRoutes({
       }
 
       const meta = metadata.getChatMetadata(chatId);
-      return Response.json({
+      const response: ChatDetailsResponse = {
         chatId,
         firstMessage: meta?.firstMessage || '',
         createdAt: meta?.createdAt || null,
         lastActivityAt: meta?.lastActivity || null,
         agentSessionId: session.agentSessionId || null,
-      });
+        transcriptSource: await agents.describeTranscriptSource(session, chatId),
+      };
+      return Response.json(response);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
@@ -1179,6 +1181,7 @@ export default function createChatRoutes({
       const updated = Object.keys(patch).length > 0
         ? await agents.updateSessionSettings(chatId, patch)
         : chat;
+      if (Object.keys(patch).length > 0) searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
         success: true,
         chatId,
@@ -1205,6 +1208,7 @@ export default function createChatRoutes({
       if (modelProtocol !== undefined)
         patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
       await agents.updateSessionSettings(chatId, patch);
+      searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);
@@ -1234,6 +1238,7 @@ export default function createChatRoutes({
         modelEndpointId: optionalStringOrNull(body.modelEndpointId),
         modelProtocol: optionalStringOrNull(body.modelProtocol) as AgentModelPatchRequest['modelProtocol'],
       });
+      searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
         success: true,
         chatId,

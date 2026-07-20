@@ -51,8 +51,8 @@ interface WebSocketPublisher {
 }
 
 interface ChatSearchEventIndex {
-  appendMessages(chatId: string, messages: ChatMessage[]): void;
-  markDirty(chatId: string): void;
+  sourceMayHaveChanged(chatId: string): void;
+  catalogMayHaveChanged(chatId?: string): void;
   deleteChat(chatId: string): void;
 }
 
@@ -173,15 +173,6 @@ export function wireServerEvents({
     broadcast(new ScheduledPromptsInvalidatedMessage(reason));
   });
 
-  function appendSearchMessages(chatId: string, messages: ChatMessage[]): void {
-    if (!searchIndex || messages.length === 0) return;
-    try {
-      searchIndex.appendMessages(chatId, messages);
-    } catch (err) {
-      logger.warn(`search-index: append failed for ${chatId}:`, errorMessage(err));
-    }
-  }
-
   function deleteSearchChat(chatId: string): void {
     if (!searchIndex) return;
     try {
@@ -194,9 +185,18 @@ export function wireServerEvents({
   function markSearchChatDirty(chatId: string): void {
     if (!searchIndex) return;
     try {
-      searchIndex.markDirty(chatId);
+      searchIndex.sourceMayHaveChanged(chatId);
     } catch (err) {
       logger.warn(`search-index: mark dirty failed for ${chatId}:`, errorMessage(err));
+    }
+  }
+
+  function markSearchCatalogDirty(chatId?: string): void {
+    if (!searchIndex) return;
+    try {
+      searchIndex.catalogMayHaveChanged(chatId);
+    } catch (err) {
+      logger.warn('search-index: catalog refresh failed:', errorMessage(err));
     }
   }
 
@@ -319,10 +319,7 @@ export function wireServerEvents({
         errorMessage(recovery.reloadError),
       );
       if (recovery.appended.messages.length > 0) {
-        appendSearchMessages(
-          chatId,
-          recovery.appended.messages.map((entry) => entry.message),
-        );
+        markSearchChatDirty(chatId);
         broadcast(
           new ChatMessagesMessage(
             chatId,
@@ -399,7 +396,7 @@ export function wireServerEvents({
         const committedMessages = appended.messages.map((entry) => entry.message);
         if (committedMessages.length > 0) {
           metadata.updateFromAppendedMessages(chatId, committedMessages);
-          appendSearchMessages(chatId, committedMessages);
+          markSearchChatDirty(chatId);
         }
         if (appended.messages.length > 0) {
           broadcast(
@@ -430,6 +427,7 @@ export function wireServerEvents({
   });
   agentRegistry.onSessionCreated((chatId) => {
     if (!chatExists(chatId)) return;
+    markSearchCatalogDirty(chatId);
     broadcast(new ChatSessionCreatedMessage(chatId));
   });
   agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
@@ -527,7 +525,7 @@ export function wireServerEvents({
     void broadcastRemoteSettings();
   });
   chatRegistry.onChatAdded((chatId) => {
-    if (chatRegistry.getChat(chatId)?.nativeSession) markSearchChatDirty(chatId);
+    markSearchCatalogDirty(chatId);
   });
   chatRegistry.onChatRemoved((chatId) => {
     agentRegistry.discardTurn(chatId);
@@ -551,6 +549,7 @@ export function wireServerEvents({
     broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));
   });
   chatRegistry.onChatProjectPathUpdated((payload) => {
+    markSearchCatalogDirty(payload.chatId);
     broadcast(
       new ChatProjectPathUpdatedMessage(
         payload.chatId,
@@ -581,7 +580,7 @@ export function wireServerEvents({
       if (!chatExists(chatId)) return;
       const parsedMessages = messages.map((entry) => entry.message);
       metadata.updateFromAppendedMessages(chatId, parsedMessages);
-      appendSearchMessages(chatId, parsedMessages);
+      if (parsedMessages.length > 0) markSearchChatDirty(chatId);
       broadcast(
         new ChatMessagesMessage(
           chatId,

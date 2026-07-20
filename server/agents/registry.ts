@@ -1,4 +1,4 @@
-import type { AgentTranscriptPage } from '@garcon/server-agent-interface';
+import type { AgentTranscriptPage, AgentTranscriptSourceLocation } from '@garcon/server-agent-interface';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
@@ -30,6 +30,9 @@ import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter } from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('agents:registry');
 
 export interface AgentRegistryServiceContract {
   hasAgent(agentId: string): boolean;
@@ -73,6 +76,10 @@ export interface AgentRegistryServiceContract {
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
   prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
   resolveNativeSession(session: AgentChatEntry, chatId?: string): Promise<AgentNativeSessionRef | null>;
+  describeTranscriptSource(
+    session: AgentChatEntry,
+    chatId: string,
+  ): Promise<AgentTranscriptSourceLocation | null>;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
@@ -256,6 +263,32 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       throw new Error(`Native session owner mismatch for ${chatId || session.agentSessionId}`);
     }
     return reference;
+  }
+
+  async describeTranscriptSource(
+    session: AgentChatEntry,
+    chatId: string,
+  ): Promise<AgentTranscriptSourceLocation | null> {
+    const integration = this.#directory.get(session.agentId);
+    if (!integration) return null;
+    try {
+      const source = await integration.transcript.describeSource({
+        chat: toAgentChatReference(integration, chatId, session, this.#getCarryOverRevision(chatId)),
+        signal: new AbortController().signal,
+      });
+      if (source === null) return null;
+      if ((source.kind !== 'filesystem-path' && source.kind !== 'provider-reference')
+          || typeof source.value !== 'string' || source.value.length === 0) {
+        throw new Error('INVALID_TRANSCRIPT_SOURCE_DESCRIPTION');
+      }
+      return source;
+    } catch {
+      logger.warn('Transcript source description failed.', {
+        code: 'TRANSCRIPT_SOURCE_DESCRIPTION_FAILED',
+        integrationId: session.agentId,
+      });
+      return null;
+    }
   }
 
   async launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {

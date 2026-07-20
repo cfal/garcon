@@ -52,7 +52,7 @@ async function enableTranscriptSearch(fixture: IntegrationFixture): Promise<void
 }
 
 describe('multi-agent transcript search', () => {
-  test('returns only actual transcript matches across agent-owned indexes', async () => {
+  test('returns only actual transcript matches across agent-owned sources', async () => {
     await withIntegrationFixture('transcript-search-multi-agent-results', async (fixture) => {
       const openAiChatId = fixture.newChatId();
       const anthropicChatId = fixture.newChatId();
