@@ -2,7 +2,11 @@
 	import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 	import type { JsonValue } from '$shared/json';
 	import { settingValue } from '$lib/agents/agent-settings.js';
-	import { agentSettingLabel, agentSettingOptionLabel } from '$lib/agents/agent-setting-labels.js';
+	import {
+		agentSettingLabel,
+		agentSettingOptionDescription,
+		agentSettingOptionLabel,
+	} from '$lib/agents/agent-setting-labels.js';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -11,6 +15,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
+	import AgentThinkingIcon from './AgentThinkingIcon.svelte';
 
 	interface Props {
 		descriptors: readonly AgentSettingDescriptor[];
@@ -73,16 +78,26 @@
 							title={`${agentSettingLabel(descriptor)}: ${activeOptionLabel(descriptor)}`}
 							class="inline-flex size-9 items-center justify-center rounded-lg border border-composer-agent-setting-border bg-composer-agent-setting text-composer-agent-setting-foreground outline-none transition-colors hover:bg-composer-agent-setting/80 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
 						>
-							<BrainCircuit class="size-4" aria-hidden="true" />
+							{#if descriptor.labelKey === 'thinking'}
+								<AgentThinkingIcon />
+							{:else}
+								<BrainCircuit class="size-4" aria-hidden="true" />
+							{/if}
 						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start">
+						<DropdownMenuContent align="start" class="min-w-64">
 							<DropdownMenuRadioGroup
 								value={stringValue(descriptor)}
 								onValueChange={(value) => onChange(descriptor, value)}
 							>
 								{#each descriptor.options as option (option.value)}
-									<DropdownMenuRadioItem value={option.value}>
-										{agentSettingOptionLabel(option)}
+									{@const description = agentSettingOptionDescription(option)}
+									<DropdownMenuRadioItem value={option.value} class="items-start">
+										<div class="min-w-0">
+											<div class="font-medium">{agentSettingOptionLabel(option)}</div>
+											{#if description}
+												<div class="text-xs text-muted-foreground">{description}</div>
+											{/if}
+										</div>
 									</DropdownMenuRadioItem>
 								{/each}
 							</DropdownMenuRadioGroup>

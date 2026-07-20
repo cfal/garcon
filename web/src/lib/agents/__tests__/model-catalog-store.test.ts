@@ -79,7 +79,15 @@ describe('ModelCatalogStore', () => {
 								type: 'enum',
 								label: 'Effort',
 								labelKey: 'thinking',
-								options: [{ value: 'high', label: 'High', labelKey: 'deep' }],
+								options: [
+									{
+										value: 'high',
+										label: 'High',
+										labelKey: 'deep',
+										description: 'Uses extended thinking for every response.',
+										descriptionKey: 'thinkingEnabled',
+									},
+								],
 							},
 						],
 						defaultSettings: {
@@ -107,7 +115,14 @@ describe('ModelCatalogStore', () => {
 				key: 'effort',
 				type: 'enum',
 				labelKey: 'thinking',
-				options: [expect.objectContaining({ value: 'high', labelKey: 'deep' })],
+				options: [
+					expect.objectContaining({
+						value: 'high',
+						labelKey: 'deep',
+						description: 'Uses extended thinking for every response.',
+						descriptionKey: 'thinkingEnabled',
+					}),
+				],
 			}),
 		]);
 		expect(store.getDefaultAgentSettings('sample')).toEqual({
