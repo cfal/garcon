@@ -1,8 +1,9 @@
 import { promises as fs } from 'node:fs';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
   getNativeMessageRevisionSource,
+  orderedTranscriptDigest,
   type AgentForkRequest,
   type AgentForking,
   type AgentHost,
@@ -16,9 +17,9 @@ import {
 } from './fork-jsonl.js';
 
 export interface JsonlForkingOptions {
-  readonly host: AgentHost;
+  readonly host: Pick<AgentHost, 'carryOver'>;
   readonly supportsWhileRunning: boolean;
-  readonly transcript: AgentTranscript;
+  readonly transcript: Pick<AgentTranscript, 'load' | 'revision' | 'resolveNativeSession'>;
   readonly nativeSessions: PathNativeSessionCodec;
   readonly rewriteEntry?: (
     entry: unknown,
@@ -64,7 +65,7 @@ async function forkJsonlAtPoint(
   let cutoffLine: number | null = null;
   let leadingLineCount = 0;
   let retainedMessageCounts: ReadonlyMap<number, number> | undefined;
-  let expectedForkRevision: string | null = null;
+  let expectedForkDigest: string | null = null;
   if (request.point) {
     if (request.point.sourceRevision.carryOver !== request.source.carryOverRevision) {
       throw sourceRevisionChanged();
@@ -103,7 +104,7 @@ async function forkJsonlAtPoint(
       ? Math.max(0, Math.min(...sourceLines) - 1)
       : 0;
     const retainedMessages = native.messages.slice(0, nativeSequence);
-    expectedForkRevision = computeAgentTranscriptRevision(retainedMessages);
+    expectedForkDigest = forkTranscriptDigest(retainedMessages);
     const retainedCounts = new Map<number, number>();
     for (const message of retainedMessages) {
       const sourcePosition = getNativeMessageRevisionSource(message);
@@ -157,7 +158,7 @@ async function forkJsonlAtPoint(
         },
         signal: request.admission.signal,
       });
-      if (forked.revision !== expectedForkRevision) {
+      if (forkTranscriptDigest(forked.messages) !== expectedForkDigest) {
         throw new AgentIntegrationError(
           'TRANSCRIPT_UNAVAILABLE',
           'The provider-native fork did not preserve the selected message prefix',
@@ -170,6 +171,13 @@ async function forkJsonlAtPoint(
     }
   }
   return { agentSessionId: result.agentSessionId, nativeSession };
+}
+
+function forkTranscriptDigest(messages: readonly ChatMessage[]): string {
+  return orderedTranscriptDigest(messages.map((message, index) => ({
+    seq: index + 1,
+    message,
+  })));
 }
 
 async function resolveSourceReference(
