@@ -1,9 +1,6 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
-import { parseAgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type { StartChatCommandResponse } from '../../common/chat-command-contracts.js';
-import { normalizePermissionMode, normalizeThinkingMode } from '../../common/chat-modes.js';
-import { normalizeTags } from '../../common/tags.ts';
 import type { RunAgentTurnOptions } from '../agents/session-types.js';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { createLogger } from '../lib/log.js';
@@ -39,6 +36,7 @@ export class StartCommands {
       ...input,
       chatId: this.deps.chatIds.allocate(),
       images: [],
+      agentSettings: input.agentSettingsById[input.agentId],
     });
     return this.support.withChatMutationLock(
       normalized.chatId,
@@ -48,55 +46,40 @@ export class StartCommands {
 
   private async normalizeStart(input: ChatStartInput): Promise<NormalizedChatStart> {
     const chatId = this.support.requireChatId(input.chatId);
-    const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
-    const clientMessageId = this.support.requireClientRequestId(input.clientMessageId, 'clientMessageId');
-    const agentId = input.agentId.trim();
-    const command = input.command.trim();
-    const model = input.model.trim();
-    const images = this.support.validateAttachments(input.images) ?? [];
+    const images = input.images ?? [];
 
-    if (!agentId) throw new CommandValidationError('VALIDATION_FAILED', 'agentId is required');
-    if (!this.deps.agents.hasAgent(agentId)) {
-      throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`);
+    if (!this.deps.agents.hasAgent(input.agentId)) {
+      throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
-    if (!model) throw new CommandValidationError('VALIDATION_FAILED', 'model is required');
-    if (!command && images.length === 0) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
-    }
+    this.support.assertContent(input.command, images);
     await this.assertStartImagesSupported({
-      agentId,
-      model,
+      agentId: input.agentId,
+      model: input.model,
       apiProviderId: input.apiProviderId,
       modelEndpointId: input.modelEndpointId,
       images,
     });
 
-    const directSettings = parseAgentSettingsEnvelope(input.agentSettings);
-    const settingsById = input.agentSettingsById && typeof input.agentSettingsById === 'object'
-      ? input.agentSettingsById as Record<string, unknown>
-      : null;
-    const scheduledSettings = parseAgentSettingsEnvelope(settingsById?.[agentId]);
-    const agentSettings = directSettings ?? scheduledSettings;
-    if (!agentSettings || agentSettings.ownerId !== agentId) {
+    if (!input.agentSettings || input.agentSettings.ownerId !== input.agentId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'agentSettings must be owned by agentId');
     }
 
     return {
       chatId,
-      clientRequestId,
-      clientMessageId,
-      agentId,
-      projectPath: await this.resolveProjectPathForStart(input.projectPath.trim()),
-      command,
+      clientRequestId: input.clientRequestId,
+      clientMessageId: input.clientMessageId,
+      agentId: input.agentId,
+      projectPath: await this.resolveProjectPathForStart(input.projectPath),
+      command: input.command,
       images,
-      model,
+      model: input.model,
       apiProviderId: input.apiProviderId ?? null,
       modelEndpointId: input.modelEndpointId ?? null,
       modelProtocol: input.modelProtocol ?? null,
-      permissionMode: normalizePermissionMode(input.permissionMode),
-      thinkingMode: normalizeThinkingMode(input.thinkingMode),
-      agentSettings,
-      tags: normalizeTags(Array.isArray(input.tags) ? input.tags : []),
+      permissionMode: input.permissionMode,
+      thinkingMode: input.thinkingMode,
+      agentSettings: input.agentSettings,
+      tags: input.tags ?? [],
     };
   }
 

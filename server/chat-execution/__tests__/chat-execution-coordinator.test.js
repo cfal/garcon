@@ -1430,6 +1430,12 @@ describe('orchestration', () => {
   });
 
   describe('active input delivery', () => {
+    const activeInputOptions = (clientRequestId = 'request-active') => ({
+      clientRequestId,
+      clientMessageId: `${clientRequestId}-message`,
+      turnId: `${clientRequestId}-turn`,
+    });
+
     it('persists input by default without offering it to a running agent', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
@@ -1438,6 +1444,17 @@ describe('orchestration', () => {
 
       expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
       expect(result.control.entries.map((entry) => entry.content)).toEqual(['scheduled input']);
+    });
+
+    it('rejects accepted active input without ledger identifiers', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
+
+      await expect(orchQueue.deliverActiveInput('c1', 'missing identity')).rejects.toMatchObject({
+        code: 'INTERNAL_ERROR',
+        status: 500,
+      });
+      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
     });
 
     it('registers the user row before delivering active input to a running agent', async () => {
@@ -1453,7 +1470,7 @@ describe('orchestration', () => {
       });
 
       const result = await orchQueue.deliverActiveInput('c1', '/goal pause', {
-        clientRequestId: 'request-active',
+        ...activeInputOptions(),
         clientMessageId: 'message-active',
       });
 
@@ -1479,7 +1496,9 @@ describe('orchestration', () => {
         return true;
       });
 
-      await expect(orchQueue.deliverActiveInput('c1', 'receiver-safe')).resolves.toBe(true);
+      await expect(
+        orchQueue.deliverActiveInput('c1', 'receiver-safe', activeInputOptions()),
+      ).resolves.toBe(true);
     });
 
     it('persists input for running agents without active-input support', async () => {
@@ -1496,7 +1515,7 @@ describe('orchestration', () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async () => false);
 
-      const result = await orchQueue.deliverActiveInput('c1', 'race-safe input');
+      const result = await orchQueue.deliverActiveInput('c1', 'race-safe input', activeInputOptions());
 
       expect(result).toBe(false);
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
@@ -1575,7 +1594,7 @@ describe('orchestration', () => {
 
       await expect(
         orchQueue.deliverActiveInput('c1', 'accepted then failed', {
-          clientRequestId: 'request-failed',
+          ...activeInputOptions('request-failed'),
         }),
       ).rejects.toMatchObject({
         message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
@@ -1602,7 +1621,7 @@ describe('orchestration', () => {
         orchQueue.deliverActiveInput(
           'c1',
           'not delivered',
-          { clientRequestId: 'request-admission-failed' },
+          activeInputOptions('request-admission-failed'),
           async () => {
             throw new Error('ledger scheduling failed');
           },
@@ -1634,7 +1653,7 @@ describe('orchestration', () => {
 
       await expect(
         orchQueue.deliverActiveInput('c1', 'must not deliver', {
-          clientRequestId: 'request-append-failed',
+          ...activeInputOptions('request-append-failed'),
         }),
       ).rejects.toMatchObject({
         message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
@@ -1665,7 +1684,7 @@ describe('orchestration', () => {
       });
 
       const result = await orchQueue.deliverActiveInput('c1', 'deliver despite listener', {
-        clientRequestId: 'request-listener-failed',
+        ...activeInputOptions('request-listener-failed'),
       });
 
       expect(result).toBe(true);

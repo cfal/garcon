@@ -18,6 +18,7 @@ import {
   CommandSupport,
   CommandValidationError,
   commandResultFromRecord,
+  runOptionsForCommand,
   type CompactInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
@@ -37,13 +38,15 @@ export class SessionCommands {
 
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
     this.support.requireChat(input.chatId);
-    const images = this.support.validateAttachments(input.images ?? input.options?.images);
-    this.support.assertContent(input.command, images);
+    this.support.assertContent(input.command, input.images);
     return this.support.withChatMutationLock(input.chatId, () =>
       this.support.submitHttpRun({
-        ...input,
-        images,
-        options: this.support.optionsWithoutAttachments(input.options),
+        chatId: input.chatId,
+        command: input.command,
+        images: input.images,
+        clientRequestId: input.clientRequestId,
+        clientMessageId: input.clientMessageId,
+        options: runOptionsForCommand(input),
       }, 'interactive-existing-chat'),
     );
   }

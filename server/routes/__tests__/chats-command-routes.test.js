@@ -566,6 +566,24 @@ describe('REST chat command routes', () => {
     expect(missing.body.errorCode).toBe('SESSION_NOT_FOUND');
   });
 
+  it('POST /run validates attachments at the request boundary', async () => {
+    const agent = createRouteAgent();
+    const invalid = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody({
+        images: [{
+          data: `data:application/octet-stream;base64,${Buffer.from('bad').toString('base64')}`,
+          name: 'bad.bin',
+          mimeType: 'application/octet-stream',
+        }],
+      }),
+    );
+
+    expect(invalid.response.status).toBe(400);
+    expect(invalid.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
   it('POST /run returns current execution control when direct admission is busy', async () => {
     const agent = createRouteAgent();
     const control = storedQueue([], {

@@ -1,5 +1,9 @@
 import crypto from 'crypto';
-import type { ForkChatResponse, ForkRunCommandResponse } from '../../common/chat-command-contracts.js';
+import type {
+  ForkChatCommandRequest,
+  ForkChatResponse,
+  ForkRunCommandResponse,
+} from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { rollbackForkTarget, type ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import { commandLedgerKey } from './command-ledger.js';
@@ -7,15 +11,10 @@ import {
   CommandSupport,
   CommandValidationError,
   commandResultFromRecord,
+  runOptionsForCommand,
   type NormalizedSubmitForkRunInput,
   type SubmitForkRunInput,
 } from './command-support.js';
-
-export interface ForkChatInput {
-  sourceChatId: string;
-  chatId: string;
-  upToSeq?: unknown;
-}
 
 interface ForkContext {
   sourceChatId: string;
@@ -32,7 +31,7 @@ export class ForkCommands {
     return this.support.deps;
   }
 
-  async forkChat(input: ForkChatInput): Promise<ForkChatResponse> {
+  async forkChat(input: ForkChatCommandRequest): Promise<ForkChatResponse> {
     const normalized = {
       ...input,
       sourceChatId: this.support.requireChatId(input.sourceChatId, 'sourceChatId'),
@@ -46,14 +45,15 @@ export class ForkCommands {
   }
 
   async submitForkRun(input: SubmitForkRunInput): Promise<ForkRunCommandResponse> {
-    const images = this.support.validateAttachments(input.images ?? input.options?.images);
-    this.support.assertContent(input.command, images);
+    this.support.assertContent(input.command, input.images);
     const normalized = {
-      ...input,
       sourceChatId: this.support.requireChatId(input.sourceChatId, 'sourceChatId'),
       chatId: this.support.requireChatId(input.chatId),
-      images,
-      options: this.support.optionsWithoutAttachments(input.options),
+      command: input.command,
+      images: input.images,
+      clientRequestId: input.clientRequestId,
+      clientMessageId: input.clientMessageId,
+      options: runOptionsForCommand(input),
     };
     return this.support.withChatMutationLocks(
       [normalized.sourceChatId, normalized.chatId],
@@ -138,10 +138,10 @@ export class ForkCommands {
     return { ...result, chat: await this.support.projectCommandChat(input.chatId) };
   }
 
-  private validateFork(input: ForkChatInput): ForkContext {
+  private validateFork(input: ForkChatCommandRequest): ForkContext {
     const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
     const targetChatId = this.support.requireChatId(input.chatId);
-    const upToSeq = normalizeForkSeq(input.upToSeq);
+    const upToSeq = input.upToSeq;
 
     if (sourceChatId === targetChatId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'sourceChatId and chatId must differ');
@@ -205,15 +205,6 @@ export class ForkCommands {
       forkAgentSession: this.deps.agents.forkAgentSession.bind(this.deps.agents),
     });
   }
-}
-
-function normalizeForkSeq(value: unknown): number | undefined {
-  if (value == null || value === '') return undefined;
-  const parsed = typeof value === 'string' ? Number(value.trim()) : value;
-  if (typeof parsed !== 'number' || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new CommandValidationError('VALIDATION_FAILED', 'upToSeq must be a positive integer');
-  }
-  return parsed;
 }
 
 function normalizeNextForkOrdinal(value: unknown): number | null {

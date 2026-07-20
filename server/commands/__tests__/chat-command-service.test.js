@@ -20,6 +20,10 @@ import {
 } from '../../chat-execution/chat-execution-coordinator.js';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
+import {
+  parseForkChatCommandRequest,
+  parseStartChatCommandRequest,
+} from '../../../common/chat-command-contracts.ts';
 
 let workspaceDir;
 let projectBaseDir;
@@ -558,27 +562,6 @@ describe('ChatCommandService', () => {
     ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
-  it('rejects unsupported direct run attachments before scheduling queue work', async () => {
-    const { service, queue } = makeService();
-
-    await expect(
-      service.submitRun({
-        chatId: SOURCE_CHAT_ID,
-        command: 'inspect this file',
-        images: [attachment('application/octet-stream')],
-        clientRequestId: 'req-bad-attachment',
-        clientMessageId: 'msg-bad-attachment',
-      }),
-    ).rejects.toMatchObject({
-      code: 'VALIDATION_FAILED',
-      status: 400,
-      message: 'Invalid file type. Only images, Markdown, text, and PDF files are allowed.',
-    });
-
-    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
-    expect(queue.runReservedTurn).not.toHaveBeenCalled();
-  });
-
   it('rejects unsupported chat start attachments before creating the chat', async () => {
     const { service, chats, agents } = makeService();
 
@@ -589,7 +572,7 @@ describe('ChatCommandService', () => {
         projectPath: projectBaseDir,
         command: 'start with this file',
         model: 'opus',
-        images: [attachment('application/octet-stream')],
+        images: [attachment('image/png')],
         clientRequestId: 'req-start-bad-attachment',
         clientMessageId: 'msg-start-bad-attachment',
       }),
@@ -602,10 +585,10 @@ describe('ChatCommandService', () => {
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 
-  it('normalizes chat start tags before storing the command and chat', async () => {
+  it('stores chat start tags normalized by the request boundary', async () => {
     const { service, chats } = makeService();
 
-    const result = await service.submitStart({
+    const result = await service.submitStart(parseStartChatCommandRequest({
       chatId: TARGET_CHAT_ID,
       agentId: 'claude',
       projectPath: projectBaseDir,
@@ -615,7 +598,9 @@ describe('ChatCommandService', () => {
       tags: ['Review Needed', 'review-needed', '  QA  ', 42, '!!!'],
       clientRequestId: 'req-start-tags',
       clientMessageId: 'msg-start-tags',
-    });
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    }));
 
     expect(result.status).toBe('accepted');
     expect(chats.addChat).toHaveBeenCalledWith(
@@ -641,8 +626,7 @@ describe('ChatCommandService', () => {
       modelProtocol: null,
       permissionMode: 'default',
       thinkingMode: 'ultra',
-      agentSettings: agentSettings(),
-      tags: ['Review Needed', 'review-needed', 'QA'],
+      tags: ['qa', 'review-needed'],
     };
 
     await service.submitStart({
@@ -650,11 +634,13 @@ describe('ChatCommandService', () => {
       chatId: TARGET_CHAT_ID,
       clientRequestId: 'req-interactive',
       clientMessageId: 'msg-interactive',
+      agentSettings: agentSettings(),
     });
     const scheduled = await service.submitScheduledStart({
       ...shared,
       clientRequestId: 'req-scheduled',
       clientMessageId: 'msg-scheduled',
+      agentSettingsById: { claude: agentSettings() },
     });
 
     expect(scheduled.chatId).toBe(SCHEDULED_CHAT_ID);
@@ -842,8 +828,8 @@ describe('ChatCommandService', () => {
       .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
   });
 
-  it('requires command identity and rejects invalid IDs before ledger acceptance', async () => {
-    const { service, chats } = makeService();
+  it('requires command identity and rejects invalid IDs at the request boundary', async () => {
+    const { chats } = makeService();
     const input = {
       chatId: TARGET_CHAT_ID,
       agentId: 'claude',
@@ -855,17 +841,14 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-start',
     };
 
-    await expect(service.submitStart(input)).rejects.toMatchObject({
-      code: 'VALIDATION_FAILED',
-      message: 'clientRequestId is required',
-    });
-    await expect(
-      service.submitStart({
+    expect(() => parseStartChatCommandRequest(input)).toThrow('clientRequestId is required');
+    expect(() =>
+      parseStartChatCommandRequest({
         ...input,
         chatId: '178372590000007231252',
         clientRequestId: 'req-start',
       }),
-    ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    ).toThrow('chatId must be a valid 16-digit Unix-microsecond timestamp');
     expect(chats.addChat).not.toHaveBeenCalled();
     await expect(fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
@@ -907,7 +890,10 @@ describe('ChatCommandService', () => {
       command: 'continue',
       clientRequestId: 'req-1',
       clientMessageId: 'msg-1',
-      options: { model: 'opus' },
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: agentSettings(),
     };
 
     const first = await service.submitRun(input);
@@ -1573,19 +1559,16 @@ describe('ChatCommandService', () => {
     expect(queue.abortForChatDeletion).not.toHaveBeenCalled();
   });
 
-  it('rejects malformed message-point fork sequence values', async () => {
-    const { service, forkChatFileCopy } = makeService();
+  it('rejects malformed message-point fork sequence values at the request boundary', async () => {
+    const { forkChatFileCopy } = makeService();
 
-    await expect(
-      service.forkChat({
+    expect(() =>
+      parseForkChatCommandRequest({
         sourceChatId: SOURCE_CHAT_ID,
         chatId: TARGET_CHAT_ID,
         upToSeq: '2abc',
       }),
-    ).rejects.toMatchObject({
-      code: 'VALIDATION_FAILED',
-      status: 400,
-    });
+    ).toThrow('upToSeq must be a positive integer');
 
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });

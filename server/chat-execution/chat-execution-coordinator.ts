@@ -2,7 +2,6 @@
 // Extends EventEmitter to notify listeners of queue state changes,
 // dispatching events, stop requests, and session stops.
 
-import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import type { ChatStopIntent } from '../../common/chat-types.ts';
@@ -386,10 +385,11 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
       || currentQueue.recoveredInputContinuation !== null
     ) return false;
 
-    const activeOptions = ensureTurnIdentifiers({
+    const activeOptions = {
       ...this.#getDrainOptions(chatId),
       ...options,
-    });
+    };
+    assertTurnIdentifiers(activeOptions);
     let pendingRegistered = false;
     let deliveryMayHaveStarted = false;
     try {
@@ -914,11 +914,17 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 }
 
-function ensureTurnIdentifiers(options: RunAgentTurnOptions): RunAgentTurnOptions {
-  return {
-    ...options,
-    clientRequestId: options.clientRequestId ?? crypto.randomUUID(),
-    clientMessageId: options.clientMessageId ?? crypto.randomUUID(),
-    turnId: options.turnId ?? crypto.randomUUID(),
-  };
+function assertTurnIdentifiers(
+  options: RunAgentTurnOptions,
+): asserts options is RunAgentTurnOptions & Required<Pick<
+  RunAgentTurnOptions,
+  'clientRequestId' | 'clientMessageId' | 'turnId'
+>> {
+  if (!options.clientRequestId || !options.clientMessageId || !options.turnId) {
+    throw new DomainError(
+      'INTERNAL_ERROR',
+      'Accepted input is missing command identifiers',
+      500,
+    );
+  }
 }

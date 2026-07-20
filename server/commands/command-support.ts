@@ -2,20 +2,25 @@ import crypto from 'crypto';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
+  AgentInterruptAndSendCommandRequest,
   AgentRunCommandRequest,
+  AgentStopCommandRequest,
+  CompactCommandRequest,
   CommandAcceptedResponse,
   CommandErrorCode,
   ForkRunCommandRequest,
+  PermissionDecisionCommandRequest,
+  ProjectPathPatchRequest,
+  StartChatCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import { InvalidChatIdError, parseChatId, type ChatId } from '../../common/chat-id.js';
-import { normalizePermissionMode, normalizeThinkingMode } from '../../common/chat-modes.js';
+import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type {
   AgentExecutionCommandType,
   RunAgentTurnOptions,
   StartedAgentSession,
 } from '../agents/session-types.js';
-import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.ts';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
@@ -125,45 +130,23 @@ export interface ChatCommandServiceDeps {
   chatMutationLock?: KeyedPromiseLock;
 }
 
-export interface SubmitRunInput {
+export type SubmitRunInput = AgentRunCommandRequest;
+export type SubmitForkRunInput = ForkRunCommandRequest;
+
+export interface NormalizedSubmitRunInput {
   chatId: string;
   command: string;
-  images?: unknown;
-  clientRequestId?: string;
-  clientMessageId?: string;
-  options?: RunAgentTurnOptions;
-}
-
-export interface SubmitForkRunInput extends SubmitRunInput {
-  sourceChatId: string;
-}
-
-export type NormalizedSubmitRunInput = Omit<SubmitRunInput, 'images'> & {
   images?: RunAgentTurnOptions['images'];
-};
+  clientRequestId: string;
+  clientMessageId: string;
+  options: RunAgentTurnOptions;
+}
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   sourceChatId: string;
 }
 
-export interface ChatStartInput {
-  chatId: string;
-  clientRequestId: string;
-  clientMessageId: string;
-  agentId: string;
-  projectPath: string;
-  command: string;
-  model: string;
-  apiProviderId?: string | null;
-  modelEndpointId?: string | null;
-  modelProtocol?: ApiProtocol | null;
-  permissionMode?: unknown;
-  thinkingMode?: unknown;
-  agentSettings?: unknown;
-  agentSettingsById?: unknown;
-  tags?: unknown[];
-  images?: unknown;
-}
+export type ChatStartInput = StartChatCommandRequest;
 
 export interface ScheduledChatStartInput {
   clientRequestId: string;
@@ -175,10 +158,10 @@ export interface ScheduledChatStartInput {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
-  permissionMode?: unknown;
-  thinkingMode?: unknown;
-  agentSettingsById?: unknown;
-  tags?: unknown[];
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
+  agentSettingsById: Record<string, AgentSettingsEnvelope>;
+  tags: string[];
 }
 
 export interface NormalizedChatStart {
@@ -193,8 +176,8 @@ export interface NormalizedChatStart {
   apiProviderId: string | null;
   modelEndpointId: string | null;
   modelProtocol: ApiProtocol | null;
-  permissionMode: ReturnType<typeof normalizePermissionMode>;
-  thinkingMode: ReturnType<typeof normalizeThinkingMode>;
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
   agentSettings: AgentSettingsEnvelope;
   tags: string[];
 }
@@ -218,31 +201,10 @@ export interface QueueMutationInput {
   pauseId?: string;
 }
 
-export interface PermissionDecisionInput {
-  chatId: string;
-  permissionRequestId: string;
-  clientRequestId: string;
-  allow: boolean;
-  alwaysAllow?: boolean;
-  response?: Record<string, unknown>;
-}
-
-export interface StopInput {
-  chatId: string;
-  clientRequestId: string;
-  agentId?: unknown;
-}
-
-export interface CompactInput {
-  chatId: string;
-  clientRequestId: string;
-  instructions?: string;
-}
-
-export interface UpdateProjectPathInput {
-  chatId: string;
-  projectPath: string;
-}
+export type PermissionDecisionInput = PermissionDecisionCommandRequest;
+export type StopInput = AgentStopCommandRequest | AgentInterruptAndSendCommandRequest;
+export type CompactInput = CompactCommandRequest;
+export type UpdateProjectPathInput = ProjectPathPatchRequest;
 
 export interface DeleteChatInput {
   chatId: string;
@@ -299,18 +261,18 @@ export function commandResultFromRecord(
   };
 }
 
-export function runOptionsFromCommandRequest(
-  body: Partial<AgentRunCommandRequest | ForkRunCommandRequest>,
+export function runOptionsForCommand(
+  input: AgentRunCommandRequest | ForkRunCommandRequest,
 ): RunAgentTurnOptions {
-  const options: RunAgentTurnOptions = {};
-  if (body.model !== undefined) options.model = body.model;
-  if (body.permissionMode !== undefined) options.permissionMode = normalizePermissionMode(body.permissionMode);
-  if (body.thinkingMode !== undefined) options.thinkingMode = normalizeThinkingMode(body.thinkingMode);
-  if (body.agentSettings !== undefined) options.agentSettings = body.agentSettings;
-  if (body.apiProviderId !== undefined) options.apiProviderId = body.apiProviderId;
-  if (body.modelEndpointId !== undefined) options.modelEndpointId = body.modelEndpointId;
-  if (body.modelProtocol !== undefined) options.modelProtocol = body.modelProtocol;
-  return options;
+  return {
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+    ...(input.thinkingMode === undefined ? {} : { thinkingMode: input.thinkingMode }),
+    ...(input.agentSettings === undefined ? {} : { agentSettings: input.agentSettings }),
+    ...(input.apiProviderId === undefined ? {} : { apiProviderId: input.apiProviderId }),
+    ...(input.modelEndpointId === undefined ? {} : { modelEndpointId: input.modelEndpointId }),
+    ...(input.modelProtocol === undefined ? {} : { modelProtocol: input.modelProtocol }),
+  };
 }
 
 export class CommandSupport {
@@ -365,17 +327,6 @@ export class CommandSupport {
   assertContent(command: string, images?: RunAgentTurnOptions['images']): void {
     if (!command.trim() && (!images || images.length === 0)) {
       throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
-    }
-  }
-
-  validateAttachments(value: unknown): RunAgentTurnOptions['images'] | undefined {
-    try {
-      return validateCommandAttachments(value);
-    } catch (error) {
-      if (error instanceof AttachmentValidationError) {
-        throw new CommandValidationError('VALIDATION_FAILED', error.message, error.status);
-      }
-      throw error;
     }
   }
 
@@ -458,10 +409,12 @@ export class CommandSupport {
       return commandResultFromRecord(ledger.record, 'duplicate');
     }
 
-    const options = withTurnIds(this.optionsWithoutAttachments(input.options), {
-      ...ids,
+    const options: RunAgentTurnOptions = {
+      ...this.optionsWithoutAttachments(input.options),
+      clientRequestId: ids.clientRequestId,
+      clientMessageId: ids.clientMessageId,
       turnId: ledger.record.turnId ?? ids.turnId,
-    });
+    };
     options.commandType = commandType;
     if (input.images !== undefined) options.images = input.images;
 
@@ -506,18 +459,6 @@ export class CommandSupport {
       control,
     );
   }
-}
-
-function withTurnIds(
-  options: RunAgentTurnOptions,
-  ids: { clientRequestId?: string; clientMessageId?: string; turnId?: string },
-): RunAgentTurnOptions {
-  return {
-    ...options,
-    clientRequestId: ids.clientRequestId ?? options.clientRequestId ?? crypto.randomUUID(),
-    clientMessageId: ids.clientMessageId ?? options.clientMessageId ?? crypto.randomUUID(),
-    turnId: ids.turnId ?? options.turnId ?? crypto.randomUUID(),
-  };
 }
 
 function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): Record<string, unknown> {

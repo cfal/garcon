@@ -275,6 +275,7 @@ describe('POST /api/v1/chats/start', () => {
       model: 'glm-5',
       permissionMode: 'default',
       thinkingMode: 'none',
+      agentSettings: { ownerId: 'factory', schemaVersion: 1, values: {} },
       command: 'review the diagram',
       images: [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }],
     }));
@@ -372,6 +373,7 @@ describe('POST /api/v1/chats/start', () => {
       agentId: 'unknown-provider',
       projectPath,
       model: 'opus',
+      agentSettings: { ownerId: 'unknown-provider', schemaVersion: 1, values: {} },
       command: 'hello',
     }));
 

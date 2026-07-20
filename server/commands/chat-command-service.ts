@@ -1,5 +1,6 @@
 import type {
   ActiveInputCommandRequest,
+  ForkChatCommandRequest,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryReplaceCommandRequest,
@@ -20,7 +21,7 @@ import {
   type SubmitRunInput,
   type UpdateProjectPathInput,
 } from './command-support.js';
-import { ForkCommands, type ForkChatInput } from './fork-commands.js';
+import { ForkCommands } from './fork-commands.js';
 import { QueueCommands } from './queue-commands.js';
 import { SessionCommands } from './session-commands.js';
 import { StartCommands } from './start-commands.js';
@@ -29,7 +30,6 @@ export {
   CommandExecutionControlError,
   CommandValidationError,
   commandResultFromRecord,
-  runOptionsFromCommandRequest,
 } from './command-support.js';
 export type {
   ChatStartInput,
@@ -68,7 +68,7 @@ export class ChatCommandService {
     return this.#session.submitRun(input);
   }
 
-  forkChat(input: ForkChatInput) {
+  forkChat(input: ForkChatCommandRequest) {
     return this.#fork.forkChat(input);
   }
 
