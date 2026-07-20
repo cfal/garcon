@@ -380,6 +380,7 @@ After completion of a task, verify:
 - Store logic: unit tests near store domain.
 - Event/router logic: adapter/normalization/reducer tests.
 - Critical UI behavior: component-level tests for interactions and state transitions.
+- Name DOM-free web tests `*.logic.test.ts` only when they avoid Svelte components, browser globals, and module mocks; these run in the shared Node threads project with `isolate: false`.
 
 ### Integration Tests
 
