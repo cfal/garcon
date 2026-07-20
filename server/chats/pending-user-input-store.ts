@@ -2,18 +2,10 @@ import { EventEmitter } from 'events';
 import type { UserMessageDeliveryStatus } from '../../common/chat-types.js';
 import type {
   PendingUserInput,
-  PendingUserInputAttachment,
   PendingUserInputClearReason,
 } from '../../common/pending-user-input.js';
 
-export interface PendingUserInputImageEvidence extends PendingUserInputAttachment {
-  dataSha256: string;
-  dataLength: number;
-}
-
-export interface PendingUserInputRecord extends PendingUserInput {
-  imageEvidence?: PendingUserInputImageEvidence[];
-}
+export type PendingUserInputRecord = PendingUserInput;
 export type PendingUserInputStoreClearReason = PendingUserInputClearReason;
 
 type UpdatedCallback = (input: PendingUserInput) => void;

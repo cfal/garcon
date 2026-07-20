@@ -11,162 +11,20 @@ import type {
 } from '../../common/pending-user-input.js';
 import {
   PendingUserInputStore,
-  type PendingUserInputImageEvidence,
   type PendingUserInputRecord,
 } from './pending-user-input-store.js';
 import type { PendingInputHistoryReader } from './chat-message-reader.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { createLogger } from '../lib/log.js';
+import {
+  matchingRequestIds,
+  type IdentitylessEvidenceClaim,
+} from './pending-input-matching.js';
+
+const logger = createLogger('pending-inputs');
 
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
   return left.createdAt.localeCompare(right.createdAt);
-}
-
-const PENDING_ECHO_MAX_AFTER_MS = 5 * 60 * 1000;
-
-function imageEvidence(images: ChatImage[] | undefined): PendingUserInputImageEvidence[] {
-  return (images ?? []).map((image) => ({
-    name: image.name,
-    ...(image.mimeType ? { mimeType: image.mimeType } : {}),
-    dataSha256: crypto.createHash('sha256').update(image.data).digest('hex'),
-    dataLength: image.data.length,
-  }));
-}
-
-function imagesMatch(record: PendingUserInputRecord, images: ChatImage[] | undefined): boolean {
-  const leftImages = record.imageEvidence ?? imageEvidence(record.images);
-  const rightImages = imageEvidence(images);
-  return leftImages.length === rightImages.length && leftImages.every((image, index) => {
-    const candidate = rightImages[index];
-    return candidate !== undefined
-      && image.dataSha256 === candidate.dataSha256
-      && image.dataLength === candidate.dataLength
-      && image.name === candidate.name
-      && image.mimeType === candidate.mimeType;
-  });
-}
-
-function isUnidentifiedPendingEcho(record: PendingUserInputRecord, message: UserMessage): boolean {
-  if (message.metadata?.clientRequestId) return false;
-  if (
-    record.turnId
-    && message.metadata?.turnId
-    && record.turnId !== message.metadata.turnId
-  ) {
-    return false;
-  }
-  if (record.content !== message.content || !imagesMatch(record, message.images)) return false;
-  const pendingAt = Date.parse(record.createdAt);
-  const messageAt = Date.parse(message.timestamp);
-  return Number.isFinite(pendingAt)
-    && Number.isFinite(messageAt)
-    && messageAt >= pendingAt
-    && messageAt <= pendingAt + PENDING_ECHO_MAX_AFTER_MS;
-}
-
-interface IdentitylessEvidenceClaim {
-  count: number;
-  messageAt: number;
-}
-
-interface PendingInputMatches {
-  requestIds: Set<string>;
-  identitylessEvidence: Map<string, IdentitylessEvidenceClaim>;
-}
-
-function identitylessEvidenceKey(message: UserMessage): string {
-  return crypto.createHash('sha256').update(JSON.stringify({
-    timestamp: message.timestamp,
-    content: message.content,
-    images: message.images ?? [],
-    turnId: message.metadata?.turnId ?? null,
-  })).digest('hex');
-}
-
-function matchingRequestIds(
-  records: PendingUserInputRecord[],
-  messages: UserMessage[],
-  claimedIdentitylessEvidence: ReadonlyMap<string, IdentitylessEvidenceClaim>,
-  allowIdentityless = true,
-): PendingInputMatches {
-  const matchedMessageIndexes = new Set<number>();
-  const requestIds = new Set<string>();
-  const identitylessEvidence = new Map<string, IdentitylessEvidenceClaim>();
-  const identitylessOccurrences = new Map<number, { key: string; occurrence: number; messageAt: number }>();
-  const occurrenceCounts = new Map<string, number>();
-
-  messages.forEach((message, index) => {
-    if (message.metadata?.clientRequestId) return;
-    const key = identitylessEvidenceKey(message);
-    const occurrence = (occurrenceCounts.get(key) ?? 0) + 1;
-    occurrenceCounts.set(key, occurrence);
-    identitylessOccurrences.set(index, {
-      key,
-      occurrence,
-      messageAt: Date.parse(message.timestamp),
-    });
-  });
-
-  for (const record of records) {
-    const messageIndex = messages.findIndex(
-      (message, index) =>
-        !matchedMessageIndexes.has(index)
-        && message.metadata?.clientRequestId === record.clientRequestId,
-    );
-    if (messageIndex < 0) continue;
-    matchedMessageIndexes.add(messageIndex);
-    requestIds.add(record.clientRequestId);
-  }
-
-  if (!allowIdentityless) return { requestIds, identitylessEvidence };
-
-  const candidates: Array<{
-    record: PendingUserInputRecord;
-    recordIndex: number;
-    messageIndex: number;
-    evidence: { key: string; occurrence: number; messageAt: number };
-    distanceMs: number;
-  }> = [];
-  records.forEach((record, recordIndex) => {
-    if (requestIds.has(record.clientRequestId)) return;
-    messages.forEach((message, messageIndex) => {
-      if (matchedMessageIndexes.has(messageIndex) || !isUnidentifiedPendingEcho(record, message)) {
-        return;
-      }
-      const evidence = identitylessOccurrences.get(messageIndex);
-      if (
-        !evidence
-        || evidence.occurrence <= (claimedIdentitylessEvidence.get(evidence.key)?.count ?? 0)
-      ) return;
-      candidates.push({
-        record,
-        recordIndex,
-        messageIndex,
-        evidence,
-        distanceMs: Math.abs(evidence.messageAt - Date.parse(record.createdAt)),
-      });
-    });
-  });
-  candidates.sort((left, right) =>
-    left.distanceMs - right.distanceMs
-    || left.recordIndex - right.recordIndex
-    || left.messageIndex - right.messageIndex,
-  );
-
-  for (const candidate of candidates) {
-    if (
-      matchedMessageIndexes.has(candidate.messageIndex)
-      || requestIds.has(candidate.record.clientRequestId)
-    ) continue;
-    matchedMessageIndexes.add(candidate.messageIndex);
-    requestIds.add(candidate.record.clientRequestId);
-    const prior = identitylessEvidence.get(candidate.evidence.key);
-    identitylessEvidence.set(candidate.evidence.key, {
-      count: Math.max(prior?.count ?? 0, candidate.evidence.occurrence),
-      messageAt: candidate.evidence.messageAt,
-    });
-  }
-
-  return { requestIds, identitylessEvidence };
 }
 
 function userMessages(messages: ChatMessage[] | null): UserMessage[] {
@@ -417,7 +275,13 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     );
     for (const record of this.#currentCohortRecords(cohort)) {
       if (record.deliveryStatus === 'failed') continue;
-      this.store.updateDeliveryStatusIfCurrent(cohort.chatId, record, 'unconfirmed');
+      if (this.store.updateDeliveryStatusIfCurrent(cohort.chatId, record, 'unconfirmed')) {
+        logger.debug('pending input expired unmatched', {
+          chatId: cohort.chatId,
+          clientRequestId: record.clientRequestId,
+          count: 1,
+        });
+      }
     }
   }
 
@@ -429,6 +293,12 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   ): void {
     const claimedEvidence = this.#claimedIdentitylessEvidenceByChatId.get(chatId) ?? new Map();
     const matches = matchingRequestIds(records, messages, claimedEvidence, allowIdentityless);
+    if (matches.identitylessRequestIds.size > 0) {
+      logger.debug('identityless pending input echoes matched', {
+        chatId,
+        count: matches.identitylessRequestIds.size,
+      });
+    }
     for (const [key, evidence] of matches.identitylessEvidence) {
       const prior = claimedEvidence.get(key);
       claimedEvidence.set(key, {
