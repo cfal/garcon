@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 export {};
 
@@ -34,8 +35,11 @@ function respond(line: string): void {
   if (request.method === 'thread/list') {
     const threadId = process.env.INTEGRATION_CODEX_THREAD_ID;
     const nativePath = process.env.INTEGRATION_CODEX_NATIVE_PATH;
+    const discovered = process.env.INTEGRATION_CODEX_DISCOVER_JSONL === '1'
+      ? discoverCodexThreads()
+      : [];
     write(request.id, {
-      data: threadId && nativePath ? [{ id: threadId, path: nativePath }] : [],
+      data: threadId && nativePath ? [{ id: threadId, path: nativePath }, ...discovered] : discovered,
       nextCursor: null,
       backwardsCursor: null,
     });
@@ -83,4 +87,37 @@ function respond(line: string): void {
 
 function write(id: number, result: unknown): void {
   process.stdout.write(`${JSON.stringify({ id, result })}\n`);
+}
+
+function discoverCodexThreads(): Array<{ id: string; path: string }> {
+  const codexHome = process.env.CODEX_HOME;
+  if (!codexHome) return [];
+  const files: string[] = [];
+  collectJsonlFiles(join(codexHome, 'sessions'), files);
+  return files.flatMap((path) => {
+    try {
+      const firstLine = readFileSync(path, 'utf8').split('\n').find((line) => line.trim());
+      const entry = firstLine ? JSON.parse(firstLine) as {
+        type?: unknown;
+        payload?: { id?: unknown };
+      } : null;
+      return entry?.type === 'session_meta' && typeof entry.payload?.id === 'string'
+        ? [{ id: entry.payload.id, path }]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function collectJsonlFiles(directory: string, files: string[]): void {
+  try {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) collectJsonlFiles(path, files);
+      else if (entry.isFile() && entry.name.endsWith('.jsonl')) files.push(path);
+    }
+  } catch {
+    return;
+  }
 }

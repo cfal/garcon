@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
 import { buildThreadResumeParams } from '../../../server-agents/codex/src/agents/codex/app-server/request-builders.js';
@@ -12,6 +13,14 @@ describe('Codex fork at message', () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
     const sourceAgentSessionId = randomUUID();
     let sourceNativePath = '';
+    const serverEnvironment = {
+      GARCON_CODEX_CLI: fileURLToPath(new URL(
+        '../../support/fake-codex-app-server.ts',
+        import.meta.url,
+      )),
+      PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+      INTEGRATION_CODEX_DISCOVER_JSONL: '1',
+    };
 
     await withIntegrationFixture('codex-fork-at-message', async (fixture) => {
       const source = await fixture.client.getMessages(sourceChatId);
@@ -34,44 +43,44 @@ describe('Codex fork at message', () => {
       expect(forked.messages.map((entry) => entry.message))
         .toEqual(source.messages.map((entry) => entry.message));
 
-        const registry = JSON.parse(
-          await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
-        ) as {
-          sessions: Record<string, {
-            nativeSession: { value: { path: string; agentSessionId: string } };
-          }>;
-        };
-        const targetNative = registry.sessions[targetChatId]!.nativeSession.value;
-        const targetNativePath = targetNative.path;
+      const registry = JSON.parse(
+        await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
+      ) as {
+        sessions: Record<string, {
+          nativeSession: { value: { path: string; agentSessionId: string } };
+        }>;
+      };
+      const targetNative = registry.sessions[targetChatId]!.nativeSession.value;
+      const targetNativePath = targetNative.path;
       const targetLines = (await readFile(targetNativePath, 'utf8')).trimEnd().split('\n');
       expect(JSON.parse(targetLines[1]!)).toEqual({ type: 'garcon_fork_filtered' });
       expect(targetLines.some((line) => line.includes('"name":"exec"'))).toBe(true);
-        expect(targetLines.some((line) => line.includes('"name":"wait"'))).toBe(true);
-        expect(targetNativePath).not.toBe(sourceNativePath);
+      expect(targetLines.some((line) => line.includes('"name":"wait"'))).toBe(true);
+      expect(targetNativePath).not.toBe(sourceNativePath);
 
-        const codex = new CodexAppServerClient({
-          env: {
-            HOME: fixture.dirs.home,
-            CODEX_HOME: join(fixture.dirs.home, '.codex'),
-          },
+      const codex = new CodexAppServerClient({
+        env: {
+          HOME: fixture.dirs.home,
+          CODEX_HOME: join(fixture.dirs.home, '.codex'),
+        },
+      });
+      try {
+        const resumed = await codex.resumeThread(buildThreadResumeParams({
+          agentSessionId: targetNative.agentSessionId,
+          nativePath: targetNativePath,
+          model: 'gpt-5.6-sol',
+          projectPath: fixture.dirs.project,
+          permissionMode: 'default',
+        }));
+        expect(resumed.thread).toMatchObject({
+          id: targetNative.agentSessionId,
+          path: targetNativePath,
         });
-        try {
-          const resumed = await codex.resumeThread(buildThreadResumeParams({
-            agentSessionId: targetNative.agentSessionId,
-            nativePath: targetNativePath,
-            model: 'gpt-5.6-sol',
-            projectPath: fixture.dirs.project,
-            permissionMode: 'default',
-          }));
-          expect(resumed.thread).toMatchObject({
-            id: targetNative.agentSessionId,
-            path: targetNativePath,
-          });
-        } finally {
-          codex.shutdown();
-        }
+      } finally {
+        codex.shutdown();
+      }
 
-        await fixture.restartGarcon();
+      await fixture.restartGarcon();
       const reloaded = await fixture.client.getMessages(targetChatId);
       expect(reloaded.messages.map((entry) => entry.message))
         .toEqual(source.messages.map((entry) => entry.message));
@@ -79,6 +88,7 @@ describe('Codex fork at message', () => {
         entry.message.type === 'exec-tool-use' || entry.message.type === 'wait-tool-use'
       ))).toBe(false);
     }, {
+      serverEnvironment,
       async prepareWorkspace(directories) {
         sourceNativePath = join(
           directories.home,
