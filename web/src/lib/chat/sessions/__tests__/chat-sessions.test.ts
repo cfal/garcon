@@ -537,6 +537,7 @@ describe('ChatSessionsStore', () => {
 		const ref = store.byId;
 
 		expect(store.byId).toBe(ref);
+		expect(store.isChatProcessing('scheduled-chat')).toBe(true);
 
 		store.upsertFromServer([
 			makeServerSession({ id: 'scheduled-chat', title: 'Scheduled chat', isActive: false }),

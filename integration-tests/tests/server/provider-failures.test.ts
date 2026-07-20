@@ -175,11 +175,25 @@ describe('provider failures', () => {
         && event.chatId === chatId
         && event.control.queue.pause?.kind === 'queued-turn-failed'
       ));
+      const dispatchEventIndex = failureEvents.findIndex((event) => (
+        event.type === 'queue-dispatching'
+        && event.chatId === chatId
+        && event.content === 'failure-b'
+      ));
+      const processingStoppedIndex = failureEvents.findIndex((event, index) => (
+        index > dispatchEventIndex
+        && event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.isProcessing === false
+      ));
       const terminalEventIndex = failureEvents.findIndex((event) => (
         event.type === 'agent-run-failed' && event.chatId === chatId
       ));
       expect(pauseEventIndex).toBeGreaterThanOrEqual(0);
+      expect(dispatchEventIndex).toBeGreaterThanOrEqual(0);
+      expect(processingStoppedIndex).toBeGreaterThan(dispatchEventIndex);
       expect(terminalEventIndex).toBeGreaterThan(pauseEventIndex);
+      expect(terminalEventIndex).toBeGreaterThan(processingStoppedIndex);
       expect(failed.clientRequestId).toBeString();
       const queue = (await fixture.client.getExecutionControl(chatId)).queue;
       expect(queue.pause).toMatchObject({

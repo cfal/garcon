@@ -47,6 +47,7 @@ export interface ChatSessionsPort {
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
+	isChatProcessing(chatId: string): boolean;
 	applyProcessingEvent(chatId: string, isProcessing: boolean): void;
 	invalidateProcessingAuthority(): void;
 	reconcileProcessing(activeChatIds: Set<string>): void;
@@ -620,6 +621,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			...this.byId,
 			[chatId]: { ...chat, lastReadAt: reconciledLastReadAt, isUnread },
 		};
+	}
+
+	/** Returns WebSocket-authoritative processing state before or after list hydration. */
+	isChatProcessing(chatId: string): boolean {
+		return this.#resolveProcessing(chatId, this.byId[chatId]?.isProcessing ?? false);
 	}
 
 	/** Applies a WebSocket-authoritative processing event for one chat. */

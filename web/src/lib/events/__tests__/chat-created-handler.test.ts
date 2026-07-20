@@ -25,7 +25,7 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		conversationUi: makeConversationUi(),
 		markTurnRunning: vi.fn(),
 		clearTurnStatus: vi.fn(),
-		markChatsAsCompleted: vi.fn(),
+		isChatProcessing: vi.fn(() => false),
 		startupCoordinator: new StartupCoordinator(),
 		onChatProcessing: vi.fn(),
 		onChatNotProcessing: vi.fn(),

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleChatStatus } from '../handlers/chat';
+import { handleChatAborted, handleChatStatus } from '../handlers/chat';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatEventContext } from '../handlers/chat';
-import { ChatProcessingUpdatedMessage } from '$shared/ws-events';
+import { ChatProcessingUpdatedMessage, ChatSessionStoppedMessage } from '$shared/ws-events';
 
 function makeConversationUi(): ChatEventContext['conversationUi'] {
 	return {
@@ -22,7 +22,7 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		conversationUi: makeConversationUi(),
 		markTurnRunning: vi.fn(),
 		clearTurnStatus: vi.fn(),
-		markChatsAsCompleted: vi.fn(),
+		isChatProcessing: vi.fn(() => false),
 		startupCoordinator: new StartupCoordinator(),
 		onChatProcessing: vi.fn(),
 		onChatNotProcessing: vi.fn(),
@@ -69,5 +69,34 @@ describe('handleChatStatus', () => {
 
 		handleChatStatus(makeMsg('chat-a', false), ctx);
 		expect(ctx.onChatNotProcessing).toHaveBeenCalledWith('chat-a');
+	});
+});
+
+describe('handleChatAborted', () => {
+	it('preserves successor-turn metadata and permission requests', () => {
+		const ctx = makeCtx({
+			getCurrentChatId: () => 'chat-a',
+			isChatProcessing: () => true,
+		});
+
+		handleChatAborted(
+			new ChatSessionStoppedMessage('chat-a', true, 'interrupt-and-send'),
+			ctx,
+		);
+
+		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
+		expect(ctx.conversationUi.clearPendingPermissionRequests).not.toHaveBeenCalled();
+	});
+
+	it('clears stopped-turn metadata before provider processing settles', () => {
+		const ctx = makeCtx({
+			getCurrentChatId: () => 'chat-a',
+			isChatProcessing: () => true,
+		});
+
+		handleChatAborted(new ChatSessionStoppedMessage('chat-a', true, 'stop'), ctx);
+
+		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-a');
+		expect(ctx.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
 	});
 });

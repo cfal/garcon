@@ -47,7 +47,6 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		sessions: {
 			selectedChat,
 			selectedChatId: selectedChat?.id ?? null,
-			byId: selectedChat ? { [selectedChat.id]: selectedChat } : {},
 			order: selectedChat ? [selectedChat.id] : [],
 			hasChat: (chatId) => chatId === selectedChat?.id,
 			patchPreview: vi.fn(),
@@ -55,6 +54,8 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			patchLastReadAt: vi.fn(),
 			removeChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
+			isChatProcessing: (chatId) =>
+				chatId === selectedChat?.id && selectedChat.isProcessing,
 			applyProcessingEvent: vi.fn(),
 			reconcileProcessing: vi.fn(),
 			quietRefreshChats: vi.fn(),

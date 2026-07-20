@@ -9,6 +9,7 @@ import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 
 const TS = '2026-05-14T00:00:01.000Z';
 
@@ -45,6 +46,7 @@ function rawMessage(seq: number, message: Record<string, unknown>) {
 }
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
+	const selectedChat = chatRecord();
 	return {
 		agentSettings: {
 			permissionMode: () => 'default',
@@ -80,13 +82,14 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		},
 		conversationUi: new ConversationUiState(),
 		sessions: {
-			selectedChat: chatRecord(),
+			selectedChat,
 			setSelectedChatId: vi.fn(),
 			patchPreview: vi.fn(),
 			quietRefreshChats: vi.fn(),
 			removeChat: vi.fn(),
 			patchChat: vi.fn(),
 			reconcileProcessing: vi.fn(),
+			isChatProcessing: vi.fn(() => selectedChat.isProcessing),
 			applyProcessingEvent: vi.fn(),
 			patchLastReadAt: vi.fn(),
 		},
@@ -238,6 +241,73 @@ describe('event router integration', () => {
 			'generation-current',
 			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
 		);
+	});
+
+	it('does not let a delayed terminal clear a successor turn', () => {
+		let selectedChat = chatRecord();
+		const defaults = createStores();
+		const applyProcessingEvent = vi.fn((chatId: string, isProcessing: boolean) => {
+			if (chatId === selectedChat.id) selectedChat = { ...selectedChat, isProcessing };
+		});
+		const sessions = {
+			...defaults.sessions,
+			get selectedChat() {
+				return selectedChat;
+			},
+			isChatProcessing: (chatId: string) =>
+				chatId === selectedChat.id && selectedChat.isProcessing,
+			applyProcessingEvent,
+		};
+		const stores = createStores({ sessions });
+
+		renderRouterWithRawMessages(
+			[
+				{ type: 'chat-processing-updated', chatId: 'chat-a', isProcessing: false },
+				{ type: 'chat-processing-updated', chatId: 'chat-a', isProcessing: true },
+				{
+					type: 'agent-run-finished',
+					chatId: 'chat-a',
+					turnId: 'previous-turn',
+					exitCode: 0,
+				},
+			],
+			stores,
+		);
+
+		expect(applyProcessingEvent.mock.calls).toEqual([
+			['chat-a', false],
+			['chat-a', true],
+		]);
+		expect(stores.lifecycle.clearTurnStatus).toHaveBeenCalledTimes(1);
+	});
+
+	it('preserves an early processing event before the chat list record arrives', () => {
+		const sessionStore = new ChatSessionsStore();
+		const defaults = createStores();
+		const sessions = {
+			...defaults.sessions,
+			selectedChat: null,
+			isChatProcessing: (chatId: string) => sessionStore.isChatProcessing(chatId),
+			applyProcessingEvent: (chatId: string, isProcessing: boolean) =>
+				sessionStore.applyProcessingEvent(chatId, isProcessing),
+		};
+		const stores = createStores({ sessions });
+
+		renderRouterWithRawMessages(
+			[
+				{ type: 'chat-processing-updated', chatId: 'chat-a', isProcessing: true },
+				{
+					type: 'agent-run-finished',
+					chatId: 'chat-a',
+					turnId: 'previous-turn',
+					exitCode: 0,
+				},
+			],
+			stores,
+		);
+
+		expect(sessionStore.isChatProcessing('chat-a')).toBe(true);
+		expect(stores.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
 	});
 
 	it('reloads the selected chat when live messages expose a seq gap', () => {

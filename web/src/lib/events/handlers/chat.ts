@@ -26,7 +26,7 @@ export interface ChatEventContext {
 	>;
 	markTurnRunning: (chatId?: string | null) => void;
 	clearTurnStatus: (chatId?: string | null) => void;
-	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
+	isChatProcessing: (chatId?: string | null) => boolean;
 	onChatProcessing: (chatId?: string | null) => void;
 	onChatNotProcessing: (chatId?: string | null) => void;
 	// Startup ownership callbacks.
@@ -69,12 +69,13 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 	const abortSucceeded = msg.success !== false;
 	if (!abortSucceeded) return;
 
-	ctx.clearTurnStatus(abortedChatId);
-	ctx.markChatsAsCompleted(abortedChatId);
+	const successorIsProcessing =
+		msg.intent === 'interrupt-and-send' && ctx.isChatProcessing(abortedChatId);
+	if (!successorIsProcessing) ctx.clearTurnStatus(abortedChatId);
 	if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
 		ctx.clearPendingChatId();
 	}
-	ctx.conversationUi.clearPendingPermissionRequests();
+	if (!successorIsProcessing) ctx.conversationUi.clearPendingPermissionRequests();
 	if (msg.intent === 'stop') {
 		ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());
 	}

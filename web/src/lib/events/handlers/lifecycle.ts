@@ -22,7 +22,7 @@ export interface LifecycleContext {
 		'setPendingPermissionRequests' | 'clearPendingPermissionRequests'
 	>;
 	clearTurnStatus: (chatId?: string | null) => void;
-	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
+	isChatProcessing: (chatId?: string | null) => boolean;
 	onNavigateToChat: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
@@ -33,9 +33,9 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	const pendingChatId = ctx.getPendingChatId();
 	const currentChatId = ctx.getCurrentChatId();
 	const completedChatId = msg.chatId || currentChatId || pendingChatId;
+	const successorIsProcessing = ctx.isChatProcessing(completedChatId);
 
-	ctx.clearTurnStatus(completedChatId);
-	ctx.markChatsAsCompleted(completedChatId);
+	if (!successorIsProcessing) ctx.clearTurnStatus(completedChatId);
 
 	const runFailed = agentReportedFailure(msg.exitCode);
 
@@ -54,17 +54,19 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	}
 
 	// Preserve plan-exit permission requests across turn boundaries
-	ctx.conversationUi.setPendingPermissionRequests((prev) =>
-		prev.filter((r) => r.permissionRequestId.startsWith('plan-exit-')),
-	);
+	if (!successorIsProcessing) {
+		ctx.conversationUi.setPendingPermissionRequests((prev) =>
+			prev.filter((r) => r.permissionRequestId.startsWith('plan-exit-')),
+		);
+	}
 }
 
 export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleContext) {
 	const errorChatId = msg.chatId || ctx.getCurrentChatId();
+	const successorIsProcessing = ctx.isChatProcessing(errorChatId);
 
-	ctx.clearTurnStatus(errorChatId);
-	ctx.markChatsAsCompleted(errorChatId);
+	if (!successorIsProcessing) ctx.clearTurnStatus(errorChatId);
 
 	ctx.appendLocalNotice('error', msg.error || m.chat_notice_agent_error());
-	ctx.conversationUi.clearPendingPermissionRequests();
+	if (!successorIsProcessing) ctx.conversationUi.clearPendingPermissionRequests();
 }
