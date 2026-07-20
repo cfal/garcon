@@ -66,7 +66,7 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -- WAI-ARIA window splitter: a focusable separator resized via arrow keys -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -- WAI-ARIA window splitter is a focusable separator resized via arrow keys; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 <div
 	class={cn(
 		'relative flex-shrink-0 group select-none touch-none z-10 outline-none',

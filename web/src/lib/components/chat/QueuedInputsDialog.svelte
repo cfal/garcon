@@ -4,6 +4,7 @@
 	import type { ChatQueueState, QueueEntry, QueuePause } from '$lib/types/chat';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
+	import { errorMessage } from '$lib/utils/error-message.js';
 	import QueuedInputEditorPanel from './QueuedInputEditorPanel.svelte';
 	import QueuedInputRow from './QueuedInputRow.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -58,11 +59,6 @@
 			deletingIds = new Set([...deletingIds].filter((entryId) => liveIds.has(entryId)));
 		}
 	});
-
-	function errorMessage(error: unknown): string {
-		if (error instanceof ApiError || error instanceof Error) return error.message;
-		return String(error);
-	}
 
 	function queuePauseDetail(value: QueuePause): string | null {
 		switch (value.kind) {

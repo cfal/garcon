@@ -71,7 +71,7 @@ export function buildReadToolGroupRenderItems(
 			message,
 			filePath,
 			displayName: filePath ? readFileDisplayName(filePath) : 'Unknown file',
-			rangeLabel: readRangePresenter(message as unknown as Record<string, unknown>),
+			rangeLabel: readRangePresenter(message),
 			isUnknown: filePath.length === 0,
 		};
 	});

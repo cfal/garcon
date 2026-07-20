@@ -335,7 +335,7 @@
 	{/if}
 
 	<div class="flex-1 min-h-0 overflow-hidden">
-		<!-- svelte-ignore a11y_no_static_element_interactions -- drop target for initiating split mode and focused-pane measurement root -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -- split-mode native drop target also owns focused-pane measurement; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 		<div
 			class="h-full relative"
 			bind:this={splitRootEl}
@@ -408,7 +408,7 @@
 				</div>
 			{/if}
 			{#if splitDrop.showActiveSplitDropLayer}
-				<!-- svelte-ignore a11y_no_static_element_interactions -- drag target only exists during native drag-and-drop -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -- transient target exists only during native drag-and-drop; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 				<div
 					class="absolute inset-0 z-40 pointer-events-auto"
 					data-split-drag-layer

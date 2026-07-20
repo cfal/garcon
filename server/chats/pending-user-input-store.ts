@@ -16,6 +16,12 @@ type StatusUpdatedCallback = (
 ) => void;
 type ClearedCallback = (chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason) => void;
 
+interface PendingUserInputEvents {
+  updated: Parameters<UpdatedCallback>;
+  'status-updated': Parameters<StatusUpdatedCallback>;
+  cleared: Parameters<ClearedCallback>;
+}
+
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
   return left.createdAt.localeCompare(right.createdAt);
 }
@@ -34,7 +40,7 @@ function clonePendingInput(record: PendingUserInputRecord): PendingUserInput {
   };
 }
 
-export class PendingUserInputStore extends EventEmitter {
+export class PendingUserInputStore extends EventEmitter<PendingUserInputEvents> {
   #recordsByChatId = new Map<string, PendingUserInputRecord[]>();
 
   listForChat(chatId: string): PendingUserInput[] {

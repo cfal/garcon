@@ -417,7 +417,7 @@
 	);
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -- keydown on container for Escape handling -->
+<!-- svelte-ignore a11y_no_static_element_interactions -- container delegates bubbled Escape handling for the sidebar subtree; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 <div class="h-full flex flex-col bg-card md:select-none relative" onkeydown={handleSidebarKeydown}>
 	<div class="order-1 flex-shrink-0">
 		<SidebarSearchDock

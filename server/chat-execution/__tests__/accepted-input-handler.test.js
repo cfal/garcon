@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { AcceptedInputSaga } from '../accepted-input-saga.ts';
+import { AcceptedInputHandler } from '../accepted-input-handler.ts';
 import { ActiveInputDeliveryError, DomainError } from '../../lib/domain-error.ts';
 
 function command(overrides = {}) {
@@ -37,7 +37,7 @@ function settlement(overrides = {}) {
   };
 }
 
-// Builds the saga over its injected collaborators while exposing every mock
+// Builds the handler over its injected collaborators while exposing every mock
 // flatly for assertions. Queue mutations map to the control operations, pending
 // bookkeeping to the pending-input store, and the rest to the coordinator port.
 function scaffold(overrides = {}) {
@@ -70,7 +70,7 @@ function scaffold(overrides = {}) {
     hasAppliedCreate: mock(async () => false),
     ...overrides,
   };
-  const saga = new AcceptedInputSaga({
+  const handler = new AcceptedInputHandler({
     controls: {
       create: m.create,
       stageActiveFallback: m.stageActiveFallback,
@@ -93,16 +93,16 @@ function scaffold(overrides = {}) {
       hasAppliedCreate: m.hasAppliedCreate,
     },
   });
-  return { m, saga };
+  return { m, handler };
 }
 
-describe('AcceptedInputSaga', () => {
+describe('AcceptedInputHandler', () => {
   test('settles an enqueue before requesting dispatch', async () => {
     const events = [];
     const settle = settlement({
       settleQueueMutation: mock(async () => { events.push('settled'); }),
     });
-    const { saga, m } = scaffold({
+    const { handler, m } = scaffold({
       create: mock(async () => {
         events.push('created');
         return { entryId: 'entry-1', control: control(), duplicate: false };
@@ -110,7 +110,7 @@ describe('AcceptedInputSaga', () => {
       requestDrain: mock(() => { events.push('drain'); }),
     });
 
-    await saga.enqueue({
+    await handler.enqueue({
       command: command(),
       content: 'queued',
       settlement: settle,
@@ -123,9 +123,9 @@ describe('AcceptedInputSaga', () => {
   test('records synchronous admission rejection without mutating the transcript', async () => {
     const busy = new DomainError('SESSION_BUSY', 'busy', 409, true);
     const settle = settlement();
-    const { saga, m } = scaffold({ reserveDirect: mock(() => { throw busy; }) });
+    const { handler, m } = scaffold({ reserveDirect: mock(() => { throw busy; }) });
 
-    await expect(saga.schedule({
+    await expect(handler.schedule({
       command: command(),
       content: 'direct',
       options: { clientRequestId: 'request-1', turnId: 'turn-1' },
@@ -145,13 +145,13 @@ describe('AcceptedInputSaga', () => {
     const settle = settlement({
       markPreScheduleFailure: mock(async () => { events.push('settled'); }),
     });
-    const { saga } = scaffold({
+    const { handler } = scaffold({
       registerPending: mock(async () => { throw registrationError; }),
       markFailed: mock(() => true),
       releaseDirect: mock(async () => { events.push('released'); }),
     });
 
-    await expect(saga.schedule({
+    await expect(handler.schedule({
       command: command(),
       content: 'direct',
       options: { clientRequestId: 'request-1', turnId: 'turn-1' },
@@ -177,7 +177,7 @@ describe('AcceptedInputSaga', () => {
     const settle = settlement({
       settleOperationFailure: mock(async () => { events.push('settled'); }),
     });
-    const { saga } = scaffold({
+    const { handler } = scaffold({
       runDirect: mock(async (_reservation, _content, _options, _dispatch, beforeFailureRelease) => {
         try {
           await beforeFailureRelease(providerError);
@@ -188,7 +188,7 @@ describe('AcceptedInputSaga', () => {
       }),
     });
 
-    await expect(saga.runInitial({
+    await expect(handler.runInitial({
       command: command(),
       content: 'initial',
       options: { clientRequestId: 'request-1', turnId: 'turn-1' },
@@ -206,14 +206,14 @@ describe('AcceptedInputSaga', () => {
   test('stages active input before provider handoff and retains it when confirmation fails', async () => {
     const providerError = new Error('connection lost');
     const settle = settlement();
-    const { saga, m } = scaffold({
+    const { handler, m } = scaffold({
       deliverActive: mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery();
         throw new ActiveInputDeliveryError(providerError, true);
       }),
     });
 
-    await expect(saga.deliverActive({
+    await expect(handler.deliverActive({
       command: command(),
       content: 'interrupt',
       settlement: settle,
@@ -245,7 +245,7 @@ describe('AcceptedInputSaga', () => {
       markScheduled: mock(async () => { events.push('scheduled'); }),
       settleActiveInput: mock(async () => { events.push('settled'); }),
     });
-    const { saga, m } = scaffold({
+    const { handler, m } = scaffold({
       stageActiveFallback: mock(async () => {
         events.push('staged');
         return { entryId: 'entry-1', control: control(), duplicate: false };
@@ -261,7 +261,7 @@ describe('AcceptedInputSaga', () => {
       }),
     });
 
-    await expect(saga.deliverActive({
+    await expect(handler.deliverActive({
       command: command(),
       content: 'steer',
       settlement: settle,
@@ -277,7 +277,7 @@ describe('AcceptedInputSaga', () => {
     const settle = settlement({
       settleQueueMutation: mock(async () => { events.push('settled'); }),
     });
-    const { saga, m } = scaffold({
+    const { handler, m } = scaffold({
       hasAppliedCreate: mock(async () => true),
       returnUnsent: mock(async () => {
         events.push('requeued');
@@ -286,7 +286,7 @@ describe('AcceptedInputSaga', () => {
       requestDrain: mock(() => { events.push('drain'); }),
     });
 
-    await expect(saga.recoverActive({
+    await expect(handler.recoverActive({
       command: command(),
       content: 'recover',
       settlement: settle,

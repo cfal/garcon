@@ -90,6 +90,14 @@ export interface NewChatRegistryEntry {
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
 export type ChatRegistryResolvedEntry = { id: string } & ChatRegistryEntry;
+
+function pickAllowedPatch(patch: ChatRegistryPatch): ChatRegistryPatch {
+  return Object.fromEntries(
+    ALLOWED_PATCH_FIELDS
+      .filter((field) => Object.hasOwn(patch, field))
+      .map((field) => [field, patch[field]]),
+  );
+}
 export interface ChatRegistryUpdateOptions {
   flush?: boolean;
 }
@@ -97,6 +105,14 @@ export type ChatAddedCallback = (chatId: string) => void;
 export type ChatRemovedCallback = (chatId: string) => void;
 export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
 export type ChatProjectPathUpdatedCallback = (payload: ChatProjectPathUpdatedPayload) => void;
+
+interface ChatRegistryEvents {
+  'chat-added': Parameters<ChatAddedCallback>;
+  'chat-removed': Parameters<ChatRemovedCallback>;
+  'chat-read-updated': Parameters<ChatReadUpdatedCallback>;
+  'chat-project-path-updated': Parameters<ChatProjectPathUpdatedCallback>;
+}
+
 export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
   nativeSession?: AgentNativeSessionRef | null;
 }
@@ -226,7 +242,7 @@ function isJsonValue(value: unknown): value is JsonValue {
   return isJsonObject(value);
 }
 
-export class ChatRegistry extends EventEmitter implements IChatRegistry {
+export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IChatRegistry {
   #registry: ChatRegistrySnapshot | null = null;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #agentSessionIdIndex = new Map<string, string>();
@@ -419,7 +435,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     const registry = this.getRegistry();
     const existing = registry.sessions[id];
     if (!existing) return options.flush ? Promise.resolve(null) : null;
-    const normalizedPatch: ChatRegistryPatch = { ...patch };
+    const normalizedPatch = pickAllowedPatch(patch);
     if ('permissionMode' in normalizedPatch) {
       normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
     }
@@ -436,11 +452,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       throw new Error(`Invalid agent settings for ${id}`);
     }
     const previousAgentSessionId = existing.agentSessionId;
-    for (const key of ALLOWED_PATCH_FIELDS) {
-      if (key in normalizedPatch) {
-        existing[key] = normalizedPatch[key] as never;
-      }
-    }
+    Object.assign(existing, normalizedPatch);
     if ('agentSessionId' in normalizedPatch && existing.agentSessionId !== previousAgentSessionId) {
       this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
       this.#setAgentSessionIdIndex(id, existing.agentSessionId);

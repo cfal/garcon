@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequestSummary } from '$lib/api/pull-requests';
-import { PullRequestsStore } from '$lib/stores/pull-requests.svelte';
+import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,

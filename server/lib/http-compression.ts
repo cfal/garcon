@@ -317,7 +317,10 @@ async function compressResponseBody(
 ): Promise<HttpBodyStream | HttpBodyChunk> {
   const CompressionStreamCtor = globalThis.CompressionStream;
   if (typeof CompressionStreamCtor === 'function') {
-    return body.pipeThrough(new CompressionStreamCtor(streamFormat as unknown as CompressionFormat) as CompressionStreamPair);
+    const BunCompressionStream = CompressionStreamCtor as new (
+      format: Bun.CompressionFormat,
+    ) => CompressionStreamPair;
+    return body.pipeThrough(new BunCompressionStream(streamFormat));
   }
 
   const input = new Uint8Array(await new Response(body).arrayBuffer());
@@ -327,7 +330,7 @@ async function compressResponseBody(
     case 'deflate':
       return Bun.deflateSync(input);
     case 'zstd':
-      return Bun.zstdCompressSync(input) as unknown as HttpBodyChunk;
+      return Uint8Array.from(Bun.zstdCompressSync(input));
   }
 }
 

@@ -9,6 +9,7 @@ import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { ThinkingMode } from '../../common/chat-modes.js';
+import { isRecord } from '../../common/json.js';
 import {
   createGenerationRequestSignal,
   GENERATION_PROVIDER_TIMEOUT_MS,
@@ -118,10 +119,6 @@ Video Game Development Insights
 function normalizeTitle(text: unknown): string {
   if (!text || typeof text !== 'string') return '';
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function generationSettingsWithoutEnabled(value: unknown): unknown {

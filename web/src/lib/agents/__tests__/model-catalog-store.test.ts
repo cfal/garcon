@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as clientApi from '$lib/api/client';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
-import { createModelCatalogStore } from '../model-catalog.svelte';
+import { createModelCatalogStore } from '../model-catalog-store.svelte';
 
 vi.mock('$lib/api/client', () => ({
 	apiFetch: vi.fn(),

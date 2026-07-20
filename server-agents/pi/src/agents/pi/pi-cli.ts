@@ -250,7 +250,8 @@ async function runPiCommand(
   });
 
   if (input != null) {
-    const stdin = proc.stdin as unknown as { end(): void; write(chunk: string): void };
+    const stdin = proc.stdin;
+    if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
     stdin.write(input);
     stdin.end();
   }
@@ -394,7 +395,14 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     const timestamp = new Date().toISOString();
 
     if (event.type === 'session' && typeof event.id === 'string') {
-      this.#activateSession(session, event as unknown as PiSessionHeader);
+      this.#activateSession(session, {
+        type: 'session',
+        id: event.id,
+        timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
+        cwd: typeof event.cwd === 'string' ? event.cwd : '',
+        ...(typeof event.version === 'number' ? { version: event.version } : {}),
+        ...(typeof event.parentSession === 'string' ? { parentSession: event.parentSession } : {}),
+      });
       return;
     }
 
@@ -584,7 +592,8 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     session.process = proc;
     session.cleanup = run.cleanup;
     session.configuredSessionDir = run.configuredSessionDir;
-    const stdin = proc.stdin as unknown as { end(): void; write(chunk: string): void };
+    const stdin = proc.stdin;
+    if (!stdin || typeof stdin === 'number') throw new Error('Pi process stdin is unavailable');
     stdin.write(run.prompt);
     stdin.end();
 

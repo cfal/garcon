@@ -15,16 +15,13 @@ import {
 import { assertWorkspaceLayoutInvariants } from './workspace-layout.svelte.js';
 import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
 import { clampDesiredSidebarWidth } from './sidebar-sizing';
+import { isRecord } from '$shared/json';
 
 export type WorkspaceLayoutRestoreSource = 'absent' | 'valid' | 'fallback';
 
 export interface WorkspaceLayoutParseResult {
 	source: WorkspaceLayoutRestoreSource;
 	snapshot: WorkspaceLayoutSnapshot;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseRef(value: unknown): PersistedWorkspaceSurfaceRef | null {

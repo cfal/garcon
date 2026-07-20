@@ -114,7 +114,11 @@ function defaultStorePath(): string {
   return path.join(getConfigDir(), 'notifications.json');
 }
 
-export class TelegramSettingsStore extends EventEmitter {
+interface TelegramSettingsStoreEvents {
+  changed: [];
+}
+
+export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEvents> {
   #filePath: string;
   #snapshot: NotificationSecretsSnapshot = emptySnapshot();
   #writeLock = new KeyedPromiseLock();

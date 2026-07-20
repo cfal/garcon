@@ -606,7 +606,8 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     });
     session.process = proc;
 
-    const stdin = proc.stdin as unknown as { end(): void; write(chunk: string): void };
+    const stdin = proc.stdin;
+    if (!stdin || typeof stdin === 'number') throw new Error('Factory process stdin is unavailable');
     stdin.write(prompt);
     stdin.end();
 

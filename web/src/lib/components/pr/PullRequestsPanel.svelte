@@ -2,7 +2,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+	import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { cn } from '$lib/utils/cn';
 	import PullRequestListItem from './PullRequestListItem.svelte';

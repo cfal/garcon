@@ -5,6 +5,7 @@
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 	import type { HostId } from '$lib/workspace/surface-types.js';
 	import { isImageFilePath } from '$lib/utils/file-kind.js';
+	import { errorMessage } from '$lib/utils/error-message.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
 	import FileTreeRenderRow from './FileTreeRenderRow.svelte';
@@ -81,9 +82,6 @@
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
 
-	function errorMessage(error: unknown): string {
-		return error instanceof Error ? error.message : String(error);
-	}
 </script>
 
 <div

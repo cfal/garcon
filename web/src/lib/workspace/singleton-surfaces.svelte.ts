@@ -6,7 +6,7 @@ import {
 	GitSurfaceController,
 	type GitSurfaceControllerDeps,
 } from '$lib/git/surface/git-surface.svelte.js';
-import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ModelSelectorPopover from '../ModelSelectorPopover.svelte';
 	import { setModelCatalog } from '$lib/context';
-	import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,

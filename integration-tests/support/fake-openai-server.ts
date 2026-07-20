@@ -1,6 +1,7 @@
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
 import { INTEGRATION_OPENAI_API_KEY } from './openai-test-contract.js';
+import { isRecord } from '../../common/json.js';
 
 export interface FakeOpenAiContentPart {
   type: string;
@@ -149,10 +150,6 @@ class HeldCompletionController implements HeldCompletion {
       { status: 503 },
     ));
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseContent(value: unknown): string | FakeOpenAiContentPart[] | null {

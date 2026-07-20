@@ -3,7 +3,7 @@ import { NewChatFormState } from '../new-chat-form-state.svelte';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
-import type { ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/files', () => ({

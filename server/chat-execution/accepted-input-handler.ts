@@ -21,9 +21,7 @@ import type { StoredChatExecutionControlState } from './control-state.ts';
 
 const logger = createLogger('accepted-input');
 
-// Coordinator-owned execution operations the accepted-input orchestration drives.
-// Queue mutations and pending-input bookkeeping are performed directly against the
-// injected control operations and pending-input store instead of through here.
+// Exposes coordinator-owned operations that accepted-input handling drives.
 export interface AcceptedInputCoordinator {
   requestDrain(chatId: string, context: string): void;
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation;
@@ -57,7 +55,7 @@ export interface AcceptedInputDeps {
   coordinator: AcceptedInputCoordinator;
 }
 
-export class AcceptedInputSaga {
+export class AcceptedInputHandler {
   readonly #controls: ChatExecutionControlOperations;
   readonly #pendingInputs: PendingInputsPort;
   readonly #coordinator: AcceptedInputCoordinator;
@@ -364,9 +362,7 @@ export class AcceptedInputSaga {
     this.#coordinator.checkpoint(reservation);
   }
 
-  // Awaits one reservation-scoped step, then re-validates the reservation exactly
-  // once. Every await between reserve and run can be invalidated by an admission
-  // abort or a concurrent clear, so each is paired with a single check here.
+  // Revalidates after every awaited step that can race an admission abort or clear.
   async #checkpointAfter<T>(reservation: DirectTurnReservation, promise: Promise<T>): Promise<T> {
     const result = await promise;
     this.#coordinator.checkpoint(reservation);

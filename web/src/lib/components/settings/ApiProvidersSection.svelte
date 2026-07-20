@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { nativeSourceLabelFor } from '$lib/i18n/agent-labels';
+	import { nativeSourceLabelFor } from '$lib/agents/agent-labels';
 	import ApiProviderProtocolPanel from './ApiProviderProtocolPanel.svelte';
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 

@@ -80,7 +80,11 @@ export interface ScheduleInResult {
   snapshot: ScheduledPromptsSnapshot;
 }
 
-export class ScheduledPromptScheduler extends EventEmitter {
+interface ScheduledPromptSchedulerEvents {
+  invalidated: [reason: ScheduledPromptsInvalidationReason];
+}
+
+export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedulerEvents> {
   readonly #jobs = new Map<string, Bun.CronJob>();
   readonly #lock = new KeyedPromiseLock();
   #reconciliationJob: Bun.CronJob | null = null;

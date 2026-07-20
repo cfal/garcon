@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 import { legacyChatIdToCanonical } from '../../common/chat-id.js';
+import { isRecord } from '../../common/json.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { commandLedgerKey, commandPayloadHash } from '../commands/command-ledger.js';
 
@@ -13,10 +14,6 @@ interface MigrationResult<T> {
 export interface WorkspaceChatIdMigrationResult {
   migratedChatIds: Record<string, string>;
   changedFiles: string[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function discoverLegacyRegistryIds(

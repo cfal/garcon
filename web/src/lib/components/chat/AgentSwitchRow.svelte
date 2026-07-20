@@ -6,7 +6,7 @@
 	import ArrowRightLeft from '@lucide/svelte/icons/arrow-right-left';
 	import type { AgentSwitchMessage } from '$shared/chat-types';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import { agentLabelFor } from '$lib/i18n/agent-labels';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {

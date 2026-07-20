@@ -6,7 +6,7 @@ import type {
 } from '$lib/components/model-selector/model-selector-types';
 import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '$lib/git/commit/commit-message-default-prompt.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';

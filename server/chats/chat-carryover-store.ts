@@ -10,6 +10,7 @@ import { AgentSwitchMessage, parseChatMessages } from '../../common/chat-types.j
 import type { IChatRegistry } from './store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import { isRecord } from '../../common/json.js';
 import {
   TranscriptSearchCarryOverError,
   type TranscriptSearchCarryOverRequest,
@@ -24,7 +25,7 @@ const CARRYOVER_VERSION = 4;
 export interface CarryOverSegment {
   agentId: string;
   model: string;
-  messages: ChatMessage[];
+  messages: readonly ChatMessage[];
   at: string;
   boundary?: boolean;
   boundaryTarget?: { agentId: string; model: string };
@@ -32,22 +33,18 @@ export interface CarryOverSegment {
 
 interface CarryOverChatEntry {
   revision: number;
-  segments: CarryOverSegment[];
+  segments: readonly CarryOverSegment[];
   staged?: {
     targetEpoch: string;
     ownerId: string;
     revision: number;
-    segments: CarryOverSegment[];
+    segments: readonly CarryOverSegment[];
   };
 }
 
 interface ChatCarryOverStoreOptions {
   filePath: string | null;
   saveDelayMs?: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export class ChatCarryOverStore {
@@ -78,7 +75,7 @@ export class ChatCarryOverStore {
     registry.onChatRemoved((chatId) => this.clear(String(chatId)));
   }
 
-  getSegments(chatId: string): CarryOverSegment[] {
+  getSegments(chatId: string): readonly CarryOverSegment[] {
     return this.#activeEntry(String(chatId))?.segments ?? [];
   }
 
@@ -422,7 +419,7 @@ async function* streamRenderedSegments(
   }
 }
 
-function normalizePersistedSegments(value: unknown): CarryOverSegment[] {
+function normalizePersistedSegments(value: unknown): readonly CarryOverSegment[] {
   if (!Array.isArray(value)) return [];
   const segments: CarryOverSegment[] = [];
   for (const entry of value) {
@@ -488,20 +485,20 @@ function immutableSegment(segment: CarryOverSegment): CarryOverSegment {
     : undefined;
   return Object.freeze({
     ...segment,
-    messages: Object.freeze([...segment.messages]) as unknown as ChatMessage[],
+    messages: Object.freeze([...segment.messages]),
     ...(boundaryTarget ? { boundaryTarget } : {}),
   });
 }
 
-function immutableSegments(segments: readonly CarryOverSegment[]): CarryOverSegment[] {
-  return Object.freeze([...segments]) as unknown as CarryOverSegment[];
+function immutableSegments(segments: readonly CarryOverSegment[]): readonly CarryOverSegment[] {
+  return Object.freeze([...segments]);
 }
 
 function sliceRenderedSegments(
   source: readonly CarryOverSegment[],
   upToSequence?: number,
   current?: { agentId: string; model: string },
-): CarryOverSegment[] {
+): readonly CarryOverSegment[] {
   if (upToSequence === undefined) return source.map(cloneSegment);
   let remaining = upToSequence;
   const result: CarryOverSegment[] = [];

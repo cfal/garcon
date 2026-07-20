@@ -1,6 +1,7 @@
 // Core HTTP client with auth token injection and typed request helpers.
 
 import type { HttpErrorResponse } from '$shared/http-error';
+import { isRecord } from '$shared/json';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -85,10 +86,6 @@ export class ApiError extends Error {
 		this.retryable = retryable;
 		this.payload = payload;
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null;
 }
 
 function isHttpErrorResponse(value: unknown): value is HttpErrorResponse {

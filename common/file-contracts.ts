@@ -1,3 +1,5 @@
+import { isRecord } from './json.js';
+
 export interface CanonicalFileIdentity {
   canonicalFileRootPath: string;
   normalizedRelativePath: string;
@@ -75,10 +77,6 @@ export interface LegacyFileTreeEntry {
   size?: number;
   modified?: string | null;
   permissionsRwx?: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object';
 }
 
 function isNonEmptyString(value: unknown): value is string {

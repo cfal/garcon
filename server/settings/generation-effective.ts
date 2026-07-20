@@ -1,6 +1,7 @@
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentModelOption } from '../../common/agents.js';
 import { normalizeThinkingMode, type ThinkingMode } from '../../common/chat-modes.js';
+import { isRecord } from '../../common/json.js';
 
 type GenerationModelMap = Record<string, AgentModelOption[]>;
 type GenerationAuthMap = Record<string, { authenticated?: boolean }>;
@@ -27,10 +28,6 @@ export interface EffectiveGenerationConfig {
 }
 
 type EffectiveGenerationUiConfig = Record<string, unknown> & EffectiveGenerationConfig;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function isAgent(value: unknown): value is string {
   return typeof value === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(value);

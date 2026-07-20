@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PullRequestsStore } from '../pull-requests.svelte';
+import { PullRequestsStore } from '../pull-requests-store.svelte';
 import * as prApi from '$lib/api/pull-requests';
 import type { PullRequestDetail, PullRequestSummary } from '$lib/api/pull-requests';
 

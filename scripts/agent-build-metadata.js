@@ -1,5 +1,6 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { isRecord } from '../common/json.js';
 
 const PROVIDER_PACKAGE_PATTERN = /^@garcon\/server-agent-(?!interface$|common$)[a-z0-9-]+$/;
 
@@ -173,10 +174,6 @@ function packageNameFromMetadataSpecifier(specifier) {
   const match = specifier.match(/^(@[^/]+\/[^/]+|[^/]+)\/package\.json$/);
   if (!match) throw new Error(`Invalid embedded dependency metadata specifier: ${specifier}`);
   return match[1];
-}
-
-function isRecord(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function readJson(filePath) {

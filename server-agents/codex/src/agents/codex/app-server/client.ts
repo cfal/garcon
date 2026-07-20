@@ -32,7 +32,7 @@ export interface CodexAppServerProcess {
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
   exited: Promise<number>;
-  kill(signal?: string): void;
+  kill(): void;
 }
 
 export type SpawnCodexAppServer = (
@@ -78,12 +78,19 @@ function defaultSpawnCodexAppServer(
   args: string[],
   options: { env: Record<string, string> },
 ): CodexAppServerProcess {
-  return Bun.spawn([command, ...args], {
+  const process = Bun.spawn([command, ...args], {
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
     env: options.env,
-  }) as unknown as CodexAppServerProcess;
+  });
+  return {
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    exited: process.exited,
+    kill: () => { process.kill(); },
+  };
 }
 
 function mergedEnv(overrides?: Record<string, string>): Record<string, string> {

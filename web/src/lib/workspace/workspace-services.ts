@@ -12,10 +12,10 @@ import type {
 	FileOpenPlacementPreference,
 	LocalSettingsStore,
 } from '$lib/stores/local-settings.svelte.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
-import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+import { createPullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';

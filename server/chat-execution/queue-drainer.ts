@@ -17,10 +17,8 @@ import {
 
 const logger = createLogger('queue-dispatch');
 
-// Coordinator-owned effects the dispatch loop cannot perform directly: event
-// emission, transcript registration, the direct-turn settle handoff, the drain
-// stop barrier, and the shutdown flag. Everything else is a direct call on the
-// injected ownership, controls, turn runner, or pending-input collaborators.
+// Exposes coordinator-owned effects that the drain loop cannot perform through
+// its ownership, controls, turn runner, or pending-input collaborators.
 export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
   registerPending(chatId: string, content: string, options: RunAgentTurnOptions): Promise<void>;
@@ -29,8 +27,6 @@ export interface QueueDispatchCallbacks {
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
   settleAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
   stopBarrier(chatId: string): Promise<boolean> | null;
-  // Removes a delivered entry through the coordinator's public queue method so
-  // the sent-entry finalization stays a single, observable code path.
   removeSent(chatId: string, entryId: string): Promise<unknown>;
 }
 
@@ -55,7 +51,7 @@ function optionsForQueuedTurn(
   return { ...options, ...delivery };
 }
 
-export class QueueDispatchSaga {
+export class QueueDrainer {
   readonly #ownership: ExecutionOwnership;
   readonly #controls: ChatExecutionControlOperations;
   readonly #turnRunner: AgentTurnRunnerPort;

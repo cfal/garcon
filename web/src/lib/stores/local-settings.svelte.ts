@@ -342,10 +342,10 @@ export class LocalSettingsStore {
 	}
 
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
-		const normalizedValue = key === 'hiddenToolTypes' ? normalizeHiddenToolTypes(value) : value;
-		(this as unknown as Record<K, LocalSettingsSnapshot[K]>)[key] =
-			normalizedValue as LocalSettingsSnapshot[K];
-		persistLocalSettings(this.snapshot());
+		const next = { ...this.snapshot(), [key]: value };
+		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
+		this.#apply(next);
+		persistLocalSettings(next);
 	}
 
 	toggle(key: BooleanLocalSettingKey): void {

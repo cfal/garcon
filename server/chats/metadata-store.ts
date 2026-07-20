@@ -7,6 +7,7 @@ import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import { isRecord } from '../../common/json.js';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -40,10 +41,6 @@ interface MetadataIndexOptions {
 
 interface MetadataAgentSource {
   getPreview(session: ChatRegistryEntry, chatId: string): Promise<unknown>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export class MetadataIndex {

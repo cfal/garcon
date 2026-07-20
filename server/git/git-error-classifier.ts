@@ -2,6 +2,8 @@
 // status codes and user-facing messages. Used by the route layer when
 // an error is not already a GitDomainError.
 
+import { errorMessage } from '../lib/errors.js';
+
 export type ClassifiedGitErrorCode =
   | 'NOT_REPO'
   | 'NO_REMOTE'
@@ -25,16 +27,8 @@ export interface ClassifiedGitError {
   details?: string;
 }
 
-function errorMessage(error: unknown): string {
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-  }
-  return 'Git operation failed.';
-}
-
 export function classifyGitError(error: unknown): ClassifiedGitError {
-  const message = errorMessage(error);
+  const message = errorMessage(error, 'Git operation failed.');
   const text = message.toLowerCase();
 
   if (text.includes('not a git repository') || text.includes('git is not initialized')) {

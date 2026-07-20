@@ -1,4 +1,4 @@
-import type { JsonObject } from './json.js';
+import { isRecord, type JsonObject } from './json.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 
@@ -95,10 +95,6 @@ export function parseAgentSettingsById(
     parsed[agentId] = envelope;
   }
   return parsed;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
