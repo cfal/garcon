@@ -22,7 +22,9 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import { createCodexConfig, type CodexConfig } from './config.js';
 import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
 import { CodexExecution } from './agents/codex/execution.js';
-import { rewriteCodexForkTranscriptEntry } from './agents/codex/fork-transcript.js';
+import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
+import { createCodexForking } from './agents/codex/codex-forking.js';
+import { inspectCodexHistoryProfile } from './agents/codex/history-profile.js';
 import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
@@ -111,7 +113,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     this.execution = new CodexExecution(host, runtime, nativeSessions, config);
-    this.transcript = createCodexTranscript(runtime, nativeSessions);
+    this.transcript = createCodexTranscript(runtime, nativeSessions, config);
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CODEX_MODELS.DEFAULT,
@@ -140,13 +142,46 @@ export default class CodexAgentIntegration implements AgentIntegration {
         return skillDiscovery.commands(projectPath);
       },
     };
-    this.forking = createJsonlForking({
+    const legacyForking = createJsonlForking({
       host,
       supportsWhileRunning: true,
       transcript: this.transcript,
       nativeSessions,
-      rewriteEntry: rewriteCodexForkTranscriptEntry,
+      createRewriteEntry: createCodexForkTranscriptRewriter,
       forkWholeSession: (request) => forkWholeCodexSession(
+        request,
+        host,
+        runtime,
+        nativeSessions,
+        config,
+      ),
+    });
+    this.forking = createCodexForking({
+      legacy: legacyForking,
+      resolveProfile: async (request) => {
+        let reference = request.source.nativeSession;
+        let source = nativeSessions.decode(reference);
+        if (!source.path) {
+          reference = await this.transcript.resolveNativeSession({
+            chat: request.source,
+            signal: request.admission.signal,
+          });
+          source = nativeSessions.decode(reference);
+        }
+        if (!source.path) {
+          throw new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            'Source native transcript is unavailable',
+            false,
+          );
+        }
+        return inspectCodexHistoryProfile({
+          nativePath: source.path,
+          expectedThreadId: request.source.agentSessionId ?? source.agentSessionId,
+          signal: request.admission.signal,
+        });
+      },
+      forkPaginatedWhole: (request) => forkWholeCodexSession(
         request,
         host,
         runtime,
@@ -213,6 +248,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
 function createCodexTranscript(
   runtime: CodexAppServerRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
+  config: CodexConfig,
 ): AgentTranscript {
   const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
     const native = nativeSessions.decode(chat.nativeSession);
@@ -223,20 +259,38 @@ function createCodexTranscript(
       nativePath: native.path,
     };
   };
-  const loadMessages = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
-    runtime.loadMessages(reference(chat))
+  const loadMessages = (
+    chat: Parameters<AgentTranscript['load']>[0]['chat'],
+    signal: AbortSignal,
+  ) => (
+    runtime.loadMessages(reference(chat), signal)
   );
   const resolvePath = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
     const value = reference(chat);
     return value.nativePath ?? runtime.resolveNativePath(value);
   };
-  const resolveIndexSource = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+  const resolveIndexSource = async (
+    chat: Parameters<AgentTranscript['load']>[0]['chat'],
+    signal: AbortSignal,
+  ) => {
     const nativePath = await resolvePath(chat);
-    return nativePath ? {
+    if (!nativePath) return null;
+    const value = reference(chat);
+    const profile = await inspectCodexHistoryProfile({
+      nativePath,
+      expectedThreadId: value.agentSessionId,
+      signal,
+    });
+    return {
       ownerId: 'codex',
-      schemaVersion: 1,
-      value: { nativePath },
-    } as const : null;
+      schemaVersion: 2,
+      value: {
+        nativePath,
+        threadId: profile.threadId,
+        historyMode: profile.mode,
+        codexHome: config.home(),
+      },
+    } as const;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -253,28 +307,28 @@ function createCodexTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat);
+      const messages = await loadMessages(chat, signal);
       return { messages, revision: computeAgentTranscriptRevision(messages) };
     },
     async loadPage({ chat, page, signal }) {
       signal.throwIfAborted();
-      return runtime.loadMessagePage(reference(chat), page);
+      return runtime.loadMessagePage(reference(chat), page, signal);
     },
     async preview({ chat, signal }) {
       signal.throwIfAborted();
-      return normalizeCodexPreview(await runtime.getPreview(reference(chat)));
+      return normalizeCodexPreview(await runtime.getPreview(reference(chat), signal));
     },
     async revision({ chat, signal }) {
       signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat));
+      return computeAgentTranscriptRevision(await loadMessages(chat, signal));
     },
     async resolveIndexSource({ chat, signal }) {
       signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      return resolveIndexSource(chat, signal);
     },
     async refreshIndexSource({ chat, signal }) {
       signal.throwIfAborted();
-      return resolveIndexSource(chat);
+      return resolveIndexSource(chat, signal);
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();

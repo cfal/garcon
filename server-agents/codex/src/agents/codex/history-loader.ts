@@ -4,7 +4,6 @@
 import { promises as fs } from 'fs';
 import { readJsonlLineEntries, readJsonlTailLines } from '@garcon/server-agent-common/shared/history-loader-utils';
 import {
-  normalizeCodexJsonlEntry,
   extractTextContent,
   type CodexJsonlNormalizationContext,
 } from './history-normalizer.js';
@@ -17,6 +16,7 @@ import {
   transcriptRevision,
 } from '@garcon/server-agent-common/lib/transcript-revision';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
+import { LegacyCodexProjection } from './legacy-history-projection.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -132,11 +132,12 @@ export function addCodexJsonlLine(
   buckets: CodexMessageBuckets,
   line: string,
   context: CodexJsonlNormalizationContext = {},
+  projection = new LegacyCodexProjection(),
 ): boolean {
   const entry = parseCodexJsonlEntry(line);
   if (!entry) return false;
   try {
-    const result = normalizeCodexJsonlEntry(entry, context);
+    const result = projection.project(entry, context);
     if (!result) return false;
 
     let withinSourceOrdinal = 0;
@@ -186,6 +187,7 @@ function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: bool
 async function scanCodexMessagePage(
   nativePath: string,
   windowSize: number,
+  signal?: AbortSignal,
 ): Promise<{
   summary: CodexMessageSummary;
   messages: ChatMessage[];
@@ -215,13 +217,14 @@ async function scanCodexMessagePage(
     bucketNames.map((name) => [name, new TranscriptRevisionAccumulator()]),
   ) as Record<(typeof bucketNames)[number], TranscriptRevisionAccumulator>;
   let requiresFullLoad = false;
+  const projection = new LegacyCodexProjection();
 
-  for await (const entry of readJsonlLineEntries(nativePath)) {
+  for await (const entry of readJsonlLineEntries(nativePath, { signal })) {
     const buckets = createCodexMessageBuckets();
     const hasMalformedTimestamp = addCodexJsonlLine(buckets, entry.line, {
       sourceByteOffset: entry.byteOffset,
       sourceLineNumber: entry.lineNumber,
-    });
+    }, projection);
     requiresFullLoad ||= hasMalformedTimestamp;
     for (const name of bucketNames) {
       for (const message of buckets[name]) {
@@ -272,22 +275,24 @@ async function scanCodexMessagePage(
 export async function loadCodexChatMessages(
   nativePath: string | null | undefined,
   logger: AgentLogger = NOOP_LOGGER,
-  options: { readonly throwOnError?: boolean } = {},
+  options: { readonly throwOnError?: boolean; readonly signal?: AbortSignal } = {},
 ): Promise<ChatMessage[]> {
   if (!nativePath) return [];
 
   try {
     const buckets = createCodexMessageBuckets();
+    const projection = new LegacyCodexProjection();
 
-    for await (const entry of readJsonlLineEntries(nativePath)) {
+    for await (const entry of readJsonlLineEntries(nativePath, { signal: options.signal })) {
       addCodexJsonlLine(buckets, entry.line, {
         sourceByteOffset: entry.byteOffset,
         sourceLineNumber: entry.lineNumber,
-      });
+      }, projection);
     }
 
     return finishCodexMessages(buckets, true);
   } catch (error) {
+    options.signal?.throwIfAborted();
     if (options.throwOnError) throw error;
     logger.error('Codex transcript load failed', {
       nativePath,
@@ -302,6 +307,7 @@ export async function loadCodexChatMessagePage(
   limit: number,
   offset: number,
   logger: AgentLogger = NOOP_LOGGER,
+  signal?: AbortSignal,
 ): Promise<AgentTranscriptPage | null> {
   if (
     !nativePath
@@ -316,9 +322,14 @@ export async function loadCodexChatMessagePage(
     // Retains the newest offset + limit messages because exact arbitrary-offset
     // selection under global timestamp ordering requires the skipped suffix too.
     const windowSize = offset + limit;
-    const scan = await scanCodexMessagePage(nativePath, windowSize);
+    signal?.throwIfAborted();
+    const scan = await scanCodexMessagePage(nativePath, windowSize, signal);
     if (scan.requiresFullLoad) {
-      return pageFromMessages(await loadCodexChatMessages(nativePath, logger), limit, offset);
+      return pageFromMessages(
+        await loadCodexChatMessages(nativePath, logger, { signal }),
+        limit,
+        offset,
+      );
     }
     const { summary, messages, revision } = scan;
     if (offset >= summary.total) {
@@ -336,6 +347,7 @@ export async function loadCodexChatMessagePage(
       revision,
     };
   } catch (error) {
+    signal?.throwIfAborted();
     logger.warn('Codex transcript page load failed', {
       nativePath,
       error: error instanceof Error ? error.message : String(error),
@@ -344,7 +356,7 @@ export async function loadCodexChatMessagePage(
   }
 }
 
-function pageFromMessages(
+export function pageFromMessages(
   messages: ChatMessage[],
   limit: number,
   offset: number,
@@ -405,6 +417,7 @@ function isCodexMessageEntry(entry: unknown): boolean {
 export async function getCodexPreviewFromNativePath(
   nativePath: string | null | undefined,
   logger: AgentLogger = NOOP_LOGGER,
+  signal?: AbortSignal,
 ): Promise<{
   firstMessage: string;
   lastMessage: string;
@@ -414,6 +427,7 @@ export async function getCodexPreviewFromNativePath(
   if (!nativePath) return null;
   let fh: fs.FileHandle | null = null;
   try {
+    signal?.throwIfAborted();
     fh = await fs.open(nativePath, 'r');
     const stats = await fh.stat();
     if (stats.size === 0) return null;
@@ -421,6 +435,7 @@ export async function getCodexPreviewFromNativePath(
     const headSize = Math.min(CODEX_HEAD_BYTES, stats.size);
     const headBuf = Buffer.alloc(headSize);
     await fh.read(headBuf, 0, headSize, 0);
+    signal?.throwIfAborted();
     await fh.close();
     fh = null;
 
@@ -440,6 +455,7 @@ export async function getCodexPreviewFromNativePath(
     }
 
     const { lines } = await readJsonlTailLines(nativePath, 64 * 1024, 500);
+    signal?.throwIfAborted();
     let lastTimestamp: string | null = null;
     let lastMessage: string | null = null;
 
@@ -468,6 +484,7 @@ export async function getCodexPreviewFromNativePath(
       createdAt: firstMessageTimestamp || null,
     };
   } catch (err) {
+    signal?.throwIfAborted();
     logger.warn('Codex transcript preview load failed', {
       nativePath,
       error: err instanceof Error ? err.message : String(err),

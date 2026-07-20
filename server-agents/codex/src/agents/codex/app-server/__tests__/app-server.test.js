@@ -145,6 +145,7 @@ class FakeClient extends EventEmitter {
     this.clearThreadGoal = mock(script.clearThreadGoal ?? (async () => ({ cleared: true })));
     this.injectThreadItems = mock(script.injectThreadItems ?? (async () => ({})));
     this.listThreads = mock(script.listThreads ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
+    this.listThreadTurns = mock(script.listThreadTurns ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
     this.loadedThreads = mock(script.loadedThreads ?? (async () => ({ data: [] })));
     this.unsubscribeThread = mock(script.unsubscribeThread ?? (async () => ({ status: 'notSubscribed' })));
     this.startTurn = mock(script.startTurn ?? (async () => ({ turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } })));
@@ -215,6 +216,92 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('requests full paginated turns with the typed app-server contract', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/turns/list') {
+        return {
+          data: [makeTurn({ id: 'turn-history', items: [{
+            type: 'agentMessage', id: 'message-1', text: 'history', phase: null, memoryCitation: null,
+          }] })],
+          nextCursor: null,
+          backwardsCursor: null,
+        };
+      }
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await expect(client.listThreadTurns({
+      threadId: 'thread-1',
+      cursor: null,
+      limit: 100,
+      sortDirection: 'asc',
+      itemsView: 'full',
+    })).resolves.toMatchObject({ data: [{ id: 'turn-history', itemsView: 'full' }] });
+    client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/turns/list',
+      params: {
+        threadId: 'thread-1',
+        cursor: null,
+        limit: 100,
+        sortDirection: 'asc',
+        itemsView: 'full',
+      },
+    }));
+  });
+
+    it('rejects unknown paginated public item discriminators', async () => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return {
+        data: [makeTurn({ items: [{ type: 'futureItem', id: 'item-1' }] })],
+        nextCursor: null,
+        backwardsCursor: null,
+      };
+    });
+
+    await expect(client.listThreadTurns({
+      threadId: 'thread-1',
+      sortDirection: 'asc',
+      itemsView: 'full',
+    })).rejects.toThrow('Unsupported Codex thread item type: futureItem');
+      client.shutdown();
+    });
+
+    it('accepts canonical sleep items and validates their duration', async () => {
+      const valid = createRpcClientFixture((message) => {
+        if (message.method === 'initialize') return initializeResponse;
+        return {
+          data: [makeTurn({ items: [{ type: 'sleep', id: 'sleep-1', durationMs: 250 }] })],
+          nextCursor: null,
+          backwardsCursor: null,
+        };
+      });
+      await expect(valid.client.listThreadTurns({
+        threadId: 'thread-1',
+        sortDirection: 'asc',
+        itemsView: 'full',
+      })).resolves.toMatchObject({ data: [{ items: [{ type: 'sleep', durationMs: 250 }] }] });
+      valid.client.shutdown();
+
+      const invalid = createRpcClientFixture((message) => {
+        if (message.method === 'initialize') return initializeResponse;
+        return {
+          data: [makeTurn({ items: [{ type: 'sleep', id: 'sleep-1', durationMs: -1 }] })],
+          nextCursor: null,
+          backwardsCursor: null,
+        };
+      });
+      await expect(invalid.client.listThreadTurns({
+        threadId: 'thread-1',
+        sortDirection: 'asc',
+        itemsView: 'full',
+      })).rejects.toThrow('durationMs');
+      invalid.client.shutdown();
+    });
+
   it('sends loaded-list and unsubscribe requests with metrics', async () => {
     const { client, writes, spawn } = createRpcClientFixture((message) => {
       if (message.method === 'initialize') return initializeResponse;
@@ -4644,6 +4731,11 @@ describe('CodexAppServerRuntime', () => {
     const nativePath = path.join(tmpDir, 'history-thread.jsonl');
     await writeJsonl(nativePath, [
       {
+        type: 'session_meta',
+        timestamp: '2026-02-21T09:59:59.000Z',
+        payload: { id: 'thread-1', history_mode: 'legacy' },
+      },
+      {
         type: 'event_msg',
         timestamp: '2026-02-21T10:00:00.000Z',
         payload: { type: 'user_message', message: 'load this' },
@@ -4693,6 +4785,75 @@ describe('CodexAppServerRuntime', () => {
     expect(messages[3].content).toBe('Loaded from JSONL');
   });
 
+  it('loads paginated history through full canonical app-server items', async () => {
+    const nativePath = path.join(tmpDir, 'paginated-thread.jsonl');
+    await writeJsonl(nativePath, [{
+      type: 'session_meta',
+      timestamp: '2026-07-20T00:00:00.000Z',
+      payload: { id: 'thread-1', history_mode: 'paginated', history_base: null },
+    }, {
+      type: 'response_item',
+      timestamp: '2026-07-20T00:00:01.000Z',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'raw duplicate' }] },
+    }]);
+    const fake = new FakeClient({
+      listThreadTurns: async () => ({
+        data: [makeTurn({ items: [
+          { type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: 'canonical prompt' }] },
+          { type: 'agentMessage', id: 'assistant-1', text: 'canonical answer', phase: null, memoryCitation: null },
+        ] })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    const messages = await provider.loadMessages({
+      provider: 'codex',
+      agentSessionId: 'thread-1',
+      nativePath,
+      projectPath: '/repo',
+    });
+
+    expect(messages.map((message) => message.content)).toEqual([
+      'canonical prompt',
+      'canonical answer',
+    ]);
+    expect(messages.some((message) => message.content === 'raw duplicate')).toBe(false);
+    expect(fake.listThreadTurns).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      sortDirection: 'asc',
+      itemsView: 'full',
+    }));
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed before loading an inherited paginated history', async () => {
+    const nativePath = path.join(tmpDir, 'inherited-paginated-thread.jsonl');
+    await writeJsonl(nativePath, [{
+      type: 'session_meta',
+      timestamp: '2026-07-20T00:00:00.000Z',
+      payload: {
+        id: 'thread-1',
+        history_mode: 'paginated',
+        history_base: { thread_id: 'thread-0', end_ordinal_exclusive: 1, end_byte_offset: 10 },
+      },
+    }]);
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    await expect(provider.loadMessages({
+      provider: 'codex',
+      agentSessionId: 'thread-1',
+      nativePath,
+      projectPath: '/repo',
+    })).rejects.toMatchObject({
+      code: 'OPERATION_UNSUPPORTED',
+      details: { operation: 'load-history', historyMode: 'paginated', provider: 'codex' },
+    });
+    expect(fake.listThreadTurns).not.toHaveBeenCalled();
+  });
+
   it('resolves missing native paths through thread/list without loading threads', async () => {
     const nativePath = path.join(tmpDir, 'resolved-thread.jsonl');
     await fs.writeFile(nativePath, '{}\n');
@@ -4736,6 +4897,11 @@ describe('CodexAppServerRuntime', () => {
   it('loads previews from native Codex JSONL', async () => {
     const nativePath = path.join(tmpDir, 'preview-thread.jsonl');
     await writeJsonl(nativePath, [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-21T09:59:59.000Z',
+        payload: { id: 'thread-1', history_mode: 'legacy' },
+      },
       {
         type: 'event_msg',
         timestamp: '2026-02-21T10:00:00.000Z',

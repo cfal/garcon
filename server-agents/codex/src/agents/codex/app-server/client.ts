@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
+import { parseThreadTurnsListResponse } from './protocol.js';
 import type {
   InitializeResponse,
   JsonRpcFailure,
@@ -14,6 +15,8 @@ import type {
   ThreadInjectItemsParams,
   ThreadInjectItemsResponse,
   ThreadLoadedListResponse,
+  ThreadTurnsListParams,
+  ThreadTurnsListResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
   CodexThreadGoalStatus,
@@ -207,6 +210,11 @@ export class CodexAppServerClient extends EventEmitter {
 
   listThreads(params: Record<string, unknown>): Promise<ThreadListResponse> {
     return this.request<ThreadListResponse>('thread/list', params);
+  }
+
+  async listThreadTurns(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
+    const response = await this.request<unknown>('thread/turns/list', params);
+    return parseThreadTurnsListResponse(response);
   }
 
   loadedThreads(): Promise<ThreadLoadedListResponse> {

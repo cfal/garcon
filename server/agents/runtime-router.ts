@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
-import type {
-  AgentExecutionContext,
-  AgentOperationIdentity,
+import {
+  AgentIntegrationError,
+  type AgentExecutionContext,
+  type AgentOperationIdentity,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -13,6 +14,7 @@ import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolve
 import { getMaxSessions } from '../config.js';
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
+import { DomainError } from '../lib/domain-error.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus } from './event-bus.js';
 import type {
@@ -364,6 +366,11 @@ export class AgentRuntimeRouter {
           carryOver: sourceReference.carryOverRevision,
         },
       } : null,
+    }).catch((error) => {
+      if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {
+        throw new DomainError('OPERATION_UNSUPPORTED', error.message, 422, error.retryable);
+      }
+      throw error;
     });
     return {
       agentSessionId: result.agentSessionId,

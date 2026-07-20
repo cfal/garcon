@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
+import { CodexHistoryService } from '../history-source.js';
 import {
   assertCodexExecutionOpen,
   codexEventMetadata,
@@ -136,6 +136,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #capacityRetryDelay: (delayMs: number) => Promise<void>;
   #logger: AgentLogger;
   #skillDiscovery: CodexSkillDiscovery;
+  #history: CodexHistoryService;
   #idlePurger = new IdleSessionPurger<RunningCodexSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.status === 'running' || session.status === 'completing',
@@ -155,6 +156,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       .slice(0, MAX_CAPACITY_RETRIES);
     this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
     this.#logger = options.logger ?? NOOP_LOGGER;
+    this.#history = new CodexHistoryService({
+      createClient: this.#createClient,
+      logger: this.#logger,
+    });
     this.#skillDiscovery = options.skillDiscovery ?? new CodexSkillDiscovery({
       logger: this.#logger,
     });
@@ -756,19 +761,20 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       .map((session) => ({ id: session.threadId, status: session.status, startedAt: session.startedAt }));
   }
 
-  async loadMessages(session: CodexChatEntry): Promise<ChatMessage[]> {
-    return this.#loadJsonlMessages(session);
+  async loadMessages(session: CodexChatEntry, signal?: AbortSignal): Promise<ChatMessage[]> {
+    return this.#history.load(session, signal);
   }
 
   async loadMessagePage(
     session: CodexChatEntry,
     page: { limit: number; offset: number },
+    signal?: AbortSignal,
   ): Promise<CodexTranscriptPage | null> {
-    return loadCodexChatMessagePage(session.nativePath, page.limit, page.offset, this.#logger);
+    return this.#history.loadPage(session, page, signal);
   }
 
-  async getPreview(session: CodexChatEntry): Promise<unknown> {
-    return this.#getJsonlPreview(session);
+  async getPreview(session: CodexChatEntry, signal?: AbortSignal): Promise<unknown> {
+    return this.#history.preview(session, signal);
   }
 
   async forkSession(args: CodexForkSessionRequest): Promise<CodexStartedSession | null> {
@@ -1546,16 +1552,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     return null;
   }
 
-  #loadJsonlMessages(session: CodexChatEntry): Promise<ChatMessage[]> {
-    // Codex app-server `thread/read` also reads rollout JSONL, but projects it
-    // through a lossy app-server view that drops raw function_call/tool rows.
-    // Garcon uses the native JSONL transcript as the display source of record.
-    return loadCodexChatMessages(session.nativePath, this.#logger);
-  }
-
-  #getJsonlPreview(session: CodexChatEntry): Promise<unknown> {
-    return getCodexPreviewFromNativePath(session.nativePath, this.#logger);
-  }
 }
 
 function denialResponseForRequest(method: string): unknown {

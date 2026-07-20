@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { rewriteCodexForkTranscriptEntry } from '../fork-transcript.js';
+import {
+  createCodexForkTranscriptRewriter,
+  rewriteCodexForkTranscriptEntry,
+} from '../fork-transcript.js';
 
 const context = {
   sourceAgentSessionId: '11111111-1111-1111-1111-111111111111',
@@ -99,5 +102,36 @@ describe('rewriteCodexForkTranscriptEntry', () => {
       ...context,
       retainedMessageCount: 0,
     })).toEqual({ type: 'garcon_fork_filtered' });
+  });
+
+  it('preserves hidden Code Mode envelopes and their paired outputs', () => {
+    const rewrite = createCodexForkTranscriptRewriter();
+    const exec = {
+      type: 'response_item',
+      payload: { type: 'custom_tool_call', name: 'exec', call_id: 'outer', input: 'text("ok")' },
+    };
+    const output = {
+      type: 'response_item',
+      payload: { type: 'custom_tool_call_output', call_id: 'outer', output: 'done' },
+    };
+
+    expect(rewrite(exec, { ...context, retainedMessageCount: 0 })).toBe(exec);
+    expect(rewrite(output, { ...context, retainedMessageCount: 0 })).toBe(output);
+  });
+
+  it('preserves provider records that the shared legacy projection does not render', () => {
+    const entry = {
+      type: 'response_item',
+      payload: {
+        type: 'agent_message',
+        id: 'provider-only',
+        content: [{ type: 'output_text', text: 'ordinary provider state' }],
+      },
+    };
+
+    expect(createCodexForkTranscriptRewriter()(entry, {
+      ...context,
+      retainedMessageCount: 0,
+    })).toBe(entry);
   });
 });
