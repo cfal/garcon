@@ -12,6 +12,7 @@ import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-ca
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { classifyDirectIntegrationError } from '@garcon/server-agent-common/direct/errors';
 import { DirectExecution } from '@garcon/server-agent-common/direct/execution';
+import { relocateLegacySessionDirectory } from '@garcon/server-agent-common/direct/legacy-session-relocation';
 import { createDirectOpenAiChatRuntime } from '@garcon/server-agent-common/direct/router';
 import { createDirectSessionPaths } from '@garcon/server-agent-common/direct/session-paths';
 import {
@@ -24,6 +25,8 @@ import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycl
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+
+const SESSIONS_LABEL = 'openai-compatible-sessions';
 
 const DESCRIPTOR = {
   id: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -69,7 +72,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
     );
     const sessionPaths = createDirectSessionPaths(
       host.storage.rootDirectory,
-      'openai-compatible-sessions',
+      SESSIONS_LABEL,
     );
     const runtime = createDirectOpenAiChatRuntime({
       runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -81,6 +84,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
       sessionLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
       findSessionFilePath: sessionPaths.findSessionFilePath,
+      logger: host.logger,
     });
 
     this.settings = createVersionedSettings({
@@ -148,6 +152,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
       },
     };
     this.lifecycle = createIntegrationLifecycle({
+      migrateOwnedStorage: (store) => relocateLegacySessionDirectory(host, store, SESSIONS_LABEL),
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
         runtime.shutdown();

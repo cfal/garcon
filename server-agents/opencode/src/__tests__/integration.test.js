@@ -13,6 +13,7 @@ function createHost() {
     storage: {
       rootDirectory: '/tmp/opencode-test',
       directory: mock(() => Promise.resolve('/tmp/opencode-test/search')),
+      claimLegacyWorkspaceDirectory: mock(() => Promise.resolve({ moved: 0, skipped: 0 })),
     },
     environment: { get: mock(() => undefined) },
     apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },

@@ -155,18 +155,18 @@ describe('LocalSettingsStore', () => {
 
 	it('persists hidden tool groups', () => {
 		const store = createLocalSettingsStore();
-		const commands = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'commands');
-		if (!commands) throw new Error('expected command tool group');
-		store.setToolTypesHidden(commands.toolTypes, true);
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		if (!bash) throw new Error('expected Bash tool group');
+		store.setToolTypesHidden(bash.toolTypes, true);
 
-		expect(store.areToolTypesHidden(commands.toolTypes)).toBe(true);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
-		).toMatchObject({ hiddenToolTypes: commands.toolTypes });
+		).toMatchObject({ hiddenToolTypes: bash.toolTypes });
 
 		const restored = createLocalSettingsStore();
-		expect(restored.areToolTypesHidden(commands.toolTypes)).toBe(true);
-		restored.setToolTypesHidden(commands.toolTypes, false);
+		expect(restored.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		restored.setToolTypesHidden(bash.toolTypes, false);
 		expect(restored.hiddenToolTypes).toEqual([]);
 
 		store.destroy();
@@ -181,10 +181,54 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		const commands = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'commands');
-		if (!commands) throw new Error('expected command tool group');
-		expect(store.hiddenToolTypes).toEqual(commands.toolTypes);
-		expect(store.areToolTypesHidden(commands.toolTypes)).toBe(true);
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		if (!bash) throw new Error('expected Bash tool group');
+		expect(store.hiddenToolTypes).toEqual(bash.toolTypes);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		store.destroy();
+	});
+
+	it('keeps Bash and Exec visibility independent', () => {
+		const store = createLocalSettingsStore();
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		const exec = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'exec');
+		if (!bash || !exec) throw new Error('expected Bash and Exec tool groups');
+
+		store.setToolTypesHidden(bash.toolTypes, true);
+
+		expect(store.hiddenToolTypes).toEqual(bash.toolTypes);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		expect(store.areToolTypesHidden(exec.toolTypes)).toBe(false);
+
+		store.setToolTypesHidden(exec.toolTypes, true);
+		store.setToolTypesHidden(bash.toolTypes, false);
+
+		expect(store.hiddenToolTypes).toEqual(exec.toolTypes);
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(false);
+		expect(store.areToolTypesHidden(exec.toolTypes)).toBe(true);
+		store.destroy();
+	});
+
+	it('preserves legacy combined command selections across the split', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				hiddenToolTypes: [
+					'bash-tool-use',
+					'exec-tool-use',
+					'wait-tool-use',
+					'write-stdin-tool-use',
+				],
+			}),
+		);
+
+		const store = createLocalSettingsStore();
+		const bash = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash');
+		const exec = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'exec');
+		if (!bash || !exec) throw new Error('expected Bash and Exec tool groups');
+
+		expect(store.areToolTypesHidden(bash.toolTypes)).toBe(true);
+		expect(store.areToolTypesHidden(exec.toolTypes)).toBe(true);
 		store.destroy();
 	});
 
