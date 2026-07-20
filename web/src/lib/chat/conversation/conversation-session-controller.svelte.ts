@@ -30,7 +30,6 @@ import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
 } from '$lib/agents/agent-modes.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {
