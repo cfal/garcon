@@ -6,6 +6,8 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import Maximize2 from '@lucide/svelte/icons/maximize-2';
+	import MermaidViewerDialog from './MermaidViewerDialog.svelte';
 	import { renderMermaid } from './mermaid-loader';
 
 	interface Props {
@@ -18,6 +20,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	let renderError = $state('');
 	let loading = $state(true);
 	let copied = $state(false);
+	let viewerOpen = $state(false);
 
 	async function handleCopy() {
 		const didCopy = await copyToClipboard(text);
@@ -53,38 +56,51 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	<div
 		class="flex items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
 	>
-		<span>mermaid</span>
-		<button
-			onclick={handleCopy}
-			class="inline-flex h-6 w-6 items-center justify-center rounded opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100 hover:bg-accent"
-			title={m.chat_code_block_copy()}
-			aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}
+		<span class="mr-auto">mermaid</span>
+		<div
+			class="flex items-center gap-0.5 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
 		>
-			{#if copied}
-				<svg
-					class="w-3 h-3 text-status-success-foreground"
-					fill="none"
-					stroke="currentColor"
-					viewBox="0 0 24 24"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M5 13l4 4L19 7"
-					/>
-				</svg>
-			{:else}
-				<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-					/>
-				</svg>
-			{/if}
-		</button>
+			<button
+				onclick={handleCopy}
+				class="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				title={m.chat_code_block_copy()}
+				aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}
+			>
+				{#if copied}
+					<svg
+						class="w-3 h-3 text-status-success-foreground"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M5 13l4 4L19 7"
+						/>
+					</svg>
+				{:else}
+					<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+						/>
+					</svg>
+				{/if}
+			</button>
+			<button
+				onclick={() => (viewerOpen = true)}
+				class="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				title={m.chat_mermaid_expand()}
+				aria-label={m.chat_mermaid_expand()}
+				disabled={loading || Boolean(renderError) || !renderedSvg}
+			>
+				<Maximize2 class="h-3 w-3" />
+			</button>
+		</div>
 	</div>
 
 	<div class="mermaid-container overflow-x-auto p-4">
@@ -114,6 +130,12 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		{/if}
 	</div>
 </div>
+
+<MermaidViewerDialog
+	open={viewerOpen}
+	svg={renderedSvg}
+	onOpenChange={(open) => (viewerOpen = open)}
+/>
 
 <style>
 	.mermaid-container :global(svg) {
