@@ -9,6 +9,7 @@ import { normalizePendingUserInput } from './pending-user-input';
 import type { ChatExecutionControlState } from './chat-execution-control';
 import { parseChatExecutionControlState } from './chat-execution-control';
 import type { RemoteSettingsSnapshot } from './settings';
+import type { ErrorCode } from './error-codes';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
   isScheduledPromptsInvalidationReason,
@@ -268,7 +269,8 @@ export class SnippetsInvalidatedMessage {
   constructor(public reason: SnippetsInvalidationReason) {}
 }
 
-export type ClientRequestErrorCode =
+export type ClientRequestErrorCode = Extract<
+  ErrorCode,
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
@@ -276,7 +278,8 @@ export type ClientRequestErrorCode =
   | 'NATIVE_PATH_UNRESOLVED'
   | 'HISTORY_LOAD_FAILED'
   | 'REQUEST_TIMEOUT'
-  | 'INTERNAL_ERROR';
+  | 'INTERNAL_ERROR'
+>;
 
 const CLIENT_REQUEST_ERROR_CODES: readonly ClientRequestErrorCode[] = [
   'MISSING_CHAT_ID',

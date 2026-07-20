@@ -6,10 +6,12 @@ import type { ApiProtocol } from './api-providers.js';
 import type { ChatExecutionControlState } from './chat-execution-control.js';
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
+import type { ErrorCode } from './error-codes.js';
 
 export type CommandStatus = 'accepted' | 'duplicate';
 
-export type CommandErrorCode =
+export type CommandErrorCode = Extract<
+  ErrorCode,
   | 'VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
   | 'IDEMPOTENCY_CONFLICT'
@@ -31,7 +33,8 @@ export type CommandErrorCode =
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
   | 'SERVER_RESTART_INTERRUPTED'
-  | 'INTERNAL_ERROR';
+  | 'INTERNAL_ERROR'
+>;
 
 export interface CommandAcceptedResponse {
   success: true;
