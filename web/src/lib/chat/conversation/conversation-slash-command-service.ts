@@ -87,7 +87,7 @@ export interface ConversationSlashCommandDeps {
 }
 
 export type SlashCommandSubmissionResolution =
-	| { kind: 'handled'; outcome: ConversationSubmissionOutcome }
+	| { kind: 'handled'; outcome: ConversationSubmissionOutcome | Promise<ConversationSubmissionOutcome> }
 	| { kind: 'continue'; content: string; isActiveDeliveryInput: boolean };
 
 export class ConversationSlashCommandService {
@@ -98,19 +98,19 @@ export class ConversationSlashCommandService {
 		private readonly acceptedInputs = new AcceptedInputSubmissionService(),
 	) {}
 
-	async dispatchSubmission(input: {
+	dispatchSubmission(input: {
 		chatId: string;
 		chat: ChatSessionRecord;
 		text: string;
 		images: File[];
 		ownsComposer: boolean;
-	}): Promise<SlashCommandSubmissionResolution> {
+	}): SlashCommandSubmissionResolution {
 		const { chatId, chat, text, images, ownsComposer } = input;
 		const rename = parseRenameCommand(text);
 		if (rename) {
 			return {
 				kind: 'handled',
-				outcome: await this.submitRenameCommand(chatId, chat, rename.title, images, ownsComposer),
+				outcome: this.submitRenameCommand(chatId, chat, rename.title, images, ownsComposer),
 			};
 		}
 
@@ -118,7 +118,7 @@ export class ConversationSlashCommandService {
 		if (schedule.kind !== 'not-command') {
 			return {
 				kind: 'handled',
-				outcome: await this.submitScheduleInCommand(chatId, chat, schedule, images, ownsComposer),
+				outcome: this.submitScheduleInCommand(chatId, chat, schedule, images, ownsComposer),
 			};
 		}
 
@@ -147,7 +147,7 @@ export class ConversationSlashCommandService {
 				}
 				return {
 					kind: 'handled',
-					outcome: await this.submitForkCommand(
+					outcome: this.submitForkCommand(
 						chatId,
 						chat,
 						fork.message,
@@ -162,7 +162,7 @@ export class ConversationSlashCommandService {
 		if (compact) {
 			return {
 				kind: 'handled',
-				outcome: await this.submitCompactCommand(chatId, chat, compact.instructions, ownsComposer),
+				outcome: this.submitCompactCommand(chatId, chat, compact.instructions, ownsComposer),
 			};
 		}
 

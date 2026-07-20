@@ -87,19 +87,19 @@ export class ConversationQueueController {
 	}
 
 	startControlRefresh(chatId: string): Promise<void> {
-		const refresh = getChatExecutionControl(chatId).then((result) => {
-			this.options.conversationUi.setExecutionControlFromRefresh(chatId, result.control);
-		});
-		this.#controlRefreshByChatId.set(chatId, refresh);
-		void refresh
-			.catch(() => {
-				// A later broadcast, reconnect, or server-side admission check still preserves FIFO.
+		const refresh = getChatExecutionControl(chatId)
+			.then((result) => {
+				this.options.conversationUi.setExecutionControlFromRefresh(chatId, result.control);
 			})
 			.finally(() => {
 				if (this.#controlRefreshByChatId.get(chatId) === refresh) {
 					this.#controlRefreshByChatId.delete(chatId);
 				}
 			});
+		this.#controlRefreshByChatId.set(chatId, refresh);
+		void refresh.catch(() => {
+			// A later broadcast, reconnect, or server-side admission check still preserves FIFO.
+		});
 		return refresh;
 	}
 

@@ -434,7 +434,7 @@ export class ConversationSessionController {
 		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		const slash = await this.#slashCommands.dispatchSubmission({
+		const slash = this.#slashCommands.dispatchSubmission({
 			chatId,
 			chat: selected,
 			text,
