@@ -35,7 +35,15 @@ function createIntegration() {
           type: "enum",
           label: "Effort",
           labelKey: "thinking",
-          options: [{ value: "high", label: "High", labelKey: "deep" }],
+          options: [
+            {
+              value: "high",
+              label: "High",
+              labelKey: "deep",
+              description: "Uses extended thinking for every response.",
+              descriptionKey: "thinkingEnabled",
+            },
+          ],
         },
       ],
       defaults: () => ({
@@ -90,7 +98,12 @@ describe("AgentCatalogService", () => {
           type: "enum",
           labelKey: "thinking",
           options: [
-            expect.objectContaining({ value: "high", labelKey: "deep" }),
+            expect.objectContaining({
+              value: "high",
+              labelKey: "deep",
+              description: "Uses extended thinking for every response.",
+              descriptionKey: "thinkingEnabled",
+            }),
           ],
         }),
       ],

@@ -112,9 +112,27 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         label: 'Thinking',
         labelKey: 'thinking',
         options: [
-          { value: 'auto', label: 'Auto', labelKey: 'automatic' },
-          { value: 'on', label: 'On', labelKey: 'enabled' },
-          { value: 'off', label: 'Off', labelKey: 'disabled' },
+          {
+            value: 'auto',
+            label: 'Auto',
+            labelKey: 'automatic',
+            description: 'Lets Claude decide when extended thinking is useful.',
+            descriptionKey: 'thinkingAutomatic',
+          },
+          {
+            value: 'on',
+            label: 'On',
+            labelKey: 'enabled',
+            description: 'Uses extended thinking for every response.',
+            descriptionKey: 'thinkingEnabled',
+          },
+          {
+            value: 'off',
+            label: 'Off',
+            labelKey: 'disabled',
+            description: 'Answers without extended thinking.',
+            descriptionKey: 'thinkingDisabled',
+          },
         ],
       }],
     });
