@@ -89,6 +89,33 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(filterHiddenToolRenderItems(items, [])).toBe(items);
 	});
 
+	it('filters Bash and Exec tool calls independently', () => {
+		const items = buildConversationFeedRenderItems(
+			rows([
+				new UserMessage(TS, 'start'),
+				new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+				new ExecToolUseMessage(TS, 'exec-1', 'text("ok")', 'javascript'),
+				new AssistantMessage(TS, 'done'),
+			]),
+		);
+
+		const visibleTypes = (hiddenToolTypes: readonly string[]) =>
+			filterHiddenToolRenderItems(items, hiddenToolTypes).flatMap((item) =>
+				item.kind === 'message' ? [item.message.type] : [],
+			);
+
+		expect(visibleTypes(['bash-tool-use'])).toEqual([
+			'user-message',
+			'exec-tool-use',
+			'assistant-message',
+		]);
+		expect(visibleTypes(['exec-tool-use'])).toEqual([
+			'user-message',
+			'bash-tool-use',
+			'assistant-message',
+		]);
+	});
+
 	it('filters grouped file reads when file reads are hidden', () => {
 		const items = buildConversationFeedRenderItems(
 			rows([
