@@ -19,7 +19,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - DO NOT run the same tests again and again to grep for different output. Instead, forward 2>&1 and `tee` the cargo test to a /tmp file, and grep from it after.
 - DO NOT consider backwards compatibility, as the server and client are always distributed together.
 - DO NOT use emojis
-- Keep Garcon core lean and agent agnostic. All agent-specific runtime, dependency, storage, search, and translation code must stay behind `@garcon/server-agent-interface` in `server-agents/<id>/`; `server/agents/default-agent-integrations.ts` is the only core provider import point.
+- Keep Garcon core lean and agent agnostic. All agent-specific runtime, dependencies, storage, index-source parsing, and translation code must stay behind `@garcon/server-agent-interface` in `server-agents/<id>/`; `server/agents/default-agent-integrations.ts` is the only core provider import point. Provider-neutral transcript search, its shared database, and its fixed Worker pair live in `server-agents/common`.
 - If interacting with the Claude, Codex, or Opencode SDK, clone it and look through if as needed:
   - https://github.com/anthropics/claude-agent-sdk-python
     - this is the Python SDK - the Typescript one is closed source, but you can find references in our node_modules
