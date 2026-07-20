@@ -137,7 +137,7 @@ describe('loadCodexChatMessages', () => {
     ], (filePath) => loadCodexChatMessages(filePath));
 
     expect(messages.map((message) => message.content)).toEqual(['recovered prompt', 'later reply']);
-    expect(getNativeMessageSource(messages[0])).toEqual({ lineNumber: 1 });
+    expect(getNativeMessageSource(messages[0])).toEqual({ byteOffset: 0, lineNumber: 1 });
   });
 
   it('prefers response_item assistant content over duplicate event_msg wrappers', async () => {
