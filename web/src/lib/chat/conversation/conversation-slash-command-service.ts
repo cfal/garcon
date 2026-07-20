@@ -6,6 +6,14 @@ import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
+import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
+import {
+	parseCompactCommand,
+	isCodexGoalCommand,
+	parseRenameCommand,
+	parseScheduleInCommand,
+	parseSteerCommand,
+} from '$lib/chat/composer/slash-commands.js';
 import { createClientChatId } from '$lib/chat/sessions/client-chat-id.js';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import type {
@@ -63,6 +71,8 @@ interface SlashCommandModelCatalog {
 		modelEndpointId: string | null;
 		modelProtocol: ApiProtocol | null;
 	};
+	supportsFork(agentId: SessionAgentId): boolean;
+	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
 }
 
 export interface ConversationSlashCommandDeps {
@@ -76,6 +86,10 @@ export interface ConversationSlashCommandDeps {
 	scrollToBottom(): void;
 }
 
+export type SlashCommandSubmissionResolution =
+	| { kind: 'handled'; outcome: ConversationSubmissionOutcome }
+	| { kind: 'continue'; content: string; isActiveDeliveryInput: boolean };
+
 export class ConversationSlashCommandService {
 	readonly #scheduleInFlight = new Set<string>();
 
@@ -83,6 +97,82 @@ export class ConversationSlashCommandService {
 		private readonly deps: ConversationSlashCommandDeps,
 		private readonly acceptedInputs = new AcceptedInputSubmissionService(),
 	) {}
+
+	async dispatchSubmission(input: {
+		chatId: string;
+		chat: ChatSessionRecord;
+		text: string;
+		images: File[];
+		ownsComposer: boolean;
+	}): Promise<SlashCommandSubmissionResolution> {
+		const { chatId, chat, text, images, ownsComposer } = input;
+		const rename = parseRenameCommand(text);
+		if (rename) {
+			return {
+				kind: 'handled',
+				outcome: await this.submitRenameCommand(chatId, chat, rename.title, images, ownsComposer),
+			};
+		}
+
+		const schedule = parseScheduleInCommand(text);
+		if (schedule.kind !== 'not-command') {
+			return {
+				kind: 'handled',
+				outcome: await this.submitScheduleInCommand(chatId, chat, schedule, images, ownsComposer),
+			};
+		}
+
+		const agentId = chat.agentId as SessionAgentId;
+		const steer = parseSteerCommand(text);
+		if (steer.kind === 'invalid') {
+			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_prompt_required());
+			return { kind: 'handled', outcome: 'rejected' };
+		}
+		if (steer.kind === 'valid' && agentId !== 'codex') {
+			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_codex_only());
+			return { kind: 'handled', outcome: 'rejected' };
+		}
+		if (steer.kind === 'valid' && (chat.status !== 'running' || !chat.isProcessing)) {
+			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_requires_active_turn());
+			return { kind: 'handled', outcome: 'rejected' };
+		}
+
+		if (this.deps.modelCatalog.supportsFork(agentId)) {
+			const fork = parseForkCommand(text);
+			if (fork) {
+				if (chat.status === 'running' && chat.isProcessing
+					&& !this.deps.modelCatalog.supportsForkWhileRunning(agentId)) {
+					this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
+					return { kind: 'handled', outcome: 'rejected' };
+				}
+				return {
+					kind: 'handled',
+					outcome: await this.submitForkCommand(
+						chatId,
+						chat,
+						fork.message,
+						images,
+						ownsComposer,
+					),
+				};
+			}
+		}
+
+		const compact = parseCompactCommand(text);
+		if (compact) {
+			return {
+				kind: 'handled',
+				outcome: await this.submitCompactCommand(chatId, chat, compact.instructions, ownsComposer),
+			};
+		}
+
+		return {
+			kind: 'continue',
+			content: steer.kind === 'valid' ? steer.prompt : text,
+			isActiveDeliveryInput:
+				steer.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)),
+		};
+	}
 
 	async submitScheduleInCommand(
 		chatId: string,

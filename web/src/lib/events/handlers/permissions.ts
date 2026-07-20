@@ -9,12 +9,12 @@ import {
 	type ChatMessage,
 } from '$shared/chat-types';
 import type { LoadingStatusEntry } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface PermissionLifecycleContext {
 	getCurrentChatId: () => string | null;
-	conversationUi: Pick<ConversationUiState, 'setPendingPermissionRequests'>;
+	conversationUi: Pick<ConversationUiPort, 'setPendingPermissionRequests'>;
 	markTurnRunning: (chatId?: string | null) => void;
 	pushLoadingStatus: (entry: LoadingStatusEntry) => void;
 	popLoadingStatus: (id: string) => void;

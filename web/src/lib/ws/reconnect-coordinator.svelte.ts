@@ -10,8 +10,9 @@ import {
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import type { ChatViewMessage } from '$shared/chat-view';
 import type { ChatTranscriptCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { getChatExecutionControl } from '$lib/api/chats.js';
 
 export interface ReconnectWsPort {
@@ -19,19 +20,18 @@ export interface ReconnectWsPort {
 	sendRequest(message: object): Promise<Record<string, unknown>>;
 }
 
-export interface ReconnectTranscriptState {
-	getCursor(): ReturnType<ActiveTranscriptState['getCursor']>;
-	applyMessages: ActiveTranscriptState['applyMessages'];
-	setPendingUserInputs: ActiveTranscriptState['setPendingUserInputs'];
-	loadMessages(chatId: string): Promise<unknown>;
+export type ReconnectTranscriptState = Pick<
+	ActiveTranscriptPort,
+	'getCursor' | 'applyMessages' | 'setPendingUserInputs' | 'loadMessages'
+> & {
 	transcriptCache: {
 		markStale(chatId: string): void;
 		markValidated(chatId: string): void;
 	};
-}
+};
 
 export type ReconnectConversationUiState = Pick<
-	ConversationUiState,
+	ConversationUiPort,
 	'executionControlChatIds' | 'removeExecutionControl' | 'setExecutionControlFromRefresh'
 >;
 
@@ -39,11 +39,14 @@ export interface ChatReconnectCoordinatorOptions {
 	ws: ReconnectWsPort;
 	chatState: ReconnectTranscriptState;
 	conversationUi: ReconnectConversationUiState;
-	getSelectedChatId: () => string | null;
+	sessions: Pick<
+		ChatSessionsPort,
+		| 'selectedChatId'
+		| 'reconcileProcessing'
+		| 'invalidateProcessingAuthority'
+		| 'quietRefreshChats'
+	>;
 	getExecutionControl?: (chatId: string) => Promise<{ control: ChatExecutionControlState }>;
-	reconcileProcessing: (activeChatIds: Set<string>) => void;
-	invalidateProcessingAuthority: () => void;
-	quietRefreshChats: () => Promise<void> | void;
 	getBackgroundCursors: () => ChatTranscriptCursor[];
 	getVisibleChatIds?: () => string[];
 	getVisibleChatCursor?: (chatId: string) => ChatTranscriptCursor | null;
@@ -86,7 +89,7 @@ export class ChatReconnectCoordinator {
 		if (!connected) {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
-			this.options.invalidateProcessingAuthority();
+			this.options.sessions.invalidateProcessingAuthority();
 			return;
 		}
 		if (this.#wasConnected) return;
@@ -95,7 +98,7 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #handleConnected(): Promise<void> {
-		const chatId = this.options.getSelectedChatId();
+		const chatId = this.options.sessions.selectedChatId;
 
 		if (!this.#hasConnectedBefore) {
 			this.#hasConnectedBefore = true;
@@ -145,9 +148,9 @@ export class ChatReconnectCoordinator {
 		}
 
 		if (runningChatIds !== null) {
-			this.options.reconcileProcessing(runningChatIds);
+			this.options.sessions.reconcileProcessing(runningChatIds);
 		} else {
-			this.options.invalidateProcessingAuthority();
+			this.options.sessions.invalidateProcessingAuthority();
 		}
 		await this.#refreshChatsQuietly();
 		if (epoch !== this.#reconnectEpoch) {
@@ -236,7 +239,7 @@ export class ChatReconnectCoordinator {
 		const cursor = this.options.chatState.getCursor();
 		try {
 			const message = await this.#subscribe(chatId, cursor.generationId, cursor.lastSeq);
-			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
+			if (epoch !== this.#reconnectEpoch || this.options.sessions.selectedChatId !== chatId) return;
 
 			if (message.mode === 'snapshot-required') {
 				await this.#loadSelectedSnapshot(chatId, epoch);
@@ -259,7 +262,7 @@ export class ChatReconnectCoordinator {
 			this.options.chatState.setPendingUserInputs(message.pendingUserInputs);
 			this.options.chatState.transcriptCache.markValidated(chatId);
 		} catch {
-			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
+			if (epoch !== this.#reconnectEpoch || this.options.sessions.selectedChatId !== chatId) return;
 			try {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 			} catch {
@@ -269,9 +272,9 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #loadSelectedSnapshot(chatId: string, epoch: number): Promise<void> {
-		if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
+		if (epoch !== this.#reconnectEpoch || this.options.sessions.selectedChatId !== chatId) return;
 		await this.options.chatState.loadMessages(chatId);
-		if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;
+		if (epoch !== this.#reconnectEpoch || this.options.sessions.selectedChatId !== chatId) return;
 		this.options.chatState.transcriptCache.markValidated(chatId);
 	}
 
@@ -368,7 +371,7 @@ export class ChatReconnectCoordinator {
 
 	async #refreshChatsQuietly(): Promise<void> {
 		try {
-			await this.options.quietRefreshChats();
+			await this.options.sessions.quietRefreshChats();
 		} catch (error) {
 			console.warn('[ChatReconnectCoordinator] Chat-list refresh failed', error);
 		}

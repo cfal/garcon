@@ -7,12 +7,12 @@ import { createEventRouter, type EventRouterStores } from '$lib/events/router.sv
 import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
-import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { ChatViewMessage } from '$shared/chat-view';
 import type {
 	ChatTranscriptApplyResult,
@@ -21,25 +21,26 @@ import type {
 import type { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
 
 export interface ConversationRouterStoreDeps {
-	sessions: {
-		selectedChat: ChatSessionRecord | null;
-		selectedChatId: string | null;
-		byId: Record<string, ChatSessionRecord>;
-		order: string[];
-		hasChat: (chatId: string) => boolean;
-		patchPreview: (chatId: string, content: string, timestamp?: string) => void;
-		patchChat: (chatId: string, patch: Partial<ChatSessionRecord>) => void;
-		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
-		removeChat: (chatId: string) => void;
-		setSelectedChatId: (id: string | null) => void;
-		applyProcessingEvent: (chatId: string, isProcessing: boolean) => void;
-		reconcileProcessing: (activeChatIds: Set<string>) => void;
-		quietRefreshChats: () => Promise<void> | void;
-	};
-	chatState: ActiveTranscriptState;
+	sessions: Pick<
+		ChatSessionsPort,
+		| 'selectedChat'
+		| 'selectedChatId'
+		| 'byId'
+		| 'order'
+		| 'hasChat'
+		| 'patchPreview'
+		| 'patchChat'
+		| 'patchLastReadAt'
+		| 'removeChat'
+		| 'setSelectedChatId'
+		| 'applyProcessingEvent'
+		| 'reconcileProcessing'
+		| 'quietRefreshChats'
+	>;
+	chatState: ActiveTranscriptPort;
 	agentState: AgentState;
 	lifecycle: ConversationLifecycleState;
-	conversationUi: ConversationUiState;
+	conversationUi: ConversationUiPort;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	transcriptCache?: ChatTranscriptCache;
@@ -143,24 +144,11 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 			setIsSystemChatChange: (v) => deps.lifecycle.setIsSystemChatChange(v),
 		},
 		conversationUi: deps.conversationUi,
-		sessions: {
-			selectedChat: () => deps.sessions.selectedChat,
-			setSelectedChatId: (id) => deps.sessions.setSelectedChatId(id),
-			reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
-			setChatProcessing: (chatId, isProcessing) =>
-				deps.sessions.applyProcessingEvent(chatId, isProcessing),
-			patchChatPreview: (chatId, content, timestamp) => {
-				deps.sessions.patchPreview(chatId, content, timestamp);
-			},
-			refreshChats: () => {
-				void deps.sessions.quietRefreshChats();
-			},
+		sessions: deps.sessions,
+		navigation: {
 			navigateToChat: (chatId) => {
 				void gotoChat(chatId);
 			},
-			removeChat: (chatId) => deps.sessions.removeChat(chatId),
-			patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
-			patchChatProjectPath: (chatId, patch) => deps.sessions.patchChat(chatId, patch),
 			navigateAwayFromChat: (chatId) => {
 				if (deps.sessions.selectedChatId !== chatId) return;
 				const idx = deps.sessions.order.indexOf(chatId);
@@ -173,7 +161,6 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					goto('/');
 				}
 			},
-			patchLastReadAt: (chatId, lastReadAt) => deps.sessions.patchLastReadAt(chatId, lastReadAt),
 		},
 		startup: {
 			startupCoordinator: deps.startupCoordinator,

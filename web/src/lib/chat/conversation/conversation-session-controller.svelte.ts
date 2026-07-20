@@ -4,76 +4,61 @@
 // callback functions supplied through the deps interface.
 
 import {
-	deleteQueuedInput,
-	getChatExecutionControl,
-	pauseChatQueue,
-	replaceQueuedInput,
-	resumeChatQueue,
 	sendPermissionDecision,
 	stopChat,
 	interruptAndSendChat,
-	updateChatModel,
-	updateExecutionSettings,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import type { ChatImage } from '$shared/chat-types';
-import {
-	parseChatExecutionControlState,
-	type ChatExecutionControlState,
-} from '$shared/chat-execution-control';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
-import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
-import {
-	parseCompactCommand,
-	isCodexGoalCommand,
-	parseRenameCommand,
-	parseScheduleInCommand,
-	parseSteerCommand,
-} from '$lib/chat/composer/slash-commands.js';
 import {
 	INITIAL_VISIBLE_MESSAGES,
-	type ActiveTranscriptState,
+	type ActiveTranscriptPort,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
-import type { JsonObject, JsonValue } from '$shared/json';
-import { withAgentSetting } from '$lib/agents/agent-settings.js';
+import type { JsonValue } from '$shared/json';
 import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
 } from '$lib/agents/agent-modes.js';
-import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {
 	PermissionDecisionPayload,
-	QueueCommandErrorResponse,
 } from '$shared/chat-command-contracts';
-import type { ChatListEntry } from '$shared/chat-list';
 import {
 	ConversationAgentSwitchService,
 	type AgentSwitchSelection,
 } from '$lib/chat/conversation/conversation-agent-switch-service.js';
 import { ConversationSlashCommandService } from '$lib/chat/conversation/conversation-slash-command-service.js';
+import { ConversationQueueController } from '$lib/chat/conversation/conversation-queue-controller.svelte.js';
+import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import type { ConversationSubmissionOutcome } from '$lib/chat/conversation/conversation-submission-outcome.js';
 import { classifySubmission } from '$lib/chat/conversation/submission-classifier.js';
 import {
 	errorDetail,
-	pendingUserInput,
 	prepareChatImages,
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
+import {
+	submitDraftRoute,
+	submitQueueRoute,
+	submitRunRoute,
+} from '$lib/chat/conversation/submission-routes.js';
 import * as m from '$lib/paraglide/messages.js';
 
 type SessionTranscriptState = Pick<
-	ActiveTranscriptState,
+	ActiveTranscriptPort,
 	| 'activeChatId'
 	| 'chatMessages'
 	| 'isUserScrolledUp'
@@ -126,7 +111,7 @@ type SessionLifecycleState = Pick<
 >;
 
 type SessionConversationUiState = Pick<
-	ConversationUiState,
+	ConversationUiPort,
 	| 'pendingPermissionRequests'
 	| 'previousPermissionMode'
 	| 'clearPendingPermissionRequests'
@@ -140,21 +125,22 @@ type SessionConversationUiState = Pick<
 type SessionStartupCoordinator = Pick<StartupCoordinator, 'beginLocalStartup' | 'completeStartup'>;
 
 export interface SessionControllerDeps {
-	sessions: {
-		selectedChatId: string | null;
-		selectedChat: ChatSessionRecord | null;
-		byId: Record<string, ChatSessionRecord>;
-		startupByChatId: Record<string, ChatStartupConfig>;
-		isDraft: (chatId: string) => boolean;
-		patchDraftStartup: (chatId: string, patch: Partial<ChatStartupConfig>) => void;
-		patchChat: (chatId: string, patch: Partial<ChatSessionRecord>) => void;
-		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
-		applyStartEntry: (entry: ChatListEntry) => void;
-		applyProcessingEvent: (chatId: string, isProcessing: boolean) => void;
-		upsertServerChat: (entry: ChatListEntry) => void;
-		setSelectedChatId: (id: string | null) => void;
-		renameChat: (chatId: string, newTitle: string) => Promise<boolean>;
-	};
+	sessions: Pick<
+		ChatSessionsPort,
+		| 'selectedChatId'
+		| 'selectedChat'
+		| 'byId'
+		| 'startupByChatId'
+		| 'isDraft'
+		| 'patchDraftStartup'
+		| 'patchChat'
+		| 'patchLastReadAt'
+		| 'applyStartEntry'
+		| 'applyProcessingEvent'
+		| 'upsertServerChat'
+		| 'setSelectedChatId'
+		| 'renameChat'
+	>;
 	chatState: SessionTranscriptState;
 	composerState: SessionComposerState;
 	agentState: SessionAgentState;
@@ -201,29 +187,6 @@ export interface SessionControllerDeps {
 	scrollToBottom: () => void;
 }
 
-function controlFromMutationError(error: unknown): ChatExecutionControlState | null {
-	if (!(error instanceof ApiError) || !isQueueCommandErrorResponse(error.payload)) return null;
-	return error.payload.control ? parseChatExecutionControlState(error.payload.control) : null;
-}
-
-function isQueueCommandErrorResponse(value: unknown): value is QueueCommandErrorResponse {
-	if (!value || typeof value !== 'object') return false;
-	const body = value as Record<string, unknown>;
-	return (
-		body.success === false &&
-		typeof body.error === 'string' &&
-		typeof body.errorCode === 'string' &&
-		typeof body.retryable === 'boolean'
-	);
-}
-
-function isDepartedQueueEntryError(error: unknown): boolean {
-	return (
-		error instanceof ApiError &&
-		(error.errorCode === 'QUEUE_ENTRY_ALREADY_SENT' || error.errorCode === 'QUEUE_ENTRY_NOT_FOUND')
-	);
-}
-
 function isExecutionControlAdmissionConflict(error: unknown): boolean {
 	return (
 		error instanceof ApiError &&
@@ -232,27 +195,35 @@ function isExecutionControlAdmissionConflict(error: unknown): boolean {
 	);
 }
 
-interface FailedQueueSubmission {
-	sequence: number;
-	text: string;
-	images: File[];
-}
-
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
-	#controlRefreshByChatId = new Map<string, Promise<void>>();
-	#queueSubmissionSequence = 0;
-	#pendingQueueSubmissionsByChatId = new Map<string, number>();
-	#failedQueueSubmissionsByChatId = new Map<string, FailedQueueSubmission[]>();
-	#latestAgentSettingsMutationByChatId = new Map<string, symbol>();
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
 	readonly #acceptedInputs: AcceptedInputSubmissionService;
+	readonly #queue: ConversationQueueController;
+	readonly #settings: ConversationSettingsController;
 
 	constructor(private deps: SessionControllerDeps) {
 		this.#acceptedInputs = new AcceptedInputSubmissionService();
 		this.#slashCommands = new ConversationSlashCommandService(deps, this.#acceptedInputs);
 		this.#agentSwitch = new ConversationAgentSwitchService(deps);
+		const acceptedInputs = this.#acceptedInputs;
+		const agentSwitch = this.#agentSwitch;
+		this.#queue = new ConversationQueueController({
+			get sessions() { return deps.sessions; },
+			get chatState() { return deps.chatState; },
+			get composerState() { return deps.composerState; },
+			get lifecycle() { return deps.lifecycle; },
+			get conversationUi() { return deps.conversationUi; },
+			get acceptedInputs() { return acceptedInputs; },
+		});
+		this.#settings = new ConversationSettingsController({
+			get sessions() { return deps.sessions; },
+			get agentState() { return deps.agentState; },
+			get modelCatalog() { return deps.modelCatalog; },
+			get chatState() { return deps.chatState; },
+			get agentSwitch() { return agentSwitch; },
+		});
 	}
 
 	#executionModelSelection(): {
@@ -286,90 +257,6 @@ export class ConversationSessionController {
 		deps.conversationUi.clearPendingPermissionRequests();
 		deps.setIsViewportPinnedToBottom(true);
 		deps.setInitialBottomRestorePending(null);
-	}
-
-	#markPendingUserInputDelivery(
-		clientRequestId: string,
-		deliveryStatus: 'accepted' | 'unconfirmed' | 'failed',
-	): void {
-		this.deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
-	}
-
-	#beginOptimisticInput(
-		chatId: string,
-		text: string,
-		images: ChatImage[],
-		clientRequestId: string,
-		clientMessageId: string,
-		restoreComposerOnFailure: boolean,
-	): void {
-		this.deps.chatState.upsertPendingUserInput(
-			pendingUserInput(chatId, text, images, clientRequestId, clientMessageId),
-		);
-		this.deps.chatState.isUserScrolledUp = false;
-		if (restoreComposerOnFailure) this.deps.composerState.clearAfterSubmit(chatId);
-		this.deps.composerState.isSubmitting = true;
-	}
-
-	#beginQueueSubmission(chatId: string): number {
-		const pendingCount = this.#pendingQueueSubmissionsByChatId.get(chatId) ?? 0;
-		if (pendingCount === 0) this.deps.chatState.clearLocalNotices();
-		this.#pendingQueueSubmissionsByChatId.set(chatId, pendingCount + 1);
-		return ++this.#queueSubmissionSequence;
-	}
-
-	#recordQueueSubmissionFailure(chatId: string, failure: FailedQueueSubmission): void {
-		const failures = this.#failedQueueSubmissionsByChatId.get(chatId) ?? [];
-		this.#failedQueueSubmissionsByChatId.set(chatId, [...failures, failure]);
-	}
-
-	#finishQueueSubmission(chatId: string): void {
-		const remaining = (this.#pendingQueueSubmissionsByChatId.get(chatId) ?? 1) - 1;
-		if (remaining > 0) {
-			this.#pendingQueueSubmissionsByChatId.set(chatId, remaining);
-			return;
-		}
-
-		this.#pendingQueueSubmissionsByChatId.delete(chatId);
-		const failures = this.#failedQueueSubmissionsByChatId.get(chatId) ?? [];
-		this.#failedQueueSubmissionsByChatId.delete(chatId);
-		if (failures.length === 0 || this.deps.sessions.selectedChatId !== chatId) return;
-
-		const composerUntouched =
-			this.deps.composerState.inputText.length === 0 && this.deps.composerState.images.length === 0;
-		if (!composerUntouched) return;
-
-		const earliestFailure = failures.reduce((earliest, failure) =>
-			failure.sequence < earliest.sequence ? failure : earliest,
-		);
-		this.deps.composerState.inputText = earliestFailure.text;
-		this.deps.composerState.images = earliestFailure.images;
-		this.deps.composerState.saveDraft(chatId);
-	}
-
-	#startControlRefresh(chatId: string): Promise<void> {
-		const refresh = getChatExecutionControl(chatId).then((result) => {
-			this.deps.conversationUi.setExecutionControlFromRefresh(chatId, result.control);
-		});
-		this.#controlRefreshByChatId.set(chatId, refresh);
-		void refresh
-			.catch(() => {
-				// A later broadcast, reconnect, or server-side admission check still preserves FIFO.
-			})
-			.finally(() => {
-				if (this.#controlRefreshByChatId.get(chatId) === refresh) {
-					this.#controlRefreshByChatId.delete(chatId);
-				}
-			});
-		return refresh;
-	}
-
-	async #settleControlRefresh(refresh: Promise<void>): Promise<void> {
-		try {
-			await refresh;
-		} catch {
-			// The server rejects a direct run while queued inputs are pending.
-		}
 	}
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
@@ -473,7 +360,7 @@ export class ConversationSessionController {
 
 		deps.lifecycle.setCurrentChatId(chatId);
 		deps.composerState.restoreDraft(chatId);
-		void this.#startControlRefresh(chatId);
+		void this.#queue.startControlRefresh(chatId);
 
 		if (
 			selected.lastActivityAt &&
@@ -535,102 +422,38 @@ export class ConversationSessionController {
 		}
 	}
 
-	// Submits a message for a specific chat. Accepts explicit chatId to
-	// prevent selection-dependent races during draft startup.
-	async submitForChat(
-		chatId: string,
-		messageOverride?: string,
-		imageOverride?: File[],
-	): Promise<ConversationSubmissionOutcome> {
+	// Accepts an explicit chat ID so draft startup cannot race selection changes.
+	async submitForChat(chatId: string, messageOverride?: string, imageOverride?: File[]): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
-		const isDraft = selected.status === 'draft';
-		const startup = deps.sessions.startupByChatId[chatId];
-
 		const text = messageOverride ?? deps.composerState.inputText.trim();
 		const submissionImages = imageOverride ?? deps.composerState.images;
 		if (!text && submissionImages.length === 0) return 'no-op';
+
 		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		const renameCommand = parseRenameCommand(text);
-		if (renameCommand) {
-			return this.#slashCommands.submitRenameCommand(
-				chatId,
-				selected,
-				renameCommand.title,
-				[...submissionImages],
-				restoreComposerOnFailure,
-			);
-		}
-		const scheduleInCommand = parseScheduleInCommand(text);
-		if (scheduleInCommand.kind !== 'not-command') {
-			return this.#slashCommands.submitScheduleInCommand(
-				chatId,
-				selected,
-				scheduleInCommand,
-				[...submissionImages],
-				restoreComposerOnFailure,
-			);
-		}
+		const slash = await this.#slashCommands.dispatchSubmission({
+			chatId,
+			chat: selected,
+			text,
+			images: [...submissionImages],
+			ownsComposer: restoreComposerOnFailure,
+		});
+		if (slash.kind === 'handled') return slash.outcome;
 
-		const agentId = selected.agentId as SessionAgentId;
-		const steerCommand = parseSteerCommand(text);
-		if (steerCommand.kind !== 'not-command') {
-			if (steerCommand.kind === 'invalid') {
-				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_prompt_required());
-				return 'rejected';
-			}
-			if (agentId !== 'codex') {
-				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_codex_only());
-				return 'rejected';
-			}
-			if (selected.status !== 'running' || !selected.isProcessing) {
-				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_requires_active_turn());
-				return 'rejected';
-			}
-		}
-		if (deps.modelCatalog.supportsFork(agentId)) {
-			const forkCommand = parseForkCommand(text);
-			if (forkCommand) {
-				const isProcessing = selected.status === 'running' && selected.isProcessing;
-				if (isProcessing && !deps.modelCatalog.supportsForkWhileRunning(agentId)) {
-					deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
-					return 'rejected';
-				}
-				return this.#slashCommands.submitForkCommand(
-					chatId,
-					selected,
-					forkCommand.message,
-					[...submissionImages],
-					messageOverride === undefined && imageOverride === undefined,
-				);
-			}
-		}
-
-		const compactCommand = parseCompactCommand(text);
-		if (compactCommand) {
-			return this.#slashCommands.submitCompactCommand(
-				chatId,
-				selected,
-				compactCommand.instructions,
-				messageOverride === undefined && imageOverride === undefined,
-			);
-		}
-
+		const isDraft = selected.status === 'draft';
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
-		const pendingControlRefresh = this.#controlRefreshByChatId.get(chatId);
+		const pendingControlRefresh = this.#queue.pendingControlRefresh(chatId);
 		if (!isDraft && !activeTurn && pendingControlRefresh) {
-			await this.#settleControlRefresh(pendingControlRefresh);
+			await this.#queue.settleControlRefresh(pendingControlRefresh);
 		}
-		const currentControl = deps.conversationUi.getExecutionControl(chatId);
 		const route = classifySubmission({
 			isDraft,
 			isProcessing: activeTurn,
-			control: currentControl,
-			isActiveDeliveryInput:
-				steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)),
+			control: deps.conversationUi.getExecutionControl(chatId),
+			isActiveDeliveryInput: slash.isActiveDeliveryInput,
 			hasAttachments: submissionImages.length > 0,
 		});
 		if (route === 'queue-attachments-unsupported') {
@@ -638,193 +461,44 @@ export class ConversationSessionController {
 			return 'rejected';
 		}
 
-		const ownsDraftSubmission = route === 'draft';
-		if (ownsDraftSubmission) {
+		if (route === 'draft') {
 			if (deps.composerState.isSubmitting) return 'no-op';
 			deps.composerState.isSubmitting = true;
 		}
-
 		let imagePayload: ChatImage[] = [];
-		if (submissionImages.length > 0) {
-			try {
-				imagePayload = await prepareChatImages(submissionImages);
-			} catch (error) {
-				console.error('[SessionController] Failed to prepare attachment payload:', error);
-				if (ownsDraftSubmission) {
-					deps.composerState.isSubmitting = false;
-				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
-				);
-				return 'rejected';
-			}
+		try {
+			if (submissionImages.length > 0) imagePayload = await prepareChatImages(submissionImages);
+		} catch (error) {
+			console.error('[SessionController] Failed to prepare attachment payload:', error);
+			if (route === 'draft') deps.composerState.isSubmitting = false;
+			deps.chatState.appendLocalNotice('error', m.chat_notice_failed_prepare_attachments({
+				detail: errorDetail(error),
+			}));
+			return 'rejected';
 		}
 
+		const context = {
+			chatId,
+			chat: selected,
+			startup: deps.sessions.startupByChatId[chatId],
+			text,
+			content: slash.content,
+			images: imagePayload,
+			previousText,
+			previousImages,
+			restoreComposerOnFailure,
+		};
 		if (route === 'queue' || route === 'active') {
-			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
-			const submissionSequence = this.#beginQueueSubmission(chatId);
-			// Clear optimistically before awaiting the network, matching the
-			// non-queue path. Clearing after the await would wipe any text the
-			// user typed during the round-trip.
-			if (restoreComposerOnFailure) {
-				deps.composerState.clearAfterSubmit(chatId);
-			}
-			const submission =
-				route === 'active'
-					? this.#acceptedInputs.active({ chatId, content })
-					: this.#acceptedInputs.enqueue({ chatId, content });
-			try {
-				const result = await submission.submit();
-				deps.conversationUi.setExecutionControl(chatId, result.control);
-				return 'accepted';
-			} catch (err) {
-				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
-				if (restoreComposerOnFailure && !outcomeUnknown) {
-					this.#recordQueueSubmissionFailure(chatId, {
-						sequence: submissionSequence,
-						text: previousText,
-						images: previousImages,
-					});
-				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					outcomeUnknown
-						? m.chat_notice_queue_outcome_unconfirmed()
-						: m.chat_notice_failed_queue_message({
-								detail: errorDetail(err),
-								content: restoreComposerOnFailure ? previousText : text,
-							}),
-				);
-				if (outcomeUnknown) void this.#startControlRefresh(chatId);
-				return outcomeUnknown ? 'unknown' : 'rejected';
-			} finally {
-				this.#finishQueueSubmission(chatId);
-			}
+			return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context, route);
 		}
-
-		if (route === 'draft') {
-			const submission = this.#acceptedInputs.start(() => {
-				const agentId = startup?.agentId ?? selected.agentId;
-				return {
-					chatId,
-					agentId: agentId as typeof deps.agentState.agentId,
-					projectPath: selected.projectPath,
-					model: startup?.model ?? selected.model ?? deps.agentState.model,
-					apiProviderId:
-						startup?.apiProviderId ?? selected.apiProviderId ?? deps.agentState.apiProviderId,
-					modelEndpointId:
-						startup?.modelEndpointId ?? selected.modelEndpointId ?? deps.agentState.modelEndpointId,
-					modelProtocol:
-						startup?.modelProtocol ?? selected.modelProtocol ?? deps.agentState.modelProtocol,
-					permissionMode: startup?.permissionMode ?? deps.agentState.permissionMode,
-					thinkingMode: startup?.thinkingMode ?? deps.agentState.thinkingMode,
-					agentSettings: startup?.agentSettings ?? deps.agentState.agentSettings,
-					command: text,
-					images: imagePayload.length > 0 ? imagePayload : undefined,
-					tags: startup?.tags,
-				};
-			});
-			this.#beginOptimisticInput(
-				chatId,
-				text,
-				imagePayload,
-				submission.clientRequestId,
-				submission.clientMessageId,
-				restoreComposerOnFailure,
-			);
-			deps.startupCoordinator.beginLocalStartup(chatId);
-			try {
-				const response = await submission.submit();
-				deps.sessions.applyStartEntry(response.chat);
-				this.#markPendingUserInputDelivery(submission.clientRequestId, 'accepted');
-				if (response.status === 'accepted') {
-					deps.lifecycle.beginTurn(chatId);
-				} else {
-					deps.startupCoordinator.completeStartup(chatId);
-				}
-				return 'accepted';
-			} catch (err) {
-				console.error('[SessionController] Failed to start chat:', err);
-				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
-				this.#markPendingUserInputDelivery(
-					submission.clientRequestId,
-					outcomeUnknown ? 'unconfirmed' : 'failed',
-				);
-				deps.startupCoordinator.completeStartup(chatId);
-				if (!outcomeUnknown) {
-					deps.lifecycle.clearTurnStatus();
-					deps.sessions.applyProcessingEvent(chatId, false);
-				}
-				if (restoreComposerOnFailure && !outcomeUnknown) {
-					deps.composerState.inputText = previousText;
-					deps.composerState.images = previousImages;
-					deps.composerState.saveDraft(chatId);
-				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					outcomeUnknown
-						? m.chat_notice_delivery_outcome_unconfirmed()
-						: m.chat_notice_failed_start_chat({ detail: errorDetail(err) }),
-				);
-				return outcomeUnknown ? 'unknown' : 'rejected';
-			} finally {
-				deps.composerState.isSubmitting = false;
-			}
-		} else {
-			const selection = this.#executionModelSelection();
-			const submission = this.#acceptedInputs.run({
-				chatId,
-				command: text,
-				images: imagePayload.length > 0 ? imagePayload : undefined,
-				permissionMode: deps.agentState.permissionMode,
-				thinkingMode: deps.agentState.thinkingMode,
-				agentSettings: deps.agentState.agentSettings,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			this.#beginOptimisticInput(
-				chatId,
-				text,
-				imagePayload,
-				submission.clientRequestId,
-				submission.clientMessageId,
-				restoreComposerOnFailure,
-			);
-			try {
-				await submission.submit();
-				this.#markPendingUserInputDelivery(submission.clientRequestId, 'accepted');
-				deps.lifecycle.beginTurn(chatId);
-				return 'accepted';
-			} catch (err) {
-				const outcomeUnknown = err instanceof CommandOutcomeUnknownError;
-				if (isExecutionControlAdmissionConflict(err)) {
-					deps.chatState.clearPendingUserInput(submission.clientRequestId);
-					await this.#settleControlRefresh(this.#startControlRefresh(chatId));
-				} else if (outcomeUnknown) {
-					this.#markPendingUserInputDelivery(submission.clientRequestId, 'unconfirmed');
-					void this.#startControlRefresh(chatId);
-				} else {
-					this.#markPendingUserInputDelivery(submission.clientRequestId, 'failed');
-				}
-				if (restoreComposerOnFailure && !outcomeUnknown) {
-					deps.composerState.inputText = previousText;
-					deps.composerState.images = previousImages;
-					deps.composerState.saveDraft(chatId);
-				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					outcomeUnknown
-						? m.chat_notice_delivery_outcome_unconfirmed()
-						: m.chat_notice_failed_send_message({ detail: errorDetail(err) }),
-				);
-				return outcomeUnknown ? 'unknown' : 'rejected';
-			} finally {
-				deps.composerState.isSubmitting = false;
-			}
-		}
+		if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
+		return submitRunRoute(
+			deps,
+			this.#acceptedInputs,
+			this.#queue,
+			context,
+			this.#executionModelSelection(),
+		);
 	}
 
 	// Forks a chat without sending a new message, then selects the fork. Backs
@@ -962,7 +636,7 @@ export class ConversationSessionController {
 				})
 				.catch(async (error) => {
 					if (isExecutionControlAdmissionConflict(error)) {
-						await this.#settleControlRefresh(this.#startControlRefresh(chatId));
+						await this.#queue.settleControlRefresh(this.#queue.startControlRefresh(chatId));
 					}
 					deps.chatState.appendLocalNotice(
 						'error',
@@ -1010,54 +684,27 @@ export class ConversationSessionController {
 	}
 
 	handleQueuePause(): Promise<void> {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		return this.pauseQueueForChat(chatId);
+		return this.#queue.handlePause();
 	}
 
 	handleQueueResume(pauseId: string): Promise<void> {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		return this.resumeQueueForChat(chatId, pauseId);
+		return this.#queue.handleResume(pauseId);
 	}
 
 	handleQueueControlError(action: 'pause' | 'resume', error: unknown): void {
-		this.deps.chatState.appendLocalNotice(
-			'error',
-			action === 'pause'
-				? m.chat_notice_failed_pause_queue({ detail: errorDetail(error) })
-				: m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
-		);
+		this.#queue.handleControlError(action, error);
 	}
 
 	async pauseQueueForChat(chatId: string): Promise<void> {
-		const result = await pauseChatQueue(chatId);
-		this.deps.conversationUi.setExecutionControl(chatId, result.control);
+		await this.#queue.pauseForChat(chatId);
 	}
 
 	async resumeQueueForChat(chatId: string, pauseId: string): Promise<void> {
-		try {
-			const result = await resumeChatQueue(chatId, pauseId);
-			this.deps.conversationUi.setExecutionControl(chatId, result.control);
-		} catch (error) {
-			const control = controlFromMutationError(error);
-			if (control) this.deps.conversationUi.setExecutionControl(chatId, control);
-			throw error;
-		}
+		await this.#queue.resumeForChat(chatId, pauseId);
 	}
 
 	async createQueueEntryForChat(chatId: string, content: string): Promise<void> {
-		const submission = this.#acceptedInputs.enqueue({ chatId, content });
-		try {
-			const result = await submission.submit();
-			this.deps.conversationUi.setExecutionControl(chatId, result.control);
-		} catch (error) {
-			const control = controlFromMutationError(error);
-			if (control) this.deps.conversationUi.setExecutionControl(chatId, control);
-			throw error;
-		}
+		await this.#queue.createForChat(chatId, content);
 	}
 
 	async replaceQueueEntryForChat(
@@ -1066,246 +713,34 @@ export class ConversationSessionController {
 		content: string,
 		expectedRevision: number,
 	): Promise<void> {
-		try {
-			const result = await replaceQueuedInput({
-				clientRequestId: createClientCommandId(),
-				chatId,
-				entryId,
-				content,
-				expectedRevision,
-			});
-			this.deps.conversationUi.setExecutionControl(chatId, result.control);
-		} catch (error) {
-			const control = controlFromMutationError(error);
-			if (control) this.deps.conversationUi.setExecutionControl(chatId, control);
-			throw error;
-		}
+		await this.#queue.replaceForChat(chatId, entryId, content, expectedRevision);
 	}
 
 	async deleteQueueEntryForChat(chatId: string, entryId: string): Promise<void> {
-		try {
-			const result = await deleteQueuedInput({
-				clientRequestId: createClientCommandId(),
-				chatId,
-				entryId,
-			});
-			this.deps.conversationUi.setExecutionControl(chatId, result.control);
-		} catch (error) {
-			const control = controlFromMutationError(error);
-			if (control) this.deps.conversationUi.setExecutionControl(chatId, control);
-			throw error;
-		}
+		await this.#queue.deleteForChat(chatId, entryId);
 	}
 
 	async handleDeleteQueuedInput(entryId: string): Promise<void> {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return;
-		try {
-			await this.deleteQueueEntryForChat(chatId, entryId);
-		} catch (error) {
-			if (isDepartedQueueEntryError(error)) return;
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
-			);
-		}
+		await this.#queue.handleDelete(entryId);
 	}
 
-	// Entry point for the composer model selector. Same-agent selections keep the
-	// existing model-switch behavior; cross-agent selections continue the chat
-	// under a new agent, seeding a fresh runtime from the canonical transcript.
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId;
-		if (!chatId) return;
-		const currentAgentId = deps.sessions.selectedChat?.agentId ?? deps.agentState.agentId;
-		if (next.agentId === currentAgentId) {
-			this.handleModelChange(next.modelValue);
-			return;
-		}
-		void this.#agentSwitch.switchAgent(chatId, next);
+		this.#settings.handleModelSelectionChange(next);
 	}
 
 	handleModelChange(model: string): void {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId;
-		if (!chatId) return;
-		const agentId = deps.agentState.agentId;
-		const selection = deps.modelCatalog.selectionFor(agentId, model);
-		if (deps.sessions.isDraft(chatId)) {
-			deps.agentState.setModelSelection({
-				model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			deps.sessions.patchDraftStartup(chatId, {
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			deps.sessions.patchChat(chatId, {
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			return;
-		}
-
-		// Block switching between local and cloud models within an active
-		// session. The CLI conversation history contains agent-specific
-		// artifacts (e.g. thinking-block signatures) that are invalid when
-		// replayed against a different backend.
-		const currentModel = deps.sessions.selectedChat?.model ?? deps.agentState.model;
-		const currentEndpointId =
-			deps.sessions.selectedChat?.modelEndpointId ?? deps.agentState.modelEndpointId;
-		const wasLocal = deps.modelCatalog.isLocalModel(agentId, currentModel, currentEndpointId);
-		const isLocal = deps.modelCatalog.isLocalModel(agentId, model, selection.modelEndpointId);
-		if (wasLocal !== isLocal) {
-			const target = isLocal ? m.chat_model_kind_local() : m.chat_model_kind_cloud();
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_cannot_switch_model_mid_session({ target, model: selection.model }),
-			);
-			return;
-		}
-
-		const previousModel = deps.sessions.selectedChat?.model ?? deps.agentState.model;
-		const previousApiProviderId =
-			deps.sessions.selectedChat?.apiProviderId ?? deps.agentState.apiProviderId;
-		const previousEndpointId =
-			deps.sessions.selectedChat?.modelEndpointId ?? deps.agentState.modelEndpointId;
-		const previousProtocol =
-			deps.sessions.selectedChat?.modelProtocol ?? deps.agentState.modelProtocol;
-		deps.agentState.setModelSelection({
-			model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
-		void updateChatModel({
-			chatId,
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		}).catch((error) => {
-			deps.agentState.setModelSelection({
-				model: deps.modelCatalog.selectionValueFor(agentId, previousModel, previousEndpointId),
-				apiProviderId: previousApiProviderId ?? null,
-				modelEndpointId: previousEndpointId ?? null,
-				modelProtocol: previousProtocol ?? null,
-			});
-			deps.sessions.patchChat(chatId, {
-				model: previousModel,
-				apiProviderId: previousApiProviderId ?? null,
-				modelEndpointId: previousEndpointId ?? null,
-				modelProtocol: previousProtocol ?? null,
-			});
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_update_model({ detail: errorDetail(error) }),
-			);
-		});
-		deps.sessions.patchChat(chatId, {
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
+		this.#settings.handleModelChange(model);
 	}
 
 	handlePermissionModeChange(mode: PermissionMode): void {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId;
-		if (!chatId) return;
-		if (deps.sessions.isDraft(chatId)) {
-			deps.sessions.patchDraftStartup(chatId, { permissionMode: mode });
-			deps.sessions.patchChat(chatId, { permissionMode: mode });
-			return;
-		}
-		const previous = normalizeSupportedPermissionMode(
-			deps.sessions.selectedChat?.permissionMode,
-			deps.modelCatalog.getPermissionModes(deps.agentState.agentId),
-		);
-		deps.sessions.patchChat(chatId, { permissionMode: mode });
-		void updateExecutionSettings({ chatId, permissionMode: mode }).catch((error) => {
-			deps.agentState.permissionMode = previous;
-			deps.sessions.patchChat(chatId, { permissionMode: previous });
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_update_permission_mode({ detail: errorDetail(error) }),
-			);
-		});
+		this.#settings.handlePermissionModeChange(mode);
 	}
 
 	handleThinkingModeChange(mode: ThinkingMode): void {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId;
-		if (!chatId) return;
-		if (deps.sessions.isDraft(chatId)) {
-			deps.sessions.patchDraftStartup(chatId, { thinkingMode: mode });
-			deps.sessions.patchChat(chatId, { thinkingMode: mode });
-			return;
-		}
-		const previous = normalizeSupportedThinkingMode(
-			deps.sessions.selectedChat?.thinkingMode,
-			deps.modelCatalog.getThinkingModes(deps.agentState.agentId),
-		);
-		deps.sessions.patchChat(chatId, { thinkingMode: mode });
-		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
-			deps.agentState.thinkingMode = previous;
-			deps.sessions.patchChat(chatId, { thinkingMode: previous });
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_update_thinking_mode({ detail: errorDetail(error) }),
-			);
-		});
+		this.#settings.handleThinkingModeChange(mode);
 	}
 
 	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId;
-		if (!chatId) return;
-		const previous = deps.agentState.agentSettings;
-		const next = withAgentSetting(previous, descriptor, value);
-		if (next === previous) return;
-		deps.agentState.setAgentSettings(next);
-		if (deps.sessions.isDraft(chatId)) {
-			deps.sessions.patchDraftStartup(chatId, { agentSettings: next });
-			deps.sessions.patchChat(chatId, { agentSettings: next });
-			return;
-		}
-		deps.sessions.patchChat(chatId, { agentSettings: next });
-		const agentSettingsPatch: JsonObject = { [descriptor.key]: value };
-		const mutation = Symbol(chatId);
-		this.#latestAgentSettingsMutationByChatId.set(chatId, mutation);
-		void updateExecutionSettings({ chatId, agentSettingsPatch })
-			.then((response) => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
-				if (deps.sessions.selectedChatId === chatId) {
-					deps.agentState.setAgentSettings(response.agentSettings);
-				}
-				deps.sessions.patchChat(chatId, { agentSettings: response.agentSettings });
-			})
-			.catch((error) => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
-				if (deps.sessions.selectedChatId === chatId) {
-					deps.agentState.setAgentSettings(previous);
-				}
-				deps.sessions.patchChat(chatId, { agentSettings: previous });
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
-				);
-			})
-			.finally(() => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) === mutation) {
-					this.#latestAgentSettingsMutationByChatId.delete(chatId);
-				}
-			});
+		this.#settings.handleAgentSettingChange(descriptor, value);
 	}
 }

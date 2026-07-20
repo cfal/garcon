@@ -9,7 +9,6 @@ import { describe, expect, test } from 'vitest';
 const MAX_LINES = 1000;
 
 const GRANDFATHER: Record<string, number> = {
-	'src/lib/chat/conversation/conversation-session-controller.svelte.ts': 1350,
 	'src/lib/workspace/workspace-coordinator.svelte.ts': 1075,
 	'src/lib/chat/tools/tool-display-registry.ts': 1075,
 	'src/lib/components/sidebar/SidebarVirtualSortableChatList.svelte': 1050,

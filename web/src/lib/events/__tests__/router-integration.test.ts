@@ -7,8 +7,38 @@ import type { DrainHandle } from '$lib/ws/drain';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 
 const TS = '2026-05-14T00:00:01.000Z';
+
+function chatRecord(): ChatSessionRecord {
+	return {
+		id: 'chat-a',
+		projectPath: '/repo',
+		effectiveProjectKey: '/repo',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
+		title: 'Chat A',
+		agentId: 'claude',
+		model: 'opus',
+		apiProviderId: null,
+		modelEndpointId: null,
+		modelProtocol: null,
+		permissionMode: 'default',
+		thinkingMode: 'none',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+		createdAt: null,
+		lastActivityAt: null,
+		lastReadAt: null,
+		isPinned: false,
+		isArchived: false,
+		isProcessing: false,
+		isUnread: false,
+		status: 'running',
+		tags: [],
+	};
+}
 
 function rawMessage(seq: number, message: Record<string, unknown>) {
 	return { seq, message };
@@ -50,21 +80,22 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		},
 		conversationUi: new ConversationUiState(),
 		sessions: {
-			selectedChat: () => ({ id: 'chat-a', projectPath: '/repo' }) as never,
+			selectedChat: chatRecord(),
 			setSelectedChatId: vi.fn(),
-			patchChatPreview: vi.fn(),
-			refreshChats: vi.fn(),
-			navigateToChat: vi.fn(),
+			patchPreview: vi.fn(),
+			quietRefreshChats: vi.fn(),
 			removeChat: vi.fn(),
-			patchChatTitle: vi.fn(),
-			patchChatProjectPath: vi.fn(),
-			navigateAwayFromChat: vi.fn(),
+			patchChat: vi.fn(),
 			reconcileProcessing: vi.fn(),
-			setChatProcessing: vi.fn(),
+			applyProcessingEvent: vi.fn(),
 			patchLastReadAt: vi.fn(),
 		},
+		navigation: {
+			navigateToChat: vi.fn(),
+			navigateAwayFromChat: vi.fn(),
+		},
 		startup: {
-			startupCoordinator: {} as never,
+			startupCoordinator: new StartupCoordinator(),
 			onExternalChatCreated: vi.fn(),
 		},
 		readState: {
@@ -100,7 +131,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.sessions.refreshChats).toHaveBeenCalledTimes(1);
+		expect(stores.sessions.quietRefreshChats).toHaveBeenCalledTimes(1);
 	});
 
 	it('routes ws-fault through normalize + global filter + handler without a chat ID', () => {
@@ -112,7 +143,7 @@ describe('event router integration', () => {
 			},
 			sessions: {
 				...defaults.sessions,
-				selectedChat: () => null,
+				selectedChat: null,
 			},
 		});
 
@@ -137,7 +168,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.sessions.patchChatProjectPath).toHaveBeenCalledWith('chat-b', {
+		expect(stores.sessions.patchChat).toHaveBeenCalledWith('chat-b', {
 			projectPath: '/workspace/worktree',
 			effectiveProjectKey: '/workspace/worktree',
 		});
@@ -168,13 +199,13 @@ describe('event router integration', () => {
 		expect(stores.chatState.updatePendingUserInputDeliveryStatus).not.toHaveBeenCalled();
 		expect(stores.chatState.warmBackgroundTranscript).not.toHaveBeenCalled();
 		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
-		expect(stores.sessions.setChatProcessing).not.toHaveBeenCalled();
+		expect(stores.sessions.applyProcessingEvent).not.toHaveBeenCalled();
 		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
 			'chat-a',
 			'generation-current',
 			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
 		);
-		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
+		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
 	});
 
 	it('does not re-enable processing from a late selected chat message', () => {
@@ -200,8 +231,8 @@ describe('event router integration', () => {
 
 		expect(stores.lifecycle.clearTurnStatus).toHaveBeenCalledWith();
 		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
-		expect(stores.sessions.setChatProcessing).toHaveBeenCalledTimes(1);
-		expect(stores.sessions.setChatProcessing).toHaveBeenCalledWith('chat-a', false);
+		expect(stores.sessions.applyProcessingEvent).toHaveBeenCalledTimes(1);
+		expect(stores.sessions.applyProcessingEvent).toHaveBeenCalledWith('chat-a', false);
 		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
 			'chat-a',
 			'generation-current',
@@ -265,7 +296,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-b', 'background', TS);
+		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-b', 'background', TS);
 		expect(stores.chatState.warmBackgroundTranscript).toHaveBeenCalledWith(
 			'chat-b',
 			'generation-b',
@@ -286,7 +317,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith(
+		expect(stores.sessions.patchPreview).toHaveBeenCalledWith(
 			'chat-a',
 			'queued message',
 		);
