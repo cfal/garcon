@@ -8,6 +8,7 @@ import type {
   TranscriptSearchService,
   TranscriptSearchSourceRefreshRequest,
 } from '@garcon/server-agent-common/search/transcript-search-service';
+import { TranscriptSearchUnavailableError } from './errors.js';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -15,17 +16,6 @@ const DEFAULT_SEARCH_TIMEOUT_MS = 5_000;
 const RECONCILE_DELAY_MS = 100;
 const SOURCE_RESOLUTION_CONCURRENCY = 8;
 const RECONCILE_RETRY_MS = [5_000, 30_000, 5 * 60_000] as const;
-
-export class TranscriptSearchUnavailableError extends Error {
-  constructor(
-    readonly code: 'TRANSCRIPT_SEARCH_DISABLED' | 'SEARCH_INDEX_UNAVAILABLE' | 'SEARCH_INDEX_BUSY',
-    message: string,
-    readonly retryable: boolean,
-  ) {
-    super(message);
-    this.name = 'TranscriptSearchUnavailableError';
-  }
-}
 
 export interface TranscriptSearchChatRegistration {
   readonly agentId: string;

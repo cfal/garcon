@@ -35,6 +35,7 @@ import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-error.js';
+import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
@@ -569,7 +570,13 @@ export default function createChatRoutes({
 
   async function postSearchChats(body: unknown): Promise<Response> {
     try {
-      if (!searchIndex) return jsonError('Chat search index is not available', 503, 'SEARCH_INDEX_UNAVAILABLE');
+      if (!searchIndex) {
+        throw new TranscriptSearchUnavailableError(
+          'SEARCH_INDEX_UNAVAILABLE',
+          'Chat search index is not available',
+          true,
+        );
+      }
       const search = parseSearchRequest(body);
       const result = await searchIndex.search({
         query: search.query,
@@ -589,26 +596,6 @@ export default function createChatRoutes({
         index: result.index,
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
-      if (
-        error
-        && typeof error === 'object'
-        && 'code' in error
-        && (error.code === 'TRANSCRIPT_SEARCH_DISABLED'
-          || error.code === 'SEARCH_INDEX_UNAVAILABLE'
-          || error.code === 'SEARCH_INDEX_BUSY')
-      ) {
-        const typed = error as { code: string; message?: string; retryable?: boolean };
-        const status = typed.code === 'TRANSCRIPT_SEARCH_DISABLED' ? 409 : 503;
-        return jsonError(
-          typed.message ?? 'Transcript search is unavailable',
-          status,
-          typed.code,
-          typed.retryable ?? status === 503,
-        );
-      }
-      if (error instanceof ValidationDomainError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
       return jsonErrorFromUnknown(error);
     }
   }
