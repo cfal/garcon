@@ -185,11 +185,12 @@ export class IntegrationFixture {
     }
   }
 
-  async restartGarcon(): Promise<void> {
+  async restartGarcon(options: { beforeStart?: () => Promise<void> } = {}): Promise<void> {
     await this.#closeClients();
     await this.garcon.stop();
     this.#archiveCurrentRun();
     this.#clients.clear();
+    await options.beforeStart?.();
     await this.#startReplacementGarcon();
   }
 
