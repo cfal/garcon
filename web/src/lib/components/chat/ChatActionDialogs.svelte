@@ -38,6 +38,7 @@
 	let deleteButtonRef = $state<HTMLButtonElement | null>(null);
 	let firstMessageCopied = $state(false);
 	let agentSessionIdCopied = $state(false);
+	let transcriptSourceCopied = $state(false);
 
 	let deleteOpen = $derived(chatDeleteConfirmation !== null);
 	let renameOpen = $derived(chatRenameConfirmation !== null);
@@ -178,6 +179,41 @@
 							{formatHumanDate(chatDetailsDialog?.createdAt || null)}
 						</div>
 					</div>
+					{#if chatDetailsDialog?.transcriptSource}
+						<div class="min-w-0 space-y-1">
+							<div class="flex items-center justify-between gap-2">
+								<div class="text-sm font-medium">
+									{chatDetailsDialog.transcriptSource.kind === 'filesystem-path'
+										? m.sidebar_details_native_path()
+										: m.sidebar_details_native_reference()}
+								</div>
+								<button
+									type="button"
+									class="inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+									onclick={(e) =>
+										copyField(
+											e,
+											chatDetailsDialog?.transcriptSource?.value || null,
+											(v) => (transcriptSourceCopied = v),
+										)}
+									title={m.chat_tool_display_copy_to_clipboard()}
+									aria-label={m.chat_tool_display_copy_to_clipboard()}
+								>
+									{#if transcriptSourceCopied}
+										<Check class="h-4 w-4 text-status-success-foreground" />
+									{:else}
+										<Copy class="h-4 w-4" />
+									{/if}
+								</button>
+							</div>
+							<pre
+								role="region"
+								aria-label={chatDetailsDialog.transcriptSource.kind === 'filesystem-path'
+									? m.sidebar_details_native_path()
+									: m.sidebar_details_native_reference()}
+								class="{detailsTextSurfaceClass} max-h-24 min-h-12">{chatDetailsDialog.transcriptSource.value}</pre>
+						</div>
+					{/if}
 					<div class="space-y-1">
 						<div class="text-sm font-medium">{m.sidebar_details_last_activity()}</div>
 						<div class="text-sm text-muted-foreground">

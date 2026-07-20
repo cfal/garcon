@@ -61,6 +61,7 @@ import type {
 	AgentModelPatchResponse,
 } from '$shared/chat-command-contracts';
 import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
+import type { ChatDetailsResponse } from '$shared/chat-details';
 import {
 	parseChatExecutionControlState,
 	type ChatExecutionControlState,
@@ -93,13 +94,7 @@ export interface StartChatParams {
 	tags?: string[];
 }
 
-export interface ChatDetailsResponse {
-	chatId: string;
-	firstMessage: string;
-	createdAt: string | null;
-	lastActivityAt: string | null;
-	agentSessionId: string | null;
-}
+export type { ChatDetailsResponse } from '$shared/chat-details';
 
 export type ListChatsResponse = ChatListResponse;
 

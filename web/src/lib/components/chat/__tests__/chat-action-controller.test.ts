@@ -216,6 +216,7 @@ describe('ChatActionController', () => {
 			createdAt: '2026-07-14T00:00:00.000Z',
 			lastActivityAt: null,
 			agentSessionId: 'session-1',
+			transcriptSource: null,
 		});
 
 		await controller.loadDetails('chat-1', dialogs);

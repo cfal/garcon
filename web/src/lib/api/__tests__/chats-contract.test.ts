@@ -136,6 +136,7 @@ describe('chats API contract', () => {
 			createdAt: '2026-02-20T10:00:00.000Z',
 			lastActivityAt: '2026-02-21T11:00:00.000Z',
 			agentSessionId: 'thread-abc',
+			transcriptSource: null,
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 

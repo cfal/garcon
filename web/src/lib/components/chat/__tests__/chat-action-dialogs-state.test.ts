@@ -77,6 +77,7 @@ describe('ChatActionDialogsState', () => {
 			createdAt: '2026-01-01',
 			lastActivityAt: '2026-01-02',
 			agentSessionId: 'stale-session',
+			transcriptSource: null,
 		});
 
 		expect(dialogs.chatDetailsDialog?.chatId).toBe('c2');

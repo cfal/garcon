@@ -1310,6 +1310,7 @@
 	"sidebar_details_last_message": "Last message",
 	"sidebar_details_loading": "Loading details...",
 	"sidebar_details_native_path": "Native path",
+	"sidebar_details_native_reference": "Native transcript reference",
 	"sidebar_details_unavailable": "Unavailable",
 	"sidebar_project_path_browse": "Browse folders",
 	"sidebar_project_path_current_label": "Current path",
