@@ -27,7 +27,7 @@ import type {
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
 import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
-import { AgentRuntimeRouter } from './runtime-router.js';
+import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../lib/log.js';
@@ -71,7 +71,7 @@ export interface AgentRegistryServiceContract {
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   }): Promise<boolean>;
-  runSingleQuery(prompt: string, options: { agentId: string; [key: string]: unknown }): Promise<string>;
+  runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
   prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
@@ -201,7 +201,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch) {
     return this.#settings.updateSessionSettings(chatId, patch);
   }
-  runSingleQuery(prompt: string, options: { agentId: string; [key: string]: unknown }) {
+  runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);
   }
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {

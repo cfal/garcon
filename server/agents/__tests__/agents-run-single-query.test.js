@@ -108,6 +108,27 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
     }));
   });
 
+  it('preserves one-shot thinking, timeout, cancellation, and cwd fallback', async () => {
+    const { router, run } = makeRouter();
+    const controller = new AbortController();
+
+    await router.runSingleQuery('prompt', {
+      agentId: 'test',
+      model: 'model-a',
+      cwd: '/repo-from-cwd',
+      thinkingMode: 'xhigh',
+      timeoutMs: 110_000,
+      signal: controller.signal,
+    });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      projectPath: '/repo-from-cwd',
+      thinkingMode: 'xhigh',
+      timeoutMs: 110_000,
+      signal: controller.signal,
+    }));
+  });
+
   it('rejects integrations without the optional one-shot facet', async () => {
     const { router } = makeRouter({ singleQuery: null });
 

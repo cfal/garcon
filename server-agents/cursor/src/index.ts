@@ -14,6 +14,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createCursorConfig } from './config.js';
 import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
 import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
@@ -150,7 +151,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
           return await runSingleQuery(request.prompt, {
             projectPath: request.projectPath,
             model: request.model,
-            ...request.settings.values,
+            ...singleQueryRuntimeOptions(request),
           }, config);
         } catch (error) {
           if (error instanceof AgentIntegrationError) throw error;

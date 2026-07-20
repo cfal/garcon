@@ -12,6 +12,7 @@ import type {
   AgentSettingsEnvelope,
 } from '@garcon/common/agent-integration';
 import type { AgentModelOption } from '@garcon/common/agents';
+import type { ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
 import type {
@@ -103,6 +104,8 @@ export interface AgentSingleQueryRequest {
   readonly prompt: string;
   readonly projectPath: string;
   readonly model: string;
+  readonly thinkingMode: ThinkingMode;
+  readonly timeoutMs?: number;
   readonly settings: AgentSettingsEnvelope;
   readonly endpoint: AgentEndpointSelection | null;
   readonly signal: AbortSignal;

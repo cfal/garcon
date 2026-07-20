@@ -31,6 +31,7 @@ import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { isRecord } from '@garcon/common/json';
 import { isManualBypassMode, providerStartupPermissionMode } from '@garcon/server-agent-common/execution/permission-modes';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
+import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -183,6 +184,8 @@ interface ClaudeSingleQueryOptions {
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
   envOverrides?: Record<string, string>;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface ClaudeCliDependencies {
@@ -325,40 +328,53 @@ function convertCLIMessageToChatMessages(msg: CLIMessage): ChatMessage[] {
 // Runs a one-shot CLI query and returns the plain text output.
 async function runSingleQuery(
   prompt: string,
-  { model, cwd, permissionMode, thinkingMode, claudeThinkingMode, envOverrides }: ClaudeSingleQueryOptions = {},
+  {
+    model,
+    cwd,
+    permissionMode,
+    thinkingMode,
+    claudeThinkingMode,
+    envOverrides,
+    timeoutMs,
+    signal,
+  }: ClaudeSingleQueryOptions = {},
   dependencies: ClaudeCliDependencies = defaultClaudeCliDependencies(),
 ): Promise<string> {
-  const claudeBinary = dependencies.binary();
-  const supportsLegacyThinkingFlag = await dependencies.versionProbe.supportsLegacyThinkingFlag(claudeBinary);
-  const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt, supportsLegacyThinkingFlag });
+  return withSingleQueryControl({ signal, timeoutMs }, async (querySignal) => {
+    const claudeBinary = dependencies.binary();
+    const supportsLegacyThinkingFlag = await dependencies.versionProbe.supportsLegacyThinkingFlag(claudeBinary);
+    const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt, supportsLegacyThinkingFlag });
 
-  const proc = Bun.spawn([claudeBinary, ...args], {
-    cwd: cwd || process.cwd(),
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: (() => { const { CLAUDECODE, ...env } = process.env; return { ...env, ...envOverrides }; })(),
-  });
-
-  const chunks: Uint8Array[] = [];
-  const reader = proc.stdout.getReader();
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-  } catch (err: unknown) {
-    dependencies.logger.error('Claude one-shot stdout read failed', {
-      error: errorMessage(err),
+    const proc = Bun.spawn([claudeBinary, ...args], {
+      cwd: cwd || process.cwd(),
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      signal: querySignal,
+      env: (() => { const { CLAUDECODE, ...env } = process.env; return { ...env, ...envOverrides }; })(),
     });
-  }
 
-  await proc.exited;
+    const chunks: Uint8Array[] = [];
+    const reader = proc.stdout.getReader();
 
-  const decoder = new TextDecoder();
-  return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+    } catch (err: unknown) {
+      dependencies.logger.error('Claude one-shot stdout read failed', {
+        error: errorMessage(err),
+      });
+    }
+
+    await proc.exited;
+    querySignal.throwIfAborted();
+
+    const decoder = new TextDecoder();
+    return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
+  });
 }
 
 // Forwards non-default effort exactly and leaves unsupported values to the CLI.

@@ -19,6 +19,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createPiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';
 import { LazyPiRuntime } from './agents/pi/lazy-runtime.js';
@@ -144,7 +145,7 @@ export default class PiAgentIntegration implements AgentIntegration {
           return await runSingleQuery(request.prompt, {
             projectPath: request.projectPath,
             model: request.model,
-            ...request.settings.values,
+            ...singleQueryRuntimeOptions(request),
           }, config);
         } catch (error) {
           if (error instanceof AgentIntegrationError) throw error;

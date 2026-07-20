@@ -7,7 +7,11 @@ import {
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
-import { normalizePermissionMode, normalizeThinkingMode } from '../../common/chat-modes.js';
+import {
+  normalizePermissionMode,
+  normalizeThinkingMode,
+  type ThinkingMode,
+} from '../../common/chat-modes.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
@@ -38,6 +42,20 @@ export interface AgentRuntimeRouterOptions {
   events: AgentEventBus;
   getCarryOverRevision(chatId: string): string;
   loadCarryOver(chatId: string, entry: AgentChatEntry): readonly ChatMessage[];
+}
+
+export interface RunSingleQueryOptions {
+  readonly agentId: string;
+  readonly model?: string;
+  readonly projectPath?: string;
+  readonly cwd?: string;
+  readonly thinkingMode?: ThinkingMode;
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+  readonly apiProviderId?: string | null;
+  readonly modelEndpointId?: string | null;
+  readonly agentSettings?: AgentSettingsEnvelope;
+  readonly [key: string]: unknown;
 }
 
 export class AgentRuntimeRouter {
@@ -380,7 +398,7 @@ export class AgentRuntimeRouter {
 
   async runSingleQuery(
     prompt: string,
-    options: { agentId: string; [key: string]: unknown },
+    options: RunSingleQueryOptions,
   ): Promise<string> {
     const { agentId } = options;
     const integration = this.#directory.require(agentId);
@@ -393,17 +411,30 @@ export class AgentRuntimeRouter {
       modelEndpointId: typeof options.modelEndpointId === 'string' ? options.modelEndpointId : null,
     }) : null;
     if (selection) await this.#validateEndpoint(integration, selection);
+    const timeoutMs = typeof options.timeoutMs === 'number'
+      && Number.isFinite(options.timeoutMs)
+      && options.timeoutMs > 0
+      ? options.timeoutMs
+      : undefined;
     return integration.singleQuery.run({
       prompt,
-      projectPath: typeof options.projectPath === 'string' ? options.projectPath : process.cwd(),
+      projectPath: typeof options.projectPath === 'string'
+        ? options.projectPath
+        : typeof options.cwd === 'string'
+          ? options.cwd
+          : process.cwd(),
       model: selection?.model ?? model,
+      thinkingMode: normalizeThinkingMode(options.thinkingMode),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
       settings: integration.settings.parse(
         isAgentSettingsEnvelope(options.agentSettings)
           ? options.agentSettings
           : integration.settings.defaults(),
       ),
       endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
-      signal: new AbortController().signal,
+      signal: options.signal instanceof AbortSignal
+        ? options.signal
+        : new AbortController().signal,
     });
   }
 
