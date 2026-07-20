@@ -75,6 +75,8 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/lib/paraglide',
+			// A single locale keeps production output compact while avoiding one module per message in dev.
+			outputStructure: 'locale-modules',
 		}),
 	],
 	resolve: {

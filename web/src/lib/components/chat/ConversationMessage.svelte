@@ -13,7 +13,10 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
-	import { ChevronRight, CircleAlert, FileText, LoaderCircle } from '@lucide/svelte';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import FileText from '@lucide/svelte/icons/file-text';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import { getChatSessions, getFileSessions, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
@@ -159,9 +162,9 @@
 			? m.chat_message_delivery_sending()
 			: userDeliveryStatus === 'unconfirmed'
 				? m.chat_message_delivery_unconfirmed()
-			: userDeliveryStatus === 'failed'
-				? m.chat_message_delivery_failed()
-				: '',
+				: userDeliveryStatus === 'failed'
+					? m.chat_message_delivery_failed()
+					: '',
 	);
 
 	const showNonAssistantHeader = $derived(!isGrouped && message instanceof ErrorMessage);
@@ -194,10 +197,10 @@
 	const canGenerateTitleFromMessage = $derived(
 		Boolean(
 			asUser &&
-				messageMenuText.trim() &&
-				activeChatContext?.chatId &&
-				forkUpToSeq !== undefined &&
-				onGenerateTitleFromMessage,
+			messageMenuText.trim() &&
+			activeChatContext?.chatId &&
+			forkUpToSeq !== undefined &&
+			onGenerateTitleFromMessage,
 		),
 	);
 	function attachmentMimeType(attachment: { data?: string; mimeType?: string }): string {
@@ -435,24 +438,27 @@
 								/>
 							</div>
 							{#if asUser.images && asUser.images.length > 0}
-									<div class="mt-2 grid grid-cols-2 gap-2">
-										{#each asUser.images as img, idx (img.name || idx)}
-											{#if isImageAttachment(img)}
-												<img
-													src={img.data}
-													alt={img.name}
-													class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
+								<div class="mt-2 grid grid-cols-2 gap-2">
+									{#each asUser.images as img, idx (img.name || idx)}
+										{#if isImageAttachment(img)}
+											<img
+												src={img.data}
+												alt={img.name}
+												class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
+											/>
+										{:else}
+											<div
+												class="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-foreground"
+											>
+												<FileText
+													class="h-4 w-4 flex-shrink-0 text-muted-foreground"
+													aria-hidden="true"
 												/>
-											{:else}
-												<div
-													class="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-foreground"
-												>
-													<FileText class="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
-													<span class="truncate text-xs">{img.name}</span>
-												</div>
-											{/if}
-										{/each}
-									</div>
+												<span class="truncate text-xs">{img.name}</span>
+											</div>
+										{/if}
+									{/each}
+								</div>
 							{/if}
 						</div>
 					</ContextMenuTrigger>
@@ -461,42 +467,41 @@
 						onInteractOutside={closeMessageMenuFromInteractOutside}
 					>
 						<MessageActionMenu
-								canFork={Boolean(onForkChat && forkUpToSeq)}
-								canForkNow={canForkAtMessageNow}
-								onFork={handleFork}
-								onCopy={copyText}
-								onSendToNewSession={sendToNewSession}
-								onSelectText={openSelectTextDialog}
-								onGenerateTitleFromMessage={canGenerateTitleFromMessage
-									? generateTitleFromCurrentMessage
-									: undefined}
-							/>
-						</ContextMenuContent>
-					</ContextMenu>
-					<div
-						class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
-					>
-						{@render floatingMessageMenuButton('bottom-0 right-0')}
-						{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'unconfirmed' || userDeliveryStatus === 'failed'}
-							<span
-								class={cn(
-									'user-message-delivery-indicator absolute left-1/2 top-1/2 inline-flex size-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center',
-									userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-									userDeliveryStatus === 'unconfirmed' &&
-										'text-status-warning-muted-foreground',
-								)}
-								title={userDeliveryTitle}
-								aria-label={userDeliveryTitle}
-							>
-								{#if userDeliveryStatus === 'submitting'}
-									<LoaderCircle class="size-3.5 animate-spin" />
-								{:else}
-									<CircleAlert class="size-3" />
-								{/if}
-							</span>
-						{/if}
-					</div>
+							canFork={Boolean(onForkChat && forkUpToSeq)}
+							canForkNow={canForkAtMessageNow}
+							onFork={handleFork}
+							onCopy={copyText}
+							onSendToNewSession={sendToNewSession}
+							onSelectText={openSelectTextDialog}
+							onGenerateTitleFromMessage={canGenerateTitleFromMessage
+								? generateTitleFromCurrentMessage
+								: undefined}
+						/>
+					</ContextMenuContent>
+				</ContextMenu>
+				<div
+					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
+				>
+					{@render floatingMessageMenuButton('bottom-0 right-0')}
+					{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'unconfirmed' || userDeliveryStatus === 'failed'}
+						<span
+							class={cn(
+								'user-message-delivery-indicator absolute left-1/2 top-1/2 inline-flex size-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+								userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+								userDeliveryStatus === 'unconfirmed' && 'text-status-warning-muted-foreground',
+							)}
+							title={userDeliveryTitle}
+							aria-label={userDeliveryTitle}
+						>
+							{#if userDeliveryStatus === 'submitting'}
+								<LoaderCircle class="size-3.5 animate-spin" />
+							{:else}
+								<CircleAlert class="size-3" />
+							{/if}
+						</span>
+					{/if}
 				</div>
+			</div>
 		{:else}
 			<div class="w-full">
 				{#if showNonAssistantHeader}
@@ -584,9 +589,7 @@
 								bind:ref={messageMenuTriggerRef}
 								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
 							>
-								<div
-									class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8"
-								>
+								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 									<div class="px-px text-sm text-foreground">
 										<Markdown
 											source={formattedContent}

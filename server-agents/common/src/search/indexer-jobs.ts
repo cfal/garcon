@@ -2,9 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Database } from 'bun:sqlite';
-import { parseChatMessages, type ChatMessage } from '@garcon/common/chat-types';
 import {
-  AgentTranscriptIndexError,
   type AgentLogger,
   type AgentTranscriptIndexFailure,
   type AgentTranscriptIndexerModule,
@@ -34,6 +32,7 @@ import {
   validateCatalogEntry,
   validateNativeBatch,
 } from './indexer-job-data.js';
+import { IndexerCarryOverStream, IndexerCatalogFrames } from './indexer-protocol-streams.js';
 import type {
   IndexerEvent,
   IndexerRequest,
@@ -56,8 +55,6 @@ interface QueuedWork {
   readonly enqueuedAt: number;
 }
 
-const CARRY_OVER_CHUNK_TIMEOUT_MS = 5_000;
-const FRAME_ASSEMBLY_TIMEOUT_MS = 5_000;
 const DIRTY_DEBOUNCE_MS = 100;
 const DIRTY_REVISION_RETRY_MS = [1_000, 5_000, 30_000] as const;
 const FAILURE_RETRY_MS = [5_000, 30_000, 5 * 60_000] as const;
@@ -74,7 +71,6 @@ let operationEpoch = '';
 let scratchDirectory = '';
 let closing = false;
 let newestCatalogSequence = 0;
-let eventRequestId = 1_000_000;
 const registrations = new Map<string, TranscriptIndexModuleRegistration>();
 const instances = new Map<string, AgentTranscriptIndexSource>();
 const catalog = new Map<string, CatalogWork>();
@@ -90,18 +86,6 @@ const dirtyRevisionAttempts = new Map<string, { generation: CatalogWork['generat
 const nullProbeAttempts = new Map<string, CatalogWork['generation']>();
 const failureAttempts = new Map<string, { generation: CatalogWork['generation']; count: number }>();
 const safetyCheckedAt = new Map<string, number>();
-const carryWaiters = new Map<number, {
-  resolve(value: Extract<IndexerRequest, { type: 'carry-over-chunk' }>): void;
-  reject(error: Error): void;
-  timer: ReturnType<typeof setTimeout>;
-}>();
-const catalogAssemblies = new Map<number, {
-  readonly generation: CatalogWork['generation'];
-  readonly chats: TranscriptSearchCatalogEntry[];
-  readonly timer: ReturnType<typeof setTimeout>;
-  readonly lifecycleEpoch: string;
-  nextChunkIndex: number;
-}>();
 const quarantines = new Map<string, string>();
 let draining = false;
 let queueToken = 0;
@@ -114,15 +98,11 @@ function post(message: IndexerEvent): void {
   self.postMessage(message);
 }
 
+const catalogFrames = new IndexerCatalogFrames(post);
+const carryOverStream = new IndexerCarryOverStream(post, () => lifecycleEpoch);
+
 function response(request: IndexerRequest) {
   return { requestId: request.requestId, lifecycleEpoch: request.lifecycleEpoch };
-}
-
-function discardCatalogAssembly(requestId: number): void {
-  const assembly = catalogAssemblies.get(requestId);
-  if (!assembly) return;
-  clearTimeout(assembly.timer);
-  catalogAssemblies.delete(requestId);
 }
 
 function requireDb(): Database {
@@ -290,68 +270,6 @@ function emitSourceStatus(
     errorCode,
     retryable,
   });
-}
-
-async function nextCarryChunk(requestId: number): Promise<Extract<IndexerRequest, { type: 'carry-over-chunk' }>> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      carryWaiters.delete(requestId);
-      reject(new Error('CARRY_OVER_TIMEOUT'));
-    }, CARRY_OVER_CHUNK_TIMEOUT_MS);
-    timer.unref?.();
-    carryWaiters.set(requestId, { resolve, reject, timer });
-  });
-}
-
-async function* carryOverBatches(
-  entry: CatalogWork,
-  signal: AbortSignal,
-): AsyncIterable<readonly ChatMessage[]> {
-  if (entry.carryOverRevision === 'carry-v1:0') return;
-  const requestId = ++eventRequestId;
-  post({
-    type: 'carry-over-open',
-    requestId,
-    lifecycleEpoch,
-    chatId: entry.chatId,
-    expectedRevision: entry.carryOverRevision,
-    currentAgentId: entry.agentId,
-    currentModel: entry.model,
-  });
-  try {
-    let expectedChunkIndex = 0;
-    while (true) {
-      signal.throwIfAborted();
-      const chunk = await nextCarryChunk(requestId);
-      if (chunk.chunkIndex !== expectedChunkIndex
-          || chunk.messages.length > TRANSCRIPT_INDEX_LOAD_LIMITS.maxMessagesPerBatch
-          || Buffer.byteLength(JSON.stringify(chunk.messages))
-            > TRANSCRIPT_INDEX_LOAD_LIMITS.maxBatchBytes) {
-        throw new Error('INVALID_CARRY_OVER_FRAME');
-      }
-      expectedChunkIndex += 1;
-      if (chunk.code) {
-        throw new AgentTranscriptIndexError({
-          kind: 'agent-transcript-index-failure',
-          code: chunk.code,
-          retryable: chunk.retryable === true,
-          refreshSource: false,
-        });
-      }
-      if (chunk.revision !== entry.carryOverRevision) throw new Error('CARRY_OVER_REVISION_CHANGED');
-      const messages = parseChatMessages(chunk.messages);
-      yield messages;
-      if (chunk.done) return;
-      post({ type: 'carry-over-pull', requestId, lifecycleEpoch });
-    }
-  } finally {
-    const waiter = carryWaiters.get(requestId);
-    if (waiter) {
-      clearTimeout(waiter.timer);
-      carryWaiters.delete(requestId);
-    }
-    post({ type: 'carry-over-cancel', requestId, lifecycleEpoch });
-  }
 }
 
 function newerGeneration(
@@ -588,7 +506,7 @@ async function buildChat(entry: CatalogWork, work: QueuedWork): Promise<void> {
     const content = createHash('sha256');
     let rowCount = 0;
     let carriedMessages = 0;
-    for await (const batch of carryOverBatches(entry, controller.signal)) {
+    for await (const batch of carryOverStream.batches(entry, controller.signal)) {
       const batchStartedAt = performance.now();
       if (!generationCurrent(entry)) throw new DOMException('Superseded', 'AbortError');
       carriedMessages += batch.length;
@@ -787,45 +705,8 @@ export async function handleIndexerRequest(request: IndexerRequest): Promise<voi
         return;
       }
       case 'catalog-chunk': {
-        if (!Number.isSafeInteger(request.chunkIndex) || request.chunkIndex < 0
-            || request.chats.length > 500
-            || Buffer.byteLength(JSON.stringify(request.chats)) > 8 * 1024 * 1024) {
-          throw new Error('INVALID_CATALOG_FRAME');
-        }
-        const existing = catalogAssemblies.get(request.requestId);
-        const assembly = existing ?? (() => {
-          const timer = setTimeout(() => {
-            const current = catalogAssemblies.get(request.requestId);
-            if (!current || current.lifecycleEpoch !== request.lifecycleEpoch) return;
-            catalogAssemblies.delete(request.requestId);
-            post({
-              type: 'error',
-              requestId: request.requestId,
-              lifecycleEpoch: request.lifecycleEpoch,
-              code: 'CATALOG_FRAME_TIMEOUT',
-              retryable: true,
-            });
-          }, FRAME_ASSEMBLY_TIMEOUT_MS);
-          timer.unref?.();
-          return {
-            generation: request.generation,
-            chats: [],
-            timer,
-            lifecycleEpoch: request.lifecycleEpoch,
-            nextChunkIndex: 0,
-          };
-        })();
-        if (!existing) catalogAssemblies.set(request.requestId, assembly);
-        if (assembly.nextChunkIndex !== request.chunkIndex
-            || compareGeneration(assembly.generation, request.generation) !== 0) {
-          discardCatalogAssembly(request.requestId);
-          throw new Error('INVALID_CATALOG_FRAME');
-        }
-        assembly.chats.push(...request.chats);
-        assembly.nextChunkIndex += 1;
-        if (!request.done) return;
-        discardCatalogAssembly(request.requestId);
-        const snapshot = { generation: assembly.generation, chats: assembly.chats };
+        const snapshot = catalogFrames.accept(request);
+        if (!snapshot) return;
         if (snapshot.generation.epoch !== operationEpoch
             || snapshot.generation.sequence < newestCatalogSequence) {
           post({ type: 'ack', ...response(request) });
@@ -931,12 +812,7 @@ export async function handleIndexerRequest(request: IndexerRequest): Promise<voi
         return;
       }
       case 'carry-over-chunk': {
-        const waiter = carryWaiters.get(request.requestId);
-        if (waiter) {
-          clearTimeout(waiter.timer);
-          carryWaiters.delete(request.requestId);
-          waiter.resolve(request);
-        }
+        carryOverStream.accept(request);
         return;
       }
       case 'close': {
@@ -948,12 +824,8 @@ export async function handleIndexerRequest(request: IndexerRequest): Promise<voi
         dirtyTimers.clear();
         retryTimers.clear();
         for (const active of activeBuilds.values()) active.abort();
-        for (const waiter of carryWaiters.values()) {
-          clearTimeout(waiter.timer);
-          waiter.reject(new Error('CARRY_OVER_CANCELLED'));
-        }
-        carryWaiters.clear();
-        for (const requestId of catalogAssemblies.keys()) discardCatalogAssembly(requestId);
+        carryOverStream.cancelAll();
+        catalogFrames.clear();
         await Promise.allSettled([...instances.values()].reverse().map((instance) => instance.close()));
         instances.clear();
         const activeDb = db;
@@ -966,7 +838,7 @@ export async function handleIndexerRequest(request: IndexerRequest): Promise<voi
       }
     }
   } catch (error) {
-    if (request.type === 'catalog-chunk') discardCatalogAssembly(request.requestId);
+    if (request.type === 'catalog-chunk') catalogFrames.discard(request.requestId);
     post({
       type: 'error',
       ...response(request),

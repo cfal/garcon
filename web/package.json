@@ -12,7 +12,7 @@
 	],
 	"scripts": {
 		"dev": "vite dev",
-		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide",
+		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --output-structure locale-modules",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",

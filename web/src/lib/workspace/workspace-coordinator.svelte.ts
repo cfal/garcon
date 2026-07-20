@@ -4,7 +4,6 @@ import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
 	CHAT_SURFACE_ID,
-	PORTABLE_SINGLETON_KINDS,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
 	type DesktopPlacement,
@@ -21,7 +20,6 @@ import {
 } from './workspace-transition-arbiter.js';
 import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
-import { selectMobileEntrySurface } from './responsive-handoff.js';
 import type {
 	FilePlacementPort,
 	FilePlacementResult,
@@ -32,17 +30,15 @@ import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svel
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
-import { visiblePresentationMap } from './visible-presentations.js';
 import { FileDialogCoordinator } from './file-dialog-coordinator.js';
-import { MobilePresentationPlanner } from './mobile-presentation-planner.js';
 import { TerminalPlacementService } from './terminal-placement-service.js';
 import type { WorkspaceCommitOptions } from './workspace-commit.js';
-import { WorkspacePresentationFrames } from './workspace-presentation-frames.svelte.js';
 import {
 	canOmitCanonicalPullRequests,
 	canOpenCanonicalSidebar,
 	nextSidebarSeedKind,
 } from './canonical-layout.js';
+import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 
 interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
@@ -60,19 +56,6 @@ interface WorkspaceCoordinatorDeps {
 	getRouteIdentity(): string;
 }
 
-class WorkspacePublicationInvariantError extends Error {
-	constructor(
-		message = 'Workspace transition arbitration failed to publish a serialized layout update',
-	) {
-		super(message);
-		this.name = 'WorkspacePublicationInvariantError';
-	}
-}
-
-function isSidebarHidden(snapshot: WorkspaceLayoutSnapshot): boolean {
-	return !snapshot.sidebarOpen || snapshot.manualFullscreen;
-}
-
 function revealSidebarMutations(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] {
 	const mutations: WorkspaceLayoutMutation[] = [];
 	if (snapshot.manualFullscreen) {
@@ -84,16 +67,8 @@ function revealSidebarMutations(snapshot: WorkspaceLayoutSnapshot): WorkspaceLay
 
 export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #deps: WorkspaceCoordinatorDeps;
-	lastFocusedSurfaceId = $state(CHAT_SURFACE_ID as string);
-	focusOwner = $state<FocusOwner>({ kind: 'surface', surfaceId: CHAT_SURFACE_ID });
-	#sidebarOverlayMode = false;
-	#inFlightCommitCount = 0;
 	#reservedSurfaceIds = new SvelteSet<string>();
-	#presentationMode = $state<'desktop' | 'mobile'>('desktop');
-	#requestedPresentationMode: 'desktop' | 'mobile' = 'desktop';
-	#responsiveGeneration = 0;
-	readonly #mobilePresentation: MobilePresentationPlanner;
-	readonly #presentationFrames: WorkspacePresentationFrames;
+	readonly #presentation: WorkspacePresentationController;
 	readonly #fileDialog: FileDialogCoordinator;
 	readonly #terminalPlacement: TerminalPlacementService;
 	closeGuardRequest = $state<{
@@ -106,17 +81,21 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	constructor(deps: WorkspaceCoordinatorDeps) {
 		this.#deps = deps;
-		this.#mobilePresentation = new MobilePresentationPlanner({
-			getContext: () => this.#deps.workspaceContext.current,
+		this.#presentation = new WorkspacePresentationController({
+			arbiter: deps.arbiter,
+			terminals: deps.terminals,
+			workspaceContext: deps.workspaceContext,
+			appShell: deps.appShell,
+			chatInteractionGate: deps.chatInteractionGate,
+			transientLayers: deps.transientLayers,
+			files: deps.files,
+			singletons: deps.singletons,
+			surfaceFrames: deps.surfaceFrames,
+			onLayoutChanged: deps.onLayoutChanged,
 			getRouteIdentity: deps.getRouteIdentity,
 		});
-		this.#presentationFrames = new WorkspacePresentationFrames({
-			frames: deps.surfaceFrames,
-			terminals: deps.terminals,
-			files: deps.files,
-		});
 		const commit = (mutations: WorkspaceMutationPlan, options?: WorkspaceCommitOptions) =>
-			this.#commit(mutations, options);
+			this.#presentation.commit(mutations, options);
 		this.#fileDialog = new FileDialogCoordinator({
 			layout: deps.arbiter.layout,
 			files: deps.files,
@@ -124,13 +103,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			reservations: this.#reservedSurfaceIds,
 			commit,
 			isMobile: () => this.isMobile,
-			responsiveGeneration: () => this.#responsiveGeneration,
+			responsiveGeneration: () => this.#presentation.responsiveGeneration,
 			activeMainId: () => this.activeMainId,
 			activeSidebarId: () => this.activeSidebarId,
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
-			hostOf: (surfaceId) => this.#hostOf(surfaceId),
-			eligibleDesktopReturn: (surfaceId) => this.#eligibleDesktopReturn(surfaceId),
-			present: (surfaceId) => this.#presentSurface(surfaceId),
+			hostOf: (surfaceId) => this.#presentation.hostOf(surfaceId),
+			eligibleDesktopReturn: (surfaceId) => this.#presentation.eligibleDesktopReturn(surfaceId),
+			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 			placeOnMobile: (sessionId, surfaceId, publication) =>
 				this.#placeFileSessionOnMobile(sessionId, surfaceId, publication),
 		});
@@ -140,48 +119,58 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			reservations: this.#reservedSurfaceIds,
 			commit,
 			commitDestroyedRemoval: (surfaceId, mutations) =>
-				this.#commitDestroyedRemoval(surfaceId, mutations),
+				this.#presentation.commitDestroyedRemoval(surfaceId, mutations),
 			currentProjectPath: () => deps.workspaceContext.current?.projectPath ?? null,
 			isMobile: () => this.isMobile,
 			isChatPresented: () => this.isChatPresented,
 			cancelChatTransition: () => deps.chatInteractionGate.cancelBeforeInertTransition(),
-			hostOf: (surfaceId) => this.#hostOf(surfaceId),
+			hostOf: (surfaceId) => this.#presentation.hostOf(surfaceId),
 			activeMainId: () => this.activeMainId,
 			activeSidebarId: () => this.activeSidebarId,
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
 			focusSurface: (surfaceId) => this.focusSurface(surfaceId),
-			present: (surfaceId) => this.#presentSurface(surfaceId),
+			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 			resolveMobileReturn: (excluding, snapshot) =>
-				this.#mobilePresentation.resolveReturn(excluding, snapshot ?? this.layout.snapshot),
+				this.#presentation.resolveMobileReturn(excluding, snapshot),
 			confirmClose: (request) => this.#confirmClose(request),
-			clearAttachmentError: (surfaceId) => this.#presentationFrames.clearError(surfaceId),
+			clearAttachmentError: (surfaceId) => this.#presentation.clearAttachmentError(surfaceId),
 		});
-		this.#presentationMode = deps.appShell.isMobile ? 'mobile' : 'desktop';
-		this.#requestedPresentationMode = this.#presentationMode;
-		this.#deps.chatInteractionGate.setPresented(
-			this.#isChatPresentedInSnapshot(this.layout.snapshot, this.#presentationMode),
-		);
-		this.#syncSingletonVisibility(this.layout.snapshot, this.#presentationMode);
 	}
 
 	get layout() {
-		return this.#deps.arbiter.layout;
+		return this.#presentation.layout;
+	}
+
+	get lastFocusedSurfaceId(): string {
+		return this.#presentation.lastFocusedSurfaceId;
+	}
+
+	set lastFocusedSurfaceId(surfaceId: string) {
+		this.#presentation.lastFocusedSurfaceId = surfaceId;
+	}
+
+	get focusOwner(): FocusOwner {
+		return this.#presentation.focusOwner;
+	}
+
+	set focusOwner(owner: FocusOwner) {
+		this.#presentation.focusOwner = owner;
 	}
 
 	get isMobile(): boolean {
-		return this.#presentationMode === 'mobile';
+		return this.#presentation.isMobile;
 	}
 
 	isSurfacePresented(surfaceId: string): boolean {
-		return this.#isSurfacePresented(surfaceId);
+		return this.#presentation.isSurfacePresented(surfaceId);
 	}
 
 	get activeMainId(): string {
-		return this.layout.snapshot.main.activeId ?? CHAT_SURFACE_ID;
+		return this.#presentation.activeMainId;
 	}
 
 	get activeSidebarId(): string | null {
-		return this.layout.snapshot.sidebar.activeId;
+		return this.#presentation.activeSidebarId;
 	}
 
 	get canOpenSidebar(): boolean {
@@ -189,21 +178,19 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	get isChatPresented(): boolean {
-		return this.isMobile
-			? this.layout.snapshot.mobileActiveSurfaceId === CHAT_SURFACE_ID
-			: this.activeMainId === CHAT_SURFACE_ID;
+		return this.#presentation.isChatPresented;
 	}
 
 	get isChatInteractive(): boolean {
-		return this.isChatPresented && !this.#deps.transientLayers.makesMainInert;
+		return this.#presentation.isChatInteractive;
 	}
 
 	frameVersion(surfaceId: string): number {
-		return this.#presentationFrames.version(surfaceId);
+		return this.#presentation.frameVersion(surfaceId);
 	}
 
 	get attachmentErrors(): Readonly<Record<string, string>> {
-		return this.#presentationFrames.errors;
+		return this.#presentation.attachmentErrors;
 	}
 
 	isSurfaceCloseBlocked(surfaceId: string): boolean {
@@ -222,101 +209,47 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	noteSurfaceFocus(surfaceId: string): void {
-		if (!this.#isSurfacePresented(surfaceId)) return;
-		this.focusOwner = { kind: 'surface', surfaceId };
-		this.lastFocusedSurfaceId = surfaceId;
+		this.#presentation.noteSurfaceFocus(surfaceId);
 	}
 
 	noteChatListFocus(): void {
-		this.focusOwner = { kind: 'chat-list' };
+		this.#presentation.noteChatListFocus();
 	}
 
 	noteHostChromeFocus(host: HostId, surfaceId: string): void {
-		if (!this.#isSurfacePresented(surfaceId)) return;
-		this.focusOwner = { kind: 'host-chrome', host, surfaceId };
+		this.#presentation.noteHostChromeFocus(host, surfaceId);
 	}
 
 	async focusChat(): Promise<void> {
-		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		await this.#presentChat();
-	}
-
-	async #presentChat(): Promise<void> {
-		const current = this.isMobile
-			? await this.#commit([
-					{ type: 'set-mobile-presentation', activeId: CHAT_SURFACE_ID, returnStack: [] },
-				])
-			: await this.#commit([{ type: 'focus-host', host: 'main', surfaceId: CHAT_SURFACE_ID }]);
-		if (!current) return;
-		this.#presentSurface(CHAT_SURFACE_ID);
+		await this.#presentation.focusChat();
 	}
 
 	async focusSurface(surfaceId: string): Promise<void> {
-		if (this.#reservedSurfaceIds.has(surfaceId)) return;
-		const host = this.#hostOf(surfaceId);
-		if (!host) return;
-		if (surfaceId !== CHAT_SURFACE_ID && this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		let current: boolean;
-		if (this.isMobile) {
-			current = await this.#commit((latest) =>
-				latest.surfaces[surfaceId]
-					? [{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] }]
-					: [],
-			);
-		} else {
-			const plan = (latest: WorkspaceLayoutSnapshot) => {
-				const latestHost = this.#hostOfSnapshot(latest, surfaceId);
-				if (!latestHost) return [];
-				const mutations = latestHost === 'sidebar' ? revealSidebarMutations(latest) : [];
-				mutations.push({ type: 'focus-host', host: latestHost, surfaceId });
-				return mutations;
-			};
-			if (host === 'sidebar') {
-				current = await this.#commitSidebarReveal(plan);
-			} else {
-				current = await this.#commit(plan);
-			}
-		}
-		if (!current) return;
-		this.#presentSurface(surfaceId);
+		await this.#presentation.focusSurface(surfaceId, this.#reservedSurfaceIds);
 	}
 
 	focusPreviousTabInFocusedHost(owner: FocusOwner = this.focusOwner): boolean {
-		return this.#focusAdjacentTabInFocusedHost(owner, -1);
+		return this.#presentation.focusPreviousTab(
+			owner,
+			(surfaceId) => void this.focusSurface(surfaceId),
+		);
 	}
 
 	focusNextTabInFocusedHost(owner: FocusOwner = this.focusOwner): boolean {
-		return this.#focusAdjacentTabInFocusedHost(owner, 1);
+		return this.#presentation.focusNextTab(owner, (surfaceId) => void this.focusSurface(surfaceId));
 	}
 
 	toggleFocusBetweenMainAndSidebar(owner: FocusOwner = this.focusOwner): void {
-		const snapshot = this.layout.snapshot;
-		const sidebarSurfaceId = snapshot.sidebar.activeId;
-		if (
-			this.isMobile ||
-			this.#sidebarOverlayMode ||
-			!snapshot.sidebarOpen ||
-			snapshot.manualFullscreen ||
-			!sidebarSurfaceId
-		) {
-			return;
-		}
-
-		const ownerHost =
-			owner.kind === 'host-chrome'
-				? owner.host
-				: owner.kind === 'surface'
-					? this.#presentationHostOf(owner.surfaceId)
-					: null;
-		void this.focusSurface(ownerHost === 'sidebar' ? this.activeMainId : sidebarSurfaceId);
+		this.#presentation.toggleFocusBetweenMainAndSidebar(
+			owner,
+			(surfaceId) => void this.focusSurface(surfaceId),
+		);
 	}
 
 	async openSingleton(kind: PortableSingletonKind, preferredHostIfAbsent: HostId): Promise<void> {
 		const surfaceId = singletonSurfaceId(kind);
 		if (this.layout.surface(surfaceId)) {
-			if (this.isMobile || this.#hostOf(surfaceId)) {
+			if (this.isMobile || this.#presentation.hostOf(surfaceId)) {
 				await this.focusSurface(surfaceId);
 			} else {
 				await this.moveSurface(surfaceId, preferredHostIfAbsent);
@@ -328,8 +261,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
 		const commit = () =>
-			this.#commit((latest) => {
-				const existingHost = this.#hostOfSnapshot(latest, surfaceId);
+			this.#presentation.commit((latest) => {
+				const existingHost = this.#presentation.hostOfSnapshot(latest, surfaceId);
 				if (existingHost) {
 					return [
 						...(existingHost === 'sidebar' && !latest.sidebarOpen
@@ -348,10 +281,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			});
 		const current =
 			preferredHostIfAbsent === 'sidebar'
-				? await this.#commitThroughSidebarOverlay(commit)
+				? await this.#presentation.commitThroughSidebarOverlay(commit)
 				: await commit();
 		if (!current) return;
-		this.#presentSurface(surfaceId);
+		this.#presentation.presentSurface(surfaceId);
 	}
 
 	async moveSurface(surfaceId: string, destination: HostId): Promise<void> {
@@ -361,7 +294,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
 		const commit = () =>
-			this.#commit((latest) => {
+			this.#presentation.commit((latest) => {
 				if (!latest.surfaces[surfaceId]) return [];
 				const mutations: WorkspaceLayoutMutation[] = [];
 				if (
@@ -376,10 +309,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			});
 		const current =
 			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen
-				? await this.#commitThroughSidebarOverlay(commit)
+				? await this.#presentation.commitThroughSidebarOverlay(commit)
 				: await commit();
 		if (!current) return;
-		this.#presentSurface(surfaceId);
+		this.#presentation.presentSurface(surfaceId);
 	}
 
 	async closeSurface(surfaceId: string): Promise<boolean> {
@@ -412,7 +345,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				);
 				if (!canDestroy) return false;
 			}
-			const sourceHost = this.#hostOf(surfaceId);
+			const sourceHost = this.#presentation.hostOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
 			let mobileFallbackId: string | null = null;
 			const removalPlan = (latest: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] => {
@@ -423,7 +356,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 						: { type: 'remove-surface', surfaceId },
 				];
 				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
-					const fallback = this.#mobilePresentation.resolveReturn(surfaceId, latest);
+					const fallback = this.#presentation.resolveMobileReturn(surfaceId, latest);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({
 						type: 'set-mobile-presentation',
@@ -435,9 +368,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			};
 			const current =
 				surface.type === 'terminal'
-					? await this.#commit(removalPlan)
-					: await this.#commitDestroyedRemoval(surfaceId, removalPlan);
-			this.#presentationFrames.clearError(surfaceId);
+					? await this.#presentation.commit(removalPlan)
+					: await this.#presentation.commitDestroyedRemoval(surfaceId, removalPlan);
+			this.#presentation.clearAttachmentError(surfaceId);
 			if (wasDialog) this.#fileDialog.clearReturnSurface();
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
 			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
@@ -451,13 +384,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const fallbackSurfaceId =
 				mobileFallbackId ??
 				(wasDialog
-					? this.#eligibleDesktopReturn(this.#fileDialog.returnSurfaceId)
+					? this.#presentation.eligibleDesktopReturn(this.#fileDialog.returnSurfaceId)
 					: sourceHost === 'sidebar' && this.layout.snapshot.sidebarOpen
 						? this.activeSidebarId
 						: this.activeMainId) ??
 				this.activeMainId;
 			this.lastFocusedSurfaceId = fallbackSurfaceId;
-			this.#focusPresentedSurface(fallbackSurfaceId);
+			this.#presentation.focusPresentedSurface(fallbackSurfaceId);
 			return true;
 		} finally {
 			this.#reservedSurfaceIds.delete(surfaceId);
@@ -509,26 +442,22 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		];
 		const current =
 			destination === 'sidebar'
-				? await this.#commitSidebarReveal(plan, { publication })
-				: await this.#commit(plan, { publication });
-		if (current) this.#presentSurface(surfaceId);
+				? await this.#presentation.commitSidebarReveal(plan, { publication })
+				: await this.#presentation.commit(plan, { publication });
+		if (current) this.#presentation.presentSurface(surfaceId);
 		return 'placed';
 	}
 
 	async focusFileSession(sessionId: string): Promise<void> {
 		const surfaceId = fileSurfaceId(sessionId);
 		if (this.layout.snapshot.dialogFileSurfaceId === surfaceId) {
-			this.#presentSurface(surfaceId);
+			this.#presentation.presentSurface(surfaceId);
 			return;
 		}
 		if (this.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId) || this.isMobile) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-			const returnStack = this.#mobilePresentation.returnStackForTransient(
-				surfaceId,
-				this.layout.snapshot,
-				this.isMobile,
-			);
-			const current = await this.#commit([
+			const returnStack = this.#presentation.returnStackForTransient(surfaceId);
+			const current = await this.#presentation.commit([
 				{
 					type: 'set-mobile-presentation',
 					activeId: surfaceId,
@@ -536,7 +465,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				},
 			]);
 			if (!current) return;
-			this.#presentSurface(surfaceId);
+			this.#presentation.presentSurface(surfaceId);
 			return;
 		}
 		await this.focusSurface(surfaceId);
@@ -579,7 +508,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async openSidebar(): Promise<void> {
 		if (!this.canOpenSidebar) return;
 		const commit = () =>
-			this.#commit((latest) => {
+			this.#presentation.commit((latest) => {
 				if (latest.sidebar.order.length > 0) {
 					return [{ type: 'set-sidebar-open', open: true }];
 				}
@@ -597,137 +526,49 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				];
 				return mutations;
 			});
-		const current = await this.#commitThroughSidebarOverlay(commit);
+		const current = await this.#presentation.commitThroughSidebarOverlay(commit);
 		if (!current) return;
-		if (this.activeSidebarId) this.#presentSurface(this.activeSidebarId);
+		if (this.activeSidebarId) this.#presentation.presentSurface(this.activeSidebarId);
 	}
 
 	setSidebarOverlayMode(overlay: boolean): void {
-		this.#sidebarOverlayMode = overlay;
+		this.#presentation.setSidebarOverlayMode(overlay);
 	}
 
 	async closeSidebar(): Promise<void> {
-		const current = await this.#commit([{ type: 'set-sidebar-open', open: false }]);
+		const current = await this.#presentation.commit([{ type: 'set-sidebar-open', open: false }]);
 		if (!current) return;
-		this.#presentSurface(this.activeMainId);
+		this.#presentation.presentSurface(this.activeMainId);
 	}
 
 	async enterMobilePresentation(): Promise<void> {
-		if (this.#requestedPresentationMode === 'mobile') return;
-		this.#requestedPresentationMode = 'mobile';
-		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		const responsiveGeneration = ++this.#responsiveGeneration;
-		const from = this.#presentationMode;
-		let activeId = CHAT_SURFACE_ID as string;
-		let current: boolean;
-		try {
-			current = await this.#commit(
-				(latest) => {
-					activeId = selectMobileEntrySurface(latest, this.lastFocusedSurfaceId);
-					return [
-						{
-							type: 'set-mobile-presentation',
-							activeId,
-							returnStack: latest.mobileReturnStack,
-						},
-					];
-				},
-				{ presentationMode: 'mobile' },
-			);
-		} catch (error) {
-			if (
-				responsiveGeneration === this.#responsiveGeneration &&
-				this.#presentationMode !== 'mobile'
-			) {
-				this.#requestedPresentationMode = from;
-				this.#setPresentationMode(from);
-			}
-			throw error;
-		}
-		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
-		this.#presentSurface(activeId);
+		await this.#presentation.enterMobilePresentation();
 	}
 
 	async exitMobilePresentation(): Promise<void> {
-		if (this.#requestedPresentationMode === 'desktop') return;
-		this.#requestedPresentationMode = 'desktop';
-		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		const responsiveGeneration = ++this.#responsiveGeneration;
-		let current: boolean;
-		try {
-			current = await this.#commit((latest) => this.#mobilePresentation.planDesktopReturn(latest), {
-				presentationMode: 'desktop',
-			});
-		} catch (error) {
-			if (
-				responsiveGeneration === this.#responsiveGeneration &&
-				this.#presentationMode !== 'desktop'
-			) {
-				this.#requestedPresentationMode = 'mobile';
-				this.#setPresentationMode('mobile');
-			}
-			throw error;
-		}
-		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
-		this.#focusPresentedSurface(this.lastFocusedSurfaceId);
+		await this.#presentation.exitMobilePresentation();
 	}
 
 	async focusMobileSingleton(kind: PortableSingletonKind): Promise<void> {
-		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		const surfaceId = singletonSurfaceId(kind);
-		if (!this.layout.surface(surfaceId)) {
-			await this.#commit([
-				{ type: 'register-surface', surface: portableSingletonDescriptor(kind) },
-			]);
-		}
-		const current = await this.#commit([
-			{
-				type: 'set-mobile-presentation',
-				activeId: surfaceId,
-				returnStack:
-					kind === 'commit'
-						? this.#mobilePresentation.returnStackForTransient(
-								surfaceId,
-								this.layout.snapshot,
-								this.isMobile,
-							)
-						: this.layout.snapshot.mobileReturnStack,
-			},
-		]);
-		if (!current) return;
-		this.#presentSurface(surfaceId);
+		await this.#presentation.focusMobileSingleton(kind);
 	}
 
 	async mobileBack(): Promise<void> {
-		if (!this.isMobile) return;
-		const currentId = this.layout.snapshot.mobileActiveSurfaceId;
-		const fallback = this.#mobilePresentation.resolveReturn(currentId, this.layout.snapshot);
-		const current = await this.#commit([
-			{
-				type: 'set-mobile-presentation',
-				activeId: fallback.activeId,
-				returnStack: fallback.returnStack,
-			},
-		]);
-		if (!current) return;
-		this.#presentSurface(fallback.activeId);
+		await this.#presentation.mobileBack();
 	}
 
 	async setSidebarWidth(width: number): Promise<void> {
-		await this.#commit([{ type: 'set-sidebar-width', width }]);
+		await this.#presentation.commit([{ type: 'set-sidebar-width', width }]);
 	}
 
 	async setManualFullscreen(enabled: boolean): Promise<void> {
-		const current = await this.#commit([{ type: 'set-manual-fullscreen', enabled }]);
+		const current = await this.#presentation.commit([{ type: 'set-manual-fullscreen', enabled }]);
 		if (!current) return;
-		if (enabled) this.#presentSurface(this.activeMainId);
+		if (enabled) this.#presentation.presentSurface(this.activeMainId);
 	}
 
 	async retryPresentation(surfaceId: string, host: PresentationHostId): Promise<void> {
-		if (!this.layout.surface(surfaceId)) return;
-		const current = await this.#presentationFrames.retry(surfaceId, host);
-		if (!current) return;
-		this.#focusPresentedSurface(surfaceId);
+		await this.#presentation.retryPresentation(surfaceId, host);
 	}
 
 	async reconcileTerminals(
@@ -741,104 +582,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const snapshot = this.layout.snapshot;
 		const pullRequestsSurfaceId = singletonSurfaceId('pull-requests');
 		if (!canOmitCanonicalPullRequests(snapshot)) return;
-		await this.#commit([{ type: 'remove-surface', surfaceId: pullRequestsSurfaceId }]);
+		await this.#presentation.commit([{ type: 'remove-surface', surfaceId: pullRequestsSurfaceId }]);
 	}
 
 	async activateTerminalLauncher(host: HostId): Promise<void> {
 		await this.#terminalPlacement.activateLauncher(host);
-	}
-
-	#hostOf(surfaceId: string): HostId | null {
-		return this.#hostOfSnapshot(this.layout.snapshot, surfaceId);
-	}
-
-	#isSurfacePresented(surfaceId: string): boolean {
-		return [...this.#visiblePresentations(this.layout.snapshot).values()].includes(surfaceId);
-	}
-
-	#setPresentationMode(mode: 'desktop' | 'mobile'): void {
-		this.#presentationMode = mode;
-		this.#deps.appShell.isMobile = mode === 'mobile';
-	}
-
-	#hostOfSnapshot(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): HostId | null {
-		if (snapshot.main.order.includes(surfaceId)) return 'main';
-		if (snapshot.sidebar.order.includes(surfaceId)) return 'sidebar';
-		return null;
-	}
-
-	#focusAdjacentTabInFocusedHost(owner: FocusOwner, offset: -1 | 1): boolean {
-		if (this.isMobile || owner.kind === 'chat-list') return false;
-		if (!this.#isSurfacePresented(owner.surfaceId)) return false;
-		const snapshot = this.layout.snapshot;
-		const host =
-			owner.kind === 'host-chrome' ? owner.host : this.#hostOfSnapshot(snapshot, owner.surfaceId);
-		if (!host || (host === 'sidebar' && (!snapshot.sidebarOpen || snapshot.manualFullscreen))) {
-			return false;
-		}
-		const hostState = snapshot[host];
-		if (hostState.activeId !== owner.surfaceId) return false;
-		const activeIndex = hostState.activeId ? hostState.order.indexOf(hostState.activeId) : -1;
-		if (activeIndex < 0) return false;
-		const nextSurfaceId = hostState.order[activeIndex + offset];
-		if (nextSurfaceId) void this.focusSurface(nextSurfaceId);
-		return true;
-	}
-
-	#presentationHostOf(surfaceId: string): PresentationHostId | null {
-		const snapshot = this.layout.snapshot;
-		if (this.#presentationMode === 'mobile') {
-			return snapshot.mobileActiveSurfaceId === surfaceId ? 'mobile' : null;
-		}
-		if (snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
-		if (snapshot.main.activeId === surfaceId) return 'main';
-		if (
-			snapshot.sidebarOpen &&
-			!snapshot.manualFullscreen &&
-			snapshot.sidebar.activeId === surfaceId
-		)
-			return 'sidebar';
-		return null;
-	}
-
-	#focusPresentedSurface(surfaceId: string): void {
-		if (surfaceId === CHAT_SURFACE_ID) {
-			this.#deps.appShell.requestComposerFocus();
-			return;
-		}
-		const host = this.#presentationHostOf(surfaceId);
-		if (host) this.#deps.surfaceFrames?.focus(surfaceId, host);
-	}
-
-	#presentSurface(surfaceId: string): void {
-		this.lastFocusedSurfaceId = surfaceId;
-		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
-		this.#focusPresentedSurface(surfaceId);
-	}
-
-	#commitThroughSidebarOverlay(commit: () => Promise<boolean>): Promise<boolean> {
-		return this.#sidebarOverlayMode
-			? this.#deps.transientLayers.open('main-inert', commit)
-			: commit();
-	}
-
-	#commitSidebarReveal(
-		plan: WorkspaceMutationPlan,
-		options: WorkspaceCommitOptions = {},
-	): Promise<boolean> {
-		const commit = () => this.#commit(plan, options);
-		return this.#sidebarOverlayMode &&
-			(isSidebarHidden(this.layout.snapshot) || this.#inFlightCommitCount > 0)
-			? this.#deps.transientLayers.open('main-inert', commit)
-			: commit();
-	}
-
-	#eligibleDesktopReturn(surfaceId: string | null): string | null {
-		if (!surfaceId || !this.layout.surface(surfaceId)) return null;
-		const snapshot = this.layout.snapshot;
-		if (snapshot.main.order.includes(surfaceId)) return surfaceId;
-		if (snapshot.sidebarOpen && snapshot.sidebar.order.includes(surfaceId)) return surfaceId;
-		return null;
 	}
 
 	#confirmClose(request: NonNullable<WorkspaceCoordinator['closeGuardRequest']>): Promise<boolean> {
@@ -857,12 +605,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		publication?: { publish(): void; rollback(): void },
 	): Promise<FilePlacementResult> {
 		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		const returnStack = this.#mobilePresentation.returnStackForTransient(
-			surfaceId,
-			this.layout.snapshot,
-			this.isMobile,
-		);
-		const current = await this.#commit(
+		const returnStack = this.#presentation.returnStackForTransient(surfaceId);
+		const current = await this.#presentation.commit(
 			[
 				{
 					type: 'register-surface',
@@ -876,185 +620,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			],
 			{ publication },
 		);
-		if (current) this.#presentSurface(surfaceId);
+		if (current) this.#presentation.presentSurface(surfaceId);
 		return 'placed';
-	}
-
-	async #commitDestroyedRemoval(
-		surfaceId: string,
-		mutations: WorkspaceMutationPlan,
-	): Promise<boolean> {
-		try {
-			return await this.#commit(mutations, { requiredPublication: true });
-		} catch (error) {
-			if (!this.layout.surface(surfaceId)) {
-				console.error('Required workspace removal completed with degraded follow-up work', error);
-				return true;
-			}
-			console.error('Retrying required workspace removal after a publication failure', error);
-			const removed = await this.#deps.arbiter.commit(
-				(latest) => (latest.surfaces[surfaceId] ? [{ type: 'remove-surface', surfaceId }] : []),
-				{},
-				{ retryPublishFailure: true },
-			);
-			if (!removed || this.layout.surface(surfaceId)) {
-				throw new Error(`Required workspace removal failed for ${surfaceId}`, { cause: error });
-			}
-			return true;
-		}
-	}
-
-	async #commit(
-		mutations: WorkspaceMutationPlan,
-		options: WorkspaceCommitOptions = {},
-	): Promise<boolean> {
-		this.#inFlightCommitCount += 1;
-		try {
-			return await this.#performCommit(mutations, options);
-		} finally {
-			this.#inFlightCommitCount -= 1;
-		}
-	}
-
-	async #performCommit(
-		mutations: WorkspaceMutationPlan,
-		options: WorkspaceCommitOptions,
-	): Promise<boolean> {
-		let expectations: ReturnType<WorkspacePresentationFrames['prepare']> = [];
-		let presentationGeneration: number | null = null;
-		let presentationFrom: 'desktop' | 'mobile' | null = null;
-		let presentationTo: 'desktop' | 'mobile' | null = null;
-		const published = await this.#deps.arbiter.commit(
-			mutations,
-			{
-				beforePublish: (next, base) => {
-					presentationTo = options.presentationMode ?? this.#presentationMode;
-					try {
-						if (options.presentationMode) {
-							presentationFrom = this.#presentationMode;
-							this.#setPresentationMode(options.presentationMode);
-						}
-						this.#deps.chatInteractionGate.setPresented(
-							this.#isChatPresentedInSnapshot(next, presentationTo),
-						);
-						this.#hideLeavingSingletons(
-							base,
-							next,
-							presentationFrom ?? this.#presentationMode,
-							presentationTo,
-						);
-						options.publication?.publish();
-						presentationGeneration = this.#presentationFrames.beginTransition(
-							base,
-							next,
-							presentationFrom ?? this.#presentationMode,
-							presentationTo,
-						);
-						expectations = this.#presentationFrames.prepare(
-							base,
-							next,
-							presentationFrom ?? this.#presentationMode,
-							presentationTo,
-						);
-					} catch (error) {
-						if (!options.requiredPublication) throw error;
-						expectations = [];
-						this.#presentationFrames.recordPreparationError(next, error, presentationTo);
-					}
-				},
-				publishFailed: () => {
-					try {
-						if (presentationFrom) this.#setPresentationMode(presentationFrom);
-						this.#deps.chatInteractionGate.setPresented(
-							this.#isChatPresentedInSnapshot(this.layout.snapshot, presentationFrom ?? undefined),
-						);
-						this.#syncSingletonVisibility(this.layout.snapshot, presentationFrom ?? undefined);
-						options.publication?.rollback();
-						this.#presentationFrames.cancel(expectations);
-					} catch (error) {
-						if (!options.requiredPublication) throw error;
-						console.error('Failed to roll back required workspace publication', error);
-					}
-				},
-			},
-			{ retryPublishFailure: false },
-		);
-		if (!published) throw new WorkspacePublicationInvariantError();
-		if (!presentationTo) {
-			throw new WorkspacePublicationInvariantError('Workspace presentation mode was not prepared');
-		}
-		this.#syncSingletonVisibility(this.layout.snapshot, presentationTo);
-		this.#normalizeFocusOwner(this.layout.snapshot, presentationTo);
-		try {
-			this.#deps.onLayoutChanged?.(this.layout.snapshot);
-		} catch (error) {
-			if (!options.requiredPublication) throw error;
-			console.error('Failed to persist required workspace layout publication', error);
-		}
-		await Promise.all(
-			expectations.map((expectation) => this.#presentationFrames.settle(expectation)),
-		);
-		return this.#presentationFrames.isTransitionCurrent(presentationGeneration);
-	}
-
-	#normalizeFocusOwner(
-		snapshot: WorkspaceLayoutSnapshot,
-		mode: 'desktop' | 'mobile' = this.#presentationMode,
-	): void {
-		if (this.focusOwner.kind === 'chat-list') return;
-		const visible = new Set(this.#visiblePresentations(snapshot, mode).values());
-		if (visible.has(this.focusOwner.surfaceId)) return;
-		const fallback =
-			(visible.has(this.lastFocusedSurfaceId) ? this.lastFocusedSurfaceId : null) ??
-			(mode === 'mobile'
-				? snapshot.mobileActiveSurfaceId
-				: (snapshot.main.activeId ?? CHAT_SURFACE_ID));
-		this.focusOwner = { kind: 'surface', surfaceId: fallback };
-		this.lastFocusedSurfaceId = fallback;
-	}
-
-	#isChatPresentedInSnapshot(
-		snapshot: WorkspaceLayoutSnapshot,
-		mode: 'desktop' | 'mobile' = this.#presentationMode,
-	): boolean {
-		return mode === 'mobile'
-			? snapshot.mobileActiveSurfaceId === CHAT_SURFACE_ID
-			: snapshot.main.activeId === CHAT_SURFACE_ID;
-	}
-
-	#syncSingletonVisibility(
-		snapshot: WorkspaceLayoutSnapshot,
-		mode: 'desktop' | 'mobile' = this.#presentationMode,
-	): void {
-		const visibleSurfaceIds = new Set(this.#visiblePresentations(snapshot, mode).values());
-		for (const kind of PORTABLE_SINGLETON_KINDS) {
-			this.#deps.singletons.setPresentationVisible(
-				kind,
-				visibleSurfaceIds.has(singletonSurfaceId(kind)),
-			);
-		}
-	}
-
-	#hideLeavingSingletons(
-		base: WorkspaceLayoutSnapshot,
-		next: WorkspaceLayoutSnapshot,
-		fromMode: 'desktop' | 'mobile' = this.#presentationMode,
-		toMode: 'desktop' | 'mobile' = this.#presentationMode,
-	): void {
-		const before = new Set(this.#visiblePresentations(base, fromMode).values());
-		const after = new Set(this.#visiblePresentations(next, toMode).values());
-		for (const kind of PORTABLE_SINGLETON_KINDS) {
-			const surfaceId = singletonSurfaceId(kind);
-			if (before.has(surfaceId) && !after.has(surfaceId)) {
-				this.#deps.singletons.setPresentationVisible(kind, false);
-			}
-		}
-	}
-
-	#visiblePresentations(
-		snapshot: WorkspaceLayoutSnapshot,
-		mode: 'desktop' | 'mobile' = this.#presentationMode,
-	): Map<PresentationHostId, string> {
-		return visiblePresentationMap(snapshot, mode);
 	}
 }

@@ -6,7 +6,8 @@
 	import { cn } from '$lib/utils/cn';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { LoadingStatus as ChatLoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-	import { GitCommitHorizontal, Square } from '@lucide/svelte';
+	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
+	import Square from '@lucide/svelte/icons/square';
 
 	interface Props {
 		isVisible: boolean;

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { QueueEntry } from '$lib/types/chat';
 	import * as m from '$lib/paraglide/messages.js';
-	import { Loader2, Pencil, Trash2 } from '@lucide/svelte';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	interface Props {
 		entry: QueueEntry;

@@ -1,17 +1,15 @@
 <script lang="ts">
 	import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 	import * as m from '$lib/paraglide/messages.js';
-	import {
-		ChevronLeft,
-		ChevronRight,
-		FastForward,
-		ListTodo,
-		Loader2,
-		Pause,
-		Pencil,
-		Play,
-		Trash2,
-	} from '@lucide/svelte';
+	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import FastForward from '@lucide/svelte/icons/fast-forward';
+	import ListTodo from '@lucide/svelte/icons/list-todo';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import Pause from '@lucide/svelte/icons/pause';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import Play from '@lucide/svelte/icons/play';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
@@ -67,9 +65,7 @@
 		previewIndex === 0 && !queue?.pause && canInterrupt && Boolean(onInterrupt),
 	);
 	let deletingEntryIds = $state<Set<string>>(new Set());
-	let dispatchMutation = $state<
-		'idle' | 'pausing' | 'resuming' | 'interrupting'
-	>('idle');
+	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting'>('idle');
 	const queueActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
 		const neutralButtonClass =
@@ -166,10 +162,7 @@
 			await action();
 		} catch (error) {
 			if (mutation === 'pausing' || mutation === 'resuming') {
-				onQueueControlError(
-					mutation === 'pausing' ? 'pause' : 'resume',
-					error,
-				);
+				onQueueControlError(mutation === 'pausing' ? 'pause' : 'resume', error);
 			}
 		} finally {
 			if (dispatchMutation === mutation) dispatchMutation = 'idle';

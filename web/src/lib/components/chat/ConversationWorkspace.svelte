@@ -65,7 +65,9 @@
 		getGitQuickSummary,
 		getGitBranchActions,
 	} from '$lib/context';
-	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
+	import ArrowDown from '@lucide/svelte/icons/arrow-down';
+	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';

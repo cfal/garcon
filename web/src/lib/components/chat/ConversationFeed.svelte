@@ -17,7 +17,9 @@
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
 	} from '$lib/chat/conversation/chat-max-width.js';
-	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '$lib/components/ui/button';
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { cn } from '$lib/utils/cn';

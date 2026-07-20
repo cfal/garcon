@@ -3,7 +3,7 @@
 	// chat was continued under a different agent with a fresh seeded session,
 	// so prior tool state was not carried over.
 
-	import { ArrowRightLeft } from '@lucide/svelte';
+	import ArrowRightLeft from '@lucide/svelte/icons/arrow-right-left';
 	import type { AgentSwitchMessage } from '$shared/chat-types';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import { agentLabelFor } from '$lib/i18n/agent-labels';
