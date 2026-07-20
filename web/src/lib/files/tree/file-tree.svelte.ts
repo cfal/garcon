@@ -310,8 +310,9 @@ export class FileTreeStore {
 		}
 
 		const { project } = projectState;
+		const projectPathChanged = project.projectPath !== this.#projectPath;
 		this.#projectPath = project.projectPath;
-		if (project.effectiveProjectKey === this.#effectiveProjectKey) {
+		if (!projectPathChanged && project.effectiveProjectKey === this.#effectiveProjectKey) {
 			this.#resumePendingWork();
 			return;
 		}
