@@ -45,9 +45,21 @@ describe('ClaudeAgentIntegration', () => {
         key: 'claudeThinkingMode',
         labelKey: 'thinking',
         options: [
-          expect.objectContaining({ value: 'auto', labelKey: 'automatic' }),
-          expect.objectContaining({ value: 'on', labelKey: 'enabled' }),
-          expect.objectContaining({ value: 'off', labelKey: 'disabled' }),
+          expect.objectContaining({
+            value: 'auto',
+            labelKey: 'automatic',
+            descriptionKey: 'thinkingAutomatic',
+          }),
+          expect.objectContaining({
+            value: 'on',
+            labelKey: 'enabled',
+            descriptionKey: 'thinkingEnabled',
+          }),
+          expect.objectContaining({
+            value: 'off',
+            labelKey: 'disabled',
+            descriptionKey: 'thinkingDisabled',
+          }),
         ],
       }),
     ]);

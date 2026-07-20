@@ -9,6 +9,7 @@ import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
 import {
 	isAgentSettingLabelKey,
+	isAgentSettingOptionDescriptionKey,
 	isAgentSettingOptionLabelKey,
 	parseAgentSettingsEnvelope,
 	type AgentSettingDescriptor,
@@ -141,6 +142,10 @@ function normalizeSettingDescriptors(value: unknown): AgentSettingDescriptor[] {
 						value: option.value,
 						label: option.label,
 						...(isAgentSettingOptionLabelKey(option.labelKey) ? { labelKey: option.labelKey } : {}),
+						...(typeof option.description === 'string' ? { description: option.description } : {}),
+						...(isAgentSettingOptionDescriptionKey(option.descriptionKey)
+							? { descriptionKey: option.descriptionKey }
+							: {}),
 					},
 				];
 			});
