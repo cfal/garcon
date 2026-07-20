@@ -2,6 +2,7 @@ import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-sta
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
+  type StoredQueueDeliveryIdentity,
   type StoredQueueEntry,
 } from './control-state.ts';
 import { DomainError } from '../lib/domain-error.ts';
@@ -66,6 +67,50 @@ export class ChatExecutionControlOperations {
         this.#logMutation('create', chatId, result.entryId, committed.control, result.entry?.revision);
       }
       return { ...result, control: committed.control };
+    });
+  }
+
+  async stageActiveFallback(
+    chatId: string,
+    content: string,
+    command: QueueCommandIdentity,
+    delivery: StoredQueueDeliveryIdentity,
+  ): Promise<QueueCommandMutationResult> {
+    return this.host.runExclusive(chatId, async () => {
+      const current = await this.#load(chatId);
+      const context = this.#transitionContext(chatId);
+      const created = createQueueEntry(current, { content, command }, context);
+      if (created.outcome.status === 'rejected') {
+        throw transitionError(created.outcome.rejection, current);
+      }
+      const popped = popNextQueueEntry(created.next, context, {
+        entryId: created.outcome.value.entryId,
+        delivery,
+      });
+      if (popped.outcome.status === 'rejected') {
+        throw transitionError(popped.outcome.rejection, current);
+      }
+      if (!popped.outcome.value) {
+        throw new DomainError(
+          'SESSION_BUSY',
+          'Chat queue changed before active input delivery',
+          409,
+          true,
+        );
+      }
+      const control = await this.#commit(chatId, popped.next);
+      this.#logMutation(
+        'pop',
+        chatId,
+        created.outcome.value.entryId,
+        control,
+        created.outcome.value.entry?.revision,
+      );
+      return {
+        entryId: created.outcome.value.entryId,
+        control,
+        duplicate: created.outcome.value.duplicate,
+      };
     });
   }
 
@@ -239,8 +284,11 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async returnUnsent(chatId: string, entryId: string): Promise<void> {
-    await this.host.runExclusive(chatId, async () => {
+  async returnUnsent(
+    chatId: string,
+    entryId: string,
+  ): Promise<StoredChatExecutionControlState> {
+    return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const entry = current.entries.find((candidate) => candidate.id === entryId);
       const committed = await this.#commitTransition(
@@ -251,6 +299,7 @@ export class ChatExecutionControlOperations {
       if (committed.changed) {
         this.#logMutation('requeue', chatId, entryId, committed.control, entry?.revision);
       }
+      return committed.control;
     });
   }
 

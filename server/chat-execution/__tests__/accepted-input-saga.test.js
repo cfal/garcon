@@ -48,8 +48,15 @@ function scaffold(overrides = {}) {
   };
   const m = {
     create: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
+    stageActiveFallback: mock(async () => ({
+      entryId: 'entry-1',
+      control: control({ entries: [{ id: 'entry-1', status: 'sending' }] }),
+      duplicate: false,
+    })),
     replace: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
     delete: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
+    removeSent: mock(async () => control()),
+    returnUnsent: mock(async () => control({ entries: [{ id: 'entry-1', status: 'queued' }] })),
     read: mock(async () => control()),
     markFailed: mock(() => false),
     requestDrain: mock(() => undefined),
@@ -64,7 +71,15 @@ function scaffold(overrides = {}) {
     ...overrides,
   };
   const saga = new AcceptedInputSaga({
-    controls: { create: m.create, replace: m.replace, delete: m.delete, read: m.read },
+    controls: {
+      create: m.create,
+      stageActiveFallback: m.stageActiveFallback,
+      replace: m.replace,
+      delete: m.delete,
+      removeSent: m.removeSent,
+      returnUnsent: m.returnUnsent,
+      read: m.read,
+    },
     pendingInputs: { markFailed: m.markFailed },
     coordinator: {
       requestDrain: m.requestDrain,
@@ -188,11 +203,12 @@ describe('AcceptedInputSaga', () => {
     expect(events).toEqual(['compensated', 'settled', 'released']);
   });
 
-  test('records an active delivery as ambiguous once the provider callback may have run', async () => {
+  test('stages active input before provider handoff and retains it when confirmation fails', async () => {
     const providerError = new Error('connection lost');
     const settle = settlement();
     const { saga, m } = scaffold({
-      deliverActive: mock(async () => {
+      deliverActive: mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
         throw new ActiveInputDeliveryError(providerError, true);
       }),
     });
@@ -208,6 +224,79 @@ describe('AcceptedInputSaga', () => {
       expect.any(ActiveInputDeliveryError),
       true,
     );
+    expect(m.stageActiveFallback).toHaveBeenCalledWith(
+      'chat-1',
+      'interrupt',
+      { key: 'command-1', entryId: 'entry-1' },
+      {
+        clientRequestId: 'request-1',
+        clientMessageId: 'entry-1',
+        turnId: 'turn-1',
+      },
+    );
+    expect(settle.markScheduled).toHaveBeenCalledWith(command(), 'turn-1');
+    expect(m.removeSent).not.toHaveBeenCalled();
     expect(m.create).not.toHaveBeenCalled();
+  });
+
+  test('removes the staged fallback after confirmed active delivery', async () => {
+    const events = [];
+    const settle = settlement({
+      markScheduled: mock(async () => { events.push('scheduled'); }),
+      settleActiveInput: mock(async () => { events.push('settled'); }),
+    });
+    const { saga, m } = scaffold({
+      stageActiveFallback: mock(async () => {
+        events.push('staged');
+        return { entryId: 'entry-1', control: control(), duplicate: false };
+      }),
+      deliverActive: mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        events.push('delivered');
+        return true;
+      }),
+      removeSent: mock(async () => {
+        events.push('removed');
+        return control();
+      }),
+    });
+
+    await expect(saga.deliverActive({
+      command: command(),
+      content: 'steer',
+      settlement: settle,
+    })).resolves.toMatchObject({ delivery: 'active' });
+
+    expect(events).toEqual(['staged', 'scheduled', 'delivered', 'removed', 'settled']);
+    expect(m.removeSent).toHaveBeenCalledWith('chat-1', 'entry-1');
+  });
+
+  test('requeues a staged active fallback exactly once during accepted-command recovery', async () => {
+    const events = [];
+    const queuedControl = control({ entries: [{ id: 'entry-1', status: 'queued' }] });
+    const settle = settlement({
+      settleQueueMutation: mock(async () => { events.push('settled'); }),
+    });
+    const { saga, m } = scaffold({
+      hasAppliedCreate: mock(async () => true),
+      returnUnsent: mock(async () => {
+        events.push('requeued');
+        return queuedControl;
+      }),
+      requestDrain: mock(() => { events.push('drain'); }),
+    });
+
+    await expect(saga.recoverActive({
+      command: command(),
+      content: 'recover',
+      settlement: settle,
+    })).resolves.toEqual({
+      delivery: 'queued',
+      entryId: 'entry-1',
+      control: queuedControl,
+    });
+
+    expect(events).toEqual(['requeued', 'settled', 'drain']);
+    expect(m.deliverActive).not.toHaveBeenCalled();
   });
 });

@@ -5,6 +5,7 @@ import {
   cloneStoredChatExecutionControl,
   type StoredAppliedQueueCommand,
   type StoredChatExecutionControlState,
+  type StoredQueueDeliveryIdentity,
   type StoredQueueEntry,
 } from './control-state.ts';
 
@@ -277,15 +278,21 @@ export function resumeQueue(
 export function popNextQueueEntry(
   current: StoredChatExecutionControlState,
   context: TransitionContext,
+  input: {
+    entryId?: string;
+    delivery?: StoredQueueDeliveryIdentity;
+  } = {},
 ): ControlTransition<PoppedQueueEntry | null> {
   const next = cloneStoredChatExecutionControl(current);
   if (next.pause) return accepted(next, null, false);
   if (next.entries.some((entry) => entry.status === 'sending')) return accepted(next, null, false);
   const entry = next.entries.find((candidate) => candidate.status === 'queued');
-  if (!entry) return accepted(next, null, false);
+  if (!entry || (input.entryId !== undefined && entry.id !== input.entryId)) {
+    return accepted(next, null, false);
+  }
 
   entry.status = 'sending';
-  entry.delivery ??= {
+  entry.delivery ??= input.delivery ?? {
     clientRequestId: context.newId(),
     clientMessageId: context.newId(),
     turnId: context.newId(),

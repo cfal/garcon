@@ -191,16 +191,39 @@ export class AcceptedInputSaga {
   }
 
   async deliverActive(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome> {
+    const turnId = input.command.turnId;
+    if (!turnId) {
+      throw new DomainError('INTERNAL_ERROR', 'Accepted active input is missing a turn identifier', 500);
+    }
+    const delivery = {
+      clientRequestId: input.command.clientRequestId,
+      clientMessageId: input.command.entryId,
+      turnId,
+    };
     let deliveryAccepted = false;
     try {
       const delivered = await this.#coordinator.deliverActive(
         input.command.chatId,
         input.content,
-        { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
-        () => input.settlement.markScheduled(input.command, input.command.turnId!),
+        delivery,
+        async () => {
+          await this.#controls.stageActiveFallback(
+            input.command.chatId,
+            input.content,
+            { key: input.command.key, entryId: input.command.entryId },
+            delivery,
+          );
+          try {
+            await input.settlement.markScheduled(input.command, turnId);
+          } catch (error) {
+            await this.#controls.removeSent(input.command.chatId, input.command.entryId);
+            throw error;
+          }
+        },
       );
       if (delivered) {
         deliveryAccepted = true;
+        await this.#controls.removeSent(input.command.chatId, input.command.entryId);
         await input.settlement.settleActiveInput(input.command);
         return { delivery: 'active', control: await this.#controls.read(input.command.chatId) };
       }
@@ -230,12 +253,16 @@ export class AcceptedInputSaga {
         409,
       );
     }
+    const control = await this.#controls.returnUnsent(
+      input.command.chatId,
+      input.command.entryId,
+    );
     await input.settlement.settleQueueMutation(input.command, input.command.entryId);
     this.#coordinator.requestDrain(input.command.chatId, 'recovered active fallback');
     return {
       delivery: 'queued',
       entryId: input.command.entryId,
-      control: await this.#controls.read(input.command.chatId),
+      control,
     };
   }
 

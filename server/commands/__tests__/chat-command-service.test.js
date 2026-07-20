@@ -121,6 +121,7 @@ function projectedChat(chatId, projectPath = '/repo') {
 }
 
 function makeService(overrides = {}) {
+  const activeFallbacks = new Map();
   const session = {
     id: SOURCE_CHAT_ID,
     agentId: 'claude',
@@ -284,13 +285,31 @@ function makeService(overrides = {}) {
         const delivered = await queue.deliverActiveInput(
           input.command.chatId,
           input.content,
-          { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
+          {
+            clientRequestId: input.command.clientRequestId,
+            clientMessageId: input.command.entryId,
+            turnId: input.command.turnId,
+          },
           async () => {
-            await input.settlement.markScheduled(input.command, input.command.turnId);
+            activeFallbacks.set(input.command.key, {
+              ...queueEntry(input.command.entryId, input.content, 'sending'),
+              delivery: {
+                clientRequestId: input.command.clientRequestId,
+                clientMessageId: input.command.entryId,
+                turnId: input.command.turnId,
+              },
+            });
+            try {
+              await input.settlement.markScheduled(input.command, input.command.turnId);
+            } catch (error) {
+              activeFallbacks.delete(input.command.key);
+              throw error;
+            }
           },
         );
         if (delivered) {
           deliveryAccepted = true;
+          activeFallbacks.delete(input.command.key);
           await input.settlement.settleActiveInput(input.command);
           return { delivery: 'active', control: await queue.readChatExecutionControl(input.command.chatId) };
         }
@@ -298,16 +317,14 @@ function makeService(overrides = {}) {
         return { delivery: 'queued', entryId: result.entryId, control: result.control };
       } catch (error) {
         deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
+        if (!deliveryAccepted) activeFallbacks.delete(input.command.key);
         await input.settlement.settleActiveInputFailure(input.command, error, deliveryAccepted);
         throw error;
       }
     }),
     recoverAcceptedActiveInput: mock(async (input) => {
-      const control = await queue.readChatExecutionControl(input.command.chatId);
-      const applied = control.appliedCommands.find(
-        (command) => command.key === input.command.key && command.operation === 'create',
-      );
-      if (!applied) {
+      const fallback = activeFallbacks.get(input.command.key);
+      if (!fallback) {
         throw new DomainError(
           'INTERNAL_ERROR',
           'The previous active-input delivery did not reach a recorded outcome',
@@ -315,10 +332,20 @@ function makeService(overrides = {}) {
           false,
         );
       }
-      await input.settlement.settleQueueMutation(input.command, applied.entryId);
+      fallback.status = 'queued';
+      const control = storedQueue([fallback], {
+        appliedCommands: [{
+          key: input.command.key,
+          operation: 'create',
+          entryId: input.command.entryId,
+          appliedAt: '2026-07-20T00:00:00.000Z',
+        }],
+      });
+      await input.settlement.settleQueueMutation(input.command, input.command.entryId);
+      await queue.triggerDrain(input.command.chatId);
       return {
         delivery: 'queued',
-        entryId: applied.entryId,
+        entryId: input.command.entryId,
         control,
       };
     }),
@@ -1718,43 +1745,6 @@ describe('ChatCommandService', () => {
     });
   });
 
-  it('does not redeliver active input when recording the completed delivery fails', async () => {
-    const { service, queue, ledger } = makeService({
-      queue: {
-        readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
-        deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
-          await afterPendingRegistered();
-          return true;
-        }),
-      },
-    });
-    const update = ledger.update.bind(ledger);
-    let failFinishedUpdate = true;
-    ledger.update = mock((key, record) => {
-      if (failFinishedUpdate && record.status === 'finished') {
-        failFinishedUpdate = false;
-        return Promise.reject(new Error('ledger finish failed'));
-      }
-      return update(key, record);
-    });
-    const input = {
-      chatId: SOURCE_CHAT_ID,
-      content: 'deliver exactly once',
-      clientRequestId: 'request-active-ledger-failure',
-    };
-
-    await expect(service.submitActiveInput(input)).rejects.toThrow('ledger finish failed');
-    await expect(service.submitActiveInput(input)).rejects.toMatchObject({
-      code: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
-      retryable: false,
-    });
-
-    expect(queue.deliverActiveInput).toHaveBeenCalledOnce();
-    const record = await readLedgerRecord(ledger, 'active-input', input.clientRequestId);
-    expect(record).toMatchObject({ status: 'failed' });
-    expect(record.errorCode).toBe('ACTIVE_INPUT_OUTCOME_UNKNOWN');
-  });
-
   it('reopens pre-accept active delivery failures for the same request id', async () => {
     let attempts = 0;
     const { service, queue, ledger } = makeService({
@@ -1922,7 +1912,7 @@ describe('ChatCommandService', () => {
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
-  it('does not replay post-accept active delivery failures for the same request id', async () => {
+  it('requeues an ambiguous active delivery exactly once on retry', async () => {
     const { service, queue, ledger } = makeService({
       queue: {
         readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
@@ -1949,21 +1939,101 @@ describe('ChatCommandService', () => {
     let record = await readLedgerRecord(ledger, 'active-input', input.clientRequestId);
     expect(record).toEqual(
       expect.objectContaining({
-        status: 'failed',
+        status: 'accepted',
         error: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
       }),
     );
     expect(record.errorCode).toBe('ACTIVE_INPUT_OUTCOME_UNKNOWN');
 
-    await expect(service.submitActiveInput(input)).rejects.toMatchObject({
-      code: 'ACTIVE_INPUT_OUTCOME_UNKNOWN',
-      status: 409,
-      retryable: false,
-      message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+    const recovered = await service.submitActiveInput(input);
+    expect(recovered).toMatchObject({
+      status: 'duplicate',
+      delivery: 'queued',
+      entryId: record.entryId,
+      control: {
+        queue: {
+          entries: [expect.objectContaining({ id: record.entryId, content: 'deliver once' })],
+          dispatchingEntryId: null,
+        },
+      },
     });
     record = await readLedgerRecord(ledger, 'active-input', input.clientRequestId);
-    expect(record.status).toBe('failed');
+    expect(record).toMatchObject({ status: 'finished', entryId: recovered.entryId });
     expect(queue.deliverActiveInput).toHaveBeenCalledTimes(1);
+    expect(queue.triggerDrain).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers an ambiguous active delivery through the real execution control transitions', async () => {
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      await beforeDelivery();
+      throw new Error('connection closed after provider acceptance');
+    });
+    const queueService = makeRealQueue(pendingInputsService, {
+      isChatRunning: mock(() => true),
+      submitActiveInput,
+    });
+    const { service, ledger } = makeService({
+      queueService,
+      pendingInputsService,
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'recover through control state',
+      clientRequestId: 'request-real-active-recovery',
+    };
+
+    await expect(service.submitActiveInput(input)).rejects.toMatchObject({
+      deliveryAccepted: true,
+      message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+    });
+    const uncertain = await queueService.readChatExecutionControl(SOURCE_CHAT_ID);
+    expect(uncertain.entries).toHaveLength(1);
+    expect(uncertain.entries[0]).toMatchObject({
+      content: input.content,
+      status: 'sending',
+      delivery: {
+        clientRequestId: input.clientRequestId,
+        clientMessageId: uncertain.entries[0].id,
+      },
+    });
+    expect(uncertain.appliedCommands).toContainEqual(expect.objectContaining({
+      operation: 'create',
+      entryId: uncertain.entries[0].id,
+    }));
+
+    const recovered = await service.submitActiveInput(input);
+    expect(recovered).toMatchObject({
+      status: 'duplicate',
+      delivery: 'queued',
+      entryId: uncertain.entries[0].id,
+      control: {
+        queue: {
+          entries: [expect.objectContaining({
+            id: uncertain.entries[0].id,
+            content: input.content,
+          })],
+          dispatchingEntryId: null,
+        },
+      },
+    });
+    expect(submitActiveInput).toHaveBeenCalledTimes(1);
+    expect(await readLedgerRecord(ledger, 'active-input', input.clientRequestId)).toMatchObject({
+      status: 'finished',
+      entryId: uncertain.entries[0].id,
+    });
+
+    const repeated = await service.submitActiveInput(input);
+    expect(repeated).toMatchObject({
+      status: 'duplicate',
+      delivery: 'queued',
+      entryId: uncertain.entries[0].id,
+    });
+    expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toHaveLength(1);
+    expect(submitActiveInput).toHaveBeenCalledTimes(1);
   });
 
   it('does not report an incomplete active-input ledger record as delivered', async () => {

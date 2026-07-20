@@ -158,14 +158,6 @@ export class QueueCommands {
       this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
       if (ledger.kind === 'duplicate') {
         if (ledger.record.status === 'failed') {
-          if (ledger.record.errorCode === 'ACTIVE_INPUT_OUTCOME_UNKNOWN') {
-            throw new CommandValidationError(
-              'ACTIVE_INPUT_OUTCOME_UNKNOWN',
-              ledger.record.error ?? 'The previous active-input delivery failed after acceptance',
-              409,
-              false,
-            );
-          }
           this.support.throwRecordedExecutionFailure(ledger.record);
         }
         if (ledger.record.status === 'accepted') {

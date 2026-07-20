@@ -188,6 +188,43 @@ describe('chat execution control transitions', () => {
     expect(cleared.next.pause).toBeNull();
   });
 
+  it('stages only the queue head with the supplied active delivery identity', () => {
+    const initial = emptyStoredChatExecutionControl();
+    const first = createQueueEntry(initial, {
+      content: 'first',
+      command: { key: 'first-command', entryId: 'first-entry' },
+    }, context());
+    const second = createQueueEntry(first.next, {
+      content: 'second',
+      command: { key: 'second-command', entryId: 'second-entry' },
+    }, context(1));
+    const delivery = {
+      clientRequestId: 'active-request',
+      clientMessageId: 'active-message',
+      turnId: 'active-turn',
+    };
+
+    const skipped = popNextQueueEntry(second.next, context(2), {
+      entryId: 'second-entry',
+      delivery,
+    });
+    expect(value(skipped)).toBeNull();
+    expect(skipped.changed).toBe(false);
+
+    const staged = popNextQueueEntry(second.next, context(3), {
+      entryId: 'first-entry',
+      delivery,
+    });
+    expect(value(staged).entry).toMatchObject({
+      id: 'first-entry',
+      status: 'sending',
+      delivery,
+    });
+    const blocked = popNextQueueEntry(staged.next, context(4));
+    expect(value(blocked)).toBeNull();
+    expect(blocked.changed).toBe(false);
+  });
+
   it('preserves invariants through a deterministic transition sequence', () => {
     let seed = 0x5eed1234;
     const random = () => {

@@ -62,7 +62,7 @@ export class ChatCommandSettlement implements CommandSettlementPort {
     deliveryAccepted: boolean,
   ): Promise<void> {
     await this.ledger.update(command.key, {
-      status: 'failed',
+      status: deliveryAccepted ? 'accepted' : 'failed',
       error: error instanceof Error ? error.message : String(error),
       errorCode: deliveryAccepted
         ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
