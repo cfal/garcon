@@ -25,6 +25,10 @@ export interface JsonlForkingOptions {
     entry: unknown,
     context: ForkTranscriptEntryContext,
   ) => unknown;
+  readonly createRewriteEntry?: () => (
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ) => unknown;
   readonly forkWholeSession?: (
     request: AgentForkRequest,
   ) => Promise<AgentStartedSession | null>;
@@ -130,7 +134,7 @@ async function forkJsonlAtPoint(
     cutoffLine,
     leadingLineCount,
     retainedMessageCounts,
-    rewriteEntry: options.rewriteEntry,
+    rewriteEntry: options.createRewriteEntry?.() ?? options.rewriteEntry,
   });
   const nativeSession = options.nativeSessions.encode({
     path: result.nativePath,

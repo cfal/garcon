@@ -106,9 +106,10 @@ export function convertCodexAppServerItem(
       // tokens); the trigger is supplied by the runtime, which knows whether
       // /compact initiated it. Defaults to 'manual' when unknown.
       return [new CompactionMessage(timestamp, options.compactionTrigger ?? 'manual', '')];
-    case 'hookPrompt':
-    case 'imageView':
-    case 'enteredReviewMode':
+      case 'hookPrompt':
+      case 'imageView':
+      case 'sleep':
+      case 'enteredReviewMode':
     case 'exitedReviewMode':
       return [];
     default:

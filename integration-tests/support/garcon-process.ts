@@ -11,11 +11,15 @@ export interface GarconProcessOptions {
   projectDir: string;
   homeDir: string;
   startupTimeoutMs?: number;
+  environment?: Record<string, string>;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
 
-function isolatedEnvironment(homeDir: string): Record<string, string> {
+function isolatedEnvironment(
+  homeDir: string,
+  overrides: Record<string, string> = {},
+): Record<string, string> {
   return {
     HOME: homeDir,
     XDG_CONFIG_HOME: `${homeDir}/.config`,
@@ -26,6 +30,7 @@ function isolatedEnvironment(homeDir: string): Record<string, string> {
     ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
     ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
     ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+    ...overrides,
   };
 }
 
@@ -108,7 +113,7 @@ export class GarconProcess {
         options.projectDir,
       ],
       cwd: options.repoRoot,
-      env: isolatedEnvironment(options.homeDir),
+      env: isolatedEnvironment(options.homeDir, options.environment),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

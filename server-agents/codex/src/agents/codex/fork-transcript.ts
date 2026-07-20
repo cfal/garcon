@@ -1,10 +1,26 @@
 import type { ForkTranscriptEntryContext } from '@garcon/server-agent-common/forking/fork-jsonl';
 import { isRecord } from '@garcon/common/json';
-import { normalizeCodexJsonlEntry } from './history-normalizer.js';
+import { LegacyCodexProjection } from './legacy-history-projection.js';
 
 export function rewriteCodexForkTranscriptEntry(
   entry: unknown,
   context: ForkTranscriptEntryContext,
+): unknown {
+  return rewriteCodexForkEntry(entry, context, new LegacyCodexProjection());
+}
+
+export function createCodexForkTranscriptRewriter(): (
+  entry: unknown,
+  context: ForkTranscriptEntryContext,
+) => unknown {
+  const projection = new LegacyCodexProjection();
+  return (entry, context) => rewriteCodexForkEntry(entry, context, projection);
+}
+
+function rewriteCodexForkEntry(
+  entry: unknown,
+  context: ForkTranscriptEntryContext,
+  projection: LegacyCodexProjection,
 ): unknown {
   if (!isRecord(entry)) {
     return entry;
@@ -12,7 +28,7 @@ export function rewriteCodexForkTranscriptEntry(
 
   const retainedMessageCount = context.retainedMessageCount;
   if (retainedMessageCount !== undefined) {
-    const normalized = normalizeCodexJsonlEntry(entry);
+    const normalized = projection.project(entry, {});
     const emittedCount = normalized
       ? normalized.canonical.length
         + normalized.fallbackUser.length
