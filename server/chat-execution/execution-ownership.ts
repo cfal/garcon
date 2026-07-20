@@ -15,10 +15,8 @@ import type {
 } from './types.ts';
 import { executionTurnIdentity } from './types.ts';
 
-// One chat's runtime execution state. Collapsing the former twelve parallel
-// per-chat collections into a single record makes the invariants ("a chat cannot
-// drain while holding a direct reservation") checkable in one place and lets a
-// single garbage-collection step retire a chat once every field is back to rest.
+// Keeps one chat's execution invariants and garbage collection in one record
+// instead of twelve parallel per-chat collections.
 interface ChatExecutionState {
   draining: boolean;
   directReservationId: string | null;
@@ -77,8 +75,7 @@ export class ExecutionOwnership {
     return state;
   }
 
-  // Retires a chat once it holds no live state, replacing the scattered per-field
-  // deletes that previously risked orphaning one collection while clearing another.
+  // Retires the complete record once the chat holds no live execution state.
   #gc(chatId: string): void {
     const state = this.#chats.get(chatId);
     if (state && isIdle(state)) this.#chats.delete(chatId);
@@ -305,9 +302,7 @@ export class ExecutionOwnership {
     this.#gc(chatId);
   }
 
-  // Clears a chat's transient execution state on reset/deletion. Deliberately
-  // preserves `draining` and any in-flight session stop, matching the prior
-  // per-collection clear that left `#draining`/`#sessionStops` untouched.
+  // Preserves an active drain and session stop while clearing other transient state.
   clearChat(chatId: string, reason: Error): void {
     const state = this.#chats.get(chatId);
     if (state) {

@@ -39,6 +39,7 @@ import {
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
+import { isRecord } from '../../common/json.js';
 
 const logger = createLogger('settings:store');
 import type {
@@ -71,8 +72,10 @@ type SessionNameChangedCallback = (chatId: string, title: string) => void;
 type ListChangedCallback = (reason: string, chatId: string) => void;
 type RemoteSettingsChangedCallback = () => void;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+interface SettingsStoreEvents {
+  'session-name-changed': Parameters<SessionNameChangedCallback>;
+  'list-changed': Parameters<ListChangedCallback>;
+  'remote-settings-changed': Parameters<RemoteSettingsChangedCallback>;
 }
 
 function stringRecord(raw: Record<string, unknown>): Record<string, string> {
@@ -221,7 +224,7 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
   };
 }
 
-export class SettingsStore extends EventEmitter {
+export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   #cache: ProjectSettings | null = null;
   #mutationDraft: ProjectSettings | null = null;
   #workspaceDir: string;

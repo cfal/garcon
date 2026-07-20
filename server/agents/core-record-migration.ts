@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { AgentLegacySettingsScope } from '@garcon/server-agent-interface';
-import type { JsonObject, JsonValue } from '@garcon/common/json';
+import { isRecord, type JsonObject, type JsonValue } from '@garcon/common/json';
 import type { IntegrationRegistry } from './integration-registry.js';
 
 const MIGRATION_ID = 'agent-integration-v1';
@@ -65,27 +65,6 @@ export async function migrateAgentIntegrationCoreRecords(options: {
   await writeManifest(journalDir, { id: MIGRATION_ID, state: 'committing', files });
   await applyStagedTargets(options.workspaceDir, journalDir, files);
   await writeManifest(journalDir, { id: MIGRATION_ID, state: 'committed', files });
-}
-
-export async function restorePreAgentIntegrationCoreRecords(workspaceDir: string): Promise<void> {
-  const journalDir = path.join(workspaceDir, 'migration-journals', MIGRATION_ID);
-  const manifest = await readManifest(journalDir);
-  if (!manifest) throw new Error(`No ${MIGRATION_ID} rollback journal is available.`);
-  if (manifest.state !== 'committed') {
-    throw new Error(`Cannot restore ${MIGRATION_ID} before its migration has committed.`);
-  }
-  for (const file of manifest.files) {
-    const destination = path.join(workspaceDir, file.relativePath);
-    if (!file.existed) {
-      await removeDurable(destination);
-      continue;
-    }
-    const backup = await fs.readFile(journalPath(journalDir, 'backup', file.relativePath));
-    if (sha256(backup) !== file.backupSha256) {
-      throw new Error(`Core migration backup checksum mismatch: ${file.relativePath}`);
-    }
-    await replaceDurable(destination, backup);
-  }
 }
 
 async function recoverCoreRecordMigration(workspaceDir: string, journalDir: string): Promise<void> {
@@ -217,7 +196,8 @@ async function createMigrationTargets(
   if (isRecord(scheduled) && Array.isArray(scheduled.prompts)) {
     let changed = false;
     const prompts: JsonValue[] = [];
-    for (const candidate of scheduled.prompts) {
+    const scheduledPrompts: readonly JsonValue[] = scheduled.prompts;
+    for (const candidate of scheduledPrompts) {
       if (!isRecord(candidate) || !isRecord(candidate.target) || candidate.target.type !== 'new-chat') {
         prompts.push(candidate as JsonValue);
         continue;
@@ -306,7 +286,11 @@ function parseSettingsEnvelope(agentId: string, value: JsonValue): AgentSettings
   ) {
     throw new Error(`Invalid settings envelope for integration ${agentId}`);
   }
-  return value as unknown as AgentSettingsEnvelope;
+  return {
+    ownerId: value.ownerId,
+    schemaVersion: value.schemaVersion,
+    values: value.values,
+  };
 }
 
 function assertSettingsOwner(agentId: string, envelope: AgentSettingsEnvelope): void {
@@ -319,7 +303,8 @@ function needsSettingsMigration(settings: JsonObject): boolean {
   const execution = isRecord(settings.executionDefaults) ? settings.executionDefaults : {};
   const records = [
     isRecord(execution.global) ? execution.global : {},
-    ...Object.values(isRecord(execution.byAgent) ? execution.byAgent : {}).filter(isRecord),
+    ...Object.values(isRecord(execution.byAgent) ? execution.byAgent : {})
+      .filter((value): value is JsonObject => isRecord(value)),
   ];
   return [
     'lastPermissionMode',
@@ -403,10 +388,6 @@ function withoutKeys(value: JsonObject, keys: readonly string[]): JsonObject {
   return result;
 }
 
-function isRecord(value: unknown): value is JsonObject {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
 function stringValue(value: JsonValue | undefined): string | null {
   return typeof value === 'string' && value ? value : null;
 }
@@ -449,11 +430,6 @@ async function replaceDurable(filePath: string, contents: Uint8Array): Promise<v
   const temporary = `${filePath}.${crypto.randomUUID()}.tmp`;
   await writeDurable(temporary, contents);
   await fs.rename(temporary, filePath);
-  await fsyncDirectory(path.dirname(filePath));
-}
-
-async function removeDurable(filePath: string): Promise<void> {
-  await fs.rm(filePath, { force: true });
   await fsyncDirectory(path.dirname(filePath));
 }
 

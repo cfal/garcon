@@ -1,7 +1,3 @@
-// Manages per-chat message queues and orchestrates turn execution.
-// Extends EventEmitter to notify listeners of queue state changes,
-// dispatching events, stop requests, and session stops.
-
 import { EventEmitter } from 'events';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import type { ChatStopIntent } from '../../common/chat-types.ts';
@@ -60,10 +56,10 @@ import {
   type TurnFailedCallback,
   type TurnSettledCallback,
 } from './types.ts';
-import { QueueDispatchSaga } from './queue-dispatch-saga.ts';
+import { QueueDrainer } from './queue-drainer.ts';
 import { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import { ExecutionOwnership } from './execution-ownership.ts';
-import { AcceptedInputSaga } from './accepted-input-saga.ts';
+import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
@@ -94,7 +90,18 @@ export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunA
   };
 }
 
-export class ChatExecutionCoordinator extends EventEmitter implements ChatExecutionService {
+interface ChatExecutionCoordinatorEvents {
+  'chat-messages': Parameters<ChatMessagesCallback>;
+  'execution-control-updated': Parameters<ExecutionControlUpdatedCallback>;
+  dispatching: Parameters<DispatchingCallback>;
+  'session-stop-requested': Parameters<SessionStopRequestedCallback>;
+  'session-stopped': Parameters<SessionStoppedCallback>;
+  'chat-idle': Parameters<ChatIdleCallback>;
+  'turn-failed': Parameters<TurnFailedCallback>;
+  'turn-settled': Parameters<TurnSettledCallback>;
+}
+
+export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordinatorEvents> implements ChatExecutionService {
   #locks = new KeyedPromiseLock();
   #shuttingDown = false;
   #ownership = new ExecutionOwnership();
@@ -103,9 +110,9 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   #pendingInputs: PendingInputsPort;
   #getDrainOptions: QueueDrainOptionsResolver;
   #chatExists: ChatExistsResolver;
-  #dispatchSaga: QueueDispatchSaga;
+  #queueDrainer: QueueDrainer;
   #controlOperations: ChatExecutionControlOperations;
-  #acceptedInputs: AcceptedInputSaga;
+  #acceptedInputHandler: AcceptedInputHandler;
   #acceptedInputTranscript: AcceptedInputTranscript;
 
   constructor(
@@ -148,7 +155,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
         this.emit('execution-control-updated', chatId, control);
       },
     });
-    this.#acceptedInputs = new AcceptedInputSaga({
+    this.#acceptedInputHandler = new AcceptedInputHandler({
       controls: this.#controlOperations,
       pendingInputs: this.#pendingInputs,
       coordinator: {
@@ -174,7 +181,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
         ),
       },
     });
-    this.#dispatchSaga = new QueueDispatchSaga({
+    this.#queueDrainer = new QueueDrainer({
       ownership: this.#ownership,
       controls: this.#controlOperations,
       turnRunner: this.#turnRunner,
@@ -265,12 +272,8 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     this.on('chat-messages', cb);
   }
 
-  // Settles the queue after an agent turn finishes. Called for every turn,
-  // including the initial chat-start turn that runs via startSession and never
-  // goes through runReservedTurn's post-turn #drain. If a queued entry is
-  // waiting and the queue is not paused, resumes draining so the entry is sent
-  // without a manual pause/resume; otherwise emits chat-idle when nothing is
-  // pending. Skips when a drain loop is already active to avoid duplicate work.
+  // Resumes queued work after every turn, including initial turns that bypass
+  // runReservedTurn's post-turn drain, unless a drain already owns the chat.
   async checkChatIdle(chatId: string): Promise<void> {
     if (this.#shuttingDown) return;
     if (this.#ownership.isDraining(chatId)) return;
@@ -333,27 +336,27 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   }
 
   async enqueueAccepted(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult> {
-    return this.#acceptedInputs.enqueue(input);
+    return this.#acceptedInputHandler.enqueue(input);
   }
 
   async replaceAccepted(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult> {
-    return this.#acceptedInputs.replace(input);
+    return this.#acceptedInputHandler.replace(input);
   }
 
   async deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult> {
-    return this.#acceptedInputs.delete(input);
+    return this.#acceptedInputHandler.delete(input);
   }
 
   async scheduleDirectInput(input: AcceptedDirectInput): Promise<void> {
-    await this.#acceptedInputs.schedule(input);
+    await this.#acceptedInputHandler.schedule(input);
   }
 
   async runInitialInput(input: AcceptedDirectInput): Promise<void> {
-    await this.#acceptedInputs.runInitial(input);
+    await this.#acceptedInputHandler.runInitial(input);
   }
 
   async scheduleDirectOperation(input: AcceptedDirectOperation): Promise<void> {
-    await this.#acceptedInputs.scheduleOperation(input);
+    await this.#acceptedInputHandler.scheduleOperation(input);
   }
 
   async deliverActiveInput(
@@ -402,13 +405,13 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
   async deliverAcceptedActiveInput(
     input: AcceptedActiveInput,
   ): Promise<AcceptedActiveInputOutcome> {
-    return this.#acceptedInputs.deliverActive(input);
+    return this.#acceptedInputHandler.deliverActive(input);
   }
 
   async recoverAcceptedActiveInput(
     input: AcceptedActiveInput,
   ): Promise<AcceptedActiveInputOutcome> {
-    return this.#acceptedInputs.recoverActive(input);
+    return this.#acceptedInputHandler.recoverActive(input);
   }
 
   async clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState> {
@@ -527,7 +530,6 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     return this.#ownership.hasOwner(chatId);
   }
 
-  // Triggers drain if the agent is not currently running.
   async triggerDrain(chatId: string): Promise<void> {
     if (this.#shuttingDown) return;
     if (this.#ownership.hasDirect(chatId) || this.#ownership.isDraining(chatId)) {
@@ -554,7 +556,7 @@ export class ChatExecutionCoordinator extends EventEmitter implements ChatExecut
     this.#ownership.beginDrain(chatId);
     try {
       this.#ownership.consumeDrainRequest(chatId);
-      await this.#dispatchSaga.run(chatId);
+      await this.#queueDrainer.run(chatId);
     } finally {
       this.#ownership.endDrain(chatId);
       this.#ownership.exitManualStop(chatId, { drainStillActive: false });

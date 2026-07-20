@@ -6,7 +6,6 @@ function printHelp() {
 Usage:
   bun server/main.ts [options]
   bun run start -- [options]
-  bun server/main.ts restore-agent-integration-v1 [options]
 
 Options:
   --help, -h                     Show this help screen and exit.
@@ -47,14 +46,6 @@ Notes:
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
   printHelp();
-} else if (process.argv[2] === 'restore-agent-integration-v1') {
-  const [{ initializeServerConfig }, { restorePreAgentIntegrationCoreRecords }] = await Promise.all([
-    import('./config.js'),
-    import('./agents/core-record-migration.js'),
-  ]);
-  const config = initializeServerConfig();
-  await restorePreAgentIntegrationCoreRecords(config.workspaceDir);
-  process.stdout.write(`Restored pre-integration core records in ${config.workspaceDir}\n`);
 } else {
   const { startServer } = await import('./server.js');
   await startServer();

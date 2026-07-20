@@ -103,7 +103,11 @@ interface SnippetServiceDeps {
   now?: () => Date;
 }
 
-export class SnippetService extends EventEmitter {
+interface SnippetServiceEvents {
+  invalidated: [reason: SnippetsInvalidationReason];
+}
+
+export class SnippetService extends EventEmitter<SnippetServiceEvents> {
   constructor(private readonly deps: SnippetServiceDeps) {
     super();
   }

@@ -3,10 +3,7 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  migrateAgentIntegrationCoreRecords,
-  restorePreAgentIntegrationCoreRecords,
-} from '../core-record-migration.js';
+import { migrateAgentIntegrationCoreRecords } from '../core-record-migration.js';
 
 const MIGRATION_DIR = path.join('migration-journals', 'agent-integration-v1');
 
@@ -196,10 +193,6 @@ describe('agent integration core-record migration', () => {
     ));
     expect(manifest.state).toBe('committed');
 
-    await restorePreAgentIntegrationCoreRecords(workspaceDir);
-    expect(JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'))).toEqual(originalChats);
-    expect(JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'))).toEqual(originalSettings);
-    expect(JSON.parse(await fs.readFile(path.join(workspaceDir, 'scheduled-prompts.json'), 'utf8'))).toEqual(originalScheduled);
   });
 
   it('discards a prepared journal before loading core records', async () => {
