@@ -42,6 +42,7 @@ export interface IntegrationDirectories {
 
 export interface IntegrationFixtureOptions {
   chatTitleEnabled?: boolean;
+  prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
 }
 
 interface IntegrationProcessRunDiagnostics {
@@ -114,6 +115,7 @@ export class IntegrationFixture {
     let garcon: GarconProcess | null = null;
     let client: GarconTestClient | null = null;
     try {
+      await options.prepareWorkspace?.(dirs);
       garcon = await GarconProcess.start({
         repoRoot: REPO_ROOT,
         configDir: dirs.config,
