@@ -217,6 +217,20 @@ export class SpaDriver {
   }
 
   async clickButton(name: string, options: ClickOptions = {}): Promise<void> {
+    const params = { name, contains: options.contains === true, last: options.last === true };
+    // A button can render a beat after navigation or a WebSocket-driven update
+    // (the open sidebar adds initial render work), so wait for it before clicking
+    // rather than failing on the first probe.
+    await this.#page.waitForFunction(
+      ({ name, contains }) =>
+        [...document.querySelectorAll('button')].some((element) => {
+          if (element.closest('[aria-hidden="true"]')) return false;
+          const accessibleName = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+          return contains ? accessibleName.includes(name) : accessibleName === name;
+        }),
+      { timeout: 20_000 },
+      params,
+    );
     try {
       await this.#page.evaluate(({ name, contains, last }) => {
         const buttons = [...document.querySelectorAll('button')].filter((element) => {
@@ -228,7 +242,7 @@ export class SpaDriver {
         if (!button) throw new Error(`Missing button: ${name}`);
         if (button.disabled) throw new Error(`Button is disabled: ${name}`);
         button.click();
-      }, { name, contains: options.contains === true, last: options.last === true });
+      }, params);
     } catch (error) {
       // Lightpanda may collect the CDP evaluation promise when a click replaces
       // the document. The next positive product milestone still verifies it.
