@@ -26,6 +26,13 @@ jobs:
         with:
           bun-version: latest
 
+      # Node backs the vitest step (vitest crashes under Bun's runtime) and any
+      # node-shebang tooling; 24 is current and runs TypeScript 7 cleanly.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install web dependencies
         working-directory: web
         run: bun install --frozen-lockfile
@@ -34,13 +41,15 @@ jobs:
         working-directory: web
         run: bun run i18n:compile
 
+      # svelte-check and eslint run under Bun (faster, and Bun's runtime handles
+      # the TypeScript 7 API that breaks under older Node). vitest stays on Node.
       - name: Run web checks
         working-directory: web
-        run: bun run check
+        run: bun run --bun check
 
       - name: Run web lint
         working-directory: web
-        run: bun run lint
+        run: bun run --bun lint
 
       - name: Run web tests
         working-directory: web
