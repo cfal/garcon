@@ -43,6 +43,7 @@ export interface IntegrationDirectories {
 export interface IntegrationFixtureOptions {
   chatTitleEnabled?: boolean;
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
+  serverEnvironment?: Record<string, string>;
 }
 
 interface IntegrationProcessRunDiagnostics {
@@ -76,6 +77,7 @@ export class IntegrationFixture {
     anthropic: FakeAnthropicServer;
   };
   readonly directAgents: DirectTestAgents;
+  readonly #serverEnvironment: Record<string, string>;
   garcon: GarconProcess;
   client: GarconTestClient;
   readonly #clients = new Map<string, GarconTestClient>();
@@ -88,6 +90,7 @@ export class IntegrationFixture {
     garcon: GarconProcess;
     client: GarconTestClient;
     directAgents: DirectTestAgents;
+    serverEnvironment?: Record<string, string>;
   }) {
     this.dirs = input.dirs;
     this.fakeProviders = input.fakeProviders;
@@ -95,6 +98,7 @@ export class IntegrationFixture {
     this.client = input.client;
     this.#clients.set('primary', input.client);
     this.directAgents = input.directAgents;
+    this.#serverEnvironment = { ...(input.serverEnvironment ?? {}) };
   }
 
   static async create(options: IntegrationFixtureOptions = {}): Promise<IntegrationFixture> {
@@ -122,6 +126,7 @@ export class IntegrationFixture {
         workspaceDir: dirs.workspace,
         projectDir: dirs.project,
         homeDir: dirs.home,
+        environment: options.serverEnvironment,
       });
       client = await GarconTestClient.connect(garcon.baseUrl);
       await client.ping();
@@ -150,7 +155,14 @@ export class IntegrationFixture {
           } : { enabled: false },
         },
       });
-      return new IntegrationFixture({ dirs, fakeProviders, garcon, client, directAgents });
+      return new IntegrationFixture({
+        dirs,
+        fakeProviders,
+        garcon,
+        client,
+        directAgents,
+        serverEnvironment: options.serverEnvironment,
+      });
     } catch (error) {
       await client?.close().catch(() => undefined);
       await garcon?.stop().catch(() => undefined);
@@ -363,6 +375,7 @@ export class IntegrationFixture {
       workspaceDir: this.dirs.workspace,
       projectDir: this.dirs.project,
       homeDir: this.dirs.home,
+      environment: this.#serverEnvironment,
     });
     this.client = await GarconTestClient.connect(this.garcon.baseUrl);
     this.#clients.set('primary', this.client);
