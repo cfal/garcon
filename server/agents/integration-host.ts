@@ -1,4 +1,14 @@
-import { lstat, mkdir, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rename,
+  rmdir,
+  unlink,
+} from 'node:fs/promises';
 import path from 'node:path';
 import type {
   AgentApiProviderReader,
@@ -6,6 +16,7 @@ import type {
   AgentEnvironmentReader,
   AgentHost,
   AgentHostFactory,
+  AgentLegacyDirectoryClaim,
   AgentLogger,
   AgentResolvedCredential,
   AgentScopedStorage,
@@ -67,9 +78,11 @@ class BoundEnvironmentReader implements AgentEnvironmentReader {
 
 class ScopedStorage implements AgentScopedStorage {
   readonly rootDirectory: string;
+  readonly #workspaceDir: string;
 
   constructor(workspaceDir: string, agentId: string) {
-    this.rootDirectory = path.resolve(workspaceDir, 'agent-data', agentId);
+    this.#workspaceDir = path.resolve(workspaceDir);
+    this.rootDirectory = path.join(this.#workspaceDir, 'agent-data', agentId);
   }
 
   async directory(namespace: string): Promise<string> {
@@ -92,28 +105,114 @@ class ScopedStorage implements AgentScopedStorage {
     }
     return resolved;
   }
+
+  async claimLegacyWorkspaceDirectory(name: string): Promise<AgentLegacyDirectoryClaim> {
+    assertNamespace(name);
+    const source = path.join(this.#workspaceDir, name);
+    const sourceStats = await lstatOrNull(source);
+    if (!sourceStats) return { moved: 0, skipped: 0 };
+    assertDirectoryWithoutSymlink(source, sourceStats);
+
+    const destination = await this.directory(name);
+    const claim = { moved: 0, skipped: 0 };
+    await moveDirectoryContents(source, destination, claim);
+    return claim;
+  }
 }
 
 async function ensureDirectoryWithoutSymlink(directory: string): Promise<void> {
-  const existing = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  });
-  if (existing?.isSymbolicLink()) {
+  const existing = await lstatOrNull(directory);
+  if (existing) {
+    assertDirectoryWithoutSymlink(directory, existing);
+    return;
+  }
+  await mkdir(directory);
+}
+
+function assertDirectoryWithoutSymlink(
+  directory: string,
+  stats: Awaited<ReturnType<typeof lstat>>,
+): void {
+  if (stats.isSymbolicLink()) {
     throw new AgentIntegrationError(
       'INVALID_SETTINGS',
       `Agent storage path must not be a symbolic link: ${directory}`,
       false,
     );
   }
-  if (existing && !existing.isDirectory()) {
+  if (!stats.isDirectory()) {
     throw new AgentIntegrationError(
       'INVALID_SETTINGS',
       `Agent storage path is not a directory: ${directory}`,
       false,
     );
   }
-  if (!existing) await mkdir(directory);
+}
+
+async function lstatOrNull(candidate: string): Promise<Awaited<ReturnType<typeof lstat>> | null> {
+  return lstat(candidate).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+}
+
+async function moveDirectoryContents(
+  source: string,
+  destination: string,
+  claim: { moved: number; skipped: number },
+): Promise<void> {
+  const entries = await readdir(source, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(source, entry.name);
+    const destinationPath = path.join(destination, entry.name);
+    const sourceStats = await lstatOrNull(sourcePath);
+    if (!sourceStats) continue;
+
+    if (sourceStats.isSymbolicLink()) {
+      claim.skipped += 1;
+      continue;
+    }
+    if (sourceStats.isDirectory()) {
+      await ensureDirectoryWithoutSymlink(destinationPath);
+      await moveDirectoryContents(sourcePath, destinationPath, claim);
+      continue;
+    }
+    if (!sourceStats.isFile()) {
+      claim.skipped += 1;
+      continue;
+    }
+    if (await lstatOrNull(destinationPath)) {
+      claim.skipped += 1;
+      continue;
+    }
+    await moveFile(sourcePath, destinationPath, claim);
+  }
+  await rmdir(source).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTEMPTY') throw error;
+  });
+}
+
+async function moveFile(
+  source: string,
+  destination: string,
+  claim: { moved: number; skipped: number },
+): Promise<void> {
+  try {
+    await rename(source, destination);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+    try {
+      await copyFile(source, destination, constants.COPYFILE_EXCL);
+    } catch (copyError) {
+      if ((copyError as NodeJS.ErrnoException).code === 'EEXIST') {
+        claim.skipped += 1;
+        return;
+      }
+      throw copyError;
+    }
+    await unlink(source);
+  }
+  claim.moved += 1;
 }
 
 function assertNamespace(namespace: string): void {

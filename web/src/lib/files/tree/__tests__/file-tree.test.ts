@@ -302,6 +302,39 @@ describe('FileTreeStore', () => {
 		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
 	});
 
+	it('resets when the chat project path changes within the same effective project', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [entry('old.ts', 'file')]))
+			.mockResolvedValueOnce(
+				response('/workspace/project/packages/app', [
+					entry('new.ts', 'file', '/workspace/project/packages/app'),
+				]),
+			)
+			.mockResolvedValueOnce(response('/workspace/project/packages/app'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		expect(store.rootEntries[0]?.name).toBe('old.ts');
+
+		store.setProjectState(
+			availableProject('/workspace/project/packages/app', '/workspace/project'),
+		);
+		expect(store.navigation).toMatchObject({
+			kind: 'loading',
+			target: { path: '/workspace/project/packages/app', reason: 'initial' },
+		});
+		expect(store.rootEntries).toEqual([]);
+		await tick();
+
+		expect(store.currentDirectoryPath).toBe('/workspace/project/packages/app');
+		expect(store.rootEntries[0]?.name).toBe('new.ts');
+		await store.refresh();
+		expect(filesApi.getTree).toHaveBeenLastCalledWith(
+			{ directoryPath: '/workspace/project/packages/app' },
+			expect.any(Object),
+		);
+	});
+
 	it('navigates to parent and directly back to the chat project', async () => {
 		vi.mocked(filesApi.getTree)
 			.mockResolvedValueOnce(response('/workspace/project'))

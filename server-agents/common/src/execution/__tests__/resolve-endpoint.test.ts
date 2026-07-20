@@ -29,6 +29,7 @@ describe('resolveAgentEndpoint', () => {
       storage: {
         rootDirectory: '/tmp',
         directory: async () => '/tmp',
+        claimLegacyWorkspaceDirectory: async () => ({ moved: 0, skipped: 0 }),
       },
       environment: { get: () => undefined },
       apiProviders: { resolveCredential },

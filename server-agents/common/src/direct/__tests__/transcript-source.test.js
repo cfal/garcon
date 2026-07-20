@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,12 +14,13 @@ async function tempDir() {
   return dir;
 }
 
-function source(root) {
+function source(root, logger) {
   const paths = createDirectSessionPaths(root, 'sessions');
   return createDirectCompatibleTranscriptSource({
     agentId: 'direct-openai-compatible',
     sessionLabel: 'Direct (Chat Completions)',
     findSessionFilePath: paths.findSessionFilePath,
+    logger,
   });
 }
 
@@ -197,6 +198,28 @@ describe('Direct compatible transcript source', () => {
       modelEndpointId: 'chat_endpoint',
       nativePath: '!direct-openai-compatible:missing-session',
     })).resolves.toBeNull();
+  });
+
+  it('warns when loading a missing transcript and stays quiet when the file exists', async () => {
+    const root = await tempDir();
+    const warn = mock(() => undefined);
+    const transcript = source(root, { warn });
+    const reference = {
+      agentSessionId: 'session-1',
+      modelEndpointId: 'chat_endpoint',
+    };
+
+    await expect(transcript.loadMessages(reference)).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      'Direct transcript file missing for session session-1 (endpoint chat_endpoint)',
+    );
+
+    warn.mockClear();
+    await writeTranscript(root, 'chat_endpoint', 'session-1', [
+      { role: 'user', content: 'found' },
+    ]);
+    await expect(transcript.loadMessages(reference)).resolves.toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('scans later compatible endpoints when the recorded endpoint has no transcript', async () => {

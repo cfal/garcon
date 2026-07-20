@@ -13,6 +13,7 @@ function createHost() {
     storage: {
       rootDirectory: '/tmp/garcon-claude-integration-test',
       directory: mock(() => Promise.resolve('/tmp/garcon-claude-integration-test/search')),
+      claimLegacyWorkspaceDirectory: mock(() => Promise.resolve({ moved: 0, skipped: 0 })),
     },
     environment: { get: mock(() => undefined) },
     apiProviders: { resolveCredential: mock(() => Promise.resolve(null)) },

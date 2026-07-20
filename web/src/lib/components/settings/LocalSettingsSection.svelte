@@ -30,7 +30,8 @@
 		{ value: 'small', label: m.settings_chat_max_width_small },
 	];
 	const hideableToolGroupLabels = {
-		commands: m.settings_chat_hidden_tool_commands,
+		bash: m.settings_chat_hidden_tool_bash,
+		exec: m.settings_chat_hidden_tool_exec,
 		'file-reads': m.settings_chat_hidden_tool_file_reads,
 		'file-changes': m.settings_chat_hidden_tool_file_changes,
 		web: m.settings_chat_hidden_tool_web,
