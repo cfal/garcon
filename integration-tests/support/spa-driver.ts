@@ -125,6 +125,17 @@ export class SpaDriver {
   }
 
   async #clickNewChatModelSelector(): Promise<void> {
+    await this.#page.waitForFunction(
+      () => {
+        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+        const button = dialog
+          ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
+              (element.getAttribute('aria-label') ?? '').includes(' / '))
+          : null;
+        return button !== null && button !== undefined && !button.disabled;
+      },
+      { timeout: 20_000 },
+    );
     await this.#page.evaluate(() => {
       const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
       const button = dialog
