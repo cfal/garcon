@@ -65,4 +65,20 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     expect(harness.events).toEqual(['delete', 'delete']);
     expect(harness.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
   });
+
+  it('retries admission while the durable setting is already enabled', async () => {
+    const harness = createHarness(true);
+    harness.controller.start.mockImplementationOnce(async () => {
+      harness.events.push('start');
+      throw new Error('reader unavailable');
+    });
+
+    await expect(harness.coordinator.setEnabled(true)).rejects.toMatchObject({
+      code: 'TRANSCRIPT_SEARCH_ENABLE_FAILED',
+    });
+    await harness.coordinator.setEnabled(true);
+
+    expect(harness.events).toEqual(['start', 'start']);
+    expect(harness.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
+  });
 });

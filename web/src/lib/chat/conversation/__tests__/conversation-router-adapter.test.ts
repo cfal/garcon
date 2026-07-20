@@ -84,7 +84,7 @@ describe('buildRouterStores', () => {
 		const selectedChat = chatRecord();
 		const stores = buildRouterStores(depsFor(selectedChat));
 
-		expect(stores.sessions.selectedChat()).toBe(selectedChat);
+		expect(stores.sessions.selectedChat).toBe(selectedChat);
 	});
 
 	it('warms background transcripts through the shared transcript cache', () => {
@@ -150,7 +150,7 @@ describe('buildRouterStores', () => {
 		const deps = depsFor(chatRecord());
 		const stores = buildRouterStores(deps);
 
-		stores.sessions.patchChatPreview('chat-1', 'Preview', '2026-02-25T12:00:00.000Z');
+		stores.sessions.patchPreview('chat-1', 'Preview', '2026-02-25T12:00:00.000Z');
 
 		expect(deps.sessions.patchPreview).toHaveBeenCalledWith(
 			'chat-1',

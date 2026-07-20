@@ -11,6 +11,7 @@
     "./api-provider-templates": "./api-provider-templates.ts",
     "./api-providers": "./api-providers.ts",
     "./chat-command-contracts": "./chat-command-contracts.ts",
+    "./chat-details": "./chat-details.ts",
     "./chat-id": "./chat-id.ts",
     "./chat-list": "./chat-list.ts",
     "./chat-modes": "./chat-modes.ts",

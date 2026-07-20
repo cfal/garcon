@@ -28,7 +28,18 @@ export class TranscriptSearchSettingsCoordinator {
     await this.#lock.runExclusive(SETTINGS_LOCK_KEY, async () => {
       const current = this.#settings.getFeatureSettings().transcriptSearch.enabled;
       if (current === enabled) {
-        if (!enabled) await this.#disableAndDelete();
+        if (!enabled) {
+          await this.#disableAndDelete();
+        } else {
+          try {
+            await this.#controller.start();
+          } catch (error) {
+            throw new TranscriptSearchSettingsError(
+              'TRANSCRIPT_SEARCH_ENABLE_FAILED',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
         return;
       }
       if (enabled) {

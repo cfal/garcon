@@ -14,13 +14,11 @@ import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
   CommandExecutionControlError,
   CommandValidationError,
-  runOptionsFromCommandRequest,
 } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import {
-  normalizeStoredChatExecutionControlState,
   toClientChatExecutionControlState,
-} from '../chat-execution-control-state.ts';
+} from '../chat-execution/control-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,
@@ -34,21 +32,20 @@ import type {
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
-import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-error.js';
+import { ActiveInputDeliveryError, DomainError, ValidationDomainError } from '../lib/domain-error.js';
+import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
+import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import {
   QueueEntryMutationError,
   QueuePauseChangedError,
-  RecoveredInputContinuationChangedError,
-  RecoveredInputContinuationRequiresQueueError,
   type ChatExecutionService,
 } from '../chat-execution/chat-execution-coordinator.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
-import type { PendingUserInputRecoveryCoordinator } from '../chats/pending-user-input-recovery.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
@@ -61,27 +58,30 @@ const MAX_SEARCH_TEXT_CHARS = 8_192;
 const MAX_SEARCH_CHAT_IDS = 10_000;
 const MAX_SEARCH_CHAT_ID_CHARS = 512;
 import type {
-  AgentInterruptAndSendCommandRequest,
-  AgentRunCommandRequest,
-  AgentStopCommandRequest,
-  CompactCommandRequest,
   ExecutionSettingsPatchRequest,
-  ForkRunCommandRequest,
   ModelPatchRequest,
   AgentModelPatchRequest,
-  PermissionDecisionCommandRequest,
-  ProjectPathPatchRequest,
-  ActiveInputCommandRequest,
-  QueueEntryCreateCommandRequest,
-  QueueEntryDeleteCommandRequest,
-  QueueEntryReplaceCommandRequest,
   QueueCommandErrorResponse,
-  QueueMutationRequest,
-  QueuePauseRequest,
-  QueueResumeRequest,
-  RecoveredInputContinueRequest,
   RunningChatsResponse,
-  StartChatCommandRequest,
+} from '../../common/chat-command-contracts.ts';
+import {
+  CommandRequestValidationError,
+  parseActiveInputCommandRequest,
+  parseAgentInterruptAndSendCommandRequest,
+  parseAgentRunCommandRequest,
+  parseAgentStopCommandRequest,
+  parseCompactCommandRequest,
+  parseDeleteChatCommandRequest,
+  parseForkChatCommandRequest,
+  parseForkRunCommandRequest,
+  parsePermissionDecisionCommandRequest,
+  parseProjectPathPatchRequest,
+  parseQueueEntryCreateCommandRequest,
+  parseQueueEntryDeleteCommandRequest,
+  parseQueueEntryReplaceCommandRequest,
+  parseQueueMutationRequest,
+  parseQueueResumeRequest,
+  parseStartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
 import type {
   GenerateChatTitleRequest,
@@ -91,6 +91,7 @@ import type {
   ChatSearchRequest,
   ChatSearchResponse,
 } from '../../common/chat-search.js';
+import type { ChatDetailsResponse } from '../../common/chat-details.js';
 import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
 import {
   generateChatTitleFromMessage,
@@ -130,9 +131,9 @@ type QueueDep = ChatExecutionService;
 type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
-type PendingInputRecoveryDep = Pick<PendingUserInputRecoveryCoordinator, 'reconcileChat'>;
 
 interface ChatSearchDep {
+  catalogMayHaveChanged(chatId?: string): void;
   search(options: {
     query: string;
     textTokens?: string[];
@@ -141,7 +142,6 @@ interface ChatSearchDep {
   }): Promise<{
     results: ChatSearchResponse['results'];
     index: ChatSearchResponse['index'];
-    partialFailures?: ChatSearchResponse['partialFailures'];
   }>;
 }
 
@@ -162,20 +162,30 @@ function requireStringField(body: Record<string, unknown>, field: string): strin
   return value.trim();
 }
 
-function requireContentField(body: Record<string, unknown>, field: string): string {
-  const value = body[field];
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new ValidationDomainError(`${field} is required`);
-  }
-  return value;
-}
-
 function bodyRecord(body: unknown): Record<string, unknown> {
   return body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
 }
 
-function optionalRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+function parseCommandRequest<T>(parser: (value: unknown) => T, body: unknown): T {
+  try {
+    return parser(body);
+  } catch (error) {
+    if (error instanceof CommandRequestValidationError) {
+      throw new ValidationDomainError(error.message);
+    }
+    throw error;
+  }
+}
+
+function validatedCommandAttachments(value: unknown) {
+  try {
+    return validateCommandAttachments(value);
+  } catch (error) {
+    if (error instanceof AttachmentValidationError) {
+      throw new DomainError('VALIDATION_FAILED', error.message, error.status);
+    }
+    throw error;
+  }
 }
 
 function chatIdFromBodyOrQuery(body: unknown, url: URL): string {
@@ -338,7 +348,6 @@ interface ChatRouteDeps {
   chatViews: ChatViewsDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
-  pendingInputRecovery: PendingInputRecoveryDep;
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   agentSwitch: AgentSwitchService;
@@ -355,7 +364,6 @@ export default function createChatRoutes({
   chatViews,
   agents,
   pendingInputs,
-  pendingInputRecovery,
   commandService,
   chatListProjector,
   agentSwitch,
@@ -448,31 +456,11 @@ export default function createChatRoutes({
     }
   }
 
-  async function postStartSession(body: Partial<StartChatCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postStartSession(body: unknown): Promise<Response> {
     try {
-      if ('options' in body) {
-        return jsonError('options is not supported', 400, 'VALIDATION_FAILED', false);
-      }
-      const result = await commands.submitStart({
-        chatId: String(body.chatId || ''),
-        clientRequestId: requireStringField(body, 'clientRequestId'),
-        clientMessageId: requireStringField(body, 'clientMessageId'),
-        agentId: typeof body.agentId === 'string' ? body.agentId : '',
-        projectPath: String(body.projectPath || ''),
-        command: String(body.command || ''),
-        model: typeof body.model === 'string' ? body.model : '',
-        apiProviderId: typeof body.apiProviderId === 'string' ? body.apiProviderId : null,
-        modelEndpointId: typeof body.modelEndpointId === 'string' ? body.modelEndpointId : null,
-        modelProtocol:
-          typeof body.modelProtocol === 'string'
-            ? (body.modelProtocol as StartChatCommandRequest['modelProtocol'])
-            : null,
-        permissionMode: body.permissionMode,
-        thinkingMode: body.thinkingMode,
-        agentSettings: body.agentSettings,
-        tags: Array.isArray(body.tags) ? body.tags : undefined,
-        images: body.images,
-      });
+      const input = parseCommandRequest(parseStartChatCommandRequest, body);
+      const images = validatedCommandAttachments(input.images);
+      const result = await commands.submitStart({ ...input, images });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -490,7 +478,8 @@ export default function createChatRoutes({
     if (!chatId) return jsonError('chatId is required', 400);
 
     try {
-      await commandService.deleteChat({ chatId });
+      const input = parseCommandRequest(parseDeleteChatCommandRequest, { chatId });
+      await commandService.deleteChat(input);
       lastSelectedChat.clearIf(chatId);
       return Response.json({ success: true });
     } catch (error: unknown) {
@@ -544,12 +533,8 @@ export default function createChatRoutes({
       const beforeSeq = parseBeforeSeq(beforeSeqRaw);
       if (beforeSeq instanceof Response) return beforeSeq;
 
-      let page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
+      const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
       await pendingInputs.reconcileRetainedHistory(chatId);
-      const recovery = await pendingInputRecovery.reconcileChat(chatId);
-      if (recovery.nativeSnapshotApplied) {
-        page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
-      }
       return Response.json({
         chatId,
         generationId: page.generationId,
@@ -568,7 +553,13 @@ export default function createChatRoutes({
 
   async function postSearchChats(body: unknown): Promise<Response> {
     try {
-      if (!searchIndex) return jsonError('Chat search index is not available', 503, 'SEARCH_INDEX_UNAVAILABLE');
+      if (!searchIndex) {
+        throw new TranscriptSearchUnavailableError(
+          'SEARCH_INDEX_UNAVAILABLE',
+          'Chat search index is not available',
+          true,
+        );
+      }
       const search = parseSearchRequest(body);
       const result = await searchIndex.search({
         query: search.query,
@@ -586,29 +577,8 @@ export default function createChatRoutes({
         results: result.results,
         total: result.results.length,
         index: result.index,
-        ...(result.partialFailures ? { partialFailures: result.partialFailures } : {}),
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
-      if (
-        error
-        && typeof error === 'object'
-        && 'code' in error
-        && (error.code === 'TRANSCRIPT_SEARCH_DISABLED'
-          || error.code === 'SEARCH_INDEX_UNAVAILABLE'
-          || error.code === 'SEARCH_INDEX_BUSY')
-      ) {
-        const typed = error as { code: string; message?: string; retryable?: boolean };
-        const status = typed.code === 'TRANSCRIPT_SEARCH_DISABLED' ? 409 : 503;
-        return jsonError(
-          typed.message ?? 'Transcript search is unavailable',
-          status,
-          typed.code,
-          typed.retryable ?? status === 503,
-        );
-      }
-      if (error instanceof ValidationDomainError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -624,13 +594,15 @@ export default function createChatRoutes({
       }
 
       const meta = metadata.getChatMetadata(chatId);
-      return Response.json({
+      const response: ChatDetailsResponse = {
         chatId,
         firstMessage: meta?.firstMessage || '',
         createdAt: meta?.createdAt || null,
         lastActivityAt: meta?.lastActivity || null,
         agentSessionId: session.agentSessionId || null,
-      });
+        transcriptSource: await agents.describeTranscriptSource(session, chatId),
+      };
+      return Response.json(response);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
@@ -782,16 +754,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function postForkChat(body: Record<string, unknown>): Promise<Response> {
+  async function postForkChat(body: unknown): Promise<Response> {
     try {
-      const sourceChatId = typeof body.sourceChatId === 'string' ? body.sourceChatId : '';
-      const chatId = typeof body.chatId === 'string' ? body.chatId : '';
-
-      const result = await commands.forkChat({
-        sourceChatId,
-        chatId,
-        ...(body.upToSeq == null ? {} : { upToSeq: body.upToSeq }),
-      });
+      const result = await commands.forkChat(parseCommandRequest(parseForkChatCommandRequest, body));
 
       return Response.json(result);
     } catch (error: unknown) {
@@ -802,28 +767,13 @@ export default function createChatRoutes({
     }
   }
 
-  async function postRunChat(body: Partial<AgentRunCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postRunChat(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const clientMessageId = requireStringField(body, 'clientMessageId');
-      const chatId = requireStringField(body, 'chatId');
-      const command = typeof body.command === 'string' ? body.command : '';
-      const hasImages = Array.isArray(body.images) && body.images.length > 0;
-      if (!command.trim() && !hasImages) {
-        return jsonError('command or images are required', 400);
-      }
-      const session = registry.getChat(chatId);
+      const input = parseCommandRequest(parseAgentRunCommandRequest, body);
+      const images = validatedCommandAttachments(input.images);
+      const session = registry.getChat(input.chatId);
       if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-
-      const options = runOptionsFromCommandRequest(body as AgentRunCommandRequest);
-      const result = await commands.submitRun({
-        chatId,
-        command,
-        images: body.images,
-        clientRequestId,
-        clientMessageId,
-        options,
-      });
+      const result = await commands.submitRun({ ...input, images });
 
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
@@ -879,24 +829,11 @@ export default function createChatRoutes({
     }
   }
 
-  async function postForkRunChat(body: Partial<ForkRunCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postForkRunChat(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const clientMessageId = requireStringField(body, 'clientMessageId');
-      const sourceChatId = typeof body.sourceChatId === 'string' ? body.sourceChatId : '';
-      const chatId = typeof body.chatId === 'string' ? body.chatId : '';
-      const command = requireStringField(body, 'command');
-
-      const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);
-      const result = await commands.submitForkRun({
-        sourceChatId,
-        chatId,
-        command,
-        images: body.images,
-        clientRequestId,
-        clientMessageId,
-        options,
-      });
+      const input = parseCommandRequest(parseForkRunCommandRequest, body);
+      const images = validatedCommandAttachments(input.images);
+      const result = await commands.submitForkRun({ ...input, images });
 
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
@@ -918,17 +855,13 @@ export default function createChatRoutes({
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
     if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-    const control = toClientChatExecutionControlState(
-      normalizeStoredChatExecutionControlState(await queue.readChatExecutionControl(chatId)),
-    );
+    const control = toClientChatExecutionControlState(await queue.readChatExecutionControl(chatId));
     return Response.json({ success: true, chatId, control });
   }
 
   function queueControlErrorResponse(
     error: QueueEntryMutationError
-      | QueuePauseChangedError
-      | RecoveredInputContinuationChangedError
-      | RecoveredInputContinuationRequiresQueueError,
+      | QueuePauseChangedError,
   ): Response {
     const body: QueueCommandErrorResponse = {
       success: false,
@@ -940,18 +873,10 @@ export default function createChatRoutes({
     return Response.json(body, { status: error.status });
   }
 
-  async function postQueueEntryCreate(
-    body: Partial<QueueEntryCreateCommandRequest> & Record<string, unknown>,
-  ): Promise<Response> {
+  async function postQueueEntryCreate(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const content = requireContentField(body, 'content');
-      const result = await commands.submitQueueEntryCreate({
-        chatId,
-        content,
-        clientRequestId,
-      });
+      const input = parseCommandRequest(parseQueueEntryCreateCommandRequest, body);
+      const result = await commands.submitQueueEntryCreate(input);
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -962,25 +887,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function putQueueEntry(
-    body: Partial<QueueEntryReplaceCommandRequest> & Record<string, unknown>,
-  ): Promise<Response> {
+  async function putQueueEntry(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const entryId = requireStringField(body, 'entryId');
-      const content = requireContentField(body, 'content');
-      const expectedRevision = body.expectedRevision;
-      if (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision) || expectedRevision < 1) {
-        throw new ValidationDomainError('expectedRevision must be a positive integer');
-      }
-      const result = await commands.submitQueueEntryReplace({
-        clientRequestId,
-        chatId,
-        entryId,
-        content,
-        expectedRevision,
-      });
+      const input = parseCommandRequest(parseQueueEntryReplaceCommandRequest, body);
+      const result = await commands.submitQueueEntryReplace(input);
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -991,18 +901,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function deleteQueueEntry(
-    body: Partial<QueueEntryDeleteCommandRequest> & Record<string, unknown>,
-  ): Promise<Response> {
+  async function deleteQueueEntry(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const entryId = requireStringField(body, 'entryId');
-      const result = await commands.submitQueueEntryDelete({
-        clientRequestId,
-        chatId,
-        entryId,
-      });
+      const input = parseCommandRequest(parseQueueEntryDeleteCommandRequest, body);
+      const result = await commands.submitQueueEntryDelete(input);
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1013,18 +915,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function postActiveInput(
-    body: Partial<ActiveInputCommandRequest> & Record<string, unknown>,
-  ): Promise<Response> {
+  async function postActiveInput(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const content = requireContentField(body, 'content');
-      const result = await commands.submitActiveInput({
-        clientRequestId,
-        chatId,
-        content,
-      });
+      const input = parseCommandRequest(parseActiveInputCommandRequest, body);
+      const result = await commands.submitActiveInput(input);
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1037,14 +931,12 @@ export default function createChatRoutes({
     }
   }
 
-  async function postQueueMutation(
-    body: (QueueMutationRequest | QueueResumeRequest) & Record<string, unknown>,
-    action: 'clear' | 'pause' | 'resume',
-  ): Promise<Response> {
+  async function postQueueMutation(body: unknown, action: 'clear' | 'pause' | 'resume'): Promise<Response> {
     try {
-      const chatId = requireStringField(body, 'chatId');
-      const pauseId = action === 'resume' ? requireStringField(body, 'pauseId') : undefined;
-      const result = await commands.mutateQueue({ chatId, action, pauseId });
+      const input = action === 'resume'
+        ? parseCommandRequest(parseQueueResumeRequest, body)
+        : parseCommandRequest(parseQueueMutationRequest, body);
+      const result = await commands.mutateQueue({ ...input, action });
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1055,42 +947,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function postRecoveredInputContinue(
-    body: Partial<RecoveredInputContinueRequest> & Record<string, unknown>,
-  ): Promise<Response> {
+  async function postPermissionDecision(body: unknown): Promise<Response> {
     try {
-      const chatId = requireStringField(body, 'chatId');
-      const continuationId = requireStringField(body, 'continuationId');
-      return Response.json(await commands.continueRecoveredInput({ chatId, continuationId }));
-    } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (
-        error instanceof RecoveredInputContinuationChangedError
-        || error instanceof RecoveredInputContinuationRequiresQueueError
-      ) {
-        return queueControlErrorResponse(error);
-      }
-      return jsonErrorFromUnknown(error);
-    }
-  }
-
-  async function postPermissionDecision(
-    body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>,
-  ): Promise<Response> {
-    try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const permissionRequestId = requireStringField(body, 'permissionRequestId');
-      const result = await commands.submitPermissionDecision({
-        chatId,
-        permissionRequestId,
-        allow: Boolean(body.allow),
-        alwaysAllow: Boolean(body.alwaysAllow),
-        response: optionalRecord(body.response),
-        clientRequestId,
-      });
+      const input = parseCommandRequest(parsePermissionDecisionCommandRequest, body);
+      const result = await commands.submitPermissionDecision(input);
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1100,15 +960,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function postStopChat(body: Partial<AgentStopCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postStopChat(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const result = await commands.submitStop({
-        chatId,
-        clientRequestId,
-        agentId: body.agentId,
-      });
+      const input = parseCommandRequest(parseAgentStopCommandRequest, body);
+      const result = await commands.submitStop(input);
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1118,17 +973,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function postInterruptAndSend(
-    body: Partial<AgentInterruptAndSendCommandRequest> & Record<string, unknown>,
-  ): Promise<Response> {
+  async function postInterruptAndSend(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const result = await commands.submitInterruptAndSend({
-        chatId,
-        clientRequestId,
-        agentId: body.agentId,
-      });
+      const input = parseCommandRequest(parseAgentInterruptAndSendCommandRequest, body);
+      const result = await commands.submitInterruptAndSend(input);
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1138,15 +986,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function postCompactChat(body: Partial<CompactCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postCompactChat(body: unknown): Promise<Response> {
     try {
-      const clientRequestId = requireStringField(body, 'clientRequestId');
-      const chatId = requireStringField(body, 'chatId');
-      const result = await commands.submitCompact({
-        chatId,
-        clientRequestId,
-        instructions: typeof body.instructions === 'string' ? body.instructions : undefined,
-      });
+      const input = parseCommandRequest(parseCompactCommandRequest, body);
+      const result = await commands.submitCompact(input);
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1179,6 +1022,7 @@ export default function createChatRoutes({
       const updated = Object.keys(patch).length > 0
         ? await agents.updateSessionSettings(chatId, patch)
         : chat;
+      if (Object.keys(patch).length > 0) searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
         success: true,
         chatId,
@@ -1205,6 +1049,7 @@ export default function createChatRoutes({
       if (modelProtocol !== undefined)
         patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
       await agents.updateSessionSettings(chatId, patch);
+      searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);
@@ -1234,6 +1079,7 @@ export default function createChatRoutes({
         modelEndpointId: optionalStringOrNull(body.modelEndpointId),
         modelProtocol: optionalStringOrNull(body.modelProtocol) as AgentModelPatchRequest['modelProtocol'],
       });
+      searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
         success: true,
         chatId,
@@ -1251,13 +1097,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchProjectPath(body: ProjectPathPatchRequest & Record<string, unknown>): Promise<Response> {
+  async function patchProjectPath(body: unknown): Promise<Response> {
     try {
-      const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : '';
-      const projectPath = typeof body.projectPath === 'string' ? body.projectPath.trim() : '';
-      if (!chatId) return jsonError('chatId is required', 400, 'VALIDATION_FAILED');
-      if (!projectPath) return jsonError('projectPath is required', 400, 'VALIDATION_FAILED');
-      const result = await commands.updateProjectPath({ chatId, projectPath });
+      const input = parseCommandRequest(parseProjectPathPatchRequest, body);
+      const result = await commands.updateProjectPath(input);
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -1293,16 +1136,13 @@ export default function createChatRoutes({
     },
     '/api/v1/chats/active-input': { POST: withJsonBody(postActiveInput) },
     '/api/v1/chats/queue/clear': {
-      POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')),
+      POST: withJsonBody((body: unknown) => postQueueMutation(body, 'clear')),
     },
     '/api/v1/chats/queue/pause': {
-      POST: withJsonBody((body: QueuePauseRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')),
+      POST: withJsonBody((body: unknown) => postQueueMutation(body, 'pause')),
     },
     '/api/v1/chats/queue/resume': {
-      POST: withJsonBody((body: QueueResumeRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')),
-    },
-    '/api/v1/chats/recovered-input/continue': {
-      POST: withJsonBody(postRecoveredInputContinue),
+      POST: withJsonBody((body: unknown) => postQueueMutation(body, 'resume')),
     },
     '/api/v1/chats/permissions/decision': {
       POST: withJsonBody(postPermissionDecision),

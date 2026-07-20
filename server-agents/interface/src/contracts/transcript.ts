@@ -1,6 +1,7 @@
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
+import type { AgentTranscriptIndexSourceRef } from './transcript-index.js';
 
 export interface AgentTranscript {
   resolveNativeSession(request: AgentTranscriptRequest): Promise<AgentNativeSessionRef | null>;
@@ -10,8 +11,26 @@ export interface AgentTranscript {
   ): Promise<AgentTranscriptPage | null>;
   preview(request: AgentTranscriptRequest): Promise<AgentTranscriptPreview | null>;
   revision(request: AgentTranscriptRequest): Promise<string>;
+  resolveIndexSource(
+    request: AgentTranscriptRequest,
+  ): Promise<AgentTranscriptIndexSourceRef | null>;
+  refreshIndexSource(
+    request: AgentTranscriptIndexRefreshRequest,
+  ): Promise<AgentTranscriptIndexSourceRef | null>;
+  describeSource(
+    request: AgentTranscriptRequest,
+  ): Promise<AgentTranscriptSourceLocation | null>;
   release(request: AgentTranscriptReleaseRequest): Promise<void>;
 }
+
+export interface AgentTranscriptIndexRefreshRequest extends AgentTranscriptRequest {
+  readonly failedSource: AgentTranscriptIndexSourceRef;
+  readonly failureCode: string;
+}
+
+export type AgentTranscriptSourceLocation =
+  | { readonly kind: 'filesystem-path'; readonly value: string }
+  | { readonly kind: 'provider-reference'; readonly value: string };
 
 export interface AgentTranscriptSnapshot {
   readonly messages: readonly ChatMessage[];

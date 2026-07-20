@@ -8,6 +8,7 @@ import {
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
+import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
@@ -15,7 +16,6 @@ import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycl
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createClaudeConfig } from './config.js';
 import { getClaudeAuthStatus } from './agents/claude/claude-auth.js';
@@ -61,12 +61,19 @@ const CLAUDE_DESCRIPTOR = {
 
 export default class ClaudeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'claude';
-  static readonly apiVersion = 1 as const;
+  static readonly apiVersion = 2 as const;
+  static readonly transcriptIndex = {
+    apiVersion: 1,
+    moduleUrl: resolveAgentStandaloneEntrypoint({
+      integrationId: 'claude',
+      name: 'transcript-index-source',
+      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
+    }),
+  } as const;
 
   readonly descriptor = CLAUDE_DESCRIPTOR;
   readonly execution;
   readonly transcript;
-  readonly transcriptSearch;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -123,24 +130,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       configHomeDir: config.configHomeDir,
       logger,
     });
-    const search = createTranscriptSearch({
-      host,
-      agentId: 'claude',
-      loadTranscript: async ({ chat, signal }) => {
-        const snapshot = await this.transcript.load({
-          chat: {
-            ...chat,
-            agentId: 'claude',
-            agentSessionId: nativeSessions.decode(chat.nativeSession).agentSessionId,
-            settings: this.settings.defaults(),
-          },
-          signal,
-        });
-        return snapshot.messages;
-      },
-    });
-    this.transcriptSearch = search;
     this.catalog = createModelCatalog({
+      logger: host.logger,
       defaultModel: CLAUDE_MODELS.DEFAULT,
       fallbackModels: CLAUDE_MODELS.OPTIONS,
       requiresStrictModelDiscovery: false,
@@ -218,7 +209,6 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
         runtime.shutdown();
         login.stop();
         commandDiscovery.clear();
-        await search.close();
       },
     });
   }
@@ -249,6 +239,16 @@ function createClaudeTranscript(options: {
   const loadMessages = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
     loadClaudeChatMessages(await derivedPath(chat), options.logger)
   );
+  const resolveIndexSource = async (
+    chat: Parameters<AgentTranscript['load']>[0]['chat'],
+  ) => {
+    const nativePath = await derivedPath(chat);
+    return nativePath ? {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      value: { nativePath },
+    } as const : null;
+  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -295,6 +295,19 @@ function createClaudeTranscript(options: {
     async revision({ chat, signal }) {
       signal.throwIfAborted();
       return computeAgentTranscriptRevision(await loadMessages(chat));
+    },
+    async resolveIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async refreshIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async describeSource({ chat, signal }) {
+      signal.throwIfAborted();
+      const nativePath = await derivedPath(chat);
+      return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();

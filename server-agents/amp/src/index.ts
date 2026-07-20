@@ -8,12 +8,12 @@ import {
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createAmpConfig } from './config.js';
 import { getAmpAuthStatus } from './agents/amp/amp-auth.js';
@@ -36,12 +36,19 @@ const AMP_DESCRIPTOR = {
 
 export default class AmpAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'amp';
-  static readonly apiVersion = 1 as const;
+  static readonly apiVersion = 2 as const;
+  static readonly transcriptIndex = {
+    apiVersion: 1,
+    moduleUrl: resolveAgentStandaloneEntrypoint({
+      integrationId: 'amp',
+      name: 'transcript-index-source',
+      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
+    }),
+  } as const;
 
   readonly descriptor = AMP_DESCRIPTOR;
   readonly execution;
   readonly transcript: AgentTranscript;
-  readonly transcriptSearch;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -74,21 +81,9 @@ export default class AmpAgentIntegration implements AgentIntegration {
       }],
     });
     this.execution = new AmpExecution(runtime, nativeSessions);
-    this.transcript = createAmpTranscript(runtime, nativeSessions);
-    const search = createTranscriptSearch({
-      host,
-      agentId: 'amp',
-      loadTranscript: async ({ chat, signal }) => {
-        signal.throwIfAborted();
-        const native = nativeSessions.decode(chat.nativeSession);
-        const threadId = native.agentSessionId
-          ?? getArtificialAgentSessionId(native.path, 'amp');
-        if (!threadId) return [];
-        return loadAmpChatMessages(await runtime.exportThread(threadId, { cwd: chat.projectPath }));
-      },
-    });
-    this.transcriptSearch = search;
+    this.transcript = createAmpTranscript(runtime, nativeSessions, config.binary);
     this.catalog = createModelCatalog({
+      logger: host.logger,
       defaultModel: AMP_MODELS.DEFAULT,
       fallbackModels: AMP_MODELS.OPTIONS,
       requiresStrictModelDiscovery: false,
@@ -130,7 +125,6 @@ export default class AmpAgentIntegration implements AgentIntegration {
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
         runtime.shutdown();
-        await search.close();
       },
     });
   }
@@ -139,6 +133,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
 function createAmpTranscript(
   runtime: AmpCliRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
+  binary: () => string,
 ): AgentTranscript {
   const threadId = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
     const native = nativeSessions.decode(chat.nativeSession);
@@ -150,6 +145,14 @@ function createAmpTranscript(
     const id = threadId(chat);
     if (!id) return [];
     return loadAmpChatMessages(await runtime.exportThread(id, { cwd: chat.projectPath }));
+  };
+  const resolveIndexSource = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+    const id = threadId(chat);
+    return id ? {
+      ownerId: 'amp',
+      schemaVersion: 1,
+      value: { threadId: id, projectPath: chat.projectPath, binary: binary() },
+    } as const : null;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -175,6 +178,19 @@ function createAmpTranscript(
     async revision({ chat, signal }) {
       signal.throwIfAborted();
       return computeAgentTranscriptRevision(await loadMessages(chat));
+    },
+    async resolveIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async refreshIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async describeSource({ chat, signal }) {
+      signal.throwIfAborted();
+      const id = threadId(chat);
+      return id ? { kind: 'provider-reference', value: id } : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();

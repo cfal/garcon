@@ -131,6 +131,7 @@ describe('SidebarController', () => {
 				createdAt: '2025-01-01',
 				lastActivityAt: '2025-01-02',
 				agentSessionId: 'agent-session-1',
+				transcriptSource: null,
 			};
 			mockGetChatDetails.mockResolvedValue(details);
 

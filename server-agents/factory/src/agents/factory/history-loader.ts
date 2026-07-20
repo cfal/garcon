@@ -202,13 +202,17 @@ export async function findFactorySessionFileBySessionId(sessionId: string): Prom
 async function readFactorySessionEvents(
   sessionPath: string,
   logger: AgentLogger,
+  throwOnError = false,
 ): Promise<FactoryStoredEventWithSource[]> {
   const events: FactoryStoredEventWithSource[] = [];
 
   for await (const entry of readJsonlLineEntries(sessionPath)) {
     try {
       const event = JSON.parse(entry.line) as FactoryStoredEvent;
-      if (!event || typeof event !== 'object' || typeof event.type !== 'string') continue;
+      if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
+        if (throwOnError) throw new Error('Factory transcript record is invalid');
+        continue;
+      }
       events.push({
         event,
         source: {
@@ -217,7 +221,8 @@ async function readFactorySessionEvents(
           byteOffset: entry.byteOffset,
         },
       });
-    } catch {
+    } catch (error) {
+      if (throwOnError) throw error;
       logger.warn('Factory transcript contains invalid JSON.', {
         sessionPath,
         line: entry.line.slice(0, 120),
@@ -324,11 +329,13 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInpu
 export async function loadFactoryChatMessages(
   sessionPath: string,
   logger: AgentLogger = SILENT_LOGGER,
+  options: { readonly throwOnError?: boolean } = {},
 ): Promise<ChatMessage[]> {
   try {
-    const events = await readFactorySessionEvents(sessionPath, logger);
+    const events = await readFactorySessionEvents(sessionPath, logger, options.throwOnError);
     return loadFactoryChatMessagesFromEvents(events);
   } catch (error) {
+    if (options.throwOnError) throw error;
     logger.warn('Factory transcript loading failed.', {
       sessionPath,
       error: error instanceof Error ? error.message : String(error),

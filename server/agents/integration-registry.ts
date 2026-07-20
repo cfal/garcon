@@ -58,6 +58,10 @@ export class IntegrationRegistry {
     return [...this.#records.values()].map((record) => record.integration);
   }
 
+  classes(): readonly AgentIntegrationClass[] {
+    return [...this.#records.values()].map((record) => record.integrationClass);
+  }
+
   start(): Promise<void> {
     if (this.#started) return Promise.resolve();
     if (this.#startPromise) return this.#startPromise;
@@ -122,7 +126,7 @@ function validateClass(
   integrationClass: AgentIntegrationClass,
   existing: ReadonlyMap<string, IntegrationRecord>,
 ): void {
-  if (integrationClass.apiVersion !== 1) {
+  if (integrationClass.apiVersion !== 2) {
     throw new Error(
       `Unsupported agent integration API version for ${integrationClass.integrationId}: ${integrationClass.apiVersion}`,
     );
@@ -132,6 +136,11 @@ function validateClass(
   }
   if (existing.has(integrationClass.integrationId)) {
     throw new Error(`Duplicate agent integration ID: ${integrationClass.integrationId}`);
+  }
+  if (integrationClass.transcriptIndex?.apiVersion !== 1
+      || typeof integrationClass.transcriptIndex.moduleUrl !== 'string'
+      || integrationClass.transcriptIndex.moduleUrl.length === 0) {
+    throw new Error(`Agent integration ${integrationClass.integrationId} has an invalid transcript index module`);
   }
 }
 

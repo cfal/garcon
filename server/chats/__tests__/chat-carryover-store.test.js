@@ -244,4 +244,47 @@ describe('chat-carryover-store', () => {
     expect(persisted.chats.target.staged).toBeUndefined();
     expect(store.getMessages('target')).toHaveLength(1);
   });
+
+  it('opens a revision-fenced bounded search stream over an immutable snapshot', async () => {
+    const store = new ChatCarryOverStore({ filePath: null });
+    await store.init();
+    store.appendSegment('chat-1', segment(
+      'alpha',
+      'model-a',
+      ...Array.from({ length: 251 }, (_, index) => new UserMessage(ts, `message ${index}`)),
+    ));
+    const stream = await store.openSearchStream({
+      chatId: 'chat-1',
+      expectedRevision: 'carry-v1:1',
+      currentAgentId: 'beta',
+      currentModel: 'model-b',
+      signal: new AbortController().signal,
+      limits: { maxMessagesPerBatch: 250, maxBatchBytes: 8 * 1024 * 1024 },
+    });
+    store.appendSegment('chat-1', segment('beta', 'model-b', new UserMessage(ts, 'newer')));
+
+    const batches = [];
+    for await (const batch of stream.batches) batches.push(batch);
+    const messages = batches.flat();
+
+    expect(batches.every((batch) => batch.length <= 250)).toBe(true);
+    expect(messages).toHaveLength(252);
+    expect(messages.at(-1)?.type).toBe('agent-switch');
+    expect(messages.some((message) => message.content === 'newer')).toBe(false);
+  });
+
+  it('rejects a search stream after its requested revision changes', async () => {
+    const store = new ChatCarryOverStore({ filePath: null });
+    await store.init();
+    store.appendSegment('chat-1', segment('alpha', 'model-a', new UserMessage(ts, 'first')));
+
+    await expect(store.openSearchStream({
+      chatId: 'chat-1',
+      expectedRevision: 'carry-v1:0',
+      currentAgentId: 'beta',
+      currentModel: 'model-b',
+      signal: new AbortController().signal,
+      limits: { maxMessagesPerBatch: 250, maxBatchBytes: 8 * 1024 * 1024 },
+    })).rejects.toMatchObject({ failure: { code: 'CARRY_OVER_REVISION_CHANGED', retryable: true } });
+  });
 });

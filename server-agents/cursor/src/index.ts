@@ -8,11 +8,11 @@ import {
   type AgentTranscriptPreview,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createCursorConfig } from './config.js';
 import { AcpAgentRuntime } from './agents/shared/acp-agent-runtime.js';
@@ -20,6 +20,7 @@ import { createCursorAcpPolicy } from './agents/cursor/cursor-acp-policy.js';
 import { getCursorAuthStatus } from './agents/cursor/cursor-auth.js';
 import { CursorAcpEventConverter } from './agents/cursor/cursor-acp-event-converter.js';
 import { CursorExecution } from './agents/cursor/execution.js';
+import { cursorStoreDbPath } from './agents/cursor/history-loader.js';
 import { getCursorModels } from './agents/cursor/cursor-models.js';
 import {
   createCursorAcpNativePath,
@@ -61,12 +62,19 @@ const CURSOR_DESCRIPTOR = {
 
 export default class CursorAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'cursor';
-  static readonly apiVersion = 1 as const;
+  static readonly apiVersion = 2 as const;
+  static readonly transcriptIndex = {
+    apiVersion: 1,
+    moduleUrl: resolveAgentStandaloneEntrypoint({
+      integrationId: 'cursor',
+      name: 'transcript-index-source',
+      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
+    }),
+  } as const;
 
   readonly descriptor = CURSOR_DESCRIPTOR;
   readonly execution;
   readonly transcript: AgentTranscript;
-  readonly transcriptSearch;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -95,18 +103,8 @@ export default class CursorAgentIntegration implements AgentIntegration {
     });
     this.execution = new CursorExecution(runtime, nativeSessions);
     this.transcript = createCursorTranscript(transcriptReader, nativeSessions);
-    const search = createTranscriptSearch({
-      host,
-      agentId: 'cursor',
-      loadTranscript: async ({ chat, signal }) => {
-        signal.throwIfAborted();
-        return transcriptReader.loadMessages(cursorReference(chat, nativeSessions), {
-          chatId: chat.chatId,
-        });
-      },
-    });
-    this.transcriptSearch = search;
     this.catalog = createModelCatalog({
+      logger: host.logger,
       defaultModel: '',
       fallbackModels: [],
       requiresStrictModelDiscovery: false,
@@ -168,7 +166,6 @@ export default class CursorAgentIntegration implements AgentIntegration {
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
         runtime.shutdown();
-        await search.close();
       },
     });
   }
@@ -198,6 +195,19 @@ function createCursorTranscript(
     cursorReference(chat, nativeSessions),
     { chatId: chat.chatId },
   );
+  const resolveIndexSource = (chat: ChatReference) => {
+    const reference = cursorReference(chat, nativeSessions);
+    if (!reference.agentSessionId) return null;
+    return {
+      ownerId: 'cursor',
+      schemaVersion: 1,
+      value: {
+        sessionId: reference.agentSessionId,
+        projectPath: reference.projectPath,
+        storePath: cursorStoreDbPath(reference.agentSessionId, reference.projectPath),
+      },
+    } as const;
+  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -221,6 +231,22 @@ function createCursorTranscript(
     async revision({ chat, signal }) {
       signal.throwIfAborted();
       return computeAgentTranscriptRevision(await loadMessages(chat));
+    },
+    async resolveIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async refreshIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async describeSource({ chat, signal }) {
+      signal.throwIfAborted();
+      const source = resolveIndexSource(chat);
+      const storePath = source?.value.storePath;
+      return typeof storePath === 'string'
+        ? { kind: 'filesystem-path', value: storePath }
+        : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();

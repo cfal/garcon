@@ -34,16 +34,10 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       load: async () => ({ messages: [], revision: 'empty' }),
       preview: async () => null,
       revision: async () => 'empty',
+      resolveIndexSource: async () => null,
+      refreshIndexSource: async () => null,
+      describeSource: async () => null,
       release: async () => {},
-    },
-    transcriptSearch: {
-      reconcile: async () => {},
-      search: async () => ({
-        hits: [],
-        index: { indexedChatCount: 0, pendingChatCount: 0, failedChatCount: 0, unsupportedChatCount: 0 },
-      }),
-      status: async () => ({ indexedChatCount: 0, pendingChatCount: 0, failedChatCount: 0, unsupportedChatCount: 0 }),
-      disableAndDelete: async () => {},
     },
     catalog: {
       snapshot: async () => ({
@@ -81,7 +75,8 @@ function createFacetIntegration(host, id, lifecycle = {}) {
 function integrationClass(id, options = {}) {
   return class TestIntegration {
     static integrationId = id;
-    static apiVersion = options.apiVersion ?? 1;
+    static apiVersion = options.apiVersion ?? 2;
+    static transcriptIndex = { apiVersion: 1, moduleUrl: import.meta.url };
 
     constructor(host) {
       options.onConstruct?.(host);
@@ -137,7 +132,7 @@ describe('IntegrationRegistry', () => {
     })).toThrow('Duplicate agent integration ID');
     expect(duplicateConstructions).toBe(0);
 
-    const Invalid = integrationClass('invalid', { apiVersion: 2 });
+    const Invalid = integrationClass('invalid', { apiVersion: 1 });
     expect(() => new IntegrationRegistry({
       integrations: [Invalid],
       hostFactory: hostFactory(os.tmpdir()),

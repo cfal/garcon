@@ -4,6 +4,7 @@ export interface SearchMessageRowInput {
   readonly role: ChatSearchSnippetRole;
   readonly timestamp: string | null;
   readonly body: string;
+  readonly sourceAnchor?: string | null;
 }
 
 export interface HistoricalSearchMessageRow extends SearchMessageRowInput {

@@ -28,9 +28,9 @@ import { isDomainError } from '../lib/domain-error.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
-import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
+import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coordinator.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
-import { toClientChatExecutionControlState } from '../chat-execution-control-state.js';
+import { toClientChatExecutionControlState } from '../chat-execution/control-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 const logger = createLogger('ws:chat');
@@ -44,7 +44,7 @@ type AgentRegistryDep = Pick<
 >;
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
-type QueueDep = Pick<ChatExecutionService, 'readChatExecutionControl'>;
+type QueueDep = Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;

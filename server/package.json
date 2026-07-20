@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@garcon/common": "workspace:*",
+    "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
     "@garcon/server-agent-amp": "workspace:*",
     "@garcon/server-agent-claude": "workspace:*",

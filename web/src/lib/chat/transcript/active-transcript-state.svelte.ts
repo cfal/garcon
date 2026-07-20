@@ -15,7 +15,7 @@ export const INITIAL_VISIBLE_MESSAGES = 100;
 export const INITIAL_SWITCH_VISIBLE_MESSAGES = 20;
 const SWITCH_REVEAL_BATCH_SIZE = 20;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
-type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
+export type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
 type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
 
@@ -56,7 +56,31 @@ function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): Pendi
 	);
 }
 
-export class ActiveTranscriptState {
+export interface ActiveTranscriptPort {
+	readonly transcriptCache: ChatTranscriptCache;
+	activeChatId: string | null;
+	readonly chatMessages: ChatMessage[];
+	isUserScrolledUp: boolean;
+	getCursor(): ChatCursor;
+	applyMessages(
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+	): MessageApplyResult;
+	loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]>;
+	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
+	clearLocalNotices(): void;
+	setPendingUserInputs(inputs: PendingUserInput[]): void;
+	upsertPendingUserInput(input: PendingUserInput): void;
+	clearPendingUserInput(clientRequestId: string): void;
+	updatePendingUserInputDeliveryStatus(
+		clientRequestId: string,
+		deliveryStatus: UserMessageDeliveryStatus,
+	): void;
+	activateChat(chatId: string | null): ChatRestoreResult | null;
+}
+
+export class ActiveTranscriptState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
 	activeChatId = $state<string | null>(null);
 	entries = $state<ChatViewMessage[]>([]);

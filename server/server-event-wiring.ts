@@ -1,6 +1,6 @@
 import { parseChatMessages, type ChatMessage } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
-import { toClientChatExecutionControlState } from './chat-execution-control-state.ts';
+import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
@@ -21,7 +21,6 @@ import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ChatProcessErrorRecovery } from './chats/chat-process-error-recovery.js';
 import { UserAbortLifecycleCoordinator } from './chats/user-abort-lifecycle-coordinator.js';
-import type { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
@@ -51,8 +50,8 @@ interface WebSocketPublisher {
 }
 
 interface ChatSearchEventIndex {
-  appendMessages(chatId: string, messages: ChatMessage[]): void;
-  markDirty(chatId: string): void;
+  sourceMayHaveChanged(chatId: string): void;
+  catalogMayHaveChanged(chatId?: string): void;
   deleteChat(chatId: string): void;
 }
 
@@ -68,7 +67,6 @@ export interface ServerEventWiringDeps {
   chatViews: ChatViewStore;
   chatNativeReloader: NativeReloaderDep;
   pendingInputs: PendingUserInputService;
-  pendingRecovery: Pick<PendingUserInputRecoveryCoordinator, 'waitForSettlements'>;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
   telegramNotifier: TelegramNotifier;
@@ -93,7 +91,6 @@ export function wireServerEvents({
   chatViews,
   chatNativeReloader,
   pendingInputs,
-  pendingRecovery,
   commandLedger,
   shareStore,
   telegramNotifier,
@@ -173,15 +170,6 @@ export function wireServerEvents({
     broadcast(new ScheduledPromptsInvalidatedMessage(reason));
   });
 
-  function appendSearchMessages(chatId: string, messages: ChatMessage[]): void {
-    if (!searchIndex || messages.length === 0) return;
-    try {
-      searchIndex.appendMessages(chatId, messages);
-    } catch (err) {
-      logger.warn(`search-index: append failed for ${chatId}:`, errorMessage(err));
-    }
-  }
-
   function deleteSearchChat(chatId: string): void {
     if (!searchIndex) return;
     try {
@@ -194,9 +182,18 @@ export function wireServerEvents({
   function markSearchChatDirty(chatId: string): void {
     if (!searchIndex) return;
     try {
-      searchIndex.markDirty(chatId);
+      searchIndex.sourceMayHaveChanged(chatId);
     } catch (err) {
       logger.warn(`search-index: mark dirty failed for ${chatId}:`, errorMessage(err));
+    }
+  }
+
+  function markSearchCatalogDirty(chatId?: string): void {
+    if (!searchIndex) return;
+    try {
+      searchIndex.catalogMayHaveChanged(chatId);
+    } catch (err) {
+      logger.warn('search-index: catalog refresh failed:', errorMessage(err));
     }
   }
 
@@ -319,10 +316,7 @@ export function wireServerEvents({
         errorMessage(recovery.reloadError),
       );
       if (recovery.appended.messages.length > 0) {
-        appendSearchMessages(
-          chatId,
-          recovery.appended.messages.map((entry) => entry.message),
-        );
+        markSearchChatDirty(chatId);
         broadcast(
           new ChatMessagesMessage(
             chatId,
@@ -350,7 +344,6 @@ export function wireServerEvents({
   ): Promise<void> {
     await settleExecutionCommand(chatId, turnMetadata, 'failed', agentErrorMessage);
     await reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
-    await pendingRecovery.waitForSettlements(chatId);
     broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
   }
 
@@ -365,7 +358,6 @@ export function wireServerEvents({
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }
     await pendingInputs.reconcileNativeHistory(chatId);
-    await pendingRecovery.waitForSettlements(chatId);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
   }
 
@@ -399,7 +391,7 @@ export function wireServerEvents({
         const committedMessages = appended.messages.map((entry) => entry.message);
         if (committedMessages.length > 0) {
           metadata.updateFromAppendedMessages(chatId, committedMessages);
-          appendSearchMessages(chatId, committedMessages);
+          markSearchChatDirty(chatId);
         }
         if (appended.messages.length > 0) {
           broadcast(
@@ -430,6 +422,7 @@ export function wireServerEvents({
   });
   agentRegistry.onSessionCreated((chatId) => {
     if (!chatExists(chatId)) return;
+    markSearchCatalogDirty(chatId);
     broadcast(new ChatSessionCreatedMessage(chatId));
   });
   agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
@@ -442,7 +435,6 @@ export function wireServerEvents({
       if (queuedFinalization && await queuedFinalization !== 'committed') return;
       await settleExecutionCommand(chatId, turnMetadata, 'finished');
       if (!expectedAbort) await pendingInputs.reconcileNativeHistory(chatId);
-      await pendingRecovery.waitForSettlements(chatId);
       if (!chatExists(chatId)) return;
       broadcast(
         new AgentRunFinishedMessage(
@@ -527,7 +519,7 @@ export function wireServerEvents({
     void broadcastRemoteSettings();
   });
   chatRegistry.onChatAdded((chatId) => {
-    if (chatRegistry.getChat(chatId)?.nativeSession) markSearchChatDirty(chatId);
+    markSearchCatalogDirty(chatId);
   });
   chatRegistry.onChatRemoved((chatId) => {
     agentRegistry.discardTurn(chatId);
@@ -551,6 +543,7 @@ export function wireServerEvents({
     broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));
   });
   chatRegistry.onChatProjectPathUpdated((payload) => {
+    markSearchCatalogDirty(payload.chatId);
     broadcast(
       new ChatProjectPathUpdatedMessage(
         payload.chatId,
@@ -581,7 +574,7 @@ export function wireServerEvents({
       if (!chatExists(chatId)) return;
       const parsedMessages = messages.map((entry) => entry.message);
       metadata.updateFromAppendedMessages(chatId, parsedMessages);
-      appendSearchMessages(chatId, parsedMessages);
+      if (parsedMessages.length > 0) markSearchChatDirty(chatId);
       broadcast(
         new ChatMessagesMessage(
           chatId,

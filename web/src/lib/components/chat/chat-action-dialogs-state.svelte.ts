@@ -1,5 +1,6 @@
 import type { SessionAgentId } from '$lib/types/app';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatTranscriptSourceDto } from '$shared/chat-details';
 
 export interface ChatDeleteConfirmation {
 	chatId: string;
@@ -25,6 +26,7 @@ export interface ChatDetailsDialog {
 	createdAt: string | null;
 	lastActivityAt: string | null;
 	agentSessionId: string | null;
+	transcriptSource: ChatTranscriptSourceDto | null;
 	isLoading: boolean;
 	error: string | null;
 }
@@ -80,6 +82,7 @@ export class ChatActionDialogsState {
 			createdAt: null,
 			lastActivityAt: null,
 			agentSessionId: null,
+			transcriptSource: null,
 			isLoading: true,
 			error: null,
 		};
@@ -92,6 +95,7 @@ export class ChatActionDialogsState {
 			createdAt: string | null;
 			lastActivityAt: string | null;
 			agentSessionId: string | null;
+			transcriptSource: ChatTranscriptSourceDto | null;
 		},
 	): void {
 		if (!this.chatDetailsDialog || this.chatDetailsDialog.chatId !== chatId) return;

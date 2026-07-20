@@ -5,7 +5,6 @@ import type {
 	ChatQueueState,
 	QueueEntry,
 	QueuePause,
-	RecoveredInputContinuation,
 } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
@@ -44,34 +43,21 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function continuation(): RecoveredInputContinuation {
-	return {
-		id: '19e6da82-7978-4cb1-b481-b71142fca0c4',
-		installedAt: '2026-07-18T00:00:00.000Z',
-	};
-}
-
-function renderDialog(
-	initialQueue: ChatQueueState,
-	initialContinuation: RecoveredInputContinuation | null = null,
-) {
+function renderDialog(initialQueue: ChatQueueState) {
 	const onCreate = vi.fn().mockResolvedValue(undefined);
 	const onReplace = vi.fn().mockResolvedValue(undefined);
 	const onDelete = vi.fn().mockResolvedValue(undefined);
 	const onPause = vi.fn().mockResolvedValue(undefined);
 	const onResume = vi.fn().mockResolvedValue(undefined);
-	const onContinue = vi.fn().mockResolvedValue(undefined);
 	const result = render(QueuedInputsDialogTestHost, {
 		initialQueue,
-		initialContinuation,
 		onCreate,
 		onReplace,
 		onDelete,
 		onPause,
 		onResume,
-		onContinue,
 	});
-	return { ...result, onCreate, onReplace, onDelete, onPause, onResume, onContinue };
+	return { ...result, onCreate, onReplace, onDelete, onPause, onResume };
 }
 
 afterEach(() => {
@@ -332,7 +318,6 @@ describe('QueuedInputsDialog', () => {
 
 	it.each([
 		['queued-turn-failed', m.chat_queue_pause_failed_detail()],
-		['recovered-inflight', m.chat_queue_pause_recovered_detail()],
 		['completion-uncertain', m.chat_queue_pause_completion_uncertain_detail()],
 		['unknown', m.chat_queue_pause_unknown_detail()],
 	] as const)('renders the %s automatic pause reason', (kind, detail) => {
@@ -349,28 +334,6 @@ describe('QueuedInputsDialog', () => {
 
 		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
 		expect(screen.getByText(detail)).toBeTruthy();
-	});
-
-	it('continues recovered input independently from a real queue pause', async () => {
-		const recovered = continuation();
-		const { component, onContinue, onResume } = renderDialog(
-			queue([entry(0)], { pause: manualPause() }),
-			recovered,
-		);
-
-		expect(screen.getByText(m.chat_queue_recovered_input_continuation_detail())).toBeTruthy();
-		expect(screen.getByRole('button', { name: m.chat_queue_continue() })).toBeTruthy();
-		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_continue() }));
-		expect(onContinue).toHaveBeenCalledWith(recovered.id);
-		expect(onResume).not.toHaveBeenCalled();
-
-		component.setContinuation(null);
-		await waitFor(() => {
-			expect(screen.queryByText(m.chat_queue_recovered_input_continuation_detail())).toBeNull();
-		});
-		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
 	});
 
 	it('keeps a live superseding pause when an earlier resume is still pending', async () => {

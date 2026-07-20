@@ -17,7 +17,23 @@ function controlVersion(control: ChatExecutionControlState | null): number {
 	return control?.version ?? -1;
 }
 
-export class ConversationUiState {
+export interface ConversationUiPort {
+	pendingPermissionRequests: PendingPermissionRequest[];
+	pendingViewChat: PendingViewChat | null;
+	previousPermissionMode: PermissionMode | null;
+	readonly executionControlChatIds: string[];
+	setPendingPermissionRequests(update: PendingPermissionRequestUpdate): void;
+	clearPendingPermissionRequests(): void;
+	setPendingViewChat(chat: PendingViewChat | null): void;
+	setPreviousPermissionMode(mode: PermissionMode | null): void;
+	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
+	setExecutionControl(chatId: string, control: ChatExecutionControlState | null): void;
+	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState | null): void;
+	removeExecutionControl(chatId: string): void;
+	pruneExecutionControls(activeChatIds: Set<string>): void;
+}
+
+export class ConversationUiState implements ConversationUiPort {
 	pendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
 	pendingViewChat = $state<PendingViewChat | null>(null);
 	previousPermissionMode = $state<PermissionMode | null>(null);

@@ -26,12 +26,13 @@ describe('PiAgentIntegration', () => {
     const integration = new PiAgentIntegration(host);
 
     expect(PiAgentIntegration.integrationId).toBe('pi');
-    expect(PiAgentIntegration.apiVersion).toBe(1);
+    expect(PiAgentIntegration.apiVersion).toBe(2);
+    expect(PiAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('pi');
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
     expect(integration.descriptor.requiresNativePathForProjectPathUpdate).toBe(true);
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
-    expect(integration.transcriptSearch).toBeDefined();
+    expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: false,
       supportsWhileRunning: false,

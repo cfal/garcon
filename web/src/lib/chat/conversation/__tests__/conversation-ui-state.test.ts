@@ -23,7 +23,6 @@ function makeControl(
 ): ChatExecutionControlState {
 	return {
 		queue,
-		recoveredInputContinuation: null,
 		version: 0,
 		updatedAt: null,
 		...overrides,

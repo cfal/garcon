@@ -365,11 +365,13 @@ function parseClaudeJsonlLines(lines: string[]): ChatMessage[] {
 export async function loadClaudeChatMessages(
   nativePath: string | null | undefined,
   logger: AgentLogger = NOOP_LOGGER,
+  options: { readonly throwOnError?: boolean } = {},
 ): Promise<ChatMessage[]> {
   if (!nativePath) return [];
   try {
     await fs.access(nativePath);
-  } catch {
+  } catch (error) {
+    if (options.throwOnError) throw error;
     return [];
   }
 
@@ -377,6 +379,7 @@ export async function loadClaudeChatMessages(
     const raw = await fs.readFile(nativePath, 'utf8');
     return parseClaudeJsonlLines(raw.split('\n'));
   } catch (error) {
+    if (options.throwOnError) throw error;
     logger.error('Claude transcript load failed', {
       nativePath,
       error: error instanceof Error ? error.message : String(error),

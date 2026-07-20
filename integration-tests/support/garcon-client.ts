@@ -22,7 +22,6 @@ import type {
   QueueEntryDeleteResponse,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
-  RecoveredInputContinueRequest,
   StartChatCommandRequest,
   StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
@@ -523,10 +522,6 @@ export class GarconTestClient {
 
   clearQueue(chatId: string): Promise<QueueMutationResponse> {
     return this.post<QueueMutationResponse>('/api/v1/chats/queue/clear', { chatId });
-  }
-
-  continueRecoveredInput(request: RecoveredInputContinueRequest): Promise<QueueMutationResponse> {
-    return this.post<QueueMutationResponse>('/api/v1/chats/recovered-input/continue', request);
   }
 
   stopChat(request: AgentStopCommandRequest): Promise<AgentStopResponse> {

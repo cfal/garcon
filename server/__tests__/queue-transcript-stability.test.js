@@ -13,7 +13,6 @@ import { UserAbortLifecycleCoordinator } from '../chats/user-abort-lifecycle-coo
 import { DirectChatRuntimeBase } from '../../server-agents/common/src/direct/direct-chat-runtime-base.ts';
 import {
   CommandLedger,
-  SERVER_RESTART_INTERRUPTED_ERROR_CODE,
 } from '../commands/command-ledger.js';
 
 function deferred() {
@@ -421,7 +420,7 @@ describe('queue and transcript stability', () => {
     }
   });
 
-  it('recovers sending queue work and its accepted command as interrupted after restart', async () => {
+  it('drops queue work and command receipts after restart', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-restart-stability-'));
     try {
       const chatId = 'chat-restart';
@@ -445,14 +444,14 @@ describe('queue and transcript stability', () => {
         () => true,
       ];
       const queue = new ChatExecutionCoordinator(workspaceDir, ...queueDeps);
-      const created = await queue.createChatQueueEntry(chatId, 'survive restart');
+      await queue.createChatQueueEntry(chatId, 'discard on restart');
       await queue.popNextChat(chatId);
 
       const ledgerInput = {
         commandType: 'agent-run',
         chatId,
         clientRequestId: 'request-restart',
-        payload: { chatId, command: 'survive restart' },
+        payload: { chatId, command: 'discard on restart' },
       };
       const ledger = new CommandLedger(workspaceDir);
       const accepted = await ledger.accept(ledgerInput);
@@ -460,27 +459,11 @@ describe('queue and transcript stability', () => {
       await ledger.update(accepted.record.key, { status: 'scheduled' });
 
       const restartedQueue = new ChatExecutionCoordinator(workspaceDir, ...queueDeps);
-      await restartedQueue.recoverChatExecutionControls();
-      const recoveredQueue = await restartedQueue.readChatExecutionControl(chatId);
-      expect(recoveredQueue.entries).toMatchObject([{
-        id: created.entry.id,
-        content: 'survive restart',
-        status: 'queued',
-      }]);
-      expect(recoveredQueue.pause).toMatchObject({
-        kind: 'recovered-inflight',
-        entryId: created.entry.id,
-      });
+      expect((await restartedQueue.readChatExecutionControl(chatId)).entries).toEqual([]);
 
       const restartedLedger = new CommandLedger(workspaceDir);
       const duplicate = await restartedLedger.accept(ledgerInput);
-      expect(duplicate).toMatchObject({
-        kind: 'duplicate',
-        record: {
-          status: 'failed',
-          errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
-        },
-      });
+      expect(duplicate).toMatchObject({ kind: 'accepted', record: { status: 'accepted' } });
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }

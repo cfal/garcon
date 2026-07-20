@@ -38,7 +38,7 @@
     "start": "bun scripts/start.js",
     "bench:search": "bun scripts/benchmark-chat-search.js",
     "test": "bun run test:server && bun run --cwd web test",
-    "test:server": "bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.test.js'",
+    "test:server": "bun test common/__tests__/*.test.js && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' --batch 8 && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.test.js' --batch 8",
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",

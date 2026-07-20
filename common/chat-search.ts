@@ -52,12 +52,4 @@ export interface ChatSearchResponse {
   results: ChatSearchResult[];
   total: number;
   index: ChatSearchIndexStatus;
-  partialFailures?: ChatSearchPartialFailure[];
-}
-
-export interface ChatSearchPartialFailure {
-  readonly agentId: string;
-  readonly code: 'SEARCH_TIMEOUT' | 'SEARCH_UNAVAILABLE' | 'INVALID_RESPONSE';
-  readonly retryable: boolean;
-  readonly eligibleChatCount: number;
 }

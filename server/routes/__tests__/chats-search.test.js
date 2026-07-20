@@ -9,6 +9,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
+import { TranscriptSearchUnavailableError } from '../../chats/search/errors.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
 function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByChat = {} } = {}) {
@@ -290,10 +291,11 @@ describe('POST /api/v1/chats/search', () => {
 
   it('returns a non-retryable disabled response', async () => {
     const { routes, searchIndex } = createRoutesFixture();
-    const error = Object.assign(new Error('Transcript search is disabled'), {
-      code: 'TRANSCRIPT_SEARCH_DISABLED',
-      retryable: false,
-    });
+    const error = new TranscriptSearchUnavailableError(
+      'TRANSCRIPT_SEARCH_DISABLED',
+      'Transcript search is disabled',
+      false,
+    );
     searchIndex.search.mockImplementation(() => Promise.reject(error));
 
     const response = await postSearch(routes, { query: 'needle' });
@@ -307,10 +309,9 @@ describe('POST /api/v1/chats/search', () => {
   it('returns retryable unavailable and busy responses', async () => {
     const { routes, searchIndex } = createRoutesFixture();
     for (const code of ['SEARCH_INDEX_UNAVAILABLE', 'SEARCH_INDEX_BUSY']) {
-      searchIndex.search.mockImplementationOnce(() => Promise.reject(Object.assign(
-        new Error('Search is not ready'),
-        { code, retryable: true },
-      )));
+      searchIndex.search.mockImplementationOnce(() => Promise.reject(
+        new TranscriptSearchUnavailableError(code, 'Search is not ready', true),
+      ));
       const response = await postSearch(routes, { query: 'needle' });
       expect(response.status).toBe(503);
       await expect(response.json()).resolves.toMatchObject({ errorCode: code, retryable: true });

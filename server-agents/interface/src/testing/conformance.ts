@@ -1,10 +1,15 @@
 import type {
+  AgentLogger,
   AgentIntegration,
   AgentIntegrationClass,
+  AgentTranscriptIndexerModule,
 } from '../index.js';
 
 export interface AgentIntegrationConformanceOptions {
-  readonly integrationClass: Pick<AgentIntegrationClass, 'integrationId' | 'apiVersion'>;
+  readonly integrationClass: Pick<
+    AgentIntegrationClass,
+    'integrationId' | 'apiVersion' | 'transcriptIndex'
+  >;
   readonly integration: AgentIntegration;
 }
 
@@ -12,7 +17,7 @@ export function validateAgentIntegration(
   options: AgentIntegrationConformanceOptions,
 ): void {
   const { integration, integrationClass } = options;
-  if (integrationClass.apiVersion !== 1) {
+  if (integrationClass.apiVersion !== 2) {
     throw new Error(`Unsupported agent integration API version: ${integrationClass.apiVersion}`);
   }
   if (integrationClass.integrationId !== integration.descriptor.id) {
@@ -20,8 +25,20 @@ export function validateAgentIntegration(
       `Agent integration ID mismatch: ${integrationClass.integrationId} != ${integration.descriptor.id}`,
     );
   }
-  if (!integration.execution || !integration.transcript || !integration.transcriptSearch) {
+  if (!integration.execution || !integration.transcript) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing a required facet`);
+  }
+  if ('transcriptSearch' in integration) {
+    throw new Error(`Agent integration ${integration.descriptor.id} exposes removed transcriptSearch state`);
+  }
+  if (integrationClass.transcriptIndex.apiVersion !== 1
+      || !integrationClass.transcriptIndex.moduleUrl) {
+    throw new Error(`Agent integration ${integration.descriptor.id} is missing its transcript index module`);
+  }
+  for (const method of ['resolveIndexSource', 'refreshIndexSource', 'describeSource'] as const) {
+    if (typeof integration.transcript[method] !== 'function') {
+      throw new Error(`Agent integration ${integration.descriptor.id} is missing transcript.${method}`);
+    }
   }
   if (!integration.catalog || !integration.settings || !integration.lifecycle || !integration.migration) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing a required service facet`);
@@ -88,30 +105,32 @@ export async function runAgentIntegrationConformance(
     await integration.lifecycle.start();
     started = true;
     await integration.lifecycle.start();
-    await integration.transcriptSearch.reconcile({
-      chats: [],
-      generation: { epoch: 'conformance', sequence: 1 },
-      signal,
-    });
-    const status = await integration.transcriptSearch.status({ chats: [], signal });
-    if (
-      status.indexedChatCount !== 0
-      || status.pendingChatCount !== 0
-      || status.failedChatCount !== 0
-      || status.unsupportedChatCount !== 0
-    ) {
-      throw new Error(`Agent integration ${agentId} returned non-empty search status for an empty snapshot`);
-    }
-    await integration.transcriptSearch.disableAndDelete({
-      generation: { epoch: 'conformance', sequence: 2 },
-      signal,
-    });
   } finally {
     if (started) {
       await integration.lifecycle.stop();
       await integration.lifecycle.stop();
     }
   }
+}
+
+export async function runAgentTranscriptIndexerConformance(options: {
+  readonly integrationId: string;
+  readonly moduleUrl: string;
+  readonly logger: AgentLogger;
+}): Promise<void> {
+  const imported = await import(options.moduleUrl) as { default?: unknown };
+  const module = imported.default as Partial<AgentTranscriptIndexerModule> | undefined;
+  if (!module || module.apiVersion !== 1 || module.integrationId !== options.integrationId
+      || typeof module.create !== 'function') {
+    throw new Error(`Agent integration ${options.integrationId} has an invalid transcript index module`);
+  }
+  const source = module.create({ agentId: options.integrationId, logger: options.logger });
+  if (!source || typeof source.probe !== 'function'
+      || typeof source.load !== 'function' || typeof source.close !== 'function') {
+    throw new Error(`Agent integration ${options.integrationId} has an invalid transcript index source`);
+  }
+  await source.close();
+  await source.close();
 }
 
 function assertSettingsEnvelope(

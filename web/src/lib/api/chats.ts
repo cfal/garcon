@@ -48,8 +48,6 @@ import type {
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
-	RecoveredInputContinueRequest,
-	RecoveredInputContinueResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type {
@@ -61,6 +59,7 @@ import type {
 	AgentModelPatchResponse,
 } from '$shared/chat-command-contracts';
 import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
+import type { ChatDetailsResponse } from '$shared/chat-details';
 import {
 	parseChatExecutionControlState,
 	type ChatExecutionControlState,
@@ -93,13 +92,7 @@ export interface StartChatParams {
 	tags?: string[];
 }
 
-export interface ChatDetailsResponse {
-	chatId: string;
-	firstMessage: string;
-	createdAt: string | null;
-	lastActivityAt: string | null;
-	agentSessionId: string | null;
-}
+export type { ChatDetailsResponse } from '$shared/chat-details';
 
 export type ListChatsResponse = ChatListResponse;
 
@@ -227,19 +220,6 @@ export async function resumeChatQueue(
 	const request: QueueResumeRequest = { chatId, pauseId };
 	return withParsedControl(
 		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request),
-	);
-}
-
-export async function continueRecoveredInput(
-	chatId: string,
-	continuationId: string,
-): Promise<RecoveredInputContinueResponse> {
-	const request: RecoveredInputContinueRequest = { chatId, continuationId };
-	return withParsedControl(
-		await apiPost<RecoveredInputContinueResponse>(
-			'/api/v1/chats/recovered-input/continue',
-			request,
-		),
 	);
 }
 

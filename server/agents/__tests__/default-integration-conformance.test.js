@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runAgentIntegrationConformance } from '@garcon/server-agent-interface/testing';
+import {
+  runAgentIntegrationConformance,
+  runAgentTranscriptIndexerConformance,
+} from '@garcon/server-agent-interface/testing';
 import { defaultAgentIntegrations } from '../default-agent-integrations.js';
 import { IntegrationHostFactory } from '../integration-host.js';
 import { IntegrationRegistry } from '../integration-registry.js';
@@ -40,6 +43,11 @@ describe('default agent integration conformance', () => {
       await runAgentIntegrationConformance({
         integrationClass,
         integration: registry.require(integrationClass.integrationId),
+      });
+      await runAgentTranscriptIndexerConformance({
+        integrationId: integrationClass.integrationId,
+        moduleUrl: integrationClass.transcriptIndex.moduleUrl,
+        logger: { debug() {}, info() {}, warn() {}, error() {} },
       });
     }
 

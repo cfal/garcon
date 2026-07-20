@@ -32,7 +32,7 @@ export async function collectAgentBuildContributions(options = {}) {
     }
     seenIntegrationIds.add(metadata.integrationId);
 
-    const standaloneEntrypoints = await resolvePackageFiles(
+    const standaloneEntrypoints = await resolveNamedPackageFiles(
       packageName,
       packageRoot,
       metadata.standaloneEntrypoints,
@@ -91,7 +91,7 @@ async function resolvePackageRoot(packageName, fromDirectory) {
 }
 
 function validateBuildMetadata(packageName, value) {
-  if (!isRecord(value) || value.apiVersion !== 1) {
+  if (!isRecord(value) || value.apiVersion !== 2) {
     throw new Error(`${packageName} has missing or unsupported garconBuild metadata`);
   }
   if (typeof value.integrationId !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(value.integrationId)) {
@@ -99,7 +99,11 @@ function validateBuildMetadata(packageName, value) {
   }
   return {
     integrationId: value.integrationId,
-    standaloneEntrypoints: stringArray(packageName, 'standaloneEntrypoints', value.standaloneEntrypoints),
+    standaloneEntrypoints: stringRecord(
+      packageName,
+      'standaloneEntrypoints',
+      value.standaloneEntrypoints,
+    ),
     preMainModules: stringArray(packageName, 'preMainModules', value.preMainModules),
     embeddedDependencyMetadata: stringArray(
       packageName,
@@ -107,6 +111,23 @@ function validateBuildMetadata(packageName, value) {
       value.embeddedDependencyMetadata,
     ),
   };
+}
+
+function stringRecord(packageName, field, value) {
+  if (!isRecord(value)) {
+    throw new Error(`${packageName} garconBuild.${field} must be a string record`);
+  }
+  const result = {};
+  for (const [name, entry] of Object.entries(value)) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name) || typeof entry !== 'string') {
+      throw new Error(`${packageName} garconBuild.${field} has an invalid entry`);
+    }
+    result[name] = entry;
+  }
+  if (typeof result['transcript-index-source'] !== 'string') {
+    throw new Error(`${packageName} garconBuild.${field} is missing transcript-index-source`);
+  }
+  return result;
 }
 
 function stringArray(packageName, field, value) {
@@ -124,6 +145,15 @@ async function resolvePackageFiles(packageName, packageRoot, relativePaths) {
     }
     return checkedPackageFile(packageName, packageRoot, relativePath.slice(2));
   }));
+}
+
+async function resolveNamedPackageFiles(packageName, packageRoot, relativePaths) {
+  return Object.fromEntries(await Promise.all(Object.entries(relativePaths).map(async ([name, relativePath]) => {
+    if (!relativePath.startsWith('./')) {
+      throw new Error(`${packageName} build contribution must be package-relative: ${relativePath}`);
+    }
+    return [name, await checkedPackageFile(packageName, packageRoot, relativePath.slice(2))];
+  })));
 }
 
 async function checkedPackageFile(packageName, packageRoot, relativePath) {

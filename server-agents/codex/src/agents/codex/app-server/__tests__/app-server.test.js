@@ -3732,13 +3732,14 @@ describe('CodexAppServerRuntime', () => {
       () => true,
     );
 
-	    const result = await queue.deliverActiveInput('chat-1', 'Steer from the queue', {
-	      clientRequestId: 'request-queue',
-	      clientMessageId: 'message-queue',
-	    });
+    const result = await queue.deliverActiveInput('chat-1', 'Steer from the queue', {
+      clientRequestId: 'request-queue',
+      clientMessageId: 'message-queue',
+      turnId: 'turn-queue',
+    });
 
-	    expect(result).toBe(true);
-	    expect((await queue.readChatExecutionControl('chat-1')).entries).toEqual([]);
+    expect(result).toBe(true);
+    expect((await queue.readChatExecutionControl('chat-1')).entries).toEqual([]);
     expect(fake.steerTurn).toHaveBeenCalledWith(expect.objectContaining({
       expectedTurnId: 'goal-turn',
       clientUserMessageId: 'message-queue',
@@ -3770,9 +3771,11 @@ describe('CodexAppServerRuntime', () => {
     }));
     const queue = createActiveGoalQueue(provider, { kind: 'pause' }, markUnconfirmed);
 
-	    await expect(queue.deliverActiveInput('chat-1', '/goal pause', {
-	      clientRequestId: 'request-goal-failure',
-	    })).rejects.toMatchObject({
+    await expect(queue.deliverActiveInput('chat-1', '/goal pause', {
+      clientRequestId: 'request-goal-failure',
+      clientMessageId: 'message-goal-failure',
+      turnId: 'turn-goal-failure',
+    })).rejects.toMatchObject({
       deliveryAccepted: true,
       retryable: false,
       cause: expect.objectContaining({ message: 'goal status unavailable' }),
@@ -3813,9 +3816,11 @@ describe('CodexAppServerRuntime', () => {
     });
     const queue = createActiveGoalQueue(provider, { kind: 'resume' }, markUnconfirmed);
 
-	    const delivery = queue.deliverActiveInput('chat-1', '/goal resume', {
-	      clientRequestId: 'request-goal-cancelled',
-	    });
+    const delivery = queue.deliverActiveInput('chat-1', '/goal resume', {
+      clientRequestId: 'request-goal-cancelled',
+      clientMessageId: 'message-goal-cancelled',
+      turnId: 'turn-goal-cancelled',
+    });
     await statusRequest;
     await Promise.resolve();
     await provider.abort('thread-1');

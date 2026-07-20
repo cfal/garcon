@@ -233,7 +233,10 @@ export async function fetchOpenCodeStoredMessages(
       logger.warn('OpenCode chat message load failed', { sessionId, error: message });
       return [];
     }
-    return Array.isArray(result.data) ? result.data : [];
+    if (Array.isArray(result.data)) return result.data;
+    if (options.throwOnError) throw new Error('OpenCode message fetch returned an invalid payload');
+    logger.warn('OpenCode chat message load returned an invalid payload', { sessionId });
+    return [];
   } catch (err) {
     if (options.throwOnError) throw err;
     logger.error('OpenCode chat message load failed', {

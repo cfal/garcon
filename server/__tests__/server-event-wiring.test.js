@@ -59,8 +59,8 @@ function createWiringFixture(overrides = {}) {
     ...overrides.commandLedger,
   };
   const searchIndex = {
-    appendMessages: mock(() => undefined),
-    markDirty: mock(() => undefined),
+    sourceMayHaveChanged: mock(() => undefined),
+    catalogMayHaveChanged: mock(() => undefined),
     deleteChat: mock(() => undefined),
   };
   const wiring = wireServerEvents({
@@ -150,7 +150,7 @@ describe('server event wiring', () => {
     await fixture.wiring.waitForIdle();
 
     expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
-    expect(fixture.searchIndex.appendMessages).not.toHaveBeenCalled();
+    expect(fixture.searchIndex.sourceMayHaveChanged).not.toHaveBeenCalled();
   });
 
   it('reports terminal settlement failures to the shutdown drain', async () => {

@@ -160,26 +160,6 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     }]);
   });
 
-  it('allows an empty persisted session only after recovered continuation', async () => {
-    const dir = await tempDir();
-    const sessionId = 'empty-recovered-session';
-    await fs.writeFile(path.join(dir, `${sessionId}.jsonl`), '');
-    const runtime = new CapturingDirectRuntime(dir);
-
-    await expect(runtime.runTurn(resumeRequest(sessionId, {
-      command: 'ordinary resume',
-    }))).rejects.toThrow('without persisted messages');
-
-    await runtime.runTurn(resumeRequest(sessionId, {
-      command: 'continued successor',
-      directHistoryRecovery: 'allow-empty',
-    }));
-
-    expect(runtime.captured.at(-1)?.messages).toEqual([
-      { role: 'user', content: 'continued successor' },
-    ]);
-  });
-
   it('normalizes invalid untyped effort to Default', async () => {
     const runtime = new CapturingDirectRuntime(await tempDir());
     const messages = waitForMessages(runtime);

@@ -44,8 +44,6 @@ import { DomainError } from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
   QueuePauseChangedError,
-  RecoveredInputContinuationChangedError,
-  RecoveredInputContinuationRequiresQueueError,
 } from '../../chat-execution/chat-execution-coordinator.js';
 import {
   createRouteChatListProjector,
@@ -75,7 +73,6 @@ function storedQueue(entries = [], overrides = {}) {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
-    recoveredInputContinuation: null,
     version: 0,
     updatedAt: null,
     ...overrides,
@@ -160,22 +157,18 @@ function createRouteAgent(sessionOverrides = {}) {
     scheduleDirectInput: mock(async (input) => {
       const reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
       try {
-        if (input.continueRecoveredInput) {
-          await queue.consumeRecoveredInputContinuationForDirectTurn(reservation);
-        }
         const control = await queue.readChatExecutionControl(input.command.chatId);
-        if (control.entries.length > 0 || control.pause || control.recoveredInputContinuation) {
+        if (control.entries.length > 0 || control.pause) {
           throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
         }
         await input.preparation?.prepare();
         await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
-        await input.settlement.markScheduled(input.command, input.options.turnId, true);
+        await input.settlement.markScheduled(input.command, input.options.turnId);
       } catch (error) {
         await queue.releaseDirectTurn(reservation);
         await input.preparation?.compensate();
         await input.settlement.markPreScheduleFailure(input.command, {
           error,
-          pendingInputRecovery: false,
           retryable: true,
         });
         throw error;
@@ -186,13 +179,13 @@ function createRouteAgent(sessionOverrides = {}) {
       const reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
       await input.preparation?.prepare();
       await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
-      await input.settlement.markScheduled(input.command, input.options.turnId, true);
+      await input.settlement.markScheduled(input.command, input.options.turnId);
       await input.dispatch?.(reservation.executionAdmission);
       await queue.completeDirectTurn(reservation);
     }),
     scheduleDirectOperation: mock(async (input) => {
       const reservation = queue.reserveDirectTurn(input.command.chatId, input.command);
-      await input.settlement.markScheduled(input.command, input.command.turnId, false);
+      await input.settlement.markScheduled(input.command, input.command.turnId);
       void input.dispatch(reservation.executionAdmission);
     }),
     enqueueAccepted: mock(async (input) => {
@@ -201,7 +194,6 @@ function createRouteAgent(sessionOverrides = {}) {
           input.command.chatId,
           input.content,
           { key: input.command.key, entryId: input.command.entryId },
-          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
         );
         await input.settlement.settleQueueMutation(input.command, result.entryId);
         await queue.triggerDrain(input.command.chatId);
@@ -219,7 +211,6 @@ function createRouteAgent(sessionOverrides = {}) {
           input.content,
           input.expectedRevision,
           { key: input.command.key, entryId: input.command.entryId },
-          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
         );
         await input.settlement.settleQueueMutation(input.command, result.entryId);
         return result;
@@ -234,7 +225,6 @@ function createRouteAgent(sessionOverrides = {}) {
           input.command.chatId,
           input.command.entryId,
           { key: input.command.key, entryId: input.command.entryId },
-          { protectedKeys: await input.settlement.listUnsettledQueueReceiptKeys(input.command.chatId) },
         );
         await input.settlement.settleQueueMutation(input.command, result.entryId);
         return result;
@@ -248,7 +238,7 @@ function createRouteAgent(sessionOverrides = {}) {
         input.command.chatId,
         input.content,
         { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
-        () => input.settlement.markScheduled(input.command, input.command.turnId, true),
+        () => input.settlement.markScheduled(input.command, input.command.turnId),
       );
       if (delivered) {
         await input.settlement.settleActiveInput(input.command);
@@ -275,7 +265,6 @@ function createRouteAgent(sessionOverrides = {}) {
     })),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
     assertDirectTurnReservationActive: mock(() => undefined),
-    consumeRecoveredInputContinuationForDirectTurn: mock(() => Promise.resolve(storedQueue())),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
@@ -330,7 +319,6 @@ function createRouteAgent(sessionOverrides = {}) {
       await queue.triggerDrain(chatId);
       return control;
     }),
-    continuePastRecoveredInput: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { version: 3 }))),
     waitForDispatches: mock(() => Promise.resolve(undefined)),
   };
   const pathCache = createRoutePathCache();
@@ -566,6 +554,24 @@ describe('REST chat command routes', () => {
     expect(missing.body.errorCode).toBe('SESSION_NOT_FOUND');
   });
 
+  it('POST /run validates attachments at the request boundary', async () => {
+    const agent = createRouteAgent();
+    const invalid = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody({
+        images: [{
+          data: `data:application/octet-stream;base64,${Buffer.from('bad').toString('base64')}`,
+          name: 'bad.bin',
+          mimeType: 'application/octet-stream',
+        }],
+      }),
+    );
+
+    expect(invalid.response.status).toBe(400);
+    expect(invalid.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
   it('POST /run returns current execution control when direct admission is busy', async () => {
     const agent = createRouteAgent();
     const control = storedQueue([], {
@@ -589,7 +595,6 @@ describe('REST chat command routes', () => {
       retryable: true,
       control: {
         version: 4,
-        recoveredInputContinuation: null,
         queue: { entries: [], pause: null },
       },
     });
@@ -672,7 +677,6 @@ describe('REST chat command routes', () => {
       expect.objectContaining({
         key: `queue-entry-create:${CHAT_ID}:req-queue-1`,
       }),
-      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
   });
 
@@ -711,13 +715,12 @@ describe('REST chat command routes', () => {
         key: `queue-entry-replace:${CHAT_ID}:req-replace-1`,
         entryId: 'entry-1',
       },
-      expect.objectContaining({ protectedKeys: expect.any(Set) }),
     );
     expect(deleted.response.status).toBe(200);
     expect(agent.queue.deleteChatQueueEntry).toHaveBeenCalledWith(CHAT_ID, 'entry-1', {
       key: `queue-entry-delete:${CHAT_ID}:req-delete-1`,
       entryId: 'entry-1',
-    }, expect.objectContaining({ protectedKeys: expect.any(Set) }));
+    });
   });
 
   it('POST /active-input uses the independent active delivery command', async () => {
@@ -829,78 +832,6 @@ describe('REST chat command routes', () => {
       kind: 'queued-turn-failed',
     });
     expect(agent.queue.triggerDrain).not.toHaveBeenCalled();
-  });
-
-  it('continues recovered input by stable ID and returns the current composite control', async () => {
-    const agent = createRouteAgent();
-    const continuationId = '4c31d9ed-f33a-4ccc-8bd1-b11f88d08040';
-    const continued = storedQueue([queueEntry('entry-1')], { version: 7 });
-    agent.queue.continuePastRecoveredInput.mockResolvedValueOnce(continued);
-
-    const result = await callJson(agent.routes['/api/v1/chats/recovered-input/continue'].POST, {
-      chatId: CHAT_ID,
-      continuationId,
-    });
-
-    expect(result.response.status).toBe(200);
-    expect(agent.queue.continuePastRecoveredInput).toHaveBeenCalledWith(CHAT_ID, continuationId);
-    expect(result.body.control).toMatchObject({
-      version: 7,
-      recoveredInputContinuation: null,
-      queue: { entries: [expect.objectContaining({ id: 'entry-1' })] },
-    });
-  });
-
-  it('returns the current composite control for stale continuation IDs', async () => {
-    const agent = createRouteAgent();
-    const latest = storedQueue([queueEntry('entry-1')], {
-      recoveredInputContinuation: {
-        id: '20b5a703-199d-4d29-ae05-d0942574cb79',
-        installedAt: '2026-07-18T00:00:00.000Z',
-      },
-      version: 8,
-    });
-    agent.queue.continuePastRecoveredInput.mockRejectedValueOnce(
-      new RecoveredInputContinuationChangedError(latest),
-    );
-
-    const result = await callJson(agent.routes['/api/v1/chats/recovered-input/continue'].POST, {
-      chatId: CHAT_ID,
-      continuationId: '4c31d9ed-f33a-4ccc-8bd1-b11f88d08040',
-    });
-
-    expect(result.response.status).toBe(409);
-    expect(result.body.errorCode).toBe('RECOVERED_INPUT_CONTINUATION_CHANGED');
-    expect(result.body.control.recoveredInputContinuation.id).toBe(
-      '20b5a703-199d-4d29-ae05-d0942574cb79',
-    );
-  });
-
-  it('preserves continuation when a stale dialog continues an already-empty queue', async () => {
-    const agent = createRouteAgent();
-    const latest = storedQueue([], {
-      recoveredInputContinuation: {
-        id: '20b5a703-199d-4d29-ae05-d0942574cb79',
-        installedAt: '2026-07-18T00:00:00.000Z',
-      },
-      version: 9,
-    });
-    agent.queue.continuePastRecoveredInput.mockRejectedValueOnce(
-      new RecoveredInputContinuationRequiresQueueError(latest),
-    );
-
-    const result = await callJson(agent.routes['/api/v1/chats/recovered-input/continue'].POST, {
-      chatId: CHAT_ID,
-      continuationId: latest.recoveredInputContinuation.id,
-    });
-
-    expect(result.response.status).toBe(409);
-    expect(result.body.errorCode).toBe('RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE');
-    expect(result.body.control).toMatchObject({
-      version: 9,
-      recoveredInputContinuation: { id: latest.recoveredInputContinuation.id },
-      queue: { entries: [] },
-    });
   });
 
   it('POST /permissions/decision deduplicates identical decisions and rejects conflicts', async () => {

@@ -1,6 +1,7 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
+import { getNativeMessageSource } from '@garcon/server-agent-interface';
 import type { ChatSearchSnippetRole } from '@garcon/common/chat-search';
-import type { HistoricalSearchMessageRow, SearchMessageRowInput } from './rows.js';
+import type { SearchMessageRowInput } from './rows.js';
 
 const MAX_BODY_CHARS = 64_000;
 const MAX_TOOL_INPUT_CHARS = 16_000;
@@ -9,8 +10,8 @@ const MAX_TOOL_RESULT_TAIL_CHARS = 512;
 const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
 const MAX_RECURSIVE_NODES = 512;
-const MAX_LIVE_MESSAGES_PER_EVENT = 64;
-const MAX_LIVE_BODY_CHARS_PER_EVENT = 128_000;
+
+export const TRANSCRIPT_SEARCH_PROJECTOR_VERSION = 1;
 
 interface ExtractionBudget {
   remaining: number;
@@ -21,12 +22,6 @@ interface ExtractionBudget {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled transcript search message type: ${String(value)}`);
-}
-
-export interface LiveProjectionResult {
-  rows: SearchMessageRowInput[];
-  consumedMessageCount: number;
-  requiresAuthoritativeReload: boolean;
 }
 
 function appendText(parts: string[], value: unknown, budget: ExtractionBudget): void {
@@ -304,56 +299,14 @@ function projectOne(message: ChatMessage): {
       role: roleForMessage(message),
       timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
       body,
+      sourceAnchor: (() => {
+        const source = getNativeMessageSource(message);
+        return source ? JSON.stringify(source) : null;
+      })(),
     } : null,
   };
 }
 
 export function projectSearchMessage(message: ChatMessage): SearchMessageRowInput | null {
   return projectOne(message).row;
-}
-
-export function projectLiveMessages(
-  messages: readonly ChatMessage[],
-  maxRows = Number.MAX_SAFE_INTEGER,
-  startIndex = 0,
-): LiveProjectionResult {
-  const rows: SearchMessageRowInput[] = [];
-  let bodyChars = 0;
-  let consumedMessageCount = 0;
-  const messageEnd = Math.min(messages.length, startIndex + MAX_LIVE_MESSAGES_PER_EVENT);
-  for (let index = startIndex; index < messageEnd; index += 1) {
-    if (bodyChars >= MAX_LIVE_BODY_CHARS_PER_EVENT) {
-      break;
-    }
-    if (rows.length >= maxRows) {
-      break;
-    }
-    const projected = projectOne(messages[index]);
-    if (projected.row) {
-      if (rows.length > 0 && bodyChars + projected.row.body.length > MAX_LIVE_BODY_CHARS_PER_EVENT) {
-        break;
-      }
-      rows.push(projected.row);
-      bodyChars += projected.row.body.length;
-    }
-    consumedMessageCount += 1;
-  }
-  return {
-    rows,
-    consumedMessageCount,
-    requiresAuthoritativeReload: startIndex + consumedMessageCount < messages.length,
-  };
-}
-
-export function projectSearchMessages(messages: readonly ChatMessage[]): SearchMessageRowInput[] {
-  return projectLiveMessages(messages).rows;
-}
-
-export function projectHistoricalSearchMessages(messages: readonly ChatMessage[]): HistoricalSearchMessageRow[] {
-  const rows: HistoricalSearchMessageRow[] = [];
-  for (let index = 0; index < messages.length; index += 1) {
-    const row = projectSearchMessage(messages[index]);
-    if (row) rows.push({ ...row, messageOrdinal: index + 1 });
-  }
-  return rows;
 }

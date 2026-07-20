@@ -11,10 +11,9 @@ function productionFiles(directory) {
 }
 
 describe('chat execution architecture boundaries', () => {
-  test('keeps control-file IO inside the repository', () => {
+  test('keeps filesystem IO out of chat execution', () => {
     for (const file of productionFiles('server/chat-execution')) {
       const source = readFileSync(file, 'utf8');
-      if (file.endsWith('chat-execution-control-repository.ts')) continue;
       expect(source, file).not.toMatch(/from ['"](?:node:)?fs['"]/);
     }
   });

@@ -5,7 +5,6 @@
 		ChatQueueState,
 		QueueEntry,
 		QueuePause,
-		RecoveredInputContinuation,
 	} from '$lib/types/chat';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
@@ -17,7 +16,6 @@
 	interface Props {
 		open: boolean;
 		queue: ChatQueueState | null;
-		continuation: RecoveredInputContinuation | null;
 		editor: QueuedInputEditorState;
 		onClose: () => void;
 		onCreate: (content: string) => Promise<void>;
@@ -25,13 +23,11 @@
 		onDelete: (entryId: string) => Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
-		onContinue: (continuationId: string) => Promise<void>;
 	}
 
 	let {
 		open,
 		queue,
-		continuation,
 		editor,
 		onClose,
 		onCreate,
@@ -39,14 +35,12 @@
 		onDelete,
 		onPause,
 		onResume,
-		onContinue,
 	}: Props = $props();
 	let listContainer: HTMLDivElement | null = $state(null);
 	let listHeading: HTMLHeadingElement | null = $state(null);
 	let deletingIds = $state<Set<string>>(new Set());
 	let rowErrors = $state<Record<string, string>>({});
 	let queueMutation = $state<'idle' | 'pausing' | 'resuming'>('idle');
-	let continuing = $state(false);
 	let queueMutationError = $state<string | null>(null);
 
 	const entries = $derived(queue?.entries ?? []);
@@ -87,26 +81,10 @@
 				return null;
 			case 'queued-turn-failed':
 				return m.chat_queue_pause_failed_detail();
-			case 'recovered-inflight':
-				return m.chat_queue_pause_recovered_detail();
 			case 'completion-uncertain':
 				return m.chat_queue_pause_completion_uncertain_detail();
 			case 'unknown':
 				return m.chat_queue_pause_unknown_detail();
-		}
-	}
-
-	async function continueQueue(): Promise<void> {
-		if (!continuation || continuing) return;
-		const continuationId = continuation.id;
-		continuing = true;
-		queueMutationError = null;
-		try {
-			await onContinue(continuationId);
-		} catch (error) {
-			queueMutationError = errorMessage(error);
-		} finally {
-			continuing = false;
 		}
 	}
 
@@ -197,31 +175,6 @@
 				</span>
 			</div>
 			<Dialog.Description class="sr-only">{m.chat_queue_dialog_description()}</Dialog.Description>
-			{#if continuation}
-				<div class="mt-3 flex flex-wrap items-start justify-between gap-3" role="status">
-					<div class="min-w-0 flex-1 text-sm">
-						<p class="font-medium text-status-warning-muted-foreground">
-							{m.chat_queue_needs_attention()}
-						</p>
-						<p class="mt-1 text-muted-foreground">
-							{m.chat_queue_recovered_input_continuation_detail()}
-						</p>
-					</div>
-					<button
-						type="button"
-						onclick={() => void continueQueue()}
-						disabled={continuing}
-						class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-					>
-						{#if continuing}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Play class="h-4 w-4" />
-						{/if}
-						{m.chat_queue_continue()}
-					</button>
-				</div>
-			{/if}
 			{#if pause}
 				<div class="mt-3 flex flex-wrap items-start justify-between gap-3" role="status">
 					<div class="min-w-0 flex-1 text-sm">

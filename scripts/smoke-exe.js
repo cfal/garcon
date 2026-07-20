@@ -189,15 +189,9 @@ async function run() {
   let child = spawnServer();
   try {
     let started = await waitForServerUrl(child);
-    const claudeSearchDatabase = path.join(
-      workspaceDir,
-      'agent-data',
-      'claude',
-      'transcript-search',
-      'index.sqlite',
-    );
+    const searchDatabase = path.join(workspaceDir, 'transcript-search', 'index.sqlite');
 
-    if (await Bun.file(claudeSearchDatabase).exists()) {
+    if (await Bun.file(searchDatabase).exists()) {
       throw new Error('Default-off executable unexpectedly created a transcript search database.');
     }
     await stopProcess(child);
@@ -206,7 +200,7 @@ async function run() {
       path.join(workspaceDir, 'project-settings.json'),
       JSON.stringify({ features: { transcriptSearch: { enabled: true } } }),
     );
-    const transcriptPath = path.join(workspaceDir, 'smoke-claude.jsonl');
+    const transcriptPath = path.join(workspaceDir, 'smoke-session.jsonl');
     await writeFile(transcriptPath, `${JSON.stringify({
       sessionId: 'smoke-session',
       uuid: 'smoke-user-message',
@@ -215,12 +209,24 @@ async function run() {
       message: { role: 'user', content: 'embeddedworkertoken' },
     })}\n`);
     await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
-      version: 2,
+      version: 3,
       sessions: {
         [SMOKE_CHAT_ID]: {
           agentId: 'claude',
+          nativeSession: {
+            ownerId: 'claude',
+            schemaVersion: 1,
+            value: {
+              path: transcriptPath,
+              agentSessionId: 'smoke-session',
+            },
+          },
+          agentOwnershipEpoch: 'smoke-ownership-epoch',
+          agentSettingsById: {
+            claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
+          },
+          tags: [],
           agentSessionId: 'smoke-session',
-          nativePath: transcriptPath,
           projectPath: workspaceDir,
           model: 'fable',
         },
@@ -249,8 +255,10 @@ async function run() {
       throw new Error(`Expected GET ${appAssetMatch[0]} to succeed, received ${assetResponse.status}`);
     }
 
-    if (!(await Bun.file(claudeSearchDatabase).exists())) {
-      throw new Error('Enabled executable did not create the Claude transcript search index.');
+    if (!(await Bun.file(searchDatabase).exists())) {
+      throw new Error(
+        `Enabled executable did not create the shared transcript search index. Captured output:\n${started.getOutput()}`,
+      );
     }
 
     await waitForTranscriptResult(

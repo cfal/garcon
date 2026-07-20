@@ -122,10 +122,11 @@ export class AgentCatalogService {
 
   async #snapshot(agentId: string, query: AgentModelQuery) {
     const integration = this.deps.directory.require(agentId);
+    const signal = new AbortController().signal;
     try {
       const snapshot = await integration.catalog.snapshot({
         strict: query.strict ?? false,
-        signal: new AbortController().signal,
+        signal,
       });
       this.#requiresStrictByAgent.set(
         agentId,
@@ -133,11 +134,13 @@ export class AgentCatalogService {
       );
       return snapshot;
     } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof Error && error.name === 'AbortError') throw error;
       if (query.strict) throw error;
-      logger.warn(
-        `agents: failed to fetch ${agentId} catalog:`,
-        error instanceof Error ? error.message : String(error),
-      );
+      logger.warn('Agent catalog snapshot failed.', {
+        code: 'CATALOG_SNAPSHOT_FAILED',
+        integrationId: agentId,
+      });
       return {
         models: [] as AgentModelOption[],
         defaultModel: "",

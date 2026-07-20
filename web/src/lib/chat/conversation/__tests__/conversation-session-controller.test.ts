@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	createQueuedInput,
-	continueRecoveredInput,
 	deleteQueuedInput,
 	forkChat,
 	forkRunChat,
@@ -39,7 +38,6 @@ import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
-	continueRecoveredInput: vi.fn(),
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
@@ -64,7 +62,6 @@ vi.mock('$lib/api/scheduled-prompts.js', () => ({
 
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
-const mockContinueRecoveredInput = vi.mocked(continueRecoveredInput);
 const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
 const mockInterruptAndSendChat = vi.mocked(interruptAndSendChat);
 const mockPauseChatQueue = vi.mocked(pauseChatQueue);
@@ -132,7 +129,6 @@ function emptyControl(): ChatExecutionControlState {
 			recentlyDispatched: [],
 			pause: null,
 		},
-		recoveredInputContinuation: null,
 		version: 0,
 		updatedAt: null,
 	};
@@ -380,7 +376,6 @@ describe('ConversationSessionController', () => {
 	beforeEach(() => {
 		mockForkChat.mockReset();
 		mockForkRunChat.mockReset();
-		mockContinueRecoveredInput.mockReset();
 		mockGetChatExecutionControl.mockReset();
 		mockInterruptAndSendChat.mockReset();
 		mockPauseChatQueue.mockReset();
@@ -707,7 +702,6 @@ describe('ConversationSessionController', () => {
 					pausedAt: '2026-07-17T00:00:00.000Z',
 				},
 			},
-			recoveredInputContinuation: null,
 			version: 2,
 			updatedAt: '2026-07-17T00:00:00.000Z',
 		};
@@ -1528,44 +1522,6 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
-	it('sends directly through an empty recovered-input continuation boundary', async () => {
-		const chat = createRunningChat({ isProcessing: false, status: 'running' });
-		const { deps } = createDeps(chat);
-		deps.composerState.inputText = 'continue with a successor';
-		const recoveredControl = controlWithQueue(
-			{},
-			{
-				recoveredInputContinuation: {
-					id: 'db66b8f9-38e2-4cd4-bbf8-9f409c8b9a96',
-					installedAt: '2026-07-18T00:00:00.000Z',
-				},
-				version: 1,
-				updatedAt: '2026-07-18T00:00:00.000Z',
-			},
-		);
-		deps.conversationUi.getExecutionControl.mockReturnValue(recoveredControl);
-		mockRunChat.mockResolvedValueOnce({
-			success: true,
-			commandType: 'agent-run',
-			clientRequestId: 'req-successor',
-			chatId: 'chat-1',
-			status: 'accepted',
-			acceptedAt: '2026-07-18T00:00:01.000Z',
-			turnId: 'turn-successor',
-		});
-
-		await new ConversationSessionController(deps).submitForChat('chat-1');
-
-		expect(mockRunChat).toHaveBeenCalledWith(
-			expect.objectContaining({
-				chatId: 'chat-1',
-				command: 'continue with a successor',
-			}),
-		);
-		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
-		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
-	});
-
 	it('creates a distinct entry when an idle chat already has queued input', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
@@ -2048,43 +2004,6 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
-	it('continues recovered input by exact ID and applies the authoritative control', async () => {
-		const { deps } = createDeps();
-		const continuedControl = controlWithQueue(
-			{
-				entries: [
-					{
-						id: 'entry-1',
-						content: 'next',
-						revision: 1,
-						createdAt: '2026-07-18T00:00:00.000Z',
-						updatedAt: '2026-07-18T00:00:00.000Z',
-					},
-				],
-			},
-			{ version: 5 },
-		);
-		mockContinueRecoveredInput.mockResolvedValueOnce({
-			success: true,
-			chatId: 'chat-1',
-			control: continuedControl,
-		});
-
-		await new ConversationSessionController(deps).continueRecoveredInputForChat(
-			'chat-1',
-			'88776c02-82f3-45bd-8b26-af0918e143b6',
-		);
-
-		expect(mockContinueRecoveredInput).toHaveBeenCalledWith(
-			'chat-1',
-			'88776c02-82f3-45bd-8b26-af0918e143b6',
-		);
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith(
-			'chat-1',
-			continuedControl,
-		);
-	});
-
 	it('applies the latest queue snapshot before rethrowing a pause conflict', async () => {
 		const { deps } = createDeps();
 		const latestControl: ChatExecutionControlState = controlWithQueue(
@@ -2142,48 +2061,6 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			content: 'Focus on the failing contract test',
 		});
-	});
-
-	it('queues Codex steer behind recovered-input continuation', async () => {
-		const chat = createRunningChat({
-			agentId: 'codex',
-			model: 'gpt-5.5',
-			isProcessing: true,
-		});
-		const { deps } = createDeps(chat);
-		deps.composerState.inputText = '/steer Wait behind the uncertain input';
-		const recoveredControl: ChatExecutionControlState = controlWithQueue(
-			{},
-			{
-				recoveredInputContinuation: {
-					id: '699b711d-e4d6-41bd-905f-093ee902dd38',
-					installedAt: '2026-07-18T00:00:00.000Z',
-				},
-				version: 1,
-				updatedAt: '2026-07-18T00:00:00.000Z',
-			},
-		);
-		deps.conversationUi.getExecutionControl.mockReturnValue(recoveredControl);
-		mockCreateQueuedInput.mockResolvedValueOnce({
-			success: true,
-			commandType: 'queue-entry-create',
-			clientRequestId: 'req-steer-queued',
-			chatId: 'chat-1',
-			status: 'accepted',
-			acceptedAt: '2026-07-18T00:00:01.000Z',
-			entryId: 'entry-steer',
-			control: recoveredControl,
-		});
-
-		await new ConversationSessionController(deps).submitForChat('chat-1');
-
-		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
-			expect.objectContaining({
-				chatId: 'chat-1',
-				content: 'Wait behind the uncertain input',
-			}),
-		);
-		expect(mockSendActiveInput).not.toHaveBeenCalled();
 	});
 
 	it('rejects steer without guidance or an active Codex turn', async () => {

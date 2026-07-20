@@ -30,16 +30,10 @@ const integration = {
     load: async () => ({ messages: [], revision: 'empty' }),
     preview: async () => null,
     revision: async () => 'empty',
+    resolveIndexSource: async () => null,
+    refreshIndexSource: async () => null,
+    describeSource: async () => null,
     release: async () => {},
-  },
-  transcriptSearch: {
-    reconcile: async () => {},
-    search: async () => ({
-      hits: [],
-      index: { indexedChatCount: 0, pendingChatCount: 0, failedChatCount: 0, unsupportedChatCount: 0 },
-    }),
-    status: async () => ({ indexedChatCount: 0, pendingChatCount: 0, failedChatCount: 0, unsupportedChatCount: 0 }),
-    disableAndDelete: async () => {},
   },
   catalog: {
     snapshot: async () => ({
@@ -70,7 +64,10 @@ const integration = {
 
 describe('validateAgentIntegration', () => {
   test('rejects a descriptor and class ID mismatch', () => {
-    const integrationClass = { integrationId: 'fake', apiVersion: 1 as const };
+    const integrationClass = {
+      integrationId: 'fake', apiVersion: 2 as const,
+      transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
+    };
     expect(() => validateAgentIntegration({
       integrationClass,
       integration,
@@ -78,7 +75,10 @@ describe('validateAgentIntegration', () => {
   });
 
   test('rejects duplicate descriptor values', () => {
-    const integrationClass = { integrationId: 'other', apiVersion: 1 as const };
+    const integrationClass = {
+      integrationId: 'other', apiVersion: 2 as const,
+      transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
+    };
     expect(() => validateAgentIntegration({
       integrationClass,
       integration: {

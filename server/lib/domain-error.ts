@@ -1,9 +1,11 @@
+import type { ErrorCode } from '../../common/error-codes.ts';
+
 export class DomainError extends Error {
-  readonly code: string;
+  readonly code: ErrorCode;
   readonly status: number;
   readonly retryable: boolean;
 
-  constructor(code: string, message: string, status = 400, retryable = false, options?: ErrorOptions) {
+  constructor(code: ErrorCode, message: string, status = 400, retryable = false, options?: ErrorOptions) {
     super(message, options);
     this.name = 'DomainError';
     this.code = code;

@@ -32,9 +32,16 @@ export async function loadDirectCompatibleChatMessages(
 ): Promise<ChatMessage[]> {
   if (!sessionId || !config.isValidSessionId(sessionId)) return [];
 
+  return loadDirectCompatibleChatMessagesFromPath(config.getSessionFilePath(sessionId));
+}
+
+export async function loadDirectCompatibleChatMessagesFromPath(
+  nativePath: string,
+): Promise<ChatMessage[]> {
+
   let raw = '';
   try {
-    raw = await fs.readFile(config.getSessionFilePath(sessionId), 'utf8');
+    raw = await fs.readFile(nativePath, 'utf8');
   } catch {
     return [];
   }

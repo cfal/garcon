@@ -11,13 +11,12 @@ import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/ses
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
-} from '../chat-execution-control-state.ts';
+} from './control-state.ts';
 import { DomainError } from '../lib/domain-error.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.ts';
 import type {
   QueueCommandIdentity,
-  ReceiptRetention,
   TransitionContext,
   TransitionRejection,
 } from './chat-execution-control-transitions.ts';
@@ -53,36 +52,6 @@ export class QueuePauseChangedError extends DomainError {
   }
 }
 
-export class RecoveredInputContinuationChangedError extends DomainError {
-  readonly control: StoredChatExecutionControlState;
-
-  constructor(control: StoredChatExecutionControlState) {
-    super(
-      'RECOVERED_INPUT_CONTINUATION_CHANGED',
-      'The recovered-input continuation changed before it could be applied',
-      409,
-      true,
-    );
-    this.name = 'RecoveredInputContinuationChangedError';
-    this.control = cloneStoredChatExecutionControl(control);
-  }
-}
-
-export class RecoveredInputContinuationRequiresQueueError extends DomainError {
-  readonly control: StoredChatExecutionControlState;
-
-  constructor(control: StoredChatExecutionControlState) {
-    super(
-      'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE',
-      'Continue queue requires at least one queued message',
-      409,
-      true,
-    );
-    this.name = 'RecoveredInputContinuationRequiresQueueError';
-    this.control = cloneStoredChatExecutionControl(control);
-  }
-}
-
 export interface QueueCommandMutationResult {
   entryId: string;
   control: StoredChatExecutionControlState;
@@ -104,7 +73,6 @@ export interface AcceptedExecutionCommand {
 
 export interface PreScheduleFailure {
   error: unknown;
-  pendingInputRecovery: boolean;
   retryable: boolean;
   preserveForkPreparation?: boolean;
 }
@@ -113,7 +81,6 @@ export interface CommandSettlementPort {
   markScheduled(
     command: AcceptedExecutionCommand,
     turnId: string,
-    requiresInputRecovery: boolean,
   ): Promise<void>;
   markPreScheduleFailure(
     command: AcceptedExecutionCommand,
@@ -128,7 +95,6 @@ export interface CommandSettlementPort {
     deliveryAccepted: boolean,
   ): Promise<void>;
   settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void>;
-  listUnsettledQueueReceiptKeys(chatId: string): Promise<ReadonlySet<string>>;
 }
 
 export interface DirectInputPreparation {
@@ -142,7 +108,6 @@ export interface AcceptedDirectInput {
   content: string;
   options: RunAgentTurnOptions;
   settlement: CommandSettlementPort;
-  continueRecoveredInput?: boolean;
   preparation?: DirectInputPreparation;
   dispatch?: (admission: AgentExecutionAdmission) => Promise<void>;
 }
@@ -270,7 +235,8 @@ export interface SessionStopInFlight {
 
 export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
 
-export interface ChatExecutionService {
+// Accepted-command surface consumed by the command service and route handlers.
+export interface ChatExecutionCommands {
   deleteChatQueueFile(chatId: string): Promise<void>;
   scheduleDirectInput(input: AcceptedDirectInput): Promise<void>;
   runInitialInput(input: AcceptedDirectInput): Promise<void>;
@@ -280,27 +246,21 @@ export interface ChatExecutionService {
   deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult>;
   deliverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
   recoverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
-  registerPendingUserInput(
-    chatId: string,
-    command: string,
-    options: PendingUserInputRegistrationOptions,
-  ): Promise<void>;
-  reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
-  assertDirectTurnReservationActive(reservation: DirectTurnReservation): void;
-  consumeRecoveredInputContinuationForDirectTurn(
-    reservation: DirectTurnReservation,
-  ): Promise<StoredChatExecutionControlState>;
-  releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;
-  completeDirectTurn(reservation: DirectTurnReservation): Promise<void>;
-  failDirectTurn(reservation: DirectTurnReservation): Promise<void>;
-  runReservedTurn(
-    reservation: DirectTurnReservation,
-    command: string,
-    options: RunAgentTurnOptions,
-  ): Promise<void>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<boolean>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
+  waitForDispatches(): Promise<void>;
+  isChatExecutionReserved(chatId: string): boolean;
+  hasChatExecutionOwner(chatId: string): boolean;
+  readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
+  clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
+  pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
+  resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
+  resumeAndDrain(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
+}
+
+// Shutdown and recovery surface consumed by the server lifecycle.
+export interface ChatExecutionLifecycle {
   beginShutdown(): string[];
   abortForShutdown(chatId: string): Promise<boolean>;
   waitForExecutionOwners(): Promise<void>;
@@ -309,17 +269,39 @@ export interface ChatExecutionService {
     chatId: string,
     turnId: string | undefined,
   ): Promise<QueuedTurnFinalizationOutcome> | null;
-  isChatDraining(chatId: string): boolean;
-  isChatExecutionReserved(chatId: string): boolean;
-  hasChatExecutionOwner(chatId: string): boolean;
-  triggerDrain(chatId: string): Promise<void>;
+}
+
+// Read-only surface consumed by WebSocket and route handlers.
+export interface ChatExecutionQueries {
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
+  isChatDraining(chatId: string): boolean;
+}
+
+// Full composition-root surface: the facets plus the direct-turn and low-level
+// queue operations that no external consumer needs through a facet.
+export interface ChatExecutionService
+  extends ChatExecutionCommands, ChatExecutionLifecycle, ChatExecutionQueries {
+  registerPendingUserInput(
+    chatId: string,
+    command: string,
+    options: PendingUserInputRegistrationOptions,
+  ): Promise<void>;
+  reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
+  assertDirectTurnReservationActive(reservation: DirectTurnReservation): void;
+  releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;
+  completeDirectTurn(reservation: DirectTurnReservation): Promise<void>;
+  failDirectTurn(reservation: DirectTurnReservation): Promise<void>;
+  runReservedTurn(
+    reservation: DirectTurnReservation,
+    command: string,
+    options: RunAgentTurnOptions,
+  ): Promise<void>;
+  triggerDrain(chatId: string): Promise<void>;
   hasAppliedQueueCreateCommand(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
   createChatQueueEntry(
     chatId: string,
     content: string,
     command?: QueueCommandIdentity,
-    receipts?: ReceiptRetention,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }>;
   replaceChatQueueEntry(
     chatId: string,
@@ -327,13 +309,11 @@ export interface ChatExecutionService {
     content: string,
     expectedRevision: number,
     command?: QueueCommandIdentity,
-    receipts?: ReceiptRetention,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }>;
   deleteChatQueueEntry(
     chatId: string,
     entryId: string,
     command?: QueueCommandIdentity,
-    receipts?: ReceiptRetention,
   ): Promise<QueueCommandMutationResult>;
   deliverActiveInput(
     chatId: string,
@@ -341,15 +321,6 @@ export interface ChatExecutionService {
     options?: RunAgentTurnOptions,
     afterPendingRegistered?: () => Promise<void>,
   ): Promise<boolean>;
-  clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
-  pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
-  resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
-  resumeAndDrain(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
-  continuePastRecoveredInput(
-    chatId: string,
-    continuationId: string,
-  ): Promise<StoredChatExecutionControlState>;
-  dropRecoveredInputContinuation(chatId: string): Promise<StoredChatExecutionControlState>;
   requeueAndPauseChat(
     chatId: string,
     entryId: string,
@@ -357,10 +328,14 @@ export interface ChatExecutionService {
   ): Promise<StoredChatExecutionControlState>;
 }
 
-export const EMPTY_RECEIPT_RETENTION: ReceiptRetention = { protectedKeys: new Set() };
-
-export function transitionContext(): TransitionContext {
-  return { now: new Date().toISOString(), newId: () => crypto.randomUUID() };
+export function transitionContext(
+  unsettledQueueReceiptKeys: () => ReadonlySet<string> = () => new Set(),
+): TransitionContext {
+  return {
+    now: new Date().toISOString(),
+    newId: () => crypto.randomUUID(),
+    unsettledQueueReceiptKeys,
+  };
 }
 
 export function executionTurnIdentity(turn: TurnIdentity): TurnIdentity | undefined {
@@ -396,9 +371,5 @@ export function transitionError(
       );
     case 'QUEUE_PAUSE_CHANGED':
       return new QueuePauseChangedError(control);
-    case 'RECOVERED_INPUT_CONTINUATION_CHANGED':
-      return new RecoveredInputContinuationChangedError(control);
-    case 'RECOVERED_INPUT_CONTINUATION_REQUIRES_QUEUE':
-      return new RecoveredInputContinuationRequiresQueueError(control);
   }
 }

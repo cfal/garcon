@@ -146,10 +146,7 @@
 		ws,
 		chatState,
 		conversationUi,
-		getSelectedChatId: () => sessions.selectedChatId,
-		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
-		invalidateProcessingAuthority: () => sessions.invalidateProcessingAuthority(),
-		quietRefreshChats: () => sessions.quietRefreshChats(),
+		sessions,
 		getBackgroundCursors: () => transcriptCache.listCursors(20),
 		getVisibleChatIds: () => getVisibleChatIds?.() ?? [],
 		getVisibleChatCursor: (chatId) => getVisiblePreviewCursor?.(chatId) ?? null,
@@ -631,17 +628,10 @@
 			<QueueControls
 				chatId={sessions.selectedChatId}
 				queue={activeQueue}
-				continuation={activeControl?.recoveredInputContinuation ?? null}
 				canInterrupt={canInterruptSelectedChat}
 				onInterrupt={() => controller.handleInterruptAndSend()}
 				onPause={() => controller.handleQueuePause()}
 				onResume={(pauseId) => controller.handleQueueResume(pauseId)}
-				onContinue={(continuationId) => {
-					const chatId = sessions.selectedChatId;
-					return chatId
-						? controller.continueRecoveredInputForChat(chatId, continuationId)
-						: Promise.resolve();
-				}}
 				onQueueControlError={(action, error) => controller.handleQueueControlError(action, error)}
 				onEdit={editQueuedInput}
 				onOpenManager={openQueuedInputsManager}
@@ -671,7 +661,6 @@
 		<QueuedInputsDialog
 			open={true}
 			queue={dialogQueue}
-			continuation={dialogControl?.recoveredInputContinuation ?? null}
 			editor={queuedInputEditor}
 			onClose={closeQueuedInputsDialog}
 			onCreate={async (content) => {
@@ -698,10 +687,6 @@
 			onResume={async (pauseId) => {
 				if (!queuedInputsDialogChatId) return;
 				await controller.resumeQueueForChat(queuedInputsDialogChatId, pauseId);
-			}}
-			onContinue={async (continuationId) => {
-				if (!queuedInputsDialogChatId) return;
-				await controller.continueRecoveredInputForChat(queuedInputsDialogChatId, continuationId);
 			}}
 		/>
 	{/if}

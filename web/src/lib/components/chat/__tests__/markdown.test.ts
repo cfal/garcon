@@ -1,7 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen } from '@testing-library/svelte';
 import { fireEvent } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { describe, it, expect, vi } from 'vitest';
 import Markdown from '../Markdown.svelte';
+import { whenMathRendererReady } from '../katex-loader';
 
 describe('Markdown', () => {
 	it('renders inline code with assistant variant styling', () => {
@@ -103,9 +105,10 @@ describe('Markdown', () => {
 				source: 'Dollar $x^2$ and parenthesis \\(y^2\\).',
 			});
 
-			await waitFor(() => {
-				expect(container.querySelectorAll('.katex')).toHaveLength(2);
-			});
+			await tick();
+			await whenMathRendererReady();
+			await tick();
+			expect(container.querySelectorAll('.katex')).toHaveLength(2);
 			expect(container.querySelectorAll('.katex-mathml')).toHaveLength(2);
 			expect(container.querySelector('.katex-display')).toBeNull();
 		});
@@ -117,9 +120,10 @@ describe('Markdown', () => {
 		])('renders %s in display mode', async (_name, source) => {
 			const { container } = render(Markdown, { source });
 
-			await waitFor(() => {
-				expect(container.querySelector('.katex-display')).toBeTruthy();
-			});
+			await tick();
+			await whenMathRendererReady();
+			await tick();
+			expect(container.querySelector('.katex-display')).toBeTruthy();
 			expect(container.querySelector('.markdown-math')?.getAttribute('data-display')).toBe('true');
 		});
 
@@ -154,9 +158,10 @@ describe('Markdown', () => {
 			expect(view.container.textContent).toContain('Result: $x');
 
 			await view.rerender({ source: 'Result: $x^2$' });
-			await waitFor(() => {
-				expect(view.container.querySelector('.katex')).toBeTruthy();
-			});
+			await tick();
+			await whenMathRendererReady();
+			await tick();
+			expect(view.container.querySelector('.katex')).toBeTruthy();
 		});
 	});
 

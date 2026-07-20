@@ -2,7 +2,7 @@ export * from './contracts/execution.js';
 export * from './contracts/host.js';
 export * from './contracts/integration.js';
 export * from './contracts/services.js';
-export * from './contracts/transcript-search.js';
+export * from './contracts/transcript-index.js';
 export * from './contracts/transcript.js';
 export * from './errors.js';
 export * from './native-message-source.js';

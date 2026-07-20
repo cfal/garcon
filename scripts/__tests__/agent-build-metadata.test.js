@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { collectAgentBuildContributions } from '../agent-build-metadata.js';
+import { defaultAgentIntegrations } from '../../server/agents/default-agent-integrations.js';
 
 const temporaryDirectories = [];
 
@@ -36,9 +37,9 @@ async function createFixture(options = {}) {
     exports: './src/index.ts',
     dependencies: options.declareSdk === false ? {} : { 'fixture-sdk': '1.0.0' },
     garconBuild: options.garconBuild ?? {
-      apiVersion: 1,
+      apiVersion: 2,
       integrationId: 'fixture',
-      standaloneEntrypoints: ['./src/worker.ts'],
+      standaloneEntrypoints: { 'transcript-index-source': './src/worker.ts' },
       preMainModules: ['./src/prepare.ts'],
       embeddedDependencyMetadata: ['fixture-sdk/package.json'],
     },
@@ -55,7 +56,9 @@ async function createFixture(options = {}) {
 describe('collectAgentBuildContributions', () => {
   test('resolves every contribution declared by the repository packages', async () => {
     const contributions = await collectAgentBuildContributions();
-    expect(contributions.length).toBeGreaterThan(0);
+    expect(contributions.map((entry) => entry.integrationId).sort()).toEqual(
+      defaultAgentIntegrations.map((entry) => entry.integrationId).sort(),
+    );
   });
 
   test('resolves validated package-owned contributions', async () => {
@@ -66,9 +69,9 @@ describe('collectAgentBuildContributions', () => {
     });
     expect(contribution.integrationId).toBe('fixture');
     expect(contribution.packageRoot).toBe(fixture.packageDir);
-    expect(contribution.standaloneEntrypoints).toEqual([
-      path.join(fixture.packageDir, 'src', 'worker.ts'),
-    ]);
+    expect(contribution.standaloneEntrypoints).toEqual({
+      'transcript-index-source': path.join(fixture.packageDir, 'src', 'worker.ts'),
+    });
     expect(contribution.preMainModules).toEqual([
       path.join(fixture.packageDir, 'src', 'prepare.ts'),
     ]);
@@ -76,7 +79,7 @@ describe('collectAgentBuildContributions', () => {
       path.join(fixture.root, 'dependencies', 'fixture-sdk', 'package.json'),
     ]);
     const result = await Bun.build({
-      entrypoints: contribution.standaloneEntrypoints,
+      entrypoints: Object.values(contribution.standaloneEntrypoints),
       target: 'bun',
       format: 'esm',
     });
@@ -94,9 +97,9 @@ describe('collectAgentBuildContributions', () => {
   test('rejects a contribution that resolves outside its package', async () => {
     const fixture = await createFixture({
       garconBuild: {
-        apiVersion: 1,
+        apiVersion: 2,
         integrationId: 'fixture',
-        standaloneEntrypoints: ['./src/escaped.ts'],
+        standaloneEntrypoints: { 'transcript-index-source': './src/escaped.ts' },
         preMainModules: [],
         embeddedDependencyMetadata: [],
       },

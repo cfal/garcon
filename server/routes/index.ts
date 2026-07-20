@@ -22,7 +22,6 @@ import type { MetadataIndex } from '../chats/metadata-store.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
-import type { PendingUserInputRecoveryCoordinator } from '../chats/pending-user-input-recovery.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
 import type { IShareStore } from '../chats/share-store.js';
@@ -47,7 +46,6 @@ export default function createAllRoutes({
   chatViews,
   agents,
   pendingInputs,
-  pendingInputRecovery,
   telegramNotifier,
   telegramSettings,
   shareStore,
@@ -71,7 +69,6 @@ export default function createAllRoutes({
   chatViews: ChatViewPageReader;
   agents: AgentRegistry;
   pendingInputs: PendingUserInputServiceContract;
-  pendingInputRecovery: PendingUserInputRecoveryCoordinator;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
   shareStore: IShareStore;
@@ -101,7 +98,6 @@ export default function createAllRoutes({
       chatViews,
       agents,
       pendingInputs,
-      pendingInputRecovery,
       commandService: chatCommands,
       chatListProjector,
       agentSwitch,

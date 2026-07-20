@@ -15,12 +15,10 @@ export class ChatCommandSettlement implements CommandSettlementPort {
   async markScheduled(
     command: AcceptedExecutionCommand,
     turnId: string,
-    requiresInputRecovery: boolean,
   ): Promise<void> {
     await this.ledger.update(command.key, {
       status: 'scheduled',
       turnId,
-      ...(requiresInputRecovery ? { pendingInputRecovery: 'required' as const } : {}),
       forkPreparation: undefined,
     });
   }
@@ -33,7 +31,6 @@ export class ChatCommandSettlement implements CommandSettlementPort {
       status: 'failed' as const,
       error: failure.error instanceof Error ? failure.error.message : String(failure.error),
       errorCode: failure.retryable ? PRE_SCHEDULE_FAILURE_ERROR_CODE : undefined,
-      ...(failure.pendingInputRecovery ? { pendingInputRecovery: 'required' as const } : {}),
       ...(failure.preserveForkPreparation ? {} : { forkPreparation: undefined }),
     };
     await this.ledger.update(command.key, patch);
@@ -65,12 +62,11 @@ export class ChatCommandSettlement implements CommandSettlementPort {
     deliveryAccepted: boolean,
   ): Promise<void> {
     await this.ledger.update(command.key, {
-      status: 'failed',
+      status: deliveryAccepted ? 'accepted' : 'failed',
       error: error instanceof Error ? error.message : String(error),
       errorCode: deliveryAccepted
         ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
         : PRE_SCHEDULE_FAILURE_ERROR_CODE,
-      ...(deliveryAccepted ? { pendingInputRecovery: 'required' as const } : {}),
     });
   }
 
@@ -80,7 +76,4 @@ export class ChatCommandSettlement implements CommandSettlementPort {
     });
   }
 
-  listUnsettledQueueReceiptKeys(chatId: string): Promise<ReadonlySet<string>> {
-    return this.ledger.listRetainedQueueReceiptKeys(chatId);
-  }
 }

@@ -14,7 +14,7 @@ import {
   webSocketUpgradeHeaders,
 } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
-import { forkChatFileCopy, rollbackForkTarget } from './chats/fork-chat.js';
+import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireServerEvents } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
@@ -45,7 +45,6 @@ import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   ChatCarryOverStore,
   renderCarriedTranscript,
@@ -78,6 +77,7 @@ import {
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
@@ -96,6 +96,10 @@ import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
+import {
+  cleanupLegacyQueueState,
+  WorkspaceMigrationRunner,
+} from './migrations/index.js';
 import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
@@ -129,15 +133,16 @@ export async function startServer(): Promise<void> {
       },
     });
     const workspaceDir = workspaceLease.workspaceDir;
-    const chatIdMigration = await migrateWorkspaceChatIds(workspaceDir);
-    const migratedChatIdCount = Object.keys(
-      chatIdMigration.migratedChatIds,
-    ).length;
-    if (migratedChatIdCount > 0) {
-      logger.info(
-        `migrated ${migratedChatIdCount} legacy chat ID(s) across ${chatIdMigration.changedFiles.length} persisted file(s)`,
-      );
-    }
+    const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
+    await workspaceMigrations.run('chat-id-migration', async () => {
+      const result = await migrateWorkspaceChatIds(workspaceDir);
+      const migratedChatIdCount = Object.keys(result.migratedChatIds).length;
+      if (migratedChatIdCount > 0) {
+        logger.info(
+          `migrated ${migratedChatIdCount} legacy chat ID(s) across ${result.changedFiles.length} persisted file(s)`,
+        );
+      }
+    });
 
     // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
@@ -194,7 +199,9 @@ export async function startServer(): Promise<void> {
       () => apiProviderStore.list(),
       (agentId) => integrationRegistry.get(agentId)?.descriptor.supportedEndpointProtocols ?? [],
     );
-    await migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry });
+    await workspaceMigrations.run('core-record-migration', () => (
+      migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry })
+    ));
     await chatRegistry.init();
     await settings.init();
     carryOver.bindRegistry(chatRegistry);
@@ -205,7 +212,16 @@ export async function startServer(): Promise<void> {
       carryOver,
       integrations: integrationRegistry,
     });
-    await agentOwnership.initialize();
+    let ownershipInitialized = false;
+    await workspaceMigrations.run('ephemeral-queue-state-cleanup', () => cleanupLegacyQueueState({
+      workspaceDir,
+      async settleOwnershipIntents() {
+        await agentOwnership.initialize();
+        ownershipInitialized = true;
+      },
+    }));
+    if (!ownershipInitialized) await agentOwnership.initialize();
+    await workspaceMigrations.finish();
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
       isApiProviderReferenced(apiProviderId) {
@@ -287,8 +303,14 @@ export async function startServer(): Promise<void> {
       { loadNativeMessages },
       chatExecutionActivity.isActive,
     );
+    const transcriptSearchService = new TranscriptSearchService({
+      workspaceDirectory: workspaceDir,
+      logger,
+      openCarryOverStream: (request) => carryOver.openSearchStream(request),
+    });
     const chatSearch = new TranscriptSearchController({
       integrations: integrationRegistry,
+      service: transcriptSearchService,
       listChats: () => Object.entries(chatRegistry.listAllChats()).flatMap(([chatId, session]) => {
         const integration = integrationRegistry.get(session.agentId);
         if (!integration) return [];
@@ -304,9 +326,16 @@ export async function startServer(): Promise<void> {
         }];
       }),
     });
-    await chatSearch.initialize(
-      settings.getFeatureSettings().transcriptSearch.enabled,
-    );
+    try {
+      await chatSearch.initialize(
+        settings.getFeatureSettings().transcriptSearch.enabled,
+      );
+    } catch (error) {
+      logger.warn('Transcript search admission failed; server startup will continue.', {
+        code: 'SEARCH_INDEX_ADMISSION_FAILED',
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
     const transcriptSearchSettings = new TranscriptSearchSettingsCoordinator(
       settings,
       chatSearch,
@@ -370,6 +399,7 @@ export async function startServer(): Promise<void> {
     const shareStore = new ShareStore(workspaceDir);
     await shareStore.init();
 
+    const commandLedger = new CommandLedger(workspaceDir);
     const queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
@@ -377,59 +407,10 @@ export async function startServer(): Promise<void> {
       chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
       (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      undefined,
+      (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
     chatExecutionActivity.attachReservedExecutions(queue);
-    const commandLedger = new CommandLedger(workspaceDir);
-    const interruptedSessionControls = await commandLedger.listRestartInterruptedSessionControls();
-    for (const record of interruptedSessionControls) {
-      if (record.commandType === 'agent-stop' && chatRegistry.getChat(record.chatId)) {
-        await queue.pauseChatQueue(record.chatId);
-      }
-      const settled = await commandLedger.settleRestartInterruptedSessionControl(record.key);
-      if (!settled) {
-        throw new Error(`Could not settle interrupted ${record.commandType} for ${record.chatId}`);
-      }
-      logger.warn(`${record.commandType}: recovered interrupted command for ${record.chatId}`);
-    }
-    const forkPreparations = await commandLedger.listForkPreparationsPendingRecovery();
-    for (const record of forkPreparations) {
-      const preparation = record.forkPreparation!;
-      const sourceChatId = preparation.sourceChatId;
-      pendingInputs.clearChat(record.chatId, 'chat-removed');
-      await queue.deleteChatQueueFile(record.chatId).catch(() => undefined);
-      await rollbackForkTarget({
-        sourceChatId,
-        targetChatId: record.chatId,
-        registry: chatRegistry,
-        settings,
-        ownership: agentOwnership,
-        sourceNextForkOrdinal: preparation.sourceNextForkOrdinal,
-      });
-      await commandLedger.settleForkPreparationRecovery(record.key);
-      logger.warn(`fork-run: removed interrupted pre-schedule target ${record.chatId}`);
-    }
-    const pendingRecovery = new PendingUserInputRecoveryCoordinator(
-      {
-        ledger: commandLedger,
-        pendingInputs,
-        nativeSnapshots: chatViewPages,
-        queuedInputHandoffs: queue,
-        chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
-        onRecoveredChatSettled: async (chatId) => {
-          await queue.dropRecoveredInputContinuation(chatId);
-        },
-      },
-      (error) => {
-        logger.warn('pending-inputs: failed to settle durable recovery:', errorMessage(error));
-      },
-    );
-    pendingRecovery.start();
-    const pendingRecoveryResult = await pendingRecovery.restore();
-    if (pendingRecoveryResult.restored > 0 || pendingRecoveryResult.discardedMissingChat > 0) {
-      logger.warn(
-        `pending-inputs: restart recovery restored=${pendingRecoveryResult.restored} missingChats=${pendingRecoveryResult.discardedMissingChat}`,
-      );
-    }
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
@@ -510,7 +491,6 @@ export async function startServer(): Promise<void> {
         chatViews,
         chatNativeReloader: indexedNativeReloader,
         pendingInputs,
-        pendingRecovery,
         commandLedger,
         shareStore,
         telegramNotifier,
@@ -520,10 +500,6 @@ export async function startServer(): Promise<void> {
         loadNativeMessages,
         searchIndex: chatSearch,
       }),
-      recoverControls: () => queue.recoverChatExecutionControls(
-        new Set(pendingRecoveryResult.restoredChatIds),
-      ),
-      activateRecoveredSettlement: () => pendingRecovery.activateRecoveredChatSettlement(),
       startScheduledPrompts: () => scheduledPrompts.start(),
     });
 
@@ -537,7 +513,6 @@ export async function startServer(): Promise<void> {
       chatViews: chatViewPages,
       agents: agentRegistry,
       pendingInputs,
-      pendingInputRecovery: pendingRecovery,
       telegramNotifier,
       telegramSettings,
       shareStore,
@@ -702,7 +677,6 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
-        pendingRecovery.beginShutdown();
         await server.stop(true);
         clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
@@ -727,7 +701,6 @@ export async function startServer(): Promise<void> {
           () => chatCommands.waitForBackgroundTasks(),
           () => queue.waitForExecutionOwners(),
           () => eventWiring.waitForIdle(),
-          () => pendingRecovery.waitForBackgroundTasks(),
         ]);
         if (!backgroundTasks.completed) {
           cleanupFailed = true;
@@ -737,12 +710,12 @@ export async function startServer(): Promise<void> {
           cleanupFailed = true;
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
+        await chatSearch.close();
         await integrationRegistry.stop();
         terminalManager.shutdown();
         await metadata.flush();
         await carryOver.flush();
         await chatRegistry.flush();
-        await chatSearch.close();
       } catch (err) {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));

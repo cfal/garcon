@@ -9,13 +9,13 @@ import {
   type AgentIntegration,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { classifyDirectIntegrationError } from '@garcon/server-agent-common/direct/errors';
 import { DirectExecution } from '@garcon/server-agent-common/direct/execution';
 import { createDirectOpenAiResponsesRuntime } from '@garcon/server-agent-common/direct/router';
 import { createDirectSessionPaths } from '@garcon/server-agent-common/direct/session-paths';
 import {
   createDirectTranscript,
-  directTranscriptReference,
 } from '@garcon/server-agent-common/direct/transcript';
 import { createDirectCompatibleTranscriptSource } from '@garcon/server-agent-common/direct/transcript-source';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
@@ -23,7 +23,6 @@ import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-fo
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 
 const DESCRIPTOR = {
@@ -41,12 +40,19 @@ const DESCRIPTOR = {
 
 export default class DirectOpenAiResponsesCompatibleIntegration implements AgentIntegration {
   static readonly integrationId = DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID;
-  static readonly apiVersion = 1 as const;
+  static readonly apiVersion = 2 as const;
+  static readonly transcriptIndex = {
+    apiVersion: 1,
+    moduleUrl: resolveAgentStandaloneEntrypoint({
+      integrationId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+      name: 'transcript-index-source',
+      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
+    }),
+  } as const;
 
   readonly descriptor = DESCRIPTOR;
   readonly execution;
   readonly transcript;
-  readonly transcriptSearch;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -84,17 +90,13 @@ export default class DirectOpenAiResponsesCompatibleIntegration implements Agent
       descriptors: [],
     });
     this.execution = new DirectExecution(host, runtime, nativeSessions);
-    this.transcript = createDirectTranscript({ reader, nativeSessions });
-    const search = createTranscriptSearch({
-      host,
-      agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-      loadTranscript: async ({ chat, signal }) => {
-        signal.throwIfAborted();
-        return reader.loadMessages(directTranscriptReference(chat, nativeSessions));
-      },
+    this.transcript = createDirectTranscript({
+      ownerId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+      reader,
+      nativeSessions,
     });
-    this.transcriptSearch = search;
     this.catalog = createModelCatalog({
+      logger: host.logger,
       defaultModel: '',
       fallbackModels: [],
       requiresStrictModelDiscovery: false,
@@ -149,7 +151,6 @@ export default class DirectOpenAiResponsesCompatibleIntegration implements Agent
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
         runtime.shutdown();
-        await search.close();
       },
     });
   }

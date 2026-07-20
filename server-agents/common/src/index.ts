@@ -1,1 +1,1 @@
-export * from './search/transcript-search.js';
+export * from './search/transcript-search-service.js';

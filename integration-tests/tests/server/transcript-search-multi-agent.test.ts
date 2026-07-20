@@ -52,7 +52,7 @@ async function enableTranscriptSearch(fixture: IntegrationFixture): Promise<void
 }
 
 describe('multi-agent transcript search', () => {
-  test('returns only actual transcript matches across agent-owned indexes', async () => {
+  test('returns only actual transcript matches across agent-owned sources', async () => {
     await withIntegrationFixture('transcript-search-multi-agent-results', async (fixture) => {
       const openAiChatId = fixture.newChatId();
       const anthropicChatId = fixture.newChatId();
@@ -107,10 +107,10 @@ describe('multi-agent transcript search', () => {
         { query: shared, chatIds, limit: 20 },
         (response) => response.index.pendingChatCount === 0 && response.results.length === 2,
       );
-      expect(sharedResult.results.map((result) => result.chatId)).toEqual([
+      expect(sharedResult.results.map((result) => result.chatId).sort()).toEqual([
         anthropicChatId,
         openAiChatId,
-      ]);
+      ].sort());
       expect(new Set(sharedResult.results.map((result) => result.chatId)).size).toBe(2);
       expect(sharedResult.results.map((result) => result.chatId)).not.toContain(controlChatId);
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(6);

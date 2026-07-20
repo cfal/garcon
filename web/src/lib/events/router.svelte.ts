@@ -27,18 +27,16 @@ import {
 } from '$shared/ws-events';
 import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
-import type { UserMessageDeliveryStatus } from '$shared/chat-types';
-import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
-import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { ChatSessionRouterView } from '$lib/types/chat-session';
+import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import {
 	clearPendingChatId,
 	getPendingChatId,
 	setPendingChatId,
 } from '$lib/chat/conversation/pending-chat-handoff.js';
-import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
 
 import { untrack } from 'svelte';
 import { normalizeEvent } from '$lib/ws/normalize';
@@ -76,26 +74,33 @@ export interface EventRouterAgentSettings {
 	setPermissionMode: (mode: PermissionMode) => void;
 }
 
-export interface EventRouterSessionsStore {
-	selectedChat: () => ChatSessionRouterView | null;
-	setSelectedChatId: (chatId: string | null) => void;
-	patchChatPreview: (chatId: string, content: string, timestamp?: string) => void;
-	refreshChats: () => void;
+export type EventRouterSessionsStore = Pick<
+	ChatSessionsPort,
+	| 'selectedChat'
+	| 'setSelectedChatId'
+	| 'patchPreview'
+	| 'quietRefreshChats'
+	| 'removeChat'
+	| 'patchChat'
+	| 'reconcileProcessing'
+	| 'applyProcessingEvent'
+	| 'patchLastReadAt'
+>;
+
+export interface EventRouterNavigation {
 	navigateToChat: (chatId: string) => void;
-	removeChat: (chatId: string) => void;
-	patchChatTitle: (chatId: string, title: string) => void;
-	patchChatProjectPath: (
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	) => void;
 	navigateAwayFromChat: (chatId: string) => void;
-	reconcileProcessing: (runningChatIds: Set<string>) => void;
-	setChatProcessing: (chatId: string, isProcessing: boolean) => void;
-	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 }
 
-export interface EventRouterChatStateStore {
-	getCursor: () => { generationId: string; lastSeq: number };
+export type EventRouterChatStateStore = Pick<
+	ActiveTranscriptPort,
+	| 'getCursor'
+	| 'appendLocalNotice'
+	| 'upsertPendingUserInput'
+	| 'clearPendingUserInput'
+	| 'updatePendingUserInputDeliveryStatus'
+	| 'loadMessages'
+> & {
 	applyChatMessages: (
 		chatId: string,
 		generationId: string,
@@ -115,18 +120,10 @@ export interface EventRouterChatStateStore {
 	) => boolean | void;
 	loadVisibleChatPreview: (chatId: string) => Promise<void> | void;
 	markVisibleChatPreviewStale: (chatId: string) => void;
-	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
-	upsertPendingUserInput: (input: PendingUserInput) => void;
-	clearPendingUserInput: (clientRequestId: string) => void;
-	updatePendingUserInputDeliveryStatus: (
-		clientRequestId: string,
-		deliveryStatus: UserMessageDeliveryStatus,
-	) => void;
-	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	removeChatTranscript: (chatId: string) => void;
 	markChatTranscriptStale: (chatId: string) => void;
 	markChatTranscriptValidated: (chatId: string) => void;
-}
+};
 
 export interface EventRouterLifecycleStore {
 	currentChatId: () => string | null;
@@ -156,9 +153,10 @@ export interface EventRouterReadStateStore {
 export interface EventRouterStores {
 	agentSettings: EventRouterAgentSettings;
 	sessions: EventRouterSessionsStore;
+	navigation: EventRouterNavigation;
 	chatState: EventRouterChatStateStore;
 	lifecycle: EventRouterLifecycleStore;
-	conversationUi: ConversationUiState;
+	conversationUi: ConversationUiPort;
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
 }
@@ -244,7 +242,7 @@ function createHelpers(stores: EventRouterStores) {
 			chatIds.filter((id): id is string => typeof id === 'string' && id.length > 0),
 		);
 		for (const id of unique) {
-			stores.sessions.setChatProcessing(id, false);
+			stores.sessions.applyProcessingEvent(id, false);
 		}
 	};
 
@@ -258,12 +256,12 @@ function buildDispatch(
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
 	const { markTurnRunning, clearTurnStatus, markChatsAsCompleted } = createHelpers(stores);
 
-	const onNavigateToChat = (chatId: string) => stores.sessions.navigateToChat(chatId);
+	const onNavigateToChat = (chatId: string) => stores.navigation.navigateToChat(chatId);
 	const onChatProcessing = (chatId?: string | null) => {
-		if (chatId) stores.sessions.setChatProcessing(chatId, true);
+		if (chatId) stores.sessions.applyProcessingEvent(chatId, true);
 	};
 	const onChatNotProcessing = (chatId?: string | null) => {
-		if (chatId) stores.sessions.setChatProcessing(chatId, false);
+		if (chatId) stores.sessions.applyProcessingEvent(chatId, false);
 	};
 
 	const lifecycleCtx: LifecycleContext = {
@@ -281,7 +279,7 @@ function buildDispatch(
 	};
 
 	const chatEventCtx: ChatEventContext = {
-		getSelectedChat: stores.sessions.selectedChat,
+		getSelectedChat: () => stores.sessions.selectedChat,
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
 		appendLocalNotice: stores.chatState.appendLocalNotice,
@@ -308,7 +306,7 @@ function buildDispatch(
 
 	const queueCtx: QueueContext = {
 		getCurrentChatId: stores.lifecycle.currentChatId,
-		getSelectedChatId: () => stores.sessions.selectedChat()?.id || null,
+		getSelectedChatId: () => stores.sessions.selectedChat?.id || null,
 		conversationUi: stores.conversationUi,
 		markTurnRunning,
 		onChatProcessing,
@@ -322,12 +320,12 @@ function buildDispatch(
 	};
 
 	const sidebarCtx: SidebarContext = {
-		removeChat: stores.sessions.removeChat,
-		navigateAwayFromChat: stores.sessions.navigateAwayFromChat,
-		patchChatTitle: stores.sessions.patchChatTitle,
-		patchChatProjectPath: stores.sessions.patchChatProjectPath,
-		patchLastReadAt: stores.sessions.patchLastReadAt,
-		refreshChats: stores.sessions.refreshChats,
+		removeChat: (chatId) => stores.sessions.removeChat(chatId),
+		navigateAwayFromChat: stores.navigation.navigateAwayFromChat,
+		patchChatTitle: (chatId, title) => stores.sessions.patchChat(chatId, { title }),
+		patchChatProjectPath: (chatId, patch) => stores.sessions.patchChat(chatId, patch),
+		patchLastReadAt: (chatId, lastReadAt) => stores.sessions.patchLastReadAt(chatId, lastReadAt),
+		refreshChats: () => { void stores.sessions.quietRefreshChats(); },
 		removeChatTranscript: stores.chatState.removeChatTranscript,
 	};
 
@@ -342,7 +340,7 @@ function buildDispatch(
 		'chat-generation-reset': (msg) => {
 			if (!(msg instanceof ChatGenerationResetMessage)) return;
 			messagesAccumulator.flush();
-			const selectedChatId = stores.sessions.selectedChat()?.id ?? null;
+			const selectedChatId = stores.sessions.selectedChat?.id ?? null;
 			if (selectedChatId === msg.chatId) {
 				const cursor = stores.chatState.getCursor();
 				if (cursor.generationId !== msg.generationId) {
@@ -394,7 +392,7 @@ function buildDispatch(
 			handleQueueSending(msg, queueCtx);
 			const sendChatId = msg.chatId || stores.lifecycle.currentChatId();
 			if (sendChatId && msg.content) {
-				stores.sessions.patchChatPreview(
+				stores.sessions.patchPreview(
 					sendChatId,
 					String(msg.content).slice(0, 200),
 				);
@@ -469,7 +467,7 @@ export function createEventRouter(
 				const event = normalizeEvent(wsMsg.data);
 				if (!event) continue;
 
-				const selectedChat = stores.sessions.selectedChat();
+				const selectedChat = stores.sessions.selectedChat;
 				const currentChatId = stores.lifecycle.currentChatId();
 				const pendingViewChatId = stores.conversationUi.pendingViewChat?.chatId || null;
 				const activeViewChatId = selectedChat?.id || currentChatId || pendingViewChatId;
@@ -500,7 +498,7 @@ export function createEventRouter(
 						}
 						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));
 						if (preview) {
-							stores.sessions.patchChatPreview(agentMsg.chatId, preview.content, preview.timestamp);
+							stores.sessions.patchPreview(agentMsg.chatId, preview.content, preview.timestamp);
 
 							// Enqueue read receipt for the active chat when visible.
 							const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);

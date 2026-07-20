@@ -69,7 +69,6 @@ export type {
 export type { ChatQueueState, QueueEntry, QueuePause } from '$shared/queue-state';
 export type {
 	ChatExecutionControlState,
-	RecoveredInputContinuation,
 } from '$shared/chat-execution-control';
 
 export type PendingViewChat = {

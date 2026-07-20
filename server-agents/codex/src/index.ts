@@ -10,6 +10,7 @@ import {
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
+import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
@@ -17,7 +18,6 @@ import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycl
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createCodexConfig, type CodexConfig } from './config.js';
 import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
@@ -52,12 +52,19 @@ const CODEX_DESCRIPTOR = {
 
 export default class CodexAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'codex';
-  static readonly apiVersion = 1 as const;
+  static readonly apiVersion = 2 as const;
+  static readonly transcriptIndex = {
+    apiVersion: 1,
+    moduleUrl: resolveAgentStandaloneEntrypoint({
+      integrationId: 'codex',
+      name: 'transcript-index-source',
+      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
+    }),
+  } as const;
 
   readonly descriptor = CODEX_DESCRIPTOR;
   readonly execution;
   readonly transcript;
-  readonly transcriptSearch;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -105,25 +112,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
     });
     this.execution = new CodexExecution(host, runtime, nativeSessions, config);
     this.transcript = createCodexTranscript(runtime, nativeSessions);
-    const search = createTranscriptSearch({
-      host,
-      agentId: 'codex',
-      loadTranscript: async ({ chat, signal }) => {
-        const native = nativeSessions.decode(chat.nativeSession);
-        const snapshot = await this.transcript.load({
-          chat: {
-            ...chat,
-            agentId: 'codex',
-            agentSessionId: native.agentSessionId,
-            settings: this.settings.defaults(),
-          },
-          signal,
-        });
-        return snapshot.messages;
-      },
-    });
-    this.transcriptSearch = search;
     this.catalog = createModelCatalog({
+      logger: host.logger,
       defaultModel: CODEX_MODELS.DEFAULT,
       fallbackModels: CODEX_MODELS.OPTIONS,
       requiresStrictModelDiscovery: false,
@@ -215,7 +205,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
         runtime.shutdown();
         login.stop();
         skillDiscovery.clear();
-        await search.close();
       },
     });
   }
@@ -237,6 +226,18 @@ function createCodexTranscript(
   const loadMessages = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
     runtime.loadMessages(reference(chat))
   );
+  const resolvePath = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+    const value = reference(chat);
+    return value.nativePath ?? runtime.resolveNativePath(value);
+  };
+  const resolveIndexSource = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+    const nativePath = await resolvePath(chat);
+    return nativePath ? {
+      ownerId: 'codex',
+      schemaVersion: 1,
+      value: { nativePath },
+    } as const : null;
+  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -266,6 +267,19 @@ function createCodexTranscript(
     async revision({ chat, signal }) {
       signal.throwIfAborted();
       return computeAgentTranscriptRevision(await loadMessages(chat));
+    },
+    async resolveIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async refreshIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async describeSource({ chat, signal }) {
+      signal.throwIfAborted();
+      const nativePath = await resolvePath(chat);
+      return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();

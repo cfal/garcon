@@ -29,6 +29,29 @@ export interface ChatSessionsStoreDeps {
 	notifyError?: (message: string) => void;
 }
 
+export interface ChatSessionsPort {
+	byId: Record<string, ChatSessionRecord>;
+	order: string[];
+	selectedChatId: string | null;
+	startupByChatId: Record<string, ChatStartupConfig>;
+	readonly selectedChat: ChatSessionRecord | null;
+	setSelectedChatId(chatId: string | null): void;
+	quietRefreshChats(): Promise<void>;
+	renameChat(chatId: string, newTitle: string): Promise<boolean>;
+	hasChat(chatId: string): boolean;
+	isDraft(chatId: string): boolean;
+	patchDraftStartup(chatId: string, patch: Partial<ChatStartupConfig>): void;
+	applyStartEntry(entry: ChatListEntry): void;
+	upsertServerChat(entry: ChatListEntry): void;
+	removeChat(chatId: string): void;
+	patchPreview(chatId: string, content: string, timestamp?: string): void;
+	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
+	patchLastReadAt(chatId: string, lastReadAt: string): void;
+	applyProcessingEvent(chatId: string, isProcessing: boolean): void;
+	invalidateProcessingAuthority(): void;
+	reconcileProcessing(activeChatIds: Set<string>): void;
+}
+
 function normalizeExecutionFields<
 	T extends {
 		agentId: string;
@@ -205,7 +228,7 @@ function insertServerEntry(
 	);
 }
 
-export class ChatSessionsStore {
+export class ChatSessionsStore implements ChatSessionsPort {
 	byId = $state<Record<string, ChatSessionRecord>>({});
 	order = $state<string[]>([]);
 	selectedChatId = $state<string | null>(null);

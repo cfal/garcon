@@ -9,6 +9,7 @@ import type {
 } from './transcript-source.js';
 
 export function createDirectTranscript(options: {
+  readonly ownerId: string;
   readonly reader: DirectCompatibleTranscriptReader;
   readonly nativeSessions: PathNativeSessionCodec;
 }): AgentTranscript {
@@ -23,6 +24,17 @@ export function createDirectTranscript(options: {
   const loadMessages = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
     options.reader.loadMessages(reference(chat))
   );
+  const resolvePath = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => (
+    options.reader.resolveNativePath(reference(chat))
+  );
+  const resolveIndexSource = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
+    const nativePath = await resolvePath(chat);
+    return nativePath ? {
+      ownerId: options.ownerId,
+      schemaVersion: 1,
+      value: { nativePath },
+    } as const : null;
+  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -47,6 +59,19 @@ export function createDirectTranscript(options: {
     async revision({ chat, signal }) {
       signal.throwIfAborted();
       return computeAgentTranscriptRevision(await loadMessages(chat));
+    },
+    async resolveIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async refreshIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async describeSource({ chat, signal }) {
+      signal.throwIfAborted();
+      const nativePath = await resolvePath(chat);
+      return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
     async release({ chat, signal }) {
       signal.throwIfAborted();

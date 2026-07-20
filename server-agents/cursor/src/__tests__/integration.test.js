@@ -26,11 +26,12 @@ describe('CursorAgentIntegration', () => {
     const integration = new CursorAgentIntegration(host);
 
     expect(CursorAgentIntegration.integrationId).toBe('cursor');
-    expect(CursorAgentIntegration.apiVersion).toBe(1);
+    expect(CursorAgentIntegration.apiVersion).toBe(2);
+    expect(CursorAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('cursor');
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
-    expect(integration.transcriptSearch).toBeDefined();
+    expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: false,
       supportsWhileRunning: false,

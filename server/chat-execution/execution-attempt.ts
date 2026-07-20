@@ -8,39 +8,29 @@ type ExecutionAttemptPhase =
   | 'abortable'
   | 'settled';
 
+interface AttemptWaiter {
+  predicate: () => boolean;
+  resolve: (value: boolean) => void;
+}
+
 /** Owns the identity and lifecycle gates for one queue-managed provider turn. */
 export class QueueExecutionAttempt {
   readonly entryId: string | undefined;
   #turn: TurnIdentity;
+  // The phase is the single source of truth for lifecycle waits; `runSettled`
+  // and `terminalObserved` are orthogonal completion signals, and `launchAllowed`
+  // records the one gate a phase transition cannot express on its own.
   #phase: ExecutionAttemptPhase;
   readonly #expectedAbortStopIds = new Set<string>();
   #runSettled = false;
   #terminalObserved = false;
-
-  readonly #registered: Promise<boolean>;
-  #resolveRegistered!: (registered: boolean) => void;
-  #registeredSettled: boolean;
-  readonly #launchDecision: Promise<boolean>;
-  #resolveLaunchDecision!: (shouldLaunch: boolean) => void;
-  #launchDecisionSettled = false;
-  readonly #abortable: Promise<boolean>;
-  #resolveAbortable!: (abortable: boolean) => void;
-  #abortableSettled = false;
-  readonly #settled: Promise<void>;
-  #resolveSettled!: () => void;
-  #settledResolved = false;
+  #launchAllowed = false;
+  #waiters: AttemptWaiter[] = [];
 
   constructor(turn: TurnIdentity, entryId?: string) {
     this.#turn = { ...turn };
     this.entryId = entryId;
     this.#phase = entryId ? 'registering' : 'reserved';
-    this.#registeredSettled = !entryId;
-    this.#registered = entryId
-      ? new Promise((resolve) => { this.#resolveRegistered = resolve; })
-      : Promise.resolve(true);
-    this.#launchDecision = new Promise((resolve) => { this.#resolveLaunchDecision = resolve; });
-    this.#abortable = new Promise((resolve) => { this.#resolveAbortable = resolve; });
-    this.#settled = new Promise((resolve) => { this.#resolveSettled = resolve; });
   }
 
   get isExpectedAbort(): boolean {
@@ -56,7 +46,7 @@ export class QueueExecutionAttempt {
   }
 
   get isSettled(): boolean {
-    return this.#settledResolved;
+    return this.#phase === 'settled';
   }
 
   identity(): TurnIdentity {
@@ -67,16 +57,18 @@ export class QueueExecutionAttempt {
     return matchesTurnIdentity(this.#turn, turn);
   }
 
+  // Resolves true once the turn leaves the 'registering' gate under its own
+  // power, or false if it settles while still registering.
   waitUntilRegistered(): Promise<boolean> {
-    return this.#registered;
+    return this.#waitFor(() => this.#phase !== 'registering' && this.#phase !== 'settled');
   }
 
   waitUntilAbortable(): Promise<boolean> {
-    return this.#abortable;
+    return this.#waitFor(() => this.#phase === 'abortable');
   }
 
   waitForLaunchDecision(signal?: AbortSignal): Promise<boolean> {
-    if (!signal) return this.#launchDecision;
+    if (!signal) return this.#waitFor(() => this.#launchAllowed);
     if (signal.aborted) return Promise.resolve(false);
     return new Promise((resolve) => {
       const finish = (shouldLaunch: boolean) => {
@@ -85,12 +77,12 @@ export class QueueExecutionAttempt {
       };
       const onAbort = () => { finish(false); };
       signal.addEventListener('abort', onAbort, { once: true });
-      void this.#launchDecision.then(finish);
+      void this.#waitFor(() => this.#launchAllowed).then(finish);
     });
   }
 
   waitUntilSettled(): Promise<void> {
-    return this.#settled;
+    return this.#waitFor(() => this.#phase === 'settled').then(() => undefined);
   }
 
   replaceReservedTurn(turn: TurnIdentity): void {
@@ -103,22 +95,24 @@ export class QueueExecutionAttempt {
   markRegistered(): void {
     if (this.#phase !== 'registering') return;
     this.#phase = 'registered';
-    this.#settleRegistered(true);
+    this.#notify();
   }
 
   allowLaunch(): void {
     if (this.#phase === 'registered') this.#phase = 'launching';
-    this.#settleLaunchDecision(true);
+    this.#launchAllowed = true;
+    this.#notify();
   }
 
   markLaunching(): void {
     if (this.#phase === 'reserved' || this.#phase === 'registered') this.#phase = 'launching';
+    this.#notify();
   }
 
   markAbortable(): void {
     if (this.#phase === 'settled') return;
     this.#phase = 'abortable';
-    this.#settleAbortable(true);
+    this.#notify();
   }
 
   expectAbort(stopId: string): void {
@@ -144,30 +138,32 @@ export class QueueExecutionAttempt {
   markSettled(): void {
     if (this.#phase === 'settled') return;
     this.#phase = 'settled';
-    this.#settleRegistered(false);
-    this.#settleLaunchDecision(false);
-    this.#settleAbortable(false);
-    if (!this.#settledResolved) {
-      this.#settledResolved = true;
-      this.#resolveSettled();
-    }
+    this.#notify();
   }
 
-  #settleRegistered(registered: boolean): void {
-    if (this.#registeredSettled) return;
-    this.#registeredSettled = true;
-    this.#resolveRegistered(registered);
+  // Resolves true once the predicate holds under its own power, or false once the
+  // attempt has settled first. Waiters are single-shot.
+  #waitFor(predicate: () => boolean): Promise<boolean> {
+    if (predicate()) return Promise.resolve(true);
+    if (this.#phase === 'settled') return Promise.resolve(false);
+    return new Promise((resolve) => {
+      this.#waiters.push({ predicate, resolve });
+    });
   }
 
-  #settleLaunchDecision(shouldLaunch: boolean): void {
-    if (this.#launchDecisionSettled) return;
-    this.#launchDecisionSettled = true;
-    this.#resolveLaunchDecision(shouldLaunch);
-  }
-
-  #settleAbortable(abortable: boolean): void {
-    if (this.#abortableSettled) return;
-    this.#abortableSettled = true;
-    this.#resolveAbortable(abortable);
+  #notify(): void {
+    if (this.#waiters.length === 0) return;
+    const settled = this.#phase === 'settled';
+    this.#waiters = this.#waiters.filter((waiter) => {
+      if (waiter.predicate()) {
+        waiter.resolve(true);
+        return false;
+      }
+      if (settled) {
+        waiter.resolve(false);
+        return false;
+      }
+      return true;
+    });
   }
 }

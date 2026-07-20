@@ -26,11 +26,12 @@ describe('OpenCodeAgentIntegration', () => {
     const integration = new OpenCodeAgentIntegration(host);
 
     expect(OpenCodeAgentIntegration.integrationId).toBe('opencode');
-    expect(OpenCodeAgentIntegration.apiVersion).toBe(1);
+    expect(OpenCodeAgentIntegration.apiVersion).toBe(2);
+    expect(OpenCodeAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('opencode');
     expect(integration.execution).toBeDefined();
     expect(integration.transcript).toBeDefined();
-    expect(integration.transcriptSearch).toBeDefined();
+    expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: false,
       supportsWhileRunning: false,

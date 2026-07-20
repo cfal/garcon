@@ -272,6 +272,7 @@ async function scanCodexMessagePage(
 export async function loadCodexChatMessages(
   nativePath: string | null | undefined,
   logger: AgentLogger = NOOP_LOGGER,
+  options: { readonly throwOnError?: boolean } = {},
 ): Promise<ChatMessage[]> {
   if (!nativePath) return [];
 
@@ -287,6 +288,7 @@ export async function loadCodexChatMessages(
 
     return finishCodexMessages(buckets, true);
   } catch (error) {
+    if (options.throwOnError) throw error;
     logger.error('Codex transcript load failed', {
       nativePath,
       error: error instanceof Error ? error.message : String(error),

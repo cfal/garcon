@@ -8,6 +8,7 @@ import {
   type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
+import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import {
   createArtificialNativePath,
   getArtificialAgentSessionId,
@@ -17,7 +18,6 @@ import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycl
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
-import { createTranscriptSearch } from '@garcon/server-agent-common/search/transcript-search';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import { createPiConfig } from './config.js';
 import { PiExecution } from './agents/pi/execution.js';
@@ -49,12 +49,19 @@ const PI_DESCRIPTOR = {
 
 export default class PiAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'pi';
-  static readonly apiVersion = 1 as const;
+  static readonly apiVersion = 2 as const;
+  static readonly transcriptIndex = {
+    apiVersion: 1,
+    moduleUrl: resolveAgentStandaloneEntrypoint({
+      integrationId: 'pi',
+      name: 'transcript-index-source',
+      sourceUrl: new URL('./transcript-index-source.ts', import.meta.url),
+    }),
+  } as const;
 
   readonly descriptor = PI_DESCRIPTOR;
   readonly execution;
   readonly transcript: AgentTranscript;
-  readonly transcriptSearch;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -83,16 +90,8 @@ export default class PiAgentIntegration implements AgentIntegration {
     });
     this.execution = new PiExecution(runtime, nativeSessions);
     this.transcript = createPiTranscript(config, nativeSessions);
-    const search = createTranscriptSearch({
-      host,
-      agentId: 'pi',
-      loadTranscript: async ({ chat, signal }) => {
-        signal.throwIfAborted();
-        return loadPiMessages(piReference(chat, nativeSessions), config);
-      },
-    });
-    this.transcriptSearch = search;
     this.catalog = createModelCatalog({
+      logger: host.logger,
       defaultModel: PI_MODELS.DEFAULT,
       fallbackModels: PI_MODELS.OPTIONS,
       requiresStrictModelDiscovery: true,
@@ -161,7 +160,6 @@ export default class PiAgentIntegration implements AgentIntegration {
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
         runtime.shutdown();
-        await search.close();
       },
     });
   }
@@ -211,6 +209,25 @@ function createPiTranscript(
     piReference(chat, nativeSessions),
     config,
   );
+  const resolvePath = async (chat: ChatReference) => {
+    const reference = piReference(chat, nativeSessions);
+    if (hasRealPiPath(reference)) return reference.nativePath!;
+    if (!reference.agentSessionId) return null;
+    const { findPiSessionFileBySessionId } = await import('./agents/pi/pi-session-paths.js');
+    return findPiSessionFileBySessionId(
+      reference.agentSessionId,
+      reference.projectPath,
+      config,
+    );
+  };
+  const resolveIndexSource = async (chat: ChatReference) => {
+    const nativePath = await resolvePath(chat);
+    return nativePath ? {
+      ownerId: 'pi',
+      schemaVersion: 1,
+      value: { nativePath },
+    } as const : null;
+  };
   return {
     async resolveNativeSession({ chat, signal }) {
       signal.throwIfAborted();
@@ -257,6 +274,23 @@ function createPiTranscript(
     async revision({ chat, signal }) {
       signal.throwIfAborted();
       return computeAgentTranscriptRevision(await loadMessages(chat));
+    },
+    async resolveIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async refreshIndexSource({ chat, signal }) {
+      signal.throwIfAborted();
+      return resolveIndexSource(chat);
+    },
+    async describeSource({ chat, signal }) {
+      signal.throwIfAborted();
+      const nativePath = await resolvePath(chat);
+      if (nativePath) return { kind: 'filesystem-path', value: nativePath };
+      const reference = piReference(chat, nativeSessions);
+      return reference.agentSessionId
+        ? { kind: 'provider-reference', value: reference.agentSessionId }
+        : null;
     },
     async release({ signal }) {
       signal.throwIfAborted();

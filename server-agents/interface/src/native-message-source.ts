@@ -28,7 +28,7 @@ export function attachNativeMessageSource<T extends object>(
   if (!source || (
     !nonEmptyString(source.entryId)
     && !isPositiveInt(source.lineNumber)
-    && !isPositiveInt(source.byteOffset)
+    && !isNonNegativeInt(source.byteOffset)
     && !isNonNegativeInt(source.withinSourceOrdinal)
   )) return target;
 
@@ -36,7 +36,7 @@ export function attachNativeMessageSource<T extends object>(
     value: {
       ...(nonEmptyString(source.entryId) ? { entryId: source.entryId } : {}),
       ...(isPositiveInt(source.lineNumber) ? { lineNumber: source.lineNumber } : {}),
-      ...(isPositiveInt(source.byteOffset) ? { byteOffset: source.byteOffset } : {}),
+      ...(isNonNegativeInt(source.byteOffset) ? { byteOffset: source.byteOffset } : {}),
       ...(isNonNegativeInt(source.withinSourceOrdinal)
         ? { withinSourceOrdinal: source.withinSourceOrdinal }
         : {}),
@@ -74,7 +74,7 @@ function getStoredNativeMessageSource(value: unknown): NativeMessageSource | nul
   return {
     ...(nonEmptyString(raw.entryId) ? { entryId: raw.entryId } : {}),
     ...(isPositiveInt(raw.lineNumber) ? { lineNumber: raw.lineNumber } : {}),
-    ...(isPositiveInt(raw.byteOffset) ? { byteOffset: raw.byteOffset } : {}),
+    ...(isNonNegativeInt(raw.byteOffset) ? { byteOffset: raw.byteOffset } : {}),
     ...(isNonNegativeInt(raw.withinSourceOrdinal)
       ? { withinSourceOrdinal: raw.withinSourceOrdinal }
       : {}),

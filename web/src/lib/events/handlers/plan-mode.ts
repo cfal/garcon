@@ -4,14 +4,14 @@
 import { isToolUseMessage } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
 import type { PermissionMode } from '$lib/types/chat';
-import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
 export interface PlanModeContext {
 	getCurrentChatId: () => string | null;
 	getPermissionMode: () => PermissionMode;
 	setPermissionMode: (mode: PermissionMode) => void;
 	conversationUi: Pick<
-		ConversationUiState,
+		ConversationUiPort,
 		'setPreviousPermissionMode' | 'setPendingPermissionRequests'
 	>;
 }
