@@ -9,7 +9,6 @@ import { join } from 'node:path';
 const MAX_LINES = 1000;
 
 const GRANDFATHER = {
-  'server/commands/chat-command-service.ts': 1850,
   'server/git/diff-engine.ts': 1575,
   'server/routes/chats.ts': 1350,
   'common/chat-types.ts': 1325,
