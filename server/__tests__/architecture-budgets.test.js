@@ -7,6 +7,8 @@ import { join } from 'node:path';
 // MAX_LINES or fewer, its entry must be removed, and no entry may grow past its
 // recorded ceiling. New files start under the budget.
 const MAX_LINES = 1000;
+// Includes the queue staging and boundary parser capability added after the original estimate.
+const EXECUTION_FOOTPRINT_BUDGET = 6463;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
@@ -35,7 +37,16 @@ function productionFiles(directory) {
 }
 
 function lineCount(file) {
-  return readFileSync(file, 'utf8').split('\n').length;
+  const source = readFileSync(file, 'utf8');
+  if (source.length === 0) return 0;
+  const lines = source.split('\n').length;
+  return source.endsWith('\n') ? lines - 1 : lines;
+}
+
+function isExecutionFootprintFile(file) {
+  return file.startsWith('server/chat-execution/')
+    || file.startsWith('server/commands/')
+    || /^server\/chats\/pending-(?:input-matching|user-input).*\.ts$/.test(file);
 }
 
 const roots = ['server', 'common', ...serverAgentSrcRoots()];
@@ -52,6 +63,13 @@ describe('server architecture budgets', () => {
       const lines = lineCount(file);
       expect(lines, `${file} has ${lines} lines (ceiling ${ceiling})`).toBeLessThanOrEqual(ceiling);
     }
+  });
+
+  test('execution and pending-input footprint does not grow', () => {
+    const executionFiles = files.filter(isExecutionFootprintFile);
+    expect(executionFiles.length).toBeGreaterThan(20);
+    const lines = executionFiles.reduce((total, file) => total + lineCount(file), 0);
+    expect(lines).toBeLessThanOrEqual(EXECUTION_FOOTPRINT_BUDGET);
   });
 
   test('grandfather entries stay above the budget and reference real files', () => {
