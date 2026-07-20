@@ -97,6 +97,10 @@ import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
+  cleanupLegacyQueueState,
+  WorkspaceMigrationRunner,
+} from './migrations/index.js';
+import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
 } from './lib/http-route-types.js';
@@ -129,15 +133,16 @@ export async function startServer(): Promise<void> {
       },
     });
     const workspaceDir = workspaceLease.workspaceDir;
-    const chatIdMigration = await migrateWorkspaceChatIds(workspaceDir);
-    const migratedChatIdCount = Object.keys(
-      chatIdMigration.migratedChatIds,
-    ).length;
-    if (migratedChatIdCount > 0) {
-      logger.info(
-        `migrated ${migratedChatIdCount} legacy chat ID(s) across ${chatIdMigration.changedFiles.length} persisted file(s)`,
-      );
-    }
+    const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
+    await workspaceMigrations.run('chat-id-migration', async () => {
+      const result = await migrateWorkspaceChatIds(workspaceDir);
+      const migratedChatIdCount = Object.keys(result.migratedChatIds).length;
+      if (migratedChatIdCount > 0) {
+        logger.info(
+          `migrated ${migratedChatIdCount} legacy chat ID(s) across ${result.changedFiles.length} persisted file(s)`,
+        );
+      }
+    });
 
     // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
@@ -194,7 +199,9 @@ export async function startServer(): Promise<void> {
       () => apiProviderStore.list(),
       (agentId) => integrationRegistry.get(agentId)?.descriptor.supportedEndpointProtocols ?? [],
     );
-    await migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry });
+    await workspaceMigrations.run('core-record-migration', () => (
+      migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry })
+    ));
     await chatRegistry.init();
     await settings.init();
     carryOver.bindRegistry(chatRegistry);
@@ -205,7 +212,16 @@ export async function startServer(): Promise<void> {
       carryOver,
       integrations: integrationRegistry,
     });
-    await agentOwnership.initialize();
+    let ownershipInitialized = false;
+    await workspaceMigrations.run('ephemeral-queue-state-cleanup', () => cleanupLegacyQueueState({
+      workspaceDir,
+      async settleOwnershipIntents() {
+        await agentOwnership.initialize();
+        ownershipInitialized = true;
+      },
+    }));
+    if (!ownershipInitialized) await agentOwnership.initialize();
+    await workspaceMigrations.finish();
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
       isApiProviderReferenced(apiProviderId) {
