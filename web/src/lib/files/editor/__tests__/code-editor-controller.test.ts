@@ -52,21 +52,29 @@ function createController() {
 }
 
 describe('CodeEditorController', () => {
-	it('moves one editor state between hosts and ignores stale cleanup', () => {
+	it('moves one editor state and its scroll position between hosts', async () => {
 		const { session, controller } = createController();
 		const firstParent = parent();
 		const secondParent = parent();
 
 		const firstLease = controller.attach(firstParent);
 		const firstScroller = firstParent.querySelector<HTMLElement>('.cm-scroller');
-		if (firstScroller) firstScroller.scrollTop = 24;
+		if (!firstScroller) throw new Error('Expected CodeMirror scroller');
+		firstScroller.scrollLeft = 9;
+		firstScroller.scrollTop = 24;
+		firstScroller.dispatchEvent(new Event('scroll'));
 		controller.prepareRendererTransfer();
 		const secondLease = controller.attach(secondParent);
 		controller.detach(firstLease);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const secondScroller = secondParent.querySelector<HTMLElement>('.cm-scroller');
 
 		expect(controller.isAttached).toBe(true);
 		expect(firstParent.querySelector('.cm-editor')).toBeNull();
 		expect(secondParent.querySelector('.cm-editor')).not.toBeNull();
+		expect(session.editorScrollSnapshot).not.toBeNull();
+		expect(secondScroller?.scrollLeft).toBe(9);
+		expect(secondScroller?.scrollTop).toBe(24);
 		controller.detach(secondLease);
 		expect(controller.isAttached).toBe(false);
 		expect(session.editorState?.doc.toString()).toBe('first\nsecond\nthird');
@@ -144,9 +152,9 @@ describe('CodeEditorController', () => {
 		scroller.scrollTop = 28;
 
 		controller.replaceContentFromDisk('new');
-		host.querySelector<HTMLElement>('.cm-content')?.dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }),
-		);
+		host
+			.querySelector<HTMLElement>('.cm-content')
+			?.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 
 		expect(controller.currentContent()).toBe('new');

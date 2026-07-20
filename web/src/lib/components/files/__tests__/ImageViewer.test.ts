@@ -29,6 +29,74 @@ describe('ImageViewer', () => {
 		expect(screen.getByText('125%')).toBeTruthy();
 	});
 
+	it('restores manual viewport offsets across presentation remounts', async () => {
+		const session = new FileSession(
+			{
+				canonicalFileRootPath: '/workspace/project',
+				normalizedRelativePath: 'image.png',
+			},
+			'/workspace/project\0image.png',
+		);
+		session.imageObjectUrl = 'blob:image';
+		session.image = {
+			...session.image,
+			mode: 'manual',
+			scale: 2,
+			scrollLeft: 31,
+			scrollTop: 79,
+		};
+		const first = render(ImageViewer, { session });
+		await tick();
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const firstViewport = screen.getByRole('img').closest('.overflow-auto') as HTMLDivElement;
+		expect(firstViewport.scrollLeft).toBe(31);
+		expect(firstViewport.scrollTop).toBe(79);
+		firstViewport.scrollLeft = 47;
+		firstViewport.scrollTop = 113;
+		await fireEvent.scroll(firstViewport);
+		first.unmount();
+
+		render(ImageViewer, { session });
+		await tick();
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const restoredViewport = screen.getByRole('img').closest('.overflow-auto') as HTMLDivElement;
+		expect(restoredViewport.scrollLeft).toBe(47);
+		expect(restoredViewport.scrollTop).toBe(113);
+	});
+
+	it('does not overwrite saved dialog offsets when unmounted before restoration', async () => {
+		let nextFrame = 1;
+		const frames = new Map<number, FrameRequestCallback>();
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+			const frame = nextFrame++;
+			frames.set(frame, callback);
+			return frame;
+		});
+		vi.stubGlobal('cancelAnimationFrame', (frame: number) => frames.delete(frame));
+		const session = new FileSession(
+			{
+				canonicalFileRootPath: '/workspace/project',
+				normalizedRelativePath: 'image.png',
+			},
+			'/workspace/project\0image.png',
+		);
+		session.image = {
+			...session.image,
+			mode: 'manual',
+			scrollLeft: 23,
+			scrollTop: 101,
+		};
+
+		const dialog = render(ImageViewer, { session });
+		await tick();
+		dialog.unmount();
+
+		expect(session.image.scrollLeft).toBe(23);
+		expect(session.image.scrollTop).toBe(101);
+	});
+
 	it('keeps the initial cursor focal point stable through a rapid wheel burst', async () => {
 		const session = new FileSession(
 			{

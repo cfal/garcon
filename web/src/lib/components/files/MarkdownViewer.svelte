@@ -17,13 +17,22 @@
 	$effect(() => {
 		const element = contentElement;
 		if (!element) return;
-		requestAnimationFrame(() => {
+		let restored = false;
+		const frame = requestAnimationFrame(() => {
+			element.scrollLeft = session.markdownScrollLeft;
 			element.scrollTop = session.markdownScrollTop;
+			restored = true;
 		});
 		return () => {
-			session.markdownScrollTop = element.scrollTop;
+			cancelAnimationFrame(frame);
+			if (restored) captureScroll(element);
 		};
 	});
+
+	function captureScroll(element: HTMLDivElement): void {
+		session.markdownScrollLeft = element.scrollLeft;
+		session.markdownScrollTop = element.scrollTop;
+	}
 
 	function navigateFileLink(link: MarkdownLinkNavigateEvent): boolean {
 		if (link.kind !== 'file') return false;
@@ -50,6 +59,7 @@
 	aria-label={session.fileName}
 	class="markdown-viewer-content h-full overflow-auto bg-background p-4 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-6"
 	style={`--markdown-viewer-font-size: ${markdownFontSize}px;`}
+	onscroll={(event) => captureScroll(event.currentTarget)}
 >
 	<Markdown
 		source={session.content}

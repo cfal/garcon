@@ -8,13 +8,7 @@ import {
 	highlightActiveLine,
 	keymap,
 } from '@codemirror/view';
-import {
-	EditorSelection,
-	EditorState,
-	Compartment,
-	Text,
-	type Extension,
-} from '@codemirror/state';
+import { EditorSelection, EditorState, Compartment, Text, type Extension } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
 	foldGutter,
@@ -52,6 +46,10 @@ export class CodeEditorController {
 	#rendererGeneration = 0;
 	#baselineDocument: Text | null = null;
 	#lineSeparator: '\n' | '\r\n';
+	readonly #handleScroll = (): void => {
+		const view = this.#view;
+		if (view) this.#captureScroll(view);
+	};
 
 	constructor(
 		readonly session: FileSession,
@@ -68,20 +66,40 @@ export class CodeEditorController {
 		if (this.#view) throw new Error('File editor renderer is already attached');
 		const lease = ++this.#rendererGeneration;
 		const editorState = this.session.editorState ?? this.createState(this.session.content);
+		const scrollSnapshot = this.session.editorScrollSnapshot;
+		const scrollLeft = this.session.textScrollLeft;
+		const scrollTop = this.session.textScrollTop;
 		this.#view = new EditorView({
 			state: editorState,
 			parent,
+			scrollTo: scrollSnapshot ?? undefined,
 			dispatchTransactions: (transactions, view) => {
 				view.update(transactions);
-				this.capture(view.state);
+				this.capture(view);
 			},
 		});
+		this.#view.scrollDOM.addEventListener('scroll', this.#handleScroll);
 		this.reconfigure();
 		void this.applyLanguage();
+		const attachedView = this.#view;
+		attachedView.requestMeasure({
+			key: this,
+			read: () => undefined,
+			write: () => {
+				if (this.#view !== attachedView || lease !== this.#rendererGeneration) return;
+				if (!scrollSnapshot || (scrollLeft !== 0 && attachedView.scrollDOM.scrollLeft === 0)) {
+					attachedView.scrollDOM.scrollLeft = scrollLeft;
+				}
+				if (!scrollSnapshot || (scrollTop !== 0 && attachedView.scrollDOM.scrollTop === 0)) {
+					attachedView.scrollDOM.scrollTop = scrollTop;
+				}
+				this.#captureScroll(attachedView);
+			},
+		});
 		requestAnimationFrame(() => {
-			if (!this.#view || lease !== this.#rendererGeneration) return;
-			this.#view.scrollDOM.scrollTop = this.session.textScrollTop;
-			this.applyRequestedLocation();
+			if (this.#view === attachedView && lease === this.#rendererGeneration) {
+				this.applyRequestedLocation();
+			}
 		});
 		return lease;
 	}
@@ -99,9 +117,10 @@ export class CodeEditorController {
 	#detachCurrent(): void {
 		const view = this.#view;
 		if (!view) return;
+		this.#captureScroll(view);
+		view.scrollDOM.removeEventListener('scroll', this.#handleScroll);
 		this.session.editorState = view.state;
 		this.session.content = this.#serializeDocument(view.state.doc);
-		this.session.textScrollTop = view.scrollDOM.scrollTop;
 		view.destroy();
 		this.#view = null;
 	}
@@ -139,6 +158,7 @@ export class CodeEditorController {
 		const nextDocument = normalizedDocument(content);
 		const anchor = Math.min(previousSelection?.anchor ?? 0, nextDocument.length);
 		const head = Math.min(previousSelection?.head ?? anchor, nextDocument.length);
+		const scrollLeft = view?.scrollDOM.scrollLeft ?? this.session.textScrollLeft;
 		const scrollTop = view?.scrollDOM.scrollTop ?? this.session.textScrollTop;
 		const nextState = this.createState(nextDocument, EditorSelection.single(anchor, head));
 
@@ -147,6 +167,7 @@ export class CodeEditorController {
 		this.session.dirty = false;
 		this.#lineSeparator = lineSeparatorFor(content);
 		this.#baselineDocument = nextDocument;
+		this.session.editorScrollSnapshot = null;
 
 		if (!view) {
 			this.session.editorState = previousState ? nextState : null;
@@ -157,10 +178,13 @@ export class CodeEditorController {
 		view.setState(nextState);
 		this.reconfigure();
 		void this.applyLanguage();
+		this.session.textScrollLeft = scrollLeft;
 		this.session.textScrollTop = scrollTop;
 		requestAnimationFrame(() => {
 			if (this.#view !== view) return;
+			view.scrollDOM.scrollLeft = scrollLeft;
 			view.scrollDOM.scrollTop = scrollTop;
+			this.#captureScroll(view);
 		});
 	}
 
@@ -237,10 +261,17 @@ export class CodeEditorController {
 		return extensions;
 	}
 
-	private capture(editorState: EditorState): void {
-		this.session.editorState = editorState;
+	private capture(view: EditorView): void {
+		this.session.editorState = view.state;
 		this.#baselineDocument ??= normalizedDocument(this.session.baseline);
-		this.session.dirty = !editorState.doc.eq(this.#baselineDocument);
+		this.session.dirty = !view.state.doc.eq(this.#baselineDocument);
+		this.#captureScroll(view);
+	}
+
+	#captureScroll(view: EditorView): void {
+		this.session.editorScrollSnapshot = view.scrollSnapshot();
+		this.session.textScrollLeft = view.scrollDOM.scrollLeft;
+		this.session.textScrollTop = view.scrollDOM.scrollTop;
 	}
 
 	#serializeDocument(document: Text): string {

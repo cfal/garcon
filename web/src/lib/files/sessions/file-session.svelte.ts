@@ -1,4 +1,4 @@
-import type { EditorState } from '@codemirror/state';
+import type { EditorState, StateEffect } from '@codemirror/state';
 import type { CanonicalFileIdentity, FileRevision } from '$shared/file-contracts';
 import type { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
@@ -58,7 +58,10 @@ export class FileSession {
 
 	loadedRevision: FileRevision | null = null;
 	editorState: EditorState | null = null;
+	editorScrollSnapshot: StateEffect<unknown> | null = null;
+	textScrollLeft = 0;
 	textScrollTop = 0;
+	markdownScrollLeft = 0;
 	markdownScrollTop = 0;
 	editor: CodeEditorController | null = null;
 	loadController: AbortController | null = null;
