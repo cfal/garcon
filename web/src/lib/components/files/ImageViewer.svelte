@@ -96,16 +96,16 @@
 		});
 	}
 
-	function persistViewport(): void {
-		if (!viewportElement || correctingScroll) return;
+	function persistViewport(viewport = viewportElement): void {
+		if (!viewport || correctingScroll) return;
 		const anchor = captureViewport();
 		if (!anchor) return;
 		session.image = {
 			...session.image,
 			focalX: anchor.focal.x,
 			focalY: anchor.focal.y,
-			scrollLeft: viewportElement.scrollLeft,
-			scrollTop: viewportElement.scrollTop,
+			scrollLeft: viewport.scrollLeft,
+			scrollTop: viewport.scrollTop,
 		};
 	}
 
@@ -140,6 +140,8 @@
 	$effect(() => {
 		const viewport = viewportElement;
 		if (!viewport) return;
+		let restored = false;
+		correctingScroll = true;
 		const observer = new ResizeObserver(() => {
 			if (session.image.mode === 'fit') fitToWindow();
 		});
@@ -151,17 +153,18 @@
 			if (session.image.mode === 'fit') fitToWindow();
 			else restoreSavedManualFocalPoint();
 			scheduleScrollRelease();
+			restored = true;
 		});
 		return () => {
 			cancelAnimationFrame(frame);
 			cancelPendingManualZoom();
 			if (scrollReleaseFrame !== null) cancelAnimationFrame(scrollReleaseFrame);
 			observer.disconnect();
-			if (viewportElement) {
+			if (restored) {
 				session.image = {
 					...session.image,
-					scrollLeft: viewportElement.scrollLeft,
-					scrollTop: viewportElement.scrollTop,
+					scrollLeft: viewport.scrollLeft,
+					scrollTop: viewport.scrollTop,
 				};
 			}
 		};
@@ -205,7 +208,7 @@
 		bind:this={viewportElement}
 		class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted p-4"
 		onwheel={handleWheel}
-		onscroll={persistViewport}
+		onscroll={(event) => persistViewport(event.currentTarget)}
 	>
 		{#if session.imageObjectUrl}
 			<img
