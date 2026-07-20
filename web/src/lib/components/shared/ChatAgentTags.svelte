@@ -4,7 +4,7 @@
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
-	import { agentLabelFor } from '$lib/i18n/agent-labels';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import ColoredTag from './ColoredTag.svelte';

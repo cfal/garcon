@@ -1,4 +1,5 @@
 import { DEFAULT_APP_TITLE } from '$shared/settings';
+import { isRecord } from '$shared/json';
 
 export interface PublicAppTitle {
 	title: string;
@@ -9,10 +10,6 @@ const DEFAULT_TITLE_BOOTSTRAP: PublicAppTitle = {
 	title: DEFAULT_APP_TITLE,
 	version: 0,
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 function bootstrapTitle(): PublicAppTitle {
 	const raw = globalThis.__GARCON_APP_TITLE__;

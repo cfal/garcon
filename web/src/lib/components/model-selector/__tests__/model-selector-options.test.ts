@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import {
 	buildAgentOptions,
 	buildModelRows,

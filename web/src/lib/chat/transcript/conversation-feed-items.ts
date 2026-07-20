@@ -11,6 +11,7 @@ import type { ChatMessage } from '$shared/chat-types';
 import type { ChatDisplayRow, ChatTranscriptRow } from './active-transcript-state.svelte.js';
 import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
+import { isRecord } from '$shared/json';
 
 export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
@@ -67,10 +68,6 @@ export function filterHiddenToolRenderItems(
 		if (item.kind === 'read-group') return !hidden.has('read-tool-use');
 		return item.kind !== 'message' || !hidden.has(item.message.type);
 	});
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function rawToolResultText(content: Record<string, unknown>): string {

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
-import { PullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import SingletonSurfaceRegistryTemplateHost from './SingletonSurfaceRegistryTemplateHost.svelte';
 

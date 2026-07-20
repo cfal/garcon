@@ -1,7 +1,7 @@
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import { getLocale } from '$lib/paraglide/runtime.js';
-import { buildThinkingModeOptions } from '$lib/execution/thinking-mode-options';
+import { buildThinkingModeOptions } from '$lib/agents/thinking-mode-options';
 import { normalizeThinkingMode, type ThinkingMode } from '$shared/chat-modes';
 import type {
 	FilteredModelRowsResult,

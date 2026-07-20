@@ -8,7 +8,7 @@
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
-	import { createScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte.js';
+	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
@@ -16,7 +16,7 @@
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
-	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 	import { createSplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';

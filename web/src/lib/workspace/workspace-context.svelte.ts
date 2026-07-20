@@ -1,5 +1,5 @@
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 
 export interface WorkspaceContext {
 	chatId: string;

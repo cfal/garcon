@@ -1050,8 +1050,12 @@ export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 
 export function getToolDisplayDetails(toolMessage: ToolUseChatMessage): Record<string, unknown> {
 	return Object.fromEntries(
-		Object.entries(toolMessage as unknown as Record<string, unknown>).filter(
+		Object.entries(toolMessage).filter(
 			([key]) => key !== 'timestamp' && key !== 'toolId' && key !== 'type',
 		),
 	);
+}
+
+export function getToolDisplayPayload(toolMessage: ToolUseChatMessage): Record<string, unknown> {
+	return Object.fromEntries(Object.entries(toolMessage));
 }

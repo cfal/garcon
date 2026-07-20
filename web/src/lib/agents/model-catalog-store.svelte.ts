@@ -1,5 +1,5 @@
 import { apiFetch } from '$lib/api/client.js';
-import { agentLabelFor } from '$lib/i18n/agent-labels';
+import { agentLabelFor } from './agent-labels.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,

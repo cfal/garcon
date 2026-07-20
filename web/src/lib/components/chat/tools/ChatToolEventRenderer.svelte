@@ -6,6 +6,7 @@
 	import {
 		TOOL_DISPLAY_REGISTRY,
 		getToolDisplayLabel,
+		getToolDisplayPayload,
 	} from '$lib/chat/tools/tool-display-registry.js';
 	import { resolveDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
 	import type {
@@ -50,7 +51,7 @@
 	let displayConfig = $derived(mode === 'input' ? config.input : config.result);
 
 	let parsedData = $derived(
-		mode === 'input' ? (toolMessage as unknown as Record<string, unknown>) : (toolResult ?? {}),
+		mode === 'input' ? getToolDisplayPayload(toolMessage) : (toolResult ?? {}),
 	);
 
 	function handleAction() {

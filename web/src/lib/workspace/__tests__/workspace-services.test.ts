@@ -4,7 +4,7 @@ import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';

@@ -19,7 +19,7 @@
 		ModelSelectorChange,
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
-	import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import Check from '@lucide/svelte/icons/check';
 	import Loader2 from '@lucide/svelte/icons/loader-2';

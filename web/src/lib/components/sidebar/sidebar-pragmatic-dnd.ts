@@ -8,7 +8,7 @@ const splitPaneChatDragKind = 'split-pane-chat';
 const sidebarChatDropTargetKind = 'sidebar-chat-row-target';
 const chatOrderLists: ChatOrderList[] = ['pinned', 'normal', 'archived'];
 
-export interface SidebarChatDragData {
+export interface SidebarChatDragData extends Record<string | symbol, unknown> {
 	kind: typeof sidebarChatDragKind;
 	splitPaneDragKind: typeof splitPaneChatDragKind;
 	chatId: string;
@@ -18,7 +18,7 @@ export interface SidebarChatDragData {
 	reorderScopeKey: string;
 }
 
-export interface SidebarChatDropTargetData {
+export interface SidebarChatDropTargetData extends Record<string | symbol, unknown> {
 	kind: typeof sidebarChatDropTargetKind;
 	chatId: string;
 	list: ChatOrderList;

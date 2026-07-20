@@ -1,6 +1,6 @@
 import type { SessionAgentId } from '$lib/types/app';
-import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
-import { nativeSourceLabelFor } from '$lib/i18n/agent-labels';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import { nativeSourceLabelFor } from '$lib/agents/agent-labels';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {
 	FilteredModelResult,

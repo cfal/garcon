@@ -4,6 +4,14 @@
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolPayload } from '$lib/chat/tools/tool-display-contract.js';
 
+interface ReadRangePayload {
+	offset?: unknown;
+	startLine?: unknown;
+	limit?: unknown;
+	numLines?: unknown;
+	endLine?: unknown;
+}
+
 /** Coerces a value to a finite number, returning null when not representable. */
 export function asFiniteNumber(value: unknown): number | null {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -15,7 +23,7 @@ export function asFiniteNumber(value: unknown): number | null {
 }
 
 /** Formats a human-readable line range string from Read tool input. */
-export function readRangePresenter(input: ToolPayload): string | undefined {
+export function readRangePresenter(input: ReadRangePayload): string | undefined {
 	const offset = asFiniteNumber(input.offset ?? input.startLine);
 	const limit = asFiniteNumber(input.limit ?? input.numLines);
 	const endLine = asFiniteNumber(input.endLine);

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
-	import { ApiError } from '$lib/api/client.js';
+	import { errorMessage } from '$lib/utils/error-message.js';
 	import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
@@ -28,11 +28,6 @@
 		if (!entryId || !editorTextarea) return;
 		void tick().then(() => editorTextarea?.focus());
 	});
-
-	function errorMessage(error: unknown): string {
-		if (error instanceof ApiError || error instanceof Error) return error.message;
-		return String(error);
-	}
 
 	async function saveEdit(): Promise<void> {
 		if (!editor.canSave || !editor.entryId || editor.baseRevision === null) return;

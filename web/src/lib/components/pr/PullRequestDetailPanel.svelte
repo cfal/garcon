@@ -3,7 +3,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
-	import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+	import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import type { PullRequestThread } from '$lib/api/pull-requests';
 	import PullRequestHeader from './PullRequestHeader.svelte';

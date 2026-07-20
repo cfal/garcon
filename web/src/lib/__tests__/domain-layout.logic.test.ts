@@ -15,7 +15,7 @@ const expectedConcerns = {
 		'tools',
 		'transcript',
 	],
-	git: ['commit', 'history', 'review', 'surface', 'targets', 'workbench'],
+	git: ['commit', 'history', 'pull-requests', 'review', 'surface', 'targets', 'workbench'],
 	files: ['editor', 'sessions', 'tree'],
 	terminal: ['runtime', 'sessions'],
 	sidebar: ['projects', 'search'],

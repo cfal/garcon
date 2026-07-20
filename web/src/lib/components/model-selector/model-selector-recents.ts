@@ -1,5 +1,5 @@
 import type { SessionAgentId } from '$lib/types/app';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RecentAgentSetting } from '$shared/settings';
 import {
 	buildModelSources,

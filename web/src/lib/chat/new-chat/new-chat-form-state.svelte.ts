@@ -23,7 +23,7 @@ import {
 	normalizeAgentSettings,
 	withAgentSetting,
 } from '$lib/agents/agent-settings.js';
-import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import {
 	normalizeSupportedPermissionMode,

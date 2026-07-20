@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ScheduledPromptsStore } from '../scheduled-prompts.svelte';
+import { ScheduledPromptsStore } from '../scheduled-prompts-store.svelte';
 import type { ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
 
 function scheduledPrompt(id: string) {

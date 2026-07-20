@@ -230,7 +230,7 @@
 		</div>
 
 		<!-- Directory list -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox div needs focus for arrow key navigation -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox needs focus for arrow-key navigation; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 		<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
@@ -286,8 +286,12 @@
 	</div>
 {:else}
 	<!-- Desktop dropdown browser -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -- modal backdrop dismiss pattern -->
-	<div class="fixed inset-0 z-20" onclick={onClose} onkeydown={() => {}}></div>
+	<button
+		type="button"
+		class="fixed inset-0 z-20 border-0 bg-transparent p-0"
+		onclick={onClose}
+		aria-label={m.editor_actions_close()}
+	></button>
 		<div
 			class="absolute top-full left-0 right-0 z-30 mt-1 border border-border rounded-lg shadow-lg bg-card flex flex-col max-h-72"
 			role="dialog"
@@ -324,7 +328,7 @@
 		</div>
 
 		<!-- Directory list -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox div needs focus for arrow key navigation -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox needs focus for arrow-key navigation; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 		<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">

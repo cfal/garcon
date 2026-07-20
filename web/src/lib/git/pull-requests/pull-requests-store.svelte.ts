@@ -1,4 +1,4 @@
-// Reactive store for the GitHub pull request viewer. Owns the PR list for the
+// Owns the GitHub pull request viewer's PR list for the
 // active project plus the currently selected PR's detail (diff + threads).
 // Selecting a PR loads its detail lazily; generation guards drop stale
 // responses when the project or selection changes mid-flight.
@@ -12,6 +12,7 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
+import { errorMessage } from '$lib/utils/error-message.js';
 
 export interface PullRequestsStoreDeps {
 	notifyError?: (message: string) => void;
@@ -319,10 +320,6 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.selectedNumber = snapshot.selectedNumber;
 		this.detail = snapshot.detail;
 	}
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-	return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export function createPullRequestsStore(deps: PullRequestsStoreDeps = {}): PullRequestsStore {

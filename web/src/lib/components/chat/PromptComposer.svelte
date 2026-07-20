@@ -772,7 +772,7 @@
 				onchange={handleFileChange}
 			/>
 
-			<!-- svelte-ignore a11y_no_static_element_interactions -- drag-and-drop region with role=region and aria-label -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -- labeled region accepts native file drops; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 			<div
 				class="relative bg-transparent focus-within:ring-0 transition-all duration-200 overflow-hidden"
 				ondragover={handleDragOver}
@@ -887,7 +887,7 @@
 		/>
 		{#if !appShell.isMobile}
 			<!-- Keeps the grab zone outside the clipped rounded surface. -->
-			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer drag handle -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -- pointer-only resize handle supplements composer sizing controls; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 			<div
 				onpointerdown={handleResizeStart}
 				class="absolute left-0 right-0 -top-1 z-40 h-3 cursor-row-resize touch-none"
