@@ -23,8 +23,12 @@ export const FILE_OPEN_PLACEMENT_VALUES = [
 ] as const satisfies readonly FileOpenPlacementPreference[];
 export const HIDEABLE_TOOL_GROUPS = [
 	{
-		id: 'commands',
-		toolTypes: ['bash-tool-use', 'exec-tool-use', 'wait-tool-use', 'write-stdin-tool-use'],
+		id: 'bash',
+		toolTypes: ['bash-tool-use', 'write-stdin-tool-use'],
+	},
+	{
+		id: 'exec',
+		toolTypes: ['exec-tool-use', 'wait-tool-use'],
 	},
 	{
 		id: 'file-reads',

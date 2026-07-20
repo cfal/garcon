@@ -126,7 +126,8 @@ describe('Settings', () => {
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();
 			expect(screen.getByText('Hide tool calls')).toBeTruthy();
-			expect(screen.getByText('Command execution (Bash)')).toBeTruthy();
+			expect(screen.getByRole('switch', { name: 'Bash' })).toBeTruthy();
+			expect(screen.getByRole('switch', { name: 'Exec' })).toBeTruthy();
 			expect(screen.getByText('File reads and searches')).toBeTruthy();
 			expect(screen.getByText('File changes')).toBeTruthy();
 			expect(screen.getByText('Web searches and fetches')).toBeTruthy();
