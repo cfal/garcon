@@ -7,6 +7,7 @@ import {
   type BrowserContext,
   type Page,
 } from 'puppeteer-core';
+import type { ServerWsMessage } from '../../common/ws-events.js';
 import { createIntegrationFixture, type IntegrationFixture } from './integration-fixture.js';
 import { LightpandaProcess } from './lightpanda-process.js';
 import { withTimeout } from './deferred.js';
@@ -58,10 +59,12 @@ export class E2eFixture {
       await page.evaluateOnNewDocument(() => {
         const scope = globalThis as typeof globalThis & {
           __garconSpaWsOpenCount?: number;
+          __garconSpaWsEvents?: unknown[];
         };
         const storageKey = '__garconSpaWsOpenCount';
         const NativeWebSocket = globalThis.WebSocket;
         scope.__garconSpaWsOpenCount = Number(globalThis.sessionStorage.getItem(storageKey)) || 0;
+        scope.__garconSpaWsEvents = [];
         globalThis.WebSocket = new Proxy(NativeWebSocket, {
           construct(Target, args: ConstructorParameters<typeof WebSocket>) {
             const socket = new Target(...args);
@@ -73,6 +76,13 @@ export class E2eFixture {
                   storageKey,
                   String(scope.__garconSpaWsOpenCount),
                 );
+              });
+              socket.addEventListener('message', (event) => {
+                try {
+                  scope.__garconSpaWsEvents?.push(JSON.parse(String(event.data)));
+                } catch {
+                  // Product code owns protocol validation; the fixture only records parseable events.
+                }
               });
             }
             return socket;
@@ -137,6 +147,36 @@ export class E2eFixture {
       this.integration.garcon.describeLogs(),
       this.lightpanda.describeLogs(),
     ].join('\n'));
+  }
+
+  async spaWebSocketEventCount(): Promise<number> {
+    return await this.page.evaluate(() => {
+      const scope = globalThis as typeof globalThis & {
+        __garconSpaWsEvents?: unknown[];
+      };
+      return scope.__garconSpaWsEvents?.length ?? 0;
+    });
+  }
+
+  async waitForSpaWebSocketEvent(input: {
+    afterIndex: number;
+    type: ServerWsMessage['type'];
+    chatId?: string;
+  }): Promise<void> {
+    await this.page.waitForFunction(
+      ({ afterIndex, type, chatId }) => {
+        const scope = globalThis as typeof globalThis & {
+          __garconSpaWsEvents?: unknown[];
+        };
+        return (scope.__garconSpaWsEvents ?? []).slice(afterIndex).some((event) => {
+          if (!event || typeof event !== 'object' || Array.isArray(event)) return false;
+          const record = event as Record<string, unknown>;
+          return record.type === type && (chatId === undefined || record.chatId === chatId);
+        });
+      },
+      { timeout: 20_000 },
+      input,
+    );
   }
 
   async writeDiagnostics(testName: string, error: unknown): Promise<string> {
