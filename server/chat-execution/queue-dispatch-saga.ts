@@ -1,50 +1,46 @@
 import crypto from 'crypto';
 import type { AutomaticQueuePauseKind } from '../../common/queue-state.ts';
 import type { RunAgentTurnOptions } from '../agents/session-types.ts';
-import type { StoredChatExecutionControlState, StoredQueueEntry } from '../chat-execution-control-state.ts';
+import type { StoredQueueEntry } from './control-state.ts';
 import { createLogger } from '../lib/log.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { QueuedTurnFinalizationHandle } from './turn-finalization-tracker.ts';
-import { executionTurnIdentity } from './types.ts';
+import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
+import type { ExecutionOwnership } from './execution-ownership.ts';
+import {
+  executionTurnIdentity,
+  type AgentTurnRunnerPort,
+  type PendingInputsPort,
+  type QueueDrainOptionsResolver,
+} from './types.ts';
 
 const logger = createLogger('queue-dispatch');
 
-export interface QueueDispatchHost {
-  shouldHalt(chatId: string): boolean;
+// Coordinator-owned effects the dispatch loop cannot perform directly: event
+// emission, transcript registration, the direct-turn settle handoff, the drain
+// stop barrier, and the shutdown flag. Everything else is a direct call on the
+// injected ownership, controls, turn runner, or pending-input collaborators.
+export interface QueueDispatchCallbacks {
   isShuttingDown(): boolean;
-  hasManualStop(chatId: string): boolean;
-  stopBarrier(chatId: string): Promise<boolean> | null;
-  popNext(chatId: string): Promise<{ entry: StoredQueueEntry; control: StoredChatExecutionControlState } | null>;
-  readControl(chatId: string): Promise<StoredChatExecutionControlState>;
-  setActiveEntry(chatId: string, entryId: string): void;
-  setAdmissionController(chatId: string, controller: AbortController): void;
-  shutdownTargetsEntry(chatId: string, entryId: string): boolean;
-  resolveOptions(chatId: string, entry: StoredQueueEntry): RunAgentTurnOptions;
-  usesRecoveredHistory(chatId: string): boolean;
-  beginFinalization(chatId: string, turnId: string): QueuedTurnFinalizationHandle;
-  installAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
   registerPending(chatId: string, content: string, options: RunAgentTurnOptions): Promise<void>;
   publishDispatching(chatId: string, entry: StoredQueueEntry): void;
-  waitUntilTurnAbortable(
-    chatId: string,
-    turn: TurnIdentity,
-    signal: AbortSignal,
-  ): Promise<boolean>;
-  runProvider(chatId: string, content: string, options: RunAgentTurnOptions): Promise<void>;
-  isProviderRunning(chatId: string): boolean;
-  settleAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
-  discardPending(chatId: string, clientRequestId: string): void;
-  returnUnsent(chatId: string, entryId: string): Promise<void>;
-  restoreStopped(chatId: string, entryId: string): Promise<void>;
-  requeueAndPause(
-    chatId: string,
-    entryId: string,
-    kind: AutomaticQueuePauseKind,
-  ): Promise<void>;
-  removeSent(chatId: string, entryId: string): Promise<void>;
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
+  settleAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
+  stopBarrier(chatId: string): Promise<boolean> | null;
+  // Removes a delivered entry through the coordinator's public queue method so
+  // the sent-entry finalization stays a single, observable code path.
+  removeSent(chatId: string, entryId: string): Promise<unknown>;
+}
+
+export interface QueueDispatchDeps {
+  ownership: ExecutionOwnership;
+  controls: ChatExecutionControlOperations;
+  turnRunner: AgentTurnRunnerPort;
+  pendingInputs: PendingInputsPort;
+  getDrainOptions: QueueDrainOptionsResolver;
+  callbacks: QueueDispatchCallbacks;
 }
 
 function optionsForQueuedTurn(
@@ -60,38 +56,66 @@ function optionsForQueuedTurn(
 }
 
 export class QueueDispatchSaga {
-  constructor(private readonly host: QueueDispatchHost) {}
+  readonly #ownership: ExecutionOwnership;
+  readonly #controls: ChatExecutionControlOperations;
+  readonly #turnRunner: AgentTurnRunnerPort;
+  readonly #pendingInputs: PendingInputsPort;
+  readonly #getDrainOptions: QueueDrainOptionsResolver;
+  readonly #callbacks: QueueDispatchCallbacks;
+
+  constructor(deps: QueueDispatchDeps) {
+    this.#ownership = deps.ownership;
+    this.#controls = deps.controls;
+    this.#turnRunner = deps.turnRunner;
+    this.#pendingInputs = deps.pendingInputs;
+    this.#getDrainOptions = deps.getDrainOptions;
+    this.#callbacks = deps.callbacks;
+  }
+
+  #shouldHalt(chatId: string): boolean {
+    return this.#callbacks.isShuttingDown()
+      || this.#ownership.hasSuppression(chatId, 'abort')
+      || this.#ownership.hasSuppression(chatId, 'deletion')
+      || this.#ownership.hasSuppression(chatId, 'manual-stop')
+      || this.#ownership.hasDirect(chatId)
+      || this.#ownership.stop(chatId) !== undefined
+      || this.#turnRunner.isChatRunning(chatId);
+  }
+
+  #hasManualStop(chatId: string): boolean {
+    return this.#ownership.hasSuppression(chatId, 'manual-stop');
+  }
 
   async run(chatId: string): Promise<void> {
-    while (!this.host.shouldHalt(chatId)) {
-      const result = await this.host.popNext(chatId);
+    while (!this.#shouldHalt(chatId)) {
+      const result = await this.#controls.pop(chatId);
       if (!result) {
-        const control = await this.host.readControl(chatId);
+        const control = await this.#controls.read(chatId);
         if (!control.entries.some((entry) => entry.status === 'queued' || entry.status === 'sending')) {
-          this.host.publishIdle(chatId);
+          this.#callbacks.publishIdle(chatId);
         }
         return;
       }
 
       const { entry } = result;
-      this.host.setActiveEntry(chatId, entry.id);
-      if (this.host.isShuttingDown()) {
-        await this.host.returnUnsent(chatId, entry.id);
+      this.#ownership.setActiveDrainEntry(chatId, entry.id);
+      if (this.#callbacks.isShuttingDown()) {
+        await this.#controls.returnUnsent(chatId, entry.id);
         return;
       }
-      if (this.host.hasManualStop(chatId)) {
-        await this.host.restoreStopped(chatId, entry.id);
+      if (this.#hasManualStop(chatId)) {
+        await this.#controls.restoreStopped(chatId, entry.id);
         return;
       }
-      const stop = this.host.stopBarrier(chatId);
+      const stop = this.#callbacks.stopBarrier(chatId);
       if (stop) {
         const stopped = await stop.catch(() => false);
-        if (this.host.hasManualStop(chatId)) {
-          await this.host.restoreStopped(chatId, entry.id);
+        if (this.#hasManualStop(chatId)) {
+          await this.#controls.restoreStopped(chatId, entry.id);
           return;
         }
         if (!stopped) {
-          await this.host.returnUnsent(chatId, entry.id);
+          await this.#controls.returnUnsent(chatId, entry.id);
           return;
         }
       }
@@ -107,45 +131,45 @@ export class QueueDispatchSaga {
     let finalization: QueuedTurnFinalizationHandle | undefined;
     let executionStarted = false;
     const admissionController = new AbortController();
-    this.host.setAdmissionController(chatId, admissionController);
+    this.#ownership.setDrainAdmission(chatId, admissionController);
 
     try {
-      options = optionsForQueuedTurn(this.host.resolveOptions(chatId, entry), entry);
-      if (this.host.usesRecoveredHistory(chatId)) options.directHistoryRecovery = 'allow-empty';
+      options = optionsForQueuedTurn(this.#getDrainOptions(chatId), entry);
+      if (this.#ownership.usesRecoveredHistory(chatId)) options.directHistoryRecovery = 'allow-empty';
       options.executionAdmission = Object.freeze({
         signal: admissionController.signal,
         markStarted: () => { executionStarted = true; },
       });
-      if (this.host.isShuttingDown()) {
+      if (this.#callbacks.isShuttingDown()) {
         admissionController.abort(new Error('Turn interrupted because the server is shutting down'));
       }
       const turn = executionTurnIdentity(options)!;
-      finalization = this.host.beginFinalization(chatId, turn.turnId!);
+      finalization = this.#ownership.beginFinalization(chatId, turn.turnId!);
       attempt = new QueueExecutionAttempt(turn, entry.id);
-      this.host.installAttempt(chatId, attempt);
-      await this.host.registerPending(chatId, entry.content, options);
+      this.#ownership.installAttempt(chatId, attempt);
+      await this.#callbacks.registerPending(chatId, entry.content, options);
       attempt.markRegistered();
-      if (this.host.shouldHalt(chatId)) {
+      if (this.#shouldHalt(chatId)) {
         stage = 'running';
         const shouldStart = await attempt.waitForLaunchDecision(admissionController.signal);
         if (!shouldStart) throw new Error('Queued turn stopped before runtime start');
       }
-      this.host.publishDispatching(chatId, entry);
+      this.#callbacks.publishDispatching(chatId, entry);
       stage = 'running';
       attempt.markLaunching();
       await this.#runProvider(chatId, entry, options, attempt);
 
-      if (this.host.shutdownTargetsEntry(chatId, entry.id)) {
+      if (this.#ownership.shutdownTargetsEntry(chatId, entry.id)) {
         await this.#compensateShutdown(chatId, entry, options, executionStarted);
         finalization.settle('not-committed');
         return false;
       }
       stage = 'finalizing';
-      await this.host.removeSent(chatId, entry.id);
+      await this.#callbacks.removeSent(chatId, entry.id);
       finalization.settle('committed');
       return true;
     } catch (error: unknown) {
-      if (this.host.shutdownTargetsEntry(chatId, entry.id)) {
+      if (this.#ownership.shutdownTargetsEntry(chatId, entry.id)) {
         attempt?.clearExpectedAbort();
         await this.#tryShutdownCompensation(chatId, entry, options, executionStarted);
         finalization?.settle('not-committed');
@@ -161,8 +185,8 @@ export class QueueDispatchSaga {
       finalization?.settle('not-committed');
       if (attempt && !attempt.isRunSettled) {
         attempt.markRunSettled();
-        if (!this.host.isProviderRunning(chatId)) attempt.markTerminalObserved();
-        this.host.settleAttempt(chatId, attempt);
+        if (!this.#turnRunner.isChatRunning(chatId)) attempt.markTerminalObserved();
+        this.#callbacks.settleAttempt(chatId, attempt);
       }
     }
   }
@@ -174,7 +198,7 @@ export class QueueDispatchSaga {
     attempt: QueueExecutionAttempt,
   ): Promise<void> {
     const abortableWaitController = new AbortController();
-    const abortable = this.host.waitUntilTurnAbortable(
+    const abortable = this.#turnRunner.waitUntilTurnAbortable(
       chatId,
       attempt.identity(),
       abortableWaitController.signal,
@@ -186,15 +210,15 @@ export class QueueDispatchSaga {
       () => false,
     );
     try {
-      const run = this.host.runProvider(chatId, entry.content, options);
+      const run = this.#turnRunner.runAgentTurn(chatId, entry.content, options);
       void Promise.race([abortable, run.then(() => false, () => false)])
         .finally(() => abortableWaitController.abort());
       await run;
     } finally {
       abortableWaitController.abort();
       attempt.markRunSettled();
-      if (!this.host.isProviderRunning(chatId)) attempt.markTerminalObserved();
-      this.host.settleAttempt(chatId, attempt);
+      if (!this.#turnRunner.isChatRunning(chatId)) attempt.markTerminalObserved();
+      this.#callbacks.settleAttempt(chatId, attempt);
     }
   }
 
@@ -205,11 +229,11 @@ export class QueueDispatchSaga {
     executionStarted: boolean,
   ): Promise<void> {
     if (executionStarted) {
-      await this.host.requeueAndPause(chatId, entry.id, 'completion-uncertain');
+      await this.#controls.requeueAndPause(chatId, entry.id, 'completion-uncertain');
       return;
     }
-    if (options.clientRequestId) this.host.discardPending(chatId, options.clientRequestId);
-    await this.host.returnUnsent(chatId, entry.id);
+    if (options.clientRequestId) this.#pendingInputs.discard(chatId, options.clientRequestId);
+    await this.#controls.returnUnsent(chatId, entry.id);
   }
 
   async #tryShutdownCompensation(
@@ -238,7 +262,7 @@ export class QueueDispatchSaga {
   ): Promise<boolean> {
     let stopped = false;
     try {
-      const stop = this.host.stopBarrier(chatId);
+      const stop = this.#callbacks.stopBarrier(chatId);
       stopped = stop ? await stop : false;
     } catch {
       // The provider failure remains authoritative when the stop acknowledgement fails.
@@ -249,7 +273,7 @@ export class QueueDispatchSaga {
     }
 
     try {
-      await this.host.removeSent(chatId, entry.id);
+      await this.#callbacks.removeSent(chatId, entry.id);
       finalization?.settle('committed');
       return true;
     } catch (error: unknown) {
@@ -259,7 +283,7 @@ export class QueueDispatchSaga {
         message: error instanceof Error ? error.message : String(error),
       });
       try {
-        await this.host.requeueAndPause(chatId, entry.id, 'completion-uncertain');
+        await this.#controls.requeueAndPause(chatId, entry.id, 'completion-uncertain');
       } catch (compensationError: unknown) {
         logger.error('queue: failed to record aborted-entry pause:', {
           chatId,
@@ -292,7 +316,7 @@ export class QueueDispatchSaga {
     }
     let compensated = false;
     try {
-      await this.host.requeueAndPause(chatId, entry.id, kind);
+      await this.#controls.requeueAndPause(chatId, entry.id, kind);
       compensated = true;
     } catch (compensationError: unknown) {
       logger.error('queue: failed to record automatic pause:', {
@@ -304,7 +328,7 @@ export class QueueDispatchSaga {
     }
     finalization?.settle('not-committed');
     if (kind === 'queued-turn-failed' && compensated) {
-      this.host.publishTurnFailed(chatId, message, options);
+      this.#callbacks.publishTurnFailed(chatId, message, options);
     }
   }
 }

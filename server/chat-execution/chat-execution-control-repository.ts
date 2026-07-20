@@ -8,7 +8,7 @@ import {
   parseStoredChatExecutionControlState,
   storedChatExecutionControlNeedsCanonicalization,
   type StoredChatExecutionControlState,
-} from '../chat-execution-control-state.ts';
+} from './control-state.ts';
 
 const QUEUE_FILE_SUFFIX = '.queue.json';
 

@@ -20,7 +20,7 @@ import type { ChatCommandService } from '../commands/chat-command-service.js';
 import {
   normalizeStoredChatExecutionControlState,
   toClientChatExecutionControlState,
-} from '../chat-execution-control-state.ts';
+} from '../chat-execution/control-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,

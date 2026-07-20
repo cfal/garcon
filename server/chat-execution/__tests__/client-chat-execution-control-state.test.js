@@ -4,7 +4,7 @@ import {
   normalizeStoredChatExecutionControlState,
   parseStoredChatExecutionControlState,
   toClientChatExecutionControlState,
-} from '../../chat-execution-control-state.js';
+} from '../control-state.js';
 
 function entry(id, status, revision = 1) {
   return {

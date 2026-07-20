@@ -18,7 +18,7 @@ import {
 import {
   MAX_STORED_APPLIED_QUEUE_COMMANDS,
   emptyStoredChatExecutionControl,
-} from '../../chat-execution-control-state.ts';
+} from '../control-state.ts';
 
 function context(start = 0) {
   let nextId = start;

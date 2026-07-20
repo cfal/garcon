@@ -11,7 +11,7 @@ import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/ses
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
-} from '../chat-execution-control-state.ts';
+} from './control-state.ts';
 import { DomainError } from '../lib/domain-error.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.ts';
@@ -270,7 +270,8 @@ export interface SessionStopInFlight {
 
 export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
 
-export interface ChatExecutionService {
+// Accepted-command surface consumed by the command service and route handlers.
+export interface ChatExecutionCommands {
   deleteChatQueueFile(chatId: string): Promise<void>;
   scheduleDirectInput(input: AcceptedDirectInput): Promise<void>;
   runInitialInput(input: AcceptedDirectInput): Promise<void>;
@@ -280,6 +281,45 @@ export interface ChatExecutionService {
   deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult>;
   deliverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
   recoverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
+  stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
+  interruptActiveTurn(chatId: string): Promise<boolean>;
+  abortForChatDeletion(chatId: string): Promise<boolean>;
+  waitForDispatches(): Promise<void>;
+  isChatExecutionReserved(chatId: string): boolean;
+  hasChatExecutionOwner(chatId: string): boolean;
+  readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
+  continuePastRecoveredInput(
+    chatId: string,
+    continuationId: string,
+  ): Promise<StoredChatExecutionControlState>;
+  clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
+  pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
+  resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
+  resumeAndDrain(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
+}
+
+// Shutdown and recovery surface consumed by the server lifecycle.
+export interface ChatExecutionLifecycle {
+  beginShutdown(): string[];
+  abortForShutdown(chatId: string): Promise<boolean>;
+  waitForExecutionOwners(): Promise<void>;
+  waitForDispatches(): Promise<void>;
+  getQueuedTurnFinalization(
+    chatId: string,
+    turnId: string | undefined,
+  ): Promise<QueuedTurnFinalizationOutcome> | null;
+}
+
+// Read-only surface consumed by WebSocket and route handlers.
+export interface ChatExecutionQueries {
+  readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
+  isChatDraining(chatId: string): boolean;
+}
+
+// Full composition-root surface: the facets plus the direct-turn and low-level
+// queue operations that no external consumer needs through a facet.
+export interface ChatExecutionService
+  extends ChatExecutionCommands, ChatExecutionLifecycle, ChatExecutionQueries {
   registerPendingUserInput(
     chatId: string,
     command: string,
@@ -298,22 +338,7 @@ export interface ChatExecutionService {
     command: string,
     options: RunAgentTurnOptions,
   ): Promise<void>;
-  stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
-  interruptActiveTurn(chatId: string): Promise<boolean>;
-  abortForChatDeletion(chatId: string): Promise<boolean>;
-  beginShutdown(): string[];
-  abortForShutdown(chatId: string): Promise<boolean>;
-  waitForExecutionOwners(): Promise<void>;
-  waitForDispatches(): Promise<void>;
-  getQueuedTurnFinalization(
-    chatId: string,
-    turnId: string | undefined,
-  ): Promise<QueuedTurnFinalizationOutcome> | null;
-  isChatDraining(chatId: string): boolean;
-  isChatExecutionReserved(chatId: string): boolean;
-  hasChatExecutionOwner(chatId: string): boolean;
   triggerDrain(chatId: string): Promise<void>;
-  readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
   hasAppliedQueueCreateCommand(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
   createChatQueueEntry(
     chatId: string,
@@ -341,14 +366,6 @@ export interface ChatExecutionService {
     options?: RunAgentTurnOptions,
     afterPendingRegistered?: () => Promise<void>,
   ): Promise<boolean>;
-  clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
-  pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
-  resumeChatQueue(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
-  resumeAndDrain(chatId: string, pauseId: string): Promise<StoredChatExecutionControlState>;
-  continuePastRecoveredInput(
-    chatId: string,
-    continuationId: string,
-  ): Promise<StoredChatExecutionControlState>;
   dropRecoveredInputContinuation(chatId: string): Promise<StoredChatExecutionControlState>;
   requeueAndPauseChat(
     chatId: string,

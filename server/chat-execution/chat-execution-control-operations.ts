@@ -7,7 +7,7 @@ import {
   normalizeStoredChatExecutionControlState,
   type StoredChatExecutionControlState,
   type StoredQueueEntry,
-} from '../chat-execution-control-state.ts';
+} from './control-state.ts';
 import { DomainError } from '../lib/domain-error.ts';
 import { createLogger } from '../lib/log.ts';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';

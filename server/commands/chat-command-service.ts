@@ -46,14 +46,14 @@ import {
 } from './command-ledger.js';
 import {
   QueueEntryMutationError,
-  type ChatExecutionService,
+  type ChatExecutionCommands,
 } from '../chat-execution/chat-execution-coordinator.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
 import {
   normalizeStoredChatExecutionControlState,
   toClientChatExecutionControlState,
   type StoredChatExecutionControlState,
-} from '../chat-execution-control-state.ts';
+} from '../chat-execution/control-state.ts';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import {
@@ -70,30 +70,7 @@ import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js'
 
 const logger = createLogger('commands:chat-command-service');
 
-type QueueDep = Pick<
-  ChatExecutionService,
-  | 'scheduleDirectInput'
-  | 'runInitialInput'
-  | 'scheduleDirectOperation'
-  | 'enqueueAccepted'
-  | 'replaceAccepted'
-  | 'deleteAccepted'
-  | 'deliverAcceptedActiveInput'
-  | 'recoverAcceptedActiveInput'
-  | 'stopActiveTurn'
-  | 'interruptActiveTurn'
-  | 'abortForChatDeletion'
-  | 'waitForDispatches'
-  | 'isChatExecutionReserved'
-  | 'hasChatExecutionOwner'
-  | 'readChatExecutionControl'
-  | 'continuePastRecoveredInput'
-  | 'clearChatQueue'
-  | 'pauseChatQueue'
-  | 'resumeChatQueue'
-  | 'resumeAndDrain'
-  | 'deleteChatQueueFile'
->;
+type QueueDep = ChatExecutionCommands;
 
 interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;

@@ -6,7 +6,7 @@ import {
   type StoredAppliedQueueCommand,
   type StoredChatExecutionControlState,
   type StoredQueueEntry,
-} from '../chat-execution-control-state.ts';
+} from './control-state.ts';
 
 export interface TransitionContext {
   now: string;

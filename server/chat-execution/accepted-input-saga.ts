@@ -3,7 +3,8 @@ import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/ses
 import { ActiveInputDeliveryError, DomainError } from '../lib/domain-error.ts';
 import { createLogger } from '../lib/log.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
-import type { QueueCommandIdentity, ReceiptRetention } from './chat-execution-control-transitions.ts';
+import type { ReceiptRetention } from './chat-execution-control-transitions.ts';
+import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type {
   AcceptedActiveInput,
   AcceptedActiveInputOutcome,
@@ -13,45 +14,27 @@ import type {
   AcceptedQueueDelete,
   AcceptedQueueReplace,
   DirectTurnReservation,
+  PendingInputsPort,
   PendingUserInputRegistrationOptions,
   QueueCommandMutationResult,
 } from './types.ts';
-import type { StoredChatExecutionControlState } from '../chat-execution-control-state.ts';
+import type { StoredChatExecutionControlState } from './control-state.ts';
 
 const logger = createLogger('accepted-input');
 
-export interface AcceptedInputSagaHost {
-  createQueueEntry(
-    chatId: string,
-    content: string,
-    command: QueueCommandIdentity,
-    receipts: ReceiptRetention,
-  ): Promise<QueueCommandMutationResult>;
-  replaceQueueEntry(
-    chatId: string,
-    entryId: string,
-    content: string,
-    expectedRevision: number,
-    command: QueueCommandIdentity,
-    receipts: ReceiptRetention,
-  ): Promise<QueueCommandMutationResult>;
-  deleteQueueEntry(
-    chatId: string,
-    entryId: string,
-    command: QueueCommandIdentity,
-    receipts: ReceiptRetention,
-  ): Promise<QueueCommandMutationResult>;
+// Coordinator-owned execution operations the accepted-input orchestration drives.
+// Queue mutations and pending-input bookkeeping are performed directly against the
+// injected control operations and pending-input store instead of through here.
+export interface AcceptedInputCoordinator {
   requestDrain(chatId: string, context: string): void;
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation;
   checkpoint(reservation: DirectTurnReservation): void;
   consumeRecoveredInput(reservation: DirectTurnReservation): Promise<void>;
-  readControl(chatId: string): Promise<StoredChatExecutionControlState>;
   registerPending(
     chatId: string,
     content: string,
     options: PendingUserInputRegistrationOptions,
   ): Promise<void>;
-  markPendingFailed(chatId: string, clientRequestId: string): boolean;
   releaseDirect(reservation: DirectTurnReservation): Promise<void>;
   runDirect(
     reservation: DirectTurnReservation,
@@ -70,20 +53,34 @@ export interface AcceptedInputSagaHost {
   hasAppliedCreate(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
 }
 
+export interface AcceptedInputDeps {
+  controls: ChatExecutionControlOperations;
+  pendingInputs: PendingInputsPort;
+  coordinator: AcceptedInputCoordinator;
+}
+
 export class AcceptedInputSaga {
-  constructor(private readonly host: AcceptedInputSagaHost) {}
+  readonly #controls: ChatExecutionControlOperations;
+  readonly #pendingInputs: PendingInputsPort;
+  readonly #coordinator: AcceptedInputCoordinator;
+
+  constructor(deps: AcceptedInputDeps) {
+    this.#controls = deps.controls;
+    this.#pendingInputs = deps.pendingInputs;
+    this.#coordinator = deps.coordinator;
+  }
 
   async enqueue(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult> {
     try {
       const receipts = await this.#receipts(input.command.chatId, input.settlement);
-      const result = await this.host.createQueueEntry(
+      const result = await this.#controls.create(
         input.command.chatId,
         input.content,
         { key: input.command.key, entryId: input.command.entryId },
         receipts,
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);
-      this.host.requestDrain(input.command.chatId, 'accepted enqueue');
+      this.#coordinator.requestDrain(input.command.chatId, 'accepted enqueue');
       return result;
     } catch (error) {
       await input.settlement.settleQueueMutationFailure(input.command, error);
@@ -94,7 +91,7 @@ export class AcceptedInputSaga {
   async replace(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult> {
     try {
       const receipts = await this.#receipts(input.command.chatId, input.settlement);
-      const result = await this.host.replaceQueueEntry(
+      const result = await this.#controls.replace(
         input.command.chatId,
         input.command.entryId,
         input.content,
@@ -113,7 +110,7 @@ export class AcceptedInputSaga {
   async delete(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult> {
     try {
       const receipts = await this.#receipts(input.command.chatId, input.settlement);
-      const result = await this.host.deleteQueueEntry(
+      const result = await this.#controls.delete(
         input.command.chatId,
         input.command.entryId,
         { key: input.command.key, entryId: input.command.entryId },
@@ -129,8 +126,8 @@ export class AcceptedInputSaga {
 
   async schedule(input: AcceptedDirectInput): Promise<void> {
     const reservation = await this.#prepareDirect(input);
-    this.host.trackDispatch(
-      this.host.runDirect(reservation, input.content, input.options, input.dispatch).catch((error) => {
+    this.#coordinator.trackDispatch(
+      this.#coordinator.runDirect(reservation, input.content, input.options, input.dispatch).catch((error) => {
         logger.error('commands: run failed:', error instanceof Error ? error.message : String(error));
       }),
     );
@@ -138,7 +135,7 @@ export class AcceptedInputSaga {
 
   async runInitial(input: AcceptedDirectInput): Promise<void> {
     const reservation = await this.#prepareDirect(input);
-    await this.host.runDirect(
+    await this.#coordinator.runDirect(
       reservation,
       input.content,
       input.options,
@@ -151,22 +148,23 @@ export class AcceptedInputSaga {
     const options = withTurnIdentifiers(input.command);
     let reservation: DirectTurnReservation;
     try {
-      reservation = this.host.reserveDirect(input.command.chatId, options);
+      reservation = this.#coordinator.reserveDirect(input.command.chatId, options);
     } catch (error) {
       await this.#recordAdmissionFailure(input, error);
       throw error;
     }
     try {
-      this.host.checkpoint(reservation);
-      const control = await this.host.readControl(input.command.chatId);
-      this.host.checkpoint(reservation);
+      this.#checkpoint(reservation);
+      const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
-      await input.settlement.markScheduled(input.command, options.turnId!, false);
-      this.host.checkpoint(reservation);
+      await this.#checkpointAfter(
+        reservation,
+        input.settlement.markScheduled(input.command, options.turnId!, false),
+      );
     } catch (error) {
       let failure = error;
       try {
-        await this.host.releaseDirect(reservation);
+        await this.#coordinator.releaseDirect(reservation);
       } catch (releaseError) {
         failure = aggregateFailure(
           failure,
@@ -185,8 +183,8 @@ export class AcceptedInputSaga {
       }
       throw failure;
     }
-    this.host.trackDispatch(
-      this.host.runDirect(reservation, '', options, input.dispatch).catch(async (error) => {
+    this.#coordinator.trackDispatch(
+      this.#coordinator.runDirect(reservation, '', options, input.dispatch).catch(async (error) => {
         logger.error('compact: failed to compact chat:', error instanceof Error ? error.message : String(error));
         try {
           await input.settlement.settleOperationFailure(input.command, error);
@@ -203,7 +201,7 @@ export class AcceptedInputSaga {
   async deliverActive(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome> {
     let deliveryAccepted = false;
     try {
-      const delivered = await this.host.deliverActive(
+      const delivered = await this.#coordinator.deliverActive(
         input.command.chatId,
         input.content,
         { clientRequestId: input.command.clientRequestId, turnId: input.command.turnId },
@@ -212,7 +210,7 @@ export class AcceptedInputSaga {
       if (delivered) {
         deliveryAccepted = true;
         await input.settlement.settleActiveInput(input.command);
-        return { delivery: 'active', control: await this.host.readControl(input.command.chatId) };
+        return { delivery: 'active', control: await this.#controls.read(input.command.chatId) };
       }
     } catch (error) {
       deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
@@ -228,7 +226,7 @@ export class AcceptedInputSaga {
   }
 
   async recoverActive(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome> {
-    const applied = await this.host.hasAppliedCreate(
+    const applied = await this.#coordinator.hasAppliedCreate(
       input.command.chatId,
       input.command.key,
       input.command.entryId,
@@ -241,40 +239,41 @@ export class AcceptedInputSaga {
       );
     }
     await input.settlement.settleQueueMutation(input.command, input.command.entryId);
-    this.host.requestDrain(input.command.chatId, 'recovered active fallback');
+    this.#coordinator.requestDrain(input.command.chatId, 'recovered active fallback');
     return {
       delivery: 'queued',
       entryId: input.command.entryId,
-      control: await this.host.readControl(input.command.chatId),
+      control: await this.#controls.read(input.command.chatId),
     };
   }
 
   async #prepareDirect(input: AcceptedDirectInput): Promise<DirectTurnReservation> {
     let reservation: DirectTurnReservation;
     try {
-      reservation = this.host.reserveDirect(input.command.chatId, input.options);
+      reservation = this.#coordinator.reserveDirect(input.command.chatId, input.options);
     } catch (error) {
       await this.#recordAdmissionFailure(input, error);
       throw error;
     }
     try {
-      this.host.checkpoint(reservation);
+      this.#checkpoint(reservation);
       if (input.continueRecoveredInput) {
-        await this.host.consumeRecoveredInput(reservation);
-        this.host.checkpoint(reservation);
+        await this.#checkpointAfter(reservation, this.#coordinator.consumeRecoveredInput(reservation));
       }
-      const control = await this.host.readControl(input.command.chatId);
-      this.host.checkpoint(reservation);
+      const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
-      await input.preparation?.prepare();
-      this.host.checkpoint(reservation);
-      await this.host.registerPending(input.command.chatId, input.content, input.options);
-      this.host.checkpoint(reservation);
-      await input.settlement.markScheduled(input.command, input.options.turnId!, true);
-      this.host.checkpoint(reservation);
+      await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare()));
+      await this.#checkpointAfter(
+        reservation,
+        this.#coordinator.registerPending(input.command.chatId, input.content, input.options),
+      );
+      await this.#checkpointAfter(
+        reservation,
+        input.settlement.markScheduled(input.command, input.options.turnId!, true),
+      );
       return reservation;
     } catch (error) {
-      const pendingInputRecovery = this.host.markPendingFailed(
+      const pendingInputRecovery = this.#pendingInputs.markFailed(
         input.command.chatId,
         input.options.clientRequestId!,
       );
@@ -295,7 +294,7 @@ export class AcceptedInputSaga {
         }
       }
       try {
-        await this.host.releaseDirect(reservation);
+        await this.#coordinator.releaseDirect(reservation);
       } catch (releaseError) {
         failure = aggregateFailure(
           failure,
@@ -351,6 +350,19 @@ export class AcceptedInputSaga {
     settlement: AcceptedQueueCreate['settlement'],
   ): Promise<ReceiptRetention> {
     return settlement.listUnsettledQueueReceiptKeys(chatId).then((protectedKeys) => ({ protectedKeys }));
+  }
+
+  #checkpoint(reservation: DirectTurnReservation): void {
+    this.#coordinator.checkpoint(reservation);
+  }
+
+  // Awaits one reservation-scoped step, then re-validates the reservation exactly
+  // once. Every await between reserve and run can be invalidated by an admission
+  // abort or a concurrent clear, so each is paired with a single check here.
+  async #checkpointAfter<T>(reservation: DirectTurnReservation, promise: Promise<T>): Promise<T> {
+    const result = await promise;
+    this.#coordinator.checkpoint(reservation);
+    return result;
   }
 
   async #recordAdmissionFailure(

@@ -8,7 +8,7 @@ import {
 import {
   cloneStoredChatExecutionControl,
   emptyStoredChatExecutionControl,
-} from '../../chat-execution-control-state.ts';
+} from '../control-state.ts';
 
 const temporaryDirectories = [];
 

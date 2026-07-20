@@ -5,14 +5,14 @@ import {
   type QueueEntry,
   type QueuePause,
   type RecentlyDispatchedQueueEntry,
-} from '../common/queue-state.ts';
+} from '../../common/queue-state.ts';
 import {
   parseRecoveredInputContinuation,
   type ChatExecutionControlState,
   type RecoveredInputContinuation,
-} from '../common/chat-execution-control.ts';
+} from '../../common/chat-execution-control.ts';
 
-export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../common/queue-state.ts';
+export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../../common/queue-state.ts';
 
 export interface StoredQueueDeliveryIdentity {
   clientRequestId: string;
