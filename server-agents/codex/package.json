@@ -12,7 +12,7 @@
     "@openai/codex": "0.144.6",
     "bun-pty": "^0.4.10"
   },
-  "devDependencies": { "@types/bun": "^1.3.14", "typescript": "^7.0.2" },
+  "devDependencies": { "@types/bun": "^1.3.14", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "codex",
