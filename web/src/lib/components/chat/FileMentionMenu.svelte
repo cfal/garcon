@@ -2,7 +2,7 @@
 	// Dropdown menu for mentioning project files via "@" in the chat composer.
 	// Fetches the file list once on mount, then filters locally by query.
 
-	import { File } from '@lucide/svelte';
+	import File from '@lucide/svelte/icons/file';
 	import { getFileList, type FileEntry } from '$lib/api/files.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers } from '$lib/context';

@@ -3,7 +3,8 @@
 	// Fetches the command list for the active agent/project when first shown,
 	// then filters locally by query.
 
-	import { Slash, Sparkles } from '@lucide/svelte';
+	import Slash from '@lucide/svelte/icons/slash';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
 	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/composer/slash-commands.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';

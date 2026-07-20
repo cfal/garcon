@@ -40,6 +40,17 @@ export default defineConfig(
 					varsIgnorePattern: '^_',
 				},
 			],
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: '@lucide/svelte',
+							message: 'Import individual icons from @lucide/svelte/icons/*.',
+						},
+					],
+				},
+			],
 		},
 	},
 	{

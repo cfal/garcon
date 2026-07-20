@@ -56,7 +56,9 @@
 		LOCAL_STORAGE_KEYS,
 		setLocalStorageItem,
 	} from '$lib/utils/local-persistence';
-	import { FileText, ImagePlus, X } from '@lucide/svelte';
+	import FileText from '@lucide/svelte/icons/file-text';
+	import ImagePlus from '@lucide/svelte/icons/image-plus';
+	import X from '@lucide/svelte/icons/x';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { AgentSettingDescriptor } from '$shared/agent-integration';
 	import type { JsonValue } from '$shared/json';

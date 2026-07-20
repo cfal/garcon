@@ -1,17 +1,15 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import type {
-		ChatQueueState,
-		QueueEntry,
-		QueuePause,
-	} from '$lib/types/chat';
+	import type { ChatQueueState, QueueEntry, QueuePause } from '$lib/types/chat';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import QueuedInputEditorPanel from './QueuedInputEditorPanel.svelte';
 	import QueuedInputRow from './QueuedInputRow.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { Loader2, Pause, Play } from '@lucide/svelte';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import Pause from '@lucide/svelte/icons/pause';
+	import Play from '@lucide/svelte/icons/play';
 
 	interface Props {
 		open: boolean;
@@ -25,17 +23,8 @@
 		onResume: (pauseId: string) => Promise<void>;
 	}
 
-	let {
-		open,
-		queue,
-		editor,
-		onClose,
-		onCreate,
-		onReplace,
-		onDelete,
-		onPause,
-		onResume,
-	}: Props = $props();
+	let { open, queue, editor, onClose, onCreate, onReplace, onDelete, onPause, onResume }: Props =
+		$props();
 	let listContainer: HTMLDivElement | null = $state(null);
 	let listHeading: HTMLHeadingElement | null = $state(null);
 	let deletingIds = $state<Set<string>>(new Set());

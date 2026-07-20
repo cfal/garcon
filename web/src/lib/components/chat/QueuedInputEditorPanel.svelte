@@ -4,7 +4,11 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { ListPlus, Loader2, RefreshCw, Save, Undo2 } from '@lucide/svelte';
+	import ListPlus from '@lucide/svelte/icons/list-plus';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Save from '@lucide/svelte/icons/save';
+	import Undo2 from '@lucide/svelte/icons/undo-2';
 
 	interface Props {
 		editor: QueuedInputEditorState;
@@ -93,11 +97,11 @@
 <section class="shrink-0 border-b border-border bg-muted/30 px-5 py-4 sm:px-6">
 	<div class="mb-2 flex items-center justify-between gap-3">
 		<h3 class="text-sm font-medium">{m.chat_queue_edit_message()}</h3>
-			<button
-				type="button"
-				onclick={() => onClose()}
-				disabled={editor.mutation !== 'idle'}
-				class="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+		<button
+			type="button"
+			onclick={() => onClose()}
+			disabled={editor.mutation !== 'idle'}
+			class="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 		>
 			{m.chat_queue_discard()}
 		</button>
@@ -128,11 +132,11 @@
 		<span class="sr-only">{m.chat_queue_edit_message()}</span>
 		<textarea
 			bind:this={editorTextarea}
-				bind:value={editor.draft}
-				onkeydown={handleEditorKeydown}
-				disabled={editor.mutation !== 'idle'}
-				rows="4"
-				class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+			bind:value={editor.draft}
+			onkeydown={handleEditorKeydown}
+			disabled={editor.mutation !== 'idle'}
+			rows="4"
+			class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
 		></textarea>
 	</label>
 

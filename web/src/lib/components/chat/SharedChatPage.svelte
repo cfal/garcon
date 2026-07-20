@@ -15,7 +15,7 @@
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
 	import { getAppTitle } from '$lib/context';
-	import { ChevronRight } from '@lucide/svelte';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
@@ -186,19 +186,19 @@
 										<div class="text-sm">
 											<Markdown source={message.content} variant="user" />
 										</div>
-											{#if message.images && message.images.length > 0}
-												<div class="mt-2 grid grid-cols-2 gap-2">
-													{#each message.images as image, imageIndex (image.name || imageIndex)}
-														<img
-															src={image.data}
-															alt={image.name}
-															class="rounded-lg max-w-full h-auto"
-														/>
-													{/each}
-												</div>
-											{/if}
-										</div>
+										{#if message.images && message.images.length > 0}
+											<div class="mt-2 grid grid-cols-2 gap-2">
+												{#each message.images as image, imageIndex (image.name || imageIndex)}
+													<img
+														src={image.data}
+														alt={image.name}
+														class="rounded-lg max-w-full h-auto"
+													/>
+												{/each}
+											</div>
+										{/if}
 									</div>
+								</div>
 							{:else if message instanceof AssistantMessage}
 								<div class="text-sm text-foreground">
 									<Markdown source={String(message.content || '')} variant="assistant" />

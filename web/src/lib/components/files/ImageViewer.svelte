@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { ZoomIn, ZoomOut, Maximize } from '@lucide/svelte';
+	import Maximize from '@lucide/svelte/icons/maximize';
+	import ZoomIn from '@lucide/svelte/icons/zoom-in';
+	import ZoomOut from '@lucide/svelte/icons/zoom-out';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		calculateFitScale,

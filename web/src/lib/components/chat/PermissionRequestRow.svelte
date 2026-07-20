@@ -19,7 +19,11 @@
 		getToolDisplayLabel,
 	} from '$lib/chat/tools/tool-display-registry.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
+	import Check from '@lucide/svelte/icons/check';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import FileCode from '@lucide/svelte/icons/file-code';
+	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
+	import X from '@lucide/svelte/icons/x';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';

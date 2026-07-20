@@ -4,7 +4,8 @@
 	// counts are shown when the provider reports them, and the generated summary
 	// is available behind an expand toggle.
 
-	import { ChevronRight, Layers } from '@lucide/svelte';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Layers from '@lucide/svelte/icons/layers';
 	import type { CompactionMessage } from '$shared/chat-types';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import Markdown from './Markdown.svelte';
