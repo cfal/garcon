@@ -30,19 +30,17 @@ async function runCodexExec(
   envOverrides?: Record<string, string>,
   codexConfig?: CodexProviderConfig,
 ): Promise<{ stdout: string; stderr: string }> {
-  const spawnOptions: Record<string, unknown> = {
+  const env = buildCodexExecEnv(envOverrides, codexConfig);
+  const codexCommand = await resolveCodexCliCommand();
+  const proc = Bun.spawn([codexCommand, ...args], {
     stdin: new Blob([input]),
     stdout: 'pipe',
     stderr: 'pipe',
-  };
-  const env = buildCodexExecEnv(envOverrides, codexConfig);
-  if (env) spawnOptions.env = env;
-
-  const codexCommand = await resolveCodexCliCommand();
-  const proc = Bun.spawn([codexCommand, ...args], spawnOptions);
+    ...(env ? { env } : {}),
+  });
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout as unknown as ReadableStream).text(),
-    new Response(proc.stderr as unknown as ReadableStream).text(),
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
     proc.exited,
   ]);
 

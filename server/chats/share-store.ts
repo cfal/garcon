@@ -5,6 +5,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
+import { isRecord } from '../../common/json.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 
@@ -43,10 +44,6 @@ export interface IShareStore {
 
 function createEmptyIndex(): ShareStoreIndex {
   return { version: SHARE_INDEX_VERSION, shares: {} };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isValidShareToken(token: string): boolean {

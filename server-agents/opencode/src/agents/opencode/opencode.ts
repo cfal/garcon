@@ -3,6 +3,8 @@
 
 import crypto from 'crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { isRecord } from '@garcon/common/json';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -281,10 +283,6 @@ function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRu
   };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error || 'unknown error');
-}
-
 export function buildOpenCodeServerEnv(
   baseEnv: Record<string, string | undefined> = process.env,
 ): Record<string, string | undefined> {
@@ -314,11 +312,11 @@ function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
     const providerName = provider.name || providerId;
     const agentModelsObj = provider.models || {};
     for (const [modelKey, model] of Object.entries(agentModelsObj)) {
-      const m = model as any;
-      const modelId = m.id || modelKey;
+      if (!isRecord(model)) continue;
+      const modelId = typeof model.id === 'string' ? model.id : modelKey;
       models.push({
         value: `${providerId}/${modelId}`,
-        label: `${providerName}: ${m.name || modelId}`,
+        label: `${providerName}: ${typeof model.name === 'string' ? model.name : modelId}`,
       });
     }
   }

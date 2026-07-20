@@ -1,4 +1,5 @@
 import { isTerminalStreamClientMessageType } from '../../common/ws-protocol.js';
+import { isRecord } from '../../common/json.js';
 import type { ChatHandler } from './chat.js';
 import type {
   TerminalStreamHandler,
@@ -43,8 +44,4 @@ export class PrimaryWsHandler {
       this.#chat.close(socket, code, reason);
     }
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

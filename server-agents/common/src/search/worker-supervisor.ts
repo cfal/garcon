@@ -34,6 +34,10 @@ export interface SearchWorkerSupervisorOptions<
   readonly moduleUrl: string;
   readonly logger: AgentLogger;
   readonly workerFactory?: (role: SearchWorkerRole, moduleUrl: string) => Worker;
+  readonly createRequest: (
+    input: WorkerRequestInput<Request>,
+    envelope: WorkerRequestEnvelope,
+  ) => Request;
   readonly isEvent: (value: unknown) => value is Event;
   readonly eventError: (event: Event) => Error | null;
   readonly shouldRestart: () => boolean;
@@ -122,11 +126,10 @@ export class SearchWorkerSupervisor<
       return Promise.reject(new Error(`Transcript search ${this.#options.role} is unavailable`));
     }
     const requestId = ++this.#requestId;
-    const messages = inputs.map((input) => ({
-      ...input,
+    const messages = inputs.map((input) => this.#options.createRequest(input, {
       requestId,
       lifecycleEpoch: this.#epoch,
-    }) as unknown as Request);
+    }));
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = (work: () => void): void => {

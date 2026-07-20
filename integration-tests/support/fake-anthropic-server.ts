@@ -1,5 +1,6 @@
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
+import { isRecord } from '../../common/json.js';
 import {
   INTEGRATION_ANTHROPIC_API_KEY,
   INTEGRATION_ANTHROPIC_VERSION,
@@ -204,10 +205,6 @@ class HeldAnthropicMessageController implements HeldAnthropicMessage {
     this.#released = true;
     return true;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseContentBlock(value: unknown): FakeAnthropicContentBlock | null {

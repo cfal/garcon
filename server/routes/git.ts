@@ -17,6 +17,7 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { isThinkingMode } from '../../common/chat-modes.js';
+import { isRecord } from '../../common/json.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import {
   assertRealWithinProjectBase,
@@ -92,10 +93,6 @@ function isValidLineIndices(value: unknown): value is number[] {
   return Array.isArray(value) && value.every(isNonNegativeInteger);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
 async function boundaryCheckedOptions(options: unknown): Promise<unknown> {
   if (!options || typeof options !== 'object') return options;
   const next = { ...options as Record<string, unknown> };
@@ -120,7 +117,7 @@ function createBoundaryCheckedGitService(git: GitService): GitService {
       if (typeof value !== 'function') return value;
       return async (options: unknown, ...args: unknown[]) => value.call(target, await boundaryCheckedOptions(options), ...args);
     },
-  }) as unknown as GitService;
+  });
 }
 
 function nonEmptyString(value: unknown): string | null {

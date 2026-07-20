@@ -28,6 +28,7 @@ import {
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { isRecord } from '@garcon/common/json';
 import { isManualBypassMode, providerStartupPermissionMode } from '@garcon/server-agent-common/execution/permission-modes';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 
@@ -196,10 +197,6 @@ function canonicalClaudeToolName(raw: string | undefined): string {
 
 function isClaudeAskUserQuestionTool(raw: string | undefined): boolean {
   return canonicalClaudeToolName(raw) === 'askuserquestion';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function isAskUserQuestionDecisionResponse(

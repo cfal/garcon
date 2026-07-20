@@ -12,7 +12,7 @@ interface AcpProcess {
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
   exited: Promise<number>;
-  kill(signal?: string): void;
+  kill(): void;
 }
 
 type PendingRequest = {
@@ -40,13 +40,20 @@ function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
 }
 
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
-  return Bun.spawn([command, ...args], {
+  const process = Bun.spawn([command, ...args], {
     cwd: options.cwd,
     env: options.env,
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
-  }) as unknown as AcpProcess;
+  });
+  return {
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    exited: process.exited,
+    kill: () => { process.kill(); },
+  };
 }
 
 export class AcpTransport extends EventEmitter {

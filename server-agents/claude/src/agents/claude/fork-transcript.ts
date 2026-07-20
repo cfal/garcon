@@ -1,9 +1,6 @@
 import type { ForkTranscriptEntryContext } from '@garcon/server-agent-common/forking/fork-jsonl';
+import { isRecord } from '@garcon/common/json';
 import { convertClaudeEntries } from './history-loader.js';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 export function rewriteClaudeForkTranscriptEntry(
   entry: unknown,

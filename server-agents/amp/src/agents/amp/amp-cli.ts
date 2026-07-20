@@ -146,7 +146,8 @@ async function runAmpCommand(
   });
 
   if (input != null) {
-    const stdin = proc.stdin as unknown as { write(s: string): void; end(): void };
+    const stdin = proc.stdin;
+    if (!stdin || typeof stdin === 'number') throw new Error('Amp process stdin is unavailable');
     stdin.write(input);
     stdin.end();
   }

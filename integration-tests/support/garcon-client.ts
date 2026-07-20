@@ -3,6 +3,7 @@ import {
   type AgentId,
 } from '../../common/agents.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
+import { isRecord } from '../../common/json.js';
 import type { ApiProtocol, ApiProviderCatalogEntry } from '../../common/api-providers.js';
 import type {
   AgentInterruptAndSendCommandRequest,
@@ -173,10 +174,6 @@ export class GarconWsRequestError extends Error {
     super(`${response.requestType} failed with ${response.code}: ${response.message}`);
     this.name = 'GarconWsRequestError';
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function redact(value: unknown): unknown {
