@@ -1,9 +1,11 @@
 import type { Database } from 'bun:sqlite';
 import type {
   ChatSearchIndexStatus,
+  ChatSearchClauseV1,
   ChatSearchQueryV1,
   ChatSearchResult,
   ChatSearchSnippetRole,
+  ChatSearchTokenV1,
 } from '@garcon/common/chat-search';
 import {
   CHAT_SEARCH_MAX_TERMS,
@@ -196,7 +198,7 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
     throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_TERMS} terms`);
   }
   let wordCount = 0;
-  return query.clauses.map((clause) => {
+  return query.clauses.map((clause: ChatSearchClauseV1) => {
     if ((clause.kind !== 'phrase' && clause.kind !== 'all-words')
         || !Array.isArray(clause.tokens) || clause.tokens.length === 0) {
       throw new RangeError('Transcript search query is invalid');
@@ -205,7 +207,7 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
     if (wordCount > CHAT_SEARCH_MAX_WORDS) {
       throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_WORDS} words`);
     }
-    const words = clause.tokens.map((token) => {
+    const words = clause.tokens.map((token: ChatSearchTokenV1) => {
       const parsed = wordsIn(token.text);
       if (parsed.length !== 1
           || normalizeFtsToken(parsed[0]) !== token.normalized
@@ -215,15 +217,17 @@ function compileStructuredTerms(query: ChatSearchQueryV1): CompiledTerm[] {
       return parsed[0];
     });
     const exactPhrase = clause.kind === 'phrase';
-    const prefixWords = clause.tokens.map((token) => !exactPhrase && token.match === 'prefix');
+    const prefixWords = clause.tokens.map(
+      (token: ChatSearchTokenV1) => !exactPhrase && token.match === 'prefix',
+    );
     return {
       query: exactPhrase
         ? `"${words.join(' ').replaceAll('"', '""')}"`
-        : words.map((word, index) => prefixWords[index]
+        : words.map((word: string, index: number) => prefixWords[index]
           ? `${escapeFtsWord(word)}*`
           : escapeFtsWord(word)).join(' AND '),
       words,
-      normalizedWords: clause.tokens.map((token) => token.normalized),
+      normalizedWords: clause.tokens.map((token: ChatSearchTokenV1) => token.normalized),
       exactPhrase,
       prefixWords,
     };

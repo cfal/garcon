@@ -68,5 +68,3 @@ export function resolveSearchWorkerEntrypoints(input: {
     reader: requiredPath(manifest.workers?.reader, 'workers/reader'),
   };
 }
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
