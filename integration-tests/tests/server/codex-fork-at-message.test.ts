@@ -9,7 +9,7 @@ import { buildThreadResumeParams } from '../../../server-agents/codex/src/agents
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('Codex fork at message', () => {
-  test('preserves a resumable legacy prefix while hiding Code Mode envelopes after reload', async () => {
+  test('preserves a resumable legacy prefix while decoding Code Mode Exec after reload', async () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
     const sourceAgentSessionId = randomUUID();
     let sourceNativePath = '';
@@ -29,16 +29,18 @@ describe('Codex fork at message', () => {
       const source = await fixture.client.getMessages(sourceChatId);
       expect(source.messages.map((entry) => [entry.seq, entry.message.type])).toEqual([
         [1, 'user-message'],
-        [2, 'bash-tool-use'],
-        [3, 'tool-result'],
-        [4, 'assistant-message'],
+        [2, 'exec-tool-use'],
+        [3, 'bash-tool-use'],
+        [4, 'tool-result'],
+        [5, 'tool-result'],
+        [6, 'assistant-message'],
       ]);
 
       const targetChatId = fixture.newChatId();
       const fork = await fixture.client.forkChat({
         sourceChatId,
         chatId: targetChatId,
-        upToSeq: 4,
+        upToSeq: 6,
       });
       expect(fork.chat.id).toBe(targetChatId);
 
@@ -107,9 +109,8 @@ describe('Codex fork at message', () => {
       const reloaded = await fixture.client.getMessages(targetChatId);
       expect(reloaded.messages.map((entry) => entry.message))
         .toEqual(source.messages.map((entry) => entry.message));
-      expect(reloaded.messages.some((entry) => (
-        entry.message.type === 'exec-tool-use' || entry.message.type === 'wait-tool-use'
-      ))).toBe(false);
+      expect(reloaded.messages.some((entry) => entry.message.type === 'exec-tool-use')).toBe(true);
+      expect(reloaded.messages.some((entry) => entry.message.type === 'wait-tool-use')).toBe(false);
     }, {
       serverEnvironment,
       async prepareWorkspace(directories) {

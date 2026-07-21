@@ -4,45 +4,40 @@ import type {
 } from './history-normalizer.js';
 import { normalizeCodexJsonlEntry } from './history-normalizer.js';
 
-const MAX_PENDING_HIDDEN_CALLS = 10_000;
+const MAX_PENDING_HIDDEN_WAIT_CALLS = 10_000;
 
 export class LegacyCodexProjection {
-  readonly #hiddenCallIds = new Set<string>();
+  readonly #hiddenWaitCallIds = new Set<string>();
 
   project(
     entry: Record<string, unknown>,
     context: CodexJsonlNormalizationContext,
   ): CodexJsonlNormalizationResult | null {
     const payload = entry.type === 'response_item' ? record(entry.payload) : null;
-    if (isCodeModeEnvelopeCall(payload)) {
-      this.#remember(payload.call_id);
+    if (isHiddenCodeModeWaitCall(payload)) {
+      this.#rememberHiddenWait(payload.call_id);
       return emptyResult();
     }
     if (isToolOutput(payload)) {
       const callId = string(payload?.call_id);
-      if (callId && this.#hiddenCallIds.delete(callId)) return emptyResult();
+      if (callId && this.#hiddenWaitCallIds.delete(callId)) return emptyResult();
     }
     return normalizeCodexJsonlEntry(entry, context);
   }
 
-  #remember(callId: string): void {
-    this.#hiddenCallIds.add(callId);
-    if (this.#hiddenCallIds.size <= MAX_PENDING_HIDDEN_CALLS) return;
-    const oldest = this.#hiddenCallIds.values().next().value;
-    if (oldest) this.#hiddenCallIds.delete(oldest);
+  #rememberHiddenWait(callId: string): void {
+    this.#hiddenWaitCallIds.add(callId);
+    if (this.#hiddenWaitCallIds.size <= MAX_PENDING_HIDDEN_WAIT_CALLS) return;
+    const oldest = this.#hiddenWaitCallIds.values().next().value;
+    if (oldest) this.#hiddenWaitCallIds.delete(oldest);
   }
 }
 
-function isCodeModeEnvelopeCall(
+function isHiddenCodeModeWaitCall(
   payload: Record<string, unknown> | null,
 ): payload is Record<string, unknown> & { call_id: string } {
   const callId = string(payload?.call_id);
   if (!callId) return false;
-  if (
-    payload?.type === 'custom_tool_call'
-    && payload.name === 'exec'
-    && typeof payload.input === 'string'
-  ) return true;
   if (payload?.type !== 'function_call' || payload.name !== 'wait') return false;
   const argumentsValue = parseArguments(payload.arguments);
   return typeof argumentsValue.cell_id === 'string' && argumentsValue.cell_id.trim().length > 0;
