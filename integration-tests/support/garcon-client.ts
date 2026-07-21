@@ -13,6 +13,8 @@ import type {
   AgentStopResponse,
   ActiveInputCommandRequest,
   ActiveInputCommandResponse,
+  AgentModelPatchRequest,
+  AgentModelPatchResponse,
   CommandAcceptedResponse,
   ForkChatResponse,
   ForkRunCommandRequest,
@@ -494,6 +496,10 @@ export class GarconTestClient {
     return this.post<ForkRunCommandResponse>('/api/v1/chats/fork-run', request);
   }
 
+  switchAgentModel(request: AgentModelPatchRequest): Promise<AgentModelPatchResponse> {
+    return this.patch<AgentModelPatchResponse>('/api/v1/chats/agent-model', request);
+  }
+
   deleteChat(chatId: string): Promise<{ success: boolean }> {
     return this.delete<{ success: boolean }>('/api/v1/chats', { chatId });
   }
@@ -766,6 +772,10 @@ export class GarconTestClient {
 
   put<T>(path: string, body: unknown): Promise<T> {
     return this.request<T>('PUT', path, body);
+  }
+
+  patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('PATCH', path, body);
   }
 
   delete<T>(path: string, body?: unknown): Promise<T> {

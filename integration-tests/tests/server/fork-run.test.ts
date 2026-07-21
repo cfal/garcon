@@ -9,6 +9,80 @@ import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('fork-run lifecycle', () => {
+  test('retries a child fork-run after its parent turn settles', async () => {
+    await withIntegrationFixture('fork-run-settlement', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const source = await fixture.client.startDirectChat({
+        chatId: sourceChatId,
+        content: 'fork-race-source',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(sourceChatId, source.turnId);
+
+      const parentChatId = fixture.newChatId();
+      const heldParent = fixture.fakeProviders.openAi.holdNext({
+        lastUserText: 'fork-race-parent',
+      });
+      const parent = await fixture.client.forkRunChat({
+        sourceChatId,
+        chatId: parentChatId,
+        command: 'fork-race-parent',
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: fixture.directAgents.openAi.provider.model,
+        apiProviderId: fixture.directAgents.openAi.provider.providerId,
+        modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
+        modelProtocol: fixture.directAgents.openAi.provider.protocol,
+      });
+      await heldParent.received;
+
+      const childChatId = fixture.newChatId();
+      const childRequest = {
+        sourceChatId: parentChatId,
+        chatId: childChatId,
+        command: 'fork-race-child',
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        permissionMode: 'default' as const,
+        thinkingMode: 'none' as const,
+        model: fixture.directAgents.openAi.provider.model,
+        apiProviderId: fixture.directAgents.openAi.provider.providerId,
+        modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
+        modelProtocol: fixture.directAgents.openAi.provider.protocol,
+      };
+      let busy: unknown;
+      try {
+        await fixture.client.forkRunChat(childRequest);
+      } catch (error) {
+        busy = error;
+      }
+      expect(busy).toBeInstanceOf(GarconApiError);
+      expect(busy).toMatchObject({
+        status: 409,
+        body: { errorCode: 'SESSION_BUSY', retryable: true },
+      });
+
+      heldParent.releaseEcho();
+      await fixture.client.waitForTurnTerminal(parentChatId, parent.turnId);
+      const child = await fixture.client.forkRunChat(childRequest);
+      await fixture.client.waitForTurnTerminal(childChatId, child.turnId);
+
+      const childProviderRequest = fixture.fakeProviders.openAi.requests().find(
+        (request) => request.lastUserText === 'fork-race-child',
+      );
+      expect(childProviderRequest?.body.messages).toEqual([
+        { role: 'user', content: 'fork-race-source' },
+        { role: 'assistant', content: 'echo:fork-race-source' },
+        { role: 'user', content: 'fork-race-parent' },
+        { role: 'assistant', content: 'echo:fork-race-parent' },
+        { role: 'user', content: 'fork-race-child' },
+      ]);
+    });
+  });
+
   test('atomically forks provider context, runs once, and survives restart', async () => {
     await withIntegrationFixture('fork-run-atomic', async (fixture) => {
       const sourceChatId = fixture.newChatId();
