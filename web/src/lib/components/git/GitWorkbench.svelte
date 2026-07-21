@@ -12,7 +12,6 @@
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
-	import PanelLeft from '@lucide/svelte/icons/panel-left';
 	import GitFileTree from './GitFileTree.svelte';
 	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
@@ -35,7 +34,6 @@
 	import {
 		containerPresentationForWidth,
 		observeContainerWidth,
-		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
 	import { gitContainerBreakpoints } from './git-container-presentation.js';
 
@@ -94,12 +92,13 @@
 	type SinglePane = 'files' | 'diff';
 	let containerWidth = $state(0);
 	let singlePane = $state<SinglePane>('files');
-	let compactTreeOpen = $state(false);
 	const observeWorkbenchWidth = observeContainerWidth((width) => {
 		containerWidth = width;
 	});
-	let containerPresentation = $derived<ContainerPresentation>(
-		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, gitContainerBreakpoints),
+	let containerPresentation = $derived<'narrow' | 'wide'>(
+		isMobile || containerPresentationForWidth(containerWidth, gitContainerBreakpoints) !== 'wide'
+			? 'narrow'
+			: 'wide',
 	);
 
 	function handleVisibleRowsChange(rows: GitVirtualReviewRow[]): void {
@@ -111,7 +110,6 @@
 		if (!activeProjectPath) return;
 		void wb.selectFile(activeProjectPath, path);
 		if (containerPresentation === 'narrow') singlePane = 'diff';
-		if (containerPresentation === 'compact') compactTreeOpen = false;
 	}
 
 	function handleSelectDirectory(path: string): void {
@@ -120,7 +118,6 @@
 		if (!firstFile) return;
 		void wb.selectFile(activeProjectPath, firstFile);
 		if (containerPresentation === 'narrow') singlePane = 'diff';
-		if (containerPresentation === 'compact') compactTreeOpen = false;
 	}
 
 	function handleAddCommentForFile(filePath: string, side: 'before' | 'after', line: number): void {
@@ -570,54 +567,21 @@
 				style={containerPresentation === 'wide'
 					? `grid-template-columns: ${files.treePaneWidthPx}px 6px minmax(0,1fr); grid-template-rows: minmax(0,1fr);`
 					: undefined}
-				data-git-compact-layout={containerPresentation === 'compact' ? '' : undefined}
 				data-git-wide-layout={containerPresentation === 'wide' ? '' : undefined}
 			>
-				{#if containerPresentation === 'compact' && compactTreeOpen}
-					<button
-						type="button"
-						class="absolute inset-0 z-10 cursor-default rounded-none bg-background/60"
-						aria-label="Close changed files"
-						onclick={() => (compactTreeOpen = false)}
-					></button>
-				{/if}
 				<div
 					class={cn(
 						'flex min-h-0 flex-col overflow-hidden bg-background',
 						containerPresentation === 'wide' && 'border-r border-border',
-						containerPresentation === 'compact' &&
-							(compactTreeOpen
-								? 'absolute inset-y-0 left-0 z-20 max-w-[85%] border-r border-border shadow-lg'
-								: 'hidden'),
 						containerPresentation === 'narrow' && 'absolute inset-0',
 						containerPresentation === 'narrow' &&
 							singlePane !== 'files' &&
 							'invisible pointer-events-none',
 					)}
-					style={containerPresentation === 'compact' && compactTreeOpen
-						? 'width: min(20rem, 85%);'
-						: undefined}
-					aria-label={containerPresentation === 'compact' ? 'Changed files' : undefined}
-					role={containerPresentation === 'compact' ? 'complementary' : undefined}
 					aria-hidden={containerPresentation === 'narrow' && singlePane !== 'files'}
 					inert={containerPresentation === 'narrow' && singlePane !== 'files'}
 					data-git-files-pane
 				>
-					{#if containerPresentation === 'compact'}
-						<div
-							class="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5"
-						>
-							<span class="text-xs font-medium text-foreground">Changed files</span>
-							<button
-								type="button"
-								class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								aria-label="Close changed files"
-								onclick={() => (compactTreeOpen = false)}
-							>
-								<X class="h-3.5 w-3.5" />
-							</button>
-						</div>
-					{/if}
 					<div class="min-h-0 flex-1 overflow-hidden">
 						{@render fileTree(containerPresentation !== 'wide')}
 					</div>
@@ -654,22 +618,8 @@
 					inert={containerPresentation === 'narrow' && singlePane !== 'diff'}
 					data-git-diff-pane
 				>
-					{#if containerPresentation === 'compact'}
-						<div class="shrink-0 border-b border-border px-2 py-1">
-							<button
-								type="button"
-								class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								onclick={() => (compactTreeOpen = !compactTreeOpen)}
-								aria-expanded={compactTreeOpen}
-								aria-label={compactTreeOpen ? 'Hide changed files' : 'Show changed files'}
-							>
-								<PanelLeft class="h-3.5 w-3.5" />
-								Files
-							</button>
-						</div>
-					{/if}
 					{@render diffPane(
-						containerPresentation === 'wide' ? 5 : containerPresentation === 'compact' ? 4 : 3,
+						containerPresentation === 'wide' ? 5 : 3,
 						containerPresentation === 'narrow',
 					)}
 				</div>
