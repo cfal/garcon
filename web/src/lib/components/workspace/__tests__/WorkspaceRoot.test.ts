@@ -413,7 +413,15 @@ describe('WorkspaceRoot', () => {
 	);
 
 	it('reorders stable pane instances and points chrome toward the workspace sidebar', async () => {
-		installContext();
+		const snapshot = withAdditionalSurfaces();
+		installContext({
+			...snapshot,
+			main: {
+				...snapshot.main,
+				activeId: 'terminal:one',
+				mru: ['terminal:one', ...snapshot.main.mru.filter((id) => id !== 'terminal:one')],
+			},
+		});
 		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
 			desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
 			chatActions,
@@ -426,6 +434,14 @@ describe('WorkspaceRoot', () => {
 		const chatSurface = rendered.container.querySelector(
 			`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`,
 		);
+		const portableMainSurface = await waitFor(() => {
+			const element = rendered.container.querySelector(
+				'[data-workspace-surface-id="terminal:one"]',
+			);
+			expect(element).toBeTruthy();
+			return element;
+		});
+		expect(main?.contains(portableMainSurface)).toBe(true);
 
 		expect(
 			rendered.container.querySelector('[data-floating-workspace-toolbar]')?.classList,
@@ -449,6 +465,10 @@ describe('WorkspaceRoot', () => {
 		expect(
 			rendered.container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`),
 		).toBe(chatSurface);
+		expect(rendered.container.querySelector('[data-workspace-surface-id="terminal:one"]')).toBe(
+			portableMainSurface,
+		);
+		expect(main?.contains(portableMainSurface)).toBe(true);
 		expect(
 			Array.from(
 				rendered.container.querySelectorAll<HTMLElement>('[data-desktop-layout-pane]'),
@@ -461,6 +481,24 @@ describe('WorkspaceRoot', () => {
 		expect(
 			rendered.container.querySelector('[data-floating-sidebar-toolbar]')?.classList,
 		).toContain('justify-end');
+	});
+
+	it('restores workspace focus after an external pane-order update', async () => {
+		installContext();
+		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
+			desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
+			chatActions,
+		});
+		const focusTarget = screen.getByRole('textbox', { name: 'Chat focus target' });
+		focusTarget.focus();
+		expect(document.activeElement).toBe(focusTarget);
+
+		await rendered.rerender({
+			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
+			chatActions,
+		});
+
+		await waitFor(() => expect(document.activeElement).toBe(focusTarget));
 	});
 
 	it('anchors overlay mode at the configured workspace position and reports the main inset', async () => {
@@ -480,6 +518,8 @@ describe('WorkspaceRoot', () => {
 
 		const dialog = await screen.findByRole('dialog', { name: 'Workspace sidebar' });
 		expect(dialog.classList).toContain('absolute');
+		expect(dialog.classList).toContain('z-50');
+		expect(dialog.classList).not.toContain('z-40');
 		expect(dialog.classList).not.toContain('relative');
 		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('0px');
 		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('');
@@ -661,7 +701,7 @@ describe('WorkspaceRoot', () => {
 		expect(
 			container
 				.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')
-				?.classList.contains('border-l'),
+				?.classList.contains('border-s'),
 		).toBe(true);
 		expect(screen.queryByRole('dialog', { name: 'Workspace sidebar' })).toBeNull();
 		expect(onOverlayModalChange).not.toHaveBeenCalled();
@@ -672,6 +712,7 @@ describe('WorkspaceRoot', () => {
 		expect(rootObserver).toBeTruthy();
 		rootObserver!.emit(hostRegion, 700);
 		const dialog = await screen.findByRole('dialog', { name: 'Workspace sidebar' });
+		expect(dialog.classList).toContain('z-50');
 		const backdrop = container.querySelector<HTMLButtonElement>(
 			'[data-workspace-sidebar-backdrop]',
 		)!;
@@ -703,6 +744,8 @@ describe('WorkspaceRoot', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		expect(container.querySelector('aside')?.classList).toContain('relative');
 		expect(container.querySelector('aside')?.classList).not.toContain('absolute');
+		expect(container.querySelector('aside')?.classList).toContain('z-40');
+		expect(container.querySelector('aside')?.classList).not.toContain('z-50');
 		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeTruthy();
 		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(false));
 		expect(onOverlayModalChange.mock.calls).toEqual([[true], [false]]);

@@ -8,13 +8,15 @@
 
 	interface NotificationHostProps {
 		notifications: NotificationsStore;
-		desktopLeftPx?: number;
+		desktopInlineStartPx?: number;
 	}
 
-	let { notifications, desktopLeftPx = 16 }: NotificationHostProps = $props();
+	let { notifications, desktopInlineStartPx = 16 }: NotificationHostProps = $props();
 
 	const visibleNotifications = $derived(notifications.items);
-	const notificationStyle = $derived(`--notification-left-desktop: ${desktopLeftPx}px`);
+	const notificationStyle = $derived(
+		`--notification-inline-start-desktop: ${desktopInlineStartPx}px`,
+	);
 
 	$effect(() => {
 		const timeoutIds = visibleNotifications
@@ -50,7 +52,7 @@
 
 {#if visibleNotifications.length > 0}
 	<section
-		class="fixed inset-x-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[100] flex flex-col gap-2 sm:inset-x-auto sm:left-[var(--notification-left-desktop)] sm:right-auto sm:w-96"
+		class="fixed inset-x-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[100] flex flex-col gap-2 sm:inset-x-auto sm:start-[var(--notification-inline-start-desktop)] sm:end-auto sm:w-96"
 		style={notificationStyle}
 		aria-label={m.notifications_region()}
 		aria-live="polite"

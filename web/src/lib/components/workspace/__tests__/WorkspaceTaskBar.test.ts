@@ -93,6 +93,32 @@ describe('WorkspaceTaskBar', () => {
 		expect(moveSurface).toHaveBeenCalledWith('singleton:git', 'sidebar');
 	});
 
+	it.each([
+		[false, 'lucide-panel-right'],
+		[true, 'lucide-panel-left'],
+	] as const)(
+		'points main-to-sidebar actions toward the configured sidebar when beforeMain=%s',
+		async (workspaceSidebarBeforeMain, iconClass) => {
+			render(WorkspaceTaskBar, {
+				host: 'main',
+				hostState: {
+					order: ['singleton:chat', 'singleton:git'],
+					activeId: 'singleton:git',
+					mru: ['singleton:git', 'singleton:chat'],
+				},
+				workspaceSidebarBeforeMain,
+				labelFor: (surfaceId: string) => (surfaceId === 'singleton:chat' ? 'Chat' : 'Git'),
+				onSelect: vi.fn(),
+			});
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+			const moveItem = screen.getByRole('menuitem', { name: m.workspace_move_to_sidebar() });
+			const icon = moveItem.querySelector(`.${iconClass}`);
+			expect(icon).toBeTruthy();
+			expect(icon?.classList).toContain('rtl:-scale-x-100');
+		},
+	);
+
 	it('creates a terminal in the taskbar host', async () => {
 		render(WorkspaceTaskBar, {
 			host: 'sidebar',

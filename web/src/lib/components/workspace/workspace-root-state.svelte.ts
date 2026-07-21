@@ -153,11 +153,7 @@ export class WorkspaceRootState {
 
 	surfaceStyle(presentation: HostId | 'mobile'): string {
 		if (presentation === 'mobile') return 'inset: 0;';
-		if (presentation === 'sidebar') {
-			return 'inset-block-start: var(--workspace-floating-taskbar-inset); inset-block-end: 0; inset-inline: 0;';
-		}
-		const insets = this.mainInsets;
-		return `inset-block-start: var(--workspace-floating-taskbar-inset); inset-block-end: 0; inset-inline-start: ${insets.start}px; inset-inline-end: ${insets.end}px;`;
+		return 'inset-block-start: var(--workspace-floating-taskbar-inset); inset-block-end: 0; inset-inline: 0;';
 	}
 
 	#syncWorkspaceWidth(): void {

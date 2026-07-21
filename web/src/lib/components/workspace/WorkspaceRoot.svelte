@@ -153,9 +153,43 @@
 	const renderedSidebarPresentations = $derived(
 		renderedPresentations.filter((item) => item.presentation === 'sidebar'),
 	);
-	const renderedNonSidebarPresentations = $derived(
-		renderedPresentations.filter((item) => item.presentation !== 'sidebar'),
+	const renderedMainPresentations = $derived(
+		renderedPresentations.filter((item) => item.presentation === 'main'),
 	);
+	const renderedMobilePresentations = $derived(
+		renderedPresentations.filter((item) => item.presentation === 'mobile'),
+	);
+	let hostRegionElement: HTMLDivElement | null = $state(null);
+	let previousRenderedPaneOrder = '';
+	let focusTargetAfterPaneMove: HTMLElement | null = null;
+
+	$effect.pre(() => {
+		const renderedPaneOrder = (isMobile ? DEFAULT_DESKTOP_LAYOUT_ORDER : desktopLayoutOrder).join(
+			'|',
+		);
+		if (renderedPaneOrder === previousRenderedPaneOrder) return;
+		previousRenderedPaneOrder = renderedPaneOrder;
+		const activeElement = document.activeElement;
+		focusTargetAfterPaneMove =
+			activeElement instanceof HTMLElement && hostRegionElement?.contains(activeElement)
+				? activeElement
+				: null;
+	});
+
+	$effect(() => {
+		const renderedPaneOrder = (isMobile ? DEFAULT_DESKTOP_LAYOUT_ORDER : desktopLayoutOrder).join(
+			'|',
+		);
+		void renderedPaneOrder;
+		const target = focusTargetAfterPaneMove;
+		if (!target) return;
+		focusTargetAfterPaneMove = null;
+		queueMicrotask(() => {
+			if (!target.isConnected || !hostRegionElement?.contains(target)) return;
+			if (document.activeElement && document.activeElement !== document.body) return;
+			target.focus({ preventScroll: true });
+		});
+	});
 
 	$effect(() => {
 		void snapshot;
@@ -265,6 +299,7 @@
 {/snippet}
 
 <div
+	bind:this={hostRegionElement}
 	use:rootState.observeHostRegion
 	class="workspace-host-region relative flex h-full min-h-0 min-w-0 bg-background"
 	style="--workspace-floating-taskbar-inset: 3rem;"
@@ -294,6 +329,7 @@
 						<WorkspaceTaskBar
 							host="main"
 							hostState={snapshot.main}
+							workspaceSidebarBeforeMain={desktopLayout.workspaceSidebarBeforeMain}
 							labelFor={label}
 							onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
 							onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
@@ -313,9 +349,9 @@
 											title={m.workspace_open_sidebar()}
 										>
 											{#if desktopLayout.workspaceSidebarBeforeMain}
-												<PanelLeftOpen class="h-3.5 w-3.5" />
+												<PanelLeftOpen class="h-3.5 w-3.5 rtl:-scale-x-100" />
 											{:else}
-												<PanelRightOpen class="h-3.5 w-3.5" />
+												<PanelRightOpen class="h-3.5 w-3.5 rtl:-scale-x-100" />
 											{/if}
 										</button>
 									</div>
@@ -365,6 +401,9 @@
 							{chatActions}
 						/>
 					</div>
+					{#each renderedMainPresentations as item (`${item.presentation}:${item.surfaceId}`)}
+						{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
+					{/each}
 				</div>
 			</div>
 		{:else}
@@ -391,7 +430,7 @@
 		{/if}
 	{/each}
 
-	{#each renderedNonSidebarPresentations as item (`${item.presentation}:${item.surfaceId}`)}
+	{#each renderedMobilePresentations as item (`${item.presentation}:${item.surfaceId}`)}
 		{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
 	{/each}
 </div>

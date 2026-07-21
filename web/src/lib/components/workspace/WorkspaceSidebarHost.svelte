@@ -185,9 +185,11 @@
 		aria-hidden={!presented}
 		inert={!presented}
 		data-desktop-layout-pane="workspace-sidebar"
-		class="z-40 flex h-full min-h-0 shrink-0 flex-col border-border bg-background"
-		class:border-l={edge === 'start'}
-		class:border-r={edge === 'end'}
+		class="flex h-full min-h-0 shrink-0 flex-col border-border bg-background"
+		class:z-40={!overlayOpen}
+		class:z-50={overlayOpen}
+		class:border-s={edge === 'start'}
+		class:border-e={edge === 'end'}
 		class:relative={presented && metrics.mode === 'push'}
 		class:absolute={!presented || metrics.mode === 'overlay'}
 		class:inset-y-0={!presented || metrics.mode === 'overlay'}
@@ -229,6 +231,7 @@
 			<WorkspaceTaskBar
 				host="sidebar"
 				hostState={snapshot.sidebar}
+				workspaceSidebarBeforeMain={beforeMain}
 				{labelFor}
 				onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
 				onFocus={(surfaceId) => workspace.noteHostChromeFocus('sidebar', surfaceId)}
@@ -245,9 +248,9 @@
 							title={m.workspace_close_sidebar()}
 						>
 							{#if beforeMain}
-								<PanelLeftClose class="h-3.5 w-3.5" />
+								<PanelLeftClose class="h-3.5 w-3.5 rtl:-scale-x-100" />
 							{:else}
-								<PanelRightClose class="h-3.5 w-3.5" />
+								<PanelRightClose class="h-3.5 w-3.5 rtl:-scale-x-100" />
 							{/if}
 						</button>
 					</div>

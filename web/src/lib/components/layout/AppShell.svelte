@@ -117,7 +117,7 @@
 		mobileActiveDescriptor?.type === 'file' ||
 			(mobileActiveDescriptor?.type === 'singleton' && mobileActiveDescriptor.kind === 'commit'),
 	);
-	let notificationDesktopLeftPx = $state(16);
+	let notificationDesktopInlineStartPx = $state(16);
 	const sidebarMounted = $derived(!isMobile || appShell.sidebarOpen);
 	const displayedSidebarChatIds = $derived.by(() =>
 		buildSidebarDisplayChatIds({
@@ -448,8 +448,8 @@
 		onfocusin={() => workspace.noteChatListFocus()}
 		onpointerdown={() => workspace.noteChatListFocus()}
 		class="relative h-full shrink-0 overflow-hidden border-border"
-		class:border-l={placement.dividerEdge === 'start' && !hideLeftSidebar}
-		class:border-r={placement.dividerEdge === 'end' && !hideLeftSidebar}
+		class:border-s={placement.dividerEdge === 'start' && !hideLeftSidebar}
+		class:border-e={placement.dividerEdge === 'end' && !hideLeftSidebar}
 		class:pointer-events-none={hideLeftSidebar || workspaceOverlayOpen}
 		style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
 		aria-hidden={hideLeftSidebar || workspaceOverlayOpen}
@@ -500,7 +500,7 @@
 				desktopChatListWidth={localSettings.sidebarWidth}
 				desktopChatListHidden={hideLeftSidebar}
 				{desktopChatList}
-				onMainInlineStartChange={(pixels) => (notificationDesktopLeftPx = pixels + 16)}
+				onMainInlineStartChange={(pixels) => (notificationDesktopInlineStartPx = pixels + 16)}
 				onMenuClick={isMobile ? toggleMobileSidebar : undefined}
 				isDesktopFullscreen={effectiveWorkspaceFullscreen}
 				onToggleDesktopFullscreen={() =>
@@ -561,7 +561,7 @@
 <FileDialogHost />
 <FileDirtyUnloadGuard />
 <WorkspaceCloseGuard />
-<NotificationHost {notifications} desktopLeftPx={notificationDesktopLeftPx} />
+<NotificationHost {notifications} desktopInlineStartPx={notificationDesktopInlineStartPx} />
 
 {#if appShell.showSettings}
 	{#await lazySettings() then { default: Settings }}

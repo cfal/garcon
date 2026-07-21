@@ -4,6 +4,24 @@ import * as m from '$lib/paraglide/messages.js';
 import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
+	it('points host-move icons toward the configured pane positions', async () => {
+		const rendered = render(FileDialogHostTestHost, { request: 'file' });
+		const moveMain = await screen.findByRole('button', { name: m.file_session_move_main() });
+		const moveSidebar = screen.getByRole('button', { name: m.file_session_move_sidebar() });
+		const defaultMainIcon = moveMain.querySelector('.lucide-panel-left');
+		expect(defaultMainIcon).toBeTruthy();
+		expect(defaultMainIcon?.classList).toContain('rtl:-scale-x-100');
+		expect(moveSidebar.querySelector('.lucide-panel-right')).toBeTruthy();
+
+		await rendered.rerender({
+			request: 'file',
+			desktopLayoutOrder: ['workspace-sidebar', 'main', 'chat-list'],
+		});
+
+		expect(moveMain.querySelector('.lucide-panel-right')).toBeTruthy();
+		expect(moveSidebar.querySelector('.lucide-panel-left')).toBeTruthy();
+	});
+
 	it('overrides the shared responsive width cap in restored and maximized layouts', async () => {
 		const rendered = render(FileDialogHostTestHost, { request: 'file' });
 		const dialog = await screen.findByRole('dialog');
