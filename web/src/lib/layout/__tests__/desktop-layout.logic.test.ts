@@ -1,0 +1,106 @@
+import { describe, expect, it } from 'vitest';
+import {
+	DEFAULT_DESKTOP_LAYOUT_ORDER,
+	moveDesktopLayoutPane,
+	normalizeDesktopLayoutOrder,
+	resolveDesktopLayout,
+	resolveMainInlineInsets,
+	type DesktopLayoutEdge,
+	type DesktopLayoutOrder,
+	type DesktopToolbarAlignment,
+} from '../desktop-layout';
+
+describe('desktop layout', () => {
+	it.each<
+		[
+			DesktopLayoutOrder,
+			DesktopLayoutEdge,
+			DesktopLayoutEdge,
+			DesktopToolbarAlignment,
+			DesktopToolbarAlignment,
+		]
+	>([
+		[['chat-list', 'main', 'workspace-sidebar'], 'end', 'start', 'end', 'start'],
+		[['chat-list', 'workspace-sidebar', 'main'], 'end', 'end', 'start', 'end'],
+		[['main', 'chat-list', 'workspace-sidebar'], 'start', 'start', 'end', 'start'],
+		[['main', 'workspace-sidebar', 'chat-list'], 'start', 'start', 'end', 'start'],
+		[['workspace-sidebar', 'chat-list', 'main'], 'end', 'end', 'start', 'end'],
+		[['workspace-sidebar', 'main', 'chat-list'], 'start', 'end', 'start', 'end'],
+	])(
+		'resolves pane edges and toolbar alignment for %j',
+		(order, chatEdge, workspaceEdge, mainAlignment, workspaceAlignment) => {
+			const result = resolveDesktopLayout(order);
+
+			expect(result.order).toEqual({
+				'chat-list': order.indexOf('chat-list'),
+				main: order.indexOf('main'),
+				'workspace-sidebar': order.indexOf('workspace-sidebar'),
+			});
+			expect(result.chatListEdge).toBe(chatEdge);
+			expect(result.workspaceSidebarEdge).toBe(workspaceEdge);
+			expect(result.mainToolbarAlignment).toBe(mainAlignment);
+			expect(result.workspaceSidebarToolbarAlignment).toBe(workspaceAlignment);
+		},
+	);
+
+	it.each([
+		undefined,
+		null,
+		'main',
+		['chat-list', 'main'],
+		['chat-list', 'main', 'workspace-sidebar', 'extra'],
+		['chat-list', 'main', 'main'],
+		['chat-list', 'main', 'unknown'],
+		['chat-list', 'main', 42],
+	])('falls back atomically for malformed order %j', (value) => {
+		expect(normalizeDesktopLayoutOrder(value)).toEqual(DEFAULT_DESKTOP_LAYOUT_ORDER);
+	});
+
+	it('copies valid and default orders', () => {
+		const valid: DesktopLayoutOrder = ['main', 'workspace-sidebar', 'chat-list'];
+		const normalizedValid = normalizeDesktopLayoutOrder(valid);
+		const normalizedDefault = normalizeDesktopLayoutOrder(undefined);
+
+		expect(normalizedValid).toEqual(valid);
+		expect(normalizedValid).not.toBe(valid);
+		expect(normalizedDefault).toEqual(DEFAULT_DESKTOP_LAYOUT_ORDER);
+		expect(normalizedDefault).not.toBe(DEFAULT_DESKTOP_LAYOUT_ORDER);
+	});
+
+	it('moves a pane and clamps the destination', () => {
+		expect(moveDesktopLayoutPane(DEFAULT_DESKTOP_LAYOUT_ORDER, 0, 2)).toEqual([
+			'main',
+			'workspace-sidebar',
+			'chat-list',
+		]);
+		expect(moveDesktopLayoutPane(DEFAULT_DESKTOP_LAYOUT_ORDER, 2, -1)).toEqual([
+			'workspace-sidebar',
+			'chat-list',
+			'main',
+		]);
+		expect(moveDesktopLayoutPane(DEFAULT_DESKTOP_LAYOUT_ORDER, -1, 1)).toEqual(
+			DEFAULT_DESKTOP_LAYOUT_ORDER,
+		);
+	});
+
+	it('resolves main insets from visible pane widths', () => {
+		expect(
+			resolveMainInlineInsets(['chat-list', 'main', 'workspace-sidebar'], {
+				chatList: 320,
+				workspaceSidebar: 480,
+			}),
+		).toEqual({ start: 320, end: 480 });
+		expect(
+			resolveMainInlineInsets(['workspace-sidebar', 'chat-list', 'main'], {
+				chatList: 320,
+				workspaceSidebar: 480,
+			}),
+		).toEqual({ start: 800, end: 0 });
+		expect(
+			resolveMainInlineInsets(['main', 'chat-list', 'workspace-sidebar'], {
+				chatList: 0,
+				workspaceSidebar: 0,
+			}),
+		).toEqual({ start: 0, end: 0 });
+	});
+});

@@ -16,6 +16,7 @@
 	} from '$lib/stores/local-settings.svelte.js';
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import DesktopLayoutOrderSetting from './DesktopLayoutOrderSetting.svelte';
 
 	interface SettingRowOptions {
 		disabled?: boolean;
@@ -145,6 +146,7 @@
 		</div>
 
 		<div class="px-4">
+			<DesktopLayoutOrderSetting />
 			<div class="flex items-center justify-between gap-4 py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
 				<select

@@ -182,6 +182,7 @@
 		colorblindMode: false,
 		overlayBackdropEffects: true,
 		hideChatListWhenGitInMain: false,
+		desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
 		autoExpandTools: false,
 		showThinking: true,
 		hiddenToolTypes: [],
