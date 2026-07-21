@@ -17,6 +17,7 @@ import {
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
+import { isJsonResponse } from './response-media-type.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -158,12 +159,11 @@ async function readOpenAiCompatibleTextStream(
   return accumulated;
 }
 
-async function readOpenAiCompatibleSingleQueryResponse(
+async function readOpenAiCompatibleResponse(
   response: Response,
   runtimeLabel: string,
 ): Promise<string> {
-  const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (mediaType !== 'application/json' && !mediaType?.endsWith('+json')) {
+  if (!isJsonResponse(response)) {
     return readOpenAiCompatibleTextStream(response, runtimeLabel);
   }
 
@@ -209,7 +209,7 @@ export async function runOpenAiCompatibleSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return (await readOpenAiCompatibleSingleQueryResponse(response, config.runtimeLabel)).trim();
+    return (await readOpenAiCompatibleResponse(response, config.runtimeLabel)).trim();
   } finally {
     clearTimeout(timer);
   }
@@ -271,7 +271,7 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
         const errorText = await response.text();
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      return await readOpenAiCompatibleTextStream(response, this.config.runtimeLabel);
+      return await readOpenAiCompatibleResponse(response, this.config.runtimeLabel);
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;

@@ -229,6 +229,50 @@ describe('OpenAiCompatibleChatRuntime', () => {
     expect(result).toBe('generated message');
   });
 
+  it('accepts a buffered JSON response for an interactive session', async () => {
+    const dir = await tempDir();
+    globalThis.fetch = mock(async () => Response.json({
+      choices: [{ message: { content: 'session response' } }],
+    }));
+    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig(dir));
+    const messages = waitForMessages(runtime);
+
+    await runtime.startSession({
+      chatId: 'chat-json',
+      command: 'hello',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    await expect(messages).resolves.toMatchObject([{ content: 'session response' }]);
+  });
+
+  it('ignores reasoning-only deltas before visible one-shot content', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          choices: [{ delta: { reasoning_content: 'hidden' } }],
+        })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          choices: [{ delta: { content: 'visible' } }],
+        })}\n\n`));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    }), {
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    await expect(runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+    )).resolves.toBe('visible');
+  });
+
   it('surfaces a provider error from an empty one-shot stream', async () => {
     const encoder = new TextEncoder();
     globalThis.fetch = mock(async () => new Response(new ReadableStream({
