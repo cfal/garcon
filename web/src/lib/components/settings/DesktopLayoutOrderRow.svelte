@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import ChevronUp from '@lucide/svelte/icons/chevron-up';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -40,8 +40,18 @@
 
 	let rowElement: HTMLLIElement | null = $state(null);
 	let dragHandleElement: HTMLSpanElement | null = $state(null);
+	let upButtonElement: HTMLElement | null = $state(null);
+	let downButtonElement: HTMLElement | null = $state(null);
 	let isDragging = $state(false);
 	let dropIndicatorEdge = $state<Edge | null>(null);
+
+	async function move(delta: -1 | 1): Promise<void> {
+		const destination = index + delta;
+		onMove(pane, delta);
+		await tick();
+		if (destination === 0) downButtonElement?.focus();
+		if (destination === count - 1) upButtonElement?.focus();
+	}
 
 	function isDesktopLayoutDragData(
 		value: Record<string | symbol, unknown>,
@@ -106,20 +116,22 @@
 	<span class="min-w-0 flex-1 text-sm text-foreground">{label}</span>
 	<div class="flex shrink-0 items-center gap-1">
 		<Button
+			bind:ref={upButtonElement}
 			variant="ghost"
 			size="icon-sm"
 			disabled={index === 0}
-			onclick={() => onMove(pane, -1)}
+			onclick={() => void move(-1)}
 			aria-label={m.settings_desktop_layout_move_up({ pane: label })}
 			title={m.settings_desktop_layout_move_up({ pane: label })}
 		>
 			<ChevronUp class="size-3.5" />
 		</Button>
 		<Button
+			bind:ref={downButtonElement}
 			variant="ghost"
 			size="icon-sm"
 			disabled={index === count - 1}
-			onclick={() => onMove(pane, 1)}
+			onclick={() => void move(1)}
 			aria-label={m.settings_desktop_layout_move_down({ pane: label })}
 			title={m.settings_desktop_layout_move_down({ pane: label })}
 		>

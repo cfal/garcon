@@ -1,9 +1,13 @@
 <script lang="ts">
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
-	import { getReorderDestinationIndex } from '@atlaskit/pragmatic-drag-and-drop-hitbox/util/get-reorder-destination-index';
 	import { getLocalSettings } from '$lib/context';
-	import { moveDesktopLayoutPane, type DesktopLayoutPane } from '$lib/layout/desktop-layout.js';
+	import {
+		moveDesktopLayoutPane,
+		type DesktopLayoutOrder,
+		type DesktopLayoutPane,
+	} from '$lib/layout/desktop-layout.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { reorderDesktopLayoutPaneFromDrop } from './desktop-layout-drop.js';
 	import DesktopLayoutOrderRow from './DesktopLayoutOrderRow.svelte';
 
 	const localSettings = getLocalSettings();
@@ -14,10 +18,10 @@
 		'workspace-sidebar': m.settings_desktop_layout_workspace_sidebar,
 	};
 
-	function commitMove(pane: DesktopLayoutPane, destination: number): void {
-		const from = localSettings.desktopLayoutOrder.indexOf(pane);
-		if (from < 0 || from === destination) return;
-		const next = moveDesktopLayoutPane(localSettings.desktopLayoutOrder, from, destination);
+	function commitOrder(pane: DesktopLayoutPane, next: DesktopLayoutOrder): void {
+		if (next.every((candidate, index) => candidate === localSettings.desktopLayoutOrder[index])) {
+			return;
+		}
 		localSettings.set('desktopLayoutOrder', next);
 		announcement = m.settings_desktop_layout_reordered({
 			pane: paneLabels[pane](),
@@ -25,21 +29,20 @@
 		});
 	}
 
+	function commitMove(pane: DesktopLayoutPane, destination: number): void {
+		const from = localSettings.desktopLayoutOrder.indexOf(pane);
+		if (from < 0 || from === destination) return;
+		commitOrder(pane, moveDesktopLayoutPane(localSettings.desktopLayoutOrder, from, destination));
+	}
+
 	function move(pane: DesktopLayoutPane, delta: -1 | 1): void {
 		commitMove(pane, localSettings.desktopLayoutOrder.indexOf(pane) + delta);
 	}
 
 	function drop(source: DesktopLayoutPane, target: DesktopLayoutPane, edge: Edge): void {
-		const startIndex = localSettings.desktopLayoutOrder.indexOf(source);
-		const indexOfTarget = localSettings.desktopLayoutOrder.indexOf(target);
-		commitMove(
+		commitOrder(
 			source,
-			getReorderDestinationIndex({
-				startIndex,
-				indexOfTarget,
-				closestEdgeOfTarget: edge,
-				axis: 'vertical',
-			}),
+			reorderDesktopLayoutPaneFromDrop(localSettings.desktopLayoutOrder, source, target, edge),
 		);
 	}
 </script>
