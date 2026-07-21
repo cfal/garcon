@@ -64,7 +64,7 @@ export interface AgentForkRequest extends AgentExecutionContext {
   readonly source: AgentChatReference;
   readonly point: {
     readonly messageSequence: number;
-    readonly sourceRevision: { readonly native: string; readonly carryOver: string };
+    readonly sourceRevision: { readonly nativePrefix: string; readonly carryOver: string };
   } | null;
 }
 

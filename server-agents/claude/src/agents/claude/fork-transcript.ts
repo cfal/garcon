@@ -22,7 +22,7 @@ export function rewriteClaudeForkTranscriptEntry(
 
   const emittedCount = convertClaudeEntries([entry]).length;
   if (emittedCount <= retainedMessageCount) return sessionRewritten;
-  if (retainedMessageCount === 0) return filteredEntry(context.targetAgentSessionId);
+  if (retainedMessageCount === 0) return filteredEntry(sessionRewritten);
 
   const message = isRecord(sessionRewritten.message) ? sessionRewritten.message : null;
   const content = message?.content;
@@ -53,6 +53,7 @@ export function rewriteClaudeForkTranscriptEntry(
   throw new Error('Claude fork cutoff cannot preserve the selected provider entry prefix');
 }
 
-function filteredEntry(targetAgentSessionId: string): Record<string, unknown> {
-  return { sessionId: targetAgentSessionId, type: 'garcon-fork-filtered' };
+function filteredEntry(entry: unknown): unknown {
+  if (!isRecord(entry)) return entry;
+  return { ...entry, isMeta: true };
 }
