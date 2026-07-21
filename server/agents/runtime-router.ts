@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
+  computeAgentTranscriptRevisions,
   type AgentExecutionContext,
   type AgentOperationIdentity,
 } from '@garcon/server-agent-interface';
@@ -141,7 +142,11 @@ export class AgentRuntimeRouter {
     }
   }
 
-  async runAgentTurn(chatId: string, prompt: string, opts: RunAgentTurnOptions = {}): Promise<void> {
+  async runAgentTurn(
+    chatId: string,
+    prompt: string,
+    opts: RunAgentTurnOptions = {},
+  ): Promise<void> {
     assertExecutionAdmissionOpen(opts);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) {
@@ -163,7 +168,8 @@ export class AgentRuntimeRouter {
       agentId: entry.agentId,
       model: opts.model ?? entry.model,
       apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
-      modelEndpointId: opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
+      modelEndpointId:
+        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
     assertSameApiProviderBoundary(previous, selection);
     const integration = this.#directory.require(entry.agentId);
@@ -200,7 +206,8 @@ export class AgentRuntimeRouter {
       agentId: entry.agentId,
       model: opts.model ?? entry.model,
       apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
-      modelEndpointId: opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
+      modelEndpointId:
+        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
     await this.#validateEndpoint(integration, selection);
     const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
@@ -233,9 +240,7 @@ export class AgentRuntimeRouter {
     });
     await this.#validateEndpoint(integration, selection);
     const operation = operationIdentity(opts, 'agent-compact');
-    const prompt = opts.instructions?.trim()
-      ? `/compact ${opts.instructions.trim()}`
-      : '/compact';
+    const prompt = opts.instructions?.trim() ? `/compact ${opts.instructions.trim()}` : '/compact';
     this.#events.trackTurn(chatId, operationMetadata(operation));
     try {
       const request = {
@@ -253,7 +258,10 @@ export class AgentRuntimeRouter {
     }
   }
 
-  async prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void> {
+  async prepareProjectPathUpdate(
+    agentId: string,
+    request: PrepareProjectPathUpdateRequest,
+  ): Promise<void> {
     const integration = this.#directory.require(agentId);
     if (!integration.execution.prepareProjectPathUpdate) return;
     const entry = this.#registry.getChat(request.chatId);
@@ -323,18 +331,24 @@ export class AgentRuntimeRouter {
   }
 
   getRunningSessionCount(): number {
-    return this.#directory.list().reduce(
-      (total, integration) => total + integration.execution.runningSessions().length,
-      0,
-    );
+    return this.#directory
+      .list()
+      .reduce((total, integration) => total + integration.execution.runningSessions().length, 0);
   }
 
-  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
+  resolvePermission(
+    chatId: string,
+    permissionRequestId: string,
+    decision: PermissionDecisionPayload,
+  ): void {
     const entry = this.#registry.getChat(chatId);
     const execution = entry ? this.#directory.get(entry.agentId)?.execution : null;
     if (!execution?.respondToPermission || !permissionRequestId) return;
     Promise.resolve(execution.respondToPermission(permissionRequestId, decision)).catch((error) => {
-      logger.warn('agents: permission reply failed:', error instanceof Error ? error.message : String(error));
+      logger.warn(
+        'agents: permission reply failed:',
+        error instanceof Error ? error.message : String(error),
+      );
     });
   }
 
@@ -367,26 +381,37 @@ export class AgentRuntimeRouter {
           signal: new AbortController().signal,
         })
       : null;
+    const carryOverMessageCount = args.messageSequence
+      ? this.#loadCarryOver(args.sourceChatId, source).length
+      : 0;
     if (args.messageSequence) {
-      const messageCount = this.#loadCarryOver(args.sourceChatId, source).length
-        + (sourceSnapshot?.messages.length ?? 0);
+      const messageCount = carryOverMessageCount + (sourceSnapshot?.messages.length ?? 0);
       if (args.messageSequence > messageCount) {
         throw new Error(`Message not found for seq ${args.messageSequence}`);
       }
     }
+    const nativePrefixRevision = args.messageSequence
+      ? computeAgentTranscriptRevisions(
+          sourceSnapshot!.messages,
+          Math.max(0, args.messageSequence - carryOverMessageCount),
+        ).prefix
+      : null;
     const result = await integration.forking.fork({
       ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
       source: sourceReference,
       point: args.messageSequence ? {
         messageSequence: args.messageSequence,
         sourceRevision: {
-          native: sourceSnapshot!.revision,
+          nativePrefix: nativePrefixRevision!,
           carryOver: sourceReference.carryOverRevision,
         },
       } : null,
     }).catch((error) => {
       if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {
         throw new DomainError('OPERATION_UNSUPPORTED', error.message, 422, error.retryable);
+      }
+      if (error instanceof AgentIntegrationError && error.code === 'SOURCE_REVISION_CHANGED') {
+        throw new DomainError('SOURCE_REVISION_CHANGED', error.message, 409, error.retryable);
       }
       throw error;
     });
@@ -432,15 +457,15 @@ export class AgentRuntimeRouter {
           : integration.settings.defaults(),
       ),
       endpoint: selection ? toAgentEndpointSelection(this.#endpointResolver, selection) : null,
-      signal: options.signal instanceof AbortSignal
-        ? options.signal
-        : new AbortController().signal,
+      signal: options.signal instanceof AbortSignal ? options.signal : new AbortController().signal,
     });
   }
 
   async discoverSlashCommands(agentId: string, projectPath: string) {
     const commands = this.#directory.get(agentId)?.commands;
-    return commands ? [...await commands.discover(projectPath, new AbortController().signal)] : [];
+    return commands
+      ? [...(await commands.discover(projectPath, new AbortController().signal))]
+      : [];
   }
 
   async #validateEndpoint(
@@ -450,7 +475,9 @@ export class AgentRuntimeRouter {
     const endpoint = toAgentEndpointSelection(this.#endpointResolver, selection);
     if (!endpoint) return;
     if (!integration.endpoints) {
-      throw new Error(`Agent integration ${integration.descriptor.id} does not accept API provider endpoints`);
+      throw new Error(
+        `Agent integration ${integration.descriptor.id} does not accept API provider endpoints`,
+      );
     }
     await integration.endpoints.validate(endpoint);
   }
@@ -479,9 +506,9 @@ export class AgentRuntimeRouter {
       'none',
     );
     const settings = integration.settings.parse(
-      opts.agentSettings
-        ?? entry.agentSettingsById?.[entry.agentId]
-        ?? integration.settings.defaults(),
+      opts.agentSettings ??
+        entry.agentSettingsById?.[entry.agentId] ??
+        integration.settings.defaults(),
     );
     return {
       chatId,

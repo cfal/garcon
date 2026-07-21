@@ -78,7 +78,7 @@ describe('rewriteClaudeForkTranscriptEntry', () => {
     expect(rewritten.message.content).toEqual([entry.message.content[0]]);
   });
 
-  it('neutralizes an unselected provider entry before the physical cutoff', () => {
+  it('marks an unselected provider entry as provider-native metadata', () => {
     const entry = {
       sessionId: context.sourceAgentSessionId,
       type: 'user',
@@ -89,7 +89,9 @@ describe('rewriteClaudeForkTranscriptEntry', () => {
       retainedMessageCount: 0,
     })).toEqual({
       sessionId: context.targetAgentSessionId,
-      type: 'garcon-fork-filtered',
+      type: 'user',
+      message: { role: 'user', content: 'not selected' },
+      isMeta: true,
     });
   });
 });

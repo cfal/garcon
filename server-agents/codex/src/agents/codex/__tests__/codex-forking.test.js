@@ -55,7 +55,7 @@ describe('createCodexForking', () => {
     const point = setup(legacyProfile);
     await expect(point.forking.fork(request({
       messageSequence: 2,
-      sourceRevision: { native: 'native', carryOver: 'carry-over' },
+      sourceRevision: { nativePrefix: 'prefix', carryOver: 'carry-over' },
     }))).resolves.toBe(startedSession);
     expect(point.legacyFork).toHaveBeenCalledTimes(1);
     expect(point.forkPaginatedWhole).not.toHaveBeenCalled();
@@ -65,7 +65,7 @@ describe('createCodexForking', () => {
     const values = setup(paginatedProfile);
     await expect(values.forking.fork(request({
       messageSequence: 2,
-      sourceRevision: { native: 'native', carryOver: 'carry-over' },
+      sourceRevision: { nativePrefix: 'prefix', carryOver: 'carry-over' },
     }))).rejects.toMatchObject({
       code: 'OPERATION_UNSUPPORTED',
       retryable: false,
