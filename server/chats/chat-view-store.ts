@@ -74,6 +74,28 @@ const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
 const RECENT_VIEW_RETENTION_COUNT = 10;
 
 type PruneEvictionReason = 'stale' | 'view-capacity' | 'message-capacity';
+type GenerationReason =
+  | 'native-history-load'
+  | 'native-history-page'
+  | 'native-history-reconciled'
+  | 'native-history-mismatch'
+  | 'native-replacement'
+  | 'manual-reload'
+  | 'process-error'
+  | 'initial-live-append'
+  | 'initial-provisional-append';
+
+export type ChatViewReplacementReason = Extract<
+  GenerationReason,
+  'native-replacement' | 'manual-reload' | 'process-error'
+>;
+
+interface GenerationTransition {
+  reason: GenerationReason;
+  previousGenerationId?: string;
+  generationId?: string;
+  nativeRevision?: string;
+}
 
 export class ChatViewStore {
   #views = new Map<string, ChatView>();
@@ -251,13 +273,17 @@ export class ChatViewStore {
     options: {
       processErrorNotice?: string;
       assertReplacementAllowed?: () => void;
+      replacementReason?: ChatViewReplacementReason;
     } = {},
   ): Promise<ChatViewPage> {
     return this.#withChat(chatId, async () => {
       const nativeMessages = await loadNativeMessages();
       options.assertReplacementAllowed?.();
       this.invalidateFence(chatId);
-      const view = this.#createGeneration(chatId, nativeMessages);
+      const view = this.#createGeneration(chatId, nativeMessages, {
+        reason: options.replacementReason ?? 'native-replacement',
+        previousGenerationId: this.#views.get(chatId)?.generationId,
+      });
       if (options.processErrorNotice) {
         this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
       }
@@ -289,7 +315,7 @@ export class ChatViewStore {
     return this.#withChat(chatId, async () => {
       let view = this.#views.get(chatId);
       if (!view) {
-        view = this.#createGeneration(chatId, []);
+        view = this.#createGeneration(chatId, [], { reason: 'initial-live-append' });
         this.#views.set(chatId, view);
       }
       const appended = this.#appendLiveToView(view, messages);
@@ -304,7 +330,7 @@ export class ChatViewStore {
     return this.#withChat(chatId, async () => {
       let view = this.#views.get(chatId);
       if (!view) {
-        view = this.#createGeneration(chatId, []);
+        view = this.#createGeneration(chatId, [], { reason: 'initial-provisional-append' });
         view.complete = false;
         view.loadedFromFullHistory = false;
         view.nativeRevision = undefined;
@@ -520,12 +546,16 @@ export class ChatViewStore {
       && retainedNativeOverlapMatches,
     );
 
-    const view = this.#createGeneration(
-      chatId,
-      reconciledNativeMessages,
-      preservesGeneration ? previous?.generationId : undefined,
-      revisions.full,
-    );
+    const view = this.#createGeneration(chatId, reconciledNativeMessages, {
+      reason: !previous
+        ? 'native-history-load'
+        : preservesGeneration
+          ? 'native-history-reconciled'
+          : 'native-history-mismatch',
+      previousGenerationId: previous?.generationId,
+      generationId: preservesGeneration ? previous?.generationId : undefined,
+      nativeRevision: revisions.full,
+    });
     const unpersistedLiveMessages = previous
       ? retainedLiveEntries
         .filter((entry) => entry.seq > reconciledNativeMessages.length)
@@ -543,14 +573,13 @@ export class ChatViewStore {
   #createGeneration(
     chatId: string,
     messages: ChatMessage[],
-    generationId: string = crypto.randomUUID(),
-    nativeRevision = transcriptRevision(messages),
+    transition: GenerationTransition,
   ): ChatView {
     const now = this.#now();
     const isoNow = new Date(now).toISOString();
     const view: ChatView = {
       chatId,
-      generationId,
+      generationId: transition.generationId ?? crypto.randomUUID(),
       createdAt: isoNow,
       historyReadAt: isoNow,
       messages: [],
@@ -559,14 +588,14 @@ export class ChatViewStore {
       complete: true,
       loadedFromFullHistory: true,
       retainedStartSeq: 1,
-      nativeRevision,
+      nativeRevision: transition.nativeRevision ?? transcriptRevision(messages),
       evictedLiveDigest: new OrderedTranscriptDigest(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
       lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#appendToView(view, messages);
-    logger.info(`generation created chat=${chatId} generationId=${view.generationId} messages=${messages.length} lastSeq=${view.lastSeq}`);
+    this.#logGenerationTransition(view, transition);
     return view;
   }
 
@@ -591,7 +620,7 @@ export class ChatViewStore {
       lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#mergeHistoryPage(view, page);
-    logger.info(`generation created chat=${chatId} generationId=${view.generationId} messages=${page.messages.length} lastSeq=${view.lastSeq}`);
+    this.#logGenerationTransition(view, { reason: 'native-history-page' });
     return view;
   }
 
@@ -843,6 +872,18 @@ export class ChatViewStore {
     const ageMs = Math.max(0, now - view.lastAccessAt);
     logger.info(`view evicted chat=${view.chatId} generationId=${view.generationId} reason=${reason} ageMs=${ageMs} messages=${view.messages.length}`);
     return true;
+  }
+
+  #logGenerationTransition(view: ChatView, transition: GenerationTransition): void {
+    const action = transition.previousGenerationId === undefined
+      ? 'created'
+      : transition.previousGenerationId === view.generationId
+        ? 'preserved'
+        : 'replaced';
+    const previousGeneration = transition.previousGenerationId === undefined
+      ? ''
+      : ` previousGenerationId=${transition.previousGenerationId}`;
+    logger.info(`generation ${action} chat=${view.chatId} generationId=${view.generationId} reason=${transition.reason}${previousGeneration} messages=${view.messages.length} lastSeq=${view.lastSeq}`);
   }
 }
 

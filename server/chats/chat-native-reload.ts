@@ -78,7 +78,7 @@ export class ChatNativeReloader {
     const page = await this.#views.replaceFromNative(
       chatId,
       () => this.#source.loadNativeMessages(chatId),
-      { processErrorNotice, assertReplacementAllowed },
+      { processErrorNotice, assertReplacementAllowed, replacementReason: mode },
     );
     logger.info(`reload complete mode=${mode} chat=${chatId} messages=${page.lastSeq}`);
     return { ...page, mode };

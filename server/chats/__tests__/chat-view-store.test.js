@@ -568,6 +568,43 @@ describe('ChatViewStore', () => {
     expect(older.generationId).not.toBe(recent.generationId);
   });
 
+  it('logs explicit reasons for preserved and replaced native generations', async () => {
+    const originalInfo = console.info;
+    const info = mock(() => undefined);
+    console.info = info;
+    try {
+      const initialHistory = [assistant('1'), assistant('2'), assistant('3')];
+      const historyRef = { current: initialHistory };
+      const store = new ChatViewStore(() => false);
+      const initial = await store.getOrCreatePage('chat-1', pagedLoader(historyRef), 1);
+
+      await store.getOrCreateMessages('chat-1', async () => initialHistory);
+      const preserved = store.getCursor('chat-1').generationId;
+      await store.reconcileNativeSnapshot('chat-1', [
+        assistant('replacement'),
+        ...initialHistory.slice(1),
+      ]);
+      const replaced = store.getCursor('chat-1').generationId;
+
+      expect(preserved).toBe(initial.generationId);
+      expect(replaced).not.toBe(preserved);
+      const messages = info.mock.calls.map((call) => call[1]);
+      expect(messages.some((message) => (
+        message.includes('generation preserved')
+        && message.includes(`generationId=${preserved}`)
+        && message.includes('reason=native-history-reconciled')
+      ))).toBe(true);
+      expect(messages.some((message) => (
+        message.includes('generation replaced')
+        && message.includes(`generationId=${replaced}`)
+        && message.includes('reason=native-history-mismatch')
+        && message.includes(`previousGenerationId=${preserved}`)
+      ))).toBe(true);
+    } finally {
+      console.info = originalInfo;
+    }
+  });
+
   it('changes generation when unretained compaction metadata changes', async () => {
     const historyRef = {
       current: [
