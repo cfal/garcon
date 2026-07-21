@@ -395,27 +395,22 @@ describe('WorkspaceRoot', () => {
 		[['main', 'workspace-sidebar', 'chat-list']],
 		[['workspace-sidebar', 'chat-list', 'main']],
 		[['workspace-sidebar', 'main', 'chat-list']],
-	] satisfies Array<[DesktopLayoutOrder]>)('orders all desktop panes without changing their DOM sequence for %j', (order) => {
-		installContext();
-		const { container } = render(WorkspaceRootDesktopLayoutTestHost, {
-			desktopLayoutOrder: order,
-			chatActions,
-		});
-		const panes = Array.from(
-			container.querySelectorAll<HTMLElement>('[data-desktop-layout-pane]'),
-		);
+	] satisfies Array<[DesktopLayoutOrder]>)(
+		'orders all desktop panes in DOM order for %j',
+		(order) => {
+			installContext();
+			const { container } = render(WorkspaceRootDesktopLayoutTestHost, {
+				desktopLayoutOrder: order,
+				chatActions,
+			});
+			const panes = Array.from(
+				container.querySelectorAll<HTMLElement>('[data-desktop-layout-pane]'),
+			);
 
-		expect(panes.map((pane) => pane.dataset.desktopLayoutPane)).toEqual([
-			'chat-list',
-			'main',
-			'workspace-sidebar',
-		]);
-		expect(
-			panes
-				.toSorted((left, right) => Number(left.style.order) - Number(right.style.order))
-				.map((pane) => pane.dataset.desktopLayoutPane),
-		).toEqual(order);
-	});
+			expect(panes.map((pane) => pane.dataset.desktopLayoutPane)).toEqual(order);
+			expect(panes.every((pane) => pane.style.order === '')).toBe(true);
+		},
+	);
 
 	it('reorders stable pane instances and points chrome toward the workspace sidebar', async () => {
 		installContext();
@@ -448,12 +443,18 @@ describe('WorkspaceRoot', () => {
 			chatList,
 		);
 		expect(rendered.container.querySelector('[data-desktop-layout-pane="main"]')).toBe(main);
-		expect(
-			rendered.container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]'),
-		).toBe(workspaceSidebar);
+		expect(rendered.container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')).toBe(
+			workspaceSidebar,
+		);
 		expect(
 			rendered.container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`),
 		).toBe(chatSurface);
+		expect(
+			Array.from(
+				rendered.container.querySelectorAll<HTMLElement>('[data-desktop-layout-pane]'),
+				(pane) => pane.dataset.desktopLayoutPane,
+			),
+		).toEqual(['workspace-sidebar', 'main', 'chat-list']);
 		expect(
 			rendered.container.querySelector('[data-floating-workspace-toolbar]')?.classList,
 		).toContain('justify-start');
@@ -462,7 +463,7 @@ describe('WorkspaceRoot', () => {
 		).toContain('justify-end');
 	});
 
-	it('anchors overlay mode to the configured side of main and reports the main inset', async () => {
+	it('anchors overlay mode at the configured workspace position and reports the main inset', async () => {
 		installContext();
 		const onMainInlineStartChange = vi.fn();
 		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
@@ -478,7 +479,9 @@ describe('WorkspaceRoot', () => {
 		rootObserver!.emit(hostRegion, 700);
 
 		const dialog = await screen.findByRole('dialog', { name: 'Workspace sidebar' });
-		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('320px');
+		expect(dialog.classList).toContain('absolute');
+		expect(dialog.classList).not.toContain('relative');
+		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('0px');
 		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('');
 		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(320));
 
@@ -489,7 +492,44 @@ describe('WorkspaceRoot', () => {
 			onMainInlineStartChange,
 		});
 		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('');
+		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('0px');
+		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(0));
+
+		await rendered.rerender({
+			desktopLayoutOrder: ['chat-list', 'workspace-sidebar', 'main'],
+			desktopChatListWidth: 320,
+			chatActions,
+			onMainInlineStartChange,
+		});
+		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('320px');
+
+		await rendered.rerender({
+			desktopLayoutOrder: ['main', 'workspace-sidebar', 'chat-list'],
+			desktopChatListWidth: 320,
+			chatActions,
+			onMainInlineStartChange,
+		});
 		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('320px');
+	});
+
+	it('resets the desktop notification inset when switching to mobile', async () => {
+		installContext();
+		const onMainInlineStartChange = vi.fn();
+		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
+			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
+			desktopChatListWidth: 320,
+			chatActions,
+			onMainInlineStartChange,
+		});
+
+		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(800));
+		await rendered.rerender({
+			isMobile: true,
+			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
+			desktopChatListWidth: 320,
+			chatActions,
+			onMainInlineStartChange,
+		});
 		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(0));
 	});
 
@@ -661,6 +701,8 @@ describe('WorkspaceRoot', () => {
 
 		rootObserver!.emit(hostRegion, 1_400);
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(container.querySelector('aside')?.classList).toContain('relative');
+		expect(container.querySelector('aside')?.classList).not.toContain('absolute');
 		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeTruthy();
 		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(false));
 		expect(onOverlayModalChange.mock.calls).toEqual([[true], [false]]);

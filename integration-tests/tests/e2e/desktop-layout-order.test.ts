@@ -24,18 +24,42 @@ describe("Lightpanda desktop layout order", () => {
             ...document.querySelectorAll<HTMLElement>(
               "[data-desktop-layout-pane]",
             ),
-          ];
+          ].filter((pane) => {
+            const rect = pane.getBoundingClientRect();
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              getComputedStyle(pane).visibility !== "hidden"
+            );
+          });
+          const paneIds = new Set(
+            panes.map((pane) => pane.dataset.desktopLayoutPane),
+          );
+          const visibleOrder = order.filter((pane) => paneIds.has(pane));
+          const visualOrder = panes.toSorted(
+            (left, right) =>
+              left.getBoundingClientRect().left -
+              right.getBoundingClientRect().left,
+          );
           return (
-            panes.length >= 2 &&
-            panes
-              .toSorted(
-                (left, right) =>
-                  Number(left.style.order) - Number(right.style.order),
-              )
-              .every(
-                (pane, index) =>
-                  pane.dataset.desktopLayoutPane === order[index],
-              )
+            panes.length === 2 &&
+            visibleOrder.length === 2 &&
+            panes.every(
+              (pane, index) =>
+                pane.dataset.desktopLayoutPane === visibleOrder[index],
+            ) &&
+            visualOrder.every(
+              (pane, index) =>
+                pane.dataset.desktopLayoutPane === visibleOrder[index],
+            ) &&
+            visualOrder.every((pane, index) => {
+              const next = visualOrder[index + 1];
+              return (
+                !next ||
+                pane.getBoundingClientRect().right <=
+                  next.getBoundingClientRect().left + 1
+              );
+            })
           );
         },
         { timeout: 20_000 },
@@ -63,17 +87,24 @@ describe("Lightpanda desktop layout order", () => {
               "[data-desktop-layout-pane]",
             ),
           ];
+          const mainRect = panes
+            .find((pane) => pane.dataset.desktopLayoutPane === "main")!
+            .getBoundingClientRect();
+          const chatListRect = panes
+            .find((pane) => pane.dataset.desktopLayoutPane === "chat-list")!
+            .getBoundingClientRect();
+          const workspaceSidebar = panes.find(
+            (pane) => pane.dataset.desktopLayoutPane === "workspace-sidebar",
+          )!;
           return (
             panes.length === 3 &&
-            panes
-              .toSorted(
-                (left, right) =>
-                  Number(left.style.order) - Number(right.style.order),
-              )
-              .every(
-                (pane, index) =>
-                  pane.dataset.desktopLayoutPane === order[index],
-              )
+            panes.every(
+              (pane, index) => pane.dataset.desktopLayoutPane === order[index],
+            ) &&
+            mainRect.width > 0 &&
+            chatListRect.width > 0 &&
+            mainRect.right <= chatListRect.left + 1 &&
+            workspaceSidebar.getAttribute("aria-hidden") === "false"
           );
         },
         { timeout: 20_000 },

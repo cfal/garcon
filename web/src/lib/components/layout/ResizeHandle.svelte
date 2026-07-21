@@ -21,11 +21,12 @@
 		const startX = e.clientX;
 		const startWidth = width;
 		const target = e.currentTarget as HTMLElement;
+		const inlineDirection = getComputedStyle(target).direction === 'rtl' ? -1 : 1;
 		target.setPointerCapture(e.pointerId);
 
 		function handlePointerMove(ev: PointerEvent) {
 			const edgeDirection = edge === 'start' ? -1 : 1;
-			const delta = (ev.clientX - startX) * edgeDirection;
+			const delta = (ev.clientX - startX) * inlineDirection * edgeDirection;
 			const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta));
 			onResize(newWidth);
 		}
@@ -53,7 +54,7 @@
 <div
 	class={cn(
 		'pointer-events-none absolute inset-y-0 z-10 w-0',
-		edge === 'start' ? 'left-0' : 'right-0',
+		edge === 'start' ? 'start-0' : 'end-0',
 	)}
 >
 	<div

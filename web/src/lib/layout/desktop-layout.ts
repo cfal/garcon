@@ -12,7 +12,6 @@ export const DEFAULT_DESKTOP_LAYOUT_ORDER: DesktopLayoutOrder = [
 ];
 
 export interface DesktopLayoutPlacement {
-	order: Record<DesktopLayoutPane, number>;
 	chatListEdge: DesktopLayoutEdge;
 	workspaceSidebarEdge: DesktopLayoutEdge;
 	workspaceSidebarBeforeMain: boolean;
@@ -53,17 +52,28 @@ export function resolveDesktopLayout(order: DesktopLayoutOrder): DesktopLayoutPl
 	const workspaceSidebarBeforeMain = index('workspace-sidebar') < mainIndex;
 
 	return {
-		order: {
-			'chat-list': index('chat-list'),
-			main: mainIndex,
-			'workspace-sidebar': index('workspace-sidebar'),
-		},
 		chatListEdge: index('chat-list') < mainIndex ? 'end' : 'start',
 		workspaceSidebarEdge: workspaceSidebarBeforeMain ? 'end' : 'start',
 		workspaceSidebarBeforeMain,
 		mainToolbarAlignment: workspaceSidebarBeforeMain ? 'start' : 'end',
 		workspaceSidebarToolbarAlignment: workspaceSidebarBeforeMain ? 'end' : 'start',
 	};
+}
+
+export function resolveWorkspaceSidebarOverlayInsets(
+	order: DesktopLayoutOrder,
+	chatListWidth: number,
+): MainInlineInsets {
+	const mainIndex = order.indexOf('main');
+	const sidebarIndex = order.indexOf('workspace-sidebar');
+	const chatListIndex = order.indexOf('chat-list');
+	const sidebarBeforeMain = sidebarIndex < mainIndex;
+	const chatListOutsideSidebar = sidebarBeforeMain
+		? chatListIndex < sidebarIndex
+		: chatListIndex > sidebarIndex;
+	const edgeInset = chatListOutsideSidebar ? chatListWidth : 0;
+
+	return sidebarBeforeMain ? { start: edgeInset, end: 0 } : { start: 0, end: edgeInset };
 }
 
 export function resolveMainInlineInsets(

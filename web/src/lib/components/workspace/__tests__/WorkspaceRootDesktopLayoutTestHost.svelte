@@ -14,12 +14,14 @@
 	}
 
 	let {
+		isMobile = false,
 		desktopLayoutOrder,
 		desktopChatListWidth = 320,
 		desktopChatListHidden = false,
 		chatActions,
 		onMainInlineStartChange,
 	}: {
+		isMobile?: boolean;
 		desktopLayoutOrder: DesktopLayoutOrder;
 		desktopChatListWidth?: number;
 		desktopChatListHidden?: boolean;
@@ -28,11 +30,10 @@
 	} = $props();
 </script>
 
-{#snippet desktopChatList(placement: { order: number; dividerEdge: 'start' | 'end' })}
+{#snippet desktopChatList(placement: { dividerEdge: 'start' | 'end' })}
 	<div
 		data-desktop-layout-pane="chat-list"
 		data-chat-list-edge={placement.dividerEdge}
-		style:order={placement.order}
 		style:width={desktopChatListHidden ? '0px' : `${desktopChatListWidth}px`}
 	>
 		Chat list
@@ -40,7 +41,7 @@
 {/snippet}
 
 <WorkspaceRoot
-	isMobile={false}
+	{isMobile}
 	{desktopLayoutOrder}
 	{desktopChatListWidth}
 	{desktopChatListHidden}

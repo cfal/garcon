@@ -14,7 +14,7 @@
 	}: {
 		isMobile: boolean;
 		desktopLayoutOrder?: DesktopLayoutOrder;
-		desktopChatList?: Snippet<[{ order: number; dividerEdge: DesktopLayoutEdge }]>;
+		desktopChatList?: Snippet<[{ dividerEdge: DesktopLayoutEdge }]>;
 	} = $props();
 	const desktopLayout = $derived(resolveDesktopLayout(desktopLayoutOrder));
 </script>
@@ -22,7 +22,6 @@
 <div data-testid="workspace-root-stub" data-mobile={isMobile}>
 	{#if !isMobile && desktopChatList}
 		{@render desktopChatList({
-			order: desktopLayout.order['chat-list'],
 			dividerEdge: desktopLayout.chatListEdge,
 		})}
 	{/if}

@@ -441,7 +441,7 @@
 	/>
 {/snippet}
 
-{#snippet desktopChatList(placement: { order: number; dividerEdge: DesktopLayoutEdge })}
+{#snippet desktopChatList(placement: { dividerEdge: DesktopLayoutEdge })}
 	<div
 		data-desktop-layout-pane="chat-list"
 		data-workspace-chat-list
@@ -451,7 +451,6 @@
 		class:border-l={placement.dividerEdge === 'start' && !hideLeftSidebar}
 		class:border-r={placement.dividerEdge === 'end' && !hideLeftSidebar}
 		class:pointer-events-none={hideLeftSidebar || workspaceOverlayOpen}
-		style:order={placement.order}
 		style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
 		aria-hidden={hideLeftSidebar || workspaceOverlayOpen}
 		inert={hideLeftSidebar || workspaceOverlayOpen}

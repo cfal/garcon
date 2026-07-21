@@ -52,7 +52,6 @@
 	}
 
 	interface DesktopChatListPlacement {
-		order: number;
 		dividerEdge: DesktopLayoutEdge;
 	}
 
@@ -175,8 +174,7 @@
 	});
 
 	$effect(() => {
-		if (isMobile) return;
-		const mainInlineStart = rootState.mainInsets.start;
+		const mainInlineStart = isMobile ? 0 : rootState.mainInsets.start;
 		untrack(() => onMainInlineStartChange?.(mainInlineStart));
 	});
 
@@ -274,120 +272,124 @@
 	aria-label={m.workspace_workspace_region()}
 	tabindex="-1"
 >
-	{#if !isMobile && desktopChatList}
-		{@render desktopChatList({
-			order: desktopLayout.order['chat-list'],
-			dividerEdge: desktopLayout.chatListEdge,
-		})}
-	{/if}
-
-	<div
-		data-desktop-layout-pane="main"
-		class="relative flex min-h-0 min-w-0 flex-1 flex-col"
-		style:order={desktopLayout.order.main}
-		inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
-	>
-		{#if !isMobile}
+	<!-- Moves keyed pane blocks to align DOM focus order without replacing stateful contents. -->
+	{#each isMobile ? DEFAULT_DESKTOP_LAYOUT_ORDER : desktopLayoutOrder as pane (pane)}
+		{#if pane === 'chat-list'}
+			{#if !isMobile && desktopChatList}
+				{@render desktopChatList({ dividerEdge: desktopLayout.chatListEdge })}
+			{/if}
+		{:else if pane === 'main'}
 			<div
-				data-floating-workspace-toolbar
-				class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0"
-				class:justify-start={desktopLayout.mainToolbarAlignment === 'start'}
-				class:justify-end={desktopLayout.mainToolbarAlignment === 'end'}
+				data-desktop-layout-pane="main"
+				class="relative flex min-h-0 min-w-0 flex-1 flex-col"
+				inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
 			>
-				<WorkspaceTaskBar
-					host="main"
-					hostState={snapshot.main}
-					labelFor={label}
-					onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
-					onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
-				>
-					{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
-					{#snippet endActions()}
-						{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
-							<div
-								class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-							>
-								<button
-									bind:this={openSidebarButton}
-									type="button"
-									class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-									onclick={() => void workspace.openSidebar()}
-									aria-label={m.workspace_open_sidebar()}
-									title={m.workspace_open_sidebar()}
-								>
-									{#if desktopLayout.workspaceSidebarBeforeMain}
-										<PanelLeftOpen class="h-3.5 w-3.5" />
-									{:else}
-										<PanelRightOpen class="h-3.5 w-3.5" />
-									{/if}
-								</button>
-							</div>
-						{/if}
-					{/snippet}
-				</WorkspaceTaskBar>
+				{#if !isMobile}
+					<div
+						data-floating-workspace-toolbar
+						class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0"
+						class:justify-start={desktopLayout.mainToolbarAlignment === 'start'}
+						class:justify-end={desktopLayout.mainToolbarAlignment === 'end'}
+					>
+						<WorkspaceTaskBar
+							host="main"
+							hostState={snapshot.main}
+							labelFor={label}
+							onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
+							onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
+						>
+							{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
+							{#snippet endActions()}
+								{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
+									<div
+										class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
+									>
+										<button
+											bind:this={openSidebarButton}
+											type="button"
+											class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+											onclick={() => void workspace.openSidebar()}
+											aria-label={m.workspace_open_sidebar()}
+											title={m.workspace_open_sidebar()}
+										>
+											{#if desktopLayout.workspaceSidebarBeforeMain}
+												<PanelLeftOpen class="h-3.5 w-3.5" />
+											{:else}
+												<PanelRightOpen class="h-3.5 w-3.5" />
+											{/if}
+										</button>
+									</div>
+								{/if}
+							{/snippet}
+						</WorkspaceTaskBar>
+					</div>
+				{/if}
+				<div class="relative min-h-0 flex-1 overflow-hidden">
+					<div
+						data-workspace-surface-id={CHAT_SURFACE_ID}
+						id={`main-panel-${CHAT_SURFACE_ID}`}
+						role="tabpanel"
+						aria-labelledby={!isMobile && snapshot.main.order.length > 1
+							? `main-tab-${CHAT_SURFACE_ID}`
+							: undefined}
+						aria-label={isMobile || snapshot.main.order.length === 1
+							? m.workspace_surface_chat()
+							: undefined}
+						onfocusin={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
+						onpointerdown={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
+						class="absolute inset-0"
+						class:hidden={isMobile
+							? mobileActive !== CHAT_SURFACE_ID
+							: activeMain !== CHAT_SURFACE_ID}
+						inert={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
+						aria-hidden={isMobile
+							? mobileActive !== CHAT_SURFACE_ID
+							: activeMain !== CHAT_SURFACE_ID}
+						use:surfaceFrame={{
+							registry: surfaceFrames,
+							surfaceId: CHAT_SURFACE_ID,
+							host: isMobile ? 'mobile' : 'main',
+							version: 0,
+						}}
+					>
+						<ChatSurface
+							{isMobile}
+							reserveTopFloatingToolbar={!isMobile}
+							isVisible={workspace.isChatPresented}
+							isInteractive={workspace.isChatInteractive}
+							onMenuClick={isMobile ? onMenuClick : undefined}
+							{isDesktopFullscreen}
+							{onToggleDesktopFullscreen}
+							{onRegisterReload}
+							onRegisterSubmit={(submit) => (chatSubmit = submit)}
+							{chatActions}
+						/>
+					</div>
+				</div>
 			</div>
+		{:else}
+			<WorkspaceSidebarHost
+				presented={sidebarPresented}
+				edge={desktopLayout.workspaceSidebarEdge}
+				beforeMain={desktopLayout.workspaceSidebarBeforeMain}
+				toolbarAlignment={desktopLayout.workspaceSidebarToolbarAlignment}
+				overlayInsets={rootState.sidebarOverlayInsets}
+				metrics={sidebarMetrics}
+				pushMaximum={sidebarPushMaximum}
+				{snapshot}
+				presentations={renderedSidebarPresentations}
+				labelFor={label}
+				onSendToChat={sendToChat}
+				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
+				surfaceStyle={(presentation) => rootState.surfaceStyle(presentation)}
+				getOpenSidebarButton={() => openSidebarButton}
+				onPreviewWidth={(width) => (rootState.resizePreviewWidth = width)}
+				onCommitWidth={(width) => void rootState.commitSidebarWidth(width)}
+				onCancelWidth={() => (rootState.resizePreviewWidth = null)}
+				{onOverlayModalChange}
+			/>
 		{/if}
-		<div class="relative min-h-0 flex-1 overflow-hidden">
-			<div
-				data-workspace-surface-id={CHAT_SURFACE_ID}
-				id={`main-panel-${CHAT_SURFACE_ID}`}
-				role="tabpanel"
-				aria-labelledby={!isMobile && snapshot.main.order.length > 1
-					? `main-tab-${CHAT_SURFACE_ID}`
-					: undefined}
-				aria-label={isMobile || snapshot.main.order.length === 1
-					? m.workspace_surface_chat()
-					: undefined}
-				onfocusin={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
-				onpointerdown={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
-				class="absolute inset-0"
-				class:hidden={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				inert={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				aria-hidden={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				use:surfaceFrame={{
-					registry: surfaceFrames,
-					surfaceId: CHAT_SURFACE_ID,
-					host: isMobile ? 'mobile' : 'main',
-					version: 0,
-				}}
-			>
-				<ChatSurface
-					{isMobile}
-					reserveTopFloatingToolbar={!isMobile}
-					isVisible={workspace.isChatPresented}
-					isInteractive={workspace.isChatInteractive}
-					onMenuClick={isMobile ? onMenuClick : undefined}
-					{isDesktopFullscreen}
-					{onToggleDesktopFullscreen}
-					{onRegisterReload}
-					onRegisterSubmit={(submit) => (chatSubmit = submit)}
-					{chatActions}
-				/>
-			</div>
-		</div>
-	</div>
-
-	<WorkspaceSidebarHost
-		presented={sidebarPresented}
-		order={desktopLayout.order['workspace-sidebar']}
-		edge={desktopLayout.workspaceSidebarEdge}
-		beforeMain={desktopLayout.workspaceSidebarBeforeMain}
-		toolbarAlignment={desktopLayout.workspaceSidebarToolbarAlignment}
-		overlayInsets={rootState.overlayMainInsets}
-		metrics={sidebarMetrics}
-		pushMaximum={sidebarPushMaximum}
-		{snapshot}
-		presentations={renderedSidebarPresentations}
-		labelFor={label}
-		onSendToChat={sendToChat}
-		frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
-		surfaceStyle={(presentation) => rootState.surfaceStyle(presentation)}
-		getOpenSidebarButton={() => openSidebarButton}
-		onPreviewWidth={(width) => (rootState.resizePreviewWidth = width)}
-		onCommitWidth={(width) => void rootState.commitSidebarWidth(width)}
-		onCancelWidth={() => (rootState.resizePreviewWidth = null)}
-		{onOverlayModalChange}
-	/>
+	{/each}
 
 	{#each renderedNonSidebarPresentations as item (`${item.presentation}:${item.surfaceId}`)}
 		{@render portableSurface(item.surfaceId, item.presentation, item.visible)}

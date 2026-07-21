@@ -26,7 +26,6 @@
 
 	let {
 		presented,
-		order,
 		edge,
 		beforeMain,
 		toolbarAlignment,
@@ -46,7 +45,6 @@
 		onOverlayModalChange,
 	}: {
 		presented: boolean;
-		order: number;
 		edge: DesktopLayoutEdge;
 		beforeMain: boolean;
 		toolbarAlignment: DesktopToolbarAlignment;
@@ -187,14 +185,14 @@
 		aria-hidden={!presented}
 		inert={!presented}
 		data-desktop-layout-pane="workspace-sidebar"
-		class="relative z-40 flex h-full min-h-0 shrink-0 flex-col border-border bg-background"
+		class="z-40 flex h-full min-h-0 shrink-0 flex-col border-border bg-background"
 		class:border-l={edge === 'start'}
 		class:border-r={edge === 'end'}
+		class:relative={presented && metrics.mode === 'push'}
 		class:absolute={!presented || metrics.mode === 'overlay'}
 		class:inset-y-0={!presented || metrics.mode === 'overlay'}
 		class:invisible={!presented}
 		class:pointer-events-none={!presented}
-		style:order={order}
 		style:inset-inline-start={!presented || metrics.mode === 'overlay'
 			? beforeMain
 				? `${overlayInsets.start}px`
@@ -246,11 +244,11 @@
 							aria-label={m.workspace_close_sidebar()}
 							title={m.workspace_close_sidebar()}
 						>
-						{#if beforeMain}
-							<PanelLeftClose class="h-3.5 w-3.5" />
-						{:else}
-							<PanelRightClose class="h-3.5 w-3.5" />
-						{/if}
+							{#if beforeMain}
+								<PanelLeftClose class="h-3.5 w-3.5" />
+							{:else}
+								<PanelRightClose class="h-3.5 w-3.5" />
+							{/if}
 						</button>
 					</div>
 				{/snippet}

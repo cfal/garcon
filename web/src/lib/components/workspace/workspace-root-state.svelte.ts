@@ -16,6 +16,7 @@ import {
 } from '$lib/workspace/surface-types.js';
 import {
 	resolveMainInlineInsets,
+	resolveWorkspaceSidebarOverlayInsets,
 	type DesktopLayoutOrder,
 	type MainInlineInsets,
 } from '$lib/layout/desktop-layout.js';
@@ -79,11 +80,11 @@ export class WorkspaceRootState {
 		});
 	}
 
-	get overlayMainInsets(): MainInlineInsets {
-		return resolveMainInlineInsets(this.options.desktopLayoutOrder, {
-			chatList: this.options.chatListWidth,
-			workspaceSidebar: 0,
-		});
+	get sidebarOverlayInsets(): MainInlineInsets {
+		return resolveWorkspaceSidebarOverlayInsets(
+			this.options.desktopLayoutOrder,
+			this.options.chatListWidth,
+		);
 	}
 
 	frameBridge(surfaceId: string): SurfaceFrameBridge {

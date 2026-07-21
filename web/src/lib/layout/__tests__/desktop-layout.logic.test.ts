@@ -5,6 +5,7 @@ import {
 	normalizeDesktopLayoutOrder,
 	resolveDesktopLayout,
 	resolveMainInlineInsets,
+	resolveWorkspaceSidebarOverlayInsets,
 	type DesktopLayoutEdge,
 	type DesktopLayoutOrder,
 	type DesktopToolbarAlignment,
@@ -31,11 +32,6 @@ describe('desktop layout', () => {
 		(order, chatEdge, workspaceEdge, mainAlignment, workspaceAlignment) => {
 			const result = resolveDesktopLayout(order);
 
-			expect(result.order).toEqual({
-				'chat-list': order.indexOf('chat-list'),
-				main: order.indexOf('main'),
-				'workspace-sidebar': order.indexOf('workspace-sidebar'),
-			});
 			expect(result.chatListEdge).toBe(chatEdge);
 			expect(result.workspaceSidebarEdge).toBe(workspaceEdge);
 			expect(result.mainToolbarAlignment).toBe(mainAlignment);
@@ -103,4 +99,18 @@ describe('desktop layout', () => {
 			}),
 		).toEqual({ start: 0, end: 0 });
 	});
+
+	it.each([
+		[['chat-list', 'main', 'workspace-sidebar'], { start: 0, end: 0 }],
+		[['chat-list', 'workspace-sidebar', 'main'], { start: 320, end: 0 }],
+		[['main', 'chat-list', 'workspace-sidebar'], { start: 0, end: 0 }],
+		[['main', 'workspace-sidebar', 'chat-list'], { start: 0, end: 320 }],
+		[['workspace-sidebar', 'chat-list', 'main'], { start: 0, end: 0 }],
+		[['workspace-sidebar', 'main', 'chat-list'], { start: 0, end: 0 }],
+	] satisfies Array<[DesktopLayoutOrder, { start: number; end: number }]>)(
+		'anchors the overlay at the workspace sidebar position for %j',
+		(order, expected) => {
+			expect(resolveWorkspaceSidebarOverlayInsets(order, 320)).toEqual(expected);
+		},
+	);
 });
