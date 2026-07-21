@@ -32,6 +32,7 @@ import { isRecord } from '@garcon/common/json';
 import { isManualBypassMode, providerStartupPermissionMode } from '@garcon/server-agent-common/execution/permission-modes';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import { runClaudeSingleQueryProcess } from './single-query-process.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -345,35 +346,14 @@ async function runSingleQuery(
     const supportsLegacyThinkingFlag = await dependencies.versionProbe.supportsLegacyThinkingFlag(claudeBinary);
     const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt, supportsLegacyThinkingFlag });
 
-    const proc = Bun.spawn([claudeBinary, ...args], {
+    return runClaudeSingleQueryProcess({
+      binary: claudeBinary,
+      args,
       cwd: cwd || process.cwd(),
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
       signal: querySignal,
-      env: (() => { const { CLAUDECODE, ...env } = process.env; return { ...env, ...envOverrides }; })(),
+      envOverrides,
+      logger: dependencies.logger,
     });
-
-    const chunks: Uint8Array[] = [];
-    const reader = proc.stdout.getReader();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-    } catch (err: unknown) {
-      dependencies.logger.error('Claude one-shot stdout read failed', {
-        error: errorMessage(err),
-      });
-    }
-
-    await proc.exited;
-    querySignal.throwIfAborted();
-
-    const decoder = new TextDecoder();
-    return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
   });
 }
 

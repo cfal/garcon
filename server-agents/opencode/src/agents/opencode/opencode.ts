@@ -37,6 +37,10 @@ import {
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { OpenCodeEndpointCoordinator } from './endpoint-coordinator.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import {
+  OpenCodeTimeoutError,
+  withAbortableTimeout,
+} from './request-control.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -264,13 +268,6 @@ interface OpenCodeModelCache {
   fetchedAt: number;
 }
 
-class OpenCodeTimeoutError extends Error {
-  constructor(label: string, timeoutMs: number) {
-    super(`${label} timed out after ${timeoutMs}ms`);
-    this.name = 'OpenCodeTimeoutError';
-  }
-}
-
 function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
   return {
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS,
@@ -322,35 +319,6 @@ function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
     }
   }
   return models;
-}
-
-async function withAbortableTimeout<T>(
-  operation: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number,
-  label: string,
-  callerSignal?: AbortSignal,
-): Promise<T> {
-  const controller = new AbortController();
-  const abortFromCaller = () => controller.abort(callerSignal?.reason);
-  callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
-  if (callerSignal?.aborted) abortFromCaller();
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  try {
-    controller.signal.throwIfAborted();
-    return await Promise.race([
-      operation(controller.signal),
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          const error = new OpenCodeTimeoutError(label, timeoutMs);
-          controller.abort(error);
-          reject(error);
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-    callerSignal?.removeEventListener('abort', abortFromCaller);
-  }
 }
 
 function stopOpenCodeProcess(proc: ChildProcess): void {
