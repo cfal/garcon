@@ -10,6 +10,7 @@
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { DesktopLayoutEdge } from '$lib/layout/desktop-layout.js';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
@@ -116,9 +117,7 @@
 		mobileActiveDescriptor?.type === 'file' ||
 			(mobileActiveDescriptor?.type === 'singleton' && mobileActiveDescriptor.kind === 'commit'),
 	);
-	const notificationDesktopLeftPx = $derived(
-		hideLeftSidebar ? 16 : localSettings.sidebarWidth + 16,
-	);
+	let notificationDesktopLeftPx = $state(16);
 	const sidebarMounted = $derived(!isMobile || appShell.sidebarOpen);
 	const displayedSidebarChatIds = $derived.by(() =>
 		buildSidebarDisplayChatIds({
@@ -442,32 +441,38 @@
 	/>
 {/snippet}
 
+{#snippet desktopChatList(placement: { order: number; dividerEdge: DesktopLayoutEdge })}
+	<div
+		data-desktop-layout-pane="chat-list"
+		data-workspace-chat-list
+		onfocusin={() => workspace.noteChatListFocus()}
+		onpointerdown={() => workspace.noteChatListFocus()}
+		class="relative h-full shrink-0 overflow-hidden border-border"
+		class:border-l={placement.dividerEdge === 'start' && !hideLeftSidebar}
+		class:border-r={placement.dividerEdge === 'end' && !hideLeftSidebar}
+		class:pointer-events-none={hideLeftSidebar || workspaceOverlayOpen}
+		style:order={placement.order}
+		style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
+		aria-hidden={hideLeftSidebar || workspaceOverlayOpen}
+		inert={hideLeftSidebar || workspaceOverlayOpen}
+	>
+		{@render sidebarContent(false, handleChatSelect)}
+		{#if !hideLeftSidebar}
+			<ResizeHandle
+				edge={placement.dividerEdge}
+				width={localSettings.sidebarWidth}
+				onResize={(width) => localSettings.set('sidebarWidth', width)}
+			/>
+		{/if}
+	</div>
+{/snippet}
+
 <div
 	class="flex w-screen overflow-hidden bg-background text-foreground"
 	class:mobile-shell={isMobile}
 	class:h-dvh={!isMobile}
 	class:flex-col={isMobile}
 >
-	{#if !isMobile}
-		<div
-			data-workspace-chat-list
-			onfocusin={() => workspace.noteChatListFocus()}
-			onpointerdown={() => workspace.noteChatListFocus()}
-			class={`relative h-full overflow-hidden ${hideLeftSidebar ? 'w-0 border-r-0 pointer-events-none' : 'flex-shrink-0 border-r border-border'} ${workspaceOverlayOpen ? 'pointer-events-none' : ''}`}
-			style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
-			aria-hidden={hideLeftSidebar || workspaceOverlayOpen}
-			inert={hideLeftSidebar || workspaceOverlayOpen}
-		>
-			{@render sidebarContent(false, handleChatSelect)}
-			{#if !hideLeftSidebar}
-				<ResizeHandle
-					width={localSettings.sidebarWidth}
-					onResize={(width) => localSettings.set('sidebarWidth', width)}
-				/>
-			{/if}
-		</div>
-	{/if}
-
 	{#if isMobile && appShell.sidebarOpen}
 		<div class="fixed inset-0 z-40">
 			<button
@@ -492,6 +497,11 @@
 		<div class="min-h-0 flex-1 overflow-hidden">
 			<WorkspaceRoot
 				{isMobile}
+				desktopLayoutOrder={localSettings.desktopLayoutOrder}
+				desktopChatListWidth={localSettings.sidebarWidth}
+				desktopChatListHidden={hideLeftSidebar}
+				{desktopChatList}
+				onMainInlineStartChange={(pixels) => (notificationDesktopLeftPx = pixels + 16)}
 				onMenuClick={isMobile ? toggleMobileSidebar : undefined}
 				isDesktopFullscreen={effectiveWorkspaceFullscreen}
 				onToggleDesktopFullscreen={() =>

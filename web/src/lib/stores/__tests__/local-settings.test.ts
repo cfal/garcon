@@ -72,6 +72,15 @@ describe('LocalSettingsStore', () => {
 		second.destroy();
 	});
 
+	it('normalizes malformed desktop layout orders passed to set', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('desktopLayoutOrder', ['main', 'main', 'chat-list']);
+
+		expect(store.desktopLayoutOrder).toEqual(['chat-list', 'main', 'workspace-sidebar']);
+		store.destroy();
+	});
+
 	it('persists and restores disabled overlay backdrop effects', () => {
 		const store = createLocalSettingsStore();
 		store.set('overlayBackdropEffects', false);

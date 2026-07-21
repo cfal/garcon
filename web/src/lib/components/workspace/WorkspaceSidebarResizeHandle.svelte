@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import type { DesktopLayoutEdge } from '$lib/layout/desktop-layout.js';
 
 	let {
 		value,
+		edge,
 		minimum,
 		maximum,
 		label,
@@ -12,6 +14,7 @@
 		onReset,
 	}: {
 		value: number;
+		edge: DesktopLayoutEdge;
 		minimum: number;
 		maximum: number;
 		label: string;
@@ -50,7 +53,10 @@
 
 	function previewResize(event: PointerEvent): void {
 		if (pointerId !== event.pointerId) return;
-		previewValue = clamp(startWidth + (startX - event.clientX) * inlineDirection);
+		const edgeDirection = edge === 'start' ? -1 : 1;
+		previewValue = clamp(
+			startWidth + (event.clientX - startX) * inlineDirection * edgeDirection,
+		);
 		onPreview(previewValue);
 	}
 
@@ -89,14 +95,17 @@
 		event.preventDefault();
 		const step = event.shiftKey ? 40 : 10;
 		const rtl = getComputedStyle(event.currentTarget as Element).direction === 'rtl';
-		const direction = event.key === (rtl ? 'ArrowRight' : 'ArrowLeft') ? 1 : -1;
+		const startEdgeDirection = event.key === (rtl ? 'ArrowRight' : 'ArrowLeft') ? 1 : -1;
+		const direction = edge === 'start' ? startEdgeDirection : -startEdgeDirection;
 		onCommit(clamp(value + step * direction));
 	}
 
 	onDestroy(() => finish(false));
 </script>
 
-<div class="pointer-events-none absolute inset-y-0 -start-1.5 z-50 w-3">
+<div
+	class={`pointer-events-none absolute inset-y-0 z-50 w-3 ${edge === 'start' ? '-start-1.5' : '-end-1.5'}`}
+>
 	<input
 		type="range"
 		min={minimum}
@@ -114,6 +123,6 @@
 		onkeydown={handleKeydown}
 	/>
 	<span
-		class={`pointer-events-none absolute inset-y-0 start-1/2 w-px -translate-x-1/2 transition-colors peer-hover:bg-primary/20 peer-focus-visible:bg-ring ${pointerId !== null ? 'bg-primary/30' : 'bg-transparent'}`}
+		class="pointer-events-none absolute inset-y-0 start-1/2 w-px -translate-x-1/2 bg-transparent transition-colors peer-hover:bg-primary/20 peer-focus-visible:bg-ring peer-active:bg-primary/30"
 	></span>
 </div>

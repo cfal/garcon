@@ -168,6 +168,7 @@ function installContext(): AppShellBreakpointWorkspace {
 		},
 		localSettings: {
 			hideChatListWhenGitInMain: false,
+			desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
 			sidebarWidth: 320,
 			sidebarGroupByProject: false,
 			sidebarGroupNestedProjectPaths: false,

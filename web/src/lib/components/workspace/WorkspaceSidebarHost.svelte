@@ -1,25 +1,36 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import PanelRightClose from '@lucide/svelte/icons/panel-right-close';
+	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
 	import { getTransientLayers, getWorkspaceCoordinator } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import {
-		DEFAULT_RIGHT_SIDEBAR_WIDTH,
+		DEFAULT_WORKSPACE_SIDEBAR_WIDTH,
 		type SidebarMetrics,
 	} from '$lib/workspace/sidebar-sizing.js';
 	import {
-		MIN_RIGHT_SIDEBAR_WIDTH,
+		MIN_WORKSPACE_SIDEBAR_WIDTH,
 		type HostId,
 		type WorkspaceLayoutSnapshot,
 	} from '$lib/workspace/surface-types.js';
 	import type { RenderedPortablePresentation } from '$lib/workspace/visible-presentations.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
-	import RightSidebarResizeHandle from './RightSidebarResizeHandle.svelte';
+	import WorkspaceSidebarResizeHandle from './WorkspaceSidebarResizeHandle.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
+	import type {
+		DesktopLayoutEdge,
+		DesktopToolbarAlignment,
+		MainInlineInsets,
+	} from '$lib/layout/desktop-layout.js';
 
 	let {
 		presented,
+		order,
+		edge,
+		beforeMain,
+		toolbarAlignment,
+		overlayInsets,
 		metrics,
 		pushMaximum,
 		snapshot,
@@ -35,6 +46,11 @@
 		onOverlayModalChange,
 	}: {
 		presented: boolean;
+		order: number;
+		edge: DesktopLayoutEdge;
+		beforeMain: boolean;
+		toolbarAlignment: DesktopToolbarAlignment;
+		overlayInsets: MainInlineInsets;
 		metrics: SidebarMetrics;
 		pushMaximum: number;
 		snapshot: WorkspaceLayoutSnapshot;
@@ -148,25 +164,6 @@
 	}
 </script>
 
-{#if presented && metrics.mode === 'push'}
-	<div
-		data-right-sidebar-resize-boundary
-		class="pointer-events-none absolute inset-y-0 z-[45] w-px bg-border"
-		style:inset-inline-end={`${metrics.width}px`}
-	>
-		<RightSidebarResizeHandle
-			value={metrics.width}
-			minimum={MIN_RIGHT_SIDEBAR_WIDTH}
-			maximum={pushMaximum}
-			label={m.workspace_resize_sidebar_pixels({ width: Math.round(metrics.width) })}
-			onPreview={onPreviewWidth}
-			onCommit={onCommitWidth}
-			onCancel={onCancelWidth}
-			onReset={() => onCommitWidth(DEFAULT_RIGHT_SIDEBAR_WIDTH)}
-		/>
-	</div>
-{/if}
-
 {#if overlayOpen}
 	<button
 		bind:this={backdropElement}
@@ -189,17 +186,47 @@
 		aria-label={overlayOpen ? m.workspace_sidebar_dialog() : undefined}
 		aria-hidden={!presented}
 		inert={!presented}
-		class="relative z-40 flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background"
+		data-desktop-layout-pane="workspace-sidebar"
+		class="relative z-40 flex h-full min-h-0 shrink-0 flex-col border-border bg-background"
+		class:border-l={edge === 'start'}
+		class:border-r={edge === 'end'}
 		class:absolute={!presented || metrics.mode === 'overlay'}
 		class:inset-y-0={!presented || metrics.mode === 'overlay'}
 		class:invisible={!presented}
 		class:pointer-events-none={!presented}
-		style:inset-inline-end={!presented || metrics.mode === 'overlay' ? '0' : undefined}
+		style:order={order}
+		style:inset-inline-start={!presented || metrics.mode === 'overlay'
+			? beforeMain
+				? `${overlayInsets.start}px`
+				: undefined
+			: undefined}
+		style:inset-inline-end={!presented || metrics.mode === 'overlay'
+			? beforeMain
+				? undefined
+				: `${overlayInsets.end}px`
+			: undefined}
 		style:width={`${metrics.width}px`}
 	>
+		{#if presented && metrics.mode === 'push'}
+			<div data-workspace-sidebar-resize-boundary>
+				<WorkspaceSidebarResizeHandle
+					value={metrics.width}
+					{edge}
+					minimum={MIN_WORKSPACE_SIDEBAR_WIDTH}
+					maximum={pushMaximum}
+					label={m.workspace_resize_sidebar_pixels({ width: Math.round(metrics.width) })}
+					onPreview={onPreviewWidth}
+					onCommit={onCommitWidth}
+					onCancel={onCancelWidth}
+					onReset={() => onCommitWidth(DEFAULT_WORKSPACE_SIDEBAR_WIDTH)}
+				/>
+			</div>
+		{/if}
 		<div
 			data-floating-sidebar-toolbar
-			class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 justify-center"
+			class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0"
+			class:justify-start={toolbarAlignment === 'start'}
+			class:justify-end={toolbarAlignment === 'end'}
 		>
 			<WorkspaceTaskBar
 				host="sidebar"
@@ -219,7 +246,11 @@
 							aria-label={m.workspace_close_sidebar()}
 							title={m.workspace_close_sidebar()}
 						>
+						{#if beforeMain}
+							<PanelLeftClose class="h-3.5 w-3.5" />
+						{:else}
 							<PanelRightClose class="h-3.5 w-3.5" />
+						{/if}
 						</button>
 					</div>
 				{/snippet}

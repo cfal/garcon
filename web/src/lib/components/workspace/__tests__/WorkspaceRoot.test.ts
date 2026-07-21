@@ -20,6 +20,7 @@ import {
 	type WorkspaceLayoutSnapshot,
 } from '$lib/workspace/surface-types.js';
 import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
+import type { DesktopLayoutOrder } from '$lib/layout/desktop-layout.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 
@@ -70,6 +71,9 @@ vi.mock('$lib/components/git/CommitSurface.svelte', async () => ({
 
 const PortableSurfaceContent = (await import('../PortableSurfaceContent.svelte')).default;
 const WorkspaceRoot = (await import('../WorkspaceRoot.svelte')).default;
+const WorkspaceRootDesktopLayoutTestHost = (
+	await import('./WorkspaceRootDesktopLayoutTestHost.svelte')
+).default;
 
 class TestResizeObserver implements ResizeObserver {
 	static instances: TestResizeObserver[] = [];
@@ -384,6 +388,111 @@ describe('PortableSurfaceContent', () => {
 });
 
 describe('WorkspaceRoot', () => {
+	it.each([
+		[['chat-list', 'main', 'workspace-sidebar']],
+		[['chat-list', 'workspace-sidebar', 'main']],
+		[['main', 'chat-list', 'workspace-sidebar']],
+		[['main', 'workspace-sidebar', 'chat-list']],
+		[['workspace-sidebar', 'chat-list', 'main']],
+		[['workspace-sidebar', 'main', 'chat-list']],
+	] satisfies Array<[DesktopLayoutOrder]>)('orders all desktop panes without changing their DOM sequence for %j', (order) => {
+		installContext();
+		const { container } = render(WorkspaceRootDesktopLayoutTestHost, {
+			desktopLayoutOrder: order,
+			chatActions,
+		});
+		const panes = Array.from(
+			container.querySelectorAll<HTMLElement>('[data-desktop-layout-pane]'),
+		);
+
+		expect(panes.map((pane) => pane.dataset.desktopLayoutPane)).toEqual([
+			'chat-list',
+			'main',
+			'workspace-sidebar',
+		]);
+		expect(
+			panes
+				.toSorted((left, right) => Number(left.style.order) - Number(right.style.order))
+				.map((pane) => pane.dataset.desktopLayoutPane),
+		).toEqual(order);
+	});
+
+	it('reorders stable pane instances and points chrome toward the workspace sidebar', async () => {
+		installContext();
+		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
+			desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
+			chatActions,
+		});
+		const chatList = rendered.container.querySelector('[data-desktop-layout-pane="chat-list"]');
+		const main = rendered.container.querySelector('[data-desktop-layout-pane="main"]');
+		const workspaceSidebar = rendered.container.querySelector(
+			'[data-desktop-layout-pane="workspace-sidebar"]',
+		);
+		const chatSurface = rendered.container.querySelector(
+			`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`,
+		);
+
+		expect(
+			rendered.container.querySelector('[data-floating-workspace-toolbar]')?.classList,
+		).toContain('justify-end');
+		expect(
+			rendered.container.querySelector('[data-floating-sidebar-toolbar]')?.classList,
+		).toContain('justify-start');
+
+		await rendered.rerender({
+			desktopLayoutOrder: ['workspace-sidebar', 'main', 'chat-list'],
+			chatActions,
+		});
+
+		expect(rendered.container.querySelector('[data-desktop-layout-pane="chat-list"]')).toBe(
+			chatList,
+		);
+		expect(rendered.container.querySelector('[data-desktop-layout-pane="main"]')).toBe(main);
+		expect(
+			rendered.container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]'),
+		).toBe(workspaceSidebar);
+		expect(
+			rendered.container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`),
+		).toBe(chatSurface);
+		expect(
+			rendered.container.querySelector('[data-floating-workspace-toolbar]')?.classList,
+		).toContain('justify-start');
+		expect(
+			rendered.container.querySelector('[data-floating-sidebar-toolbar]')?.classList,
+		).toContain('justify-end');
+	});
+
+	it('anchors overlay mode to the configured side of main and reports the main inset', async () => {
+		installContext();
+		const onMainInlineStartChange = vi.fn();
+		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
+			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
+			desktopChatListWidth: 320,
+			chatActions,
+			onMainInlineStartChange,
+		});
+		const hostRegion = rendered.container.querySelector<HTMLElement>('.workspace-host-region')!;
+		const rootObserver = TestResizeObserver.instances.find((observer) =>
+			observer.observed.has(hostRegion),
+		);
+		rootObserver!.emit(hostRegion, 700);
+
+		const dialog = await screen.findByRole('dialog', { name: 'Workspace sidebar' });
+		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('320px');
+		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('');
+		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(320));
+
+		await rendered.rerender({
+			desktopLayoutOrder: ['main', 'chat-list', 'workspace-sidebar'],
+			desktopChatListWidth: 320,
+			chatActions,
+			onMainInlineStartChange,
+		});
+		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('');
+		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('320px');
+		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(0));
+	});
+
 	it('offers one destructive Close without non-destructive Back for a mobile file', async () => {
 		const { workspace } = installContext(mobileFileSnapshot());
 		workspace.closeSurface.mockResolvedValueOnce(true);
@@ -506,11 +615,14 @@ describe('WorkspaceRoot', () => {
 		const chatNode = container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`);
 		expect(chatNode).toBeTruthy();
 		const resizeBoundary = container.querySelector<HTMLElement>(
-			'[data-right-sidebar-resize-boundary]',
+			'[data-workspace-sidebar-resize-boundary]',
 		);
 		expect(resizeBoundary).toBeTruthy();
-		expect(resizeBoundary?.classList.contains('z-[45]')).toBe(true);
-		expect(resizeBoundary?.style.getPropertyValue('inset-inline-end')).toBe('480px');
+		expect(
+			container
+				.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')
+				?.classList.contains('border-l'),
+		).toBe(true);
 		expect(screen.queryByRole('dialog', { name: 'Workspace sidebar' })).toBeNull();
 		expect(onOverlayModalChange).not.toHaveBeenCalled();
 
@@ -549,7 +661,7 @@ describe('WorkspaceRoot', () => {
 
 		rootObserver!.emit(hostRegion, 1_400);
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-		expect(container.querySelector('[data-right-sidebar-resize-boundary]')).toBeTruthy();
+		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeTruthy();
 		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(false));
 		expect(onOverlayModalChange.mock.calls).toEqual([[true], [false]]);
 

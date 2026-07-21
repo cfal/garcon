@@ -1,4 +1,4 @@
-import { DEFAULT_RIGHT_SIDEBAR_WIDTH } from './sidebar-sizing.js';
+import { DEFAULT_WORKSPACE_SIDEBAR_WIDTH } from './sidebar-sizing.js';
 import {
 	CHAT_SURFACE_ID,
 	TERMINAL_LAUNCHER_ID,
@@ -50,7 +50,7 @@ export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
 		},
 		surfaces: { ...CANONICAL_SURFACES },
 		sidebarOpen: false,
-		desiredSidebarWidth: DEFAULT_RIGHT_SIDEBAR_WIDTH,
+		desiredSidebarWidth: DEFAULT_WORKSPACE_SIDEBAR_WIDTH,
 		dialogFileSurfaceId: null,
 		manualFullscreen: false,
 		mobileActiveSurfaceId: CHAT_SURFACE_ID,

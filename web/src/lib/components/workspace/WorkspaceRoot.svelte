@@ -1,13 +1,14 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, untrack, type Snippet } from 'svelte';
 	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
+	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
-	import RightSidebarHost from './RightSidebarHost.svelte';
+	import WorkspaceSidebarHost from './WorkspaceSidebarHost.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
 	import {
@@ -33,6 +34,12 @@
 	} from '$lib/workspace/visible-presentations.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { DropdownMenuItem } from '$lib/components/ui/dropdown-menu';
+	import {
+		DEFAULT_DESKTOP_LAYOUT_ORDER,
+		resolveDesktopLayout,
+		type DesktopLayoutEdge,
+		type DesktopLayoutOrder,
+	} from '$lib/layout/desktop-layout.js';
 
 	interface WorkspaceChatActions {
 		requestDelete: (chat: ChatSessionRecord) => void;
@@ -44,6 +51,11 @@
 		reload: (chat: ChatSessionRecord) => void;
 	}
 
+	interface DesktopChatListPlacement {
+		order: number;
+		dividerEdge: DesktopLayoutEdge;
+	}
+
 	let {
 		isMobile,
 		onMenuClick,
@@ -51,6 +63,11 @@
 		onToggleDesktopFullscreen,
 		onRegisterReload,
 		onOverlayModalChange,
+		desktopLayoutOrder = [...DEFAULT_DESKTOP_LAYOUT_ORDER],
+		desktopChatListWidth = 0,
+		desktopChatListHidden = false,
+		desktopChatList,
+		onMainInlineStartChange,
 		chatActions,
 	}: {
 		isMobile: boolean;
@@ -59,6 +76,11 @@
 		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onOverlayModalChange?: (open: boolean) => void;
+		desktopLayoutOrder?: DesktopLayoutOrder;
+		desktopChatListWidth?: number;
+		desktopChatListHidden?: boolean;
+		desktopChatList?: Snippet<[DesktopChatListPlacement]>;
+		onMainInlineStartChange?: (pixels: number) => void;
 		chatActions: WorkspaceChatActions;
 	} = $props();
 
@@ -92,6 +114,10 @@
 	const sidebarPresented = $derived(
 		!isMobile && snapshot.sidebarOpen && !snapshot.manualFullscreen,
 	);
+	const effectiveDesktopChatListWidth = $derived(
+		!isMobile && !desktopChatListHidden ? desktopChatListWidth : 0,
+	);
+	const desktopLayout = $derived(resolveDesktopLayout(desktopLayoutOrder));
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
 	const rootState = new WorkspaceRootState({
 		workspace,
@@ -107,6 +133,12 @@
 		},
 		get portablePresentations() {
 			return portablePresentations;
+		},
+		get desktopLayoutOrder() {
+			return desktopLayoutOrder;
+		},
+		get chatListWidth() {
+			return effectiveDesktopChatListWidth;
 		},
 	});
 	const sidebarMetrics = $derived(rootState.sidebarMetrics);
@@ -135,6 +167,17 @@
 
 	$effect(() => {
 		workspace.setSidebarOverlayMode(sidebarMetrics.mode === 'overlay');
+	});
+
+	$effect(() => {
+		void effectiveDesktopChatListWidth;
+		untrack(() => rootState.syncChatListWidth());
+	});
+
+	$effect(() => {
+		if (isMobile) return;
+		const mainInlineStart = rootState.mainInsets.start;
+		untrack(() => onMainInlineStartChange?.(mainInlineStart));
 	});
 
 	onDestroy(() => {
@@ -231,14 +274,25 @@
 	aria-label={m.workspace_workspace_region()}
 	tabindex="-1"
 >
+	{#if !isMobile && desktopChatList}
+		{@render desktopChatList({
+			order: desktopLayout.order['chat-list'],
+			dividerEdge: desktopLayout.chatListEdge,
+		})}
+	{/if}
+
 	<div
+		data-desktop-layout-pane="main"
 		class="relative flex min-h-0 min-w-0 flex-1 flex-col"
+		style:order={desktopLayout.order.main}
 		inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
 	>
 		{#if !isMobile}
 			<div
 				data-floating-workspace-toolbar
-				class={`pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 ${snapshot.main.order.length === 1 ? 'justify-end' : 'justify-center'}`}
+				class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0"
+				class:justify-start={desktopLayout.mainToolbarAlignment === 'start'}
+				class:justify-end={desktopLayout.mainToolbarAlignment === 'end'}
 			>
 				<WorkspaceTaskBar
 					host="main"
@@ -261,7 +315,11 @@
 									aria-label={m.workspace_open_sidebar()}
 									title={m.workspace_open_sidebar()}
 								>
-									<PanelRightOpen class="h-3.5 w-3.5" />
+									{#if desktopLayout.workspaceSidebarBeforeMain}
+										<PanelLeftOpen class="h-3.5 w-3.5" />
+									{:else}
+										<PanelRightOpen class="h-3.5 w-3.5" />
+									{/if}
 								</button>
 							</div>
 						{/if}
@@ -309,8 +367,13 @@
 		</div>
 	</div>
 
-	<RightSidebarHost
+	<WorkspaceSidebarHost
 		presented={sidebarPresented}
+		order={desktopLayout.order['workspace-sidebar']}
+		edge={desktopLayout.workspaceSidebarEdge}
+		beforeMain={desktopLayout.workspaceSidebarBeforeMain}
+		toolbarAlignment={desktopLayout.workspaceSidebarToolbarAlignment}
+		overlayInsets={rootState.overlayMainInsets}
 		metrics={sidebarMetrics}
 		pushMaximum={sidebarPushMaximum}
 		{snapshot}

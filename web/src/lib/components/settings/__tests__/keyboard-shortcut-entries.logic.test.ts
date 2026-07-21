@@ -9,7 +9,7 @@ describe('keyboard shortcut entries', () => {
 		expect(shortcutKeys.get('Go to tab on the right')).toEqual(['Ctrl', 'Shift', 'L']);
 		expect(shortcutKeys.get('Go to chat above')).toEqual(['Ctrl', 'Shift', 'P']);
 		expect(shortcutKeys.get('Go to chat below')).toEqual(['Ctrl', 'Shift', 'N']);
-		expect(shortcutKeys.get('Toggle focus between main view and right sidebar')).toEqual([
+		expect(shortcutKeys.get('Toggle focus between main view and workspace sidebar')).toEqual([
 			'Ctrl',
 			'Shift',
 			'O',
