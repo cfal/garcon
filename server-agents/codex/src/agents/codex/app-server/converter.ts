@@ -42,6 +42,7 @@ import {
   convertCodexInterAgentLifecycle,
   convertCodexSubagentLifecycleText,
 } from '../subagent-lifecycle.js';
+import { normalizeCodexCommandDisplay } from './command-display.js';
 import type {
   CodexCollabAgentState,
   CodexCollabAgentTool,
@@ -213,7 +214,7 @@ function rawResponseItemText(content: unknown): string {
 
 function convertCommandExecution(item: Extract<CodexThreadItem, { type: 'commandExecution' }>, timestamp: string): ChatMessage[] {
   const messages: ChatMessage[] = [
-    new BashToolUseMessage(timestamp, item.id, item.command || ''),
+    new BashToolUseMessage(timestamp, item.id, normalizeCodexCommandDisplay(item.command || '')),
   ];
   if (item.status !== 'inProgress') {
     const content = item.aggregatedOutput || (item.status === 'completed' ? '' : item.status);

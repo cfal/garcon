@@ -814,6 +814,31 @@ describe('Codex app-server converter', () => {
     expect(messages.find((message) => message.type === 'web-search-tool-use')?.query).toBe('codex app server');
   });
 
+  it('normalizes Codex shell wrappers for loaded and live command executions', () => {
+    const item = {
+      type: 'commandExecution',
+      id: 'command-1',
+      command: "/bin/zsh -lc 'git status --short'",
+      cwd: '/repo',
+      processId: null,
+      source: 'agent',
+      status: 'inProgress',
+      commandActions: [],
+      aggregatedOutput: null,
+      exitCode: null,
+      durationMs: null,
+    };
+
+    expect(convertCodexAppServerItem(item, '2026-02-21T10:00:00.000Z')[0]).toMatchObject({
+      type: 'bash-tool-use',
+      command: 'git status --short',
+    });
+    expect(convertCodexAppServerLiveItem(item, '2026-02-21T10:00:00.000Z')[0]).toMatchObject({
+      type: 'bash-tool-use',
+      command: 'git status --short',
+    });
+  });
+
   it('suppresses echoed user messages on the live notification path', () => {
     expect(convertCodexAppServerLiveItem({
       type: 'userMessage',
