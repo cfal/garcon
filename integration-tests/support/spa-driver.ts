@@ -412,6 +412,16 @@ export class SpaDriver {
     );
   }
 
+  async waitForChatProcessing(expected: boolean, timeout = 20_000): Promise<void> {
+    await this.#page.waitForFunction(
+      (shouldBeProcessing) =>
+        (document.querySelector('[data-slot="chat-processing-status"]') !== null)
+          === shouldBeProcessing,
+      { timeout },
+      expected,
+    );
+  }
+
   async waitForTextAbsent(text: string, timeout = 20_000): Promise<void> {
     await this.#page.waitForFunction(
       (expected) => !document.body.innerText.includes(expected),

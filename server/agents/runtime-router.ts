@@ -331,9 +331,9 @@ export class AgentRuntimeRouter {
 
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
     const entry = this.#registry.getChat(chatId);
-    const respond = entry ? this.#directory.get(entry.agentId)?.execution.respondToPermission : null;
-    if (!respond || !permissionRequestId) return;
-    Promise.resolve(respond(permissionRequestId, decision)).catch((error) => {
+    const execution = entry ? this.#directory.get(entry.agentId)?.execution : null;
+    if (!execution?.respondToPermission || !permissionRequestId) return;
+    Promise.resolve(execution.respondToPermission(permissionRequestId, decision)).catch((error) => {
       logger.warn('agents: permission reply failed:', error instanceof Error ? error.message : String(error));
     });
   }

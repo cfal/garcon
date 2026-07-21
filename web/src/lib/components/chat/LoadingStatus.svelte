@@ -121,7 +121,12 @@
 
 {#if isVisible}
 	<div class={statusTrayClass}>
-		<div class={statusPanelClass} role="status" aria-live="polite">
+		<div
+			class={statusPanelClass}
+			role="status"
+			aria-live="polite"
+			data-slot="chat-processing-status"
+		>
 			<div class="flex min-w-0 items-center gap-1.5">
 				<span
 					class="flex-shrink-0 text-sm text-status-processing transition-all {animationPhase % 2 ===
