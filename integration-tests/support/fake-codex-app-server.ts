@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 export {};
 
@@ -21,7 +22,11 @@ if (buffered.trim()) respond(buffered);
 
 function respond(line: string): void {
   if (!line.trim()) return;
-  const request = JSON.parse(line) as { id?: number; method?: string };
+  const request = JSON.parse(line) as {
+    id?: number;
+    method?: string;
+    params?: Record<string, unknown>;
+  };
   if (typeof request.id !== 'number') return;
   if (request.method === 'initialize') {
     write(request.id, {
@@ -73,6 +78,10 @@ function respond(line: string): void {
   if (request.method === 'thread/fork') {
     const callLog = process.env.INTEGRATION_CODEX_CALL_LOG;
     if (callLog) appendFileSync(callLog, 'thread/fork\n');
+    if (process.env.INTEGRATION_CODEX_FORK_JSONL === '1') {
+      forkJsonlThread(request.id, request.params);
+      return;
+    }
     process.stdout.write(`${JSON.stringify({
       id: request.id,
       error: { code: -32601, message: 'paginated_threads is not supported yet' },
@@ -83,6 +92,51 @@ function respond(line: string): void {
     id: request.id,
     error: { code: -32601, message: `Unsupported integration fixture method ${request.method}` },
   })}\n`);
+}
+
+function forkJsonlThread(id: number, params: Record<string, unknown> | undefined): void {
+  const sourcePath = typeof params?.path === 'string' ? params.path : null;
+  if (!sourcePath) {
+    process.stdout.write(`${JSON.stringify({
+      id,
+      error: { code: -32602, message: 'thread not found without rollout path' },
+    })}\n`);
+    return;
+  }
+
+  try {
+    const targetThreadId = randomUUID();
+    const targetPath = join(dirname(sourcePath), `${targetThreadId}.jsonl`);
+    const lines = readFileSync(sourcePath, 'utf8').split('\n');
+    const metadataIndex = lines.findIndex((entry) => entry.trim());
+    const metadata = JSON.parse(lines[metadataIndex]!) as {
+      type?: unknown;
+      payload?: Record<string, unknown>;
+    };
+    if (metadata.type !== 'session_meta' || !metadata.payload) {
+      throw new Error('source transcript has no session metadata');
+    }
+    lines[metadataIndex] = JSON.stringify({
+      ...metadata,
+      payload: { ...metadata.payload, id: targetThreadId },
+    });
+    writeFileSync(targetPath, lines.join('\n'));
+    write(id, {
+      thread: { id: targetThreadId, path: targetPath },
+      model: typeof params?.model === 'string' ? params.model : 'gpt',
+      modelProvider: 'openai',
+      serviceTier: null,
+      cwd: typeof params?.cwd === 'string' ? params.cwd : '/',
+    });
+  } catch (error) {
+    process.stdout.write(`${JSON.stringify({
+      id,
+      error: {
+        code: -32602,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    })}\n`);
+  }
 }
 
 function write(id: number, result: unknown): void {

@@ -20,6 +20,7 @@ describe('Codex fork at message', () => {
       )),
       PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
       INTEGRATION_CODEX_DISCOVER_JSONL: '1',
+      INTEGRATION_CODEX_FORK_JSONL: '1',
     };
 
     await withIntegrationFixture('codex-fork-at-message', async (fixture) => {
@@ -41,6 +42,16 @@ describe('Codex fork at message', () => {
 
       const forked = await fixture.client.getMessages(targetChatId);
       expect(forked.messages.map((entry) => entry.message))
+        .toEqual(source.messages.map((entry) => entry.message));
+
+      const secondTargetChatId = fixture.newChatId();
+      const secondFork = await fixture.client.forkChat({
+        sourceChatId: targetChatId,
+        chatId: secondTargetChatId,
+      });
+      expect(secondFork.chat.id).toBe(secondTargetChatId);
+      const secondForked = await fixture.client.getMessages(secondTargetChatId);
+      expect(secondForked.messages.map((entry) => entry.message))
         .toEqual(source.messages.map((entry) => entry.message));
 
       const registry = JSON.parse(
