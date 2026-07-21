@@ -22,6 +22,7 @@ import {
   type AmpStartedSession,
 } from './runtime-types.js';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
 import {
   AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
@@ -134,7 +135,7 @@ async function readAmpStdout(proc: ReturnType<typeof Bun.spawn>): Promise<string
 
 async function runAmpCommand(
   args: string[],
-  { cwd, input }: { cwd?: string; input?: string } = {},
+  { cwd, input, signal }: { cwd?: string; input?: string; signal?: AbortSignal } = {},
   config: AmpConfig = DEFAULT_CONFIG,
 ): Promise<string> {
   const ampBinary = config.binary();
@@ -143,6 +144,7 @@ async function runAmpCommand(
     stdin: input == null ? 'ignore' : 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
+    signal,
   });
 
   if (input != null) {
@@ -157,6 +159,7 @@ async function runAmpCommand(
     proc.stderr ? new Response(proc.stderr).text() : Promise.resolve(''),
     proc.exited,
   ]);
+  signal?.throwIfAborted();
 
   if (exitCode !== 0) {
     const details = (stderr || stdout || '').trim();
@@ -298,36 +301,38 @@ async function runSingleQuery(
     '--stream-json-thinking',
     '-x',
   ];
-  let raw = '';
+  return withSingleQueryControl(options, async (signal) => {
+    let raw = '';
 
-  try {
-    raw = await runAmpCommand(args, { cwd, input: prompt }, config);
-  } catch (err) {
-    logger.error('Amp one-shot stdout read failed.', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
-
-  const textParts: string[] = [];
-
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
     try {
-      const msg = JSON.parse(line) as AmpCliMessage;
-      if (msg.type === 'assistant') {
-        for (const part of getAssistantContent(msg)) {
-          if (part.type === 'text' && part.text?.trim()) {
-            textParts.push(part.text);
+      raw = await runAmpCommand(args, { cwd, input: prompt, signal }, config);
+    } catch (err) {
+      logger.error('Amp one-shot stdout read failed.', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+
+    const textParts: string[] = [];
+
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line) as AmpCliMessage;
+        if (msg.type === 'assistant') {
+          for (const part of getAssistantContent(msg)) {
+            if (part.type === 'text' && part.text?.trim()) {
+              textParts.push(part.text);
+            }
           }
         }
+      } catch {
+        // skip non-JSON lines
       }
-    } catch {
-      // skip non-JSON lines
     }
-  }
 
-  return textParts.join('\n');
+    return textParts.join('\n');
+  });
 }
 
 function createSession(

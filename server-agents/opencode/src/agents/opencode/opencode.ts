@@ -36,6 +36,11 @@ import {
 } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { OpenCodeEndpointCoordinator } from './endpoint-coordinator.js';
+import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import {
+  OpenCodeTimeoutError,
+  withAbortableTimeout,
+} from './request-control.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -263,13 +268,6 @@ interface OpenCodeModelCache {
   fetchedAt: number;
 }
 
-class OpenCodeTimeoutError extends Error {
-  constructor(label: string, timeoutMs: number) {
-    super(`${label} timed out after ${timeoutMs}ms`);
-    this.name = 'OpenCodeTimeoutError';
-  }
-}
-
 function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
   return {
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS,
@@ -321,29 +319,6 @@ function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
     }
   }
   return models;
-}
-
-async function withAbortableTimeout<T>(
-  operation: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  const controller = new AbortController();
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      operation(controller.signal),
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          const error = new OpenCodeTimeoutError(label, timeoutMs);
-          controller.abort(error);
-          reject(error);
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-  }
 }
 
 function stopOpenCodeProcess(proc: ChildProcess): void {
@@ -1134,10 +1109,19 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return modelsFromProviders(connectedProvidersFromListResult(result));
   }
 
-  async #runRequest<T>(label: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  async #runRequest<T>(
+    label: string,
+    operation: (signal: AbortSignal) => Promise<T>,
+    control: { signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<T> {
     this.#endpointCoordinator.requestStarted();
     try {
-      return await withAbortableTimeout(operation, this.#options.requestTimeoutMs, label);
+      return await withAbortableTimeout(
+        operation,
+        control.timeoutMs ?? this.#options.requestTimeoutMs,
+        label,
+        control.signal,
+      );
     } catch (err) {
       if (err instanceof OpenCodeTimeoutError) {
         const reason = errorMessage(err);
@@ -1155,15 +1139,16 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     label: string,
     scope: OpenCodeRequestScope,
     operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
+    control: { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<T> {
-    const result = await this.#runRequest<T>(label, (signal) => operation(signal, scope));
+    const result = await this.#runRequest<T>(label, (signal) => operation(signal, scope), control);
     if (!scope.directory || !isOpenCodeNotFoundResult(result)) return result;
 
     this.#logger.warn('OpenCode request missed the scoped directory; retrying without it', {
       label,
       directory: scope.directory,
     });
-    return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}));
+    return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}), control);
   }
 
   async startSession(request: OpenCodeStartRequest): Promise<string> {
@@ -1492,12 +1477,16 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     }
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
     const scope = createOpenCodeRequestScope(projectPath || cwd);
-    return this.withClientLease(async (client) => {
+    const requestTimeoutMs = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+      ? Math.max(1, Math.round(options.timeoutMs))
+      : undefined;
+    return withSingleQueryControl(options, async (signal) => this.withClientLease(async (client) => {
       const createResult: any = await this.#runRequest<any>(
         'OpenCode session create',
-        (signal) => client.session.create(withOpenCodeRequestScope({
+        (requestSignal) => client.session.create(withOpenCodeRequestScope({
           permission: mapPermissionMode(permissionMode),
-        }, scope), { signal }),
+        }, scope), { signal: requestSignal }),
+        { signal, timeoutMs: requestTimeoutMs },
       );
 
       throwOpenCodeResultError(createResult, 'Failed to create OpenCode session');
@@ -1518,10 +1507,11 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         const promptResult: any = await this.#runScopedSessionRequest<any>(
           'OpenCode prompt',
           scope,
-          (signal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
+          (requestSignal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
             sessionID: sessionId,
             ...body,
-          }, requestScope), { signal }),
+          }, requestScope), { signal: requestSignal }),
+          { signal, timeoutMs: requestTimeoutMs },
         );
 
         throwOpenCodeResultError(promptResult, 'OpenCode one-shot prompt failed');
@@ -1530,15 +1520,15 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         await this.#runScopedSessionRequest(
           'OpenCode session delete',
           scope,
-          (signal, requestScope) => client.session.delete(
+          (requestSignal, requestScope) => client.session.delete(
             withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
-            { signal },
+            { signal: requestSignal },
           ),
         ).then((result) => {
           throwOpenCodeResultError(result, 'OpenCode session delete failed');
         }).catch(() => {});
       }
-    });
+    }));
   }
 
   startPurgeTimer(): void {

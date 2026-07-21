@@ -75,6 +75,17 @@ describe('agent architecture boundaries', () => {
     }
   });
 
+  test('forwards canonical controls through every single-query integration', () => {
+    for (const providerId of providerIds) {
+      const source = readFileSync(`server-agents/${providerId}/src/index.ts`, 'utf8');
+      if (!source.includes('this.singleQuery =')) continue;
+      expect(source, providerId).toContain('singleQueryRuntimeOptions(request)');
+      expect(source, providerId).not.toMatch(
+        /this\.singleQuery = \{[\s\S]*?\.\.\.request\.settings\.values/,
+      );
+    }
+  });
+
   test('keeps generic server modules out of provider implementation paths', () => {
     for (const root of ['server/chats', 'server/routes', 'server/ws']) {
       for (const file of walk(root)) {

@@ -25,6 +25,7 @@ import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory
 import { buildFactoryCliEnv } from './factory-env.js';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { findFactorySessionFileBySessionId } from './history-loader.js';
 import { convertFactoryAssistantText, visibleFactoryAssistantText } from './factory-text.js';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
@@ -286,7 +287,7 @@ function buildFactoryEnvironment(config: FactoryConfig, airgap: boolean) {
 async function runFactoryExec(
   args: string[],
   prompt: string,
-  options: { airgap: boolean; config?: FactoryConfig },
+  options: { airgap: boolean; config?: FactoryConfig; signal?: AbortSignal },
 ): Promise<{ stderr: string; stdout: string }> {
   const factoryBinary = (options.config ?? DEFAULT_CONFIG).binary();
   const proc = Bun.spawn([factoryBinary, ...args], {
@@ -294,6 +295,7 @@ async function runFactoryExec(
     stdin: new Blob([prompt]),
     stdout: 'pipe',
     stderr: 'pipe',
+    signal: options.signal,
   });
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -301,6 +303,7 @@ async function runFactoryExec(
     new Response(proc.stderr as ReadableStream).text(),
     proc.exited,
   ]);
+  options.signal?.throwIfAborted();
 
   if (exitCode !== 0) {
     const details = (stderr || stdout || '').trim();
@@ -334,24 +337,27 @@ export async function runSingleQuery(
         : process.cwd(),
     thinkingMode: normalizeThinkingMode(options.thinkingMode),
   };
-  const metadata = request.model ? await models.getModelMetadata(request.model) : null;
-  const reasoningEffort = request.thinkingMode === 'none' ? undefined : request.thinkingMode;
-  const supportsImages = metadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
-  const args = buildFactoryArgs(request, reasoningEffort).map((entry) => entry);
-  args[1] = '--output-format';
-  args[2] = 'json';
+  return withSingleQueryControl(options, async (signal) => {
+    const metadata = request.model ? await models.getModelMetadata(request.model) : null;
+    const reasoningEffort = request.thinkingMode === 'none' ? undefined : request.thinkingMode;
+    const supportsImages = metadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
+    const args = buildFactoryArgs(request, reasoningEffort).map((entry) => entry);
+    args[1] = '--output-format';
+    args[2] = 'json';
 
-  const { cleanup, prompt: nextPrompt } = await buildFactoryPrompt(prompt, undefined, supportsImages, request.permissionMode);
-  try {
-    const { stdout } = await runFactoryExec(args, nextPrompt, {
-      airgap: shouldAirgapFactoryInvocation(request.model, { resume: false }),
-      config,
-    });
-    const parsed = JSON.parse(stdout) as { result?: string };
-    return typeof parsed.result === 'string' ? visibleFactoryAssistantText(parsed.result) : '';
-  } finally {
-    if (cleanup) await cleanup();
-  }
+    const { cleanup, prompt: nextPrompt } = await buildFactoryPrompt(prompt, undefined, supportsImages, request.permissionMode);
+    try {
+      const { stdout } = await runFactoryExec(args, nextPrompt, {
+        airgap: shouldAirgapFactoryInvocation(request.model, { resume: false }),
+        config,
+        signal,
+      });
+      const parsed = JSON.parse(stdout) as { result?: string };
+      return typeof parsed.result === 'string' ? visibleFactoryAssistantText(parsed.result) : '';
+    } finally {
+      if (cleanup) await cleanup();
+    }
+  });
 }
 
 function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {

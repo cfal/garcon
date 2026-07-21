@@ -5,10 +5,12 @@ import { fileURLToPath } from 'node:url';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
   DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+  DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
   type AgentId,
 } from '../../common/agents.js';
 import { FakeAnthropicServer } from './fake-anthropic-server.js';
 import { FakeOpenAiServer } from './fake-openai-server.js';
+import { FakeOpenAiResponsesServer } from './fake-openai-responses-server.js';
 import {
   GarconTestClient,
   type ConfiguredDirectTestAgent,
@@ -42,6 +44,7 @@ export interface IntegrationDirectories {
 
 export interface IntegrationFixtureOptions {
   chatTitleEnabled?: boolean;
+  chatTitleAgent?: keyof DirectTestAgents;
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
   serverEnvironment?: Record<string, string>;
 }
@@ -63,6 +66,10 @@ export interface IntegrationDiagnostics {
       requests: ReturnType<FakeOpenAiServer['requests']>;
       protocolViolations: ReturnType<FakeOpenAiServer['protocolViolations']>;
     };
+    openAiResponses: {
+      requests: ReturnType<FakeOpenAiResponsesServer['diagnosticRequests']>;
+      protocolViolations: ReturnType<FakeOpenAiResponsesServer['protocolViolations']>;
+    };
     anthropic: {
       requests: ReturnType<FakeAnthropicServer['diagnosticRequests']>;
       protocolViolations: ReturnType<FakeAnthropicServer['protocolViolations']>;
@@ -74,6 +81,7 @@ export class IntegrationFixture {
   readonly dirs: IntegrationDirectories;
   readonly fakeProviders: {
     openAi: FakeOpenAiServer;
+    openAiResponses: FakeOpenAiResponsesServer;
     anthropic: FakeAnthropicServer;
   };
   readonly directAgents: DirectTestAgents;
@@ -114,6 +122,7 @@ export class IntegrationFixture {
 
     const fakeProviders = {
       openAi: FakeOpenAiServer.start(),
+      openAiResponses: FakeOpenAiResponsesServer.start(),
       anthropic: FakeAnthropicServer.start(),
     };
     let garcon: GarconProcess | null = null;
@@ -131,26 +140,35 @@ export class IntegrationFixture {
       client = await GarconTestClient.connect(garcon.baseUrl);
       await client.ping();
       const openAiProvider = await client.createOpenAiProvider(fakeProviders.openAi.baseUrl);
+      const openAiResponsesProvider = await client.createOpenAiResponsesProvider(
+        fakeProviders.openAiResponses.baseUrl,
+      );
       const anthropicProvider = await client.createAnthropicProvider(fakeProviders.anthropic.baseUrl);
       const directAgents = {
         openAi: directAgent(
           DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
           openAiProvider,
         ),
+        openAiResponses: directAgent(
+          DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+          openAiResponsesProvider,
+        ),
         anthropic: directAgent(
           DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
           anthropicProvider,
         ),
       } satisfies DirectTestAgents;
+      const titleAgent = directAgents[options.chatTitleAgent ?? 'openAi'];
+      const hasExplicitTitleAgent = options.chatTitleAgent !== undefined;
       await client.updateSettings({
         ui: {
-          chatTitle: options.chatTitleEnabled ? {
-            enabled: true,
-            agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-            model: openAiProvider.model,
-            apiProviderId: openAiProvider.providerId,
-            modelEndpointId: openAiProvider.endpointId,
-            modelProtocol: openAiProvider.protocol,
+          chatTitle: options.chatTitleEnabled || hasExplicitTitleAgent ? {
+            enabled: options.chatTitleEnabled === true,
+            agentId: titleAgent.agentId,
+            model: titleAgent.provider.model,
+            apiProviderId: titleAgent.provider.providerId,
+            modelEndpointId: titleAgent.provider.endpointId,
+            modelProtocol: titleAgent.provider.protocol,
             thinkingMode: 'none',
           } : { enabled: false },
         },
@@ -167,6 +185,7 @@ export class IntegrationFixture {
       await client?.close().catch(() => undefined);
       await garcon?.stop().catch(() => undefined);
       fakeProviders.openAi.stop();
+      fakeProviders.openAiResponses.stop();
       fakeProviders.anthropic.stop();
       await rm(root, { recursive: true, force: true });
       throw error;
@@ -305,6 +324,10 @@ export class IntegrationFixture {
           requests: this.fakeProviders.openAi.requests(),
           protocolViolations: this.fakeProviders.openAi.protocolViolations(),
         },
+        openAiResponses: {
+          requests: this.fakeProviders.openAiResponses.diagnosticRequests(),
+          protocolViolations: this.fakeProviders.openAiResponses.protocolViolations(),
+        },
         anthropic: {
           requests: this.fakeProviders.anthropic.diagnosticRequests(),
           protocolViolations: this.fakeProviders.anthropic.protocolViolations(),
@@ -332,6 +355,7 @@ export class IntegrationFixture {
       `Directories: ${JSON.stringify(this.dirs, null, 2)}`,
       `Process runs:\n${JSON.stringify(this.diagnostics().processRuns, null, 2)}`,
       `OpenAI requests:\n${this.fakeProviders.openAi.describeRequests()}`,
+      `Responses requests:\n${this.fakeProviders.openAiResponses.describeRequests()}`,
       `Anthropic requests:\n${this.fakeProviders.anthropic.describeRequests()}`,
     ].join('\n\n');
   }
@@ -352,12 +376,14 @@ export class IntegrationFixture {
     }
     try {
       this.fakeProviders.openAi.assertNoProtocolViolations();
+      this.fakeProviders.openAiResponses.assertNoProtocolViolations();
       this.fakeProviders.anthropic.assertNoProtocolViolations();
       this.garcon.assertNoUnexpectedExit();
     } catch (error) {
       errors.push(error);
     }
     this.fakeProviders.openAi.stop();
+    this.fakeProviders.openAiResponses.stop();
     this.fakeProviders.anthropic.stop();
 
     if (errors.length === 0 && process.env.KEEP_INTEGRATION_ARTIFACTS !== '1') {

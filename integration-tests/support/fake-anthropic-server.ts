@@ -70,6 +70,7 @@ type PlannedResponse =
   | { kind: 'http-error'; status: number; message: string }
   | { kind: 'stream-error'; message: string }
   | { kind: 'malformed-then-text'; content: string }
+  | { kind: 'thinking-then-text'; content: string }
   | { kind: 'empty' }
   | { kind: 'truncated-stream' }
   | { kind: 'hold'; held: HeldAnthropicMessageController };
@@ -362,6 +363,75 @@ function textStreamEvents(
   ];
 }
 
+function thinkingThenTextStreamEvents(
+  content: string,
+  request: RecordedAnthropicRequest,
+): AnthropicSseEvent[] {
+  return [
+    {
+      event: 'message_start',
+      data: { type: 'message_start', message: baseMessage(request) },
+    },
+    {
+      event: 'content_block_start',
+      data: {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'thinking', thinking: '' },
+      },
+    },
+    {
+      event: 'content_block_delta',
+      data: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: 'hidden fake reasoning' },
+      },
+    },
+    {
+      event: 'content_block_delta',
+      data: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'signature_delta', signature: 'fake-signature' },
+      },
+    },
+    {
+      event: 'content_block_stop',
+      data: { type: 'content_block_stop', index: 0 },
+    },
+    {
+      event: 'content_block_start',
+      data: {
+        type: 'content_block_start',
+        index: 1,
+        content_block: { type: 'text', text: '' },
+      },
+    },
+    ...deterministicChunks(content).map((text) => ({
+      event: 'content_block_delta',
+      data: {
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'text_delta', text },
+      },
+    })),
+    {
+      event: 'content_block_stop',
+      data: { type: 'content_block_stop', index: 1 },
+    },
+    {
+      event: 'message_delta',
+      data: {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn', stop_sequence: null },
+        usage: { output_tokens: 1 },
+      },
+    },
+    { event: 'message_stop', data: { type: 'message_stop' } },
+  ];
+}
+
 function anthropicSseResponse(
   events: AnthropicSseEvent[],
   request?: RecordedAnthropicRequest,
@@ -497,6 +567,10 @@ export class FakeAnthropicServer {
 
   respondMalformedThenTextNext(matcher: AnthropicRequestMatcher, content: string): void {
     this.#plans.push({ matcher, response: { kind: 'malformed-then-text', content } });
+  }
+
+  respondThinkingThenTextNext(matcher: AnthropicRequestMatcher, content: string): void {
+    this.#plans.push({ matcher, response: { kind: 'thinking-then-text', content } });
   }
 
   truncateNextStream(matcher: AnthropicRequestMatcher): void {
@@ -660,6 +734,9 @@ export class FakeAnthropicServer {
       return anthropicErrorResponse(plan.message, plan.status);
     }
     if (plan?.kind === 'stream-error') return anthropicStreamErrorResponse(plan.message, recorded);
+    if (plan?.kind === 'thinking-then-text') {
+      return anthropicSseResponse(thinkingThenTextStreamEvents(plan.content, recorded), recorded);
+    }
     if (plan?.kind === 'malformed-then-text') {
       if (!recorded.body.stream) return anthropicJsonMessageResponse(plan.content, recorded);
       const valid = await anthropicSseResponse(textStreamEvents(plan.content, recorded)).text();

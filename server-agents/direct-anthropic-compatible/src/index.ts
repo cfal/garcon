@@ -25,6 +25,7 @@ import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycl
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 
 const SESSIONS_LABEL = 'anthropic-compatible-sessions';
 
@@ -144,7 +145,7 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
           return await runtime.runSingleQuery(request.prompt, endpoint, {
             projectPath: request.projectPath,
             model: request.model,
-            ...request.settings.values,
+            ...singleQueryRuntimeOptions(request),
           });
         } catch (error) {
           throw classifyDirectIntegrationError(error);

@@ -17,6 +17,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createClaudeConfig } from './config.js';
 import { getClaudeAuthStatus } from './agents/claude/claude-auth.js';
 import {
@@ -210,7 +211,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
           return await runSingleQuery(request.prompt, {
             cwd: request.projectPath,
             model: request.model,
-            ...request.settings.values,
+            ...singleQueryRuntimeOptions(request),
             envOverrides: {
               ...buildClaudeHostEnvironment(config),
               ...endpointRuntime?.envOverrides,

@@ -31,6 +31,7 @@ import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
+import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 
 export interface PiModelReader {
   getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>>;
@@ -239,7 +240,7 @@ async function buildPiRun(
 async function runPiCommand(
   args: string[],
   config: PiConfig,
-  { cwd, input }: { cwd?: string; input?: string } = {},
+  { cwd, input, signal }: { cwd?: string; input?: string; signal?: AbortSignal } = {},
 ): Promise<string> {
   const proc = Bun.spawn([config.binary(), ...args], {
     cwd: cwd || process.cwd(),
@@ -247,6 +248,7 @@ async function runPiCommand(
     stdin: input == null ? 'ignore' : 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
+    signal,
   });
 
   if (input != null) {
@@ -261,6 +263,7 @@ async function runPiCommand(
     new Response(proc.stderr as ReadableStream).text(),
     proc.exited,
   ]);
+  signal?.throwIfAborted();
 
   if (exitCode !== 0) {
     const details = (stderr || stdout || '').trim();
@@ -284,7 +287,9 @@ export async function runSingleQuery(
   args.push('--model', model);
   const thinkingMode = normalizeThinkingMode(options.thinkingMode);
   if (thinkingMode !== 'none') args.push('--thinking', thinkingMode);
-  return (await runPiCommand(args, config, { cwd, input: prompt })).trim();
+  return withSingleQueryControl(options, async (signal) => (
+    await runPiCommand(args, config, { cwd, input: prompt, signal })
+  ).trim());
 }
 
 function createSession(

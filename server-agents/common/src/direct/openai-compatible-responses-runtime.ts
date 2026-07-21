@@ -16,6 +16,7 @@ import {
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
+import { isJsonResponse } from './response-media-type.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -127,43 +128,117 @@ export function extractResponsesOutputText(data: unknown): string {
     .trim();
 }
 
-export function applyResponsesStreamEvent(accumulated: string, event: unknown): {
+export interface ResponsesStreamState {
   text: string;
-  error?: string;
-} {
-  if (!event || typeof event !== 'object') return { text: accumulated };
-  const parsed = event as {
-    type?: string;
-    delta?: unknown;
+  errorMessage: string | null;
+  terminal: 'completed' | 'failed' | 'incomplete' | null;
+}
+
+interface ResponsesStreamEvent {
+  type?: string;
+  delta?: unknown;
+  error?: { message?: unknown };
+  response?: {
     error?: { message?: unknown };
-    response?: { status_details?: { error?: { message?: unknown } } };
+    incomplete_details?: { reason?: unknown };
+    status_details?: { error?: { message?: unknown } };
   };
+}
+
+function responsesFailureMessage(event: ResponsesStreamEvent): string {
+  const directMessage = event.response?.error?.message;
+  if (typeof directMessage === 'string') return directMessage;
+
+  const compatibleMessage = event.response?.status_details?.error?.message;
+  if (typeof compatibleMessage === 'string') return compatibleMessage;
+
+  const incompleteReason = event.response?.incomplete_details?.reason;
+  if (typeof incompleteReason === 'string') return incompleteReason;
+
+  return `Responses stream ended with ${event.type ?? 'an unknown failure'}.`;
+}
+
+export function consumeResponsesStreamEvent(
+  state: ResponsesStreamState,
+  event: unknown,
+): void {
+  if (!event || typeof event !== 'object') return;
+  const parsed = event as ResponsesStreamEvent;
 
   if (parsed.type === 'response.output_text.delta') {
-    return {
-      text: accumulated + (typeof parsed.delta === 'string' ? parsed.delta : ''),
-    };
+    if (typeof parsed.delta === 'string') state.text += parsed.delta;
+    return;
+  }
+
+  if (parsed.type === 'response.completed') {
+    state.terminal = 'completed';
+    return;
   }
 
   if (parsed.type === 'error') {
-    return {
-      text: accumulated,
-      error: typeof parsed.error?.message === 'string'
-        ? parsed.error.message
-        : 'Responses stream returned an error.',
-    };
+    state.errorMessage = typeof parsed.error?.message === 'string'
+      ? parsed.error.message
+      : 'Responses stream returned an error.';
+    return;
   }
 
   if (parsed.type === 'response.failed' || parsed.type === 'response.incomplete') {
-    return {
-      text: accumulated,
-      error: typeof parsed.response?.status_details?.error?.message === 'string'
-        ? parsed.response.status_details.error.message
-        : `Responses stream ended with ${parsed.type}.`,
+    state.terminal = parsed.type === 'response.failed' ? 'failed' : 'incomplete';
+    state.errorMessage = responsesFailureMessage(parsed);
+  }
+}
+
+async function readOpenAiResponsesResponse(
+  response: Response,
+  runtimeLabel: string,
+): Promise<string> {
+  if (isJsonResponse(response)) {
+    const data = await response.json() as {
+      status?: unknown;
+      error?: { message?: unknown };
+      incomplete_details?: { reason?: unknown };
+      status_details?: { error?: { message?: unknown } };
     };
+    const responseError = typeof data.error?.message === 'string'
+      ? data.error.message
+      : typeof data.status_details?.error?.message === 'string'
+        ? data.status_details.error.message
+        : null;
+    if (data.status === 'failed' || data.status === 'incomplete' || responseError) {
+      const detail = responseError
+        ?? (typeof data.incomplete_details?.reason === 'string'
+          ? data.incomplete_details.reason
+          : `Responses API returned status ${data.status}.`);
+      throw new Error(`${runtimeLabel} response error: ${detail}`);
+    }
+    return extractResponsesOutputText(data);
   }
 
-  return { text: accumulated };
+  if (!response.body) {
+    throw new Error(`${runtimeLabel} response did not include a stream body.`);
+  }
+
+  const state: ResponsesStreamState = {
+    text: '',
+    errorMessage: null,
+    terminal: null,
+  };
+  await readSseDataEvents(response.body, (data) => {
+    try {
+      consumeResponsesStreamEvent(state, JSON.parse(data));
+    } catch {
+      // Skips malformed chunks from partially-compatible providers.
+    }
+  });
+
+  if (state.errorMessage) {
+    throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
+  }
+  if (state.terminal !== 'completed') {
+    throw new Error(`${runtimeLabel} stream ended before response.completed.`);
+  }
+
+  return state.text;
 }
 
 export async function runOpenAiResponsesSingleQuery(
@@ -187,6 +262,7 @@ export async function runOpenAiResponsesSingleQuery(
       body: JSON.stringify({
         model,
         input: [{ role: 'user', content: prompt }],
+        stream: true,
         store: false,
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       }),
@@ -195,10 +271,10 @@ export async function runOpenAiResponsesSingleQuery(
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`${config.runtimeLabel} Responses API error ${response.status}: ${errorText}`);
+      throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return extractResponsesOutputText(await response.json());
+    return (await readOpenAiResponsesResponse(response, config.runtimeLabel)).trim();
   } finally {
     clearTimeout(timer);
   }
@@ -254,28 +330,9 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`${this.config.runtimeLabel} Responses API error ${response.status}: ${errorText}`);
+        throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      if (!response.body) {
-        throw new Error(`${this.config.runtimeLabel} response did not include a stream body.`);
-      }
-
-      let accumulated = '';
-      let streamError = '';
-      await readSseDataEvents(response.body, (data) => {
-        try {
-          const result = applyResponsesStreamEvent(accumulated, JSON.parse(data));
-          accumulated = result.text;
-          if (result.error) streamError = result.error;
-        } catch {
-          // Skips malformed chunks from partially-compatible providers.
-        }
-      });
-
-      if (!accumulated.trim() && streamError) {
-        throw new Error(`${this.config.runtimeLabel} Responses stream error: ${streamError}`);
-      }
-      return accumulated;
+      return await readOpenAiResponsesResponse(response, this.config.runtimeLabel);
     } finally {
       clearTimeout(timer);
       session.abortController = null;

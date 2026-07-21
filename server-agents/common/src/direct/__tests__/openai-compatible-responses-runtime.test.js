@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   OpenAiCompatibleResponsesRuntime,
-  applyResponsesStreamEvent,
   buildOpenAiResponsesUserContent,
+  consumeResponsesStreamEvent,
   extractOpenAiResponsesTextContent,
   extractResponsesOutputText,
   runOpenAiResponsesSingleQuery,
@@ -14,11 +14,14 @@ import {
 const createdDirs = [];
 const originalFetch = globalThis.fetch;
 
-function streamResponse(chunks) {
+function streamResponse(chunks, options = {}) {
   const encoder = new TextEncoder();
+  const events = options.complete === false
+    ? chunks
+    : [...chunks, { type: 'response.completed', response: { status: 'completed' } }];
   return new Response(new ReadableStream({
     start(controller) {
-      for (const chunk of chunks) {
+      for (const chunk of events) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
       }
       controller.close();
@@ -90,24 +93,36 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     })).toBe('hello');
   });
 
-  it('applies streaming deltas and stream errors', () => {
-    expect(applyResponsesStreamEvent('hel', {
+  it('tracks streaming deltas, errors, and terminal state', () => {
+    const state = { text: 'hel', errorMessage: null, terminal: null };
+    consumeResponsesStreamEvent(state, {
       type: 'response.output_text.delta',
       delta: 'lo',
-    })).toEqual({ text: 'hello' });
-    expect(applyResponsesStreamEvent('', {
+    });
+    expect(state).toEqual({ text: 'hello', errorMessage: null, terminal: null });
+
+    consumeResponsesStreamEvent(state, {
       type: 'response.failed',
       response: { status_details: { error: { message: 'bad request' } } },
-    })).toEqual({ text: '', error: 'bad request' });
+    });
+    expect(state).toEqual({
+      text: 'hello',
+      errorMessage: 'bad request',
+      terminal: 'failed',
+    });
   });
 
-  it('posts single queries to /responses and extracts output text', async () => {
+  it('posts streaming single queries to /responses and extracts output text', async () => {
     let requestUrl = '';
     let requestBody;
     globalThis.fetch = mock(async (url, init) => {
       requestUrl = String(url);
       requestBody = JSON.parse(init.body);
-      return Response.json({ output_text: 'single response' });
+      return streamResponse([
+        { type: 'response.reasoning_summary_text.delta', delta: 'hidden' },
+        { type: 'response.output_text.delta', delta: 'single' },
+        { type: 'response.output_text.delta', delta: ' response' },
+      ]);
     });
 
     const dir = await tempDir();
@@ -122,6 +137,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     expect(requestBody).toEqual({
       model: 'selected-model',
       input: [{ role: 'user', content: 'hi' }],
+      stream: true,
       store: false,
       reasoning: { effort: 'ultra' },
     });
@@ -139,6 +155,179 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     });
 
     expect(requestBody).not.toHaveProperty('reasoning');
+    expect(requestBody.stream).toBe(true);
+  });
+
+  it('accepts buffered JSON when a Responses provider ignores streaming', async () => {
+    globalThis.fetch = mock(async () => Response.json({
+      output: [{
+        type: 'message',
+        content: [{ type: 'output_text', text: 'buffered response' }],
+      }],
+    }));
+
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).resolves.toBe('buffered response');
+  });
+
+  it('rejects failed and incomplete buffered Responses payloads', async () => {
+    globalThis.fetch = mock(async () => Response.json({
+      status: 'failed',
+      output_text: 'partial',
+      error: { message: 'generation failed' },
+    }));
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) response error: generation failed');
+
+    globalThis.fetch = mock(async () => Response.json({
+      status: 'incomplete',
+      output_text: 'partial',
+      incomplete_details: { reason: 'max_output_tokens' },
+    }));
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) response error: max_output_tokens');
+
+    globalThis.fetch = mock(async () => Response.json({
+      error: { message: 'buffered provider error' },
+    }));
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) response error: buffered provider error');
+  });
+
+  it('rejects a stream error after partial one-shot output', async () => {
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'response.output_text.delta', delta: 'partial' },
+      { type: 'error', error: { message: 'generation failed' } },
+    ]));
+
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) stream error: generation failed');
+  });
+
+  it('rejects failed and incomplete one-shot streams after partial output', async () => {
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'response.output_text.delta', delta: 'partial' },
+      {
+        type: 'response.failed',
+        response: { error: { message: 'provider failed' } },
+      },
+    ], { complete: false }));
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) stream error: provider failed');
+
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'response.output_text.delta', delta: 'partial' },
+      {
+        type: 'response.incomplete',
+        response: { incomplete_details: { reason: 'max_output_tokens' } },
+      },
+    ], { complete: false }));
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) stream error: max_output_tokens');
+  });
+
+  it('rejects failed and incomplete one-shot streams before visible output', async () => {
+    globalThis.fetch = mock(async () => streamResponse([{
+      type: 'response.failed',
+      response: { error: { message: 'provider failed before output' } },
+    }], { complete: false }));
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) stream error: provider failed before output');
+
+    globalThis.fetch = mock(async () => streamResponse([{
+      type: 'response.incomplete',
+      response: { incomplete_details: { reason: 'content_filter' } },
+    }], { complete: false }));
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow('Direct (Responses) stream error: content_filter');
+  });
+
+  it('requires response.completed for one-shot streams', async () => {
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'response.output_text.delta', delta: 'partial' },
+    ], { complete: false }));
+
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).rejects.toThrow(
+      'Direct (Responses) stream ended before response.completed.',
+    );
+  });
+
+  it('skips malformed and reasoning events before valid one-shot output', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {malformed}\n\n'));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'response.reasoning_text.delta',
+          delta: 'hidden',
+        })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'response.output_text.delta',
+          delta: 'visible',
+        })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'response.completed',
+          response: { status: 'completed' },
+        })}\n\n`));
+        controller.close();
+      },
+    }), {
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    await expect(runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+    )).resolves.toBe('visible');
+  });
+
+  it('preserves caller abort while reading a one-shot stream', async () => {
+    const externalController = new AbortController();
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async (_url, init) => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'response.output_text.delta',
+          delta: 'partial',
+        })}\n\n`));
+        init.signal.addEventListener('abort', () => {
+          controller.error(init.signal.reason);
+        }, { once: true });
+      },
+    }), {
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    const result = runOpenAiResponsesSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'hi',
+      { signal: externalController.signal },
+    );
+    await Promise.resolve();
+    externalController.abort(new DOMException('Stopped', 'AbortError'));
+
+    await expect(result).rejects.toThrow('Stopped');
   });
 
   it('streams Direct Responses turns and persists assistant text', async () => {
@@ -182,6 +371,53 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     const persisted = await fs.readFile(path.join(dir, `${started.agentSessionId}.jsonl`), 'utf8');
     expect(persisted).toContain('"content":"hi"');
     expect(persisted).toContain('"content":"hello world"');
+  });
+
+  it('accepts a buffered JSON response for an interactive Responses session', async () => {
+    const dir = await tempDir();
+    globalThis.fetch = mock(async () => Response.json({ output_text: 'session response' }));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const messages = waitForMessages(runtime);
+
+    await runtime.startSession({
+      chatId: 'chat-json',
+      command: 'hi',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    await expect(messages).resolves.toMatchObject([{ content: 'session response' }]);
+  });
+
+  it('does not emit or persist partial session output after a stream failure', async () => {
+    const dir = await tempDir();
+    globalThis.fetch = mock(async () => streamResponse([
+      { type: 'response.output_text.delta', delta: 'partial' },
+      { type: 'response.failed', response: { error: { message: 'failed' } } },
+    ], { complete: false }));
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const emitted = mock(() => {});
+    runtime.onMessages(emitted);
+    const failure = new Promise((resolve) => runtime.onFailed((_chatId, message) => resolve(message)));
+
+    const started = await runtime.startSession({
+      chatId: 'chat-failed',
+      command: 'hi',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    await expect(failure).resolves.toBe('Direct (Responses) stream error: failed');
+    expect(emitted).not.toHaveBeenCalled();
+    const persisted = await fs.readFile(started.nativePath, 'utf8');
+    expect(persisted).toContain('"content":"hi"');
+    expect(persisted).not.toContain('partial');
   });
 
   it('forwards the current interactive effort and removes it for Default', async () => {
