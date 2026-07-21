@@ -78,6 +78,8 @@ function respond(line: string): void {
   if (request.method === 'thread/fork') {
     const callLog = process.env.INTEGRATION_CODEX_CALL_LOG;
     if (callLog) appendFileSync(callLog, 'thread/fork\n');
+    const paramsLog = process.env.INTEGRATION_CODEX_FORK_PARAMS_LOG;
+    if (paramsLog) appendFileSync(paramsLog, `${JSON.stringify(request.params ?? {})}\n`);
     if (process.env.INTEGRATION_CODEX_FORK_JSONL === '1') {
       forkJsonlThread(request.id, request.params);
       return;
