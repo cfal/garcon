@@ -3,11 +3,19 @@ import type {
   CodexJsonlNormalizationResult,
 } from './history-normalizer.js';
 import { normalizeCodexJsonlEntry } from './history-normalizer.js';
+import { ExecToolUseMessage } from '@garcon/common/chat-types';
+import {
+  codexCodeModeResultToolId,
+  createCodexCodeModeBashMessages,
+  projectCodexCodeModeCommands,
+  rememberCodexCodeModeResult,
+} from './code-mode-command-projection.js';
 
 const MAX_PENDING_HIDDEN_WAIT_CALLS = 10_000;
 
 export class LegacyCodexProjection {
   readonly #hiddenWaitCallIds = new Set<string>();
+  readonly #codeModeResultToolIds = new Map<string, string>();
 
   project(
     entry: Record<string, unknown>,
@@ -21,6 +29,36 @@ export class LegacyCodexProjection {
     if (isToolOutput(payload)) {
       const callId = string(payload?.call_id);
       if (callId && this.#hiddenWaitCallIds.delete(callId)) return emptyResult();
+      const resultToolId = callId ? this.#codeModeResultToolIds.get(callId) : undefined;
+      if (callId && resultToolId) {
+        this.#codeModeResultToolIds.delete(callId);
+        return normalizeCodexJsonlEntry({
+          ...entry,
+          payload: { ...payload, call_id: resultToolId },
+        }, context);
+      }
+    }
+    if (isCodeModeExecCall(payload)) {
+      const normalized = normalizeCodexJsonlEntry(entry, context);
+      const projection = projectCodexCodeModeCommands(payload.input);
+      if (!normalized || !projection) return normalized;
+      const outerMessage = normalized.canonical[0];
+      if (normalized.canonical.length !== 1 || !(outerMessage instanceof ExecToolUseMessage)) {
+        return normalized;
+      }
+      rememberCodexCodeModeResult(
+        this.#codeModeResultToolIds,
+        payload.call_id,
+        codexCodeModeResultToolId(payload.call_id, projection),
+      );
+      return {
+        ...normalized,
+        canonical: createCodexCodeModeBashMessages(
+          outerMessage.timestamp,
+          payload.call_id,
+          projection,
+        ),
+      };
     }
     return normalizeCodexJsonlEntry(entry, context);
   }
@@ -31,6 +69,15 @@ export class LegacyCodexProjection {
     const oldest = this.#hiddenWaitCallIds.values().next().value;
     if (oldest) this.#hiddenWaitCallIds.delete(oldest);
   }
+}
+
+function isCodeModeExecCall(
+  payload: Record<string, unknown> | null,
+): payload is Record<string, unknown> & { call_id: string; input: string } {
+  return payload?.type === 'custom_tool_call'
+    && payload.name === 'exec'
+    && Boolean(string(payload.call_id))
+    && typeof payload.input === 'string';
 }
 
 function isHiddenCodeModeWaitCall(

@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
+import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
@@ -616,7 +616,7 @@ describe('Codex app-server durability', () => {
 
 describe('Codex app-server converter', () => {
   it('normalizes only tracked raw Exec calls and outputs', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     const code = '// @exec: {"yield_time_ms": 1000}\ntext("ok")';
 
     expect(convertCodexRawCodeModeItem({
@@ -624,19 +624,19 @@ describe('Codex app-server converter', () => {
       name: 'other',
       call_id: 'call-other',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-other',
       output: 'ignored',
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
 
     const input = convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds);
     expect(input).toHaveLength(1);
     expect(input[0]).toBeInstanceOf(ExecToolUseMessage);
     expect(input[0]).toMatchObject({
@@ -644,20 +644,20 @@ describe('Codex app-server converter', () => {
       code,
       language: 'javascript',
     });
-    expect(activeCodeModeCallIds.has('call-exec')).toBe(true);
+    expect(activeCodeModeResultToolIds.get('call-exec')).toBe('call-exec');
 
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
 
     const output = convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec',
       output: [{ type: 'input_text', text: 'ok' }],
-    }, '2026-07-10T21:34:09.150Z', activeCodeModeCallIds);
+    }, '2026-07-10T21:34:09.150Z', activeCodeModeResultToolIds);
     expect(output).toHaveLength(1);
     expect(output[0]).toBeInstanceOf(ToolResultMessage);
     expect(output[0]).toMatchObject({
@@ -665,46 +665,92 @@ describe('Codex app-server converter', () => {
       content: { items: [{ type: 'input_text', text: 'ok' }] },
       isError: false,
     });
-    expect(activeCodeModeCallIds.has('call-exec')).toBe(false);
+    expect(activeCodeModeResultToolIds.has('call-exec')).toBe(false);
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec',
       output: 'duplicate',
-    }, '2026-07-10T21:34:09.151Z', activeCodeModeCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.151Z', activeCodeModeResultToolIds)).toEqual([]);
 
     convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec-string',
       input: 'text("done")',
-    }, '2026-07-10T21:34:09.152Z', activeCodeModeCallIds);
+    }, '2026-07-10T21:34:09.152Z', activeCodeModeResultToolIds);
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec-string',
       output: 'Script completed',
-    }, '2026-07-10T21:34:09.153Z', activeCodeModeCallIds)[0]).toMatchObject({
+    }, '2026-07-10T21:34:09.153Z', activeCodeModeResultToolIds)[0]).toMatchObject({
       content: { raw: 'Script completed' },
     });
   });
 
+  it('projects shell-only raw Exec calls and associates output with the final command', () => {
+    const activeCodeModeResultToolIds = new Map();
+    const code = `
+      const results = await Promise.all([
+        tools.exec_command({cmd: "git status"}),
+        tools.exec_command({cmd: "git diff --stat"}),
+      ]);
+      results.forEach(result => text(result.output));
+    `;
+
+    const input = convertCodexRawCodeModeItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-bash',
+      input: code,
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds);
+
+    expect(input).toHaveLength(2);
+    expect(input.every((message) => message instanceof BashToolUseMessage)).toBe(true);
+    expect(input).toMatchObject([
+      { toolId: 'codex-code-mode:call-bash:0', command: 'git status' },
+      { toolId: 'codex-code-mode:call-bash:1', command: 'git diff --stat' },
+    ]);
+    expect(activeCodeModeResultToolIds.get('call-bash')).toBe('codex-code-mode:call-bash:1');
+
+    expect(convertCodexRawCodeModeItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-bash',
+      input: code,
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
+
+    const output = convertCodexRawCodeModeItem({
+      type: 'custom_tool_call_output',
+      call_id: 'call-bash',
+      output: 'aggregate output',
+    }, '2026-07-10T21:34:09.150Z', activeCodeModeResultToolIds);
+
+    expect(output).toMatchObject([{
+      type: 'tool-result',
+      toolId: 'codex-code-mode:call-bash:1',
+      content: { raw: 'aggregate output' },
+    }]);
+    expect(activeCodeModeResultToolIds.size).toBe(0);
+  });
+
   it('ignores malformed raw Exec calls', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
-    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
-    expect(activeCodeModeCallIds.size).toBe(0);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeResultToolIds)).toEqual([]);
+    expect(activeCodeModeResultToolIds.size).toBe(0);
   });
 
   it('normalizes only tracked raw Wait calls and outputs', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     const input = convertCodexRawCodeModeItem({
       type: 'function_call',
       name: 'wait',
       call_id: 'call-wait',
       arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000}',
-    }, '2026-07-11T00:27:03.417Z', activeCodeModeCallIds);
+    }, '2026-07-11T00:27:03.417Z', activeCodeModeResultToolIds);
 
     expect(input).toHaveLength(1);
     expect(input[0]).toBeInstanceOf(WaitToolUseMessage);
@@ -714,13 +760,13 @@ describe('Codex app-server converter', () => {
       yieldTimeMs: 30000,
       maxTokens: 12000,
     });
-    expect(activeCodeModeCallIds.has('call-wait')).toBe(true);
+    expect(activeCodeModeResultToolIds.get('call-wait')).toBe('call-wait');
 
     const output = convertCodexRawCodeModeItem({
       type: 'function_call_output',
       call_id: 'call-wait',
       output: 'Script completed',
-    }, '2026-07-11T00:27:33.417Z', activeCodeModeCallIds);
+    }, '2026-07-11T00:27:33.417Z', activeCodeModeResultToolIds);
 
     expect(output[0]).toBeInstanceOf(ToolResultMessage);
     expect(output[0]).toMatchObject({
@@ -728,18 +774,18 @@ describe('Codex app-server converter', () => {
       content: { raw: 'Script completed' },
       isError: false,
     });
-    expect(activeCodeModeCallIds.has('call-wait')).toBe(false);
+    expect(activeCodeModeResultToolIds.has('call-wait')).toBe(false);
   });
 
   it('ignores malformed raw Wait calls', () => {
-    const activeCodeModeCallIds = new Set();
+    const activeCodeModeResultToolIds = new Map();
     expect(convertCodexRawCodeModeItem({
       type: 'function_call',
       name: 'wait',
       call_id: 'call-wait',
       arguments: '{"yield_time_ms":30000}',
-    }, '2026-07-11T00:27:03.417Z', activeCodeModeCallIds)).toEqual([]);
-    expect(activeCodeModeCallIds.size).toBe(0);
+    }, '2026-07-11T00:27:03.417Z', activeCodeModeResultToolIds)).toEqual([]);
+    expect(activeCodeModeResultToolIds.size).toBe(0);
   });
 
   it('converts app-server live item families to shared chat messages', () => {
@@ -995,7 +1041,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: envelope,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(activity[0]).toMatchObject({
       action: 'agent_status',
@@ -1028,7 +1074,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(completion[0]).toMatchObject({
       action: 'agent_status',
@@ -1049,7 +1095,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(completion[0]).toMatchObject({
       action: 'agent_status',
@@ -1071,19 +1117,19 @@ describe('Codex app-server converter', () => {
       author: '/root/other',
       recipient: '/root',
       content,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
     expect(convertCodexRawCodeModeItem({
       type: 'agent_message',
       author: '/root/reviewer',
       recipient: 'root',
       content,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
     expect(convertCodexRawCodeModeItem({
       type: 'agent_message',
       author: '/root/reviewer',
       recipient: '/root/other',
       content,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
 
     const nestedContent = [{
       type: 'input_text',
@@ -1094,7 +1140,7 @@ describe('Codex app-server converter', () => {
       author: '/root/parent/child',
       recipient: '/root',
       content: nestedContent,
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
   });
 
   it('maps nested v2 terminal response items to their immediate parent', () => {
@@ -1106,7 +1152,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: 'Message Type: FINAL_ANSWER\nTask name: /root/parent\nSender: /root/parent/child\nPayload:\nDone',
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(completion[0]).toMatchObject({
       action: 'agent_status',
@@ -1134,7 +1180,7 @@ describe('Codex app-server converter', () => {
       type: 'message',
       role: 'assistant',
       content: [{ type: 'output_text', text }],
-    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    }, '2026-02-21T10:01:00.000Z', new Map())).toEqual([]);
   });
 
   it('does not interpret structured user messages as legacy lifecycle notifications', () => {
@@ -1160,7 +1206,7 @@ describe('Codex app-server converter', () => {
         type: 'input_text',
         text: envelope,
       }],
-    }, '2026-02-21T10:01:00.000Z', new Set());
+    }, '2026-02-21T10:01:00.000Z', new Map());
 
     expect(messages[0]).toMatchObject({
       action: 'agent_status',
@@ -2399,7 +2445,7 @@ describe('CodexAppServerRuntime', () => {
           type: 'custom_tool_call',
           name: 'exec',
           call_id: 'call-exec-1',
-          input: 'const value = 1; text(value);',
+          input: 'const result = await tools.exec_command({cmd: "pwd"}); text(result.output);',
         },
       },
     });
@@ -2455,18 +2501,17 @@ describe('CodexAppServerRuntime', () => {
     });
 
     expect(emitted.map((message) => message.type)).toEqual([
-      'exec-tool-use',
+      'bash-tool-use',
       'tool-result',
       'wait-tool-use',
       'tool-result',
     ]);
     expect(emitted[0]).toMatchObject({
-      toolId: 'call-exec-1',
-      code: 'const value = 1; text(value);',
-      language: 'javascript',
+      toolId: 'codex-code-mode:call-exec-1:0',
+      command: 'pwd',
     });
     expect(emitted[1]).toMatchObject({
-      toolId: 'call-exec-1',
+      toolId: 'codex-code-mode:call-exec-1:0',
       content: { items: [{ type: 'input_text', text: '1' }] },
       isError: false,
     });

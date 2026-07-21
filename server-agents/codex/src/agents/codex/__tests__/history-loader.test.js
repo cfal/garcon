@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadCodexChatMessages, loadCodexChatMessagePage } from '../history-loader.js';
-import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { getNativeMessageRevisionSource, getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 
 async function withTempJsonl(lines, fn) {
@@ -58,6 +58,59 @@ describe('loadCodexChatMessages', () => {
       { type: 'exec-tool-use', toolId: 'call_exec', code, language: 'javascript' },
       { type: 'tool-result', toolId: 'call_exec' },
     ]);
+  });
+
+  it('projects shell-only Code Mode entries across full and paginated history', async () => {
+    const lines = [
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-07-10T21:34:09.149Z',
+        payload: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'outer',
+          input: `
+            const results = await Promise.all([
+              tools.exec_command({cmd: "git status"}),
+              tools.exec_command({cmd: "git diff --stat"}),
+            ]);
+            results.forEach(result => text(result.output));
+          `,
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-07-10T21:34:09.150Z',
+        payload: {
+          type: 'custom_tool_call_output',
+          call_id: 'outer',
+          output: 'aggregate output',
+        },
+      }),
+    ];
+
+    await withTempJsonl(lines, async (filePath) => {
+      const full = await loadCodexChatMessages(filePath);
+      const page = await loadCodexChatMessagePage(filePath, 2, 0);
+
+      expect(full.map((message) => [message.type, message.toolId])).toEqual([
+        ['bash-tool-use', 'codex-code-mode:outer:0'],
+        ['bash-tool-use', 'codex-code-mode:outer:1'],
+        ['tool-result', 'codex-code-mode:outer:1'],
+      ]);
+      expect(getNativeMessageRevisionSource(full[0])).toMatchObject({
+        lineNumber: 1,
+        withinSourceOrdinal: 0,
+      });
+      expect(getNativeMessageRevisionSource(full[1])).toMatchObject({
+        lineNumber: 1,
+        withinSourceOrdinal: 1,
+      });
+      expect(page.messages).toEqual(full.slice(1));
+      expect(page.total).toBe(3);
+      expect(page.hasMore).toBe(true);
+      expect(page.revision).toBe(transcriptRevision(full));
+    });
   });
 
   it('hides Code Mode Wait envelopes and paired outputs from native history', async () => {

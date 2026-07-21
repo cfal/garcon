@@ -6,6 +6,8 @@ import {
 
 export { projectCodexCodeModeCommands, type CodexCodeModeCommandProjection };
 
+const MAX_PENDING_CODE_MODE_CALLS = 10_000;
+
 export function codexCodeModeBashToolId(
   outerCallId: string,
   commandIndex: number,
@@ -28,6 +30,17 @@ export function createCodexCodeModeBashMessages(
   return projection.commands.map((command, index) => (
     new BashToolUseMessage(timestamp, codexCodeModeBashToolId(outerCallId, index), command)
   ));
+}
+
+export function rememberCodexCodeModeResult(
+  resultToolIds: Map<string, string>,
+  outerCallId: string,
+  resultToolId: string,
+): void {
+  resultToolIds.set(outerCallId, resultToolId);
+  if (resultToolIds.size <= MAX_PENDING_CODE_MODE_CALLS) return;
+  const oldest = resultToolIds.keys().next().value;
+  if (oldest) resultToolIds.delete(oldest);
 }
 
 export function rewriteCodexCodeModeCommandPrefix(commands: readonly string[]): string {

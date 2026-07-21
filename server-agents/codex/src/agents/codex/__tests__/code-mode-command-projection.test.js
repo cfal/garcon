@@ -5,6 +5,7 @@ import {
   codexCodeModeResultToolId,
   createCodexCodeModeBashMessages,
   projectCodexCodeModeCommands,
+  rememberCodexCodeModeResult,
   rewriteCodexCodeModeCommandPrefix,
 } from '../code-mode-command-projection.js';
 
@@ -160,5 +161,16 @@ describe('Code Mode Bash message projection', () => {
     const source = rewriteCodexCodeModeCommandPrefix(commands);
 
     expect(projectCodexCodeModeCommands(source)).toEqual({ commands });
+  });
+
+  it('bounds pending result associations', () => {
+    const resultToolIds = new Map();
+    for (let index = 0; index <= 10_000; index += 1) {
+      rememberCodexCodeModeResult(resultToolIds, `outer-${index}`, `result-${index}`);
+    }
+
+    expect(resultToolIds.size).toBe(10_000);
+    expect(resultToolIds.has('outer-0')).toBe(false);
+    expect(resultToolIds.get('outer-10000')).toBe('result-10000');
   });
 });
