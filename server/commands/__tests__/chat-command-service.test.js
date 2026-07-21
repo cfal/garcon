@@ -350,6 +350,17 @@ function makeService(overrides = {}) {
       };
     }),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
+    reserveTranscriptSnapshot: mock((chatId) => {
+      const source = sessions.get(chatId);
+      if (
+        queue.hasChatExecutionOwner(chatId)
+        || agents.isAgentSessionRunning(source?.agentId, source?.agentSessionId)
+      ) {
+        throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
+      }
+      return { chatId, reservationId: `snapshot-${chatId}` };
+    }),
+    releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
     reserveDirectTurn: mock((chatId) => directReservation(chatId)),
     assertDirectTurnReservationActive: mock(() => undefined),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
@@ -420,11 +431,12 @@ function makeService(overrides = {}) {
     resolvePermission: mock(() => undefined),
     supportsFork: mock(() => true),
     supportsForkAtMessage: mock(() => true),
-    supportsForkWhileRunning: mock(() => false),
+    supportsForkAtMessageWhileRunning: mock(() => false),
     supportsUpdateProjectPath: mock(() => true),
     requiresNativePathForProjectPathUpdate: mock((agentId) => agentId === 'pi'),
     isAgentSessionRunning: mock(() => false),
     forkAgentSession: mock(() => Promise.resolve(null)),
+    discardForkedAgentSession: mock(() => Promise.resolve(undefined)),
     compactSession: mock(() => Promise.resolve(undefined)),
     resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
@@ -452,7 +464,11 @@ function makeService(overrides = {}) {
     rollback: mock(() => Promise.resolve(undefined)),
   }));
   const carryOver = {
-    stageFork: mock(() => Promise.resolve()),
+    stageFork: mock(() => Promise.resolve({
+      sourceRenderedMessageCount: 0,
+      selectedRenderedMessageCount: 0,
+      staged: false,
+    })),
     promoteStaged: mock(() => Promise.resolve()),
     discardStaged: mock(() => Promise.resolve()),
   };
@@ -1276,6 +1292,48 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
+  it('keeps retryable fork-run settlement failures out of the command ledger', async () => {
+    const { service, pendingInputs, ledger, queue } = makeService();
+    const input = {
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-unsettled-fork',
+      clientMessageId: 'msg-unsettled-fork',
+    };
+    pendingInputs.hasInFlightForChat.mockReturnValueOnce(true).mockReturnValue(false);
+
+    await expect(service.submitForkRun(input)).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      status: 409,
+      retryable: true,
+    });
+    expect(await readLedgerRecord(
+      ledger,
+      'fork-run',
+      input.clientRequestId,
+      TARGET_CHAT_ID,
+    )).toBeNull();
+    expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+
+    await expect(service.submitForkRun(input)).resolves.toMatchObject({ status: 'accepted' });
+    expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a point fork while a lazy source is materializing', async () => {
+    const { service, queue, forkChatFileCopy } = makeService({
+      session: { agentSessionId: null, nativeSession: null },
+    });
+    queue.hasChatExecutionOwner.mockReturnValue(true);
+
+    await expect(service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 1,
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
   it('serializes source chat submissions behind an in-progress fork snapshot', async () => {
     let releaseFork;
     let markForkStarted;
@@ -1413,17 +1471,17 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
-  it('forks a running source when the agent supports fork-while-running', async () => {
+  it('rejects a whole-head fork while the source is running', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
-    agents.supportsForkWhileRunning.mockReturnValue(true);
+    agents.supportsForkAtMessageWhileRunning.mockReturnValue(true);
 
-    await service.forkChat({
+    await expect(service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
-    });
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
 
-    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
   it('passes the canonical message cutoff to the owning integration', async () => {
@@ -1447,7 +1505,7 @@ describe('ChatCommandService', () => {
   it('allows message-point forks while the source is processing when the agent supports running forks', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
-    agents.supportsForkWhileRunning.mockReturnValue(true);
+    agents.supportsForkAtMessageWhileRunning.mockReturnValue(true);
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,

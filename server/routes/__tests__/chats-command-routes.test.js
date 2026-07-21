@@ -277,6 +277,14 @@ function createRouteAgent(sessionOverrides = {}) {
     triggerDrain: mock(() => Promise.resolve(undefined)),
     isChatExecutionReserved: mock(() => false),
     hasChatExecutionOwner: mock(() => false),
+    reserveTranscriptSnapshot: mock((chatId) => {
+      const source = registry.getChat(chatId);
+      if (agents.isAgentSessionRunning(source?.agentId, source?.agentSessionId)) {
+        throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
+      }
+      return { chatId, reservationId: 'snapshot-reservation' };
+    }),
+    releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
     readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -342,7 +350,7 @@ function createRouteAgent(sessionOverrides = {}) {
     hasAgent: mock(() => true),
     supportsFork: mock(() => true),
     supportsForkAtMessage: mock(() => true),
-    supportsForkWhileRunning: mock(() => false),
+    supportsForkAtMessageWhileRunning: mock(() => false),
     supportsUpdateProjectPath: mock(() => true),
     supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),
@@ -351,6 +359,7 @@ function createRouteAgent(sessionOverrides = {}) {
     modelSupportsImages: mock(() => Promise.resolve(true)),
     runSingleQuery: mock(() => Promise.resolve('title')),
     forkAgentSession: mock(() => Promise.resolve({})),
+    discardForkedAgentSession: mock(() => Promise.resolve(undefined)),
     resolvePermission: mock(() => undefined),
     resolveNativeSession: mock((chat) => Promise.resolve(chat.nativeSession ?? null)),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),

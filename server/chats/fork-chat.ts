@@ -3,6 +3,11 @@ import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
+import type { CarryOverForkStage } from './chat-carryover-store.js';
+import { DomainError } from '../lib/domain-error.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:fork');
 
 interface ForkChatSettings {
   getChatName(chatId: string): string | null | undefined;
@@ -25,7 +30,7 @@ interface ForkChatCarryOver {
     ownerId: string;
     ownerModel: string;
     upToSequence?: number;
-  }): Promise<void>;
+  }): Promise<CarryOverForkStage>;
   promoteStaged(chatId: string, targetEpoch: string): Promise<void>;
   discardStaged(chatId: string, targetEpoch: string): Promise<void>;
 }
@@ -46,13 +51,14 @@ interface ForkChatInput {
     targetChatId: string;
     messageSequence?: number;
   }) => Promise<StartedAgentSession | null>;
+  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
 }
 
 export interface ForkChatFileCopyResult {
   sourceChatId: string;
   chatId: string;
   agentId: string;
-  agentSessionId: string;
+  agentSessionId: string | null;
   sourceNextForkOrdinal: number;
   rollback(): Promise<void>;
 }
@@ -98,32 +104,51 @@ export async function forkChatFileCopy({
   carryOver,
   ownership,
   forkAgentSession,
+  discardForkedAgentSession,
 }: ForkChatInput): Promise<ForkChatFileCopyResult> {
+  const startedAt = Date.now();
   const sourceAgentSessionId = sourceSession.agentSessionId;
-  if (!sourceAgentSessionId) throw new Error(`Source agentSessionId missing for chat ${sourceChatId}`);
-
   const targetEpoch = crypto.randomUUID();
-  await carryOver?.stageFork({
+  const carryOverStage = await carryOver?.stageFork({
     sourceChatId,
     targetChatId,
     targetEpoch,
     ownerId: sourceSession.agentId,
     ownerModel: sourceSession.model,
     ...(upToSequence ? { upToSequence } : {}),
-  });
-  let nativeFork: StartedAgentSession | null;
+  }) ?? {
+    sourceRenderedMessageCount: 0,
+    selectedRenderedMessageCount: 0,
+    staged: false,
+  };
+  const selectedNativeCount = upToSequence === undefined
+    ? null
+    : upToSequence - carryOverStage.selectedRenderedMessageCount;
+  if (selectedNativeCount !== null && selectedNativeCount > 0 && !sourceAgentSessionId) {
+    await carryOver?.discardStaged(targetChatId, targetEpoch);
+    throw new DomainError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Fork message is outside the source transcript',
+      422,
+    );
+  }
+  const needsNativeFork = Boolean(sourceAgentSessionId)
+    && (selectedNativeCount === null || selectedNativeCount > 0);
+  let nativeFork: StartedAgentSession | null = null;
   try {
-    nativeFork = await forkAgentSession({
-      sourceSession,
-      sourceChatId,
-      targetChatId,
-      ...(upToSequence ? { messageSequence: upToSequence } : {}),
-    });
+    if (needsNativeFork) {
+      nativeFork = await forkAgentSession({
+        sourceSession,
+        sourceChatId,
+        targetChatId,
+        ...(upToSequence ? { messageSequence: upToSequence } : {}),
+      });
+    }
   } catch (error) {
     await carryOver?.discardStaged(targetChatId, targetEpoch);
     throw error;
   }
-  if (!nativeFork?.agentSessionId) {
+  if (needsNativeFork && !nativeFork?.agentSessionId) {
     await carryOver?.discardStaged(targetChatId, targetEpoch);
     throw new Error(`Failed to create fork target for chat ${targetChatId}`);
   }
@@ -139,31 +164,49 @@ export async function forkChatFileCopy({
     modelEndpointId: sourceSession.modelEndpointId ?? null,
     modelProtocol: sourceSession.modelProtocol ?? null,
     projectPath: sourceSession.projectPath,
-    nativeSession: nativeFork.nativeSession,
+    nativeSession: nativeFork?.nativeSession ?? null,
     agentOwnershipEpoch: targetEpoch,
     tags: [...sourceSession.tags],
-    agentSessionId: nativeFork.agentSessionId,
+    agentSessionId: nativeFork?.agentSessionId ?? null,
     nextForkOrdinal: 1,
     permissionMode: sourceSession.permissionMode,
     thinkingMode: sourceSession.thinkingMode,
     agentSettingsById: { ...sourceSession.agentSettingsById },
   });
   if (!created) {
-    await carryOver?.discardStaged(targetChatId, targetEpoch);
-    throw new Error(`Chat ID collision: ${targetChatId}`);
+    const error = new Error(`Chat ID collision: ${targetChatId}`);
+    const cleanups = [carryOver?.discardStaged(targetChatId, targetEpoch)];
+    if (nativeFork) cleanups.push(discardForkedAgentSession(sourceSession.agentId, nativeFork));
+    const failures = (await Promise.allSettled(cleanups)).filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failures.length > 0) {
+      throw new AggregateError([error, ...failures.map((failure) => failure.reason)], error.message);
+    }
+    throw error;
   }
 
   let rolledBack = false;
   const rollback = async () => {
     if (rolledBack) return;
-    await rollbackForkTarget({
-      sourceChatId,
-      targetChatId,
-      registry,
-      settings,
-      ownership,
-      sourceNextForkOrdinal: nextForkOrdinal,
-    });
+    const cleanups = [rollbackForkTarget({
+        sourceChatId,
+        targetChatId,
+        registry,
+        settings,
+        ownership,
+        sourceNextForkOrdinal: nextForkOrdinal,
+      }), carryOver?.discardStaged(targetChatId, targetEpoch)];
+    if (nativeFork) cleanups.push(discardForkedAgentSession(sourceSession.agentId, nativeFork));
+    const failures = (await Promise.allSettled(cleanups)).filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures.map((failure) => failure.reason),
+        `Failed to roll back fork ${targetChatId}`,
+      );
+    }
     rolledBack = true;
   };
 
@@ -187,11 +230,21 @@ export async function forkChatFileCopy({
     throw error;
   }
 
+  logger.info('fork created', {
+    sourceChatId,
+    targetChatId,
+    agentId: sourceSession.agentId,
+    kind: nativeFork ? 'native' : 'lazy',
+    point: upToSequence ?? null,
+    carryOverMessages: carryOverStage.selectedRenderedMessageCount,
+    durationMs: Date.now() - startedAt,
+  });
+
   return {
     sourceChatId,
     chatId: targetChatId,
     agentId: sourceSession.agentId,
-    agentSessionId: nativeFork.agentSessionId,
+    agentSessionId: nativeFork?.agentSessionId ?? null,
     sourceNextForkOrdinal: nextForkOrdinal,
     rollback,
   };

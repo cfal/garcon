@@ -30,7 +30,11 @@ import {
   buildClaudeHostEnvironment,
 } from './agents/claude/endpoint-runtime.js';
 import { ClaudeExecution } from './agents/claude/execution.js';
-import { rewriteClaudeForkTranscriptEntry } from './agents/claude/fork-transcript.js';
+import {
+  claudeForkSemanticDigest,
+  projectClaudeForkEntry,
+  transformClaudeForkTranscript,
+} from './agents/claude/fork-transcript.js';
 import {
   getClaudePreviewFromNativePath,
   loadClaudeChatMessagePage,
@@ -180,10 +184,12 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     };
     this.forking = createJsonlForking({
       host,
-      supportsWhileRunning: true,
+      supportsAtMessageWhileRunning: true,
       transcript: this.transcript,
       nativeSessions,
-      rewriteEntry: rewriteClaudeForkTranscriptEntry,
+      rewriteEntry: projectClaudeForkEntry,
+      transformEntries: transformClaudeForkTranscript,
+      semanticDigest: claudeForkSemanticDigest,
     });
     this.endpoints = {
       async validate(selection) {

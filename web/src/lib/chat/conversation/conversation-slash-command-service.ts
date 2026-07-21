@@ -72,7 +72,6 @@ interface SlashCommandModelCatalog {
 		modelProtocol: ApiProtocol | null;
 	};
 	supportsFork(agentId: SessionAgentId): boolean;
-	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
 }
 
 export interface ConversationSlashCommandDeps {
@@ -140,8 +139,7 @@ export class ConversationSlashCommandService {
 		if (this.deps.modelCatalog.supportsFork(agentId)) {
 			const fork = parseForkCommand(text);
 			if (fork) {
-				if (chat.status === 'running' && chat.isProcessing
-					&& !this.deps.modelCatalog.supportsForkWhileRunning(agentId)) {
+				if (chat.status === 'running' && chat.isProcessing) {
 					this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return { kind: 'handled', outcome: 'rejected' };
 				}

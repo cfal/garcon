@@ -141,7 +141,7 @@ async function createFixture() {
   } satisfies AgentForkRequest;
   const options = {
     host,
-    supportsWhileRunning: true,
+    supportsAtMessageWhileRunning: true,
     transcript,
     nativeSessions,
     rewriteEntry(entry, context) {

@@ -282,7 +282,7 @@ function installContext(initial: WorkspaceLayoutSnapshot = withAdditionalSurface
 			handleEscape: vi.fn(() => false),
 		},
 		sessions: { selectedChat: null },
-		modelCatalog: { supportsFork: () => false, supportsForkWhileRunning: () => false },
+		modelCatalog: { supportsFork: () => false, supportsForkAtMessageWhileRunning: () => false },
 		splitLayout: { isEnabled: false },
 		gitQuickSummary: {
 			setEnabled: vi.fn(),

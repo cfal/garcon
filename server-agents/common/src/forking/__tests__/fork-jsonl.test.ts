@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { forkJsonlTranscript, JsonlSourcePrefixChangedError } from '../fork-jsonl.js';
@@ -12,6 +12,57 @@ afterEach(async () => {
 });
 
 describe('forkJsonlTranscript', () => {
+  it('transforms a selected snapshot with access to the immutable full source', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    await writeFile(sourcePath, [
+      JSON.stringify({ type: 'message', value: 'selected' }),
+      JSON.stringify({ type: 'metadata', value: 'full-source' }),
+      '',
+    ].join('\n'));
+
+    const result = await forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: 1,
+      transformEntries(input) {
+        expect(input.selectedEntries).toEqual([{ type: 'message', value: 'selected' }]);
+        expect(input.sourceEntries).toHaveLength(2);
+        return {
+          entries: [{ type: 'message', sessionId: input.targetAgentSessionId }],
+          expectedSemanticDigest: 'semantic-digest',
+        };
+      },
+    });
+
+    expect(JSON.parse((await readFile(result.nativePath, 'utf8')).trim())).toEqual({
+      type: 'message',
+      sessionId: result.agentSessionId,
+    });
+    expect(result.expectedSemanticDigest).toBe('semantic-digest');
+    expect((await stat(result.nativePath)).mode & 0o777).toBe(0o600);
+  });
+
+  it('rejects a whole-source mutation during transformation and removes the target', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    await writeFile(sourcePath, `${JSON.stringify({ type: 'message', value: 'before' })}\n`);
+
+    await expect(forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+      transformEntries(input) {
+        writeFileSync(sourcePath, `${JSON.stringify({ type: 'message', value: 'after' })}\n`);
+        return { entries: input.selectedEntries };
+      },
+    })).rejects.toBeInstanceOf(JsonlSourcePrefixChangedError);
+
+    expect((await readdir(root)).filter((name) => name !== 'source.jsonl')).toEqual([]);
+  });
+
   it('preserves physical line positions and passes per-entry retained counts', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
     roots.push(root);

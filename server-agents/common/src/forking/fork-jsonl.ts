@@ -10,6 +10,18 @@ export interface ForkTranscriptEntryContext {
   readonly retainedMessageCount?: number;
 }
 
+export interface ForkTranscriptTransformInput {
+  readonly selectedEntries: readonly unknown[];
+  readonly sourceEntries: readonly unknown[];
+  readonly sourceAgentSessionId: string;
+  readonly targetAgentSessionId: string;
+}
+
+export interface ForkTranscriptTransformResult {
+  readonly entries: readonly unknown[];
+  readonly expectedSemanticDigest?: string;
+}
+
 export interface ForkJsonlRequest {
   readonly sourcePath: string;
   readonly sourceAgentSessionId: string;
@@ -18,11 +30,15 @@ export interface ForkJsonlRequest {
   readonly retainedMessageCounts?: ReadonlyMap<number, number>;
   readonly sourceSnapshot?: JsonlSourceSnapshot;
   readonly rewriteEntry?: (entry: unknown, context: ForkTranscriptEntryContext) => unknown;
+  readonly transformEntries?: (
+    input: ForkTranscriptTransformInput,
+  ) => ForkTranscriptTransformResult;
 }
 
 export interface ForkJsonlResult {
   readonly agentSessionId: string;
   readonly nativePath: string;
+  readonly expectedSemanticDigest?: string;
 }
 
 export interface JsonlSourceSnapshot {
@@ -61,20 +77,35 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     sourceAgentSessionId: request.sourceAgentSessionId,
     targetAgentSessionId,
   };
+  const projectedEntries = selected.entries.map((entry) => {
+    if (!request.rewriteEntry) return entry.value;
+    return request.rewriteEntry(entry.value, {
+      ...context,
+      ...(request.retainedMessageCounts
+        ? {
+            retainedMessageCount: request.retainedMessageCounts.get(entry.lineNumber) ?? 0,
+          }
+        : {}),
+    });
+  });
+  const projectedByLine = new Map(
+    selected.entries.map((entry, index) => [entry.lineNumber, projectedEntries[index]]),
+  );
+  const transformed = request.transformEntries?.({
+    selectedEntries: projectedEntries,
+    sourceEntries: normalizeJsonl(snapshot.content.toString('utf8'), request.sourcePath)
+      .entries.map((entry) => entry.value),
+    ...context,
+  });
   const entriesByLine = new Map(selected.entries.map((entry) => [entry.lineNumber, entry]));
-  const retained = Array.from({ length: selected.lineCount }, (_, index) => {
+  const retained = transformed
+    ? transformed.entries.map((entry) => serializeJsonlEntry(entry, request.sourcePath))
+    : Array.from({ length: selected.lineCount }, (_, index) => {
     const lineNumber = index + 1;
     const entry = entriesByLine.get(lineNumber);
     if (!entry) return '';
     if (!request.rewriteEntry) return entry.raw;
-    const rewritten = request.rewriteEntry(entry.value, {
-      ...context,
-      ...(request.retainedMessageCounts
-        ? {
-            retainedMessageCount: request.retainedMessageCounts.get(lineNumber) ?? 0,
-          }
-        : {}),
-    });
+    const rewritten = projectedByLine.get(lineNumber);
     const serialized = Object.is(rewritten, entry.value) ? entry.raw : JSON.stringify(rewritten);
     if (serialized === undefined) {
       throw new Error(
@@ -85,8 +116,18 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
   });
   const content = retained.length > 0 ? `${retained.join('\n')}\n` : '';
   try {
-    await fs.writeFile(targetPath, content, { encoding: 'utf8', flag: 'wx' });
-    if (request.cutoffLine !== null) {
+    await fs.writeFile(targetPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    if (request.cutoffLine === null) {
+      const current = await snapshotJsonlSource(request.sourcePath).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(request.sourcePath);
+          throw error;
+        },
+      );
+      if (!current.content.equals(snapshot.content)) {
+        throw new JsonlSourcePrefixChangedError(request.sourcePath);
+      }
+    } else {
       const current = await snapshotJsonlSource(request.sourcePath).catch(
         (error: NodeJS.ErrnoException) => {
           if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(request.sourcePath);
@@ -102,7 +143,21 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     await fs.rm(targetPath, { force: true }).catch(() => undefined);
     throw error;
   }
-  return { agentSessionId: targetAgentSessionId, nativePath: targetPath };
+  return {
+    agentSessionId: targetAgentSessionId,
+    nativePath: targetPath,
+    ...(transformed?.expectedSemanticDigest !== undefined
+      ? { expectedSemanticDigest: transformed.expectedSemanticDigest }
+      : {}),
+  };
+}
+
+function serializeJsonlEntry(entry: unknown, sourcePath: string): string {
+  const serialized = JSON.stringify(entry);
+  if (serialized === undefined) {
+    throw new Error(`Fork transcript transformer returned a non-JSON value for ${sourcePath}`);
+  }
+  return serialized;
 }
 
 interface PhysicalPrefix {
@@ -175,7 +230,7 @@ async function readStableSource(sourcePath: string): Promise<JsonlSourceSnapshot
   const content = await fs.readFile(sourcePath);
   const after = await fs.stat(sourcePath);
   if (fileChanged(before, after)) {
-    throw new Error(`Source transcript changed while reading: ${sourcePath}`);
+    throw new JsonlSourcePrefixChangedError(sourcePath);
   }
   return { content };
 }

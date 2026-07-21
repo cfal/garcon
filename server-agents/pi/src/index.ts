@@ -112,7 +112,7 @@ export default class PiAgentIntegration implements AgentIntegration {
     };
     this.forking = {
       supportsAtMessage: false,
-      supportsWhileRunning: false,
+      supportsAtMessageWhileRunning: false,
       async fork(request) {
         request.admission.signal.throwIfAborted();
         if (request.point) {
@@ -135,6 +135,10 @@ export default class PiAgentIntegration implements AgentIntegration {
             modelEndpointId: null,
           }),
         };
+      },
+      // Pi exposes no safe API for deleting an uncommitted fork.
+      async discard(_session, signal) {
+        signal.throwIfAborted();
       },
     };
     this.singleQuery = {

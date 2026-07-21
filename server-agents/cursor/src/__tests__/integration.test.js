@@ -35,7 +35,7 @@ describe('CursorAgentIntegration', () => {
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: false,
-      supportsWhileRunning: false,
+      supportsAtMessageWhileRunning: false,
     });
     expect(integration.auth).toBeDefined();
     expect(integration.singleQuery).toBeDefined();

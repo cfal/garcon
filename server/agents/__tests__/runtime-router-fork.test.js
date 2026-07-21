@@ -43,7 +43,7 @@ function makeRouter(fork) {
         revision: computeAgentTranscriptRevision(messages),
       })),
     },
-    forking: { fork },
+    forking: { fork, discard: mock(async () => undefined) },
   };
   const router = new AgentRuntimeRouter({
     registry: { getChat: mock(() => entry) },
@@ -62,7 +62,7 @@ function makeRouter(fork) {
     getCarryOverRevision: () => 'carry-1',
     loadCarryOver: () => [],
   });
-  return { router, entry, messages };
+  return { router, entry, messages, integration };
 }
 
 describe('AgentRuntimeRouter forks', () => {
@@ -111,5 +111,39 @@ describe('AgentRuntimeRouter forks', () => {
       status: 409,
       retryable: true,
     });
+  });
+
+  it('maps an unavailable point to a structured validation error', async () => {
+    const fork = mock(async () => null);
+    const { router, entry } = makeRouter(fork);
+
+    await expect(router.forkAgentSession({
+      sourceSession: entry,
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      messageSequence: 3,
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_UNAVAILABLE',
+      status: 422,
+      retryable: false,
+    });
+    expect(fork).not.toHaveBeenCalled();
+  });
+
+  it('maps transcript-load failures before provider fork dispatch', async () => {
+    const fork = mock(async () => null);
+    const { router, entry, integration } = makeRouter(fork);
+    integration.transcript.load.mockRejectedValue(new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Source transcript is missing',
+      false,
+    ));
+
+    await expect(router.forkAgentSession({
+      sourceSession: entry,
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      messageSequence: 1,
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
   });
 });

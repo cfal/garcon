@@ -27,6 +27,7 @@ import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js'
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
+import type { CarryOverForkStage } from '../chats/chat-carryover-store.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
@@ -58,14 +59,18 @@ export interface CarryOverDep {
     ownerId: string;
     ownerModel: string;
     upToSequence?: number;
-  }): Promise<void>;
+  }): Promise<CarryOverForkStage>;
   promoteStaged(chatId: string, targetEpoch: string): Promise<void>;
   discardStaged(chatId: string, targetEpoch: string): Promise<void>;
 }
 
 export type PendingInputsDep = Pick<
   PendingUserInputServiceContract,
-  'clearChat' | 'hasInFlightForChat' | 'markFailed' | 'reconcileRetainedHistory'
+  | 'clearChat'
+  | 'hasInFlightForChat'
+  | 'markFailed'
+  | 'reconcileNativeHistory'
+  | 'reconcileRetainedHistory'
 >;
 
 export type AgentRegistryDep = Pick<
@@ -81,11 +86,12 @@ export type AgentRegistryDep = Pick<
   | 'runSingleQuery'
   | 'supportsFork'
   | 'supportsForkAtMessage'
-  | 'supportsForkWhileRunning'
+  | 'supportsForkAtMessageWhileRunning'
   | 'supportsUpdateProjectPath'
   | 'requiresNativePathForProjectPathUpdate'
   | 'isAgentSessionRunning'
   | 'forkAgentSession'
+  | 'discardForkedAgentSession'
   | 'compactSession'
   | 'resolveNativeSession'
   | 'prepareProjectPathUpdate'
@@ -107,6 +113,7 @@ export type ForkChatFileCopyDep = (args: {
     targetChatId: string;
     messageSequence?: number;
   }) => Promise<StartedAgentSession | null>;
+  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
 }) => Promise<ForkChatFileCopyResult>;
 
 export interface ChatCommandServiceDeps {

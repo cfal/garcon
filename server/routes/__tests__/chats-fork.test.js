@@ -21,6 +21,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { DomainError } from '../../lib/domain-error.js';
 
 const SOURCE_CHAT_ID = '1783725900000300';
 const TARGET_CHAT_ID = '1783725900000301';
@@ -49,7 +50,12 @@ const settings = {
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
-const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
+const queue = {
+  deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+  reserveTranscriptSnapshot: mock((chatId) => ({ chatId, reservationId: 'snapshot-reservation' })),
+  releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
+  hasChatExecutionOwner: mock(() => false),
+};
 const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
@@ -63,9 +69,10 @@ const agents = {
   startSession: mock(() => undefined),
   supportsFork: mock(() => true),
   supportsForkAtMessage: mock(() => true),
-  supportsForkWhileRunning: mock(() => false),
+  supportsForkAtMessageWhileRunning: mock(() => false),
   isAgentSessionRunning: mock(() => false),
   forkAgentSession: mock(() => Promise.resolve({})),
+  discardForkedAgentSession: mock(() => Promise.resolve(undefined)),
 };
 
 const commandLedger = createRouteCommandLedger('chats-fork');
@@ -275,6 +282,34 @@ describe('POST /api/v1/chats/fork', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('Malformed JSON');
+  });
+
+  it('returns a structured 422 when the selected transcript is unavailable', async () => {
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 2,
+    });
+    registry.getChat.mockImplementation((id) => {
+      if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
+      return null;
+    });
+    forkChatFileCopy.mockRejectedValue(new DomainError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Fork message is outside the source transcript',
+      422,
+    ));
+
+    const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
+    const response = await handler(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      success: false,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: false,
+    });
   });
 
   it('returns 500 for unexpected errors', async () => {

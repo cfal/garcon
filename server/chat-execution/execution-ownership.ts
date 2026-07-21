@@ -12,6 +12,7 @@ import type {
   DirectTurnReservation,
   DrainSuppressionReason,
   SessionStopInFlight,
+  TranscriptSnapshotReservation,
 } from './types.ts';
 import { executionTurnIdentity } from './types.ts';
 
@@ -20,6 +21,7 @@ import { executionTurnIdentity } from './types.ts';
 interface ChatExecutionState {
   draining: boolean;
   directReservationId: string | null;
+  transcriptSnapshotReservationId: string | null;
   directAdmission: AbortController | null;
   drainAdmission: AbortController | null;
   activeDrainEntryId: string | null;
@@ -35,6 +37,7 @@ function emptyChatExecutionState(): ChatExecutionState {
   return {
     draining: false,
     directReservationId: null,
+    transcriptSnapshotReservationId: null,
     directAdmission: null,
     drainAdmission: null,
     activeDrainEntryId: null,
@@ -50,6 +53,7 @@ function emptyChatExecutionState(): ChatExecutionState {
 function isIdle(state: ChatExecutionState): boolean {
   return !state.draining
     && state.directReservationId === null
+    && state.transcriptSnapshotReservationId === null
     && state.directAdmission === null
     && state.drainAdmission === null
     && state.activeDrainEntryId === null
@@ -89,6 +93,9 @@ export class ExecutionOwnership {
     }
     const owners = new Set<string>();
     for (const [chatId, state] of this.#chats) if (state.directReservationId !== null) owners.add(chatId);
+    for (const [chatId, state] of this.#chats) {
+      if (state.transcriptSnapshotReservationId !== null) owners.add(chatId);
+    }
     for (const [chatId, state] of this.#chats) if (state.draining) owners.add(chatId);
     for (const [chatId, state] of this.#chats) if (state.attempt !== null) owners.add(chatId);
     return [...owners];
@@ -104,7 +111,12 @@ export class ExecutionOwnership {
 
   hasAnyOwner(): boolean {
     for (const state of this.#chats.values()) {
-      if (state.draining || state.directReservationId !== null || state.attempt !== null) return true;
+      if (
+        state.draining
+        || state.directReservationId !== null
+        || state.transcriptSnapshotReservationId !== null
+        || state.attempt !== null
+      ) return true;
     }
     return false;
   }
@@ -129,17 +141,51 @@ export class ExecutionOwnership {
   hasOwner(chatId: string): boolean {
     const state = this.#chats.get(chatId);
     return state !== undefined
-      && (state.draining || state.directReservationId !== null || state.attempt !== null);
+      && (
+        state.draining
+        || state.directReservationId !== null
+        || state.transcriptSnapshotReservationId !== null
+        || state.attempt !== null
+      );
   }
 
   isReserved(chatId: string): boolean {
     const state = this.#chats.get(chatId);
-    return state !== undefined && (state.draining || state.directReservationId !== null);
+    return state !== undefined && (
+      state.draining
+      || state.directReservationId !== null
+      || state.transcriptSnapshotReservationId !== null
+    );
+  }
+
+  reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation {
+    if (this.hasOwner(chatId)) throw new Error('Another chat operation already owns execution');
+    const reservation = Object.freeze({ chatId, reservationId: crypto.randomUUID() });
+    this.#state(chatId).transcriptSnapshotReservationId = reservation.reservationId;
+    return reservation;
+  }
+
+  hasTranscriptSnapshot(chatId: string): boolean {
+    const reservationId = this.#chats.get(chatId)?.transcriptSnapshotReservationId;
+    return reservationId !== null && reservationId !== undefined;
+  }
+
+  releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): void {
+    const state = this.#chats.get(reservation.chatId);
+    if (!state) return;
+    if (state.transcriptSnapshotReservationId === null) return;
+    if (state.transcriptSnapshotReservationId !== reservation.reservationId) {
+      throw new Error('Transcript snapshot reservation is no longer active');
+    }
+    state.transcriptSnapshotReservationId = null;
+    this.#gc(reservation.chatId);
   }
 
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation {
     const state = this.#state(chatId);
-    if (state.draining) throw new Error('Cannot reserve a direct turn while draining');
+    if (state.draining || state.transcriptSnapshotReservationId !== null) {
+      throw new Error('Cannot reserve a direct turn while another operation owns execution');
+    }
     const admissionController = new AbortController();
     const reservation = Object.freeze({
       chatId,
@@ -178,8 +224,8 @@ export class ExecutionOwnership {
 
   beginDrain(chatId: string): void {
     const state = this.#state(chatId);
-    if (state.directReservationId !== null) {
-      throw new Error('Cannot drain a chat holding a direct reservation');
+    if (state.directReservationId !== null || state.transcriptSnapshotReservationId !== null) {
+      throw new Error('Cannot drain a chat holding an execution reservation');
     }
     state.draining = true;
   }
@@ -309,6 +355,7 @@ export class ExecutionOwnership {
       state.suppressions.clear();
       state.drainRequested = false;
       state.directReservationId = null;
+      state.transcriptSnapshotReservationId = null;
       state.directAdmission?.abort(reason);
       state.directAdmission = null;
       state.drainAdmission?.abort(reason);

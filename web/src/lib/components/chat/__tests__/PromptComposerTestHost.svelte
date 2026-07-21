@@ -198,7 +198,7 @@
 			description: '',
 			supportsFork: agentId !== 'amp',
 			supportsForkAtMessage: agentId !== 'amp',
-			supportsForkWhileRunning: agentId !== 'amp',
+			supportsForkAtMessageWhileRunning: agentId !== 'amp',
 			supportsUpdateProjectPath: true,
 			supportsImages: true,
 			acceptsApiProviderEndpoints: true,
@@ -227,7 +227,7 @@
 		supportsImages: (agentId: string, model: string) =>
 			modelForSelection(agentId, model)?.supportsImages ?? true,
 		supportsFork: (agentId: string) => agentId !== 'amp',
-		supportsForkWhileRunning: () => true,
+		supportsForkAtMessageWhileRunning: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,
 			apiProviderId: null,

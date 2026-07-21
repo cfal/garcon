@@ -77,6 +77,51 @@ afterEach(async () => {
   await fs.rm(workspaceDir, { recursive: true, force: true });
 });
 
+describe('transcript snapshot ownership', () => {
+  it('excludes direct execution until the snapshot is released', async () => {
+    const snapshot = queue.reserveTranscriptSnapshot('snapshot-chat');
+
+    expect(queue.hasChatExecutionOwner('snapshot-chat')).toBe(true);
+    expect(queue.isChatExecutionReserved('snapshot-chat')).toBe(true);
+    expect(() => queue.reserveDirectTurn('snapshot-chat')).toThrow('already owns execution');
+
+    await queue.releaseTranscriptSnapshot(snapshot);
+    const direct = queue.reserveDirectTurn('snapshot-chat');
+    await queue.releaseDirectTurn(direct);
+    expect(queue.hasChatExecutionOwner('snapshot-chat')).toBe(false);
+  });
+
+  it('defers a requested queue drain and resumes it after release', async () => {
+    const agents = createStateOnlyAgents();
+    agents.runAgentTurn.mockResolvedValue(undefined);
+    queue = new ChatExecutionCoordinator(
+      workspaceDir,
+      agents,
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+      () => true,
+    );
+    await queue.createChatQueueEntry('snapshot-chat', 'queued input');
+    const snapshot = queue.reserveTranscriptSnapshot('snapshot-chat');
+
+    await queue.triggerDrain('snapshot-chat');
+    expect(agents.runAgentTurn).not.toHaveBeenCalled();
+
+    await queue.releaseTranscriptSnapshot(snapshot);
+    expect(agents.runAgentTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears snapshot ownership during chat deletion and shutdown', async () => {
+    const snapshot = queue.reserveTranscriptSnapshot('snapshot-chat');
+    expect(queue.beginShutdown()).toContain('snapshot-chat');
+
+    await queue.deleteChatQueueFile('snapshot-chat');
+    await queue.waitForExecutionOwners();
+    await expect(queue.releaseTranscriptSnapshot(snapshot)).resolves.toBeUndefined();
+  });
+});
+
 describe('queue invariants', () => {
   it('does not create a pause on an empty queue', async () => {
     const result = await queue.pauseChatQueue('123');

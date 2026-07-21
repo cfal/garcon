@@ -84,7 +84,7 @@
 	const canUseForkAtMessage = $derived(
 		canUseForkAtMessageAction({
 			supportsForkAtMessage,
-			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentState.agentId),
+			supportsForkAtMessageWhileRunning: modelCatalog.supportsForkAtMessageWhileRunning(agentState.agentId),
 			isProcessing,
 		}),
 	);

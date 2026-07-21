@@ -351,7 +351,6 @@ function createDeps(chat = createRunningChat()) {
 				'ultra' as const,
 			]),
 			supportsFork: vi.fn(() => true),
-			supportsForkWhileRunning: vi.fn(() => true),
 		},
 		readReceiptOutbox: {
 			enqueue: vi.fn(),
@@ -970,11 +969,10 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
-	it('rejects /fork when processing and agent does not support fork-while-running', async () => {
+	it('rejects /fork while processing', async () => {
 		const chat = createRunningChat({ id: '123', isProcessing: true });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = '/fork continue from here';
-		deps.modelCatalog.supportsForkWhileRunning = vi.fn(() => false);
 		const controller = new ConversationSessionController(deps);
 
 		await controller.submitForChat('123');
@@ -986,28 +984,6 @@ describe('ConversationSessionController', () => {
 			noticeType: 'error',
 			content: 'Cannot fork while chat is processing',
 		});
-	});
-
-	it('allows /fork when processing and agent supports fork-while-running', async () => {
-		const chat = createRunningChat({ id: '123', isProcessing: true });
-		const { deps } = createDeps(chat);
-		deps.composerState.inputText = '/fork continue from here';
-		deps.modelCatalog.supportsForkWhileRunning = vi.fn(() => true);
-		deps.ws.sendMessage = vi.fn(() => true);
-		mockForkRunChat.mockResolvedValue({
-			success: true,
-			commandType: 'fork-run',
-			clientRequestId: 'req-1',
-			chatId: '456',
-			status: 'accepted',
-			acceptedAt: '2026-03-27T08:00:00.000Z',
-			chat: createServerEntry('456'),
-		});
-		const controller = new ConversationSessionController(deps);
-
-		await controller.submitForChat('123');
-
-		expect(mockForkRunChat).toHaveBeenCalled();
 	});
 
 	it('submits in-chat fork actions with the clicked message sequence', async () => {

@@ -50,7 +50,7 @@ export interface AgentMetadata {
 	description?: string;
 	supportsFork: boolean;
 	supportsForkAtMessage: boolean;
-	supportsForkWhileRunning: boolean;
+	supportsForkAtMessageWhileRunning: boolean;
 	supportsUpdateProjectPath: boolean;
 	supportsImages: boolean;
 	acceptsApiProviderEndpoints: boolean;
@@ -286,7 +286,7 @@ function normalizeAgentMetadataMap(agentMetadata: AgentMetadataMap): AgentMetada
 						...metadata,
 						supportsFork: metadata.supportsFork === true,
 						supportsForkAtMessage: metadata.supportsForkAtMessage === true,
-						supportsForkWhileRunning: metadata.supportsForkWhileRunning === true,
+						supportsForkAtMessageWhileRunning: metadata.supportsForkAtMessageWhileRunning === true,
 						supportsUpdateProjectPath: metadata.supportsUpdateProjectPath === true,
 						label: metadata.label ?? id,
 						supportedPermissionModes: normalizePermissionModes(metadata.supportedPermissionModes),
@@ -326,7 +326,7 @@ function parseCatalogResponse(data: unknown): {
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsFork: Boolean(entry.supportsFork),
 			supportsForkAtMessage: Boolean(entry.supportsForkAtMessage),
-			supportsForkWhileRunning: Boolean(entry.supportsForkWhileRunning),
+			supportsForkAtMessageWhileRunning: Boolean(entry.supportsForkAtMessageWhileRunning),
 			supportsUpdateProjectPath: Boolean(entry.supportsUpdateProjectPath),
 			supportsImages: Boolean(entry.supportsImages),
 			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
@@ -520,9 +520,9 @@ export class ModelCatalogStore {
 		return this.agentMetadata[agentId]?.supportsForkAtMessage ?? false;
 	}
 
-	supportsForkWhileRunning(agentId: SessionAgentId): boolean {
+	supportsForkAtMessageWhileRunning(agentId: SessionAgentId): boolean {
 		if (!isAgentId(agentId)) return false;
-		return this.agentMetadata[agentId]?.supportsForkWhileRunning ?? false;
+		return this.agentMetadata[agentId]?.supportsForkAtMessageWhileRunning ?? false;
 	}
 
 	supportsUpdateProjectPath(agentId: SessionAgentId): boolean {

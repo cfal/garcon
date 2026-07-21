@@ -56,8 +56,9 @@ export interface AgentCommands {
 
 export interface AgentForking {
   readonly supportsAtMessage: boolean;
-  readonly supportsWhileRunning: boolean;
+  readonly supportsAtMessageWhileRunning: boolean;
   fork(request: AgentForkRequest): Promise<AgentStartedSession>;
+  discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
 }
 
 export interface AgentForkRequest extends AgentExecutionContext {
