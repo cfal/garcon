@@ -13,6 +13,7 @@ describe('Codex fork at message', () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
     const sourceAgentSessionId = randomUUID();
     let sourceNativePath = '';
+    let forkParamsLogPath = '';
     const serverEnvironment = {
       GARCON_CODEX_CLI: fileURLToPath(new URL(
         '../../support/fake-codex-app-server.ts',
@@ -21,6 +22,7 @@ describe('Codex fork at message', () => {
       PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
       INTEGRATION_CODEX_DISCOVER_JSONL: '1',
       INTEGRATION_CODEX_FORK_JSONL: '1',
+      INTEGRATION_CODEX_FORK_PARAMS_LOG: '',
     };
 
     await withIntegrationFixture('codex-fork-at-message', async (fixture) => {
@@ -63,6 +65,16 @@ describe('Codex fork at message', () => {
       };
       const targetNative = registry.sessions[targetChatId]!.nativeSession.value;
       const targetNativePath = targetNative.path;
+      const forkParams = (await readFile(forkParamsLogPath, 'utf8'))
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.parse(line)) as Array<{ threadId?: string; path?: string }>;
+      expect(forkParams).toHaveLength(1);
+      expect(forkParams[0]).toMatchObject({
+        threadId: targetNative.agentSessionId,
+        path: targetNativePath,
+      });
+      expect(forkParams[0]?.path).not.toBe(sourceNativePath);
       const targetLines = (await readFile(targetNativePath, 'utf8')).trimEnd().split('\n');
       expect(JSON.parse(targetLines[1]!)).toEqual({ type: 'garcon_fork_filtered' });
       expect(targetLines.some((line) => line.includes('"name":"exec"'))).toBe(true);
@@ -101,6 +113,8 @@ describe('Codex fork at message', () => {
     }, {
       serverEnvironment,
       async prepareWorkspace(directories) {
+        forkParamsLogPath = join(directories.root, 'codex-fork-params.log');
+        serverEnvironment.INTEGRATION_CODEX_FORK_PARAMS_LOG = forkParamsLogPath;
         sourceNativePath = join(
           directories.home,
           '.codex',
