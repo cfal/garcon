@@ -412,6 +412,21 @@ describe('WorkspaceRoot', () => {
 		).toBe('false');
 	});
 
+	it('aligns desktop taskbars toward the right sidebar boundary', () => {
+		installContext(withAdditionalSurfaces());
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const mainToolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+		const sidebarToolbar = container.querySelector<HTMLElement>('[data-floating-sidebar-toolbar]');
+
+		expect(mainToolbar?.classList.contains('justify-end')).toBe(true);
+		expect(mainToolbar?.classList.contains('justify-center')).toBe(false);
+		expect(sidebarToolbar?.classList.contains('justify-start')).toBe(true);
+		expect(sidebarToolbar?.classList.contains('justify-center')).toBe(false);
+	});
+
 	it('binds focus, move, and close for every portable kind without replacing Chat', async () => {
 		const { workspace } = installContext();
 		const { container } = render(WorkspaceRoot, {
