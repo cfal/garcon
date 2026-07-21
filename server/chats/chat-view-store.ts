@@ -18,6 +18,7 @@ export interface ChatViewStoreOptions {
   cacheLimit?: number;
   messageLimit?: number;
   staleNonActiveMs?: number;
+  recentViewRetentionCount?: number;
   now?: () => number;
 }
 
@@ -63,12 +64,38 @@ interface ChatView {
   evictedLiveDigest: OrderedTranscriptDigest;
   streamFence: number;
   lastAccessAt: number;
+  lastAccessOrder: number;
 }
 
 const REPLAY_LIMIT = 2048;
 const CACHE_LIMIT = 100;
 const MESSAGE_LIMIT = 20_000;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
+const RECENT_VIEW_RETENTION_COUNT = 10;
+
+type PruneEvictionReason = 'stale' | 'view-capacity' | 'message-capacity';
+type GenerationReason =
+  | 'native-history-load'
+  | 'native-history-page'
+  | 'native-history-reconciled'
+  | 'native-history-mismatch'
+  | 'native-replacement'
+  | 'manual-reload'
+  | 'process-error'
+  | 'initial-live-append'
+  | 'initial-provisional-append';
+
+export type ChatViewReplacementReason = Extract<
+  GenerationReason,
+  'native-replacement' | 'manual-reload' | 'process-error'
+>;
+
+interface GenerationTransition {
+  reason: GenerationReason;
+  previousGenerationId?: string;
+  generationId?: string;
+  nativeRevision?: string;
+}
 
 export class ChatViewStore {
   #views = new Map<string, ChatView>();
@@ -79,6 +106,8 @@ export class ChatViewStore {
   #cacheLimit: number;
   #messageLimit: number;
   #staleNonActiveMs: number;
+  #recentViewRetentionCount: number;
+  #lastAccessOrder = 0;
   #now: () => number;
   #isChatActive: (chatId: string) => boolean;
 
@@ -91,6 +120,10 @@ export class ChatViewStore {
     this.#cacheLimit = options.cacheLimit ?? CACHE_LIMIT;
     this.#messageLimit = Math.max(1, Math.floor(options.messageLimit ?? MESSAGE_LIMIT));
     this.#staleNonActiveMs = options.staleNonActiveMs ?? STALE_NON_ACTIVE_MS;
+    this.#recentViewRetentionCount = Math.max(
+      0,
+      Math.floor(options.recentViewRetentionCount ?? RECENT_VIEW_RETENTION_COUNT),
+    );
     this.#now = options.now ?? (() => Date.now());
   }
 
@@ -109,21 +142,21 @@ export class ChatViewStore {
   getCursor(chatId: string): { generationId: string; lastSeq: number } | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
-    view.lastAccessAt = this.#now();
+    this.#touch(view);
     return { generationId: view.generationId, lastSeq: view.lastSeq };
   }
 
   getLoadedMessages(chatId: string): ChatMessage[] | null {
     const view = this.#views.get(chatId);
     if (!view?.complete) return null;
-    view.lastAccessAt = this.#now();
+    this.#touch(view);
     return view.messages.map((entry) => entry.message);
   }
 
   getRetainedHistoryMessages(chatId: string): ChatMessage[] | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
-    view.lastAccessAt = this.#now();
+    this.#touch(view);
     return view.messages
       .filter((entry) => entry.seq <= view.historyLastSeq)
       .map((entry) => entry.message);
@@ -188,7 +221,7 @@ export class ChatViewStore {
 
       const missingHistory = this.#missingHistoryRequest(view, limit, beforeSeq);
       if (missingHistory) {
-        view.lastAccessAt = this.#now();
+        this.#touch(view);
         if (missingHistory.kind === 'full') {
           const fullMessages = await loader.loadAll();
           const reconciled = this.#reconcileFullView(chatId, fullMessages);
@@ -229,7 +262,7 @@ export class ChatViewStore {
         }
       }
 
-      view.lastAccessAt = this.#now();
+      this.#touch(view);
       return this.#readPageFromView(view, limit, beforeSeq);
     });
   }
@@ -240,13 +273,17 @@ export class ChatViewStore {
     options: {
       processErrorNotice?: string;
       assertReplacementAllowed?: () => void;
+      replacementReason?: ChatViewReplacementReason;
     } = {},
   ): Promise<ChatViewPage> {
     return this.#withChat(chatId, async () => {
       const nativeMessages = await loadNativeMessages();
       options.assertReplacementAllowed?.();
       this.invalidateFence(chatId);
-      const view = this.#createGeneration(chatId, nativeMessages);
+      const view = this.#createGeneration(chatId, nativeMessages, {
+        reason: options.replacementReason ?? 'native-replacement',
+        previousGenerationId: this.#views.get(chatId)?.generationId,
+      });
       if (options.processErrorNotice) {
         this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
       }
@@ -278,7 +315,7 @@ export class ChatViewStore {
     return this.#withChat(chatId, async () => {
       let view = this.#views.get(chatId);
       if (!view) {
-        view = this.#createGeneration(chatId, []);
+        view = this.#createGeneration(chatId, [], { reason: 'initial-live-append' });
         this.#views.set(chatId, view);
       }
       const appended = this.#appendLiveToView(view, messages);
@@ -293,7 +330,7 @@ export class ChatViewStore {
     return this.#withChat(chatId, async () => {
       let view = this.#views.get(chatId);
       if (!view) {
-        view = this.#createGeneration(chatId, []);
+        view = this.#createGeneration(chatId, [], { reason: 'initial-provisional-append' });
         view.complete = false;
         view.loadedFromFullHistory = false;
         view.nativeRevision = undefined;
@@ -313,7 +350,7 @@ export class ChatViewStore {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null {
     const view = this.#views.get(chatId);
     if (!view) return null;
-    view.lastAccessAt = this.#now();
+    this.#touch(view);
     if (
       view.generationId !== generationId ||
       afterSeq > view.lastSeq ||
@@ -351,11 +388,23 @@ export class ChatViewStore {
 
   prune(): void {
     const now = this.#now();
-    const views = [...this.#views.values()].sort((a, b) => a.lastAccessAt - b.lastAccessAt);
+    const views = [...this.#views.values()].sort(
+      (left, right) => left.lastAccessOrder - right.lastAccessOrder,
+    );
+    const retainedRecentViews = this.#recentViewRetentionCount === 0
+      ? []
+      : views.slice(-this.#recentViewRetentionCount);
+    const retainedRecentChatIds = new Set(
+      retainedRecentViews.map((view) => view.chatId),
+    );
     for (const view of views) {
-      if (this.#isChatActive(view.chatId) || this.#inFlightChats.has(view.chatId)) continue;
+      if (
+        retainedRecentChatIds.has(view.chatId)
+        || this.#isChatActive(view.chatId)
+        || this.#inFlightChats.has(view.chatId)
+      ) continue;
       const isStale = now - view.lastAccessAt > this.#staleNonActiveMs;
-      if (isStale) this.#views.delete(view.chatId);
+      if (isStale) this.#evictForPrune(view, 'stale', now);
     }
 
     let cachedMessages = this.#cachedMessageCount();
@@ -368,11 +417,16 @@ export class ChatViewStore {
       }
       if (
         !this.#views.has(view.chatId)
+        || retainedRecentChatIds.has(view.chatId)
         || this.#isChatActive(view.chatId)
         || this.#inFlightChats.has(view.chatId)
       ) continue;
-      this.#views.delete(view.chatId);
-      cachedMessages -= view.messages.length;
+      const reason = this.#views.size > this.#cacheLimit
+        ? 'view-capacity'
+        : 'message-capacity';
+      if (this.#evictForPrune(view, reason, now)) {
+        cachedMessages -= view.messages.length;
+      }
     }
 
     // Active views keep their generation but not an exemption from the global
@@ -387,6 +441,9 @@ export class ChatViewStore {
       );
       this.#trimOldestMessages(view, trimCount);
       cachedMessages -= trimCount;
+      if (trimCount > 0) {
+        logger.debug(`view trimmed chat=${view.chatId} generationId=${view.generationId} reason=message-capacity removed=${trimCount} retained=${view.messages.length}`);
+      }
     }
   }
 
@@ -394,7 +451,7 @@ export class ChatViewStore {
     return this.#locks.runExclusive(`chat:${chatId}`, async () => {
       this.#inFlightChats.add(chatId);
       const view = this.#views.get(chatId);
-      if (view) view.lastAccessAt = this.#now();
+      if (view) this.#touch(view);
       try {
         return await fn();
       } finally {
@@ -410,7 +467,7 @@ export class ChatViewStore {
   ): Promise<ChatView> {
     const view = this.#views.get(chatId);
     if (view?.loadedFromFullHistory) {
-      view.lastAccessAt = this.#now();
+      this.#touch(view);
       return view;
     }
     return (await this.#loadFullView(chatId, loadNativeMessages)).view;
@@ -422,7 +479,7 @@ export class ChatViewStore {
   ): Promise<{ view: ChatView; messages: ChatMessage[] }> {
     let view = this.#views.get(chatId);
     if (view?.complete) {
-      view.lastAccessAt = this.#now();
+      this.#touch(view);
       return { view, messages: view.messages.map((entry) => entry.message) };
     }
     const nativeMessages = await loadNativeMessages();
@@ -489,12 +546,16 @@ export class ChatViewStore {
       && retainedNativeOverlapMatches,
     );
 
-    const view = this.#createGeneration(
-      chatId,
-      reconciledNativeMessages,
-      preservesGeneration ? previous?.generationId : undefined,
-      revisions.full,
-    );
+    const view = this.#createGeneration(chatId, reconciledNativeMessages, {
+      reason: !previous
+        ? 'native-history-load'
+        : preservesGeneration
+          ? 'native-history-reconciled'
+          : 'native-history-mismatch',
+      previousGenerationId: previous?.generationId,
+      generationId: preservesGeneration ? previous?.generationId : undefined,
+      nativeRevision: revisions.full,
+    });
     const unpersistedLiveMessages = previous
       ? retainedLiveEntries
         .filter((entry) => entry.seq > reconciledNativeMessages.length)
@@ -512,14 +573,13 @@ export class ChatViewStore {
   #createGeneration(
     chatId: string,
     messages: ChatMessage[],
-    generationId: string = crypto.randomUUID(),
-    nativeRevision = transcriptRevision(messages),
+    transition: GenerationTransition,
   ): ChatView {
     const now = this.#now();
     const isoNow = new Date(now).toISOString();
     const view: ChatView = {
       chatId,
-      generationId,
+      generationId: transition.generationId ?? crypto.randomUUID(),
       createdAt: isoNow,
       historyReadAt: isoNow,
       messages: [],
@@ -528,13 +588,14 @@ export class ChatViewStore {
       complete: true,
       loadedFromFullHistory: true,
       retainedStartSeq: 1,
-      nativeRevision,
+      nativeRevision: transition.nativeRevision ?? transcriptRevision(messages),
       evictedLiveDigest: new OrderedTranscriptDigest(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
+      lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#appendToView(view, messages);
-    logger.info(`generation created chat=${chatId} generationId=${view.generationId} messages=${messages.length} lastSeq=${view.lastSeq}`);
+    this.#logGenerationTransition(view, transition);
     return view;
   }
 
@@ -556,9 +617,10 @@ export class ChatViewStore {
       evictedLiveDigest: new OrderedTranscriptDigest(),
       streamFence: this.captureFence(chatId),
       lastAccessAt: now,
+      lastAccessOrder: ++this.#lastAccessOrder,
     };
     this.#mergeHistoryPage(view, page);
-    logger.info(`generation created chat=${chatId} generationId=${view.generationId} messages=${page.messages.length} lastSeq=${view.lastSeq}`);
+    this.#logGenerationTransition(view, { reason: 'native-history-page' });
     return view;
   }
 
@@ -573,7 +635,7 @@ export class ChatViewStore {
     });
     view.messages.push(...appended);
     this.#enforceViewMessageLimit(view);
-    view.lastAccessAt = this.#now();
+    this.#touch(view);
     return appended;
   }
 
@@ -634,7 +696,7 @@ export class ChatViewStore {
     view.historyLastSeq = page.total;
     view.lastSeq = Math.max(view.lastSeq, page.total);
     this.#enforceViewMessageLimit(view);
-    view.lastAccessAt = this.#now();
+    this.#touch(view);
   }
 
   #messagesFromHistoryPage(page: ChatHistoryPage): ChatViewMessage[] {
@@ -769,7 +831,7 @@ export class ChatViewStore {
   }
 
   #readPageFromView(view: ChatView, limit: number, beforeSeq?: number): ChatViewPage {
-    view.lastAccessAt = this.#now();
+    this.#touch(view);
     return this.#readPageFromMessages(view, view.messages, limit, beforeSeq);
   }
 
@@ -798,6 +860,30 @@ export class ChatViewStore {
     let count = 0;
     for (const view of this.#views.values()) count += view.messages.length;
     return count;
+  }
+
+  #touch(view: ChatView): void {
+    view.lastAccessAt = this.#now();
+    view.lastAccessOrder = ++this.#lastAccessOrder;
+  }
+
+  #evictForPrune(view: ChatView, reason: PruneEvictionReason, now: number): boolean {
+    if (!this.#views.delete(view.chatId)) return false;
+    const ageMs = Math.max(0, now - view.lastAccessAt);
+    logger.info(`view evicted chat=${view.chatId} generationId=${view.generationId} reason=${reason} ageMs=${ageMs} messages=${view.messages.length}`);
+    return true;
+  }
+
+  #logGenerationTransition(view: ChatView, transition: GenerationTransition): void {
+    const action = transition.previousGenerationId === undefined
+      ? 'created'
+      : transition.previousGenerationId === view.generationId
+        ? 'preserved'
+        : 'replaced';
+    const previousGeneration = transition.previousGenerationId === undefined
+      ? ''
+      : ` previousGenerationId=${transition.previousGenerationId}`;
+    logger.info(`generation ${action} chat=${view.chatId} generationId=${view.generationId} reason=${transition.reason}${previousGeneration} messages=${view.messages.length} lastSeq=${view.lastSeq}`);
   }
 }
 

@@ -378,7 +378,11 @@ describe('ChatViewStore', () => {
         return { messages: history.slice(start, end), total: 4, hasMore: start > 0, offset, limit };
       },
     };
-    const store = new ChatViewStore(() => false, { staleNonActiveMs: 10, now: () => now });
+    const store = new ChatViewStore(() => false, {
+      staleNonActiveMs: 10,
+      recentViewRetentionCount: 0,
+      now: () => now,
+    });
     const recent = await store.getOrCreatePage('chat-1', loader, 1);
 
     now = 11;
@@ -397,7 +401,7 @@ describe('ChatViewStore', () => {
     let queueDraining = true;
     const store = new ChatViewStore(
       (chatId) => chatId === 'chat-1' && queueDraining,
-      { staleNonActiveMs: 10, now: () => now },
+      { staleNonActiveMs: 10, recentViewRetentionCount: 0, now: () => now },
     );
     const created = await store.appendAfterEnsuringGeneration(
       'chat-1',
@@ -457,6 +461,29 @@ describe('ChatViewStore', () => {
     expect(secondRetained.generationId).toBe(second.generationId);
     expect(firstRetained.messages.length + secondRetained.messages.length).toBe(3);
     expect(store.readReplay('chat-1', first.generationId, 0)?.mode).toBe('snapshot-required');
+  });
+
+  it('trims recently retained views instead of evicting their generations', async () => {
+    const store = new ChatViewStore(() => false, {
+      messageLimit: 3,
+      recentViewRetentionCount: 2,
+    });
+    const first = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => [],
+      [assistant('1'), assistant('2')],
+    );
+    const second = await store.appendAfterEnsuringGeneration(
+      'chat-2',
+      async () => [],
+      [assistant('3'), assistant('4')],
+    );
+
+    const firstRetained = store.readPage('chat-1', 10);
+    const secondRetained = store.readPage('chat-2', 10);
+    expect(firstRetained.generationId).toBe(first.generationId);
+    expect(secondRetained.generationId).toBe(second.generationId);
+    expect(firstRetained.messages.length + secondRetained.messages.length).toBe(3);
   });
 
   it('returns a wider in-flight page without growing the retained suffix past its cap', async () => {
@@ -539,6 +566,43 @@ describe('ChatViewStore', () => {
     const older = await store.getOrCreatePage('chat-1', loader, 2, recent.pageOldestSeq);
 
     expect(older.generationId).not.toBe(recent.generationId);
+  });
+
+  it('logs explicit reasons for preserved and replaced native generations', async () => {
+    const originalInfo = console.info;
+    const info = mock(() => undefined);
+    console.info = info;
+    try {
+      const initialHistory = [assistant('1'), assistant('2'), assistant('3')];
+      const historyRef = { current: initialHistory };
+      const store = new ChatViewStore(() => false);
+      const initial = await store.getOrCreatePage('chat-1', pagedLoader(historyRef), 1);
+
+      await store.getOrCreateMessages('chat-1', async () => initialHistory);
+      const preserved = store.getCursor('chat-1').generationId;
+      await store.reconcileNativeSnapshot('chat-1', [
+        assistant('replacement'),
+        ...initialHistory.slice(1),
+      ]);
+      const replaced = store.getCursor('chat-1').generationId;
+
+      expect(preserved).toBe(initial.generationId);
+      expect(replaced).not.toBe(preserved);
+      const messages = info.mock.calls.map((call) => call[1]);
+      expect(messages.some((message) => (
+        message.includes('generation preserved')
+        && message.includes(`generationId=${preserved}`)
+        && message.includes('reason=native-history-reconciled')
+      ))).toBe(true);
+      expect(messages.some((message) => (
+        message.includes('generation replaced')
+        && message.includes(`generationId=${replaced}`)
+        && message.includes('reason=native-history-mismatch')
+        && message.includes(`previousGenerationId=${preserved}`)
+      ))).toBe(true);
+    } finally {
+      console.info = originalInfo;
+    }
   });
 
   it('changes generation when unretained compaction metadata changes', async () => {
@@ -819,6 +883,7 @@ describe('ChatViewStore', () => {
       cacheLimit: 100,
       messageLimit: 2,
       staleNonActiveMs: 10,
+      recentViewRetentionCount: 0,
       now: () => now,
     });
     const loads = new Map();
@@ -836,5 +901,60 @@ describe('ChatViewStore', () => {
     await store.getOrCreatePage('chat-3', loaderFor('chat-3'), 1);
     await store.getOrCreatePage('chat-2', loaderFor('chat-2'), 1);
     expect(loads.get('chat-2')).toBe(2);
+  });
+
+  it('retains the ten most recently accessed views after they become stale', async () => {
+    let now = 0;
+    const store = new ChatViewStore(() => false, {
+      staleNonActiveMs: 10,
+      now: () => now,
+    });
+
+    for (let index = 1; index <= 11; index += 1) {
+      await store.getOrCreatePage(
+        `chat-${index}`,
+        fullLoader(async () => [assistant(String(index))]),
+        1,
+      );
+    }
+    const firstGenerationId = store.getCursor('chat-1').generationId;
+
+    now = 11;
+    store.prune();
+
+    expect(store.getCursor('chat-2')).toBeNull();
+    expect(store.getCursor('chat-1')?.generationId).toBe(firstGenerationId);
+    for (let index = 3; index <= 11; index += 1) {
+      expect(store.getCursor(`chat-${index}`)).not.toBeNull();
+    }
+  });
+
+  it('logs stale prune evictions with the generation and reason', async () => {
+    const originalInfo = console.info;
+    const info = mock(() => undefined);
+    console.info = info;
+    try {
+      let now = 0;
+      const store = new ChatViewStore(() => false, {
+        staleNonActiveMs: 10,
+        recentViewRetentionCount: 0,
+        now: () => now,
+      });
+      const page = await store.getOrCreatePage(
+        'chat-1',
+        fullLoader(async () => [assistant('one')]),
+        1,
+      );
+
+      now = 11;
+      store.prune();
+
+      expect(info).toHaveBeenCalledWith(
+        '[chat-view]',
+        `view evicted chat=chat-1 generationId=${page.generationId} reason=stale ageMs=11 messages=1`,
+      );
+    } finally {
+      console.info = originalInfo;
+    }
   });
 });

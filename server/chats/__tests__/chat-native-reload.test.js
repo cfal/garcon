@@ -34,6 +34,33 @@ describe('ChatNativeReloader', () => {
     expect(nativeSource.loadNativeMessages).toHaveBeenCalledWith('chat-1');
   });
 
+  it('logs the reload mode as the generation replacement reason', async () => {
+    const originalInfo = console.info;
+    const info = mock(() => undefined);
+    console.info = info;
+    try {
+      const views = new ChatViewStore(() => false);
+      const reloader = new ChatNativeReloader(
+        views,
+        { loadNativeMessages: async () => [assistant('native')] },
+        () => false,
+      );
+      const before = await views.appendToCurrentOrEmpty('chat-1', [assistant('live')]);
+
+      const replacement = await reloader.reloadFromNative('chat-1', 'manual-reload');
+
+      const messages = info.mock.calls.map((call) => call[1]);
+      expect(messages.some((message) => (
+        message.includes('generation replaced')
+        && message.includes(`generationId=${replacement.generationId}`)
+        && message.includes('reason=manual-reload')
+        && message.includes(`previousGenerationId=${before.generationId}`)
+      ))).toBe(true);
+    } finally {
+      console.info = originalInfo;
+    }
+  });
+
   it('process-error reload appends a normal in-memory error row', async () => {
     const views = new ChatViewStore(() => false);
     const nativeSource = {

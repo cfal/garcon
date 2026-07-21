@@ -133,6 +133,7 @@ describe('ChatExecutionActivity', () => {
       const views = new ChatViewStore(activity.isActive, {
         now: () => now,
         staleNonActiveMs: 1,
+        recentViewRetentionCount: 0,
       });
       const queue = new ChatExecutionCoordinator(
         workspaceDir,

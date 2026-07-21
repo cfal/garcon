@@ -47,6 +47,35 @@ describe('chat stream resume integration', () => {
     expect(replay.lastSeq).toBe(3);
   });
 
+  it('retains the most recently subscribed idle chat for same-generation replay', async () => {
+    let now = 0;
+    const views = new ChatViewStore(() => false, {
+      recentViewRetentionCount: 1,
+      staleNonActiveMs: 10,
+      now: () => now,
+    });
+    const watched = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => [],
+      [assistant('first')],
+    );
+    await views.appendAfterEnsuringGeneration(
+      'chat-2',
+      async () => [],
+      [assistant('other')],
+    );
+    views.readReplay('chat-1', watched.generationId, watched.lastSeq);
+
+    now = 11;
+    views.prune();
+    expect(views.getCursor('chat-2')).toBeNull();
+    await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('missed')]);
+
+    const replay = views.readReplay('chat-1', watched.generationId, watched.lastSeq);
+    expect(replay.mode).toBe('delta');
+    expect(contents(replay)).toEqual(['missed']);
+  });
+
   it('process failure reload resets generation and prevents stale late output', async () => {
     const views = new ChatViewStore(() => false);
     const nativeReloader = new ChatNativeReloader(
