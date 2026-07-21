@@ -104,7 +104,7 @@ interface RunningCodexSession {
   activeInputChain: Promise<void>;
   activeDeliveryReservations: number;
   pendingFinish: FinishSessionOptions | null;
-  liveCodeModeCallIds: Set<string>;
+  liveCodeModeResultToolIds: Map<string, string>;
   capacityRetryCount: number;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
@@ -1007,7 +1007,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeInputChain: Promise.resolve(),
       activeDeliveryReservations: 0,
       pendingFinish: null,
-      liveCodeModeCallIds: new Set(),
+      liveCodeModeResultToolIds: new Map(),
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
@@ -1248,7 +1248,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const messages = convertCodexRawCodeModeItem(
       params.item,
       new Date().toISOString(),
-      session.liveCodeModeCallIds,
+      session.liveCodeModeResultToolIds,
     );
     if (messages.length) this.emitMessages(session.chatId, messages);
   }
@@ -1268,7 +1268,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async #completeTurn(session: RunningCodexSession, params: TurnCompletedNotification): Promise<void> {
     session.turnAttemptGeneration += 1;
-    session.liveCodeModeCallIds.clear();
+    session.liveCodeModeResultToolIds.clear();
     if (params.turn.status === 'failed') {
       const pendingCapacityFailure = session.pendingCapacityFailure?.turnId === params.turn.id
         ? session.pendingCapacityFailure

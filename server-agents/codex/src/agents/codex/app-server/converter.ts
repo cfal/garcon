@@ -32,10 +32,17 @@ import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } fr
 import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
 import { convertCodexWaitFunctionCall } from '../jsonl-tool-use-converter.js';
 import {
+  codexCodeModeResultToolId,
+  createCodexCodeModeBashMessages,
+  projectCodexCodeModeCommands,
+  rememberCodexCodeModeResult,
+} from '../code-mode-command-projection.js';
+import {
   convertCodexSubagentActivity,
   convertCodexInterAgentLifecycle,
   convertCodexSubagentLifecycleText,
 } from '../subagent-lifecycle.js';
+import { normalizeCodexCommandDisplay } from './command-display.js';
 import type {
   CodexCollabAgentState,
   CodexCollabAgentTool,
@@ -120,7 +127,7 @@ export function convertCodexAppServerItem(
 export function convertCodexRawCodeModeItem(
   item: CodexRawResponseItem,
   timestamp: string,
-  activeCodeModeCallIds: Set<string>,
+  activeCodeModeResultToolIds: Map<string, string>,
 ): ChatMessage[] {
   if (item.type === 'agent_message') {
     const text = rawResponseItemText(item.content);
@@ -150,9 +157,18 @@ export function convertCodexRawCodeModeItem(
     && typeof item.call_id === 'string'
     && typeof item.input === 'string'
   ) {
-    if (activeCodeModeCallIds.has(item.call_id)) return [];
-    activeCodeModeCallIds.add(item.call_id);
-    return [new ExecToolUseMessage(timestamp, item.call_id, item.input, 'javascript')];
+    if (activeCodeModeResultToolIds.has(item.call_id)) return [];
+    const projection = projectCodexCodeModeCommands(item.input);
+    if (!projection) {
+      rememberCodexCodeModeResult(activeCodeModeResultToolIds, item.call_id, item.call_id);
+      return [new ExecToolUseMessage(timestamp, item.call_id, item.input, 'javascript')];
+    }
+    rememberCodexCodeModeResult(
+      activeCodeModeResultToolIds,
+      item.call_id,
+      codexCodeModeResultToolId(item.call_id, projection),
+    );
+    return createCodexCodeModeBashMessages(timestamp, item.call_id, projection);
   }
 
   if (
@@ -160,22 +176,24 @@ export function convertCodexRawCodeModeItem(
     && item.name === 'wait'
     && typeof item.call_id === 'string'
   ) {
-    if (activeCodeModeCallIds.has(item.call_id)) return [];
+    if (activeCodeModeResultToolIds.has(item.call_id)) return [];
     const message = convertCodexWaitFunctionCall(timestamp, item.call_id, item.arguments);
     if (!message) return [];
-    activeCodeModeCallIds.add(item.call_id);
+    rememberCodexCodeModeResult(activeCodeModeResultToolIds, item.call_id, item.call_id);
     return [message];
   }
 
   if (
     (item.type === 'custom_tool_call_output' || item.type === 'function_call_output')
     && typeof item.call_id === 'string'
-    && activeCodeModeCallIds.delete(item.call_id)
   ) {
+    const resultToolId = activeCodeModeResultToolIds.get(item.call_id);
+    if (!resultToolId) return [];
+    activeCodeModeResultToolIds.delete(item.call_id);
     return [
       new ToolResultMessage(
         timestamp,
-        item.call_id,
+        resultToolId,
         normalizeToolResultContent(item.output),
         false,
       ),
@@ -196,7 +214,7 @@ function rawResponseItemText(content: unknown): string {
 
 function convertCommandExecution(item: Extract<CodexThreadItem, { type: 'commandExecution' }>, timestamp: string): ChatMessage[] {
   const messages: ChatMessage[] = [
-    new BashToolUseMessage(timestamp, item.id, item.command || ''),
+    new BashToolUseMessage(timestamp, item.id, normalizeCodexCommandDisplay(item.command || '')),
   ];
   if (item.status !== 'inProgress') {
     const content = item.aggregatedOutput || (item.status === 'completed' ? '' : item.status);

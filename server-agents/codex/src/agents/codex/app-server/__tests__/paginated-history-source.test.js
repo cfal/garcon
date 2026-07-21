@@ -43,7 +43,7 @@ describe('PaginatedCodexHistorySource', () => {
       }],
       ['page-2', {
         data: [turn('turn-2', [{
-          type: 'commandExecution', id: 'command-1', command: 'pwd', cwd: '/repo',
+          type: 'commandExecution', id: 'command-1', command: "/bin/zsh -lc 'pwd'", cwd: '/repo',
           processId: null, source: 'agent', status: 'completed', commandActions: [],
           aggregatedOutput: '/repo', exitCode: 0, durationMs: 4,
         }], 1_753_056_001)],
@@ -80,6 +80,7 @@ describe('PaginatedCodexHistorySource', () => {
     expect(getNativeMessageSource(messages[0])).toEqual({ entryId: 'turn:turn-1:item:user-1' });
     expect(getNativeMessageSource(messages[1])).toEqual({ entryId: 'turn:turn-2:item:command-1' });
     expect(getNativeMessageSource(messages[2])).toEqual({ entryId: 'turn:turn-2:item:command-1' });
+    expect(messages[1]).toMatchObject({ type: 'bash-tool-use', command: 'pwd' });
     expect(messages[3].timestamp).toBe(profile.createdAt);
     expect(shutdown).toHaveBeenCalledTimes(1);
 

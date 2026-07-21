@@ -1,6 +1,10 @@
 import type { ForkTranscriptEntryContext } from '@garcon/server-agent-common/forking/fork-jsonl';
 import { isRecord } from '@garcon/common/json';
 import { LegacyCodexProjection } from './legacy-history-projection.js';
+import {
+  projectCodexCodeModeCommands,
+  rewriteCodexCodeModeCommandPrefix,
+} from './code-mode-command-projection.js';
 
 export function rewriteCodexForkTranscriptEntry(
   entry: unknown,
@@ -37,6 +41,8 @@ function rewriteCodexForkEntry(
       : 0;
     if (emittedCount > retainedMessageCount) {
       if (retainedMessageCount === 0) return { type: 'garcon_fork_filtered' };
+      const codeModePrefix = rewriteCodeModePrefix(entry, retainedMessageCount);
+      if (codeModePrefix) return codeModePrefix;
       if (
         retainedMessageCount === 1
         && entry.type === 'response_item'
@@ -67,5 +73,29 @@ function rewriteCodexForkEntry(
   return {
     ...entry,
     payload,
+  };
+}
+
+function rewriteCodeModePrefix(
+  entry: Record<string, unknown>,
+  retainedMessageCount: number,
+): Record<string, unknown> | null {
+  if (entry.type !== 'response_item' || !isRecord(entry.payload)) return null;
+  const payload = entry.payload;
+  if (
+    payload.type !== 'custom_tool_call'
+    || payload.name !== 'exec'
+    || typeof payload.input !== 'string'
+  ) return null;
+  const projection = projectCodexCodeModeCommands(payload.input);
+  if (!projection || retainedMessageCount >= projection.commands.length) return null;
+  return {
+    ...entry,
+    payload: {
+      ...payload,
+      input: rewriteCodexCodeModeCommandPrefix(
+        projection.commands.slice(0, retainedMessageCount),
+      ),
+    },
   };
 }
