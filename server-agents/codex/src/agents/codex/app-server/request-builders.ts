@@ -129,6 +129,7 @@ export function buildThreadForkParams(sourceSession: {
     ephemeral: false,
     excludeTurns: true,
   };
+  if (sourceSession.nativePath) params.path = sourceSession.nativePath;
   if (sourceSession.codexConfig?.config) params.config = sourceSession.codexConfig.config;
   return params;
 }

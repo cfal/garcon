@@ -508,7 +508,7 @@ describe('Codex app-server request builders', () => {
     expect(params).not.toHaveProperty('persistExtendedHistory');
   });
 
-  it('builds thread/fork params from durable thread identity', () => {
+  it('builds thread/fork params from durable thread identity and path', () => {
     const params = buildThreadForkParams({
       agentSessionId: 'thread-1',
       nativePath: '/tmp/jsonl.jsonl',
@@ -522,6 +522,7 @@ describe('Codex app-server request builders', () => {
       model: 'gpt-5.4-codex',
       ephemeral: false,
       excludeTurns: true,
+      path: '/tmp/jsonl.jsonl',
     });
   });
 
