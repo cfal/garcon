@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
 import { buildThreadResumeParams } from '../../../server-agents/codex/src/agents/codex/app-server/request-builders.js';
+import { projectCodexCodeModeCommands } from '../../../server-agents/codex/src/agents/codex/code-mode-command-projection.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('Codex fork at message', () => {
-  test('preserves a resumable legacy prefix while decoding Code Mode Exec after reload', async () => {
+  test('preserves resumable Code Mode prefixes across forks and reforks', async () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
     const sourceAgentSessionId = randomUUID();
     let sourceNativePath = '';
@@ -33,14 +34,17 @@ describe('Codex fork at message', () => {
         [3, 'bash-tool-use'],
         [4, 'tool-result'],
         [5, 'tool-result'],
-        [6, 'assistant-message'],
+        [6, 'bash-tool-use'],
+        [7, 'bash-tool-use'],
+        [8, 'tool-result'],
+        [9, 'assistant-message'],
       ]);
 
       const targetChatId = fixture.newChatId();
       const fork = await fixture.client.forkChat({
         sourceChatId,
         chatId: targetChatId,
-        upToSeq: 6,
+        upToSeq: 9,
       });
       expect(fork.chat.id).toBe(targetChatId);
 
@@ -111,6 +115,48 @@ describe('Codex fork at message', () => {
         .toEqual(source.messages.map((entry) => entry.message));
       expect(reloaded.messages.some((entry) => entry.message.type === 'exec-tool-use')).toBe(true);
       expect(reloaded.messages.some((entry) => entry.message.type === 'wait-tool-use')).toBe(false);
+
+      const partialChatId = fixture.newChatId();
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: partialChatId,
+        upToSeq: 6,
+      });
+      const partial = await fixture.client.getMessages(partialChatId);
+      expect(partial.messages.map((entry) => entry.message))
+        .toEqual(source.messages.slice(0, 6).map((entry) => entry.message));
+
+      const partialRegistry = JSON.parse(
+        await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
+      ) as {
+        sessions: Record<string, {
+          nativeSession: { value: { path: string; agentSessionId: string } };
+        }>;
+      };
+      const partialNativePath = partialRegistry.sessions[partialChatId]!.nativeSession.value.path;
+      const partialLines = (await readFile(partialNativePath, 'utf8')).trimEnd().split('\n');
+      const projectedEntry = partialLines
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((entry) => (
+          entry.type === 'response_item'
+          && typeof entry.payload === 'object'
+          && entry.payload !== null
+          && (entry.payload as Record<string, unknown>).call_id === 'projected-exec'
+        ));
+      const projectedPayload = projectedEntry?.payload as Record<string, unknown> | undefined;
+      expect(projectCodexCodeModeCommands(String(projectedPayload?.input))).toEqual({
+        commands: ['printf "first;command\\n"'],
+      });
+
+      const reforkChatId = fixture.newChatId();
+      await fixture.client.forkChat({
+        sourceChatId: partialChatId,
+        chatId: reforkChatId,
+        upToSeq: 6,
+      });
+      const reforked = await fixture.client.getMessages(reforkChatId);
+      expect(reforked.messages.map((entry) => entry.message))
+        .toEqual(partial.messages.map((entry) => entry.message));
     }, {
       serverEnvironment,
       async prepareWorkspace(directories) {
@@ -198,6 +244,31 @@ describe('Codex fork at message', () => {
             timestamp,
             type: 'response_item',
             payload: {
+              type: 'custom_tool_call',
+              name: 'exec',
+              call_id: 'projected-exec',
+              input: [
+                'const results = await Promise.all([',
+                '  tools.exec_command({cmd: \'printf "first;command\\\\n"\'}),',
+                '  tools.exec_command({cmd: \'printf "second command\\\\n"\'}),',
+                ']);',
+                'results.forEach(result => text(result.output));',
+              ].join('\n'),
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
+              type: 'custom_tool_call_output',
+              call_id: 'projected-exec',
+              output: 'first command\nsecond command',
+            },
+          }),
+          JSON.stringify({
+            timestamp,
+            type: 'response_item',
+            payload: {
               type: 'function_call',
               name: 'wait',
               call_id: 'outer-wait',
@@ -259,5 +330,5 @@ describe('Codex fork at message', () => {
         }));
       },
     });
-  });
+  }, 15_000);
 });

@@ -3,6 +3,7 @@ import {
   createCodexForkTranscriptRewriter,
   rewriteCodexForkTranscriptEntry,
 } from '../fork-transcript.js';
+import { projectCodexCodeModeCommands } from '../code-mode-command-projection.js';
 
 const context = {
   sourceAgentSessionId: '11111111-1111-1111-1111-111111111111',
@@ -123,6 +124,63 @@ describe('rewriteCodexForkTranscriptEntry', () => {
     const selectedRewrite = createCodexForkTranscriptRewriter();
     expect(selectedRewrite(exec, { ...context, retainedMessageCount: 1 })).toBe(exec);
     expect(selectedRewrite(output, { ...context, retainedMessageCount: 1 })).toBe(output);
+  });
+
+  it('rewrites a partially selected Code Mode command group to a stable prefix', () => {
+    const rewrite = createCodexForkTranscriptRewriter();
+    const exec = {
+      type: 'response_item',
+      payload: {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'outer',
+        input: `
+          const results = await Promise.all([
+            tools.exec_command({cmd: "printf 'one;two\\n'"}),
+            tools.exec_command({cmd: "printf '\${literal} \\n'"}),
+          ]);
+          results.forEach(result => text(result.output));
+        `,
+      },
+    };
+    const output = {
+      type: 'response_item',
+      payload: { type: 'custom_tool_call_output', call_id: 'outer', output: 'aggregate' },
+    };
+
+    const rewritten = rewrite(exec, { ...context, retainedMessageCount: 1 });
+    expect(rewritten).not.toBe(exec);
+    expect(projectCodexCodeModeCommands(rewritten.payload.input)).toEqual({
+      commands: ["printf 'one;two\n'"],
+    });
+    expect(rewrite(output, { ...context, retainedMessageCount: 0 }))
+      .toEqual({ type: 'garcon_fork_filtered' });
+
+    const reforkRewrite = createCodexForkTranscriptRewriter();
+    expect(reforkRewrite(rewritten, { ...context, retainedMessageCount: 1 })).toBe(rewritten);
+  });
+
+  it('preserves a fully selected Code Mode command group', () => {
+    const exec = {
+      type: 'response_item',
+      payload: {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'outer',
+        input: `
+          const results = await Promise.all([
+            tools.exec_command({cmd: "one"}),
+            tools.exec_command({cmd: "two"}),
+          ]);
+          results.forEach(result => text(result.output));
+        `,
+      },
+    };
+
+    expect(createCodexForkTranscriptRewriter()(
+      exec,
+      { ...context, retainedMessageCount: 2 },
+    )).toBe(exec);
   });
 
   it('preserves provider records that the shared legacy projection does not render', () => {
