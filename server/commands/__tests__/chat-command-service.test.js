@@ -1320,6 +1320,39 @@ describe('ChatCommandService', () => {
     expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it('releases the source snapshot before admitting the fork target turn', async () => {
+    const order = [];
+    const forkChatFileCopy = mock(async () => {
+      order.push('target-created');
+      return {
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        agentSessionId: 'agent-2',
+        sourceNextForkOrdinal: 1,
+        rollback: mock(() => Promise.resolve(undefined)),
+      };
+    });
+    const { service, queue } = makeService({ forkChatFileCopy });
+    queue.releaseTranscriptSnapshot.mockImplementation(async () => {
+      order.push('source-released');
+    });
+    queue.registerPendingUserInput.mockImplementation(async () => {
+      order.push('target-admitted');
+    });
+
+    await service.submitForkRun({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      clientRequestId: 'req-fork-release-order',
+      clientMessageId: 'msg-fork-release-order',
+    });
+
+    expect(order).toEqual(['target-created', 'source-released', 'target-admitted']);
+    expect(queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a point fork while a lazy source is materializing', async () => {
     const { service, queue, forkChatFileCopy } = makeService({
       session: { agentSessionId: null, nativeSession: null },

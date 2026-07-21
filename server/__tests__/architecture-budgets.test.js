@@ -8,7 +8,7 @@ import { join } from 'node:path';
 // recorded ceiling. New files start under the budget.
 const MAX_LINES = 1000;
 // Includes queue staging, boundary parsing, and settled transcript snapshot ownership.
-const EXECUTION_FOOTPRINT_BUDGET = 6669;
+const EXECUTION_FOOTPRINT_BUDGET = 6676;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

@@ -112,7 +112,7 @@ export class ForkCommands {
       forkContext.sourceNextForkOrdinal = preparedFork.sourceNextForkOrdinal;
     }
 
-    const submit = async () => {
+    const submit = async (releaseSourceSnapshot?: () => Promise<void>) => {
       const ledger = await this.deps.ledger.accept(ledgerInput);
 
       if (ledger.kind === 'conflict') {
@@ -156,6 +156,7 @@ export class ForkCommands {
               sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
             },
           });
+          await releaseSourceSnapshot?.();
         },
         compensate: async () => {
           if (forkResult) {
@@ -235,10 +236,16 @@ export class ForkCommands {
 
   private async withSettledSourceSnapshot<T>(
     context: ForkContext,
-    operation: () => Promise<T>,
+    operation: (release: () => Promise<void>) => Promise<T>,
   ): Promise<T> {
     let reservation: TranscriptSnapshotReservation | null = null;
     let failure: unknown = null;
+    const release = async () => {
+      if (!reservation) return;
+      const current = reservation;
+      await this.deps.queue.releaseTranscriptSnapshot(current);
+      reservation = null;
+    };
     try {
       reservation = this.deps.queue.reserveTranscriptSnapshot(context.sourceChatId);
       await this.deps.pendingInputs.reconcileNativeHistory(context.sourceChatId);
@@ -250,7 +257,7 @@ export class ForkCommands {
           true,
         );
       }
-      return await operation();
+      return await operation(release);
     } catch (error) {
       failure = error;
       if (
@@ -267,7 +274,7 @@ export class ForkCommands {
     } finally {
       if (reservation) {
         try {
-          await this.deps.queue.releaseTranscriptSnapshot(reservation);
+          await release();
         } catch (releaseError) {
           if (failure !== null) {
             throw new AggregateError(
