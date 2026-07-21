@@ -3,6 +3,7 @@ import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
+import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
 import { fakeAnthropicRequestHeaders } from '../../support/anthropic-test-contract.js';
 import { fakeOpenAiRequestHeaders } from '../../support/openai-test-contract.js';
@@ -86,6 +87,42 @@ describe('integration support contracts', () => {
       expect(text).toContain('hello');
       expect(text).toContain('data: [DONE]');
       expect(fake.requests()).toHaveLength(1);
+      expect(fake.requests()[0].lastUserText).toBe('hello');
+      fake.assertNoProtocolViolations();
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test('serves strict OpenAI Responses streaming echoes', async () => {
+    const fake = FakeOpenAiResponsesServer.start({ defaultDelayMs: 0 });
+    try {
+      const models = await fetch(`${fake.baseUrl}/v1/models`, {
+        headers: fakeOpenAiRequestHeaders(),
+      }).then((response) => response.json());
+      expect(models).toMatchObject({ data: [{ id: 'integration-responses-echo' }] });
+
+      const response = await fetch(`${fake.baseUrl}/v1/responses`, {
+        method: 'POST',
+        headers: fakeOpenAiRequestHeaders(),
+        body: JSON.stringify({
+          model: 'integration-responses-echo',
+          input: [{ role: 'user', content: 'hello' }],
+          stream: true,
+          store: false,
+          reasoning: { effort: 'high' },
+        }),
+      });
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toContain('response.reasoning_summary_text.delta');
+      expect(text).toContain('response.output_text.delta');
+      expect(text).toContain('response.completed');
+      expect(fake.requests()[0].body).toMatchObject({
+        stream: true,
+        store: false,
+        reasoning: { effort: 'high' },
+      });
       expect(fake.requests()[0].lastUserText).toBe('hello');
       fake.assertNoProtocolViolations();
     } finally {

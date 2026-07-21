@@ -33,6 +33,10 @@ import type {
   MarkChatsReadResponse,
 } from '../../common/chat-list.js';
 import type { ChatSearchRequest, ChatSearchResponse } from '../../common/chat-search.js';
+import type {
+  GenerateChatTitleRequest,
+  GenerateChatTitleResponse,
+} from '../../common/chat-title-contracts.js';
 import {
   normalizeScheduledPromptsSnapshot,
   type CreateScheduledPromptRequest,
@@ -95,6 +99,7 @@ export interface ConfiguredDirectTestAgent {
 
 export interface DirectTestAgents {
   openAi: ConfiguredDirectTestAgent;
+  openAiResponses: ConfiguredDirectTestAgent;
   anthropic: ConfiguredDirectTestAgent;
 }
 
@@ -339,6 +344,32 @@ export class GarconTestClient {
     };
   }
 
+  async createOpenAiResponsesProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
+    const model = 'integration-responses-echo';
+    const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+      templateId: 'custom',
+      label: 'Integration Fake OpenAI Responses',
+      endpoint: {
+        protocol: 'openai-compatible',
+        baseUrl: `${providerBaseUrl.replace(/\/$/, '')}/v1`,
+        apiKey: INTEGRATION_OPENAI_API_KEY,
+        capabilities: { chatCompletions: false, responses: true },
+        defaultModel: model,
+        models: [{ value: model, label: 'Integration Responses Echo' }],
+        supportsImages: false,
+        modelDiscovery: 'openai-models',
+      },
+    });
+    const endpoint = created.endpoints[0];
+    if (!endpoint) throw new Error('Created Responses provider did not contain an endpoint');
+    return {
+      providerId: created.id,
+      endpointId: endpoint.id,
+      model,
+      protocol: 'openai-compatible',
+    };
+  }
+
   async createAnthropicProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
     const model = 'integration-anthropic-echo';
     const created = await this.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
@@ -370,6 +401,10 @@ export class GarconTestClient {
 
   listChats(): Promise<ChatListResponse> {
     return this.get<ChatListResponse>('/api/v1/chats');
+  }
+
+  generateChatTitle(request: GenerateChatTitleRequest): Promise<GenerateChatTitleResponse> {
+    return this.post<GenerateChatTitleResponse>('/api/v1/chats/title/generate', request);
   }
 
   async getScheduledPrompts(): Promise<ScheduledPromptsSnapshot> {
