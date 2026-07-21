@@ -104,7 +104,7 @@ describe('rewriteCodexForkTranscriptEntry', () => {
     })).toEqual({ type: 'garcon_fork_filtered' });
   });
 
-  it('preserves hidden Code Mode envelopes and their paired outputs', () => {
+  it('counts Code Mode Exec envelopes and their paired outputs as rendered messages', () => {
     const rewrite = createCodexForkTranscriptRewriter();
     const exec = {
       type: 'response_item',
@@ -115,8 +115,14 @@ describe('rewriteCodexForkTranscriptEntry', () => {
       payload: { type: 'custom_tool_call_output', call_id: 'outer', output: 'done' },
     };
 
-    expect(rewrite(exec, { ...context, retainedMessageCount: 0 })).toBe(exec);
-    expect(rewrite(output, { ...context, retainedMessageCount: 0 })).toBe(output);
+    expect(rewrite(exec, { ...context, retainedMessageCount: 0 }))
+      .toEqual({ type: 'garcon_fork_filtered' });
+    expect(rewrite(output, { ...context, retainedMessageCount: 0 }))
+      .toEqual({ type: 'garcon_fork_filtered' });
+
+    const selectedRewrite = createCodexForkTranscriptRewriter();
+    expect(selectedRewrite(exec, { ...context, retainedMessageCount: 1 })).toBe(exec);
+    expect(selectedRewrite(output, { ...context, retainedMessageCount: 1 })).toBe(output);
   });
 
   it('preserves provider records that the shared legacy projection does not render', () => {

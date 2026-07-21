@@ -28,7 +28,7 @@ describe('loadCodexChatMessages', () => {
     expect(messages).toMatchObject([{ type: 'user-message', content }]);
   });
 
-  it('hides Code Mode Exec envelopes and paired outputs from native history', async () => {
+  it('decodes Code Mode Exec envelopes and paired outputs from native history', async () => {
     const code = '// @exec: {"yield_time_ms": 1000}\ntext("ok")';
     const lines = [
       JSON.stringify({
@@ -54,7 +54,10 @@ describe('loadCodexChatMessages', () => {
 
     const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
 
-    expect(messages).toEqual([]);
+    expect(messages).toMatchObject([
+      { type: 'exec-tool-use', toolId: 'call_exec', code, language: 'javascript' },
+      { type: 'tool-result', toolId: 'call_exec' },
+    ]);
   });
 
   it('hides Code Mode Wait envelopes and paired outputs from native history', async () => {
@@ -85,7 +88,7 @@ describe('loadCodexChatMessages', () => {
     expect(messages).toEqual([]);
   });
 
-  it('preserves nested commands while hiding their Code Mode envelope', async () => {
+  it('preserves Code Mode Exec envelopes and their nested commands', async () => {
     const lines = [
       JSON.stringify({
         type: 'response_item', timestamp: '2026-07-10T21:34:09.149Z',
@@ -113,8 +116,10 @@ describe('loadCodexChatMessages', () => {
       const page = await loadCodexChatMessagePage(filePath, 10, 0);
 
       expect(full.map((message) => [message.type, message.toolId])).toEqual([
+        ['exec-tool-use', 'outer'],
         ['bash-tool-use', 'inner'],
         ['tool-result', 'inner'],
+        ['tool-result', 'outer'],
       ]);
       expect(page.messages).toEqual(full);
       expect(page.revision).toBe(transcriptRevision(full));
@@ -124,11 +129,14 @@ describe('loadCodexChatMessages', () => {
   it('does not leak hidden call state between transcript loads', async () => {
     const hiddenCall = JSON.stringify({
       type: 'response_item', timestamp: '2026-07-10T21:34:09.149Z',
-      payload: { type: 'custom_tool_call', name: 'exec', call_id: 'shared', input: 'text("ok")' },
+      payload: {
+        type: 'function_call', name: 'wait', call_id: 'shared',
+        arguments: '{"cell_id":"46","yield_time_ms":30000}',
+      },
     });
     const visibleOutput = JSON.stringify({
       type: 'response_item', timestamp: '2026-07-10T21:34:09.150Z',
-      payload: { type: 'custom_tool_call_output', call_id: 'shared', output: 'unmatched output' },
+      payload: { type: 'function_call_output', call_id: 'shared', output: 'unmatched output' },
     });
 
     await withTempJsonl([hiddenCall], (filePath) => loadCodexChatMessages(filePath));
