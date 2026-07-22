@@ -92,6 +92,21 @@ async function flushPromises(): Promise<void> {
 	await Promise.resolve();
 }
 
+function captureAnimationFrames() {
+	const original = globalThis.requestAnimationFrame;
+	const callbacks: FrameRequestCallback[] = [];
+	globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+		callbacks.push(callback);
+		return callbacks.length;
+	}) as typeof requestAnimationFrame;
+	return {
+		callbacks,
+		restore() {
+			globalThis.requestAnimationFrame = original;
+		},
+	};
+}
+
 function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id: 'chat-1',
@@ -618,6 +633,42 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
+
+	it('does not restore the bottom after the user navigates during transcript revalidation', async () => {
+		const snapshot = deferred<ChatMessage[]>();
+		const { deps } = createDeps();
+		deps.chatState.loadMessages = vi.fn(() => snapshot.promise);
+		const frames = captureAnimationFrames();
+		try {
+			const controller = new ConversationSessionController(deps);
+			const load = controller.loadChat('chat-1');
+			deps.chatState.isUserScrolledUp = true;
+
+			snapshot.resolve([]);
+			await load;
+			for (const callback of frames.callbacks) callback(0);
+
+			expect(deps.scrollToBottom).not.toHaveBeenCalled();
+		} finally {
+			frames.restore();
+		}
+	});
+
+	it('restores the bottom after transcript loading when the viewport remains pinned', async () => {
+		const { deps } = createDeps();
+		deps.chatState.loadMessages = vi.fn().mockResolvedValue([]);
+		const frames = captureAnimationFrames();
+		try {
+			const controller = new ConversationSessionController(deps);
+
+			await controller.loadChat('chat-1');
+			for (const callback of frames.callbacks) callback(0);
+
+			expect(deps.scrollToBottom).toHaveBeenCalledOnce();
+		} finally {
+			frames.restore();
+		}
 	});
 
 	it('validates restored transcripts with a matching message limit on chat switch', () => {
