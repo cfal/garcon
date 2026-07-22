@@ -8,36 +8,22 @@ import {
 	resolveWorkspaceSidebarOverlayInsets,
 	type DesktopLayoutEdge,
 	type DesktopLayoutOrder,
-	type DesktopToolbarAlignment,
 } from '../desktop-layout';
 
 describe('desktop layout', () => {
-	it.each<
-		[
-			DesktopLayoutOrder,
-			DesktopLayoutEdge,
-			DesktopLayoutEdge,
-			DesktopToolbarAlignment,
-			DesktopToolbarAlignment,
-		]
-	>([
-		[['chat-list', 'main', 'workspace-sidebar'], 'end', 'start', 'end', 'start'],
-		[['chat-list', 'workspace-sidebar', 'main'], 'end', 'end', 'start', 'end'],
-		[['main', 'chat-list', 'workspace-sidebar'], 'start', 'start', 'end', 'start'],
-		[['main', 'workspace-sidebar', 'chat-list'], 'start', 'start', 'end', 'start'],
-		[['workspace-sidebar', 'chat-list', 'main'], 'end', 'end', 'start', 'end'],
-		[['workspace-sidebar', 'main', 'chat-list'], 'start', 'end', 'start', 'end'],
-	])(
-		'resolves pane edges and toolbar alignment for %j',
-		(order, chatEdge, workspaceEdge, mainAlignment, workspaceAlignment) => {
-			const result = resolveDesktopLayout(order);
+	it.each<[DesktopLayoutOrder, DesktopLayoutEdge, DesktopLayoutEdge]>([
+		[['chat-list', 'main', 'workspace-sidebar'], 'end', 'start'],
+		[['chat-list', 'workspace-sidebar', 'main'], 'end', 'end'],
+		[['main', 'chat-list', 'workspace-sidebar'], 'start', 'start'],
+		[['main', 'workspace-sidebar', 'chat-list'], 'start', 'start'],
+		[['workspace-sidebar', 'chat-list', 'main'], 'end', 'end'],
+		[['workspace-sidebar', 'main', 'chat-list'], 'start', 'end'],
+	])('resolves pane edges for %j', (order, chatEdge, workspaceEdge) => {
+		const result = resolveDesktopLayout(order);
 
-			expect(result.chatListEdge).toBe(chatEdge);
-			expect(result.workspaceSidebarEdge).toBe(workspaceEdge);
-			expect(result.mainToolbarAlignment).toBe(mainAlignment);
-			expect(result.workspaceSidebarToolbarAlignment).toBe(workspaceAlignment);
-		},
-	);
+		expect(result.chatListEdge).toBe(chatEdge);
+		expect(result.workspaceSidebarEdge).toBe(workspaceEdge);
+	});
 
 	it.each([
 		undefined,

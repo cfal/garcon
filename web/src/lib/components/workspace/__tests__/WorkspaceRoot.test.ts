@@ -412,7 +412,7 @@ describe('WorkspaceRoot', () => {
 		},
 	);
 
-	it('reorders stable pane instances and points chrome toward the workspace sidebar', async () => {
+	it('reorders stable pane instances without replacing stateful content', async () => {
 		const snapshot = withAdditionalSurfaces();
 		installContext({
 			...snapshot,
@@ -443,13 +443,6 @@ describe('WorkspaceRoot', () => {
 		});
 		expect(main?.contains(portableMainSurface)).toBe(true);
 
-		expect(
-			rendered.container.querySelector('[data-floating-workspace-toolbar]')?.classList,
-		).toContain('justify-end');
-		expect(
-			rendered.container.querySelector('[data-floating-sidebar-toolbar]')?.classList,
-		).toContain('justify-start');
-
 		await rendered.rerender({
 			desktopLayoutOrder: ['workspace-sidebar', 'main', 'chat-list'],
 			chatActions,
@@ -475,12 +468,6 @@ describe('WorkspaceRoot', () => {
 				(pane) => pane.dataset.desktopLayoutPane,
 			),
 		).toEqual(['workspace-sidebar', 'main', 'chat-list']);
-		expect(
-			rendered.container.querySelector('[data-floating-workspace-toolbar]')?.classList,
-		).toContain('justify-start');
-		expect(
-			rendered.container.querySelector('[data-floating-sidebar-toolbar]')?.classList,
-		).toContain('justify-end');
 	});
 
 	it('restores workspace focus after an external pane-order update', async () => {

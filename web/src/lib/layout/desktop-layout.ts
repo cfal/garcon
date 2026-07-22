@@ -3,7 +3,6 @@ export const DESKTOP_LAYOUT_PANES = ['chat-list', 'main', 'workspace-sidebar'] a
 export type DesktopLayoutPane = (typeof DESKTOP_LAYOUT_PANES)[number];
 export type DesktopLayoutOrder = [DesktopLayoutPane, DesktopLayoutPane, DesktopLayoutPane];
 export type DesktopLayoutEdge = 'start' | 'end';
-export type DesktopToolbarAlignment = 'start' | 'end';
 
 export const DEFAULT_DESKTOP_LAYOUT_ORDER: DesktopLayoutOrder = [
 	'chat-list',
@@ -15,8 +14,6 @@ export interface DesktopLayoutPlacement {
 	chatListEdge: DesktopLayoutEdge;
 	workspaceSidebarEdge: DesktopLayoutEdge;
 	workspaceSidebarBeforeMain: boolean;
-	mainToolbarAlignment: DesktopToolbarAlignment;
-	workspaceSidebarToolbarAlignment: DesktopToolbarAlignment;
 }
 
 export interface DesktopPaneWidths {
@@ -55,8 +52,6 @@ export function resolveDesktopLayout(order: DesktopLayoutOrder): DesktopLayoutPl
 		chatListEdge: index('chat-list') < mainIndex ? 'end' : 'start',
 		workspaceSidebarEdge: workspaceSidebarBeforeMain ? 'end' : 'start',
 		workspaceSidebarBeforeMain,
-		mainToolbarAlignment: workspaceSidebarBeforeMain ? 'start' : 'end',
-		workspaceSidebarToolbarAlignment: workspaceSidebarBeforeMain ? 'end' : 'start',
 	};
 }
 

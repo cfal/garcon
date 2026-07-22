@@ -18,17 +18,12 @@
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceSidebarResizeHandle from './WorkspaceSidebarResizeHandle.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
-	import type {
-		DesktopLayoutEdge,
-		DesktopToolbarAlignment,
-		MainInlineInsets,
-	} from '$lib/layout/desktop-layout.js';
+	import type { DesktopLayoutEdge, MainInlineInsets } from '$lib/layout/desktop-layout.js';
 
 	let {
 		presented,
 		edge,
 		beforeMain,
-		toolbarAlignment,
 		overlayInsets,
 		metrics,
 		pushMaximum,
@@ -47,7 +42,6 @@
 		presented: boolean;
 		edge: DesktopLayoutEdge;
 		beforeMain: boolean;
-		toolbarAlignment: DesktopToolbarAlignment;
 		overlayInsets: MainInlineInsets;
 		metrics: SidebarMetrics;
 		pushMaximum: number;
@@ -224,9 +218,7 @@
 		{/if}
 		<div
 			data-floating-sidebar-toolbar
-			class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0"
-			class:justify-start={toolbarAlignment === 'start'}
-			class:justify-end={toolbarAlignment === 'end'}
+			class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 justify-center"
 		>
 			<WorkspaceTaskBar
 				host="sidebar"
