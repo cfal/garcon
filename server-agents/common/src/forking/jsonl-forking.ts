@@ -17,12 +17,13 @@ import {
   jsonlSourceLineCount,
   JsonlSourcePrefixChangedError,
   snapshotJsonlSource,
+  type ForkJsonlRequest,
   type ForkTranscriptEntryContext,
 } from './fork-jsonl.js';
 
 export interface JsonlForkingOptions {
   readonly host: Pick<AgentHost, 'carryOver'>;
-  readonly supportsWhileRunning: boolean;
+  readonly supportsAtMessageWhileRunning: boolean;
   readonly transcript: Pick<AgentTranscript, 'load' | 'resolveNativeSession'>;
   readonly nativeSessions: PathNativeSessionCodec;
   readonly rewriteEntry?: (entry: unknown, context: ForkTranscriptEntryContext) => unknown;
@@ -31,12 +32,14 @@ export interface JsonlForkingOptions {
     context: ForkTranscriptEntryContext,
   ) => unknown;
   readonly forkWholeSession?: (request: AgentForkRequest) => Promise<AgentStartedSession | null>;
+  readonly transformEntries?: ForkJsonlRequest['transformEntries'];
+  readonly semanticDigest?: (messages: readonly ChatMessage[]) => string;
 }
 
 export function createJsonlForking(options: JsonlForkingOptions): AgentForking {
   return {
     supportsAtMessage: true,
-    supportsWhileRunning: options.supportsWhileRunning,
+    supportsAtMessageWhileRunning: options.supportsAtMessageWhileRunning,
     async fork(request) {
       request.admission.signal.throwIfAborted();
       if (!request.point && options.forkWholeSession) {
@@ -44,6 +47,12 @@ export function createJsonlForking(options: JsonlForkingOptions): AgentForking {
         if (result) return result;
       }
       return forkJsonlAtPoint(options, request);
+    },
+    async discard(session, signal) {
+      signal.throwIfAborted();
+      const native = options.nativeSessions.decode(session.nativeSession);
+      if (!native.path) return;
+      await fs.rm(native.path, { force: true });
     },
   };
 }
@@ -140,6 +149,7 @@ async function forkJsonlAtPoint(
     retainedMessageCounts,
     sourceSnapshot,
     rewriteEntry: options.createRewriteEntry?.() ?? options.rewriteEntry,
+    transformEntries: options.transformEntries,
   }).catch((error) => {
     if (error instanceof JsonlSourcePrefixChangedError) throw sourceRevisionChanged();
     throw error;
@@ -150,7 +160,8 @@ async function forkJsonlAtPoint(
       agentSessionId: result.agentSessionId,
       modelEndpointId: request.endpoint?.endpointId ?? sourceNative.modelEndpointId,
     });
-    if (request.point) {
+    const expectedDigest = result.expectedSemanticDigest ?? expectedForkDigest;
+    if (expectedDigest !== null) {
       const forked = await options.transcript.load({
         chat: {
           chatId: request.chatId,
@@ -164,7 +175,10 @@ async function forkJsonlAtPoint(
         },
         signal: request.admission.signal,
       });
-      if (forkTranscriptDigest(forked.messages) !== expectedForkDigest) {
+      const actualDigest = options.semanticDigest
+        ? options.semanticDigest(forked.messages)
+        : forkTranscriptDigest(forked.messages);
+      if (actualDigest !== expectedDigest) {
         throw new AgentIntegrationError(
           'TRANSCRIPT_UNAVAILABLE',
           'The provider-native fork did not preserve the selected message prefix',
@@ -174,7 +188,7 @@ async function forkJsonlAtPoint(
     }
     return { agentSessionId: result.agentSessionId, nativeSession };
   } catch (error) {
-    if (request.point) {
+    if (request.point || options.transformEntries) {
       await fs.rm(result.nativePath, { force: true }).catch(() => undefined);
     }
     throw error;

@@ -1,24 +1,23 @@
 interface ForkActionInput {
 	supportsFork: boolean;
-	supportsForkWhileRunning: boolean;
 	isProcessing: boolean;
 }
 
 interface ForkAtMessageActionInput {
 	supportsForkAtMessage: boolean;
-	supportsForkWhileRunning: boolean;
+	supportsForkAtMessageWhileRunning: boolean;
 	isProcessing: boolean;
 }
 
 function canForkInCurrentRunState(input: {
 	isProcessing: boolean;
-	supportsForkWhileRunning: boolean;
+	supportsForkAtMessageWhileRunning: boolean;
 }): boolean {
-	return !input.isProcessing || input.supportsForkWhileRunning;
+	return !input.isProcessing || input.supportsForkAtMessageWhileRunning;
 }
 
 export function canUseForkAction(input: ForkActionInput): boolean {
-	return input.supportsFork && canForkInCurrentRunState(input);
+	return input.supportsFork && !input.isProcessing;
 }
 
 export function canShowForkAtMessageAction(

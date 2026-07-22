@@ -151,6 +151,11 @@ export interface DirectTurnReservation {
   readonly executionAdmission: AgentExecutionAdmission;
 }
 
+export interface TranscriptSnapshotReservation {
+  readonly chatId: string;
+  readonly reservationId: string;
+}
+
 export interface AgentTurnRunnerPort {
   runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   submitActiveInput?(
@@ -249,6 +254,8 @@ export interface ChatExecutionCommands {
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<boolean>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
+  reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
+  releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void>;
   waitForDispatches(): Promise<void>;
   isChatExecutionReserved(chatId: string): boolean;
   hasChatExecutionOwner(chatId: string): boolean;

@@ -40,7 +40,7 @@ export interface AgentRegistryServiceContract {
   supportsAuthLoginCompletion(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
   supportsForkAtMessage(agentId: string): boolean;
-  supportsForkWhileRunning(agentId: string): boolean;
+  supportsForkAtMessageWhileRunning(agentId: string): boolean;
   supportsUpdateProjectPath(agentId: string): boolean;
   requiresNativePathForProjectPathUpdate(agentId: string): boolean;
   supportsImages(agentId: string): boolean;
@@ -56,6 +56,7 @@ export interface AgentRegistryServiceContract {
     targetChatId: string;
     messageSequence?: number;
   }): Promise<StartedAgentSession | null>;
+  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -152,7 +153,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
   supportsFork(agentId: string): boolean { return this.#directory.get(agentId)?.forking !== null; }
   supportsForkAtMessage(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessage ?? false; }
-  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsWhileRunning ?? false; }
+  supportsForkAtMessageWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessageWhileRunning ?? false; }
   supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string): boolean {
     return this.#directory.get(agentId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;
@@ -197,6 +198,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     messageSequence?: number;
   }) {
     return this.#runtime.forkAgentSession(args);
+  }
+  discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
+    return this.#runtime.discardForkedAgentSession(agentId, session);
   }
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch) {
     return this.#settings.updateSessionSettings(chatId, patch);

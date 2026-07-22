@@ -35,7 +35,7 @@ function setup(profile, nativeImplementation = async () => startedSession) {
   const resolveProfile = mock(async () => profile);
   return {
     forking: createCodexForking({
-      legacy: { supportsAtMessage: true, supportsWhileRunning: true, fork: legacyFork },
+      legacy: { supportsAtMessage: true, supportsAtMessageWhileRunning: true, fork: legacyFork },
       resolveProfile,
       forkPaginatedWhole,
     }),

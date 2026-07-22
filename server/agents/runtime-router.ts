@@ -358,67 +358,88 @@ export class AgentRuntimeRouter {
     targetChatId: string;
     messageSequence?: number;
   }): Promise<StartedAgentSession | null> {
-    const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
-    const integration = this.#directory.require(source.agentId);
-    if (!integration.forking) return null;
-    const selection = this.#endpointResolver.resolveSelection({
-      agentId: source.agentId,
-      model: source.model,
-      apiProviderId: source.apiProviderId,
-      modelEndpointId: source.modelEndpointId,
-    });
-    await this.#validateEndpoint(integration, selection);
-    const operation = operationIdentity({}, 'fork-run');
-    const sourceReference = toAgentChatReference(
-      integration,
-      args.sourceChatId,
-      source,
-      this.#getCarryOverRevision(args.sourceChatId),
-    );
-    const sourceSnapshot = args.messageSequence
-      ? await integration.transcript.load({
-          chat: sourceReference,
-          signal: new AbortController().signal,
-        })
-      : null;
-    const carryOverMessageCount = args.messageSequence
-      ? this.#loadCarryOver(args.sourceChatId, source).length
-      : 0;
-    if (args.messageSequence) {
-      const messageCount = carryOverMessageCount + (sourceSnapshot?.messages.length ?? 0);
-      if (args.messageSequence > messageCount) {
-        throw new Error(`Message not found for seq ${args.messageSequence}`);
-      }
+    if (
+      args.messageSequence !== undefined
+      && (!Number.isSafeInteger(args.messageSequence) || args.messageSequence <= 0)
+    ) {
+      throw new DomainError('VALIDATION_FAILED', 'messageSequence must be a positive safe integer', 400);
     }
-    const nativePrefixRevision = args.messageSequence
-      ? computeAgentTranscriptRevisions(
-          sourceSnapshot!.messages,
-          Math.max(0, args.messageSequence - carryOverMessageCount),
-        ).prefix
-      : null;
-    const result = await integration.forking.fork({
-      ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
-      source: sourceReference,
-      point: args.messageSequence ? {
-        messageSequence: args.messageSequence,
-        sourceRevision: {
-          nativePrefix: nativePrefixRevision!,
-          carryOver: sourceReference.carryOverRevision,
-        },
-      } : null,
-    }).catch((error) => {
+    try {
+      const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
+      const integration = this.#directory.require(source.agentId);
+      if (!integration.forking) return null;
+      const selection = this.#endpointResolver.resolveSelection({
+        agentId: source.agentId,
+        model: source.model,
+        apiProviderId: source.apiProviderId,
+        modelEndpointId: source.modelEndpointId,
+      });
+      await this.#validateEndpoint(integration, selection);
+      const operation = operationIdentity({}, 'fork-run');
+      const sourceReference = toAgentChatReference(
+        integration,
+        args.sourceChatId,
+        source,
+        this.#getCarryOverRevision(args.sourceChatId),
+      );
+      const sourceSnapshot = args.messageSequence
+        ? await integration.transcript.load({
+            chat: sourceReference,
+            signal: new AbortController().signal,
+          })
+        : null;
+      const carryOverMessageCount = args.messageSequence
+        ? this.#loadCarryOver(args.sourceChatId, source).length
+        : 0;
+      if (args.messageSequence) {
+        const messageCount = carryOverMessageCount + (sourceSnapshot?.messages.length ?? 0);
+        if (args.messageSequence > messageCount) {
+          throw new DomainError(
+            'TRANSCRIPT_UNAVAILABLE',
+            `Message not found for seq ${args.messageSequence}`,
+            422,
+          );
+        }
+      }
+      const nativePrefixRevision = args.messageSequence
+        ? computeAgentTranscriptRevisions(
+            sourceSnapshot!.messages,
+            Math.max(0, args.messageSequence - carryOverMessageCount),
+          ).prefix
+        : null;
+      const result = await integration.forking.fork({
+        ...this.#executionContext(args.targetChatId, source, selection, operation, {}),
+        source: sourceReference,
+        point: args.messageSequence ? {
+          messageSequence: args.messageSequence,
+          sourceRevision: {
+            nativePrefix: nativePrefixRevision!,
+            carryOver: sourceReference.carryOverRevision,
+          },
+        } : null,
+      });
+      return {
+        agentSessionId: result.agentSessionId,
+        nativeSession: result.nativeSession,
+      };
+    } catch (error) {
       if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {
         throw new DomainError('OPERATION_UNSUPPORTED', error.message, 422, error.retryable);
       }
       if (error instanceof AgentIntegrationError && error.code === 'SOURCE_REVISION_CHANGED') {
         throw new DomainError('SOURCE_REVISION_CHANGED', error.message, 409, error.retryable);
       }
+      if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
+        throw new DomainError('TRANSCRIPT_UNAVAILABLE', error.message, 422, error.retryable);
+      }
       throw error;
-    });
-    return {
-      agentSessionId: result.agentSessionId,
-      nativeSession: result.nativeSession,
-    };
+    }
+  }
+
+  async discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void> {
+    const forking = this.#directory.require(agentId).forking;
+    if (!forking) return;
+    await forking.discard(session, new AbortController().signal);
   }
 
   async runSingleQuery(

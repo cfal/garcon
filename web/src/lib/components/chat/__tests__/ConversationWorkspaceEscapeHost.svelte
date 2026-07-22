@@ -119,7 +119,7 @@
 		getPermissionModes: () => ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions'],
 		getThinkingModes: () => ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
 		supportsFork: () => true,
-		supportsForkWhileRunning: () => true,
+		supportsForkAtMessageWhileRunning: () => true,
 	} as never);
 
 	const chatInteractionGate = new ChatInteractionGate();

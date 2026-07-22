@@ -121,7 +121,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
     };
     this.forking = {
       supportsAtMessage: false,
-      supportsWhileRunning: false,
+      supportsAtMessageWhileRunning: false,
       async fork(request) {
         request.admission.signal.throwIfAborted();
         if (request.point) {
@@ -142,6 +142,10 @@ export default class CursorAgentIntegration implements AgentIntegration {
             modelEndpointId: null,
           }),
         };
+      },
+      // Cursor exposes no safe API for deleting an uncommitted fork.
+      async discard(_session, signal) {
+        signal.throwIfAborted();
       },
     };
     this.singleQuery = {

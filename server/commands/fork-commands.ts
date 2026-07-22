@@ -5,8 +5,11 @@ import type {
   ForkRunCommandResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
+import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { rollbackForkTarget, type ForkChatFileCopyResult } from '../chats/fork-chat.js';
-import { commandLedgerKey } from './command-ledger.js';
+import { isDomainError } from '../lib/domain-error.js';
+import { createLogger } from '../lib/log.js';
+import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -15,6 +18,8 @@ import {
   type NormalizedSubmitForkRunInput,
   type SubmitForkRunInput,
 } from './command-support.js';
+
+const logger = createLogger('commands:fork');
 
 interface ForkContext {
   sourceChatId: string;
@@ -39,8 +44,14 @@ export class ForkCommands {
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
       const context = this.validateFork(normalized);
-      await this.forkChatFromContext(context);
-      return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
+      if (context.upToSeq !== undefined) {
+        await this.forkChatFromContext(context);
+        return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
+      }
+      return this.withSettledSourceSnapshot(context, async () => {
+        await this.forkChatFromContext(context);
+        return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
+      });
     });
   }
 
@@ -67,26 +78,25 @@ export class ForkCommands {
     const turnId = crypto.randomUUID();
     const ledgerKey = commandLedgerKey('fork-run', input.chatId, clientRequestId);
     const priorRecord = await this.deps.ledger.getRecord(ledgerKey);
-    let forkContext: ForkContext | null = null;
-    if (!priorRecord) forkContext = this.validateFork(input);
-    const ledger = await this.deps.ledger.accept({
+    const ledgerInput = {
       commandType: 'fork-run',
       chatId: input.chatId,
       clientRequestId,
       payload: forkPayload(input, clientMessageId),
       turnId,
-    });
+    } as const;
 
-    if (ledger.kind === 'conflict') {
-      throw new CommandValidationError(
-        'IDEMPOTENCY_CONFLICT',
-        'clientRequestId was reused with different payload',
-        409,
-      );
-    }
-    const recoveringAcceptedCommand = ledger.kind === 'duplicate'
-      && ledger.record.status === 'accepted';
-    if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+    const retryingPreScheduleFailure = priorRecord?.status === 'failed'
+      && priorRecord.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE;
+    if (priorRecord && priorRecord.status !== 'accepted' && !retryingPreScheduleFailure) {
+      const ledger = await this.deps.ledger.accept(ledgerInput);
+      if (ledger.kind === 'conflict') {
+        throw new CommandValidationError(
+          'IDEMPOTENCY_CONFLICT',
+          'clientRequestId was reused with different payload',
+          409,
+        );
+      }
       this.support.throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
@@ -94,54 +104,86 @@ export class ForkCommands {
       };
     }
 
-    const resolvedForkContext = forkContext ?? this.validateFork(input);
-    let forkResult: ForkChatFileCopyResult | null = null;
-    const result = await this.support.scheduleAcceptedHttpRun(ledger, input, {
-      clientRequestId,
-      clientMessageId,
-      turnId,
-    }, 'fork-run', {
-      operation: 'fork-run',
-      prepare: async () => {
-        await this.deps.ledger.update(ledger.record.key, {
-          forkPreparation: {
-            phase: 'creating',
-            sourceChatId: resolvedForkContext.sourceChatId,
-            sourceNextForkOrdinal: resolvedForkContext.sourceNextForkOrdinal,
-          },
-        });
-        forkResult = await this.forkChatFromContext(resolvedForkContext);
-        await this.deps.ledger.update(ledger.record.key, {
-          forkPreparation: {
-            phase: 'created',
-            sourceChatId: resolvedForkContext.sourceChatId,
-            sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
-          },
-        });
-      },
-      compensate: async () => {
-        if (forkResult) {
-          await forkResult.rollback();
-        } else {
-          await rollbackForkTarget({
-            sourceChatId: resolvedForkContext.sourceChatId,
-            targetChatId: resolvedForkContext.targetChatId,
-            registry: this.deps.chats,
-            settings: this.deps.settings,
-            ownership: this.deps.ownership,
-            sourceNextForkOrdinal: resolvedForkContext.sourceNextForkOrdinal,
+    const preparedFork = priorRecord?.forkPreparation;
+    const forkAlreadyCreated = preparedFork !== undefined
+      && this.deps.chats.getChat(input.chatId) !== null;
+    const forkContext = this.validateFork(input, { allowExistingTarget: forkAlreadyCreated });
+    if (preparedFork?.sourceNextForkOrdinal !== undefined) {
+      forkContext.sourceNextForkOrdinal = preparedFork.sourceNextForkOrdinal;
+    }
+
+    const submit = async (releaseSourceSnapshot?: () => Promise<void>) => {
+      const ledger = await this.deps.ledger.accept(ledgerInput);
+
+      if (ledger.kind === 'conflict') {
+        throw new CommandValidationError(
+          'IDEMPOTENCY_CONFLICT',
+          'clientRequestId was reused with different payload',
+          409,
+        );
+      }
+      const recoveringAcceptedCommand = ledger.kind === 'duplicate'
+        && ledger.record.status === 'accepted';
+      if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+        this.support.throwRecordedExecutionFailure(ledger.record);
+        return {
+          ...commandResultFromRecord(ledger.record, 'duplicate'),
+          chat: await this.support.projectCommandChat(ledger.record.chatId),
+        };
+      }
+
+      let forkResult: ForkChatFileCopyResult | null = null;
+      const result = await this.support.scheduleAcceptedHttpRun(ledger, input, {
+        clientRequestId,
+        clientMessageId,
+        turnId,
+      }, 'fork-run', {
+        operation: 'fork-run',
+        prepare: async () => {
+          if (forkAlreadyCreated) return;
+          await this.deps.ledger.update(ledger.record.key, {
+            forkPreparation: {
+              phase: 'creating',
+              sourceChatId: forkContext.sourceChatId,
+              sourceNextForkOrdinal: forkContext.sourceNextForkOrdinal,
+            },
           });
-        }
-        forkResult = null;
-      },
-    });
-    return { ...result, chat: await this.support.projectCommandChat(input.chatId) };
+          forkResult = await this.forkChatFromContext(forkContext);
+          await this.deps.ledger.update(ledger.record.key, {
+            forkPreparation: {
+              phase: 'created',
+              sourceChatId: forkContext.sourceChatId,
+              sourceNextForkOrdinal: forkResult.sourceNextForkOrdinal,
+            },
+          });
+          await releaseSourceSnapshot?.();
+        },
+        compensate: async () => {
+          if (forkResult) {
+            await forkResult.rollback();
+          } else {
+            await this.rollbackPreparedFork(forkContext);
+          }
+          forkResult = null;
+        },
+      });
+      return { ...result, chat: await this.support.projectCommandChat(input.chatId) };
+    };
+
+    return forkAlreadyCreated ? submit() : this.withSettledSourceSnapshot(forkContext, submit);
   }
 
-  private validateFork(input: ForkChatCommandRequest): ForkContext {
+  private validateFork(
+    input: ForkChatCommandRequest,
+    options: { allowExistingTarget?: boolean } = {},
+  ): ForkContext {
     const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
     const targetChatId = this.support.requireChatId(input.chatId);
     const upToSeq = input.upToSeq;
+
+    if (upToSeq !== undefined && (!Number.isSafeInteger(upToSeq) || upToSeq <= 0)) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'upToSeq must be a positive safe integer');
+    }
 
     if (sourceChatId === targetChatId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'sourceChatId and chatId must differ');
@@ -168,13 +210,18 @@ export class ForkCommands {
         422,
       );
     }
-    if (
-      this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
-      && !this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)
-    ) {
-      throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
+    if (upToSeq !== undefined) {
+      if (this.deps.queue.hasChatExecutionOwner(sourceChatId) && !sourceSession.agentSessionId) {
+        throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is materializing', 409, true);
+      }
+      if (
+        this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
+        && !this.deps.agents.supportsForkAtMessageWhileRunning(sourceSession.agentId)
+      ) {
+        throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
+      }
     }
-    if (this.deps.chats.getChat(targetChatId)) {
+    if (!options.allowExistingTarget && this.deps.chats.getChat(targetChatId)) {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);
     }
 
@@ -185,6 +232,90 @@ export class ForkCommands {
       sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
       ...(upToSeq ? { upToSeq } : {}),
     };
+  }
+
+  private async withSettledSourceSnapshot<T>(
+    context: ForkContext,
+    operation: (release: () => Promise<void>) => Promise<T>,
+  ): Promise<T> {
+    let reservation: TranscriptSnapshotReservation | null = null;
+    let failure: unknown = null;
+    const release = async () => {
+      if (!reservation) return;
+      const current = reservation;
+      await this.deps.queue.releaseTranscriptSnapshot(current);
+      reservation = null;
+    };
+    try {
+      reservation = this.deps.queue.reserveTranscriptSnapshot(context.sourceChatId);
+      await this.deps.pendingInputs.reconcileNativeHistory(context.sourceChatId);
+      if (this.deps.pendingInputs.hasInFlightForChat(context.sourceChatId)) {
+        throw new CommandValidationError(
+          'SESSION_BUSY',
+          'Cannot fork until the accepted turn is persisted',
+          409,
+          true,
+        );
+      }
+      return await operation(release);
+    } catch (error) {
+      failure = error;
+      if (
+        (error instanceof CommandValidationError || isDomainError(error))
+        && error.code === 'SESSION_BUSY'
+      ) {
+        logger.info('fork deferred for source settlement', {
+          sourceChatId: context.sourceChatId,
+          agentId: context.sourceSession.agentId,
+          errorCode: error.code,
+        });
+      }
+      throw error;
+    } finally {
+      if (reservation) {
+        try {
+          await release();
+        } catch (releaseError) {
+          if (failure !== null) {
+            throw new AggregateError(
+              [failure, releaseError],
+              `Failed to release transcript snapshot for ${context.sourceChatId}`,
+            );
+          }
+          throw releaseError;
+        }
+      }
+    }
+  }
+
+  private async rollbackPreparedFork(context: ForkContext): Promise<void> {
+    const target = this.deps.chats.getChat(context.targetChatId);
+    const failures: unknown[] = [];
+    try {
+      await rollbackForkTarget({
+        sourceChatId: context.sourceChatId,
+        targetChatId: context.targetChatId,
+        registry: this.deps.chats,
+        settings: this.deps.settings,
+        ownership: this.deps.ownership,
+        sourceNextForkOrdinal: context.sourceNextForkOrdinal,
+      });
+    } catch (error) {
+      failures.push(error);
+    }
+    if (target?.agentSessionId) {
+      try {
+        await this.deps.agents.discardForkedAgentSession(target.agentId, {
+          agentSessionId: target.agentSessionId,
+          nativeSession: target.nativeSession,
+        });
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `Failed to roll back fork ${context.targetChatId}`);
+    }
   }
 
   private async forkChatFromContext(context: ForkContext): Promise<ForkChatFileCopyResult> {
@@ -203,6 +334,7 @@ export class ForkCommands {
       carryOver: this.deps.carryOver,
       ownership: this.deps.ownership,
       forkAgentSession: this.deps.agents.forkAgentSession.bind(this.deps.agents),
+      discardForkedAgentSession: this.deps.agents.discardForkedAgentSession.bind(this.deps.agents),
     });
   }
 }

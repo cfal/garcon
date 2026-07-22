@@ -31,6 +31,12 @@ export interface CarryOverSegment {
   boundaryTarget?: { agentId: string; model: string };
 }
 
+export interface CarryOverForkStage {
+  readonly sourceRenderedMessageCount: number;
+  readonly selectedRenderedMessageCount: number;
+  readonly staged: boolean;
+}
+
 interface CarryOverChatEntry {
   revision: number;
   segments: readonly CarryOverSegment[];
@@ -177,9 +183,23 @@ export class ChatCarryOverStore {
     ownerId: string;
     ownerModel: string;
     upToSequence?: number;
-  }): Promise<void> {
+  }): Promise<CarryOverForkStage> {
     const source = this.#activeEntry(String(input.sourceChatId));
-    if (!source || source.segments.length === 0) return;
+    const rendered = source
+      ? renderCarriedTranscript(source.segments, {
+          agentId: input.ownerId,
+          model: input.ownerModel,
+        })
+      : [];
+    const selectedRenderedMessageCount = input.upToSequence === undefined
+      ? rendered.length
+      : Math.min(input.upToSequence, rendered.length);
+    const result = {
+      sourceRenderedMessageCount: rendered.length,
+      selectedRenderedMessageCount,
+      staged: false,
+    };
+    if (!source || source.segments.length === 0) return result;
     const targetKey = String(input.targetChatId);
     const target = this.#entriesByChatId.get(targetKey) ?? { revision: 0, segments: [] };
     if (target.staged && target.staged.targetEpoch !== input.targetEpoch) {
@@ -190,7 +210,7 @@ export class ChatCarryOverStore {
       input.upToSequence,
       { agentId: input.ownerId, model: input.ownerModel },
     );
-    if (segments.length === 0) return;
+    if (segments.length === 0) return result;
     this.#entriesByChatId.set(targetKey, {
       ...target,
       staged: {
@@ -201,6 +221,7 @@ export class ChatCarryOverStore {
       },
     });
     await this.flush();
+    return { ...result, staged: true };
   }
 
   async promoteStaged(chatId: string, targetEpoch: string): Promise<void> {

@@ -160,13 +160,18 @@ describe('chat-carryover-store', () => {
     ));
     store.appendSegment('source', segment('beta', 'model-b', new UserMessage(ts, 'third')));
 
-    await store.stageFork({
+    const stage = await store.stageFork({
       sourceChatId: 'source',
       targetChatId: 'target',
       targetEpoch: 'target-epoch',
       ownerId: 'gamma',
       ownerModel: 'model-c',
       upToSequence: 3,
+    });
+    expect(stage).toEqual({
+      sourceRenderedMessageCount: 5,
+      selectedRenderedMessageCount: 3,
+      staged: true,
     });
     expect(store.getMessages('target')).toEqual([]);
 
@@ -202,13 +207,18 @@ describe('chat-carryover-store', () => {
       new AssistantMessage(ts, 'second'),
     ));
 
-    await store.stageFork({
+    const stage = await store.stageFork({
       sourceChatId: 'source',
       targetChatId: 'target',
       targetEpoch: 'target-epoch',
       ownerId: 'alpha',
       ownerModel: 'model-a',
       upToSequence: 1,
+    });
+    expect(stage).toEqual({
+      sourceRenderedMessageCount: 3,
+      selectedRenderedMessageCount: 1,
+      staged: true,
     });
     chats.set('target', { agentId: 'alpha', agentOwnershipEpoch: 'target-epoch' });
     expect(renderCarriedTranscript(store.getSegments('target'), {

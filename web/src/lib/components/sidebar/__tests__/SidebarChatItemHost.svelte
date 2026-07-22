@@ -20,7 +20,7 @@
 		onMoveToBottom?: () => void;
 		onForkChat?: (sourceChatId: string) => void;
 		supportsFork?: boolean;
-		supportsForkWhileRunning?: boolean;
+		supportsForkAtMessageWhileRunning?: boolean;
 	}
 
 	let {
@@ -44,7 +44,7 @@
 		onMoveToBottom,
 		onForkChat = () => {},
 		supportsFork = true,
-		supportsForkWhileRunning = false,
+		supportsForkAtMessageWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
 
 	setAppShell({
@@ -57,8 +57,8 @@
 		supportsFork() {
 			return supportsFork;
 		},
-		supportsForkWhileRunning() {
-			return supportsForkWhileRunning;
+		supportsForkAtMessageWhileRunning() {
+			return supportsForkAtMessageWhileRunning;
 		},
 		supportsUpdateProjectPath() {
 			return true;

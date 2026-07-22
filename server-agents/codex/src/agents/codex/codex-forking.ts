@@ -18,7 +18,7 @@ export interface CodexForkingOptions {
 export function createCodexForking(options: CodexForkingOptions): AgentForking {
   return {
     supportsAtMessage: true,
-    supportsWhileRunning: options.legacy.supportsWhileRunning,
+    supportsAtMessageWhileRunning: options.legacy.supportsAtMessageWhileRunning,
     async fork(request) {
       request.admission.signal.throwIfAborted();
       const profile = await options.resolveProfile(request);
@@ -33,6 +33,9 @@ export function createCodexForking(options: CodexForkingOptions): AgentForking {
         if (isUnsupportedPaginatedFork(error)) throw paginatedForkUnsupported('fork');
         throw error;
       }
+    },
+    discard(session, signal) {
+      return options.legacy.discard(session, signal);
     },
   };
 }

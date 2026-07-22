@@ -53,6 +53,7 @@ import {
   type SessionStopRequestedCallback,
   type SessionStoppedCallback,
   type StopActiveTurnResult,
+  type TranscriptSnapshotReservation,
   type TurnFailedCallback,
   type TurnSettledCallback,
 } from './types.ts';
@@ -72,6 +73,7 @@ export {
   type ChatExecutionQueries,
   type DirectTurnReservation,
   type StopActiveTurnResult,
+  type TranscriptSnapshotReservation,
 } from './types.ts';
 
 const logger = createLogger('queue');
@@ -482,6 +484,24 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     await this.#finishDirect(reservation, 'released');
   }
 
+  reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation {
+    if (this.#shuttingDown) {
+      throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
+    }
+    if (this.#ownership.hasOwner(chatId) || this.#turnRunner.isChatRunning(chatId)) {
+      throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
+    }
+    return this.#ownership.reserveTranscriptSnapshot(chatId);
+  }
+
+  async releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void> {
+    this.#ownership.releaseTranscriptSnapshot(reservation);
+    const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
+    this.#ownership.notifyOwnersChanged();
+    if (!drainRequested || !this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
+    await this.triggerDrain(reservation.chatId);
+  }
+
   async completeDirectTurn(reservation: DirectTurnReservation): Promise<void> {
     await this.#finishDirect(reservation, 'completed');
   }
@@ -532,7 +552,11 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   async triggerDrain(chatId: string): Promise<void> {
     if (this.#shuttingDown) return;
-    if (this.#ownership.hasDirect(chatId) || this.#ownership.isDraining(chatId)) {
+    if (
+      this.#ownership.hasDirect(chatId)
+      || this.#ownership.hasTranscriptSnapshot(chatId)
+      || this.#ownership.isDraining(chatId)
+    ) {
       this.#ownership.requestDrain(chatId);
       return;
     }
@@ -550,6 +574,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       this.#shuttingDown
       || this.#ownership.isDraining(chatId)
       || this.#ownership.hasDirect(chatId)
+      || this.#ownership.hasTranscriptSnapshot(chatId)
       || this.#isDrainSuppressed(chatId)
       || this.#ownership.stop(chatId) !== undefined
     ) return;

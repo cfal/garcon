@@ -42,7 +42,7 @@ export interface AgentCatalogEntry {
   kind: "agent";
   supportsFork: boolean;
   supportsForkAtMessage: boolean;
-  supportsForkWhileRunning: boolean;
+  supportsForkAtMessageWhileRunning: boolean;
   supportsUpdateProjectPath: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;

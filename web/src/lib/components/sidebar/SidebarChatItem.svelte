@@ -153,7 +153,6 @@
 	const canForkNow = $derived(
 		canUseForkAction({
 			supportsFork: canFork,
-			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentId),
 			isProcessing,
 		}),
 	);

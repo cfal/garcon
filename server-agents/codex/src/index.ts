@@ -145,7 +145,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
     };
     const legacyForking = createJsonlForking({
       host,
-      supportsWhileRunning: true,
+      supportsAtMessageWhileRunning: true,
       transcript: this.transcript,
       nativeSessions,
       createRewriteEntry: createCodexForkTranscriptRewriter,

@@ -58,7 +58,7 @@
 		supportsForkAtMessage() {
 			return false;
 		},
-		supportsForkWhileRunning() {
+		supportsForkAtMessageWhileRunning() {
 			return false;
 		},
 	} as never);
