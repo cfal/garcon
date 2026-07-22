@@ -63,7 +63,7 @@ export function parseNameStatusZ(output: string, stats: NumstatMap): ParsedDiffF
       ...(fileStats.isBinary ? { isBinary: true } : {}),
     });
   }
-  return files;
+	return files;
 }
 
 export function parseCompareFilesZ(output: string, stats: NumstatMap): GitCompareFile[] {

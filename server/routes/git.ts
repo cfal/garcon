@@ -27,6 +27,7 @@ import {
 import { createLogger } from '../lib/log.js';
 import { jsonError } from '../lib/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
+import { createGitComparisonRoutes } from './git-comparisons.js';
 
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
@@ -572,19 +573,19 @@ export default function createGitRoutes(
     });
   }
 
-  async function postWorkbenchFingerprint(body: JsonBody, request: Request): Promise<Response> {
+  async function postWorkingTreeFingerprint(body: JsonBody, request: Request): Promise<Response> {
     const project = requiredProjectFromBody(asJsonBody(body));
     if (project instanceof Response) return project;
 
     return gitJson(git, async () => {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
-      const result = await git.getWorkbenchFingerprint({
+      const result = await git.getWorkingTreeFingerprint({
         projectPath: project,
         trace,
         signal: request.signal,
       });
-      return traceJsonResponse('workbench-fingerprint', startedAt, trace, result);
+      return traceJsonResponse('working-tree-fingerprint', startedAt, trace, result);
     });
   }
 
@@ -931,14 +932,20 @@ export default function createGitRoutes(
   }
 
   async function getCompare(request: Request, url: URL): Promise<Response> {
-    const input = requiredQueryStrings(url, ['project', 'base', 'head'], 'Missing required parameters: project, base, and head.');
+    const input = requiredQueryStrings(
+      url,
+      ['project', 'base', 'head'],
+      'Missing required parameters: project, base, and head.',
+    );
     if (input instanceof Response) return input;
-    return gitJson(git, () => git.getCompare({
-      projectPath: input.project,
-      base: input.base,
-      head: input.head,
-      signal: request.signal,
-    }));
+    return gitJson(git, () =>
+      git.getCompare({
+        projectPath: input.project,
+        base: input.base,
+        head: input.head,
+        signal: request.signal,
+      }),
+    );
   }
 
   return {
@@ -954,6 +961,7 @@ export default function createGitRoutes(
     '/api/v1/git/history/commits': { POST: withJsonBody(postHistoryCommits) },
     '/api/v1/git/history/commit/snapshot': { POST: withJsonBody(postCommitSnapshot) },
     '/api/v1/git/history/commit/files': { POST: withJsonBody(postCommitFiles) },
+    ...createGitComparisonRoutes(git),
     '/api/v1/git/generate-commit-message': { POST: withJsonBody(postGenerateCommitMessage) },
     '/api/v1/git/remote-status': { GET: getRemoteStatus },
     '/api/v1/git/fetch': { POST: withJsonBody(postFetch) },
@@ -963,7 +971,8 @@ export default function createGitRoutes(
     '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
     '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
     '/api/v1/git/workbench/snapshot': { POST: withJsonBody(postWorkbenchSnapshot) },
-    '/api/v1/git/workbench/fingerprint': { POST: withJsonBody(postWorkbenchFingerprint) },
+    '/api/v1/git/workbench/fingerprint': { POST: withJsonBody(postWorkingTreeFingerprint) },
+    '/api/v1/git/working-tree/fingerprint': { POST: withJsonBody(postWorkingTreeFingerprint) },
     '/api/v1/git/quick-summary': { POST: withJsonBody(postQuickSummary) },
     '/api/v1/git/review-document/files': { POST: withJsonBody(postReviewDocumentFiles) },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },

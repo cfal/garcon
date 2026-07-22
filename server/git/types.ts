@@ -75,7 +75,7 @@ export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
   bodyConcurrency: 4,
 });
 
-export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
+export const GIT_WORKING_TREE_FINGERPRINT_VERSION = 1;
 export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
 
 export interface DiffStats {
@@ -364,6 +364,8 @@ export interface GitReviewFileBody {
   category: GitFileReviewCategory;
   isBinary: boolean;
   isTooLarge: boolean;
+  renderedRowCount: number;
+  patchBytes: number;
   rows: GitRenderedDiffRow[];
   hunks: GitRenderedHunk[];
   limitReason?: GitReviewLimitReason;
@@ -499,6 +501,136 @@ export interface GitCommitFileBodiesResponse {
   errors: Record<string, string>;
 }
 
+export type GitComparisonMode = 'direct' | 'merge-base';
+
+export interface GitComparisonRevisionEndpoint {
+  kind: 'revision';
+  revision: string;
+}
+
+export interface GitComparisonWorkingTreeEndpoint {
+  kind: 'working-tree';
+}
+
+export type GitComparisonFromEndpoint = GitComparisonRevisionEndpoint;
+export type GitComparisonToEndpoint = GitComparisonRevisionEndpoint | GitComparisonWorkingTreeEndpoint;
+
+export interface GitResolvedComparisonRevision {
+  kind: 'revision';
+  requestedRevision: string;
+  label: string;
+  hash: string;
+  shortHash: string;
+}
+
+export interface GitResolvedComparisonWorkingTree {
+  kind: 'working-tree';
+  label: string;
+  branch: string;
+  headHash: string | null;
+  fingerprint: string;
+  shortFingerprint: string;
+}
+
+export type GitResolvedComparisonTo =
+  | GitResolvedComparisonRevision
+  | GitResolvedComparisonWorkingTree;
+
+export interface GitComparisonSnapshotReady {
+  status: 'ready';
+  project: string;
+  repoRoot: string;
+  documentId: string;
+  mode: GitComparisonMode;
+  from: GitResolvedComparisonRevision;
+  to: GitResolvedComparisonTo;
+  effectiveFromHash: string;
+  mergeBaseHash?: string;
+  files: GitCommitFileSummary[];
+  limits: GitReviewDocumentLimits;
+  collectionLimit?: GitReviewCollectionLimit;
+  firstBodyCandidates: string[];
+}
+
+export interface GitComparisonSnapshotNotFound {
+  status: 'not-found';
+  project: string;
+  endpoint: 'from' | 'to';
+  revision: string;
+  message: string;
+}
+
+export interface GitComparisonSnapshotNoMergeBase {
+  status: 'no-merge-base';
+  project: string;
+  from: GitResolvedComparisonRevision;
+  to: GitResolvedComparisonRevision;
+  message: string;
+}
+
+export interface GitComparisonSnapshotWorkingTreeChanging {
+  status: 'working-tree-changing';
+  project: string;
+  message: string;
+}
+
+export type GitComparisonSnapshotResponse =
+  | GitComparisonSnapshotReady
+  | GitComparisonSnapshotNotFound
+  | GitComparisonSnapshotNoMergeBase
+  | GitComparisonSnapshotWorkingTreeChanging;
+
+export interface GitComparisonSnapshotOptions extends ProjectOptions {
+  from: GitComparisonFromEndpoint;
+  to: GitComparisonToEndpoint;
+  mode: GitComparisonMode;
+  context?: number;
+  bodyCandidateCount?: number;
+}
+
+export interface GitComparisonFileRequest {
+  path: string;
+  originalPath?: string;
+}
+
+export interface GitComparisonRevisionBodyTarget {
+  kind: 'revision';
+  hash: string;
+}
+
+export interface GitComparisonWorkingTreeBodyTarget {
+  kind: 'working-tree';
+  fingerprint: string;
+}
+
+export type GitComparisonBodyTarget =
+  | GitComparisonRevisionBodyTarget
+  | GitComparisonWorkingTreeBodyTarget;
+
+export interface GitComparisonFileBodiesOptions extends ProjectOptions {
+  documentId: string;
+  effectiveFromHash: string;
+  to: GitComparisonBodyTarget;
+  context?: number;
+  files: GitComparisonFileRequest[];
+}
+
+export interface GitComparisonFileBodiesReady extends GitReviewFileBodiesResponse {
+  status: 'ready';
+}
+
+export interface GitComparisonFileBodiesStale {
+  status: 'stale';
+  documentId: string;
+  expectedFingerprint: string;
+  actualFingerprint: string | null;
+  message: string;
+}
+
+export type GitComparisonFileBodiesResponse =
+  | GitComparisonFileBodiesReady
+  | GitComparisonFileBodiesStale;
+
 export interface GitWorkbenchSnapshotTarget {
   projectPath: string;
   repoRoot: string;
@@ -542,36 +674,36 @@ export interface GitWorkbenchSnapshotOptions extends ProjectOptions {
   bodyCandidateCount?: number;
 }
 
-export type GitWorkbenchFingerprintResponse =
-  | GitWorkbenchFingerprintReady
-  | GitWorkbenchFingerprintNotRepository
-  | GitWorkbenchFingerprintUnknown;
+export type GitWorkingTreeFingerprintResponse =
+  | GitWorkingTreeFingerprintReady
+  | GitWorkingTreeFingerprintNotRepository
+  | GitWorkingTreeFingerprintUnknown;
 
-export interface GitWorkbenchFingerprintReady {
+export interface GitWorkingTreeFingerprintReady {
   status: 'ready';
   project: string;
-  fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+  fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
   fingerprint: string;
   changedPathCount: number;
 }
 
-export interface GitWorkbenchFingerprintNotRepository {
+export interface GitWorkingTreeFingerprintNotRepository {
   status: 'not-git-repository';
   project: string;
-  fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+  fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
   fingerprint: null;
   message: string;
 }
 
-export interface GitWorkbenchFingerprintUnknown {
+export interface GitWorkingTreeFingerprintUnknown {
   status: 'unknown';
   project: string;
-  fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+  fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
   fingerprint: null;
   message: string;
 }
 
-export interface GitWorkbenchFingerprintOptions extends ProjectOptions {
+export interface GitWorkingTreeFingerprintOptions extends ProjectOptions {
   trace?: GitCommandTrace[];
   signal?: AbortSignal;
 }
@@ -759,7 +891,6 @@ export interface CompareOptions extends ProjectOptions {
   base: string;
   head: string;
 }
-
 export interface RemoteInfo {
   name: string;
   url: string;
@@ -809,12 +940,14 @@ export interface GitService {
   discard(options: FileOptions): Promise<unknown>;
   deleteUntracked(options: FileOptions): Promise<unknown>;
   getWorkbenchSnapshot(options: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse>;
-  getWorkbenchFingerprint(options: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse>;
+  getWorkingTreeFingerprint(options: GitWorkingTreeFingerprintOptions): Promise<GitWorkingTreeFingerprintResponse>;
   getQuickSummary(options: GitQuickSummaryOptions): Promise<GitQuickSummaryResponse>;
   getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
   getHistoryCommits(options: GitHistoryCommitListOptions): Promise<GitHistoryCommitListResponse>;
   getCommitSnapshot(options: GitCommitSnapshotOptions): Promise<GitCommitSnapshotResponse>;
   getCommitFileBodies(options: GitCommitFileBodiesOptions): Promise<GitCommitFileBodiesResponse>;
+  getComparisonSnapshot(options: GitComparisonSnapshotOptions): Promise<GitComparisonSnapshotResponse>;
+  getComparisonFileBodies(options: GitComparisonFileBodiesOptions): Promise<GitComparisonFileBodiesResponse>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;
   stageHunk(options: StageHunkOptions): Promise<unknown>;
   getConflicts(options: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }>;

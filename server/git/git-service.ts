@@ -5,6 +5,7 @@ import {
 } from './commit-message.js';
 import { createDiffEngine } from './diff-engine.js';
 import { createCommitHistoryOperations } from './commit-history.js';
+import { createComparisonOperations } from './comparison.js';
 import { createPorcelainOperations } from './porcelain.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
@@ -41,6 +42,7 @@ export function createGitService({ agents, classifyGitError }: CreateGitServiceO
   const status = createStatusOperations(agents);
   const diff = createDiffEngine();
   const commitHistory = createCommitHistoryOperations();
+  const comparison = createComparisonOperations();
   const porcelain = createPorcelainOperations();
   const worktrees = createWorktreeOperations();
   const quickSummary = createQuickSummaryOperations();
@@ -49,6 +51,7 @@ export function createGitService({ agents, classifyGitError }: CreateGitServiceO
     ...status,
     ...diff,
     ...commitHistory,
+    ...comparison,
     ...porcelain,
     ...worktrees,
     ...quickSummary,

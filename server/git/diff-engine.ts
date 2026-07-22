@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
-  GIT_WORKBENCH_FINGERPRINT_VERSION,
+  GIT_WORKING_TREE_FINGERPRINT_VERSION,
 } from './types.js';
 import { GitDomainError } from './git-types.js';
 import type {
@@ -16,8 +16,8 @@ import type {
   GitReviewFileBodiesResponse,
   GitReviewFileBody,
   GitReviewFileSummary,
-  GitWorkbenchFingerprintOptions,
-  GitWorkbenchFingerprintResponse,
+  GitWorkingTreeFingerprintOptions,
+  GitWorkingTreeFingerprintResponse,
   GitWorkbenchSnapshotOptions,
   GitWorkbenchSnapshotResponse,
   GitReviewMode,
@@ -60,6 +60,7 @@ import {
   parsePorcelainV1Z,
 } from './porcelain-status.js';
 import { chunkGitPathspecs } from './pathspecs.js';
+import { buildFullFileAddedPatch } from './full-file-patch.js';
 import { mapWithConcurrency, mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 function buildFacet(
@@ -228,11 +229,6 @@ function buildTreeFromChangeEntries(
   }
 
   return { root: mapTreeToArray(rootMap), hasCommits, statsState };
-}
-
-function buildFullFileAddedPatch(contentAfter: string): string {
-  const lines = contentAfter.split('\n');
-  return `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
 }
 
 function buildFullFileDeletedPatch(contentBefore: string | null): string {
@@ -657,8 +653,8 @@ async function buildWorkbenchFingerprintFromInputs({
     loadFingerprintWorktreeStats(projectPath, statusEntries),
   ]);
 
-  const fingerprint = `v${GIT_WORKBENCH_FINGERPRINT_VERSION}:${hashString([
-    `git-workbench-fingerprint-v${GIT_WORKBENCH_FINGERPRINT_VERSION}`,
+  const fingerprint = `v${GIT_WORKING_TREE_FINGERPRINT_VERSION}:${hashString([
+		`git-working-tree-fingerprint-v${GIT_WORKING_TREE_FINGERPRINT_VERSION}`,
     projectPath,
     repoRoot,
     branch,
@@ -1099,21 +1095,21 @@ function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotRespons
   };
 }
 
-function notRepositoryFingerprint(projectPath: string): GitWorkbenchFingerprintResponse {
+function notRepositoryFingerprint(projectPath: string): GitWorkingTreeFingerprintResponse {
   return {
     status: 'not-git-repository',
     project: projectPath,
-    fingerprintVersion: GIT_WORKBENCH_FINGERPRINT_VERSION,
+    fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
     fingerprint: null,
     message: 'Git is not initialized in this directory.',
   };
 }
 
-async function getWorkbenchFingerprint({
+export async function getWorkingTreeFingerprint({
   projectPath,
   trace,
   signal,
-}: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse> {
+}: GitWorkingTreeFingerprintOptions): Promise<GitWorkingTreeFingerprintResponse> {
   try {
     await fs.access(projectPath);
   } catch {
@@ -1171,7 +1167,7 @@ async function getWorkbenchFingerprint({
   return {
     status: 'ready',
     project: projectPath,
-    fingerprintVersion: GIT_WORKBENCH_FINGERPRINT_VERSION,
+    fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
     fingerprint,
     changedPathCount,
   };
@@ -1468,7 +1464,7 @@ async function stageHunk({
 export function createDiffEngine() {
   return {
     getWorkbenchSnapshot,
-    getWorkbenchFingerprint,
+    getWorkingTreeFingerprint,
     getReviewFileBodies,
     stageSelection,
     stageHunk,

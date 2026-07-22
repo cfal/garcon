@@ -412,13 +412,8 @@ async function getCommitFileBodies({
       const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
       parsedFiles[file] = limitedRenderedPatch(file, fingerprint, stdout);
     } catch (error) {
-      const fingerprint = hashString([
-        'commit-body-error',
-        details.hash,
-        selectedParent ?? EMPTY_TREE,
-        context,
-        file,
-      ].join('\x1f'));
+      if (signal?.aborted) throw error;
+      const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
       parsedFiles[file] = errorFileBody(file, fingerprint, error instanceof Error ? error.message : String(error));
       errors[file] = error instanceof Error ? error.message : String(error);
     }
