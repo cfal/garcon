@@ -192,6 +192,13 @@ function mobileFileSnapshot(): WorkspaceLayoutSnapshot {
 	};
 }
 
+function mobileCommitSnapshot(): WorkspaceLayoutSnapshot {
+	return {
+		...canonicalWorkspaceSnapshot(),
+		mobileActiveSurfaceId: 'singleton:commit',
+	};
+}
+
 function createWorkspace(initial: WorkspaceLayoutSnapshot) {
 	const layout = new WorkspaceLayoutStore(initial);
 	const commit = (mutations: readonly WorkspaceLayoutMutation[]): void => {
@@ -377,7 +384,7 @@ describe('PortableSurfaceContent', () => {
 });
 
 describe('WorkspaceRoot', () => {
-	it('offers destructive Close without non-destructive Back for a mobile file', async () => {
+	it('offers one destructive Close without non-destructive Back for a mobile file', async () => {
 		const { workspace } = installContext(mobileFileSnapshot());
 		workspace.closeSurface.mockResolvedValueOnce(true);
 		render(WorkspaceRoot, {
@@ -386,10 +393,27 @@ describe('WorkspaceRoot', () => {
 		});
 
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
-		await fireEvent.click(await screen.findByRole('button', { name: 'Close file' }));
+		const closeButtons = await screen.findAllByRole('button', { name: 'Close file' });
+		expect(closeButtons).toHaveLength(1);
+		await fireEvent.click(closeButtons[0]);
 
 		expect(workspace.closeSurface).toHaveBeenCalledWith('file:one');
 		expect(workspace.mobileBack).not.toHaveBeenCalled();
+	});
+
+	it('retains Back and Close view controls for mobile Commit', async () => {
+		const { workspace } = installContext(mobileCommitSnapshot());
+		workspace.closeSurface.mockResolvedValueOnce(true);
+		render(WorkspaceRoot, {
+			isMobile: true,
+			chatActions,
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+		expect(workspace.mobileBack).toHaveBeenCalledOnce();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close view' }));
+		expect(workspace.closeSurface).toHaveBeenCalledWith('singleton:commit');
 	});
 
 	it('reserves chat content space only while the desktop taskbar is rendered', async () => {
