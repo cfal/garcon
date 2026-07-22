@@ -10,6 +10,10 @@
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { UpdateRemoteSettingsInput } from '$shared/settings';
+	import {
+		normalizeDesktopLayoutOrder,
+		type DesktopLayoutOrder,
+	} from '$lib/layout/desktop-layout.js';
 
 	interface SettingsTestHostProps {
 		appShell: AppShellStore;
@@ -24,6 +28,7 @@
 		onLocalSet = () => undefined,
 		onLocalToggle = () => undefined,
 	}: SettingsTestHostProps = $props();
+	let desktopLayoutOrder = $state<DesktopLayoutOrder>(['chat-list', 'main', 'workspace-sidebar']);
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -182,6 +187,9 @@
 		colorblindMode: false,
 		overlayBackdropEffects: true,
 		hideChatListWhenGitInMain: false,
+		get desktopLayoutOrder() {
+			return desktopLayoutOrder;
+		},
 		autoExpandTools: false,
 		showThinking: true,
 		hiddenToolTypes: [],
@@ -193,6 +201,7 @@
 		imageViewerOpenPlacement: 'source',
 		markdownViewerOpenPlacement: 'source',
 		set(key: string, value: unknown) {
+			if (key === 'desktopLayoutOrder') desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
 			onLocalSet(key, value);
 		},
 		toggle(key: string) {

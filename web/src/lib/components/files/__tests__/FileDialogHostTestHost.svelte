@@ -1,24 +1,32 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import {
 		setAppShell,
 		setFileSessions,
+		setLocalSettings,
 		setSurfaceFrames,
 		setWorkspaceCoordinator,
 	} from '$lib/context';
 	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 	import { fileSurfaceId } from '$lib/workspace/surface-types';
 	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import FileDialogHost from '../FileDialogHost.svelte';
+	import {
+		DEFAULT_DESKTOP_LAYOUT_ORDER,
+		type DesktopLayoutOrder,
+	} from '$lib/layout/desktop-layout.js';
 
 	let {
 		request,
 		onResolve = () => undefined,
 		isMobile = false,
+		desktopLayoutOrder = DEFAULT_DESKTOP_LAYOUT_ORDER,
 	}: {
 		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file' | 'open-files';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
+		desktopLayoutOrder?: DesktopLayoutOrder;
 	} = $props();
 
 	const initialRequest = untrack(() => request);
@@ -43,9 +51,7 @@
 			: null,
 	);
 	let overwriteRequest = $state(
-		initialRequest === 'overwrite'
-			? { sessionId: 'file-session', fileName: 'dirty.ts' }
-			: null,
+		initialRequest === 'overwrite' ? { sessionId: 'file-session', fileName: 'dirty.ts' } : null,
 	);
 	let thresholdRequest = $state(
 		initialRequest === 'threshold'
@@ -59,12 +65,18 @@
 			: null,
 	);
 	let openFilesVisible = $state(initialRequest === 'open-files');
+	const localSettings = createLocalSettingsStore();
+
+	$effect(() => {
+		localSettings.desktopLayoutOrder = [...desktopLayoutOrder];
+	});
 
 	setAppShell({
 		get isMobile() {
 			return isMobile;
 		},
 	} as never);
+	setLocalSettings(localSettings);
 	setSurfaceFrames(new SurfaceFrameRegistry());
 	setWorkspaceCoordinator({
 		layout: {
@@ -114,6 +126,7 @@
 			openFilesVisible = false;
 		},
 	} as never);
+	onDestroy(() => localSettings.destroy());
 </script>
 
 <FileDialogHost />

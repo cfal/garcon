@@ -8,6 +8,11 @@ import {
 } from '$lib/utils/local-persistence';
 import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 import { parseFontSizeOption, type FontSizeOption } from '$lib/utils/font-size.js';
+import {
+	DEFAULT_DESKTOP_LAYOUT_ORDER,
+	normalizeDesktopLayoutOrder,
+	type DesktopLayoutOrder,
+} from '$lib/layout/desktop-layout.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
@@ -88,6 +93,7 @@ export interface LocalSettingsSnapshot {
 	sendByShiftEnter: boolean;
 	chatMaxWidth: ChatMaxWidth;
 	hideChatListWhenGitInMain: boolean;
+	desktopLayoutOrder: DesktopLayoutOrder;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
 	sidebarGroupByProject: boolean;
@@ -134,6 +140,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sendByShiftEnter: false,
 	chatMaxWidth: 'none',
 	hideChatListWhenGitInMain: false,
+	desktopLayoutOrder: [...DEFAULT_DESKTOP_LAYOUT_ORDER],
 	sidebarVisible: true,
 	sidebarWidth: 320,
 	sidebarGroupByProject: true,
@@ -227,6 +234,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.hideChatListWhenGitInMain,
 			DEFAULTS.hideChatListWhenGitInMain,
 		),
+		desktopLayoutOrder: normalizeDesktopLayoutOrder(parsed.desktopLayoutOrder),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		sidebarGroupByProject: parseBoolean(
@@ -302,6 +310,7 @@ export class LocalSettingsStore {
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	hideChatListWhenGitInMain = $state(DEFAULTS.hideChatListWhenGitInMain);
+	desktopLayoutOrder = $state<DesktopLayoutOrder>([...DEFAULT_DESKTOP_LAYOUT_ORDER]);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
@@ -344,6 +353,9 @@ export class LocalSettingsStore {
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
 		const next = { ...this.snapshot(), [key]: value };
 		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
+		if (key === 'desktopLayoutOrder') {
+			next.desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
+		}
 		this.#apply(next);
 		persistLocalSettings(next);
 	}
@@ -376,6 +388,7 @@ export class LocalSettingsStore {
 			sendByShiftEnter: this.sendByShiftEnter,
 			chatMaxWidth: this.chatMaxWidth,
 			hideChatListWhenGitInMain: this.hideChatListWhenGitInMain,
+			desktopLayoutOrder: [...this.desktopLayoutOrder],
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupByProject: this.sidebarGroupByProject,
@@ -407,6 +420,7 @@ export class LocalSettingsStore {
 		this.sendByShiftEnter = snap.sendByShiftEnter;
 		this.chatMaxWidth = snap.chatMaxWidth;
 		this.hideChatListWhenGitInMain = snap.hideChatListWhenGitInMain;
+		this.desktopLayoutOrder = [...snap.desktopLayoutOrder];
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;

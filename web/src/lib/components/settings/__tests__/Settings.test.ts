@@ -124,6 +124,64 @@ describe('Settings', () => {
 			await fireEvent.click(screen.getByRole('tab', { name: 'Local Settings' }));
 			expect(appShell.settingsTab).toBe('local');
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
+			expect(screen.getByRole('heading', { name: 'Desktop layout' })).toBeTruthy();
+			const desktopLayoutRows = document.querySelectorAll('[data-desktop-layout-setting-pane]');
+			expect(
+				Array.from(desktopLayoutRows, (row) =>
+					row.getAttribute('data-desktop-layout-setting-pane'),
+				),
+			).toEqual(['chat-list', 'main', 'workspace-sidebar']);
+			expect(
+				(screen.getByRole('button', { name: 'Move Chat list up' }) as HTMLButtonElement).disabled,
+			).toBe(true);
+			expect(
+				(
+					screen.getByRole('button', {
+						name: 'Move Workspace sidebar down',
+					}) as HTMLButtonElement
+				).disabled,
+			).toBe(true);
+			const moveChatDown = screen.getByRole('button', { name: 'Move Chat list down' });
+			const moveChatDownFocus = vi.spyOn(moveChatDown, 'focus');
+			moveChatDown.focus();
+			await fireEvent.click(moveChatDown);
+			await waitFor(() => {
+				expect(
+					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
+						row.getAttribute('data-desktop-layout-setting-pane'),
+					),
+				).toEqual(['main', 'chat-list', 'workspace-sidebar']);
+			});
+			expect(moveChatDownFocus).toHaveBeenCalled();
+			expect(document.activeElement).toBe(moveChatDown);
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Move Chat list up' }));
+			await waitFor(() => {
+				expect(
+					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
+						row.getAttribute('data-desktop-layout-setting-pane'),
+					),
+				).toEqual(['chat-list', 'main', 'workspace-sidebar']);
+			});
+			const moveMainUp = screen.getByRole('button', { name: 'Move Main view up' });
+			moveMainUp.focus();
+			await fireEvent.click(moveMainUp);
+			expect(onLocalSet).toHaveBeenCalledWith('desktopLayoutOrder', [
+				'main',
+				'chat-list',
+				'workspace-sidebar',
+			]);
+			await waitFor(() => {
+				expect(
+					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
+						row.getAttribute('data-desktop-layout-setting-pane'),
+					),
+				).toEqual(['main', 'chat-list', 'workspace-sidebar']);
+			});
+			expect((moveMainUp as HTMLButtonElement).disabled).toBe(true);
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: 'Move Main view down' }),
+			);
 			expect(screen.getByText('Max chat width')).toBeTruthy();
 			expect(screen.getByText('Hide tool calls')).toBeTruthy();
 			expect(screen.getByRole('switch', { name: 'Bash' })).toBeTruthy();

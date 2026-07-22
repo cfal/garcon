@@ -1,14 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import RightSidebarResizeHandle from '../RightSidebarResizeHandle.svelte';
+import WorkspaceSidebarResizeHandle from '../WorkspaceSidebarResizeHandle.svelte';
 
-function renderHandle() {
+function renderHandle(edge: 'start' | 'end' = 'start') {
 	const onPreview = vi.fn();
 	const onCommit = vi.fn();
 	const onCancel = vi.fn();
 	const onReset = vi.fn();
-	const result = render(RightSidebarResizeHandle, {
+	const result = render(WorkspaceSidebarResizeHandle, {
 		value: 480,
+		edge,
 		minimum: 360,
 		maximum: 700,
 		label: 'Resize sidebar',
@@ -20,7 +21,7 @@ function renderHandle() {
 	return { ...result, onPreview, onCommit, onCancel, onReset };
 }
 
-describe('RightSidebarResizeHandle', () => {
+describe('WorkspaceSidebarResizeHandle', () => {
 	it('previews pointer movement and commits only once on release', async () => {
 		const { onPreview, onCommit } = renderHandle();
 		const separator = screen.getByRole('slider') as HTMLElement;
@@ -56,5 +57,26 @@ describe('RightSidebarResizeHandle', () => {
 
 		expect(onCommit.mock.calls).toEqual([[490], [520], [700]]);
 		expect(onReset).toHaveBeenCalledOnce();
+	});
+
+	it('reverses pointer and keyboard direction on the end edge', async () => {
+		const { onPreview, onCommit } = renderHandle('end');
+		const separator = screen.getByRole('slider') as HTMLElement;
+		separator.setPointerCapture = vi.fn();
+		separator.hasPointerCapture = vi.fn(() => true);
+		separator.releasePointerCapture = vi.fn();
+
+		await fireEvent.pointerDown(separator, {
+			pointerId: 8,
+			clientX: 500,
+			button: 0,
+			isPrimary: true,
+		});
+		await fireEvent.pointerMove(separator, { pointerId: 8, clientX: 550 });
+		await fireEvent.pointerUp(separator, { pointerId: 8, clientX: 550 });
+		await fireEvent.keyDown(separator, { key: 'ArrowRight' });
+
+		expect(onPreview).toHaveBeenCalledWith(530);
+		expect(onCommit.mock.calls).toEqual([[530], [490]]);
 	});
 });

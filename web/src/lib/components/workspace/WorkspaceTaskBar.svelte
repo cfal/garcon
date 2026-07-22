@@ -50,6 +50,7 @@
 	let {
 		host,
 		hostState,
+		workspaceSidebarBeforeMain = false,
 		labelFor,
 		onSelect,
 		onFocus,
@@ -58,6 +59,7 @@
 	}: {
 		host: HostId;
 		hostState: HostState;
+		workspaceSidebarBeforeMain?: boolean;
 		labelFor: (surfaceId: string) => string;
 		onSelect: (surfaceId: string) => void;
 		onFocus?: (surfaceId: string) => void;
@@ -265,7 +267,11 @@
 {#snippet tabActions(surfaceId: string, Item: typeof DropdownMenuItem)}
 	{#if canMoveTab(surfaceId)}
 		<Item onclick={() => moveTab(surfaceId)}>
-			{#if host === 'main'}<PanelRight />{:else}<PanelLeft />{/if}
+			{#if (host === 'main') === workspaceSidebarBeforeMain}
+				<PanelLeft class="rtl:-scale-x-100" />
+			{:else}
+				<PanelRight class="rtl:-scale-x-100" />
+			{/if}
 			{host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
 		</Item>
 	{/if}

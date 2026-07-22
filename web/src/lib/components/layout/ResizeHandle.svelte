@@ -1,13 +1,15 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { DesktopLayoutEdge } from '$lib/layout/desktop-layout.js';
 
 	interface ResizeHandleProps {
 		width: number;
+		edge?: DesktopLayoutEdge;
 		onResize: (width: number) => void;
 	}
 
-	let { width, onResize }: ResizeHandleProps = $props();
+	let { width, edge = 'end', onResize }: ResizeHandleProps = $props();
 
 	let isDragging = $state(false);
 
@@ -19,10 +21,12 @@
 		const startX = e.clientX;
 		const startWidth = width;
 		const target = e.currentTarget as HTMLElement;
+		const inlineDirection = getComputedStyle(target).direction === 'rtl' ? -1 : 1;
 		target.setPointerCapture(e.pointerId);
 
 		function handlePointerMove(ev: PointerEvent) {
-			const delta = ev.clientX - startX;
+			const edgeDirection = edge === 'start' ? -1 : 1;
+			const delta = (ev.clientX - startX) * inlineDirection * edgeDirection;
 			const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta));
 			onResize(newWidth);
 		}
@@ -41,13 +45,18 @@
 
 	let indicatorClass = $derived(
 		cn(
-			'absolute inset-y-0 left-0 w-px transition-colors duration-150',
+			'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors duration-150',
 			isDragging ? 'bg-primary/30' : 'group-hover:bg-primary/20',
 		),
 	);
 </script>
 
-<div class="absolute inset-y-0 right-0 w-0 pointer-events-none z-10">
+<div
+	class={cn(
+		'pointer-events-none absolute inset-y-0 z-10 w-0',
+		edge === 'start' ? 'start-0' : 'end-0',
+	)}
+>
 	<div
 		class={cn(
 			'absolute inset-y-0 -left-2 w-4 cursor-col-resize group select-none touch-none pointer-events-auto',

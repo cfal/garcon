@@ -3,32 +3,32 @@ import {
 	clampDesiredSidebarWidth,
 	clampPushSidebarWidth,
 	getPushSidebarMaximum,
-	resolveRightSidebarMetrics,
+	resolveWorkspaceSidebarMetrics,
 } from '../sidebar-sizing';
 
-describe('resolveRightSidebarMetrics', () => {
+describe('resolveWorkspaceSidebarMetrics', () => {
 	it('uses push mode at the exact minimum threshold', () => {
-		expect(resolveRightSidebarMetrics(844, 4, 480)).toEqual({ mode: 'push', width: 360 });
+		expect(resolveWorkspaceSidebarMetrics(844, 4, 480)).toEqual({ mode: 'push', width: 360 });
 	});
 
 	it('clamps push width between the sidebar and main minimums', () => {
-		expect(resolveRightSidebarMetrics(1200, 4, 200)).toEqual({ mode: 'push', width: 360 });
-		expect(resolveRightSidebarMetrics(1200, 4, 900)).toEqual({ mode: 'push', width: 598 });
+		expect(resolveWorkspaceSidebarMetrics(1200, 4, 200)).toEqual({ mode: 'push', width: 360 });
+		expect(resolveWorkspaceSidebarMetrics(1200, 4, 900)).toEqual({ mode: 'push', width: 716 });
 	});
 
-	it('never lets the push sidebar become wider than main', () => {
-		expect(getPushSidebarMaximum(1_600, 5)).toBeLessThanOrEqual((1_600 - 5) / 2);
-		expect(resolveRightSidebarMetrics(1_600, 5, 1_200).width).toBe(797.5);
+	it('allows the push sidebar to become wider than main', () => {
+		expect(getPushSidebarMaximum(1_600, 5)).toBe(1_115);
+		expect(resolveWorkspaceSidebarMetrics(1_600, 5, 1_200).width).toBe(1_115);
 	});
 
 	it('uses overlay immediately below the threshold without changing desired width', () => {
-		expect(resolveRightSidebarMetrics(843, 4, 480)).toEqual({ mode: 'overlay', width: 480 });
+		expect(resolveWorkspaceSidebarMetrics(843, 4, 480)).toEqual({ mode: 'overlay', width: 480 });
 		expect(clampDesiredSidebarWidth(480)).toBe(480);
 	});
 
 	it('caps overlay width and fills workspaces narrower than the minimum', () => {
-		expect(resolveRightSidebarMetrics(800, 4, 900)).toEqual({ mode: 'overlay', width: 560 });
-		expect(resolveRightSidebarMetrics(320, 4, 480)).toEqual({ mode: 'overlay', width: 320 });
+		expect(resolveWorkspaceSidebarMetrics(800, 4, 900)).toEqual({ mode: 'overlay', width: 560 });
+		expect(resolveWorkspaceSidebarMetrics(320, 4, 480)).toEqual({ mode: 'overlay', width: 320 });
 	});
 });
 

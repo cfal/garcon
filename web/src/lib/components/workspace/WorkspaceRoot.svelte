@@ -1,13 +1,14 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, untrack, type Snippet } from 'svelte';
 	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
+	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
-	import RightSidebarHost from './RightSidebarHost.svelte';
+	import WorkspaceSidebarHost from './WorkspaceSidebarHost.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
 	import {
@@ -33,6 +34,12 @@
 	} from '$lib/workspace/visible-presentations.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { DropdownMenuItem } from '$lib/components/ui/dropdown-menu';
+	import {
+		DEFAULT_DESKTOP_LAYOUT_ORDER,
+		resolveDesktopLayout,
+		type DesktopLayoutEdge,
+		type DesktopLayoutOrder,
+	} from '$lib/layout/desktop-layout.js';
 
 	interface WorkspaceChatActions {
 		requestDelete: (chat: ChatSessionRecord) => void;
@@ -44,6 +51,10 @@
 		reload: (chat: ChatSessionRecord) => void;
 	}
 
+	interface DesktopChatListPlacement {
+		dividerEdge: DesktopLayoutEdge;
+	}
+
 	let {
 		isMobile,
 		onMenuClick,
@@ -51,6 +62,11 @@
 		onToggleDesktopFullscreen,
 		onRegisterReload,
 		onOverlayModalChange,
+		desktopLayoutOrder = [...DEFAULT_DESKTOP_LAYOUT_ORDER],
+		desktopChatListWidth = 0,
+		desktopChatListHidden = false,
+		desktopChatList,
+		onMainInlineStartChange,
 		chatActions,
 	}: {
 		isMobile: boolean;
@@ -59,6 +75,11 @@
 		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onOverlayModalChange?: (open: boolean) => void;
+		desktopLayoutOrder?: DesktopLayoutOrder;
+		desktopChatListWidth?: number;
+		desktopChatListHidden?: boolean;
+		desktopChatList?: Snippet<[DesktopChatListPlacement]>;
+		onMainInlineStartChange?: (pixels: number) => void;
 		chatActions: WorkspaceChatActions;
 	} = $props();
 
@@ -92,6 +113,10 @@
 	const sidebarPresented = $derived(
 		!isMobile && snapshot.sidebarOpen && !snapshot.manualFullscreen,
 	);
+	const effectiveDesktopChatListWidth = $derived(
+		!isMobile && !desktopChatListHidden ? desktopChatListWidth : 0,
+	);
+	const desktopLayout = $derived(resolveDesktopLayout(desktopLayoutOrder));
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
 	const rootState = new WorkspaceRootState({
 		workspace,
@@ -108,6 +133,12 @@
 		get portablePresentations() {
 			return portablePresentations;
 		},
+		get desktopLayoutOrder() {
+			return desktopLayoutOrder;
+		},
+		get chatListWidth() {
+			return effectiveDesktopChatListWidth;
+		},
 	});
 	const sidebarMetrics = $derived(rootState.sidebarMetrics);
 	const sidebarPushMaximum = $derived(rootState.sidebarPushMaximum);
@@ -122,9 +153,43 @@
 	const renderedSidebarPresentations = $derived(
 		renderedPresentations.filter((item) => item.presentation === 'sidebar'),
 	);
-	const renderedNonSidebarPresentations = $derived(
-		renderedPresentations.filter((item) => item.presentation !== 'sidebar'),
+	const renderedMainPresentations = $derived(
+		renderedPresentations.filter((item) => item.presentation === 'main'),
 	);
+	const renderedMobilePresentations = $derived(
+		renderedPresentations.filter((item) => item.presentation === 'mobile'),
+	);
+	let hostRegionElement: HTMLDivElement | null = $state(null);
+	let previousRenderedPaneOrder = '';
+	let focusTargetAfterPaneMove: HTMLElement | null = null;
+
+	$effect.pre(() => {
+		const renderedPaneOrder = (isMobile ? DEFAULT_DESKTOP_LAYOUT_ORDER : desktopLayoutOrder).join(
+			'|',
+		);
+		if (renderedPaneOrder === previousRenderedPaneOrder) return;
+		previousRenderedPaneOrder = renderedPaneOrder;
+		const activeElement = document.activeElement;
+		focusTargetAfterPaneMove =
+			activeElement instanceof HTMLElement && hostRegionElement?.contains(activeElement)
+				? activeElement
+				: null;
+	});
+
+	$effect(() => {
+		const renderedPaneOrder = (isMobile ? DEFAULT_DESKTOP_LAYOUT_ORDER : desktopLayoutOrder).join(
+			'|',
+		);
+		void renderedPaneOrder;
+		const target = focusTargetAfterPaneMove;
+		if (!target) return;
+		focusTargetAfterPaneMove = null;
+		queueMicrotask(() => {
+			if (!target.isConnected || !hostRegionElement?.contains(target)) return;
+			if (document.activeElement && document.activeElement !== document.body) return;
+			target.focus({ preventScroll: true });
+		});
+	});
 
 	$effect(() => {
 		void snapshot;
@@ -135,6 +200,16 @@
 
 	$effect(() => {
 		workspace.setSidebarOverlayMode(sidebarMetrics.mode === 'overlay');
+	});
+
+	$effect(() => {
+		void effectiveDesktopChatListWidth;
+		untrack(() => rootState.syncChatListWidth());
+	});
+
+	$effect(() => {
+		const mainInlineStart = isMobile ? 0 : rootState.mainInsets.start;
+		untrack(() => onMainInlineStartChange?.(mainInlineStart));
 	});
 
 	onDestroy(() => {
@@ -224,6 +299,7 @@
 {/snippet}
 
 <div
+	bind:this={hostRegionElement}
 	use:rootState.observeHostRegion
 	class="workspace-host-region relative flex h-full min-h-0 min-w-0 bg-background"
 	style="--workspace-floating-taskbar-inset: 3rem;"
@@ -231,102 +307,127 @@
 	aria-label={m.workspace_workspace_region()}
 	tabindex="-1"
 >
-	<div
-		class="relative flex min-h-0 min-w-0 flex-1 flex-col"
-		inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
-	>
-		{#if !isMobile}
+	<!-- Moves keyed pane blocks to align DOM focus order without replacing stateful contents. -->
+	{#each isMobile ? DEFAULT_DESKTOP_LAYOUT_ORDER : desktopLayoutOrder as pane (pane)}
+		{#if pane === 'chat-list'}
+			{#if !isMobile && desktopChatList}
+				{@render desktopChatList({ dividerEdge: desktopLayout.chatListEdge })}
+			{/if}
+		{:else if pane === 'main'}
 			<div
-				data-floating-workspace-toolbar
-				class={`pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 ${snapshot.main.order.length === 1 ? 'justify-end' : 'justify-center'}`}
+				data-desktop-layout-pane="main"
+				class="relative flex min-h-0 min-w-0 flex-1 flex-col"
+				inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
 			>
-				<WorkspaceTaskBar
-					host="main"
-					hostState={snapshot.main}
-					labelFor={label}
-					onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
-					onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
-				>
-					{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
-					{#snippet endActions()}
-						{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
-							<div
-								class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-							>
-								<button
-									bind:this={openSidebarButton}
-									type="button"
-									class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-									onclick={() => void workspace.openSidebar()}
-									aria-label={m.workspace_open_sidebar()}
-									title={m.workspace_open_sidebar()}
-								>
-									<PanelRightOpen class="h-3.5 w-3.5" />
-								</button>
-							</div>
-						{/if}
-					{/snippet}
-				</WorkspaceTaskBar>
+				{#if !isMobile}
+					<div
+						data-floating-workspace-toolbar
+						class={`pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 ${snapshot.main.order.length === 1 ? 'justify-end' : 'justify-center'}`}
+					>
+						<WorkspaceTaskBar
+							host="main"
+							hostState={snapshot.main}
+							workspaceSidebarBeforeMain={desktopLayout.workspaceSidebarBeforeMain}
+							labelFor={label}
+							onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
+							onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
+						>
+							{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
+							{#snippet endActions()}
+								{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
+									<div
+										class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
+									>
+										<button
+											bind:this={openSidebarButton}
+											type="button"
+											class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+											onclick={() => void workspace.openSidebar()}
+											aria-label={m.workspace_open_sidebar()}
+											title={m.workspace_open_sidebar()}
+										>
+											{#if desktopLayout.workspaceSidebarBeforeMain}
+												<PanelLeftOpen class="h-3.5 w-3.5 rtl:-scale-x-100" />
+											{:else}
+												<PanelRightOpen class="h-3.5 w-3.5 rtl:-scale-x-100" />
+											{/if}
+										</button>
+									</div>
+								{/if}
+							{/snippet}
+						</WorkspaceTaskBar>
+					</div>
+				{/if}
+				<div class="relative min-h-0 flex-1 overflow-hidden">
+					<div
+						data-workspace-surface-id={CHAT_SURFACE_ID}
+						id={`main-panel-${CHAT_SURFACE_ID}`}
+						role="tabpanel"
+						aria-labelledby={!isMobile && snapshot.main.order.length > 1
+							? `main-tab-${CHAT_SURFACE_ID}`
+							: undefined}
+						aria-label={isMobile || snapshot.main.order.length === 1
+							? m.workspace_surface_chat()
+							: undefined}
+						onfocusin={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
+						onpointerdown={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
+						class="absolute inset-0"
+						class:hidden={isMobile
+							? mobileActive !== CHAT_SURFACE_ID
+							: activeMain !== CHAT_SURFACE_ID}
+						inert={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
+						aria-hidden={isMobile
+							? mobileActive !== CHAT_SURFACE_ID
+							: activeMain !== CHAT_SURFACE_ID}
+						use:surfaceFrame={{
+							registry: surfaceFrames,
+							surfaceId: CHAT_SURFACE_ID,
+							host: isMobile ? 'mobile' : 'main',
+							version: 0,
+						}}
+					>
+						<ChatSurface
+							{isMobile}
+							reserveTopFloatingToolbar={!isMobile}
+							isVisible={workspace.isChatPresented}
+							isInteractive={workspace.isChatInteractive}
+							onMenuClick={isMobile ? onMenuClick : undefined}
+							{isDesktopFullscreen}
+							{onToggleDesktopFullscreen}
+							{onRegisterReload}
+							onRegisterSubmit={(submit) => (chatSubmit = submit)}
+							{chatActions}
+						/>
+					</div>
+					{#each renderedMainPresentations as item (`${item.presentation}:${item.surfaceId}`)}
+						{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
+					{/each}
+				</div>
 			</div>
+		{:else}
+			<WorkspaceSidebarHost
+				presented={sidebarPresented}
+				edge={desktopLayout.workspaceSidebarEdge}
+				beforeMain={desktopLayout.workspaceSidebarBeforeMain}
+				overlayInsets={rootState.sidebarOverlayInsets}
+				metrics={sidebarMetrics}
+				pushMaximum={sidebarPushMaximum}
+				{snapshot}
+				presentations={renderedSidebarPresentations}
+				labelFor={label}
+				onSendToChat={sendToChat}
+				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
+				surfaceStyle={(presentation) => rootState.surfaceStyle(presentation)}
+				getOpenSidebarButton={() => openSidebarButton}
+				onPreviewWidth={(width) => (rootState.resizePreviewWidth = width)}
+				onCommitWidth={(width) => void rootState.commitSidebarWidth(width)}
+				onCancelWidth={() => (rootState.resizePreviewWidth = null)}
+				{onOverlayModalChange}
+			/>
 		{/if}
-		<div class="relative min-h-0 flex-1 overflow-hidden">
-			<div
-				data-workspace-surface-id={CHAT_SURFACE_ID}
-				id={`main-panel-${CHAT_SURFACE_ID}`}
-				role="tabpanel"
-				aria-labelledby={!isMobile && snapshot.main.order.length > 1
-					? `main-tab-${CHAT_SURFACE_ID}`
-					: undefined}
-				aria-label={isMobile || snapshot.main.order.length === 1
-					? m.workspace_surface_chat()
-					: undefined}
-				onfocusin={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
-				onpointerdown={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
-				class="absolute inset-0"
-				class:hidden={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				inert={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				aria-hidden={isMobile ? mobileActive !== CHAT_SURFACE_ID : activeMain !== CHAT_SURFACE_ID}
-				use:surfaceFrame={{
-					registry: surfaceFrames,
-					surfaceId: CHAT_SURFACE_ID,
-					host: isMobile ? 'mobile' : 'main',
-					version: 0,
-				}}
-			>
-				<ChatSurface
-					{isMobile}
-					reserveTopFloatingToolbar={!isMobile}
-					isVisible={workspace.isChatPresented}
-					isInteractive={workspace.isChatInteractive}
-					onMenuClick={isMobile ? onMenuClick : undefined}
-					{isDesktopFullscreen}
-					{onToggleDesktopFullscreen}
-					{onRegisterReload}
-					onRegisterSubmit={(submit) => (chatSubmit = submit)}
-					{chatActions}
-				/>
-			</div>
-		</div>
-	</div>
+	{/each}
 
-	<RightSidebarHost
-		presented={sidebarPresented}
-		metrics={sidebarMetrics}
-		pushMaximum={sidebarPushMaximum}
-		{snapshot}
-		presentations={renderedSidebarPresentations}
-		labelFor={label}
-		onSendToChat={sendToChat}
-		frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
-		surfaceStyle={(presentation) => rootState.surfaceStyle(presentation)}
-		getOpenSidebarButton={() => openSidebarButton}
-		onPreviewWidth={(width) => (rootState.resizePreviewWidth = width)}
-		onCommitWidth={(width) => void rootState.commitSidebarWidth(width)}
-		onCancelWidth={() => (rootState.resizePreviewWidth = null)}
-		{onOverlayModalChange}
-	/>
-
-	{#each renderedNonSidebarPresentations as item (`${item.presentation}:${item.surfaceId}`)}
+	{#each renderedMobilePresentations as item (`${item.presentation}:${item.surfaceId}`)}
 		{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
 	{/each}
 </div>

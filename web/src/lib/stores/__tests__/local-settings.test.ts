@@ -10,6 +10,7 @@ describe('LocalSettingsStore', () => {
 	it('defaults max chat width and file opening preferences', () => {
 		const store = createLocalSettingsStore();
 
+		expect(store.desktopLayoutOrder).toEqual(['chat-list', 'main', 'workspace-sidebar']);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.sidebarGroupByProject).toBe(true);
@@ -23,6 +24,60 @@ describe('LocalSettingsStore', () => {
 		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
 
+		store.destroy();
+	});
+
+	it('persists and restores the desktop layout order', () => {
+		const store = createLocalSettingsStore();
+		store.set('desktopLayoutOrder', ['workspace-sidebar', 'chat-list', 'main']);
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({
+			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
+		});
+
+		const restored = createLocalSettingsStore();
+		expect(restored.desktopLayoutOrder).toEqual(['workspace-sidebar', 'chat-list', 'main']);
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([
+		['chat-list', 'main'],
+		['chat-list', 'main', 'main'],
+		['chat-list', 'main', 'unknown'],
+		'chat-list,main,workspace-sidebar',
+	])('falls back atomically for malformed desktop layout order %j', (desktopLayoutOrder) => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ desktopLayoutOrder }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.desktopLayoutOrder).toEqual(['chat-list', 'main', 'workspace-sidebar']);
+		store.destroy();
+	});
+
+	it('copies desktop layout arrays between stores and snapshots', () => {
+		const first = createLocalSettingsStore();
+		const second = createLocalSettingsStore();
+
+		expect(first.desktopLayoutOrder).not.toBe(second.desktopLayoutOrder);
+		expect(first.snapshot().desktopLayoutOrder).not.toBe(first.desktopLayoutOrder);
+
+		first.destroy();
+		second.destroy();
+	});
+
+	it('normalizes malformed desktop layout orders passed to set', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('desktopLayoutOrder', ['main', 'main', 'chat-list']);
+
+		expect(store.desktopLayoutOrder).toEqual(['chat-list', 'main', 'workspace-sidebar']);
 		store.destroy();
 	});
 
@@ -320,6 +375,7 @@ describe('LocalSettingsStore', () => {
 				sidebarGroupNestedProjectPaths: true,
 				sidebarCompactChatItems: true,
 				showQuickCommitTray: false,
+				desktopLayoutOrder: ['main', 'workspace-sidebar', 'chat-list'],
 				textEditorOpenPlacement: 'source',
 				imageViewerOpenPlacement: 'sidebar',
 				markdownViewerOpenPlacement: 'main',
@@ -338,6 +394,11 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarCompactChatItems).toBe(true);
 		expect(secondStore.showQuickCommitTray).toBe(false);
+		expect(secondStore.desktopLayoutOrder).toEqual([
+			'main',
+			'workspace-sidebar',
+			'chat-list',
+		]);
 		expect(secondStore.textEditorOpenPlacement).toBe('source');
 		expect(secondStore.imageViewerOpenPlacement).toBe('sidebar');
 		expect(secondStore.markdownViewerOpenPlacement).toBe('main');

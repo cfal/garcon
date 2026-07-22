@@ -12,6 +12,7 @@
 	import {
 		getAppShell,
 		getFileSessions,
+		getLocalSettings,
 		getWorkspaceCoordinator,
 		getSurfaceFrames,
 	} from '$lib/context';
@@ -22,9 +23,11 @@
 	} from '$lib/workspace/surface-frame-context.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { shouldWaitForFileRenderer } from './file-renderer-frame.js';
+	import { resolveDesktopLayout } from '$lib/layout/desktop-layout.js';
 
 	const files = getFileSessions();
 	const appShell = getAppShell();
+	const localSettings = getLocalSettings();
 	const workspace = getWorkspaceCoordinator();
 	const surfaceFrames = getSurfaceFrames();
 	const frameBridge = new SurfaceFrameBridge();
@@ -36,6 +39,9 @@
 		descriptor?.type === 'file' ? files.get(descriptor.fileSessionId) : null,
 	);
 	const fileRenderer = lazyRenderer(() => import('./FileSurface.svelte'));
+	const workspaceSidebarBeforeMain = $derived(
+		resolveDesktopLayout(localSettings.desktopLayoutOrder).workspaceSidebarBeforeMain,
+	);
 	let rendererRetryKey = $state(0);
 
 	function retryFileSurface(): void {
@@ -65,7 +71,11 @@
 					aria-label={m.file_session_move_main()}
 					title={m.file_session_move_main()}
 				>
-					<PanelLeft class="h-4 w-4" />
+					{#if workspaceSidebarBeforeMain}
+						<PanelRight class="h-4 w-4 rtl:-scale-x-100" />
+					{:else}
+						<PanelLeft class="h-4 w-4 rtl:-scale-x-100" />
+					{/if}
 				</Button>
 				<Button
 					variant="ghost"
@@ -74,7 +84,11 @@
 					aria-label={m.file_session_move_sidebar()}
 					title={m.file_session_move_sidebar()}
 				>
-					<PanelRight class="h-4 w-4" />
+					{#if workspaceSidebarBeforeMain}
+						<PanelLeft class="h-4 w-4 rtl:-scale-x-100" />
+					{:else}
+						<PanelRight class="h-4 w-4 rtl:-scale-x-100" />
+					{/if}
 				</Button>
 				<Button
 					variant="ghost"

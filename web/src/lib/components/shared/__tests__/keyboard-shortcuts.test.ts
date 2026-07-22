@@ -142,7 +142,7 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
-	it('toggles focus between the main view and right sidebar on Ctrl-Shift-O', () => {
+	it('toggles focus between the main view and workspace sidebar on Ctrl-Shift-O', () => {
 		const onToggleMainSidebarFocus = vi.fn();
 		const event = new KeyboardEvent('keydown', {
 			key: 'o',

@@ -23,7 +23,7 @@ export const TRANSIENT_BACKDROP_SOURCES = [
 	'components/sidebar/SidebarSearchDialog.svelte',
 	'components/git/GitPushModal.svelte',
 	'components/git/GitReviewChangesModal.svelte',
-	'components/workspace/RightSidebarHost.svelte',
+	'components/workspace/WorkspaceSidebarHost.svelte',
 	'components/layout/AppShell.svelte',
 ] as const;
 
