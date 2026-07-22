@@ -19,7 +19,6 @@ export function getPushSidebarMaximum(workspaceWidth: number, handleWidth: numbe
 	return Math.min(
 		safeWorkspaceWidth * 0.7,
 		safeWorkspaceWidth - MIN_MAIN_HOST_WIDTH - safeHandleWidth,
-		(safeWorkspaceWidth - safeHandleWidth) / 2,
 	);
 }
 

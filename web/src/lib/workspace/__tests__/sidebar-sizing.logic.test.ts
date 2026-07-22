@@ -13,12 +13,12 @@ describe('resolveWorkspaceSidebarMetrics', () => {
 
 	it('clamps push width between the sidebar and main minimums', () => {
 		expect(resolveWorkspaceSidebarMetrics(1200, 4, 200)).toEqual({ mode: 'push', width: 360 });
-		expect(resolveWorkspaceSidebarMetrics(1200, 4, 900)).toEqual({ mode: 'push', width: 598 });
+		expect(resolveWorkspaceSidebarMetrics(1200, 4, 900)).toEqual({ mode: 'push', width: 716 });
 	});
 
-	it('never lets the push sidebar become wider than main', () => {
-		expect(getPushSidebarMaximum(1_600, 5)).toBeLessThanOrEqual((1_600 - 5) / 2);
-		expect(resolveWorkspaceSidebarMetrics(1_600, 5, 1_200).width).toBe(797.5);
+	it('allows the push sidebar to become wider than main', () => {
+		expect(getPushSidebarMaximum(1_600, 5)).toBe(1_115);
+		expect(resolveWorkspaceSidebarMetrics(1_600, 5, 1_200).width).toBe(1_115);
 	});
 
 	it('uses overlay immediately below the threshold without changing desired width', () => {
