@@ -238,7 +238,7 @@
 		{#if !isMobile}
 			<div
 				data-floating-workspace-toolbar
-				class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 justify-end"
+				class={`pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 ${snapshot.main.order.length === 1 ? 'justify-end' : 'justify-center'}`}
 			>
 				<WorkspaceTaskBar
 					host="main"

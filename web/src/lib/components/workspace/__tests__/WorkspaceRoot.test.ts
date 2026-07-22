@@ -436,7 +436,7 @@ describe('WorkspaceRoot', () => {
 		).toBe('false');
 	});
 
-	it('aligns desktop taskbars toward the right sidebar boundary', () => {
+	it('centers desktop taskbars when they contain multiple tabs', () => {
 		installContext(withAdditionalSurfaces());
 		const { container } = render(WorkspaceRoot, {
 			isMobile: false,
@@ -445,10 +445,10 @@ describe('WorkspaceRoot', () => {
 		const mainToolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
 		const sidebarToolbar = container.querySelector<HTMLElement>('[data-floating-sidebar-toolbar]');
 
-		expect(mainToolbar?.classList.contains('justify-end')).toBe(true);
-		expect(mainToolbar?.classList.contains('justify-center')).toBe(false);
-		expect(sidebarToolbar?.classList.contains('justify-start')).toBe(true);
-		expect(sidebarToolbar?.classList.contains('justify-center')).toBe(false);
+		expect(mainToolbar?.classList.contains('justify-center')).toBe(true);
+		expect(mainToolbar?.classList.contains('justify-end')).toBe(false);
+		expect(sidebarToolbar?.classList.contains('justify-center')).toBe(true);
+		expect(sidebarToolbar?.classList.contains('justify-start')).toBe(false);
 	});
 
 	it('binds focus, move, and close for every portable kind without replacing Chat', async () => {

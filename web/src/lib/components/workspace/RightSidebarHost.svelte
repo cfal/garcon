@@ -199,7 +199,7 @@
 	>
 		<div
 			data-floating-sidebar-toolbar
-			class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 justify-start"
+			class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 justify-center"
 		>
 			<WorkspaceTaskBar
 				host="sidebar"
