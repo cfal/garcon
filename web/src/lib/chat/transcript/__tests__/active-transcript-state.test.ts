@@ -196,6 +196,27 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 	});
 
+	it('exposes canonical durable and pending display row identities', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, user('durable'))], {
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.upsertPendingUserInput({
+			chatId: 'chat-1',
+			clientRequestId: 'request-1',
+			content: 'pending',
+			createdAt: '2026-06-01T00:00:01.000Z',
+			deliveryStatus: 'failed',
+		});
+
+		expect(chat.displayRows).toMatchObject([
+			{ kind: 'message', id: 'generation-1:1', seq: 1 },
+			{ kind: 'message', id: 'pending:request-1' },
+		]);
+	});
+
 	it('buffers live same-generation messages while a snapshot is loading', () => {
 		const chat = new ActiveTranscriptState();
 		const epoch = chat.beginSnapshotLoad();
@@ -471,6 +492,25 @@ describe('ActiveTranscriptState', () => {
 		);
 
 		expect(chat.visibleRows).toHaveLength(60);
+		expect(chat.hasInitialMessagesToReveal).toBe(false);
+	});
+
+	it('reveals every already-loaded row for explicit navigation', () => {
+		const chat = new ActiveTranscriptState();
+		const messages = Array.from({ length: 175 }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq: 175,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+
+		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
+		chat.revealAllLoadedMessages();
+
+		expect(chat.visibleRows).toHaveLength(175);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 		expect(chat.hasInitialMessagesToReveal).toBe(false);
 	});
 

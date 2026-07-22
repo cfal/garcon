@@ -12,6 +12,7 @@ function scrollState<T extends Partial<ConversationScrollState>>(
 	const complete = {
 		completeInitialMessagesReveal: vi.fn(),
 		displayMessageCount: 0,
+		generationId: 'generation-1',
 		hasInitialMessagesToReveal: false,
 		hasMoreMessages: false,
 		isLoadingMessages: false,
@@ -146,6 +147,164 @@ describe('ConversationScrollController', () => {
 		expect(scroller.scrollTop).toBe(340);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('keeps a pinned viewport at the bottom during navigator pagination', async () => {
+		let scrollHeight = 800;
+		const scroller = { scrollTop: 400, clientHeight: 400 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			isUserScrolledUp: false,
+			loadMoreMessages: vi.fn(async () => {
+				scrollHeight = 1_100;
+				return true;
+			}),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(true);
+
+		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe(true);
+
+		expect(scroller.scrollTop).toBe(1_100);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
+	it('preserves a scrolled-up viewport during navigator pagination', async () => {
+		let scrollHeight = 800;
+		const scroller = { scrollTop: 160, clientHeight: 400 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			isUserScrolledUp: true,
+			loadMoreMessages: vi.fn(async () => {
+				scrollHeight = 1_050;
+				return true;
+			}),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(false);
+
+		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe(true);
+
+		expect(scroller.scrollTop).toBe(410);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('does not restore navigator pagination after a newer scroll-to-top operation', async () => {
+		let scrollHeight = 800;
+		let resolveLoad!: (loaded: boolean) => void;
+		const load = new Promise<boolean>((resolve) => {
+			resolveLoad = resolve;
+		});
+		const scroller = { scrollTop: 160, clientHeight: 400 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			hasMoreMessages: false,
+			isUserScrolledUp: true,
+			loadMoreMessages: vi.fn(() => load),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(false);
+
+		const pagination = controller.loadMoreMessagesForNavigator('chat-1');
+		await controller.scrollToTop();
+		scrollHeight = 1_100;
+		resolveLoad(true);
+
+		expect(await pagination).toBe(false);
+		expect(scroller.scrollTop).toBe(0);
+	});
+
+	it('centers a generation-scoped message row inside the active feed', async () => {
+		const scroller = { scrollTop: 200, scrollHeight: 1_200, clientHeight: 400 } as HTMLDivElement;
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatRowId = 'generation-1:7';
+		row.scrollIntoView = vi.fn(() => {
+			scroller.scrollTop = 300;
+		});
+		content.append(row);
+		const chatState = { generationId: 'generation-1', isUserScrolledUp: false };
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(true);
+
+		expect(
+			await controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-1',
+				rowId: 'generation-1:7',
+			}),
+		).toBe(true);
+
+		expect(row.scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' });
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('rejects stale or missing message-row targets without changing pin state', async () => {
+		const scroller = { scrollTop: 200, scrollHeight: 1_200, clientHeight: 400 } as HTMLDivElement;
+		const content = document.createElement('div');
+		const outside = document.createElement('div');
+		outside.dataset.chatRowId = 'generation-1:7';
+		document.body.append(outside);
+		const chatState = { generationId: 'generation-1', isUserScrolledUp: false };
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(true);
+
+		expect(
+			await controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-2',
+				rowId: 'generation-1:7',
+			}),
+		).toBe(false);
+		expect(
+			await controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-1',
+				rowId: 'generation-1:7',
+			}),
+		).toBe(false);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+		outside.remove();
 	});
 
 	it('treats scroll-to-top as an intentional user scroll', async () => {

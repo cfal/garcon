@@ -5,6 +5,7 @@
 import { tick } from 'svelte';
 import { reconcileScrollAfterHeightDelta } from '$lib/chat/transcript/scroll-anchor.js';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { UserMessageNavigatorTarget } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
 const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 
@@ -12,6 +13,7 @@ export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
 	| 'displayMessageCount'
 	| 'completeInitialMessagesReveal'
+	| 'generationId'
 	| 'hasInitialMessagesToReveal'
 	| 'hasMoreMessages'
 	| 'isLoadingMessages'
@@ -200,6 +202,63 @@ export class ConversationScrollController {
 		container.scrollTop = prevTop + (newHeight - prevHeight);
 		this.deps.chatState.isUserScrolledUp = true;
 		this.setPinnedToBottom(false);
+	}
+
+	async loadMoreMessagesForNavigator(chatId: string): Promise<boolean> {
+		const container = this.deps.getScrollContainer();
+		if (!container || this.deps.sessions.selectedChatId !== chatId) return false;
+
+		const operationEpoch = ++this.#anchorOperationEpoch;
+		const previousHeight = container.scrollHeight;
+		const previousTop = container.scrollTop;
+		const shouldRemainPinned =
+			this.isPinnedToBottom ||
+			!this.deps.chatState.isUserScrolledUp ||
+			this.isNearBottom();
+
+		const loaded = await this.deps.chatState.loadMoreMessages(chatId);
+		if (!loaded || !this.#isCurrentAnchorOperation(chatId, operationEpoch)) return false;
+
+		await tick();
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return false;
+
+		const updated = this.deps.getScrollContainer();
+		if (!updated) return false;
+		if (shouldRemainPinned) {
+			updated.scrollTop = updated.scrollHeight;
+			this.deps.chatState.isUserScrolledUp = false;
+			this.setPinnedToBottom(true);
+		} else {
+			updated.scrollTop = previousTop + (updated.scrollHeight - previousHeight);
+			this.deps.chatState.isUserScrolledUp = true;
+			this.setPinnedToBottom(false);
+		}
+		return true;
+	}
+
+	async jumpToMessageRow(target: UserMessageNavigatorTarget): Promise<boolean> {
+		if (
+			this.deps.sessions.selectedChatId !== target.chatId ||
+			this.deps.chatState.generationId !== target.generationId
+		) {
+			return false;
+		}
+
+		const operationEpoch = ++this.#anchorOperationEpoch;
+		await tick();
+		if (!this.#isCurrentAnchorOperation(target.chatId, operationEpoch)) return false;
+
+		const content = this.deps.getScrollContentContainer?.();
+		const row = Array.from(
+			content?.querySelectorAll<HTMLElement>('[data-chat-row-id]') ?? [],
+		).find((element) => element.dataset.chatRowId === target.rowId);
+		if (!row) return false;
+
+		row.scrollIntoView({ block: 'center', behavior: 'instant' });
+		const nearBottom = this.isNearBottom();
+		this.deps.chatState.isUserScrolledUp = !nearBottom;
+		this.setPinnedToBottom(nearBottom);
+		return true;
 	}
 
 	#isCurrentAnchorOperation(chatId: string, operationEpoch: number): boolean {

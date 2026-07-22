@@ -11,6 +11,16 @@ describe('ConversationMessage actions', () => {
 		cleanup();
 	});
 
+	it('exposes the canonical transcript row identity without adding a wrapper', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage('2026-06-27T00:00:00.000Z', 'user text'),
+			rowId: 'pending:request-1',
+		});
+
+		const row = container.querySelector('[data-chat-row-id="pending:request-1"]');
+		expect(row).toBe(container.firstElementChild);
+	});
+
 	it('renders the assistant message action button as a compact overlay', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),

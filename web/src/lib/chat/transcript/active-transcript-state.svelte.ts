@@ -183,6 +183,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return this.#displayMessages;
 	}
 
+	get displayRows(): readonly ChatDisplayRow[] {
+		return this.#displayRows;
+	}
+
 	get visibleRows(): ChatDisplayRow[] {
 		return this.#visibleRows;
 	}
@@ -559,6 +563,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	completeInitialMessagesReveal(): void {
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+		this.#initialRevealPhase = 'complete';
+	}
+
+	revealAllLoadedMessages(): void {
+		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 		this.#initialRevealPhase = 'complete';
 	}
 
