@@ -31,7 +31,13 @@ describe('queue handler', () => {
 			getSelectedChatId: () => 'chat-a',
 		});
 		const control = {
-			queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: null,
+				reorderRevision: 0,
+			},
 			version: 2,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};

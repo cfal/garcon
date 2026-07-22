@@ -11,6 +11,7 @@ import type {
   AcceptedDirectOperation,
   AcceptedQueueCreate,
   AcceptedQueueDelete,
+  AcceptedQueueMove,
   AcceptedQueueReplace,
   DirectTurnReservation,
   PendingInputsPort,
@@ -104,6 +105,28 @@ export class AcceptedInputHandler {
       const result = await this.#controls.delete(
         input.command.chatId,
         input.command.entryId,
+        { key: input.command.key, entryId: input.command.entryId },
+      );
+      await input.settlement.settleQueueMutation(input.command, result.entryId);
+      return result;
+    } catch (error) {
+      await input.settlement.settleQueueMutationFailure(input.command, error);
+      throw error;
+    }
+  }
+
+  async move(input: AcceptedQueueMove): Promise<QueueCommandMutationResult> {
+    try {
+      const result = await this.#controls.move(
+        input.command.chatId,
+        {
+          entryId: input.command.entryId,
+          targetEntryId: input.targetEntryId,
+          placement: input.placement,
+          expectedReorderRevision: input.expectedReorderRevision,
+          expectedSourceRevision: input.expectedSourceRevision,
+          expectedTargetRevision: input.expectedTargetRevision,
+        },
         { key: input.command.key, entryId: input.command.entryId },
       );
       await input.settlement.settleQueueMutation(input.command, result.entryId);

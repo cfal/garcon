@@ -7,6 +7,56 @@ import {
 } from '../../support/accepted-response-loss.js';
 
 describe('Lightpanda queue workflow', () => {
+	test('moves queued messages with buttons and executes the authoritative order', async () => {
+		await withE2eFixture('queue-reorder-workflow', async (fixture) => {
+			const app = new SpaDriver(fixture.page, fixture.integration);
+			const active = fixture.integration.fakeProviders.openAi.holdNext({
+				lastUserText: 'ui-reorder-a',
+			});
+			await app.open();
+			await fixture.waitForSpaWebSocket();
+			await app.startOpenAiDirectChat('ui-reorder-a');
+			await active.received;
+
+			await app.sendComposer('ui-reorder-b');
+			await app.sendComposer('ui-reorder-c');
+			await app.sendComposer('ui-reorder-d');
+			await app.clickResponsiveAction('Edit queue');
+			await app.waitForQueuedDialogOrder(['ui-reorder-b', 'ui-reorder-c', 'ui-reorder-d']);
+
+			await app.clickQueuedMove('ui-reorder-d', 'up');
+			await app.waitForQueuedDialogOrder(['ui-reorder-b', 'ui-reorder-d', 'ui-reorder-c']);
+			await app.waitForFocusedQueuedMove('ui-reorder-d');
+			await app.clickQueuedMove('ui-reorder-d', 'up');
+			await app.waitForQueuedDialogOrder(['ui-reorder-d', 'ui-reorder-b', 'ui-reorder-c']);
+			await app.waitForFocusedQueuedMove('ui-reorder-d');
+
+			const heldD = fixture.integration.fakeProviders.openAi.holdNext({
+				lastUserText: 'ui-reorder-d',
+			});
+			const heldB = fixture.integration.fakeProviders.openAi.holdNext({
+				lastUserText: 'ui-reorder-b',
+			});
+			const heldC = fixture.integration.fakeProviders.openAi.holdNext({
+				lastUserText: 'ui-reorder-c',
+			});
+			await app.clickDialogButton('Close');
+			active.releaseEcho();
+			await heldD.received;
+			heldD.releaseEcho();
+			await heldB.received;
+			heldB.releaseEcho();
+			await heldC.received;
+			heldC.releaseEcho();
+			await app.waitForText('echo:ui-reorder-c');
+
+			expect(fixture.integration.fakeProviders.openAi.requests().map(
+				(request) => request.lastUserText,
+			)).toEqual(['ui-reorder-a', 'ui-reorder-d', 'ui-reorder-b', 'ui-reorder-c']);
+			fixture.assertNoBrowserErrors();
+		});
+	});
+
   test('browses, edits, deletes, pauses, and resumes queued messages', async () => {
     await withE2eFixture('queue-workflow', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);

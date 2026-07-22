@@ -1,6 +1,7 @@
 import {
 	deleteQueuedInput,
 	getChatExecutionControl,
+	moveQueuedInput,
 	pauseChatQueue,
 	replaceQueuedInput,
 	resumeChatQueue,
@@ -10,12 +11,21 @@ import {
 	parseChatExecutionControlState,
 	type ChatExecutionControlState,
 } from '$shared/chat-execution-control';
-import type { QueueCommandErrorResponse } from '$shared/chat-command-contracts';
+import type {
+	QueueCommandErrorResponse,
+	QueueEntryMoveCommandRequest,
+	QueueEntryPlacement,
+} from '$shared/chat-command-contracts';
+import type { QueueEntry } from '$shared/queue-state';
 import { createClientCommandId } from './client-command-id.js';
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 import { errorDetail } from './conversation-submission-helpers.js';
 import * as m from '$lib/paraglide/messages.js';
+import {
+	CommandOutcomeUnknownError,
+	submitIdempotentCommand,
+} from './idempotent-command.js';
 
 interface FailedQueueSubmission {
 	sequence: number;
@@ -189,6 +199,35 @@ export class ConversationQueueController {
 			this.options.conversationUi.setExecutionControl(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
+			throw error;
+		}
+	}
+
+	async moveForChat(
+		chatId: string,
+		source: QueueEntry,
+		target: QueueEntry,
+		placement: QueueEntryPlacement,
+		reorderRevision: number,
+	): Promise<void> {
+		const request: QueueEntryMoveCommandRequest = {
+			clientRequestId: createClientCommandId(),
+			chatId,
+			entryId: source.id,
+			targetEntryId: target.id,
+			placement,
+			expectedReorderRevision: reorderRevision,
+			expectedSourceRevision: source.revision,
+			expectedTargetRevision: target.revision,
+		};
+		try {
+			const result = await submitIdempotentCommand(() => moveQueuedInput(request));
+			this.options.conversationUi.setExecutionControl(chatId, result.control);
+		} catch (error) {
+			this.#applyMutationErrorControl(chatId, error);
+			if (error instanceof CommandOutcomeUnknownError) {
+				await this.settleControlRefresh(this.startControlRefresh(chatId));
+			}
 			throw error;
 		}
 	}

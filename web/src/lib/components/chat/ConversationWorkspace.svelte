@@ -682,6 +682,17 @@
 				if (!queuedInputsDialogChatId) return;
 				await controller.deleteQueueEntryForChat(queuedInputsDialogChatId, entryId);
 			}}
+			onMove={async (source, target, placement, reorderRevision) => {
+				const chatId = queuedInputsDialogChatId;
+				if (!chatId) return;
+				await controller.moveQueueEntryForChat(
+					chatId,
+					source,
+					target,
+					placement,
+					reorderRevision,
+				);
+			}}
 			onPause={async () => {
 				if (!queuedInputsDialogChatId) return;
 				await controller.pauseQueueForChat(queuedInputsDialogChatId);

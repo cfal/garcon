@@ -78,6 +78,7 @@ import {
   parseProjectPathPatchRequest,
   parseQueueEntryCreateCommandRequest,
   parseQueueEntryDeleteCommandRequest,
+  parseQueueEntryMoveCommandRequest,
   parseQueueEntryReplaceCommandRequest,
   parseQueueMutationRequest,
   parseQueueResumeRequest,
@@ -915,6 +916,20 @@ export default function createChatRoutes({
     }
   }
 
+  async function putQueueEntryMove(body: unknown): Promise<Response> {
+    try {
+      const input = parseCommandRequest(parseQueueEntryMoveCommandRequest, body);
+      const result = await commands.submitQueueEntryMove(input);
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function postActiveInput(body: unknown): Promise<Response> {
     try {
       const input = parseCommandRequest(parseActiveInputCommandRequest, body);
@@ -1133,6 +1148,9 @@ export default function createChatRoutes({
       POST: withJsonBody(postQueueEntryCreate),
       PUT: withJsonBody(putQueueEntry),
       DELETE: withJsonBody(deleteQueueEntry),
+    },
+    '/api/v1/chats/queue/entries/move': {
+      PUT: withJsonBody(putQueueEntryMove),
     },
     '/api/v1/chats/active-input': { POST: withJsonBody(postActiveInput) },
     '/api/v1/chats/queue/clear': {

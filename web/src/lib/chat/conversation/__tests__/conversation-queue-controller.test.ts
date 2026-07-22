@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getChatExecutionControl } from '$lib/api/chats.js';
+import { getChatExecutionControl, moveQueuedInput } from '$lib/api/chats.js';
+import { ApiError } from '$lib/api/client.js';
 import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import {
 	ConversationQueueController,
@@ -9,10 +10,21 @@ import {
 vi.mock('$lib/api/chats.js', () => ({
 	deleteQueuedInput: vi.fn(),
 	getChatExecutionControl: vi.fn(),
+	moveQueuedInput: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	replaceQueuedInput: vi.fn(),
 	resumeChatQueue: vi.fn(),
 }));
+
+function queueEntry(id: string, revision: number) {
+	return {
+		id,
+		content: id,
+		revision,
+		createdAt: '2026-07-22T00:00:00.000Z',
+		updatedAt: '2026-07-22T00:00:00.000Z',
+	};
+}
 
 function createHarness() {
 	const sessions = { selectedChatId: 'chat-1' as string | null };
@@ -117,5 +129,97 @@ describe('ConversationQueueController', () => {
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
 		expect(controller.pendingControlRefresh('chat-1')).toBeUndefined();
+	});
+
+	it('moves queue entries with stable identity and explicit concurrency preconditions', async () => {
+		const { controller, conversationUi } = createHarness();
+		const control = emptyChatExecutionControlState();
+		vi.mocked(moveQueuedInput).mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-move',
+			clientRequestId: 'request-move',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-22T00:00:00.000Z',
+			entryId: 'entry-2',
+			control,
+		});
+
+		await controller.moveForChat(
+			'chat-1',
+			queueEntry('entry-2', 4),
+			queueEntry('entry-1', 3),
+			'before',
+			9,
+		);
+
+		expect(moveQueuedInput).toHaveBeenCalledOnce();
+		expect(vi.mocked(moveQueuedInput).mock.calls[0]?.[0]).toMatchObject({
+			chatId: 'chat-1',
+			entryId: 'entry-2',
+			targetEntryId: 'entry-1',
+			placement: 'before',
+			expectedReorderRevision: 9,
+			expectedSourceRevision: 4,
+			expectedTargetRevision: 3,
+		});
+		expect(conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', control);
+	});
+
+	it('retries an ambiguous move once with the same client request id', async () => {
+		const { controller } = createHarness();
+		const control = emptyChatExecutionControlState();
+		vi.mocked(moveQueuedInput)
+			.mockRejectedValueOnce(new ApiError(500, 'Connection lost', 'INTERNAL_ERROR'))
+			.mockResolvedValueOnce({
+				success: true,
+				commandType: 'queue-entry-move',
+				clientRequestId: 'request-move',
+				chatId: 'chat-1',
+				status: 'duplicate',
+				acceptedAt: '2026-07-22T00:00:00.000Z',
+				entryId: 'entry-2',
+				control,
+			});
+
+		await controller.moveForChat(
+			'chat-1',
+			queueEntry('entry-2', 1),
+			queueEntry('entry-1', 1),
+			'before',
+			0,
+		);
+
+		expect(moveQueuedInput).toHaveBeenCalledTimes(2);
+		const firstRequest = vi.mocked(moveQueuedInput).mock.calls[0]?.[0];
+		const secondRequest = vi.mocked(moveQueuedInput).mock.calls[1]?.[0];
+		expect(secondRequest?.clientRequestId).toBe(firstRequest?.clientRequestId);
+		expect(secondRequest).toEqual(firstRequest);
+	});
+
+	it('refreshes the latest queue after an unconfirmed move outcome', async () => {
+		const { controller, conversationUi } = createHarness();
+		const control = emptyChatExecutionControlState();
+		vi.mocked(moveQueuedInput)
+			.mockRejectedValueOnce(new Error('network failure'))
+			.mockRejectedValueOnce(new Error('network failure'));
+		vi.mocked(getChatExecutionControl).mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			control,
+		});
+
+		await expect(
+			controller.moveForChat(
+				'chat-1',
+				queueEntry('entry-2', 1),
+				queueEntry('entry-1', 1),
+				'before',
+				0,
+			),
+		).rejects.toMatchObject({ name: 'CommandOutcomeUnknownError' });
+
+		expect(getChatExecutionControl).toHaveBeenCalledWith('chat-1');
+		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
 	});
 });

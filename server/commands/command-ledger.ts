@@ -64,6 +64,7 @@ const QUEUE_RECEIPT_COMMANDS = new Set([
   'queue-entry-create',
   'queue-entry-replace',
   'queue-entry-delete',
+  'queue-entry-move',
   'active-input',
 ]);
 

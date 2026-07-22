@@ -20,7 +20,13 @@ describe('queue routing integration', () => {
 	it('applies execution-control updates for background chats through filter + handler path', () => {
 		const setExecutionControl = vi.fn();
 		const control = {
-			queue: { entries: [], dispatchingEntryId: null, recentlyDispatched: [], pause: null },
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: null,
+				reorderRevision: 0,
+			},
 			version: 3,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};

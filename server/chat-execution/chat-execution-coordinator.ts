@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import type { ChatStopIntent } from '../../common/chat-types.ts';
 import {
@@ -34,6 +35,7 @@ import {
   type AcceptedDirectOperation,
   type AcceptedQueueCreate,
   type AcceptedQueueDelete,
+  type AcceptedQueueMove,
   type AcceptedQueueReplace,
   type AgentTurnRunnerPort,
   type ChatExecutionService,
@@ -337,6 +339,21 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#controlOperations.delete(chatId, entryId, command);
   }
 
+  async moveChatQueueEntry(
+    chatId: string,
+    input: {
+      entryId: string;
+      targetEntryId: string;
+      placement: QueueEntryPlacement;
+      expectedReorderRevision: number;
+      expectedSourceRevision: number;
+      expectedTargetRevision: number;
+    },
+    command?: QueueCommandIdentity,
+  ): Promise<QueueCommandMutationResult & { rebased: boolean | null }> {
+    return this.#controlOperations.move(chatId, input, command);
+  }
+
   async enqueueAccepted(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult> {
     return this.#acceptedInputHandler.enqueue(input);
   }
@@ -347,6 +364,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   async deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult> {
     return this.#acceptedInputHandler.delete(input);
+  }
+
+  async moveAccepted(input: AcceptedQueueMove): Promise<QueueCommandMutationResult> {
+    return this.#acceptedInputHandler.move(input);
   }
 
   async scheduleDirectInput(input: AcceptedDirectInput): Promise<void> {

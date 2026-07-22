@@ -84,6 +84,7 @@ function storedQueue(entries = [], overrides = {}) {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    reorderRevision: 0,
     version: 0,
     updatedAt: null,
     ...overrides,
@@ -279,6 +280,27 @@ function makeService(overrides = {}) {
         throw error;
       }
     }),
+    moveAccepted: mock(async (input) => {
+      try {
+        const result = await queue.moveChatQueueEntry(
+          input.command.chatId,
+          {
+            entryId: input.command.entryId,
+            targetEntryId: input.targetEntryId,
+            placement: input.placement,
+            expectedReorderRevision: input.expectedReorderRevision,
+            expectedSourceRevision: input.expectedSourceRevision,
+            expectedTargetRevision: input.expectedTargetRevision,
+          },
+          { key: input.command.key, entryId: input.command.entryId },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
     deliverAcceptedActiveInput: mock(async (input) => {
       let deliveryAccepted = false;
       try {
@@ -397,6 +419,17 @@ function makeService(overrides = {}) {
         entryId,
         control: storedQueue([], { version: 1 }),
         duplicate: false,
+      }),
+    ),
+    moveChatQueueEntry: mock((_chatId, input) =>
+      Promise.resolve({
+        entryId: input.entryId,
+        control: storedQueue([
+          queueEntry(input.entryId),
+          queueEntry(input.targetEntryId, 'target', 'queued', input.expectedTargetRevision),
+        ], { version: 1, reorderRevision: input.expectedReorderRevision + 1 }),
+        duplicate: false,
+        rebased: false,
       }),
     ),
     deliverActiveInput: mock(() => Promise.resolve(false)),
@@ -1713,7 +1746,7 @@ describe('ChatCommandService', () => {
     });
   });
 
-  it('replaces and deletes queue entries through explicit ID commands', async () => {
+  it('replaces, deletes, and moves queue entries through explicit ID commands', async () => {
     const { service, queue } = makeService();
 
     const replaced = await service.submitQueueEntryReplace({
@@ -1728,6 +1761,16 @@ describe('ChatCommandService', () => {
       entryId: 'entry-1',
       clientRequestId: 'request-delete',
     });
+    const moved = await service.submitQueueEntryMove({
+      chatId: SOURCE_CHAT_ID,
+      entryId: 'entry-3',
+      targetEntryId: 'entry-1',
+      placement: 'before',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 2,
+      clientRequestId: 'request-move',
+    });
 
     expect(replaced.entryId).toBe('entry-1');
     expect(queue.replaceChatQueueEntry).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'entry-1', 'replacement', 2, {
@@ -1739,6 +1782,48 @@ describe('ChatCommandService', () => {
       key: `queue-entry-delete:${SOURCE_CHAT_ID}:request-delete`,
       entryId: 'entry-1',
     });
+    expect(moved.entryId).toBe('entry-3');
+    expect(queue.moveChatQueueEntry).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      {
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 2,
+      },
+      {
+        key: 'queue-entry-move:1783725900000000:request-move',
+        entryId: 'entry-3',
+      },
+    );
+  });
+
+  it('replays a settled move without reapplying it and rejects changed move payloads', async () => {
+    const { service, queue } = makeService();
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      entryId: 'entry-3',
+      targetEntryId: 'entry-1',
+      placement: 'before',
+      expectedReorderRevision: 2,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 2,
+      clientRequestId: 'request-move-retry',
+    };
+
+    const accepted = await service.submitQueueEntryMove(input);
+    const duplicate = await service.submitQueueEntryMove(input);
+
+    expect(accepted.status).toBe('accepted');
+    expect(duplicate.status).toBe('duplicate');
+    expect(queue.moveChatQueueEntry).toHaveBeenCalledOnce();
+    await expect(service.submitQueueEntryMove({
+      ...input,
+      targetEntryId: 'entry-2',
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(queue.moveChatQueueEntry).toHaveBeenCalledOnce();
   });
 
   it('replays semantic queue mutation failures without applying them after state changes', async () => {
@@ -1791,6 +1876,33 @@ describe('ChatCommandService', () => {
     });
 
     expect(queue.deleteChatQueueEntry).toHaveBeenCalledOnce();
+
+    queue.moveChatQueueEntry.mockRejectedValue(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_REORDER_CONFLICT',
+        'The queue order changed before the item could be moved',
+        latestQueue,
+      ),
+    );
+    const moveInput = {
+      chatId: SOURCE_CHAT_ID,
+      entryId: 'entry-3',
+      targetEntryId: 'entry-1',
+      placement: 'before',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 2,
+      clientRequestId: 'request-rejected-move',
+    };
+    await expect(service.submitQueueEntryMove(moveInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_REORDER_CONFLICT',
+    });
+    await expect(service.submitQueueEntryMove(moveInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_REORDER_CONFLICT',
+      control: expect.objectContaining({ version: 3 }),
+    });
+    expect(queue.moveChatQueueEntry).toHaveBeenCalledOnce();
+
     expect(await readLedgerRecord(
       ledger,
       'queue-entry-replace',
@@ -1801,6 +1913,11 @@ describe('ChatCommandService', () => {
       'queue-entry-delete',
       deleteInput.clientRequestId,
     )).toMatchObject({ status: 'rejected', errorCode: 'QUEUE_ENTRY_ALREADY_SENT' });
+    expect(await readLedgerRecord(
+      ledger,
+      'queue-entry-move',
+      moveInput.clientRequestId,
+    )).toMatchObject({ status: 'rejected', errorCode: 'QUEUE_ENTRY_REORDER_CONFLICT' });
   });
 
   it('completes handled active input without exposing a synthetic queue entry', async () => {

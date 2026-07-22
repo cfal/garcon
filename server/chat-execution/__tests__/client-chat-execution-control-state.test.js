@@ -21,6 +21,7 @@ function control(entries, overrides = {}) {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    reorderRevision: 2,
     version: 4,
     updatedAt: '2026-02-27T00:00:00.000Z',
     ...overrides,
@@ -43,12 +44,14 @@ describe('chat execution-control projection', () => {
     expect(result.queue.entries[0]).not.toHaveProperty('status');
     expect(result.queue.entries[0]).not.toHaveProperty('delivery');
     expect(result.queue.dispatchingEntryId).toBe('s1');
+    expect(result.queue.reorderRevision).toBe(2);
     expect(result.version).toBe(4);
   });
 
   it('retains bounded recently-dispatched markers after the sending entry leaves', () => {
     const markers = Array.from({ length: MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES + 3 }, (_, index) => ({
       entryId: `q${index}`,
+      revision: index + 1,
       dispatchedAt: `2026-02-27T00:00:${String(index).padStart(2, '0')}.000Z`,
     }));
     const result = toClientChatExecutionControlState(control([], { recentlyDispatched: markers }));

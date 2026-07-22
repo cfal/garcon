@@ -10,6 +10,7 @@ function control(overrides: Record<string, unknown> = {}) {
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
+			reorderRevision: 0,
 		},
 		version: 7,
 		updatedAt: installedAt,
@@ -55,6 +56,7 @@ describe('chat execution-control WS contract', () => {
 					dispatchingEntryId: null,
 					recentlyDispatched: [],
 					pause,
+					reorderRevision: 0,
 				},
 			}),
 		});
@@ -83,6 +85,7 @@ describe('chat execution-control WS contract', () => {
 						dispatchingEntryId: null,
 						recentlyDispatched: [],
 						pause: null,
+						reorderRevision: 0,
 					},
 				}),
 			}),
@@ -97,8 +100,9 @@ describe('chat execution-control WS contract', () => {
 				queue: {
 					entries: [],
 					dispatchingEntryId: 'entry-1',
-					recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: installedAt }],
+					recentlyDispatched: [{ entryId: 'entry-1', revision: 2, dispatchedAt: installedAt }],
 					pause: null,
+					reorderRevision: 0,
 				},
 			}),
 		});
@@ -107,7 +111,7 @@ describe('chat execution-control WS contract', () => {
 		if (!(parsed instanceof ChatExecutionControlUpdatedMessage)) return;
 		expect(parsed.control.queue.dispatchingEntryId).toBe('entry-1');
 		expect(parsed.control.queue.recentlyDispatched).toEqual([
-			{ entryId: 'entry-1', dispatchedAt: installedAt },
+			{ entryId: 'entry-1', revision: 2, dispatchedAt: installedAt },
 		]);
 	});
 });

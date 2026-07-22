@@ -55,6 +55,7 @@ function storedQueue() {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    reorderRevision: 0,
     version: 3,
     updatedAt: '2024-01-01T00:00:00.000Z',
   };
