@@ -937,3 +937,73 @@
 .rainbow-ultra-surface:hover {
 	filter: brightness(1.08) saturate(1.08);
 }
+
+/* Thinking shimmer: a bright band travels around the combined outline of the
+   chat composer and its processing status tray. The angle custom property is
+   registered so one animation on the frame wrapper keeps the gradients of both
+   elements in sync; unregistered browsers degrade to a static gradient ring.
+   Rules stay unlayered so they override Tailwind border utilities without
+   !important. */
+@property --composer-thinking-shimmer-angle {
+	syntax: '<angle>';
+	inherits: true;
+	initial-value: 0deg;
+}
+
+@keyframes composer-thinking-shimmer-rotate {
+	to {
+		--composer-thinking-shimmer-angle: 360deg;
+	}
+}
+
+.composer-thinking-shimmer {
+	/* Fallback for browsers without @property (Firefox < 128): keeps the angle
+	   valid so the ring renders statically instead of dropping the gradient. */
+	--composer-thinking-shimmer-angle: 0deg;
+	animation: composer-thinking-shimmer-rotate 3.2s linear infinite;
+}
+
+.composer-thinking-shimmer [data-composer],
+.composer-thinking-shimmer [data-slot='chat-processing-status'] {
+	border-color: transparent;
+}
+
+.composer-thinking-shimmer [data-composer]::before,
+.composer-thinking-shimmer [data-slot='chat-processing-status']::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	padding: 1px;
+	background: conic-gradient(
+		from var(--composer-thinking-shimmer-angle),
+		hsl(var(--status-processing)) 0deg,
+		hsl(var(--status-processing) / 0.3) 80deg,
+		hsl(var(--border)) 170deg,
+		hsl(var(--border)) 360deg
+	);
+	-webkit-mask:
+		linear-gradient(#fff 0 0) content-box,
+		linear-gradient(#fff 0 0);
+	-webkit-mask-composite: xor;
+	mask:
+		linear-gradient(#fff 0 0) content-box,
+		linear-gradient(#fff 0 0);
+	mask-composite: exclude;
+	pointer-events: none;
+}
+
+/* Radii mirror rounded-2xl on the composer surface and rounded-t-2xl on the
+   status tray. */
+.composer-thinking-shimmer [data-composer]::before {
+	border-radius: calc(var(--radius) * 2);
+}
+
+.composer-thinking-shimmer [data-slot='chat-processing-status']::before {
+	border-radius: calc(var(--radius) * 2) calc(var(--radius) * 2) 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.composer-thinking-shimmer {
+		animation: none;
+	}
+}

@@ -1079,6 +1079,7 @@
 	"settings_chat_max_width_medium": "Medium",
 	"settings_chat_max_width_small": "Small",
 	"settings_chat_show_thinking": "Show thinking",
+	"settings_chat_composer_thinking_shimmer": "Composer border shimmer while thinking",
 	"settings_chat_hidden_tools": "Hide tool calls",
 	"settings_chat_hidden_tool_bash": "Bash",
 	"settings_chat_hidden_tool_exec": "Exec",

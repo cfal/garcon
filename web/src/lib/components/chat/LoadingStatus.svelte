@@ -114,8 +114,9 @@
 	const statusTrayClass = cn('absolute bottom-full left-0 right-0 z-10 translate-y-3');
 	// Extra bottom padding gives the composer something solid to overlap, hiding
 	// the tray's lower edge behind the composer's stable rounded corners.
+	// `relative` anchors the thinking-shimmer ring pseudo-element to the panel.
 	const statusPanelClass = cn(
-		'pointer-events-auto flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 pb-5 pt-2 sm:px-4',
+		'pointer-events-auto relative flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 pb-5 pt-2 sm:px-4',
 	);
 </script>
 

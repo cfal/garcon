@@ -38,6 +38,7 @@
 		focusRequestToken?: number;
 		selectableAgents?: SessionAgentId[];
 		recentAgentSettings?: RecentAgentSetting[];
+		composerThinkingShimmer?: boolean;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
@@ -57,6 +58,7 @@
 		focusRequestToken = 0,
 		selectableAgents = ['claude'],
 		recentAgentSettings = [],
+		composerThinkingShimmer = true,
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
@@ -174,8 +176,15 @@
 	setConversationLifecycle(lifecycle);
 	setAppShell(appShell);
 	setLocalSettings({
-		sendByShiftEnter: false,
-		showQuickCommitTray: true,
+		get sendByShiftEnter() {
+			return false;
+		},
+		get composerThinkingShimmer() {
+			return composerThinkingShimmer;
+		},
+		get showQuickCommitTray() {
+			return true;
+		},
 	} as never);
 	setChatSessions({
 		get selectedChatId() {

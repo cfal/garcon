@@ -17,6 +17,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.sidebarSortMode).toBe('manual');
+		expect(store.composerThinkingShimmer).toBe(true);
 		expect(store.showQuickCommitTray).toBe(true);
 		expect(store.textEditorOpenPlacement).toBe('source');
 		expect(store.imageViewerOpenPlacement).toBe('source');
@@ -347,6 +348,7 @@ describe('LocalSettingsStore', () => {
 		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarCompactChatItems', true);
 		store.set('showQuickCommitTray', false);
+		store.toggle('composerThinkingShimmer');
 
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
@@ -356,7 +358,12 @@ describe('LocalSettingsStore', () => {
 			sidebarGroupNestedProjectPaths: true,
 			sidebarCompactChatItems: true,
 			showQuickCommitTray: false,
+			composerThinkingShimmer: false,
 		});
+
+		const restored = createLocalSettingsStore();
+		expect(restored.composerThinkingShimmer).toBe(false);
+		restored.destroy();
 
 		store.destroy();
 	});

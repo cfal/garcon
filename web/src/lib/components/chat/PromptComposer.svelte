@@ -556,6 +556,9 @@
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const thinkingShimmerActive = $derived(
+		selectedIsProcessing && localSettings.composerThinkingShimmer,
+	);
 	const forkCapabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDraftStartupSubmitting = $derived(
 		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
@@ -850,7 +853,9 @@
 {/snippet}
 
 {#snippet composerFrame()}
-	<div class="relative">
+	<!-- The shimmer class animates the border gradient of both the composer
+	     surface and the loading tray via a shared registered custom property. -->
+	<div class="relative" class:composer-thinking-shimmer={thinkingShimmerActive}>
 		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
 		     so the upward-opening menu is not cut off. -->
 		<SlashCommandMenu

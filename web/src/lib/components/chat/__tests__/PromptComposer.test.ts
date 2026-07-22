@@ -212,6 +212,37 @@ describe('PromptComposer focus', () => {
 		expect(gitTray.className).toContain('pb-5');
 	});
 
+	it('shimmers the composer frame only while processing and the setting is on', async () => {
+		const { container, rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: false,
+			isSubmitting: false,
+			composerThinkingShimmer: true,
+		});
+		const frame = container.querySelector('[data-composer]')?.parentElement;
+
+		expect(frame?.className).not.toContain('composer-thinking-shimmer');
+
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			composerThinkingShimmer: true,
+		});
+		expect(frame?.className).toContain('composer-thinking-shimmer');
+
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			composerThinkingShimmer: false,
+		});
+		expect(frame?.className).not.toContain('composer-thinking-shimmer');
+	});
+
 	it('shows quick commit before stop while the selected chat is processing', async () => {
 		const onAbort = vi.fn();
 		const onQuickCommit = vi.fn();
