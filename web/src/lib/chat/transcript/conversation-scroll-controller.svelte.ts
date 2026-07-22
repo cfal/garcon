@@ -37,6 +37,7 @@ export class ConversationScrollController {
 	#isAutoFillingViewport = false;
 	#isViewportVisible = true;
 	#restoreBottomOnNextVisible = false;
+	#suppressNextVisibleBottomRestore = false;
 	#bottomRestoreFrame: number | null = null;
 	#lastUserScrollIntentAt = 0;
 	#initialBottomRestoreChatId = $state<string | null>(null);
@@ -244,18 +245,30 @@ export class ConversationScrollController {
 			return false;
 		}
 
+		this.#suppressNextVisibleBottomRestore = true;
+		this.#restoreBottomOnNextVisible = false;
+		this.#cancelBottomRestoreFrame();
 		const operationEpoch = ++this.#anchorOperationEpoch;
 		await tick();
-		if (!this.#isCurrentAnchorOperation(target.chatId, operationEpoch)) return false;
+		if (!this.#isCurrentAnchorOperation(target.chatId, operationEpoch)) {
+			this.#suppressNextVisibleBottomRestore = false;
+			return false;
+		}
 
 		const content = this.deps.getScrollContentContainer?.();
 		const row = Array.from(
 			content?.querySelectorAll<HTMLElement>('[data-chat-row-id]') ?? [],
 		).find((element) => element.dataset.chatRowId === target.rowId);
-		if (!row) return false;
+		if (!row) {
+			this.#suppressNextVisibleBottomRestore = false;
+			return false;
+		}
 
 		const scroller = this.deps.getScrollContainer();
-		if (!scroller) return false;
+		if (!scroller) {
+			this.#suppressNextVisibleBottomRestore = false;
+			return false;
+		}
 		const scrollerRect = scroller.getBoundingClientRect();
 		const rowRect = row.getBoundingClientRect();
 		const rowTop = scroller.scrollTop + rowRect.top - scrollerRect.top;
@@ -263,6 +276,9 @@ export class ConversationScrollController {
 		const nearBottom = this.isNearBottom();
 		this.deps.chatState.isUserScrolledUp = !nearBottom;
 		this.setPinnedToBottom(nearBottom);
+		this.#restoreBottomOnNextVisible = false;
+		this.#cancelBottomRestoreFrame();
+		if (this.#isViewportVisible) this.#suppressNextVisibleBottomRestore = false;
 		return true;
 	}
 
@@ -383,6 +399,12 @@ export class ConversationScrollController {
 		}
 
 		if (!this.#restoreBottomOnNextVisible) return;
+		if (this.#suppressNextVisibleBottomRestore) {
+			this.#suppressNextVisibleBottomRestore = false;
+			this.#restoreBottomOnNextVisible = false;
+			this.#cancelBottomRestoreFrame();
+			return;
+		}
 		this.#restoreBottomOnNextVisible = false;
 		this.#scheduleBottomRestore();
 	}
@@ -404,7 +426,7 @@ export class ConversationScrollController {
 
 	#restoreBottomNow(): void {
 		this.#cancelBottomRestoreFrame();
-		if (!this.#isViewportVisible) return;
+		if (!this.#isViewportVisible || this.deps.chatState.isUserScrolledUp) return;
 		const node = this.deps.getScrollContainer();
 		if (!node || node.clientHeight <= 0) return;
 		this.scrollToBottom();

@@ -894,6 +894,52 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 	});
 
+	it('does not let a queued visibility restore undo a message jump', async () => {
+		const scheduledFrames: FrameRequestCallback[] = [];
+		globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+			scheduledFrames.push(callback);
+			return scheduledFrames.length;
+		}) as typeof requestAnimationFrame;
+		const cancelFrame = vi.fn();
+		globalThis.cancelAnimationFrame = cancelFrame as typeof cancelAnimationFrame;
+		const scroller = {
+			scrollTop: 200,
+			scrollHeight: 705,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 100 }),
+		} as HTMLDivElement;
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatRowId = 'generation-1:7';
+		row.getBoundingClientRect = vi.fn(() => ({ top: 350, height: 100 }) as DOMRect);
+		content.append(row);
+		const chatState = { generationId: 'generation-1', isUserScrolledUp: false };
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(true);
+		const jump = controller.jumpToMessageRow({
+			chatId: 'chat-1',
+			generationId: 'generation-1',
+			rowId: 'generation-1:7',
+		});
+		controller.setViewportVisible(false);
+		controller.setViewportVisible(true);
+
+		expect(await jump).toBe(true);
+		for (const callback of scheduledFrames) callback(0);
+
+		expect(cancelFrame).toHaveBeenCalled();
+		expect(scheduledFrames).toEqual([]);
+		expect(scroller.scrollTop).toBe(300);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
 	it('does not restore bottom when the user was scrolled up before hiding the viewport', () => {
 		const scroller = { scrollTop: 120, scrollHeight: 1000, clientHeight: 600 } as HTMLDivElement;
 		const chatState = {

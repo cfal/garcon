@@ -39,7 +39,7 @@ describe('Lightpanda user-message navigation', () => {
       await app.trackChatScrollAssignments();
       await app.clickUserMessageNavigatorRowContaining('navigator-first-turn');
       await app.waitForTextAbsent('User messages');
-      await app.waitForChatScrollAssignment(expectedScrollTop);
+      await app.waitForStableChatScrollAssignment(expectedScrollTop);
       fixture.assertNoBrowserErrors();
     });
   });

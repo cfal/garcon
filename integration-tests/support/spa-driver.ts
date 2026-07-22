@@ -362,7 +362,7 @@ export class SpaDriver {
     });
   }
 
-  async waitForChatScrollAssignment(
+  async waitForStableChatScrollAssignment(
     expected: number,
     timeout = 20_000,
   ): Promise<void> {
@@ -377,6 +377,27 @@ export class SpaDriver {
       { timeout },
       expected,
     );
+
+    await this.#page.evaluate(
+      () => new Promise<void>((resolve) => setTimeout(resolve, 100)),
+    );
+    const settled = await this.#page.$eval(
+      '[role="log"][aria-label="Chat messages"]',
+      (element) => {
+        const feed = element as HTMLElement;
+        const assignments = JSON.parse(feed.dataset.testScrollAssignments ?? '[]') as number[];
+        return { scrollTop: feed.scrollTop, lastAssignment: assignments.at(-1), assignments };
+      },
+    );
+    if (
+      settled.lastAssignment === undefined
+      || Math.abs(settled.lastAssignment - expected) >= 0.001
+      || Math.abs(settled.scrollTop - expected) >= 0.001
+    ) {
+      throw new Error(
+        `Chat scroll did not settle at ${expected}: ${JSON.stringify(settled)}`,
+      );
+    }
   }
 
   async waitForChatScrollTopGreaterThan(minimum: number, timeout = 20_000): Promise<void> {
