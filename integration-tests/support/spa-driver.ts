@@ -304,6 +304,43 @@ export class SpaDriver {
     }, name);
   }
 
+  async userMessageNavigatorRows(): Promise<string[]> {
+    return this.#page.$$eval(
+      '[data-user-message-navigator-row]',
+      (rows) => rows.map((row) => row.textContent?.trim() ?? ''),
+    );
+  }
+
+  async clickUserMessageNavigatorRowContaining(text: string): Promise<void> {
+    await this.#page.evaluate((expected) => {
+      const row = [...document.querySelectorAll<HTMLButtonElement>(
+        '[data-user-message-navigator-row]',
+      )].find((element) => element.textContent?.includes(expected));
+      if (!row) throw new Error(`Missing user-message navigator row containing: ${expected}`);
+      row.click();
+    }, text);
+  }
+
+  async chatScrollTop(): Promise<number> {
+    return this.#page.$eval(
+      '[role="log"][aria-label="Chat messages"]',
+      (element) => (element as HTMLElement).scrollTop,
+    );
+  }
+
+  async waitForChatScrollTopGreaterThan(minimum: number, timeout = 20_000): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => {
+        const feed = document.querySelector<HTMLElement>(
+          '[role="log"][aria-label="Chat messages"]',
+        );
+        return (feed?.scrollTop ?? 0) > expected;
+      },
+      { timeout },
+      minimum,
+    );
+  }
+
   async clickSidebarChatContaining(text: string): Promise<void> {
     await this.#page.evaluate((expected) => {
       const summary = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]')]
