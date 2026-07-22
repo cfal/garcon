@@ -6,6 +6,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import CodeEditor from './CodeEditor.svelte';
 	import MarkdownViewer from './MarkdownViewer.svelte';
@@ -25,13 +26,14 @@
 	import { startVisibilityPolling } from '$lib/components/shared/visibility-polling.js';
 	import { FILE_FRESHNESS_POLL_MS } from '$lib/files/sessions/file-freshness.js';
 
-	let {
-		session,
-		presentation,
-	}: {
+	interface Props {
 		session: FileSession;
 		presentation: PresentationHostId;
-	} = $props();
+		onClose?: () => void;
+		closeDisabled?: boolean;
+	}
+
+	let { session, presentation, onClose, closeDisabled = false }: Props = $props();
 	const files = getFileSessions();
 	const compact = $derived(presentation === 'sidebar' || presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
@@ -138,6 +140,18 @@
 				{/if}
 			{/snippet}
 		</ResponsiveSurfaceActions>
+		{#if onClose}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={onClose}
+				disabled={closeDisabled}
+				aria-label={m.file_session_close()}
+				title={m.file_session_close()}
+			>
+				<X class="h-4 w-4" />
+			</Button>
+		{/if}
 	</header>
 
 	{#if session.isExternallyStale || session.refreshError}
