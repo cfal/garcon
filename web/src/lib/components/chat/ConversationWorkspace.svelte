@@ -8,6 +8,7 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
+	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import QueueControls from './QueueControls.svelte';
 	import SubagentManagementBar from './SubagentManagementBar.svelte';
@@ -30,6 +31,10 @@
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+	import {
+		UserMessageNavigatorController,
+		type UserMessageNavigatorRegistration,
+	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { scheduleInitialTranscriptReveal } from '$lib/chat/transcript/initial-transcript-reveal.js';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
@@ -75,6 +80,7 @@
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
+		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		transcriptCache?: ChatTranscriptCache;
 		reserveTopFloatingToolbar?: boolean;
 		reserveFeedTopFloatingToolbar?: boolean;
@@ -98,6 +104,7 @@
 	let {
 		onRegisterSubmit,
 		onRegisterReload,
+		onRegisterUserMessageNavigator,
 		transcriptCache: providedTranscriptCache,
 		reserveTopFloatingToolbar = false,
 		reserveFeedTopFloatingToolbar = false,
@@ -304,7 +311,6 @@
 		chatState,
 		sessions,
 	});
-
 	function scrollToBottomAndFill(): void {
 		scroll.scrollToBottom();
 		void scroll.fillUnderfilledViewport();
@@ -335,11 +341,21 @@
 		setInitialBottomRestorePending: (chatId) => scroll.prepareInitialBottomRestore(chatId),
 		scrollToBottom: scrollToBottomAndFill,
 	});
+	const userMessageNavigator = new UserMessageNavigatorController({
+		transcript: chatState,
+		getSelectedChatId: () => sessions.selectedChatId,
+		reloadTranscript: (chatId) => controller.loadChat(chatId),
+		loadOlderMessages: (chatId) => scroll.loadMoreMessagesForNavigator(chatId),
+		jumpToRow: (target) => scroll.jumpToMessageRow(target),
+	});
 
 	// Expose the submit function to sibling components (runs once on mount).
 	onMount(() => {
 		onRegisterSubmit?.(submitToActiveChat);
 		onRegisterReload?.(reloadSelectedChat);
+		onRegisterUserMessageNavigator?.(() => userMessageNavigator.openForActiveChat());
+
+		return () => onRegisterUserMessageNavigator?.(null);
 	});
 
 	// Chat switch effect (dedup handled inside the controller).
@@ -351,6 +367,12 @@
 			closeQueuedInputsDialog();
 		}
 		controller.handleChatSwitchIfChanged(chatId);
+	});
+
+	$effect(() => {
+		const chatId = sessions.selectedChatId;
+		const generationId = chatState.generationId;
+		userMessageNavigator.reconcileActiveTranscript(chatId, generationId);
 	});
 
 	$effect(() => {
@@ -658,6 +680,10 @@
 		quickCommitBranchSelector={quickGitBranchSelectorControls}
 		onQuickCommit={openCommit}
 	/>
+
+	{#if userMessageNavigator.open}
+		<UserMessageNavigatorDialog controller={userMessageNavigator} />
+	{/if}
 
 	{#if queuedInputsDialogOpen}
 		<QueuedInputsDialog

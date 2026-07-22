@@ -305,6 +305,126 @@ export class SpaDriver {
     }, name);
   }
 
+  async userMessageNavigatorRows(): Promise<string[]> {
+    return this.#page.$$eval(
+      '[data-user-message-navigator-row]',
+      (rows) => rows.map((row) => row.textContent?.trim() ?? ''),
+    );
+  }
+
+  async clickUserMessageNavigatorRowContaining(text: string): Promise<void> {
+    await this.#page.evaluate((expected) => {
+      const row = [...document.querySelectorAll<HTMLButtonElement>(
+        '[data-user-message-navigator-row]',
+      )].find((element) => element.textContent?.includes(expected));
+      if (!row) throw new Error(`Missing user-message navigator row containing: ${expected}`);
+      row.click();
+    }, text);
+  }
+
+  async expectedChatScrollTopForNavigatorRowContaining(text: string): Promise<number> {
+    return this.#page.evaluate((expected) => {
+      const navigatorRow = [...document.querySelectorAll<HTMLElement>(
+        '[data-user-message-navigator-row]',
+      )].find((element) => element.textContent?.includes(expected));
+      const rowId = navigatorRow?.dataset.userMessageNavigatorRow;
+      if (!rowId) throw new Error(`Missing user-message navigator row containing: ${expected}`);
+
+      const feed = document.querySelector<HTMLElement>(
+        '[role="log"][aria-label="Chat messages"]',
+      );
+      const row = [...(feed?.querySelectorAll<HTMLElement>('[data-chat-row-id]') ?? [])].find(
+        (element) => element.dataset.chatRowId === rowId,
+      );
+      if (!feed || !row) throw new Error(`Missing chat row for navigator identity: ${rowId}`);
+
+      const feedRect = feed.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const rowTop = feed.scrollTop + rowRect.top - feedRect.top;
+      return Math.max(0, rowTop - (feed.clientHeight - rowRect.height) / 2);
+    }, text);
+  }
+
+  async trackChatScrollAssignments(): Promise<void> {
+    await this.#page.$eval('[role="log"][aria-label="Chat messages"]', (element) => {
+      const feed = element as HTMLElement;
+      let owner: object | null = feed;
+      let descriptor: PropertyDescriptor | undefined;
+      while (owner && !descriptor) {
+        descriptor = Object.getOwnPropertyDescriptor(owner, 'scrollTop');
+        owner = Object.getPrototypeOf(owner) as object | null;
+      }
+      if (!descriptor?.get || !descriptor.set) {
+        throw new Error('Missing native scrollTop descriptor.');
+      }
+      const nativeGet = descriptor.get;
+      const nativeSet = descriptor.set;
+      feed.dataset.testScrollAssignments = '[]';
+      Object.defineProperty(feed, 'scrollTop', {
+        configurable: true,
+        get: () => Number(nativeGet.call(feed)),
+        set: (value: number) => {
+          const requested = Number(value);
+          nativeSet.call(feed, requested);
+          const assignments = JSON.parse(feed.dataset.testScrollAssignments ?? '[]') as number[];
+          assignments.push(requested);
+          feed.dataset.testScrollAssignments = JSON.stringify(assignments);
+        },
+      });
+    });
+  }
+
+  async waitForStableChatScrollAssignment(
+    expected: number,
+    timeout = 20_000,
+  ): Promise<void> {
+    await this.#page.waitForFunction(
+      (target) => {
+        const feed = document.querySelector<HTMLElement>(
+          '[role="log"][aria-label="Chat messages"]',
+        );
+        const assignments = JSON.parse(feed?.dataset.testScrollAssignments ?? '[]') as number[];
+        return assignments.some((value) => Math.abs(value - target) < 0.001);
+      },
+      { timeout },
+      expected,
+    );
+
+    await this.#page.evaluate(
+      () => new Promise<void>((resolve) => setTimeout(resolve, 100)),
+    );
+    const settled = await this.#page.$eval(
+      '[role="log"][aria-label="Chat messages"]',
+      (element) => {
+        const feed = element as HTMLElement;
+        const assignments = JSON.parse(feed.dataset.testScrollAssignments ?? '[]') as number[];
+        return { scrollTop: feed.scrollTop, lastAssignment: assignments.at(-1), assignments };
+      },
+    );
+    if (
+      settled.lastAssignment === undefined
+      || Math.abs(settled.lastAssignment - expected) >= 0.001
+      || Math.abs(settled.scrollTop - expected) >= 0.001
+    ) {
+      throw new Error(
+        `Chat scroll did not settle at ${expected}: ${JSON.stringify(settled)}`,
+      );
+    }
+  }
+
+  async waitForChatScrollTopGreaterThan(minimum: number, timeout = 20_000): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => {
+        const feed = document.querySelector<HTMLElement>(
+          '[role="log"][aria-label="Chat messages"]',
+        );
+        return (feed?.scrollTop ?? 0) > expected;
+      },
+      { timeout },
+      minimum,
+    );
+  }
+
   async clickSidebarChatContaining(text: string): Promise<void> {
     await this.#page.evaluate((expected) => {
       const summary = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]')]

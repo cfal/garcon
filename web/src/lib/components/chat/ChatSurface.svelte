@@ -15,6 +15,10 @@
 	import { SplitPanePreviewStore } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type {
+		UserMessageNavigatorCommand,
+		UserMessageNavigatorRegistration,
+	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { getSplitPaneTextScale } from '$lib/chat/split/split-pane-text-scale.js';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
@@ -58,6 +62,7 @@
 		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
+		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		chatActions?: WorkspaceChatActions;
 	}
 
@@ -71,6 +76,7 @@
 		onToggleDesktopFullscreen,
 		onRegisterReload,
 		onRegisterSubmit,
+		onRegisterUserMessageNavigator,
 		chatActions = noopChatActions,
 	}: ChatSurfaceProps = $props();
 
@@ -81,6 +87,7 @@
 	const chatInteractionGate = getChatInteractionGate();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const splitPanePreviews = new SplitPanePreviewStore(chatTranscriptCache);
+	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -128,6 +135,11 @@
 
 	function handleRegisterSubmit(fn: (message: string) => Promise<boolean>): void {
 		onRegisterSubmit?.(fn);
+	}
+
+	function handleRegisterUserMessageNavigator(command: UserMessageNavigatorRegistration): void {
+		openUserMessageNavigator = command;
+		onRegisterUserMessageNavigator?.(command);
 	}
 
 	function toggleSplitMode() {
@@ -315,6 +327,7 @@
 			{shadow}
 			onToggleSplitMode={toggleSplitMode}
 			{onToggleDesktopFullscreen}
+			onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
 			onRename={() => chatActions.requestRename(selectedChat)}
 			onDetails={() => chatActions.requestDetails(selectedChat)}
 			onReload={() => chatActions.reload(selectedChat)}
@@ -382,6 +395,7 @@
 			>
 				<ConversationWorkspace
 					onRegisterSubmit={handleRegisterSubmit}
+					onRegisterUserMessageNavigator={handleRegisterUserMessageNavigator}
 					{onRegisterReload}
 					transcriptCache={chatTranscriptCache}
 					reserveTopFloatingToolbar={reserveConversationTopFloatingToolbar}

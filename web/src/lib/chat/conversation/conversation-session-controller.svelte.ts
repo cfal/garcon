@@ -397,7 +397,7 @@ export class ConversationSessionController {
 		}
 
 		if (deps.chatState.chatMessages.length > 0) {
-			requestAnimationFrame(() => deps.scrollToBottom());
+			this.#requestBottomRestore(chatId);
 		}
 
 		try {
@@ -407,7 +407,7 @@ export class ConversationSessionController {
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.transcriptCache.markValidated(chatId);
-			requestAnimationFrame(() => deps.scrollToBottom());
+			this.#requestBottomRestore(chatId);
 
 			const record = deps.sessions.byId[chatId];
 			if (
@@ -420,6 +420,15 @@ export class ConversationSessionController {
 		} catch {
 			// Leaves restored messages visible until reconnect or manual retry reloads them.
 		}
+	}
+
+	#requestBottomRestore(chatId: string): void {
+		requestAnimationFrame(() => {
+			if (this.deps.sessions.selectedChatId !== chatId || this.deps.chatState.isUserScrolledUp) {
+				return;
+			}
+			this.deps.scrollToBottom();
+		});
 	}
 
 	// Accepts an explicit chat ID so draft startup cannot race selection changes.

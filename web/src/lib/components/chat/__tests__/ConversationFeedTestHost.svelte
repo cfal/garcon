@@ -3,7 +3,7 @@
 	import ConversationFeed from '../ConversationFeed.svelte';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-	import { AssistantMessage } from '$shared/chat-types';
+	import { AssistantMessage, UserMessage } from '$shared/chat-types';
 	import {
 		setAgentState,
 		setAppShell,
@@ -14,14 +14,38 @@
 
 	interface Props {
 		reserveTopFloatingToolbar?: boolean;
-		transcriptScenario?: 'empty' | 'initial-reveal' | 'local-truncation';
+		transcriptScenario?: 'empty' | 'initial-reveal' | 'local-truncation' | 'row-ids';
 	}
 
 	const { reserveTopFloatingToolbar = false, transcriptScenario = 'empty' }: Props = $props();
 	const initialTranscriptScenario = untrack(() => transcriptScenario);
 
 	const chatState = new ActiveTranscriptState();
-	if (initialTranscriptScenario !== 'empty') {
+	if (initialTranscriptScenario === 'row-ids') {
+		chatState.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			[
+				{
+					seq: 1,
+					message: new UserMessage('2026-07-01T00:00:00.000Z', 'Durable user message'),
+				},
+			],
+			{
+				lastSeq: 1,
+				pageOldestSeq: 1,
+				hasMore: false,
+			},
+		);
+		chatState.upsertPendingUserInput({
+			chatId: 'chat-1',
+			clientRequestId: 'request-1',
+			content: 'Pending user message',
+			createdAt: '2026-07-01T00:00:01.000Z',
+			deliveryStatus: 'submitting',
+			attachments: [],
+		});
+	} else if (initialTranscriptScenario !== 'empty') {
 		const messageCount = initialTranscriptScenario === 'initial-reveal' ? 100 : 120;
 		const messages = Array.from({ length: messageCount }, (_, index) => ({
 			seq: index + 1,

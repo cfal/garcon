@@ -4,7 +4,11 @@
 
 import { tick } from 'svelte';
 import { reconcileScrollAfterHeightDelta } from '$lib/chat/transcript/scroll-anchor.js';
-import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type {
+	ActiveTranscriptState,
+	OlderMessagesLoadResult,
+} from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { UserMessageNavigatorTarget } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
 const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 
@@ -12,10 +16,12 @@ export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
 	| 'displayMessageCount'
 	| 'completeInitialMessagesReveal'
+	| 'generationId'
 	| 'hasInitialMessagesToReveal'
 	| 'hasMoreMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
+	| 'invalidatePendingHistoryLoad'
 	| 'loadAllMessages'
 	| 'loadMoreMessages'
 	| 'loadStatus'
@@ -35,6 +41,7 @@ export class ConversationScrollController {
 	#isAutoFillingViewport = false;
 	#isViewportVisible = true;
 	#restoreBottomOnNextVisible = false;
+	#suppressNextVisibleBottomRestore = false;
 	#bottomRestoreFrame: number | null = null;
 	#lastUserScrollIntentAt = 0;
 	#initialBottomRestoreChatId = $state<string | null>(null);
@@ -186,8 +193,8 @@ export class ConversationScrollController {
 		prevTop: number,
 		operationEpoch = this.#anchorOperationEpoch,
 	): Promise<void> {
-		const loaded = await this.deps.chatState.loadMoreMessages(chatId);
-		if (!loaded) return;
+		const result = await this.deps.chatState.loadMoreMessages(chatId);
+		if (result !== 'loaded') return;
 		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
 
 		await tick();
@@ -200,6 +207,85 @@ export class ConversationScrollController {
 		container.scrollTop = prevTop + (newHeight - prevHeight);
 		this.deps.chatState.isUserScrolledUp = true;
 		this.setPinnedToBottom(false);
+	}
+
+	async loadMoreMessagesForNavigator(chatId: string): Promise<OlderMessagesLoadResult> {
+		const container = this.deps.getScrollContainer();
+		if (!container || this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
+
+		const operationEpoch = ++this.#anchorOperationEpoch;
+		const previousHeight = container.scrollHeight;
+		const previousTop = container.scrollTop;
+		const shouldRemainPinned =
+			this.isPinnedToBottom ||
+			!this.deps.chatState.isUserScrolledUp ||
+			this.isNearBottom();
+
+		const result = await this.deps.chatState.loadMoreMessages(chatId);
+		if (result !== 'loaded') return result;
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return 'invalidated';
+
+		await tick();
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return 'invalidated';
+
+		const updated = this.deps.getScrollContainer();
+		if (!updated) return 'invalidated';
+		if (shouldRemainPinned) {
+			updated.scrollTop = updated.scrollHeight;
+			this.deps.chatState.isUserScrolledUp = false;
+			this.setPinnedToBottom(true);
+		} else {
+			updated.scrollTop = previousTop + (updated.scrollHeight - previousHeight);
+			this.deps.chatState.isUserScrolledUp = true;
+			this.setPinnedToBottom(false);
+		}
+		return 'loaded';
+	}
+
+	async jumpToMessageRow(target: UserMessageNavigatorTarget): Promise<boolean> {
+		if (
+			this.deps.sessions.selectedChatId !== target.chatId ||
+			this.deps.chatState.generationId !== target.generationId
+		) {
+			return false;
+		}
+
+		this.#suppressNextVisibleBottomRestore = true;
+		this.#restoreBottomOnNextVisible = false;
+		this.#cancelBottomRestoreFrame();
+		const operationEpoch = ++this.#anchorOperationEpoch;
+		await tick();
+		if (!this.#isCurrentAnchorOperation(target.chatId, operationEpoch)) {
+			this.#suppressNextVisibleBottomRestore = false;
+			return false;
+		}
+		this.deps.chatState.invalidatePendingHistoryLoad();
+
+		const content = this.deps.getScrollContentContainer?.();
+		const row = Array.from(
+			content?.querySelectorAll<HTMLElement>('[data-chat-row-id]') ?? [],
+		).find((element) => element.dataset.chatRowId === target.rowId);
+		if (!row) {
+			this.#suppressNextVisibleBottomRestore = false;
+			return false;
+		}
+
+		const scroller = this.deps.getScrollContainer();
+		if (!scroller) {
+			this.#suppressNextVisibleBottomRestore = false;
+			return false;
+		}
+		const scrollerRect = scroller.getBoundingClientRect();
+		const rowRect = row.getBoundingClientRect();
+		const rowTop = scroller.scrollTop + rowRect.top - scrollerRect.top;
+		scroller.scrollTop = Math.max(0, rowTop - (scroller.clientHeight - rowRect.height) / 2);
+		const nearBottom = this.isNearBottom();
+		this.deps.chatState.isUserScrolledUp = !nearBottom;
+		this.setPinnedToBottom(nearBottom);
+		this.#restoreBottomOnNextVisible = false;
+		this.#cancelBottomRestoreFrame();
+		this.#suppressNextVisibleBottomRestore = false;
+		return true;
 	}
 
 	#isCurrentAnchorOperation(chatId: string, operationEpoch: number): boolean {
@@ -228,8 +314,8 @@ export class ConversationScrollController {
 				if (container.scrollHeight > container.clientHeight + 1) return;
 
 				const previousHeight = container.scrollHeight;
-				const loaded = await this.deps.chatState.loadMoreMessages(chatId);
-				if (!loaded || this.deps.sessions.selectedChatId !== chatId) return;
+				const result = await this.deps.chatState.loadMoreMessages(chatId);
+				if (result !== 'loaded' || this.deps.sessions.selectedChatId !== chatId) return;
 
 				await tick();
 				const updated = this.deps.getScrollContainer();
@@ -319,6 +405,12 @@ export class ConversationScrollController {
 		}
 
 		if (!this.#restoreBottomOnNextVisible) return;
+		if (this.#suppressNextVisibleBottomRestore) {
+			this.#suppressNextVisibleBottomRestore = false;
+			this.#restoreBottomOnNextVisible = false;
+			this.#cancelBottomRestoreFrame();
+			return;
+		}
 		this.#restoreBottomOnNextVisible = false;
 		this.#scheduleBottomRestore();
 	}
@@ -340,7 +432,7 @@ export class ConversationScrollController {
 
 	#restoreBottomNow(): void {
 		this.#cancelBottomRestoreFrame();
-		if (!this.#isViewportVisible) return;
+		if (!this.#isViewportVisible || this.deps.chatState.isUserScrolledUp) return;
 		const node = this.deps.getScrollContainer();
 		if (!node || node.clientHeight <= 0) return;
 		this.scrollToBottom();
