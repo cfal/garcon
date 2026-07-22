@@ -2,6 +2,7 @@ import path from 'path';
 import {
   SNIPPET_MAX_COUNT,
   normalizeSnippet,
+  sortSnippetsByShortName,
   type Snippet,
   type SnippetDefinitionInput,
   type SnippetsSnapshot,
@@ -54,7 +55,11 @@ function normalizeFile(value: unknown): SnippetsFile {
       snippets.push(snippet);
     }
   }
-  return { version: 1, revision, snippets };
+  return {
+    version: 1,
+    revision,
+    snippets: sortSnippetsByShortName(snippets),
+  };
 }
 
 function cloneSnippet(snippet: Snippet): Snippet {
@@ -159,31 +164,6 @@ export class SnippetStore {
     });
   }
 
-  async reorder(
-    orderedSnippetIds: string[],
-    expectedRevision: number,
-  ): Promise<void> {
-    await this.#mutate(expectedRevision, (draft) => {
-      const currentIds = draft.snippets.map((snippet) => snippet.id);
-      const supplied = new Set(orderedSnippetIds);
-      if (
-        orderedSnippetIds.length !== currentIds.length ||
-        supplied.size !== orderedSnippetIds.length ||
-        currentIds.some((id) => !supplied.has(id))
-      ) {
-        throw new SnippetDomainError(
-          'SNIPPET_VALIDATION_FAILED',
-          'orderedSnippetIds must contain every current snippet exactly once',
-          400,
-        );
-      }
-      const byId = new Map(
-        draft.snippets.map((snippet) => [snippet.id, snippet]),
-      );
-      draft.snippets = orderedSnippetIds.map((id) => byId.get(id)!);
-    });
-  }
-
   async #mutate(
     expectedRevision: number,
     change: (draft: SnippetsFile) => void,
@@ -206,6 +186,7 @@ export class SnippetStore {
       }
       const draft = structuredClone(this.#file);
       change(draft);
+      draft.snippets = sortSnippetsByShortName(draft.snippets);
       draft.revision += 1;
       await this.#persistence.write(draft);
       this.#file = draft;

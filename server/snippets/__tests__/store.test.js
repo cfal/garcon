@@ -31,25 +31,24 @@ describe('snippet persistence', () => {
     }
   });
 
-  it('persists ordered mutations, private permissions, and revision conflicts', async () => {
+  it('persists sorted mutations, private permissions, and revision conflicts', async () => {
     const dir = await tempDir();
     const store = new SnippetStore(dir);
     await store.init();
-    await store.create(snippet('a'), 0);
-    await store.create(snippet('b'), 1);
-    await store.reorder(['b', 'a'], 2);
+    await store.create(snippet('b'), 0);
+    await store.create(snippet('a'), 1);
     await store.update(
-      'a',
-      { shortName: 'a', template: 'Updated' },
+      'b',
+      { shortName: 'c', template: 'Updated' },
       '2026-01-02T00:00:00.000Z',
-      3,
+      2,
     );
 
     expect(store.snapshot()).toMatchObject({
-      revision: 4,
-      snippets: [{ id: 'b' }, { id: 'a', template: 'Updated' }],
+      revision: 3,
+      snippets: [{ id: 'a' }, { id: 'b', shortName: 'c', template: 'Updated' }],
     });
-    await expect(store.remove('a', 3)).rejects.toMatchObject({
+    await expect(store.remove('a', 2)).rejects.toMatchObject({
       code: 'SNIPPET_REVISION_CONFLICT',
       status: 409,
       retryable: true,
@@ -57,7 +56,10 @@ describe('snippet persistence', () => {
 
     const filePath = path.join(dir, 'snippets.json');
     expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(await fs.readFile(filePath, 'utf8')).revision).toBe(4);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toMatchObject({
+      revision: 3,
+      snippets: [{ id: 'a' }, { id: 'b', shortName: 'c' }],
+    });
   });
 
   it('keeps each snippet update timestamp strictly monotonic', async () => {
@@ -79,7 +81,7 @@ describe('snippet persistence', () => {
     );
   });
 
-  it('enforces name uniqueness and exact full-list reorder input', async () => {
+  it('enforces name uniqueness', async () => {
     const dir = await tempDir();
     const store = new SnippetStore(dir);
     await store.init();
@@ -89,9 +91,33 @@ describe('snippet persistence', () => {
         code: 'SNIPPET_NAME_CONFLICT',
       },
     );
-    await expect(store.reorder([], 1)).rejects.toMatchObject({
-      code: 'SNIPPET_VALIDATION_FAILED',
-    });
+  });
+
+  it('sorts loaded snippets in case-insensitive alphanumeric order', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, 'snippets.json'),
+      JSON.stringify({
+        version: 1,
+        revision: 3,
+        snippets: [
+          snippet('item-10'),
+          snippet('zulu'),
+          snippet('item-2'),
+          snippet('alpha'),
+        ],
+      }),
+    );
+
+    const store = new SnippetStore(dir);
+    await store.init();
+
+    expect(store.snapshot().snippets.map(({ shortName }) => shortName)).toEqual([
+      'alpha',
+      'item-2',
+      'item-10',
+      'zulu',
+    ]);
   });
 
   it('recovers valid version-one rows while keeping the first duplicate', async () => {

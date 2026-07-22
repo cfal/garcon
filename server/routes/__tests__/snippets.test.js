@@ -27,7 +27,6 @@ function service() {
     create: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
     update: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
     remove: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
-    reorder: mock(() => Promise.resolve({ revision: 1, snippets: [] })),
     expand: mock(() =>
       Promise.resolve({
         success: true,
@@ -114,17 +113,5 @@ describe('snippet routes', () => {
       errorCode: 'SNIPPET_REVISION_CONFLICT',
       retryable: true,
     });
-  });
-
-  it('rejects malformed reorder shells before the service', async () => {
-    const snippets = service();
-    const routes = createSnippetRoutes(snippets);
-    const result = await call(
-      routes['/api/v1/snippets/reorder'].PUT,
-      { expectedRevision: 1, orderedSnippetIds: ['a', 2] },
-      'PUT',
-    );
-    expect(result.response.status).toBe(400);
-    expect(snippets.reorder).not.toHaveBeenCalled();
   });
 });

@@ -49,7 +49,7 @@ describe('snippet service', () => {
     resetServerConfigForTests();
   });
 
-  it('creates, updates, reorders, and removes with post-write invalidations', async () => {
+  it('creates, updates, and removes with post-write invalidations', async () => {
     const { service, events } = await serviceFixture();
     await service.create({
       expectedRevision: 0,
@@ -60,12 +60,8 @@ describe('snippet service', () => {
       id: 'snippet-a',
       snippet: { shortName: 'review', template: 'Updated {{arguments}}' },
     });
-    await service.reorder({
-      expectedRevision: 2,
-      orderedSnippetIds: ['snippet-a'],
-    });
-    await service.remove({ expectedRevision: 3, id: 'snippet-a' });
-    expect(events).toEqual(['created', 'updated', 'reordered', 'removed']);
+    await service.remove({ expectedRevision: 2, id: 'snippet-a' });
+    expect(events).toEqual(['created', 'updated', 'removed']);
   });
 
   it('expands chat and project contexts without emitting invalidations', async () => {

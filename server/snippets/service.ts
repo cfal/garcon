@@ -7,7 +7,6 @@ import {
   type CreateSnippetRequest,
   type ExpandSnippetRequest,
   type ExpandSnippetResponse,
-  type ReorderSnippetsRequest,
   type RemoveSnippetRequest,
   type Snippet,
   type SnippetExpansionContext,
@@ -153,15 +152,6 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     if (!id) throw this.#validationError();
     await this.deps.store.remove(id, request.expectedRevision);
     this.#emitInvalidated('removed');
-    return this.snapshot();
-  }
-
-  async reorder(request: ReorderSnippetsRequest): Promise<SnippetsSnapshot> {
-    await this.deps.store.reorder(
-      request.orderedSnippetIds,
-      request.expectedRevision,
-    );
-    this.#emitInvalidated('reordered');
     return this.snapshot();
   }
 

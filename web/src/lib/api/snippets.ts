@@ -6,7 +6,6 @@ import {
 	type CreateSnippetRequest,
 	type ExpandSnippetRequest,
 	type ExpandSnippetResponse,
-	type ReorderSnippetsRequest,
 	type RemoveSnippetRequest,
 	type SnippetsMutationResponse,
 	type SnippetsSnapshot,
@@ -45,12 +44,6 @@ export async function removeSnippet(
 	request: RemoveSnippetRequest,
 ): Promise<SnippetsMutationResponse> {
 	return mutation(await apiDelete<unknown>('/api/v1/snippets', request));
-}
-
-export async function reorderSnippets(
-	request: ReorderSnippetsRequest,
-): Promise<SnippetsMutationResponse> {
-	return mutation(await apiPut<unknown>('/api/v1/snippets/reorder', request));
 }
 
 export async function expandSnippet(
