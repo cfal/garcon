@@ -167,7 +167,7 @@ describe('GitWorkbench', () => {
 		expect(screen.queryByText('No changed files')).toBeNull();
 	});
 
-	it('switches wide, compact, and narrow layouts from host width without a viewport change', async () => {
+	it('uses tabs whenever the host is too narrow for the side-by-side layout', async () => {
 		const target = makeTarget();
 		const { container } = render(GitWorkbenchTestHost, {
 			props: {
@@ -188,19 +188,17 @@ describe('GitWorkbench', () => {
 		expect(diffSurface).toBeTruthy();
 
 		ResizeObserverHarness.emit(workbench, 700);
-		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('compact'));
+		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('narrow'));
 		expect(container.querySelector('[data-git-tree-resizer]')).toBeNull();
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
-		expect(screen.getByRole('button', { name: 'Show changed files' })).toBeTruthy();
-		await fireEvent.click(screen.getByRole('button', { name: 'Show changed files' }));
-		expect(screen.getByRole('complementary', { name: 'Changed files' })).toBeTruthy();
+		expect(container.querySelector('[data-git-segmented-navigation]')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Diff' })).toBeTruthy();
 
 		ResizeObserverHarness.emit(workbench, 480);
 		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('narrow'));
 		expect(container.querySelector('[data-git-segmented-navigation]')).toBeTruthy();
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
-		expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Diff' })).toBeTruthy();
 
 		const filesPane = container.querySelector('[data-git-files-pane]');
 		const diffPane = container.querySelector('[data-git-diff-pane]');

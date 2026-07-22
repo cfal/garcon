@@ -24,6 +24,8 @@
 		onRefresh = () => undefined,
 		onCheckFreshness = () => undefined,
 		onOpen = () => {},
+		onClose,
+		closeDisabled = false,
 	}: {
 		presentation: PresentationHostId;
 		rendererMode?: 'code' | 'markdown' | 'image';
@@ -36,6 +38,8 @@
 		onRefresh?: (sessionId: string) => void;
 		onCheckFreshness?: (sessionId: string) => void;
 		onOpen?: (request: FileOpenRequest) => void;
+		onClose?: () => void;
+		closeDisabled?: boolean;
 	} = $props();
 	const initial = untrack(() => ({
 		rendererMode,
@@ -134,4 +138,4 @@
 	onDestroy(() => localSettings.destroy());
 </script>
 
-<FileSurface {session} {presentation} />
+<FileSurface {session} {presentation} {onClose} {closeDisabled} />
