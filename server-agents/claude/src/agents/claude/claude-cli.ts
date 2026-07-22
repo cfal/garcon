@@ -53,6 +53,13 @@ interface CLIMessage {
   session_id?: string;
   model?: string;
   is_error?: boolean;
+  api_error_status?: number | string | null;
+  duration_ms?: number;
+  num_turns?: number;
+  stop_reason?: string | null;
+  terminal_reason?: string;
+  result?: unknown;
+  permission_denials?: unknown[];
   content?: unknown[];
   message?: { role?: string; content?: unknown };
   request_id?: string;
@@ -72,6 +79,13 @@ interface CLIMessage {
     error?: string;
     response?: unknown;
   };
+}
+
+function claudeResultFailureMessage(msg: CLIMessage): string {
+  const result = typeof msg.result === 'string' ? msg.result.trim() : '';
+  if (result) return result.slice(0, 4_000);
+  const outcome = msg.subtype || msg.terminal_reason || 'unknown error';
+  return `Claude CLI turn failed: ${outcome}`;
 }
 
 interface ClaudeContentPart {
@@ -112,6 +126,7 @@ interface ClaudeRunningSession {
   turnWaiters: Array<() => void>;
   startTime: number;
   lastActivityAt: number;
+  turnOutputMessageCount: number;
   process: ReturnType<typeof Bun.spawn> | null;
   // Fallback timer that force-kills the process if an interrupt is never
   // acknowledged. Cleared once the turn resolves, the process exits, or a new
@@ -506,6 +521,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       case 'assistant': {
         if (!session.isRunning) return;
         const chatMessages = convertCLIMessageToChatMessages(msg);
+        session.turnOutputMessageCount += chatMessages.length;
         if (chatMessages.length > 0) {
           this.emitMessages(session.chatId, chatMessages, session.eventMetadata);
         }
@@ -551,7 +567,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #handleSystemMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
     if (msg.subtype === 'init') {
       this.#dependencies.logger.info('Claude CLI session initialized', {
+        chatId: session.chatId,
+        turnId: session.eventMetadata.turnId ?? null,
         sessionId: session.id.slice(0, 8),
+        processId: session.process?.pid ?? null,
         providerSessionId: msg.session_id ?? '',
         model: msg.model ?? '',
       });
@@ -617,10 +636,35 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     // The turn has ended (including an acknowledged interrupt), so the abort
     // fallback must not fire against the still-alive persistent process.
     this.#clearAbortTimer(session);
+    const resultDetails = {
+      chatId: session.chatId,
+      turnId: session.eventMetadata.turnId ?? null,
+      sessionId: session.id.slice(0, 8),
+      processId: session.process?.pid ?? null,
+      outcome: msg.subtype ?? (msg.is_error ? 'error' : 'unknown'),
+      isError: Boolean(msg.is_error),
+      apiErrorStatus: msg.api_error_status ?? null,
+      terminalReason: msg.terminal_reason ?? null,
+      stopReason: msg.stop_reason ?? null,
+      durationMs: msg.duration_ms ?? null,
+      numTurns: msg.num_turns ?? null,
+      outputMessages: session.turnOutputMessageCount,
+      hasResult: typeof msg.result === 'string' && msg.result.length > 0,
+      permissionDenials: msg.permission_denials?.length ?? 0,
+    };
+    if (msg.is_error) {
+      this.#dependencies.logger.warn('Claude CLI turn completed with an error', resultDetails);
+    } else {
+      this.#dependencies.logger.info('Claude CLI turn completed', resultDetails);
+    }
     session.isRunning = false;
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
-    this.emitFinished(session.chatId, msg.is_error ? 1 : 0, session.eventMetadata);
+    if (msg.is_error) {
+      this.emitFailed(session.chatId, claudeResultFailureMessage(msg), session.eventMetadata);
+    } else {
+      this.emitFinished(session.chatId, 0, session.eventMetadata);
+    }
     if (session.turnResolve) {
       const resolve = session.turnResolve;
       session.turnResolve = null;
@@ -920,6 +964,20 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    const routeLine = (line: string) => {
+      if (!line.trim()) return;
+      let msg: CLIMessage;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        this.#dependencies.logger.warn('Claude CLI emitted invalid JSON', {
+          sessionId: session.id.slice(0, 8),
+          processId: proc.pid ?? null,
+        });
+        return;
+      }
+      this.#routeCLIMessage(session, proc, msg);
+    };
 
     try {
       while (true) {
@@ -930,20 +988,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         const lines = buffer.split('\n');
         buffer = lines.pop()!;
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let msg: CLIMessage;
-          try {
-            msg = JSON.parse(line);
-          } catch {
-            this.#dependencies.logger.warn('Claude CLI emitted invalid JSON', {
-              sessionId: session.id.slice(0, 8),
-            });
-            continue;
-          }
-          this.#routeCLIMessage(session, proc, msg);
-        }
+        for (const line of lines) routeLine(line);
       }
+      buffer += decoder.decode();
+      routeLine(buffer);
     } catch (err: unknown) {
       if (!proc.killed) {
         this.#dependencies.logger.error('Claude CLI stdout read failed', {
@@ -1005,21 +1053,35 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!proc.stderr || typeof proc.stderr === 'number') return;
     const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
+    let buffer = '';
+    const logLine = (line: string) => {
+      if (!line.trim()) return;
+      this.#dependencies.logger.info('Claude CLI stderr', {
+        sessionId: sessionId.slice(0, 8),
+        processId: proc.pid ?? null,
+        line,
+      });
+    };
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        for (const line of text.split('\n')) {
-          if (line.trim()) {
-            this.#dependencies.logger.info('Claude CLI stderr', {
-              sessionId: sessionId.slice(0, 8),
-              line,
-            });
-          }
-        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) logLine(line);
       }
-    } catch { /* stream closed */ }
+      buffer += decoder.decode();
+      logLine(buffer);
+    } catch (error) {
+      if (!proc.killed) {
+        this.#dependencies.logger.warn('Claude CLI stderr read failed', {
+          sessionId: sessionId.slice(0, 8),
+          processId: proc.pid ?? null,
+          error: errorMessage(error),
+        });
+      }
+    }
   }
 
   // Stays synchronous so callers can check process liveness and spawn without
@@ -1051,10 +1113,22 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#pipeStderr(session.id, proc);
 
     proc.exited.then((exitCode: number) => {
-      this.#dependencies.logger.info('Claude CLI process exited', {
+      const exitedDuringTurn = session.process === proc
+        && session.isRunning
+        && session.abortKilledProc !== proc;
+      const details = {
+        chatId: session.chatId,
+        turnId: session.eventMetadata.turnId ?? null,
         sessionId: session.id.slice(0, 8),
+        processId: proc.pid ?? null,
         exitCode,
-      });
+        duringTurn: exitedDuringTurn,
+      };
+      if (exitedDuringTurn) {
+        this.#dependencies.logger.error('Claude CLI process exited during an active turn', details);
+      } else {
+        this.#dependencies.logger.info('Claude CLI process exited', details);
+      }
       this.#handleProcessExit(session, proc, exitCode);
     });
 
@@ -1111,6 +1185,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       turnWaiters: [],
       startTime: Date.now(),
       lastActivityAt: Date.now(),
+      turnOutputMessageCount: 0,
       process: null,
       abortTimer: null,
       abortKilledProc: null,
@@ -1232,6 +1307,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         turnWaiters: [],
         startTime: Date.now(),
         lastActivityAt: Date.now(),
+        turnOutputMessageCount: 0,
         process: null,
         abortTimer: null,
         abortKilledProc: null,
@@ -1270,6 +1346,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.chatId = effectiveChatId;
     session.isRunning = true;
     session.lastActivityAt = Date.now();
+    session.turnOutputMessageCount = 0;
     session.eventMetadata = claudeEventMetadata({ clientRequestId, turnId });
     const desiredThinkingMode = session.options.thinkingMode || 'none';
     const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(session.options.claudeThinkingMode);
