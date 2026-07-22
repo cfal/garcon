@@ -347,15 +347,26 @@ export class SpaDriver {
   async trackChatScrollAssignments(): Promise<void> {
     await this.#page.$eval('[role="log"][aria-label="Chat messages"]', (element) => {
       const feed = element as HTMLElement;
-      let current = feed.scrollTop;
+      let owner: object | null = feed;
+      let descriptor: PropertyDescriptor | undefined;
+      while (owner && !descriptor) {
+        descriptor = Object.getOwnPropertyDescriptor(owner, 'scrollTop');
+        owner = Object.getPrototypeOf(owner) as object | null;
+      }
+      if (!descriptor?.get || !descriptor.set) {
+        throw new Error('Missing native scrollTop descriptor.');
+      }
+      const nativeGet = descriptor.get;
+      const nativeSet = descriptor.set;
       feed.dataset.testScrollAssignments = '[]';
       Object.defineProperty(feed, 'scrollTop', {
         configurable: true,
-        get: () => current,
+        get: () => Number(nativeGet.call(feed)),
         set: (value: number) => {
-          current = Number(value);
+          const requested = Number(value);
+          nativeSet.call(feed, requested);
           const assignments = JSON.parse(feed.dataset.testScrollAssignments ?? '[]') as number[];
-          assignments.push(current);
+          assignments.push(requested);
           feed.dataset.testScrollAssignments = JSON.stringify(assignments);
         },
       });
