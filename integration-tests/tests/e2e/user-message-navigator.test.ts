@@ -34,11 +34,12 @@ describe('Lightpanda user-message navigation', () => {
       expect(rows[1]?.startsWith('navigator-second-turn')).toBe(true);
       expect(rows[2]?.startsWith('navigator-first-turn')).toBe(true);
 
-      const before = await app.chatScrollTop();
+      const expectedScrollTop =
+        await app.expectedChatScrollTopForNavigatorRowContaining('navigator-first-turn');
       await app.trackChatScrollAssignments();
       await app.clickUserMessageNavigatorRowContaining('navigator-first-turn');
       await app.waitForTextAbsent('User messages');
-      await app.waitForChatScrollAssignmentDifferentFrom(before);
+      await app.waitForChatScrollAssignment(expectedScrollTop);
       fixture.assertNoBrowserErrors();
     });
   });

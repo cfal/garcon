@@ -321,11 +321,27 @@ export class SpaDriver {
     }, text);
   }
 
-  async chatScrollTop(): Promise<number> {
-    return this.#page.$eval(
-      '[role="log"][aria-label="Chat messages"]',
-      (element) => (element as HTMLElement).scrollTop,
-    );
+  async expectedChatScrollTopForNavigatorRowContaining(text: string): Promise<number> {
+    return this.#page.evaluate((expected) => {
+      const navigatorRow = [...document.querySelectorAll<HTMLElement>(
+        '[data-user-message-navigator-row]',
+      )].find((element) => element.textContent?.includes(expected));
+      const rowId = navigatorRow?.dataset.userMessageNavigatorRow;
+      if (!rowId) throw new Error(`Missing user-message navigator row containing: ${expected}`);
+
+      const feed = document.querySelector<HTMLElement>(
+        '[role="log"][aria-label="Chat messages"]',
+      );
+      const row = [...(feed?.querySelectorAll<HTMLElement>('[data-chat-row-id]') ?? [])].find(
+        (element) => element.dataset.chatRowId === rowId,
+      );
+      if (!feed || !row) throw new Error(`Missing chat row for navigator identity: ${rowId}`);
+
+      const feedRect = feed.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const rowTop = feed.scrollTop + rowRect.top - feedRect.top;
+      return Math.max(0, rowTop - (feed.clientHeight - rowRect.height) / 2);
+    }, text);
   }
 
   async trackChatScrollAssignments(): Promise<void> {
@@ -346,20 +362,20 @@ export class SpaDriver {
     });
   }
 
-  async waitForChatScrollAssignmentDifferentFrom(
-    initial: number,
+  async waitForChatScrollAssignment(
+    expected: number,
     timeout = 20_000,
   ): Promise<void> {
     await this.#page.waitForFunction(
-      (expected) => {
+      (target) => {
         const feed = document.querySelector<HTMLElement>(
           '[role="log"][aria-label="Chat messages"]',
         );
         const assignments = JSON.parse(feed?.dataset.testScrollAssignments ?? '[]') as number[];
-        return assignments.some((value) => value !== expected);
+        return assignments.some((value) => Math.abs(value - target) < 0.001);
       },
       { timeout },
-      initial,
+      expected,
     );
   }
 

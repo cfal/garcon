@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/components/chat/ConversationTranscript.svelte', async () => ({
-	default: (await import('./GenericStub.svelte')).default,
+	default: (await import('./ConversationTranscriptRowsStub.svelte')).default,
 }));
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
@@ -49,5 +49,16 @@ describe('ConversationFeed', () => {
 		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation' });
 
 		expect(screen.getByRole('button', { name: /load more/i })).toBeTruthy();
+	});
+
+	it('passes durable and pending row identities to the transcript renderer', () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
+
+		expect(
+			Array.from(
+				container.querySelectorAll<HTMLElement>('[data-transcript-row-id]'),
+				(row) => row.dataset.transcriptRowId,
+			),
+		).toEqual(['generation-1:1', 'pending:request-1']);
 	});
 });
