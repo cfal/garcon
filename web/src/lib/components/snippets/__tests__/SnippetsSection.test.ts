@@ -60,21 +60,12 @@ describe('SnippetsSection', () => {
 		await waitFor(() => expect(document.activeElement).toBe(add));
 	});
 
-	it('enforces order boundaries, moves rows, and confirms removal', async () => {
+	it('renders sorted rows without move controls and confirms removal', async () => {
 		render(SnippetsSectionTestHost);
 		await screen.findByText('review');
-		expect(
-			(screen.getByRole('button', { name: 'Move review up' }) as HTMLButtonElement).disabled,
-		).toBe(true);
-		expect(
-			(screen.getByRole('button', { name: 'Move summarize down' }) as HTMLButtonElement).disabled,
-		).toBe(true);
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Move summarize up' }));
-		await waitFor(() => {
-			const rows = screen.getAllByRole('heading', { level: 3 }).map((row) => row.textContent);
-			expect(rows).toEqual(['summarize', 'review']);
-		});
+		const rows = screen.getAllByRole('heading', { level: 3 }).map((row) => row.textContent);
+		expect(rows).toEqual(['review', 'summarize']);
+		expect(screen.queryByRole('button', { name: /Move .* (up|down)/ })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove summarize' }));
 		expect((await screen.findByRole('dialog', { name: 'Remove Snippet' })).textContent).toContain(

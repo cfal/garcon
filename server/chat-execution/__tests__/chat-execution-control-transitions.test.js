@@ -3,6 +3,7 @@ import {
   clearQueue,
   createQueueEntry,
   deleteQueueEntry,
+  moveQueueEntry,
   pauseQueue,
   popNextQueueEntry,
   removeSentQueueEntry,
@@ -29,6 +30,17 @@ function context(start = 0, protectedKeys = new Set()) {
 function value(result) {
   expect(result.outcome.status).toBe('ok');
   return result.outcome.value;
+}
+
+function storedEntry(id, status = 'queued', revision = 1) {
+  return {
+    id,
+    content: id,
+    revision,
+    status,
+    createdAt: '2026-07-19T00:00:00.000Z',
+    updatedAt: '2026-07-19T00:00:00.000Z',
+  };
 }
 
 describe('chat execution control transitions', () => {
@@ -135,6 +147,179 @@ describe('chat execution control transitions', () => {
     expect(duplicate.next).toEqual(first.next);
   });
 
+  it('moves entries by stable target identity without changing entry revisions', () => {
+    const current = emptyStoredChatExecutionControl();
+    current.entries = [
+      storedEntry('a', 'queued', 2),
+      storedEntry('b'),
+      storedEntry('c', 'queued', 3),
+    ];
+    const moved = moveQueueEntry(current, {
+      entryId: 'c',
+      targetEntryId: 'a',
+      placement: 'before',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 3,
+      expectedTargetRevision: 2,
+      command: { key: 'move-c', entryId: 'c' },
+    }, context());
+
+    expect(value(moved)).toMatchObject({ entryId: 'c', duplicate: false, rebased: false });
+    expect(moved.next.entries.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
+    expect(moved.next.entries.map((entry) => entry.revision)).toEqual([3, 2, 1]);
+    expect(moved.next.reorderRevision).toBe(1);
+    expect(moved.next.version).toBe(1);
+    expect(current.entries.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('records no-op moves and rejects stale reorder revisions', () => {
+    const current = emptyStoredChatExecutionControl();
+    current.entries = [storedEntry('a'), storedEntry('b'), storedEntry('c')];
+    const noOp = moveQueueEntry(current, {
+      entryId: 'b',
+      targetEntryId: 'a',
+      placement: 'after',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 1,
+      command: { key: 'move-b', entryId: 'b' },
+    }, context());
+    expect(noOp.next.entries.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+    expect(noOp.next.reorderRevision).toBe(0);
+    expect(noOp.next.version).toBe(1);
+
+    const duplicate = moveQueueEntry(noOp.next, {
+      entryId: 'b',
+      targetEntryId: 'a',
+      placement: 'after',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 1,
+      command: { key: 'move-b', entryId: 'b' },
+    }, context(1));
+    expect(value(duplicate)).toMatchObject({ duplicate: true, rebased: null });
+    expect(duplicate.changed).toBe(false);
+    expect(duplicate.next).toEqual(noOp.next);
+
+    const stale = moveQueueEntry(noOp.next, {
+      entryId: 'c',
+      targetEntryId: 'a',
+      placement: 'before',
+      expectedReorderRevision: 1,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 1,
+    }, context(2));
+    expect(stale.outcome).toEqual({
+      status: 'rejected',
+      rejection: { code: 'QUEUE_ENTRY_REORDER_CONFLICT' },
+    });
+    expect(stale.next).toEqual(noOp.next);
+  });
+
+  it('rebases past a dispatching target while preserving its retry priority', () => {
+    const current = emptyStoredChatExecutionControl();
+    current.entries = [
+      storedEntry('target', 'sending'),
+      storedEntry('a'),
+      storedEntry('source'),
+      storedEntry('b'),
+    ];
+    current.recentlyDispatched = [{
+      entryId: 'target',
+      revision: 1,
+      dispatchedAt: '2026-07-19T00:00:00.000Z',
+    }];
+    const moved = moveQueueEntry(current, {
+      entryId: 'source',
+      targetEntryId: 'target',
+      placement: 'before',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 1,
+      command: { key: 'move-source', entryId: 'source' },
+    }, context());
+
+    expect(value(moved).rebased).toBe(true);
+    expect(moved.next.entries.map((entry) => entry.id)).toEqual(['target', 'source', 'a', 'b']);
+    const failed = requeueAndPause(moved.next, {
+      entryId: 'target',
+      kind: 'queued-turn-failed',
+    }, context(1));
+    expect(failed.next.entries.map((entry) => entry.id)).toEqual(['target', 'source', 'a', 'b']);
+    expect(failed.next.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: 'target' });
+    const resumed = resumeQueue(failed.next, failed.next.pause.id, context(2));
+    expect(value(popNextQueueEntry(resumed.next, context(3))).entry.id).toBe('target');
+  });
+
+  it('rebases past a completed target only when its dispatched revision still matches', () => {
+    const current = emptyStoredChatExecutionControl();
+    current.entries = [storedEntry('a'), storedEntry('source'), storedEntry('b')];
+    current.recentlyDispatched = [{
+      entryId: 'target',
+      revision: 2,
+      dispatchedAt: '2026-07-19T00:00:00.000Z',
+    }];
+    const moved = moveQueueEntry(current, {
+      entryId: 'source',
+      targetEntryId: 'target',
+      placement: 'after',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 2,
+    }, context());
+
+    expect(value(moved).rebased).toBe(true);
+    expect(moved.next.entries.map((entry) => entry.id)).toEqual(['source', 'a', 'b']);
+
+    const changedTarget = moveQueueEntry(current, {
+      entryId: 'source',
+      targetEntryId: 'target',
+      placement: 'after',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 1,
+    }, context());
+    expect(changedTarget.outcome).toEqual({
+      status: 'rejected',
+      rejection: {
+        code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+        entryId: 'target',
+        actualRevision: 2,
+      },
+    });
+    expect(changedTarget.next).toEqual(current);
+  });
+
+  it('rejects moved entries or targets whose content changed', () => {
+    const current = emptyStoredChatExecutionControl();
+    current.entries = [storedEntry('a', 'queued', 2), storedEntry('b', 'queued', 3)];
+    const sourceConflict = moveQueueEntry(current, {
+      entryId: 'b',
+      targetEntryId: 'a',
+      placement: 'before',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 2,
+      expectedTargetRevision: 2,
+    }, context());
+    expect(sourceConflict.outcome).toMatchObject({
+      status: 'rejected',
+      rejection: { code: 'QUEUE_ENTRY_REVISION_CONFLICT', entryId: 'b', actualRevision: 3 },
+    });
+
+    const targetConflict = moveQueueEntry(current, {
+      entryId: 'b',
+      targetEntryId: 'a',
+      placement: 'before',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 3,
+      expectedTargetRevision: 1,
+    }, context());
+    expect(targetConflict.outcome).toMatchObject({
+      status: 'rejected',
+      rejection: { code: 'QUEUE_ENTRY_REVISION_CONFLICT', entryId: 'a', actualRevision: 2 },
+    });
+  });
+
   it('restores pause stacks and rejects stale pause identities', () => {
     const current = emptyStoredChatExecutionControl();
     current.entries.push({
@@ -168,6 +353,7 @@ describe('chat execution control transitions', () => {
     });
     current.recentlyDispatched.push({
       entryId: 'entry-1',
+      revision: 1,
       dispatchedAt: '2026-07-19T00:00:00.000Z',
     });
 

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
 import type {
   ChatImage,
@@ -32,7 +33,11 @@ export class QueueEntryMutationError extends DomainError {
   readonly control: StoredChatExecutionControlState;
 
   constructor(
-    code: 'QUEUE_ENTRY_NOT_FOUND' | 'QUEUE_ENTRY_ALREADY_SENT' | 'QUEUE_ENTRY_REVISION_CONFLICT',
+    code:
+      | 'QUEUE_ENTRY_NOT_FOUND'
+      | 'QUEUE_ENTRY_ALREADY_SENT'
+      | 'QUEUE_ENTRY_REVISION_CONFLICT'
+      | 'QUEUE_ENTRY_REORDER_CONFLICT',
     message: string,
     control: StoredChatExecutionControlState,
   ) {
@@ -130,6 +135,16 @@ export interface AcceptedQueueReplace extends AcceptedQueueCreate {
 
 export interface AcceptedQueueDelete {
   command: AcceptedExecutionCommand & { entryId: string };
+  settlement: CommandSettlementPort;
+}
+
+export interface AcceptedQueueMove {
+  command: AcceptedExecutionCommand & { entryId: string };
+  targetEntryId: string;
+  placement: QueueEntryPlacement;
+  expectedReorderRevision: number;
+  expectedSourceRevision: number;
+  expectedTargetRevision: number;
   settlement: CommandSettlementPort;
 }
 
@@ -249,6 +264,7 @@ export interface ChatExecutionCommands {
   enqueueAccepted(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult>;
   replaceAccepted(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult>;
   deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult>;
+  moveAccepted(input: AcceptedQueueMove): Promise<QueueCommandMutationResult>;
   deliverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
   recoverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
@@ -322,6 +338,18 @@ export interface ChatExecutionService
     entryId: string,
     command?: QueueCommandIdentity,
   ): Promise<QueueCommandMutationResult>;
+  moveChatQueueEntry(
+    chatId: string,
+    input: {
+      entryId: string;
+      targetEntryId: string;
+      placement: QueueEntryPlacement;
+      expectedReorderRevision: number;
+      expectedSourceRevision: number;
+      expectedTargetRevision: number;
+    },
+    command?: QueueCommandIdentity,
+  ): Promise<QueueCommandMutationResult & { rebased: boolean | null }>;
   deliverActiveInput(
     chatId: string,
     content: string,
@@ -374,6 +402,12 @@ export function transitionError(
       return new QueueEntryMutationError(
         rejection.code,
         'This queued message changed before it could be saved',
+        control,
+      );
+    case 'QUEUE_ENTRY_REORDER_CONFLICT':
+      return new QueueEntryMutationError(
+        rejection.code,
+        'The queue order changed before the item could be moved',
         control,
       );
     case 'QUEUE_PAUSE_CHANGED':

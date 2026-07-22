@@ -44,6 +44,7 @@ import type {
 	QueueEntryCreateCommandRequest,
 	QueueEntryDeleteCommandRequest,
 	QueueEntryDeleteResponse,
+	QueueEntryMoveCommandRequest,
 	QueueEntryReplaceCommandRequest,
 	QueueMutationResponse,
 	QueuePauseRequest,
@@ -177,6 +178,14 @@ export async function deleteQueuedInput(
 ): Promise<QueueEntryDeleteResponse> {
 	return withParsedControl(
 		await apiDelete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', params),
+	);
+}
+
+export async function moveQueuedInput(
+	params: QueueEntryMoveCommandRequest,
+): Promise<QueueEntryCommandResponse> {
+	return withParsedControl(
+		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries/move', params),
 	);
 }
 

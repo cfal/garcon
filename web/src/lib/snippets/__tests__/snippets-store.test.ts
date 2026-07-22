@@ -1,12 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SnippetsStore } from '../snippets-store.svelte';
 import { ApiError } from '$lib/api/client.js';
-import type {
-	ReorderSnippetsRequest,
-	Snippet,
-	SnippetsMutationResponse,
-	SnippetsSnapshot,
-} from '$shared/snippets';
+import type { Snippet, SnippetsSnapshot } from '$shared/snippets';
 import { SNIPPET_ERROR_CODES } from '$shared/snippets';
 
 function snippet(id: string): Snippet {
@@ -38,61 +33,6 @@ describe('SnippetsStore', () => {
 			snippet: { shortName: 'a', template: 'Template a' },
 		});
 		expect(store.snapshot).toEqual(snapshot(1, ['a']));
-	});
-
-	it('optimistically reorders snippets and applies the server revision', async () => {
-		let resolveMutation!: (value: SnippetsMutationResponse) => void;
-		const reorder = vi.fn(
-			(_request: ReorderSnippetsRequest) =>
-				new Promise<SnippetsMutationResponse>((resolve) => (resolveMutation = resolve)),
-		);
-		const store = new SnippetsStore({ reorder });
-		store.applySnapshot(snapshot(2, ['a', 'b']));
-
-		const moving = store.move('b', 'up');
-		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
-		expect(store.snippets.map((entry) => entry.id)).toEqual(['b', 'a']);
-		resolveMutation({ success: true, snapshot: snapshot(3, ['b', 'a']) });
-		await moving;
-
-		expect(reorder).toHaveBeenCalledWith({
-			expectedRevision: 2,
-			orderedSnippetIds: ['b', 'a'],
-		});
-		expect(store.snapshot?.revision).toBe(3);
-	});
-
-	it('rolls back an optimistic reorder when the mutation fails', async () => {
-		const store = new SnippetsStore({ reorder: vi.fn().mockRejectedValue(new Error('offline')) });
-		store.applySnapshot(snapshot(2, ['a', 'b']));
-
-		await expect(store.move('b', 'up')).rejects.toThrow('offline');
-
-		expect(store.snippets.map((entry) => entry.id)).toEqual(['a', 'b']);
-	});
-
-	it('serializes concurrent reorders so failed optimistic states cannot become rollback bases', async () => {
-		const rejections: Array<(error: Error) => void> = [];
-		const reorder = vi.fn(
-			(_request: ReorderSnippetsRequest) =>
-				new Promise<SnippetsMutationResponse>((_resolve, reject) => rejections.push(reject)),
-		);
-		const store = new SnippetsStore({ reorder });
-		store.applySnapshot(snapshot(2, ['a', 'b', 'c']));
-
-		const first = store.move('b', 'up');
-		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
-		const second = store.move('c', 'up');
-		await Promise.resolve();
-
-		expect(reorder).toHaveBeenCalledTimes(1);
-		rejections[0](new Error('first offline'));
-		await expect(first).rejects.toThrow('first offline');
-		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(2));
-		rejections[1](new Error('second offline'));
-		await expect(second).rejects.toThrow('second offline');
-
-		expect(store.snippets.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
 	});
 
 	it('refreshes after a revision conflict and preserves the original rejection', async () => {

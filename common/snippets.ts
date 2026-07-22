@@ -92,11 +92,6 @@ export interface RemoveSnippetRequest {
   id: string;
 }
 
-export interface ReorderSnippetsRequest {
-  expectedRevision: number;
-  orderedSnippetIds: string[];
-}
-
 export interface SnippetsMutationResponse {
   success: true;
   snapshot: SnippetsSnapshot;
@@ -125,7 +120,6 @@ export const SNIPPETS_INVALIDATION_REASONS = [
   'created',
   'updated',
   'removed',
-  'reordered',
 ] as const;
 
 export type SnippetsInvalidationReason =
@@ -198,6 +192,25 @@ export function normalizeSnippet(value: unknown): Snippet | null {
   return { id, ...definition, createdAt, updatedAt };
 }
 
+const snippetShortNameCollator = new Intl.Collator('en', {
+  numeric: true,
+  sensitivity: 'base',
+});
+
+export function compareSnippetShortNames(left: string, right: string): number {
+  return snippetShortNameCollator.compare(left, right);
+}
+
+export function sortSnippetsByShortName(
+  snippets: readonly Snippet[],
+): Snippet[] {
+  return [...snippets].sort(
+    (left, right) =>
+      compareSnippetShortNames(left.shortName, right.shortName) ||
+      left.id.localeCompare(right.id, 'en'),
+  );
+}
+
 export function normalizeSnippetsSnapshot(
   value: unknown,
 ): SnippetsSnapshot | null {
@@ -222,7 +235,10 @@ export function normalizeSnippetsSnapshot(
     ids.add(snippet.id);
     names.add(snippet.shortName);
   }
-  return { revision: raw.revision as number, snippets };
+  return {
+    revision: raw.revision as number,
+    snippets: sortSnippetsByShortName(snippets),
+  };
 }
 
 export function normalizeSnippetsMutationResponse(

@@ -1,4 +1,5 @@
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
+import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts';
 import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
   MAX_STORED_APPLIED_QUEUE_COMMANDS,
@@ -24,6 +25,7 @@ export type TransitionRejection =
   | { code: 'QUEUE_ENTRY_NOT_FOUND'; entryId: string }
   | { code: 'QUEUE_ENTRY_ALREADY_SENT'; entryId: string }
   | { code: 'QUEUE_ENTRY_REVISION_CONFLICT'; entryId: string; actualRevision: number }
+  | { code: 'QUEUE_ENTRY_REORDER_CONFLICT' }
   | { code: 'QUEUE_PAUSE_CHANGED' };
 
 export type TransitionOutcome<T> =
@@ -40,6 +42,10 @@ export interface QueueMutationValue {
   entryId: string;
   entry: QueueEntry | null;
   duplicate: boolean;
+}
+
+export interface QueueMoveMutationValue extends QueueMutationValue {
+  rebased: boolean | null;
 }
 
 export interface PoppedQueueEntry {
@@ -234,6 +240,110 @@ export function deleteQueueEntry(
   return accepted(next, { entryId: input.entryId, entry: null, duplicate: false }, true);
 }
 
+export function moveQueueEntry(
+  current: StoredChatExecutionControlState,
+  input: {
+    entryId: string;
+    targetEntryId: string;
+    placement: QueueEntryPlacement;
+    expectedReorderRevision: number;
+    expectedSourceRevision: number;
+    expectedTargetRevision: number;
+    command?: QueueCommandIdentity;
+  },
+  context: TransitionContext,
+): ControlTransition<QueueMoveMutationValue> {
+  const next = cloneStoredChatExecutionControl(current);
+  if (input.command) {
+    const applied = findAppliedCommand(next, input.command);
+    if (applied) {
+      const entry = next.entries.find((candidate) => candidate.id === applied.entryId);
+      return accepted(next, {
+        entryId: applied.entryId,
+        entry: entry ? toQueueEntry(entry) : null,
+        duplicate: true,
+        rebased: null,
+      }, false);
+    }
+  }
+
+  const source = next.entries.find((entry) => entry.id === input.entryId);
+  if (!source) return rejected(current, missingEntryRejection(current, input.entryId));
+  if (source.status !== 'queued') {
+    return rejected(current, { code: 'QUEUE_ENTRY_ALREADY_SENT', entryId: input.entryId });
+  }
+  if (source.revision !== input.expectedSourceRevision) {
+    return rejected(current, {
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      entryId: input.entryId,
+      actualRevision: source.revision,
+    });
+  }
+  if (next.reorderRevision !== input.expectedReorderRevision) {
+    return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
+  }
+
+  const target = next.entries.find((entry) => entry.id === input.targetEntryId);
+  const recentlyDispatchedTarget = next.recentlyDispatched.find(
+    (entry) => entry.entryId === input.targetEntryId,
+  );
+  const targetWasDispatched = target?.status === 'sending'
+    || (!target && recentlyDispatchedTarget !== undefined);
+  if (target && target.revision !== input.expectedTargetRevision) {
+    return rejected(current, {
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      entryId: input.targetEntryId,
+      actualRevision: target.revision,
+    });
+  }
+  if (
+    !target
+    && recentlyDispatchedTarget
+    && recentlyDispatchedTarget.revision !== input.expectedTargetRevision
+  ) {
+    return rejected(current, {
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      entryId: input.targetEntryId,
+      actualRevision: recentlyDispatchedTarget.revision,
+    });
+  }
+  if (!target && !targetWasDispatched) {
+    return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
+  }
+
+  const queuedOrderBefore = next.entries
+    .filter((entry) => entry.status === 'queued')
+    .map((entry) => entry.id);
+  next.entries.splice(next.entries.indexOf(source), 1);
+
+  if (targetWasDispatched) {
+    const firstQueuedIndex = next.entries.findIndex((entry) => entry.status === 'queued');
+    next.entries.splice(firstQueuedIndex < 0 ? next.entries.length : firstQueuedIndex, 0, source);
+  } else {
+    const targetIndex = next.entries.findIndex((entry) => entry.id === input.targetEntryId);
+    const insertionIndex = input.placement === 'before' ? targetIndex : targetIndex + 1;
+    next.entries.splice(insertionIndex, 0, source);
+  }
+
+  const queuedOrderAfter = next.entries
+    .filter((entry) => entry.status === 'queued')
+    .map((entry) => entry.id);
+  const orderChanged = queuedOrderBefore.some(
+    (entryId, index) => queuedOrderAfter[index] !== entryId,
+  );
+  if (orderChanged) next.reorderRevision += 1;
+  if (input.command) recordAppliedCommand(next, input.command, 'move', context);
+
+  const changed = orderChanged || Boolean(input.command);
+  if (changed) bump(next, context.now);
+  return accepted(next, {
+    entryId: source.id,
+    entry: toQueueEntry(source),
+    duplicate: false,
+    rebased: targetWasDispatched,
+  }, changed);
+}
+
 export function clearQueue(
   current: StoredChatExecutionControlState,
   context: TransitionContext,
@@ -299,7 +409,7 @@ export function popNextQueueEntry(
   };
   next.recentlyDispatched = [
     ...next.recentlyDispatched.filter((candidate) => candidate.entryId !== entry.id),
-    { entryId: entry.id, dispatchedAt: context.now },
+    { entryId: entry.id, revision: entry.revision, dispatchedAt: context.now },
   ].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
   bump(next, context.now);
   return accepted(next, { entry: { ...entry, delivery: { ...entry.delivery } } }, true);

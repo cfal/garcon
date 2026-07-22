@@ -9,6 +9,7 @@ interface ClickOptions {
 }
 
 type QueueRowAction = 'Edit queued message' | 'Remove from queue';
+type QueueMoveDirection = 'up' | 'down';
 
 export class SpaDriver {
   readonly #page: Page;
@@ -476,6 +477,53 @@ export class SpaDriver {
       if (button.disabled) throw new Error(`${action} is disabled for queued message: ${content}`);
       button.click();
     }, { content, action });
+  }
+
+  async clickQueuedMove(content: string, direction: QueueMoveDirection): Promise<void> {
+    await this.#page.evaluate(({ content, direction }) => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      if (!dialog) throw new Error('Queued messages dialog is not open.');
+      const row = [...dialog.querySelectorAll<HTMLLIElement>('ol > li')].find((element) =>
+        [...element.querySelectorAll('p')].some((message) => message.textContent?.trim() === content));
+      const button = row?.querySelector<HTMLButtonElement>(
+        `[data-queue-move-direction="${direction}"]`,
+      );
+      if (!button) throw new Error(`Missing move ${direction} action for queued message: ${content}`);
+      if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
+        throw new Error(`Move ${direction} is disabled for queued message: ${content}`);
+      }
+      button.click();
+    }, { content, direction });
+  }
+
+  async waitForQueuedDialogOrder(contents: string[]): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => {
+        const rows = [...document.querySelectorAll<HTMLLIElement>('[role="dialog"] ol > li')];
+        const actual = rows.map((row) =>
+          [...row.querySelectorAll('p')].find((message) => expected.includes(message.textContent?.trim() ?? ''))
+            ?.textContent?.trim());
+        return actual.length === expected.length
+          && actual.every((content, index) => content === expected[index]);
+      },
+      { timeout: 20_000 },
+      contents,
+    );
+  }
+
+  async waitForFocusedQueuedMove(content: string): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => {
+        const active = document.activeElement as HTMLButtonElement | null;
+        if (!active?.matches('[data-queue-move-id]')) return false;
+        const row = active.closest('li');
+        return [...(row?.querySelectorAll('p') ?? [])].some(
+          (message) => message.textContent?.trim() === expected,
+        );
+      },
+      { timeout: 20_000 },
+      content,
+    );
   }
 
   async fillQueuedEditor(value: string): Promise<void> {

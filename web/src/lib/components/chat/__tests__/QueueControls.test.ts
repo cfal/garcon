@@ -42,6 +42,7 @@ function makeQueue(count: number, pause: QueuePause | null = null): ChatQueueSta
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: count > 0 ? pause : null,
+		reorderRevision: 0,
 	};
 }
 

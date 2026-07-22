@@ -1,4 +1,5 @@
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
+import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts';
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
@@ -12,6 +13,7 @@ import {
   clearQueue,
   createQueueEntry,
   deleteQueueEntry,
+  moveQueueEntry,
   pauseQueue,
   popNextQueueEntry,
   removeSentQueueEntry,
@@ -176,6 +178,47 @@ export class ChatExecutionControlOperations {
         entryId: committed.value.entryId,
         control: committed.control,
         duplicate: committed.value.duplicate,
+      };
+    });
+  }
+
+  async move(
+    chatId: string,
+    input: {
+      entryId: string;
+      targetEntryId: string;
+      placement: QueueEntryPlacement;
+      expectedReorderRevision: number;
+      expectedSourceRevision: number;
+      expectedTargetRevision: number;
+    },
+    command?: QueueCommandIdentity,
+  ): Promise<QueueCommandMutationResult & { rebased: boolean | null }> {
+    return this.host.runExclusive(chatId, async () => {
+      const current = await this.#load(chatId);
+      const transition = moveQueueEntry(
+        current,
+        { ...input, command },
+        this.#transitionContext(chatId),
+      );
+      if (transition.outcome.status === 'rejected') {
+        this.#logMove(
+          chatId,
+          input,
+          current,
+          null,
+          transition.outcome.rejection.code,
+        );
+      }
+      const committed = await this.#commitTransition(chatId, current, transition);
+      if (!committed.value.duplicate) {
+        this.#logMove(chatId, input, committed.control, committed.value.rebased);
+      }
+      return {
+        entryId: committed.value.entryId,
+        control: committed.control,
+        duplicate: committed.value.duplicate,
+        rebased: committed.value.rebased,
       };
     });
   }
@@ -380,6 +423,33 @@ export class ChatExecutionControlOperations {
       ...(revision === undefined ? {} : { revision }),
       queueVersion: control.version,
       queuedCount: control.entries.filter((entry) => entry.status === 'queued').length,
+      ...(errorCode ? { errorCode } : {}),
+    });
+  }
+
+  #logMove(
+    chatId: string,
+    input: {
+      entryId: string;
+      targetEntryId: string;
+      placement: QueueEntryPlacement;
+      expectedReorderRevision: number;
+    },
+    control: StoredChatExecutionControlState,
+    rebased: boolean | null,
+    errorCode?: string,
+  ): void {
+    logger.debug('queue mutation', {
+      chatId,
+      operation: 'move',
+      entryId: input.entryId,
+      targetEntryId: input.targetEntryId,
+      placement: input.placement,
+      expectedReorderRevision: input.expectedReorderRevision,
+      reorderRevision: control.reorderRevision,
+      queueVersion: control.version,
+      queuedCount: control.entries.filter((entry) => entry.status === 'queued').length,
+      ...(rebased === null ? {} : { rebased }),
       ...(errorCode ? { errorCode } : {}),
     });
   }

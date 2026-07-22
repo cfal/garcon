@@ -19,6 +19,7 @@ import {
 	createQueuedInput,
 	replaceQueuedInput,
 	deleteQueuedInput,
+	moveQueuedInput,
 	sendActiveInput,
 	getChatExecutionControl,
 	clearChatQueue,
@@ -62,6 +63,7 @@ describe('chats API contract', () => {
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
 				pause: null,
+				reorderRevision: 0,
 			},
 			version: 0,
 			updatedAt: null,
@@ -456,22 +458,45 @@ describe('chats API contract', () => {
 			entryId: 'entry/1',
 		});
 
+		await moveQueuedInput({
+			clientRequestId: 'req-move',
+			chatId: 'c/1',
+			entryId: 'entry/2',
+			targetEntryId: 'entry/1',
+			placement: 'before',
+			expectedReorderRevision: 4,
+			expectedSourceRevision: 2,
+			expectedTargetRevision: 3,
+		});
+		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/queue/entries/move');
+		expect(fetchMock.mock.calls[4][1].method).toBe('PUT');
+		expect(JSON.parse(fetchMock.mock.calls[4][1].body)).toEqual({
+			clientRequestId: 'req-move',
+			chatId: 'c/1',
+			entryId: 'entry/2',
+			targetEntryId: 'entry/1',
+			placement: 'before',
+			expectedReorderRevision: 4,
+			expectedSourceRevision: 2,
+			expectedTargetRevision: 3,
+		});
+
 		await sendActiveInput({
 			clientRequestId: 'req-active',
 			chatId: 'c/1',
 			content: 'steer now',
 		});
-		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/active-input');
-		expect(fetchMock.mock.calls[4][1].method).toBe('POST');
+		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/active-input');
+		expect(fetchMock.mock.calls[5][1].method).toBe('POST');
 
 		await clearChatQueue('c/1');
 		await pauseChatQueue('c/1');
 		await resumeChatQueue('c/1', 'pause/1');
 
-		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/clear');
-		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/pause');
-		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/resume');
-		expect(JSON.parse(fetchMock.mock.calls[7][1].body)).toEqual({
+		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/clear');
+		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/pause');
+		expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/chats/queue/resume');
+		expect(JSON.parse(fetchMock.mock.calls[8][1].body)).toEqual({
 			chatId: 'c/1',
 			pauseId: 'pause/1',
 		});

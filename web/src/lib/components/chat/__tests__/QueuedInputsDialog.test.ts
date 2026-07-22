@@ -8,6 +8,7 @@ import type {
 } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
+import { ApiError } from '$lib/api/client.js';
 
 function entry(index: number, revision = 1, content = `Queued message ${index}`): QueueEntry {
 	return {
@@ -25,6 +26,7 @@ function queue(entries: QueueEntry[], overrides: Partial<ChatQueueState> = {}): 
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
+		reorderRevision: 0,
 		...overrides,
 	};
 }
@@ -47,6 +49,7 @@ function renderDialog(initialQueue: ChatQueueState) {
 	const onCreate = vi.fn().mockResolvedValue(undefined);
 	const onReplace = vi.fn().mockResolvedValue(undefined);
 	const onDelete = vi.fn().mockResolvedValue(undefined);
+	const onMove = vi.fn().mockResolvedValue(undefined);
 	const onPause = vi.fn().mockResolvedValue(undefined);
 	const onResume = vi.fn().mockResolvedValue(undefined);
 	const result = render(QueuedInputsDialogTestHost, {
@@ -54,15 +57,17 @@ function renderDialog(initialQueue: ChatQueueState) {
 		onCreate,
 		onReplace,
 		onDelete,
+		onMove,
 		onPause,
 		onResume,
 	});
-	return { ...result, onCreate, onReplace, onDelete, onPause, onResume };
+	return { ...result, onCreate, onReplace, onDelete, onMove, onPause, onResume };
 }
 
 afterEach(() => {
 	cleanup();
 	document.body.innerHTML = '';
+	vi.unstubAllGlobals();
 });
 
 describe('QueuedInputsDialog', () => {
@@ -98,7 +103,11 @@ describe('QueuedInputsDialog', () => {
 
 		component.setQueue(
 			queue([], {
-				recentlyDispatched: [{ entryId: 'entry-0', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
+				recentlyDispatched: [{
+					entryId: 'entry-0',
+					revision: 1,
+					dispatchedAt: '2026-07-16T00:01:00.000Z',
+				}],
 			}),
 		);
 
@@ -117,7 +126,11 @@ describe('QueuedInputsDialog', () => {
 		await fireEvent.input(textarea, { target: { value: 'Captured departed draft' } });
 		component.setQueue(
 			queue([], {
-				recentlyDispatched: [{ entryId: 'entry-0', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
+				recentlyDispatched: [{
+					entryId: 'entry-0',
+					revision: 1,
+					dispatchedAt: '2026-07-16T00:01:00.000Z',
+				}],
 			}),
 		);
 		const queueAsNew = await screen.findByRole('button', {
@@ -162,6 +175,112 @@ describe('QueuedInputsDialog', () => {
 		expect((textarea as HTMLTextAreaElement).value).toBe('My draft');
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_reload_latest() }));
 		expect((textarea as HTMLTextAreaElement).value).toBe('Edited elsewhere');
+	});
+
+	it('moves entries relative to their latest neighbors with the queue order revision', async () => {
+		const first = entry(0);
+		const second = entry(1);
+		const third = entry(2);
+		const { onMove } = renderDialog(queue([first, second, third], { reorderRevision: 7 }));
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.chat_queue_move_up({ position: 2 }) }),
+		);
+		expect(onMove).toHaveBeenCalledWith(second, first, 'before', 7);
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.chat_queue_move_down({ position: 2 }) }),
+		);
+		expect(onMove).toHaveBeenLastCalledWith(second, third, 'after', 7);
+	});
+
+	it('keeps touch-friendly move buttons while disabling queue boundaries', () => {
+		renderDialog(queue([entry(0), entry(1)]));
+
+		expect(
+			(screen.getByRole('button', {
+				name: m.chat_queue_move_up({ position: 1 }),
+			}) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(
+			(screen.getByRole('button', {
+				name: m.chat_queue_move_down({ position: 2 }),
+			}) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(
+			screen.getByRole('button', { name: m.chat_queue_move_down({ position: 1 }) }),
+		).toBeTruthy();
+		expect(screen.queryByText(m.chat_queue_drag_handle({ position: 1 }))).toBeNull();
+		expect(screen.getByRole('dialog').querySelector('.touch-none')).toBeNull();
+	});
+
+	it('enables drag handles only while a fine pointer media query matches', async () => {
+		const listeners = new Set<() => void>();
+		const media = {
+			matches: true,
+			media: '(hover: hover) and (pointer: fine)',
+			onchange: null,
+			addEventListener: vi.fn((_type: string, listener: () => void) => listeners.add(listener)),
+			removeEventListener: vi.fn((_type: string, listener: () => void) => listeners.delete(listener)),
+			addListener: vi.fn(),
+			removeListener: vi.fn(),
+			dispatchEvent: vi.fn(() => true),
+		};
+		vi.stubGlobal('matchMedia', vi.fn(() => media));
+		const result = renderDialog(queue([entry(0), entry(1)]));
+
+		expect(await screen.findByLabelText(m.chat_queue_drag_handle({ position: 1 }))).toBeTruthy();
+		expect(
+			screen.getByRole('button', { name: m.chat_queue_move_down({ position: 1 }) }),
+		).toBeTruthy();
+
+		media.matches = false;
+		for (const listener of listeners) listener();
+		await waitFor(() => {
+			expect(screen.queryByLabelText(m.chat_queue_drag_handle({ position: 1 }))).toBeNull();
+		});
+		result.unmount();
+		expect(media.removeEventListener).toHaveBeenCalledOnce();
+	});
+
+	it('blocks overlapping moves without disabling the focused pending button', async () => {
+		const pendingMove = deferred<void>();
+		const { onMove } = renderDialog(queue([entry(0), entry(1), entry(2)]));
+		onMove.mockReturnValueOnce(pendingMove.promise);
+		const moveUp = screen.getByRole('button', {
+			name: m.chat_queue_move_up({ position: 2 }),
+		});
+		moveUp.focus();
+		await fireEvent.click(moveUp);
+
+		await waitFor(() => expect(onMove).toHaveBeenCalledOnce());
+		expect((moveUp as HTMLButtonElement).disabled).toBe(false);
+		expect(moveUp.getAttribute('aria-disabled')).toBe('true');
+		expect(moveUp.getAttribute('aria-busy')).toBe('true');
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.chat_queue_move_down({ position: 2 }) }),
+		);
+		expect(onMove).toHaveBeenCalledOnce();
+
+		pendingMove.resolve();
+		await waitFor(() => expect(document.activeElement).toBe(moveUp));
+		expect(screen.getByText(m.chat_queue_move_success())).toBeTruthy();
+	});
+
+	it('reports reorder conflicts and refreshes the controls for another attempt', async () => {
+		const { onMove } = renderDialog(queue([entry(0), entry(1)]));
+		onMove.mockRejectedValueOnce(
+			new ApiError(409, 'Queue order changed', 'QUEUE_ENTRY_REORDER_CONFLICT'),
+		);
+		const moveDown = screen.getByRole('button', {
+			name: m.chat_queue_move_down({ position: 1 }),
+		});
+
+		await fireEvent.click(moveDown);
+
+		await waitFor(() => expect(screen.getByText(m.chat_queue_move_conflict())).toBeTruthy());
+		expect(moveDown.getAttribute('aria-disabled')).toBe('false');
+		expect(document.activeElement).toBe(moveDown);
 	});
 
 	it('deletes the selected stable ID after an earlier row disappears', async () => {
@@ -274,7 +393,11 @@ describe('QueuedInputsDialog', () => {
 
 		component.setQueue(
 			queue([], {
-				recentlyDispatched: [{ entryId: 'entry-0', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
+				recentlyDispatched: [{
+					entryId: 'entry-0',
+					revision: 1,
+					dispatchedAt: '2026-07-16T00:01:00.000Z',
+				}],
 			}),
 		);
 		await waitFor(() => {

@@ -26,6 +26,7 @@ function controlState(paused: boolean): ChatExecutionControlState {
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
 			pause: paused ? { id: 'pause-1', kind: 'manual', pausedAt: TS } : null,
+			reorderRevision: 0,
 		},
 		version: paused ? 2 : 1,
 		updatedAt: TS,

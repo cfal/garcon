@@ -47,6 +47,7 @@ function emptyExecutionControl(version = 4) {
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
+			reorderRevision: 0,
 		},
 		version,
 		updatedAt: '2026-07-18T00:00:00.000Z',
@@ -594,11 +595,12 @@ describe('parseServerWsMessage', () => {
 	});
 
 	it('parses only known snippet invalidation reasons', () => {
-		for (const reason of ['created', 'updated', 'removed', 'reordered']) {
+		for (const reason of ['created', 'updated', 'removed']) {
 			expect(parseServerWsMessage({ type: 'snippets-invalidated', reason })).toBeInstanceOf(
 				SnippetsInvalidatedMessage,
 			);
 		}
+		expect(parseServerWsMessage({ type: 'snippets-invalidated', reason: 'reordered' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'snippets-invalidated', reason: 'renamed' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'snippets-invalidated' })).toBeNull();
 	});

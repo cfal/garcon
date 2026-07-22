@@ -111,6 +111,282 @@ describe('queue lifecycle', () => {
     });
   });
 
+  test('reorders queued entries idempotently and rejects stale move observations', async () => {
+    await withIntegrationFixture('queue-reorder', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reorder-a' });
+      const acceptedA = await fixture.client.startDirectChat({
+        chatId,
+        content: 'reorder-a',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await heldA.received;
+
+      const queuedB = await fixture.client.enqueueNew(chatId, 'reorder-b');
+      const queuedC = await fixture.client.enqueueNew(chatId, 'reorder-c');
+      const queuedD = await fixture.client.enqueueNew(chatId, 'reorder-d');
+      const observed = queuedD.control.queue;
+      const entryB = observed.entries.find((entry) => entry.id === queuedB.entryId)!;
+      const entryC = observed.entries.find((entry) => entry.id === queuedC.entryId)!;
+      const entryD = observed.entries.find((entry) => entry.id === queuedD.entryId)!;
+      const moveRequest = {
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        entryId: entryD.id,
+        targetEntryId: entryB.id,
+        placement: 'before' as const,
+        expectedReorderRevision: observed.reorderRevision,
+        expectedSourceRevision: entryD.revision,
+        expectedTargetRevision: entryB.revision,
+      };
+
+      const moved = await fixture.client.moveQueued(moveRequest);
+      expect(moved.control.queue.entries.map((entry) => entry.content)).toEqual([
+        'reorder-d',
+        'reorder-b',
+        'reorder-c',
+      ]);
+      expect(moved.control.queue.reorderRevision).toBe(1);
+      const duplicate = await fixture.client.moveQueued(moveRequest);
+      expect(duplicate.status).toBe('duplicate');
+      expect(duplicate.control.queue.reorderRevision).toBe(1);
+
+      let staleOrderError: unknown;
+      try {
+        await fixture.client.moveQueued({
+          clientRequestId: crypto.randomUUID(),
+          chatId,
+          entryId: entryC.id,
+          targetEntryId: entryD.id,
+          placement: 'before',
+          expectedReorderRevision: observed.reorderRevision,
+          expectedSourceRevision: entryC.revision,
+          expectedTargetRevision: entryD.revision,
+        });
+      } catch (error) {
+        staleOrderError = error;
+      }
+      expect(staleOrderError).toMatchObject({
+        status: 409,
+        body: {
+          errorCode: 'QUEUE_ENTRY_REORDER_CONFLICT',
+          control: { queue: { reorderRevision: 1 } },
+        },
+      });
+
+      const edited = await fixture.client.replaceQueued({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        entryId: entryC.id,
+        content: 'reorder-c-edited',
+        expectedRevision: entryC.revision,
+      });
+      let staleSourceError: unknown;
+      try {
+        await fixture.client.moveQueued({
+          clientRequestId: crypto.randomUUID(),
+          chatId,
+          entryId: entryC.id,
+          targetEntryId: entryB.id,
+          placement: 'before',
+          expectedReorderRevision: edited.control.queue.reorderRevision,
+          expectedSourceRevision: entryC.revision,
+          expectedTargetRevision: entryB.revision,
+        });
+      } catch (error) {
+        staleSourceError = error;
+      }
+      expect(staleSourceError).toMatchObject({
+        status: 409,
+        body: { errorCode: 'QUEUE_ENTRY_REVISION_CONFLICT' },
+      });
+
+      const paused = await fixture.client.pauseQueue(chatId);
+      const editedC = paused.control.queue.entries.find((entry) => entry.id === entryC.id)!;
+      const latestB = paused.control.queue.entries.find((entry) => entry.id === entryB.id)!;
+      const movedWhilePaused = await fixture.client.moveQueued({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        entryId: editedC.id,
+        targetEntryId: latestB.id,
+        placement: 'before',
+        expectedReorderRevision: paused.control.queue.reorderRevision,
+        expectedSourceRevision: editedC.revision,
+        expectedTargetRevision: latestB.revision,
+      });
+      expect(movedWhilePaused.control.queue.pause).toMatchObject({ kind: 'manual' });
+      expect(movedWhilePaused.control.queue.entries.map((entry) => entry.content)).toEqual([
+        'reorder-d',
+        'reorder-c-edited',
+        'reorder-b',
+      ]);
+
+      const heldD = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reorder-d' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reorder-c-edited' });
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'reorder-b' });
+      await fixture.client.resumeQueue(chatId, movedWhilePaused.control.queue.pause!.id);
+      heldA.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, acceptedA.turnId);
+      await heldD.received;
+      heldD.releaseEcho();
+      await heldC.received;
+      heldC.releaseEcho();
+      await heldB.received;
+      const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'reorder-b');
+      const terminalCursor = fixture.client.markEvents();
+      heldB.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, queuedTurnB.turnId, {
+        afterIndex: terminalCursor,
+      });
+
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+        'reorder-a',
+        'reorder-d',
+        'reorder-c-edited',
+        'reorder-b',
+      ]);
+    });
+  });
+
+  test('rebases a move to the remaining head when its target dispatches first', async () => {
+    await withIntegrationFixture('queue-reorder-dispatch-race', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'rebase-a' });
+      const acceptedA = await fixture.client.startDirectChat({
+        chatId,
+        content: 'rebase-a',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await heldA.received;
+      const queuedB = await fixture.client.enqueueNew(chatId, 'rebase-b');
+      await fixture.client.enqueueNew(chatId, 'rebase-c');
+      const queuedD = await fixture.client.enqueueNew(chatId, 'rebase-d');
+      const observed = queuedD.control.queue;
+      const entryB = observed.entries.find((entry) => entry.id === queuedB.entryId)!;
+      const entryD = observed.entries.find((entry) => entry.id === queuedD.entryId)!;
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'rebase-b' });
+      const heldD = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'rebase-d' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'rebase-c' });
+
+      heldA.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, acceptedA.turnId);
+      await heldB.received;
+      const moveRequest = {
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        entryId: entryD.id,
+        targetEntryId: entryB.id,
+        placement: 'before' as const,
+        expectedReorderRevision: observed.reorderRevision,
+        expectedSourceRevision: entryD.revision,
+        expectedTargetRevision: entryB.revision,
+      };
+      const moved = await fixture.client.moveQueued(moveRequest);
+      expect(moved.control.queue.dispatchingEntryId).toBe(entryB.id);
+      expect(moved.control.queue.entries.map((entry) => entry.content)).toEqual([
+        'rebase-d',
+        'rebase-c',
+      ]);
+      expect((await fixture.client.moveQueued(moveRequest)).status).toBe('duplicate');
+
+      heldB.releaseEcho();
+      await heldD.received;
+      heldD.releaseEcho();
+      await heldC.received;
+      const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'rebase-c');
+      const terminalCursor = fixture.client.markEvents();
+      heldC.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, queuedTurnC.turnId, {
+        afterIndex: terminalCursor,
+      });
+
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+        'rebase-a',
+        'rebase-b',
+        'rebase-d',
+        'rebase-c',
+      ]);
+    });
+  });
+
+  test('preserves failed-target retry priority after a dispatch rebase', async () => {
+    await withIntegrationFixture('queue-reorder-target-retry', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const heldA = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-a' });
+      const acceptedA = await fixture.client.startDirectChat({
+        chatId,
+        content: 'retry-a',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await heldA.received;
+      const queuedB = await fixture.client.enqueueNew(chatId, 'retry-b');
+      await fixture.client.enqueueNew(chatId, 'retry-c');
+      const queuedD = await fixture.client.enqueueNew(chatId, 'retry-d');
+      const observed = queuedD.control.queue;
+      const entryB = observed.entries.find((entry) => entry.id === queuedB.entryId)!;
+      const entryD = observed.entries.find((entry) => entry.id === queuedD.entryId)!;
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-b' });
+
+      heldA.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, acceptedA.turnId);
+      await heldB.received;
+      await fixture.client.moveQueued({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        entryId: entryD.id,
+        targetEntryId: entryB.id,
+        placement: 'before',
+        expectedReorderRevision: observed.reorderRevision,
+        expectedSourceRevision: entryD.revision,
+        expectedTargetRevision: entryB.revision,
+      });
+
+      const firstTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'retry-b');
+      const failureCursor = fixture.client.markEvents();
+      heldB.releaseStreamError('intentional queued turn failure');
+      expect((await fixture.client.waitForTurnTerminal(chatId, firstTurnB.turnId, {
+        afterIndex: failureCursor,
+      })).type).toBe('agent-run-failed');
+      const paused = await fixture.client.getExecutionControl(chatId);
+      expect(paused.queue.pause).toMatchObject({
+        kind: 'queued-turn-failed',
+        entryId: entryB.id,
+      });
+      expect(paused.queue.entries.map((entry) => entry.content)).toEqual([
+        'retry-b',
+        'retry-d',
+        'retry-c',
+      ]);
+
+      const heldRetryB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-b' });
+      const heldD = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-d' });
+      const heldC = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'retry-c' });
+      await fixture.client.resumeQueue(chatId, paused.queue.pause!.id);
+      await heldRetryB.received;
+      heldRetryB.releaseEcho();
+      await heldD.received;
+      heldD.releaseEcho();
+      await heldC.received;
+      const queuedTurnC = await waitForQueuedTurnIdentity(fixture.client, chatId, 'retry-c');
+      const terminalCursor = fixture.client.markEvents();
+      heldC.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, queuedTurnC.turnId, {
+        afterIndex: terminalCursor,
+      });
+
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+        'retry-a',
+        'retry-b',
+        'retry-b',
+        'retry-d',
+        'retry-c',
+      ]);
+    });
+  });
+
   test('edits and deletes queued inputs by stable identity', async () => {
     await withIntegrationFixture('queue-edit-delete', async (fixture) => {
       const chatId = fixture.newChatId();

@@ -8,6 +8,7 @@ export interface QueueEntry {
 
 export interface RecentlyDispatchedQueueEntry {
   entryId: string;
+  revision: number;
   dispatchedAt: string;
 }
 
@@ -27,6 +28,7 @@ export interface ChatQueueState {
   dispatchingEntryId: string | null;
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   pause: QueuePause | null;
+  reorderRevision: number;
 }
 
 export const MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES = 32;
@@ -37,6 +39,7 @@ export function emptyChatQueueState(): ChatQueueState {
     dispatchingEntryId: null,
     recentlyDispatched: [],
     pause: null,
+    reorderRevision: 0,
   };
 }
 
@@ -65,8 +68,15 @@ function parseRecentlyDispatched(value: unknown): RecentlyDispatchedQueueEntry |
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
   const entryId = typeof item.entryId === 'string' ? item.entryId : '';
+  const revision = typeof item.revision === 'number'
+    && Number.isSafeInteger(item.revision)
+    && item.revision > 0
+    ? item.revision
+    : null;
   const dispatchedAt = typeof item.dispatchedAt === 'string' ? item.dispatchedAt : '';
-  return entryId && dispatchedAt ? { entryId, dispatchedAt } : null;
+  return entryId && revision !== null && dispatchedAt
+    ? { entryId, revision, dispatchedAt }
+    : null;
 }
 
 export function normalizeChatQueueState(value: unknown): ChatQueueState {
@@ -111,6 +121,13 @@ export function parseChatQueueState(value: unknown): ChatQueueState | null {
   const pause = parseQueuePause(raw.pause);
   if (pause === undefined) return null;
   if (!Array.isArray(raw.entries) || !Array.isArray(raw.recentlyDispatched)) return null;
+  if (
+    typeof raw.reorderRevision !== 'number'
+    || !Number.isSafeInteger(raw.reorderRevision)
+    || raw.reorderRevision < 0
+  ) {
+    return null;
+  }
   const entries = raw.entries.map(parseQueueEntry);
   const recentlyDispatched = raw.recentlyDispatched.map(parseRecentlyDispatched);
   if (entries.some((entry) => entry === null) || recentlyDispatched.some((entry) => entry === null)) {
@@ -129,5 +146,6 @@ export function parseChatQueueState(value: unknown): ChatQueueState | null {
     recentlyDispatched: (recentlyDispatched as RecentlyDispatchedQueueEntry[])
       .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES),
     pause,
+    reorderRevision: raw.reorderRevision,
   };
 }
