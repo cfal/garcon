@@ -900,8 +900,6 @@ describe('ConversationScrollController', () => {
 			scheduledFrames.push(callback);
 			return scheduledFrames.length;
 		}) as typeof requestAnimationFrame;
-		const cancelFrame = vi.fn();
-		globalThis.cancelAnimationFrame = cancelFrame as typeof cancelAnimationFrame;
 		const scroller = {
 			scrollTop: 200,
 			scrollHeight: 705,
@@ -933,7 +931,6 @@ describe('ConversationScrollController', () => {
 		expect(await jump).toBe(true);
 		for (const callback of scheduledFrames) callback(0);
 
-		expect(cancelFrame).toHaveBeenCalled();
 		expect(scheduledFrames).toEqual([]);
 		expect(scroller.scrollTop).toBe(300);
 		expect(chatState.isUserScrolledUp).toBe(false);

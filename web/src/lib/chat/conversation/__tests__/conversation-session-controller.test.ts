@@ -198,7 +198,9 @@ function createDeps(chat = createRunningChat()) {
 			chatState.pendingUserInputs = [];
 		}),
 		activateChat: vi.fn<() => ChatRestoreResult | null>(() => null),
-		loadMessages: vi.fn(() => new Promise<never>(() => {})),
+		loadMessages: vi.fn<SessionControllerDeps['chatState']['loadMessages']>(
+			() => new Promise<ChatMessage[]>(() => {}),
+		),
 		setPendingUserInputs: vi.fn((inputs: PendingUserInput[]) => {
 			chatState.pendingUserInputs = inputs;
 		}),
