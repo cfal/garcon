@@ -21,6 +21,14 @@ describe('FileDialogHost', () => {
 		rendered.unmount();
 	});
 
+	it('keeps one dialog-owned Close control', async () => {
+		const rendered = render(FileDialogHostTestHost, { request: 'file' });
+		await screen.findByRole('dialog');
+
+		expect(await screen.findAllByRole('button', { name: m.file_session_close() })).toHaveLength(1);
+		rendered.unmount();
+	});
+
 	it('does not open the desktop file dialog on mobile', () => {
 		const rendered = render(FileDialogHostTestHost, { request: 'file', isMobile: true });
 

@@ -73,7 +73,12 @@
 		{@const session = files.get(surface.fileSessionId)}
 		{#if session}
 			{#await fileRenderer() then FileSurface}
-				<FileSurface {session} {presentation} />
+				<FileSurface
+					{session}
+					{presentation}
+					onClose={() => void workspace.closeSurface(surface.id)}
+					closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
+				/>
 			{/await}
 		{:else if visible}
 			<div class="grid h-full place-items-center text-sm text-muted-foreground">
