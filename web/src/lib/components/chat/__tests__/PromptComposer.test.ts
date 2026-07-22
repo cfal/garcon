@@ -1,9 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
+
+const appCss = readFileSync('src/app.css', 'utf8');
 
 vi.mock('$lib/api/snippets', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
@@ -241,6 +244,24 @@ describe('PromptComposer focus', () => {
 			composerThinkingShimmer: false,
 		});
 		expect(frame?.className).not.toContain('composer-thinking-shimmer');
+	});
+
+	it('uses a static processing highlight when reduced motion is preferred', () => {
+		const reducedMotionRule = appCss.match(
+			/@media \(prefers-reduced-motion: reduce\)\s*\{(?<body>[\s\S]*)\}\s*$/,
+		);
+
+		expect(reducedMotionRule?.groups?.body).toContain('animation: none;');
+		expect(reducedMotionRule?.groups?.body).toContain('background: linear-gradient(');
+		expect(reducedMotionRule?.groups?.body).toContain('to bottom,');
+		expect(reducedMotionRule?.groups?.body).toContain(
+			'hsl(var(--composer-thinking-shimmer-start)) 0%,',
+		);
+		expect(reducedMotionRule?.groups?.body).not.toContain('var(--status-processing)');
+		expect(reducedMotionRule?.groups?.body).toContain('hsl(var(--border)) 100%');
+		expect(reducedMotionRule?.groups?.body).toMatch(
+			/\[data-slot='chat-processing-status'\]::before\s*\{\s*background: hsl\(var\(--composer-thinking-shimmer-start\)\);/,
+		);
 	});
 
 	it('shows quick commit before stop while the selected chat is processing', async () => {

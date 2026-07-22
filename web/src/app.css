@@ -204,6 +204,7 @@
 	--destructive: 0 84.2% 60.2%;
 	--destructive-foreground: 0 0% 98%;
 	--border: 0 0% 90%;
+	--composer-thinking-shimmer-start: 0 0% 85%;
 	--input: 0 0% 90%;
 	--ring: 0 0% 40%;
 	--radius: 0.5rem;
@@ -421,6 +422,7 @@
 	--destructive: 0 62.8% 30.6%;
 	--destructive-foreground: 0 0% 95%;
 	--border: 0 0% 20%;
+	--composer-thinking-shimmer-start: 0 0% 25%;
 	--input: 0 0% 40%;
 	--ring: 0 0% 60%;
 	--transient-backdrop-color: 0 0% 0%;
@@ -1002,8 +1004,21 @@
 	border-radius: calc(var(--radius) * 2) calc(var(--radius) * 2) 0 0;
 }
 
+/* Preserves a visible processing cue without motion. */
 @media (prefers-reduced-motion: reduce) {
 	.composer-thinking-shimmer {
 		animation: none;
+	}
+
+	.composer-thinking-shimmer [data-composer]::before {
+		background: linear-gradient(
+			to bottom,
+			hsl(var(--composer-thinking-shimmer-start)) 0%,
+			hsl(var(--border)) 100%
+		);
+	}
+
+	.composer-thinking-shimmer [data-slot='chat-processing-status']::before {
+		background: hsl(var(--composer-thinking-shimmer-start));
 	}
 }
