@@ -17,8 +17,9 @@ function scrollState<T extends Partial<ConversationScrollState>>(
 		hasMoreMessages: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
+		invalidatePendingHistoryLoad: vi.fn(),
 		loadAllMessages: vi.fn(async () => undefined),
-		loadMoreMessages: vi.fn(async () => false),
+		loadMoreMessages: vi.fn(async () => 'exhausted' as const),
 		loadStatus: 'loaded' as const,
 		...overrides,
 	} satisfies ConversationScrollState;
@@ -129,7 +130,7 @@ describe('ConversationScrollController', () => {
 			isUserScrolledUp: true,
 			loadMoreMessages: vi.fn(async () => {
 				Object.defineProperty(scroller, 'scrollHeight', { value: 1100, configurable: true });
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 
@@ -160,7 +161,7 @@ describe('ConversationScrollController', () => {
 			isUserScrolledUp: false,
 			loadMoreMessages: vi.fn(async () => {
 				scrollHeight = 1_100;
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 		const controller = new ConversationScrollController({
@@ -171,7 +172,7 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(true);
 
-		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe(true);
+		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe('loaded');
 
 		expect(scroller.scrollTop).toBe(1_100);
 		expect(chatState.isUserScrolledUp).toBe(false);
@@ -189,7 +190,7 @@ describe('ConversationScrollController', () => {
 			isUserScrolledUp: true,
 			loadMoreMessages: vi.fn(async () => {
 				scrollHeight = 1_050;
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 		const controller = new ConversationScrollController({
@@ -200,7 +201,7 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(false);
 
-		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe(true);
+		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe('loaded');
 
 		expect(scroller.scrollTop).toBe(410);
 		expect(chatState.isUserScrolledUp).toBe(true);
@@ -209,8 +210,8 @@ describe('ConversationScrollController', () => {
 
 	it('does not restore navigator pagination after a newer scroll-to-top operation', async () => {
 		let scrollHeight = 800;
-		let resolveLoad!: (loaded: boolean) => void;
-		const load = new Promise<boolean>((resolve) => {
+		let resolveLoad!: (result: 'loaded') => void;
+		const load = new Promise<'loaded'>((resolve) => {
 			resolveLoad = resolve;
 		});
 		const scroller = { scrollTop: 160, clientHeight: 400 } as HTMLDivElement;
@@ -234,10 +235,69 @@ describe('ConversationScrollController', () => {
 		const pagination = controller.loadMoreMessagesForNavigator('chat-1');
 		await controller.scrollToTop();
 		scrollHeight = 1_100;
-		resolveLoad(true);
+		resolveLoad('loaded');
 
-		expect(await pagination).toBe(false);
+		expect(await pagination).toBe('invalidated');
 		expect(scroller.scrollTop).toBe(0);
+	});
+
+	it('discards a navigator page that resolves after a message jump', async () => {
+		let scrollHeight = 800;
+		let invalidated = false;
+		let resolvePage!: () => void;
+		const page = new Promise<void>((resolve) => {
+			resolvePage = resolve;
+		});
+		const scroller = {
+			scrollTop: 200,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 100 }),
+		} as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatRowId = 'generation-1:7';
+		row.getBoundingClientRect = vi.fn(() => ({ top: 350, height: 100 }) as DOMRect);
+		content.append(row);
+		const chatState = {
+			generationId: 'generation-1',
+			isUserScrolledUp: true,
+			invalidatePendingHistoryLoad: vi.fn(() => {
+				invalidated = true;
+			}),
+			loadMoreMessages: vi.fn(async () => {
+				await page;
+				if (invalidated) return 'invalidated' as const;
+				scrollHeight = 1_100;
+				return 'loaded' as const;
+			}),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(false);
+
+		const pagination = controller.loadMoreMessagesForNavigator('chat-1');
+		expect(
+			await controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-1',
+				rowId: 'generation-1:7',
+			}),
+		).toBe(true);
+		resolvePage();
+
+		expect(await pagination).toBe('invalidated');
+		expect(chatState.invalidatePendingHistoryLoad).toHaveBeenCalledOnce();
+		expect(scrollHeight).toBe(800);
+		expect(scroller.scrollTop).toBe(300);
 	});
 
 	it('centers a generation-scoped message row inside the active feed', async () => {
@@ -560,7 +620,7 @@ describe('ConversationScrollController', () => {
 			}),
 			loadMoreMessages: vi.fn(async () => {
 				scrollHeight = 1500;
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 		const controller = new ConversationScrollController({
@@ -583,8 +643,8 @@ describe('ConversationScrollController', () => {
 
 	it('does not restore a stale pagination anchor over a scroll-to-top request', async () => {
 		let scrollHeight = 800;
-		let resolveLoad!: (loaded: boolean) => void;
-		const pageLoad = new Promise<boolean>((resolve) => {
+		let resolveLoad!: (result: 'loaded') => void;
+		const pageLoad = new Promise<'loaded'>((resolve) => {
 			resolveLoad = resolve;
 		});
 		const scroller = { scrollTop: 40, clientHeight: 400 } as HTMLDivElement;
@@ -620,7 +680,7 @@ describe('ConversationScrollController', () => {
 		await vi.waitFor(() => expect(chatState.loadAllMessages).toHaveBeenCalledOnce());
 
 		scrollHeight = 1500;
-		resolveLoad(true);
+		resolveLoad('loaded');
 		await scrollToTop;
 		await vi.waitFor(() => expect(controller.isScrollingToTop).toBe(false));
 
@@ -637,7 +697,7 @@ describe('ConversationScrollController', () => {
 			loadMoreMessages: vi.fn(async () => {
 				sessions.selectedChatId = 'chat-2';
 				Object.defineProperty(scroller, 'scrollHeight', { value: 1100, configurable: true });
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 
@@ -666,7 +726,7 @@ describe('ConversationScrollController', () => {
 			isUserScrolledUp: false,
 			loadMoreMessages: vi.fn(async () => {
 				scrollHeight = scrollHeight === 300 ? 450 : 800;
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 
@@ -699,7 +759,7 @@ describe('ConversationScrollController', () => {
 			isUserScrolledUp: false,
 			loadMoreMessages: vi.fn(async () => {
 				scrollHeight = 800;
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 		const controller = new ConversationScrollController({
@@ -735,7 +795,7 @@ describe('ConversationScrollController', () => {
 			loadMoreMessages: vi.fn(async () => {
 				scrollHeight = 800;
 				sessions.selectedChatId = 'chat-2';
-				return true;
+				return 'loaded' as const;
 			}),
 		};
 
@@ -935,6 +995,58 @@ describe('ConversationScrollController', () => {
 		expect(scroller.scrollTop).toBe(300);
 		expect(chatState.isUserScrolledUp).toBe(false);
 		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
+	it('does not leak jump suppression after completing while hidden', async () => {
+		const scheduledFrames: FrameRequestCallback[] = [];
+		globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+			scheduledFrames.push(callback);
+			return scheduledFrames.length;
+		}) as typeof requestAnimationFrame;
+		let scrollHeight = 1_200;
+		const scroller = {
+			scrollTop: 200,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 100 }),
+		} as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatRowId = 'generation-1:7';
+		row.getBoundingClientRect = vi.fn(() => ({ top: 350, height: 100 }) as DOMRect);
+		content.append(row);
+		const chatState = { generationId: 'generation-1', isUserScrolledUp: false };
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(true);
+		controller.setViewportVisible(false);
+
+		expect(
+			await controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-1',
+				rowId: 'generation-1:7',
+			}),
+		).toBe(true);
+		controller.setViewportVisible(true);
+		expect(scheduledFrames).toEqual([]);
+
+		chatState.isUserScrolledUp = false;
+		controller.setPinnedToBottom(true);
+		controller.setViewportVisible(false);
+		scrollHeight = 1_400;
+		controller.setViewportVisible(true);
+		expect(scheduledFrames).toHaveLength(1);
+		scheduledFrames[0]?.(0);
+		expect(scroller.scrollTop).toBe(1_400);
 	});
 
 	it('does not restore bottom when the user was scrolled up before hiding the viewport', () => {

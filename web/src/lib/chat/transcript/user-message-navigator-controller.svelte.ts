@@ -1,5 +1,9 @@
 import { UserMessage } from '$shared/chat-types';
-import type { ChatDisplayRow, ChatLoadStatus } from './active-transcript-state.svelte.js';
+import type {
+	ChatDisplayRow,
+	ChatLoadStatus,
+	OlderMessagesLoadResult,
+} from './active-transcript-state.svelte.js';
 
 export interface UserMessageNavigatorItem {
 	id: string;
@@ -35,7 +39,7 @@ export interface UserMessageNavigatorOptions {
 	transcript: UserMessageNavigatorTranscriptPort;
 	getSelectedChatId: () => string | null;
 	reloadTranscript: (chatId: string) => Promise<void>;
-	loadOlderMessages: (chatId: string) => Promise<boolean>;
+	loadOlderMessages: (chatId: string) => Promise<OlderMessagesLoadResult>;
 	jumpToRow: (target: UserMessageNavigatorTarget) => Promise<boolean>;
 }
 
@@ -170,9 +174,9 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		this.isLoadingOlder = true;
 		this.loadError = null;
 		try {
-			const loaded = await this.options.loadOlderMessages(chatId);
+			const result = await this.options.loadOlderMessages(chatId);
 			if (!this.#matchesOpenTranscript(chatId, generationId, lifecycleEpoch)) return;
-			if (!loaded && this.options.transcript.hasMoreMessages) {
+			if (result === 'failed') {
 				this.loadError = 'older-page-failed';
 			}
 		} finally {

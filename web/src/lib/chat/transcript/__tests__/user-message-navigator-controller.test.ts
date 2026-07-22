@@ -4,6 +4,7 @@ import type { ChatViewMessage } from '$shared/chat-view';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import {
 	UserMessageNavigatorController,
+	type UserMessageNavigatorOptions,
 	type UserMessageNavigatorTarget,
 } from '../user-message-navigator-controller.svelte.js';
 
@@ -42,7 +43,9 @@ function setup(messages: ChatViewMessage[] = [entry(1, user('first'))]) {
 	});
 	let selectedChatId: string | null = 'chat-1';
 	const reloadTranscript = vi.fn(async () => undefined);
-	const loadOlderMessages = vi.fn(async () => true);
+	const loadOlderMessages = vi.fn<UserMessageNavigatorOptions['loadOlderMessages']>(
+		async () => 'loaded',
+	);
 	const jumpToRow = vi.fn(async (_target: UserMessageNavigatorTarget) => true);
 	const controller = new UserMessageNavigatorController({
 		transcript,
@@ -112,7 +115,7 @@ describe('UserMessageNavigatorController', () => {
 				...transcript.entries,
 			];
 			transcript.hasMoreMessages = false;
-			return true;
+			return 'loaded' as const;
 		});
 		controller.openForActiveChat();
 
@@ -122,16 +125,16 @@ describe('UserMessageNavigatorController', () => {
 	});
 
 	it('coalesces concurrent load requests and exposes a typed retryable failure', async () => {
-		const pendingLoad = deferred<boolean>();
+		const pendingLoad = deferred<'failed'>();
 		const { controller, transcript, loadOlderMessages } = setup();
 		transcript.hasMoreMessages = true;
-		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce(true);
+		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce('loaded');
 		controller.openForActiveChat();
 
 		const firstLoad = controller.loadOlder();
 		const duplicateLoad = controller.loadOlder();
 		expect(loadOlderMessages).toHaveBeenCalledOnce();
-		pendingLoad.resolve(false);
+		pendingLoad.resolve('failed');
 		await Promise.all([firstLoad, duplicateLoad]);
 
 		expect(controller.loadError).toBe('older-page-failed');
@@ -140,8 +143,20 @@ describe('UserMessageNavigatorController', () => {
 		expect(controller.loadError).toBeNull();
 	});
 
+	it('does not report an invalidated older-page request as a failure', async () => {
+		const { controller, transcript, loadOlderMessages } = setup();
+		transcript.hasMoreMessages = true;
+		loadOlderMessages.mockResolvedValueOnce('invalidated');
+		controller.openForActiveChat();
+
+		await controller.loadOlder();
+
+		expect(controller.loadError).toBeNull();
+		expect(controller.isLoadingOlder).toBe(false);
+	});
+
 	it('ignores a late page result after the active chat changes', async () => {
-		const pendingLoad = deferred<boolean>();
+		const pendingLoad = deferred<'invalidated'>();
 		const { controller, transcript, loadOlderMessages, selectChat } = setup();
 		transcript.hasMoreMessages = true;
 		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise);
@@ -151,7 +166,7 @@ describe('UserMessageNavigatorController', () => {
 		selectChat('chat-2');
 		transcript.activateChat('chat-2');
 		controller.reconcileActiveTranscript('chat-2', '');
-		pendingLoad.resolve(false);
+		pendingLoad.resolve('invalidated');
 		await load;
 
 		expect(controller.open).toBe(false);
@@ -166,7 +181,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript: vi.fn(async () => undefined),
-			loadOlderMessages: vi.fn(async () => false),
+			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow: vi.fn(async () => false),
 		});
 
@@ -190,7 +205,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript: vi.fn(async () => undefined),
-			loadOlderMessages: vi.fn(async () => false),
+			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow: vi.fn(async () => false),
 		});
 
@@ -217,7 +232,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript: vi.fn(async () => undefined),
-			loadOlderMessages: vi.fn(async () => false),
+			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow,
 		});
 		controller.openForActiveChat();
@@ -241,7 +256,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript,
-			loadOlderMessages: vi.fn(async () => false),
+			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow: vi.fn(async () => false),
 		});
 		controller.openForActiveChat();
@@ -310,10 +325,10 @@ describe('UserMessageNavigatorController', () => {
 	});
 
 	it('does not retain an older-page loading state when a failed jump reopens', async () => {
-		const pendingLoad = deferred<boolean>();
+		const pendingLoad = deferred<'invalidated'>();
 		const { controller, transcript, loadOlderMessages, jumpToRow } = setup();
 		transcript.hasMoreMessages = true;
-		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce(true);
+		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce('loaded');
 		jumpToRow.mockResolvedValueOnce(false);
 		controller.openForActiveChat();
 		const load = controller.loadOlder();
@@ -322,7 +337,7 @@ describe('UserMessageNavigatorController', () => {
 
 		expect(controller.open).toBe(true);
 		expect(controller.isLoadingOlder).toBe(false);
-		pendingLoad.resolve(false);
+		pendingLoad.resolve('invalidated');
 		await load;
 		expect(controller.loadError).toBeNull();
 		expect(controller.isLoadingOlder).toBe(false);

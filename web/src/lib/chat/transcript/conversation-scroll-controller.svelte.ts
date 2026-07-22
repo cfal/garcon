@@ -4,7 +4,10 @@
 
 import { tick } from 'svelte';
 import { reconcileScrollAfterHeightDelta } from '$lib/chat/transcript/scroll-anchor.js';
-import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type {
+	ActiveTranscriptState,
+	OlderMessagesLoadResult,
+} from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { UserMessageNavigatorTarget } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
 const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
@@ -18,6 +21,7 @@ export type ConversationScrollState = Pick<
 	| 'hasMoreMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
+	| 'invalidatePendingHistoryLoad'
 	| 'loadAllMessages'
 	| 'loadMoreMessages'
 	| 'loadStatus'
@@ -189,8 +193,8 @@ export class ConversationScrollController {
 		prevTop: number,
 		operationEpoch = this.#anchorOperationEpoch,
 	): Promise<void> {
-		const loaded = await this.deps.chatState.loadMoreMessages(chatId);
-		if (!loaded) return;
+		const result = await this.deps.chatState.loadMoreMessages(chatId);
+		if (result !== 'loaded') return;
 		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
 
 		await tick();
@@ -205,9 +209,9 @@ export class ConversationScrollController {
 		this.setPinnedToBottom(false);
 	}
 
-	async loadMoreMessagesForNavigator(chatId: string): Promise<boolean> {
+	async loadMoreMessagesForNavigator(chatId: string): Promise<OlderMessagesLoadResult> {
 		const container = this.deps.getScrollContainer();
-		if (!container || this.deps.sessions.selectedChatId !== chatId) return false;
+		if (!container || this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
 
 		const operationEpoch = ++this.#anchorOperationEpoch;
 		const previousHeight = container.scrollHeight;
@@ -217,14 +221,15 @@ export class ConversationScrollController {
 			!this.deps.chatState.isUserScrolledUp ||
 			this.isNearBottom();
 
-		const loaded = await this.deps.chatState.loadMoreMessages(chatId);
-		if (!loaded || !this.#isCurrentAnchorOperation(chatId, operationEpoch)) return false;
+		const result = await this.deps.chatState.loadMoreMessages(chatId);
+		if (result !== 'loaded') return result;
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return 'invalidated';
 
 		await tick();
-		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return false;
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return 'invalidated';
 
 		const updated = this.deps.getScrollContainer();
-		if (!updated) return false;
+		if (!updated) return 'invalidated';
 		if (shouldRemainPinned) {
 			updated.scrollTop = updated.scrollHeight;
 			this.deps.chatState.isUserScrolledUp = false;
@@ -234,7 +239,7 @@ export class ConversationScrollController {
 			this.deps.chatState.isUserScrolledUp = true;
 			this.setPinnedToBottom(false);
 		}
-		return true;
+		return 'loaded';
 	}
 
 	async jumpToMessageRow(target: UserMessageNavigatorTarget): Promise<boolean> {
@@ -254,6 +259,7 @@ export class ConversationScrollController {
 			this.#suppressNextVisibleBottomRestore = false;
 			return false;
 		}
+		this.deps.chatState.invalidatePendingHistoryLoad();
 
 		const content = this.deps.getScrollContentContainer?.();
 		const row = Array.from(
@@ -278,7 +284,7 @@ export class ConversationScrollController {
 		this.setPinnedToBottom(nearBottom);
 		this.#restoreBottomOnNextVisible = false;
 		this.#cancelBottomRestoreFrame();
-		if (this.#isViewportVisible) this.#suppressNextVisibleBottomRestore = false;
+		this.#suppressNextVisibleBottomRestore = false;
 		return true;
 	}
 
@@ -308,8 +314,8 @@ export class ConversationScrollController {
 				if (container.scrollHeight > container.clientHeight + 1) return;
 
 				const previousHeight = container.scrollHeight;
-				const loaded = await this.deps.chatState.loadMoreMessages(chatId);
-				if (!loaded || this.deps.sessions.selectedChatId !== chatId) return;
+				const result = await this.deps.chatState.loadMoreMessages(chatId);
+				if (result !== 'loaded' || this.deps.sessions.selectedChatId !== chatId) return;
 
 				await tick();
 				const updated = this.deps.getScrollContainer();

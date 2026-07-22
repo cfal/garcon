@@ -20,6 +20,7 @@ type PageApplyResult = MessageApplyResult | 'stale';
 type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
+export type OlderMessagesLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
 
 export interface ChatLoadMessagesOptions {
 	minimumLimit?: number;
@@ -99,7 +100,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	loadError = $state<string | null>(null);
 	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
 	#loadEpoch = 0;
-	#loadMorePromise: Promise<boolean> | null = null;
+	#loadMorePromise: Promise<OlderMessagesLoadResult> | null = null;
 	#loadingMoreChatId: string | null = null;
 	#loadMoreOperationEpoch = 0;
 	#initialRevealPhase = $state<InitialRevealPhase>('complete');
@@ -404,11 +405,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		throw new Error(this.loadError);
 	}
 
-	async loadMoreMessages(chatId: string): Promise<boolean> {
+	async loadMoreMessages(chatId: string): Promise<OlderMessagesLoadResult> {
 		if (this.#loadMorePromise) {
-			return this.#loadingMoreChatId === chatId ? this.#loadMorePromise : false;
+			return this.#loadingMoreChatId === chatId ? this.#loadMorePromise : 'invalidated';
 		}
-		if (!this.hasMoreMessages || !chatId) return false;
+		if (!this.hasMoreMessages || !chatId) return 'exhausted';
 
 		const generationId = this.generationId;
 		const operationEpoch = this.#loadMoreOperationEpoch;
@@ -431,21 +432,23 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		chatId: string,
 		generationId: string,
 		operationEpoch: number,
-	): Promise<boolean> {
+	): Promise<OlderMessagesLoadResult> {
 		try {
 			const page = await getChatMessages({
 				chatId,
 				limit: MESSAGES_PER_PAGE,
 				beforeSeq: this.oldestSeq,
 			});
-			if (!this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch)) return false;
+			if (!this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch)) {
+				return 'invalidated';
+			}
 			if (page.generationId !== generationId) {
 				await this.loadMessages(chatId);
-				return false;
+				return 'invalidated';
 			}
 			if (page.messages.length === 0) {
 				this.hasMoreMessages = false;
-				return false;
+				return 'exhausted';
 			}
 			this.entries = [...page.messages, ...this.entries];
 			this.oldestSeq = page.messages[0].seq;
@@ -453,11 +456,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.hasMoreMessages = page.hasMore;
 			this.totalMessages = this.entries.length;
 			this.visibleMessageCount += page.messages.length;
-			return true;
+			return 'loaded';
 		} catch (error) {
 			console.error('Error loading more messages:', error);
-			return false;
+			return 'failed';
 		}
+	}
+
+	invalidatePendingHistoryLoad(): void {
+		this.#invalidateLoadMoreOperation();
 	}
 
 	#isCurrentLoadMoreOperation(
@@ -579,9 +586,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (!isCurrentTranscript()) return;
 
 		while (isCurrentTranscript() && this.hasMoreMessages) {
-			const loaded = await this.loadMoreMessages(chatId);
+			const result = await this.loadMoreMessages(chatId);
 			if (!isCurrentTranscript()) return;
-			if (!loaded) break;
+			if (result !== 'loaded') break;
 		}
 		if (!isCurrentTranscript()) return;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);

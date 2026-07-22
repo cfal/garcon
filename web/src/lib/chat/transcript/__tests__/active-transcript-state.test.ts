@@ -612,12 +612,51 @@ describe('ActiveTranscriptState', () => {
 			},
 		);
 
-		await expect(firstLoad).resolves.toBe(true);
+		await expect(firstLoad).resolves.toBe('loaded');
 		await loadAll;
 
 		expect(getChatMessages).toHaveBeenCalledOnce();
 		expect(chat.visibleRows).toHaveLength(100);
 		expect(chat.hasMoreMessages).toBe(false);
+	});
+
+	it('discards an earlier page invalidated by explicit navigation', async () => {
+		const chat = new ActiveTranscriptState();
+		const latestWindow = Array.from({ length: 50 }, (_, index) =>
+			entry(index + 51, assistant(`message-${index + 51}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+			lastSeq: 100,
+			pageOldestSeq: 51,
+			hasMore: true,
+		});
+		let resolvePage!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolvePage = resolve;
+			}),
+		);
+
+		const load = chat.loadMoreMessages('chat-1');
+		chat.invalidatePendingHistoryLoad();
+		resolvePage({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 1, assistant(`message-${index + 1}`)),
+				),
+				lastSeq: 100,
+				pageOldestSeq: 1,
+				hasMore: false,
+			}),
+		});
+
+		await expect(load).resolves.toBe('invalidated');
+		expect(chat.chatMessages.map(contentOf)).toEqual(
+			Array.from({ length: 50 }, (_, index) => `message-${index + 51}`),
+		);
+		expect(chat.hasMoreMessages).toBe(true);
 	});
 
 	it('does not complete another chat reveal when an old load-all request settles', async () => {
@@ -727,7 +766,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(oldLoad).resolves.toBe(false);
+		await expect(oldLoad).resolves.toBe('invalidated');
 
 		expect(chat.activeChatId).toBe('chat-2');
 		expect(chat.chatMessages[0]).toMatchObject({ content: 'chat-2-message-51' });
@@ -746,7 +785,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(newLoad).resolves.toBe(true);
+		await expect(newLoad).resolves.toBe('loaded');
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 100 }, (_, index) => `chat-2-message-${index + 1}`),
@@ -816,7 +855,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(oldLoad).resolves.toBe(false);
+		await expect(oldLoad).resolves.toBe('invalidated');
 
 		expect(chat.activeChatId).toBe('chat-2');
 		expect(chat.visibleRows[0]).toMatchObject({ kind: 'message', seq: 1 });
@@ -875,7 +914,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(oldLoad).resolves.toBe(false);
+		await expect(oldLoad).resolves.toBe('invalidated');
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `chat-1-message-${index + 51}`),
@@ -894,7 +933,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(newLoad).resolves.toBe(true);
+		await expect(newLoad).resolves.toBe('loaded');
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 100 }, (_, index) => `chat-1-message-${index + 1}`),
@@ -951,7 +990,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(oldLoad).resolves.toBe(false);
+		await expect(oldLoad).resolves.toBe('invalidated');
 
 		expect(chat.generationId).toBe('generation-2');
 		expect(chat.chatMessages[0]).toMatchObject({ content: 'generation-2-message-51' });
@@ -970,7 +1009,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(newLoad).resolves.toBe(true);
+		await expect(newLoad).resolves.toBe('loaded');
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 100 }, (_, index) => `generation-2-message-${index + 1}`),
@@ -1036,7 +1075,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(oldLoad).resolves.toBe(false);
+		await expect(oldLoad).resolves.toBe('invalidated');
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `message-${index + 51}`),
@@ -1053,7 +1092,7 @@ describe('ActiveTranscriptState', () => {
 				hasMore: false,
 			}),
 		});
-		await expect(newLoad).resolves.toBe(false);
+		await expect(newLoad).resolves.toBe('exhausted');
 		expect(chat.isLoadingMoreMessages).toBe(false);
 	});
 
