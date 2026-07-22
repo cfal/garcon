@@ -23,6 +23,7 @@ import type {
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryDeleteResponse,
+  QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
   StartChatCommandRequest,
@@ -548,6 +549,10 @@ export class GarconTestClient {
 
   deleteQueued(request: QueueEntryDeleteCommandRequest): Promise<QueueEntryDeleteResponse> {
     return this.delete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', request);
+  }
+
+  moveQueued(request: QueueEntryMoveCommandRequest): Promise<QueueEntryCommandResponse> {
+    return this.put<QueueEntryCommandResponse>('/api/v1/chats/queue/entries/move', request);
   }
 
   pauseQueue(chatId: string): Promise<QueueMutationResponse> {

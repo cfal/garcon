@@ -73,6 +73,7 @@ function storedQueue(entries = [], overrides = {}) {
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    reorderRevision: 0,
     version: 0,
     updatedAt: null,
     ...overrides,
@@ -233,6 +234,27 @@ function createRouteAgent(sessionOverrides = {}) {
         throw error;
       }
     }),
+    moveAccepted: mock(async (input) => {
+      try {
+        const result = await queue.moveChatQueueEntry(
+          input.command.chatId,
+          {
+            entryId: input.command.entryId,
+            targetEntryId: input.targetEntryId,
+            placement: input.placement,
+            expectedReorderRevision: input.expectedReorderRevision,
+            expectedSourceRevision: input.expectedSourceRevision,
+            expectedTargetRevision: input.expectedTargetRevision,
+          },
+          { key: input.command.key, entryId: input.command.entryId },
+        );
+        await input.settlement.settleQueueMutation(input.command, result.entryId);
+        return result;
+      } catch (error) {
+        await input.settlement.settleQueueMutationFailure(input.command, error);
+        throw error;
+      }
+    }),
     deliverAcceptedActiveInput: mock(async (input) => {
       const delivered = await queue.deliverActiveInput(
         input.command.chatId,
@@ -310,6 +332,17 @@ function createRouteAgent(sessionOverrides = {}) {
         entryId,
         control: storedQueue([], { version: 2 }),
         duplicate: false,
+      }),
+    ),
+    moveChatQueueEntry: mock((_chatId, input) =>
+      Promise.resolve({
+        entryId: input.entryId,
+        control: storedQueue([
+          queueEntry(input.entryId),
+          queueEntry(input.targetEntryId, 'target', 'queued', input.expectedTargetRevision),
+        ], { version: 2, reorderRevision: input.expectedReorderRevision + 1 }),
+        duplicate: false,
+        rebased: false,
       }),
     ),
     deliverActiveInput: mock(async (_chatId, _content, _options, beforeDelivery) => {
@@ -732,6 +765,102 @@ describe('REST chat command routes', () => {
     });
   });
 
+  it('PUT /queue/entries/move sends explicit order and entry revisions', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-1',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 2,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 4,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(200);
+    expect(result.body).toMatchObject({
+      commandType: 'queue-entry-move',
+      entryId: 'entry-3',
+      control: { queue: { reorderRevision: 3 } },
+    });
+    expect(agent.queue.moveChatQueueEntry).toHaveBeenCalledWith(
+      CHAT_ID,
+      {
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 2,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 4,
+      },
+      {
+        key: 'queue-entry-move:1783725900000700:req-move-1',
+        entryId: 'entry-3',
+      },
+    );
+  });
+
+  it('PUT /queue/entries/move rejects malformed revisions before mutation', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-invalid',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: -1,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 4,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(400);
+    expect(result.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.moveChatQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it('PUT /queue/entries/move rejects a source that started processing', async () => {
+    const agent = createRouteAgent();
+    const currentQueue = storedQueue([
+      queueEntry('entry-3', 'processing', 'sending'),
+      queueEntry('entry-1'),
+    ], { version: 5 });
+    agent.queue.moveChatQueueEntry.mockRejectedValueOnce(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_ALREADY_SENT',
+        'This queued message has already been sent',
+        currentQueue,
+      ),
+    );
+
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-sent',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('QUEUE_ENTRY_ALREADY_SENT');
+    expect(result.body.control.queue.dispatchingEntryId).toBe('entry-3');
+  });
+
   it('POST /active-input uses the independent active delivery command', async () => {
     const agent = createRouteAgent();
     const result = await callJson(agent.routes['/api/v1/chats/active-input'].POST, {
@@ -797,6 +926,43 @@ describe('REST chat command routes', () => {
     expect(result.body.errorCode).toBe('QUEUE_ENTRY_REVISION_CONFLICT');
     expect(result.body.control.queue.entries).toEqual([expect.objectContaining({ id: 'entry-1', revision: 5 })]);
     expect(result.body.control.queue.entries[0]).not.toHaveProperty('status');
+  });
+
+  it('returns the latest queue snapshot with reorder conflicts', async () => {
+    const agent = createRouteAgent();
+    const currentQueue = storedQueue(
+      [queueEntry('entry-1'), queueEntry('entry-3')],
+      { version: 9, reorderRevision: 4 },
+    );
+    agent.queue.moveChatQueueEntry.mockRejectedValueOnce(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_REORDER_CONFLICT',
+        'The queue order changed before the item could be moved',
+        currentQueue,
+      ),
+    );
+
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/move'].PUT,
+      {
+        clientRequestId: 'req-move-conflict',
+        chatId: CHAT_ID,
+        entryId: 'entry-3',
+        targetEntryId: 'entry-1',
+        placement: 'before',
+        expectedReorderRevision: 3,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('QUEUE_ENTRY_REORDER_CONFLICT');
+    expect(result.body.control).toMatchObject({
+      version: 9,
+      queue: { reorderRevision: 4 },
+    });
   });
 
   it('queue mutations return normalized authoritative state', async () => {

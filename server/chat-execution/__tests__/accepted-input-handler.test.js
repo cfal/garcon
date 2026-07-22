@@ -20,6 +20,7 @@ function control(overrides = {}) {
     pause: null,
     appliedCommands: [],
     recentlyDispatched: [],
+    reorderRevision: 0,
     ...overrides,
   };
 }
@@ -55,6 +56,12 @@ function scaffold(overrides = {}) {
     })),
     replace: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
     delete: mock(async () => ({ entryId: 'entry-1', control: control(), duplicate: false })),
+    move: mock(async () => ({
+      entryId: 'entry-1',
+      control: control(),
+      duplicate: false,
+      rebased: false,
+    })),
     removeSent: mock(async () => control()),
     returnUnsent: mock(async () => control({ entries: [{ id: 'entry-1', status: 'queued' }] })),
     read: mock(async () => control()),
@@ -76,6 +83,7 @@ function scaffold(overrides = {}) {
       stageActiveFallback: m.stageActiveFallback,
       replace: m.replace,
       delete: m.delete,
+      move: m.move,
       removeSent: m.removeSent,
       returnUnsent: m.returnUnsent,
       read: m.read,
@@ -118,6 +126,34 @@ describe('AcceptedInputHandler', () => {
 
     expect(events).toEqual(['created', 'settled', 'drain']);
     expect(m.create).toHaveBeenCalled();
+  });
+
+  test('settles a queue move with every concurrency precondition', async () => {
+    const settle = settlement();
+    const { handler, m } = scaffold();
+
+    await expect(handler.move({
+      command: command(),
+      targetEntryId: 'entry-2',
+      placement: 'before',
+      expectedReorderRevision: 4,
+      expectedSourceRevision: 2,
+      expectedTargetRevision: 3,
+      settlement: settle,
+    })).resolves.toMatchObject({ entryId: 'entry-1', duplicate: false });
+
+    expect(m.move).toHaveBeenCalledWith('chat-1', {
+      entryId: 'entry-1',
+      targetEntryId: 'entry-2',
+      placement: 'before',
+      expectedReorderRevision: 4,
+      expectedSourceRevision: 2,
+      expectedTargetRevision: 3,
+    }, {
+      key: 'command-1',
+      entryId: 'entry-1',
+    });
+    expect(settle.settleQueueMutation).toHaveBeenCalledOnce();
   });
 
   test('records synchronous admission rejection without mutating the transcript', async () => {

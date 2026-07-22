@@ -47,6 +47,7 @@ function emptyExecutionControl(version = 4) {
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
+			reorderRevision: 0,
 		},
 		version,
 		updatedAt: '2026-07-18T00:00:00.000Z',

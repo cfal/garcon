@@ -4,6 +4,7 @@ import {
   parseAgentRunCommandRequest,
   parseForkChatCommandRequest,
   parsePermissionDecisionCommandRequest,
+  parseQueueEntryMoveCommandRequest,
   parseQueueEntryReplaceCommandRequest,
   parseStartChatCommandRequest,
 } from '../chat-command-contracts.ts';
@@ -91,6 +92,62 @@ describe('chat command request parsers', () => {
       allow: 'yes',
       alwaysAllow: false,
     })).toThrow('allow must be a boolean');
+  });
+
+  it('parses queue entry moves with explicit concurrency preconditions', () => {
+    expect(parseQueueEntryMoveCommandRequest({
+      clientRequestId: ' request-move ',
+      chatId: CHAT_ID,
+      entryId: ' entry-3 ',
+      targetEntryId: ' entry-1 ',
+      placement: 'before',
+      expectedReorderRevision: 2,
+      expectedSourceRevision: 3,
+      expectedTargetRevision: 4,
+    })).toEqual({
+      clientRequestId: 'request-move',
+      chatId: CHAT_ID,
+      entryId: 'entry-3',
+      targetEntryId: 'entry-1',
+      placement: 'before',
+      expectedReorderRevision: 2,
+      expectedSourceRevision: 3,
+      expectedTargetRevision: 4,
+    });
+  });
+
+  it('rejects malformed queue entry moves', () => {
+    const valid = {
+      clientRequestId: 'request-move',
+      chatId: CHAT_ID,
+      entryId: 'entry-3',
+      targetEntryId: 'entry-1',
+      placement: 'after',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 1,
+    };
+
+    expect(() => parseQueueEntryMoveCommandRequest({
+      ...valid,
+      targetEntryId: valid.entryId,
+    })).toThrow('entryId and targetEntryId must differ');
+    expect(() => parseQueueEntryMoveCommandRequest({
+      ...valid,
+      placement: 'middle',
+    })).toThrow('placement must be before or after');
+    expect(() => parseQueueEntryMoveCommandRequest({
+      ...valid,
+      expectedReorderRevision: -1,
+    })).toThrow('expectedReorderRevision must be a non-negative integer');
+    expect(() => parseQueueEntryMoveCommandRequest({
+      ...valid,
+      expectedSourceRevision: 0,
+    })).toThrow('expected source and target revisions must be positive integers');
+    expect(() => parseQueueEntryMoveCommandRequest({
+      ...valid,
+      expectedTargetRevision: 1.5,
+    })).toThrow('expected source and target revisions must be positive integers');
   });
 
   it('uses one stable validation error type', () => {

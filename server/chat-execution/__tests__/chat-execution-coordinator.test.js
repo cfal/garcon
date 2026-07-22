@@ -270,6 +270,36 @@ describe('queue invariants', () => {
     expect(replaceRetry.control.version).toBe(replaced.control.version);
     expect(replaceRetry.control.entries[0].revision).toBe(2);
 
+	const tail = await queue.createChatQueueEntry('123', 'tail');
+	const moveCommand = {
+	  key: 'queue-entry-move:123:req-move',
+	  entryId: tail.entry.id,
+	};
+	const moved = await queue.moveChatQueueEntry('123', {
+	  entryId: tail.entry.id,
+	  targetEntryId: 'stable-entry-id',
+	  placement: 'before',
+	  expectedReorderRevision: 0,
+	  expectedSourceRevision: 1,
+	  expectedTargetRevision: 2,
+	}, moveCommand);
+	const moveRetry = await queue.moveChatQueueEntry('123', {
+	  entryId: tail.entry.id,
+	  targetEntryId: 'stable-entry-id',
+	  placement: 'before',
+	  expectedReorderRevision: 0,
+	  expectedSourceRevision: 1,
+	  expectedTargetRevision: 2,
+	}, moveCommand);
+	expect(moveRetry.duplicate).toBe(true);
+	expect(moveRetry.control.version).toBe(moved.control.version);
+	expect(moveRetry.control.reorderRevision).toBe(1);
+	expect(moveRetry.control.entries.map((entry) => entry.id)).toEqual([
+	  tail.entry.id,
+	  'stable-entry-id',
+	]);
+	await queue.deleteChatQueueEntry('123', tail.entry.id);
+
     const deleteCommand = {
       key: 'queue-entry-delete:123:req-delete',
       entryId: 'stable-entry-id',
@@ -279,6 +309,121 @@ describe('queue invariants', () => {
     expect(deleteRetry.duplicate).toBe(true);
     expect(deleteRetry.control.version).toBe(deleted.control.version);
     expect(deleteRetry.control.entries).toEqual([]);
+  });
+
+  it('moves before pop when the move acquires the queue lock first', async () => {
+    const first = await queue.createChatQueueEntry('move-first', 'first');
+    const second = await queue.createChatQueueEntry('move-first', 'second');
+    const third = await queue.createChatQueueEntry('move-first', 'third');
+
+    const [moved, popped] = await Promise.all([
+      queue.moveChatQueueEntry('move-first', {
+        entryId: third.entry.id,
+        targetEntryId: first.entry.id,
+        placement: 'before',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      }),
+      queue.popNextChat('move-first'),
+    ]);
+
+    expect(moved.control.entries.map((entry) => entry.id)).toEqual([
+      third.entry.id,
+      first.entry.id,
+      second.entry.id,
+    ]);
+    expect(popped.entry.id).toBe(third.entry.id);
+  });
+
+  it('rejects a move when its source is popped first', async () => {
+    const first = await queue.createChatQueueEntry('pop-source-first', 'first');
+    const second = await queue.createChatQueueEntry('pop-source-first', 'second');
+    const third = await queue.createChatQueueEntry('pop-source-first', 'third');
+
+    const [popResult, moveResult] = await Promise.allSettled([
+      queue.popNextChat('pop-source-first'),
+      queue.moveChatQueueEntry('pop-source-first', {
+        entryId: first.entry.id,
+        targetEntryId: third.entry.id,
+        placement: 'after',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      }),
+    ]);
+
+    expect(popResult).toMatchObject({
+      status: 'fulfilled',
+      value: { entry: { id: first.entry.id } },
+    });
+    expect(moveResult).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'QUEUE_ENTRY_ALREADY_SENT' },
+    });
+    expect((await queue.readChatExecutionControl('pop-source-first')).entries.map(
+      (entry) => entry.id,
+    )).toEqual([first.entry.id, second.entry.id, third.entry.id]);
+  });
+
+  it('rebases to the remaining head when its target is popped first', async () => {
+    const first = await queue.createChatQueueEntry('pop-target-first', 'first');
+    const second = await queue.createChatQueueEntry('pop-target-first', 'second');
+    const third = await queue.createChatQueueEntry('pop-target-first', 'third');
+
+    const [popped, moved] = await Promise.all([
+      queue.popNextChat('pop-target-first'),
+      queue.moveChatQueueEntry('pop-target-first', {
+        entryId: third.entry.id,
+        targetEntryId: first.entry.id,
+        placement: 'before',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      }),
+    ]);
+
+    expect(popped.entry.id).toBe(first.entry.id);
+    expect(moved.rebased).toBe(true);
+    expect(moved.control.entries).toEqual([
+      expect.objectContaining({ id: first.entry.id, status: 'sending' }),
+      expect.objectContaining({ id: third.entry.id, status: 'queued' }),
+      expect.objectContaining({ id: second.entry.id, status: 'queued' }),
+    ]);
+  });
+
+  it('rejects the second move serialized with a stale reorder revision', async () => {
+    const first = await queue.createChatQueueEntry('move-conflict', 'first');
+    const second = await queue.createChatQueueEntry('move-conflict', 'second');
+    const third = await queue.createChatQueueEntry('move-conflict', 'third');
+
+    const [firstMove, secondMove] = await Promise.allSettled([
+      queue.moveChatQueueEntry('move-conflict', {
+        entryId: third.entry.id,
+        targetEntryId: first.entry.id,
+        placement: 'before',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      }),
+      queue.moveChatQueueEntry('move-conflict', {
+        entryId: second.entry.id,
+        targetEntryId: third.entry.id,
+        placement: 'after',
+        expectedReorderRevision: 0,
+        expectedSourceRevision: 1,
+        expectedTargetRevision: 1,
+      }),
+    ]);
+
+    expect(firstMove).toMatchObject({ status: 'fulfilled' });
+    expect(secondMove).toMatchObject({
+      status: 'rejected',
+      reason: {
+        code: 'QUEUE_ENTRY_REORDER_CONFLICT',
+        control: { reorderRevision: 1 },
+      },
+    });
   });
 
   it('replaces one entry without changing its identity or position', async () => {

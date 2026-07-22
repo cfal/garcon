@@ -34,7 +34,9 @@ import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {
 	PermissionDecisionPayload,
+	QueueEntryPlacement,
 } from '$shared/chat-command-contracts';
+import type { QueueEntry } from '$shared/queue-state';
 import {
 	ConversationAgentSwitchService,
 	type AgentSwitchSelection,
@@ -716,6 +718,16 @@ export class ConversationSessionController {
 
 	async deleteQueueEntryForChat(chatId: string, entryId: string): Promise<void> {
 		await this.#queue.deleteForChat(chatId, entryId);
+	}
+
+	async moveQueueEntryForChat(
+		chatId: string,
+		source: QueueEntry,
+		target: QueueEntry,
+		placement: QueueEntryPlacement,
+		reorderRevision: number,
+	): Promise<void> {
+		await this.#queue.moveForChat(chatId, source, target, placement, reorderRevision);
 	}
 
 	async handleDeleteQueuedInput(entryId: string): Promise<void> {

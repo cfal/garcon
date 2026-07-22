@@ -25,6 +25,7 @@ export type CommandErrorCode = Extract<
   | 'QUEUE_ENTRY_NOT_FOUND'
   | 'QUEUE_ENTRY_ALREADY_SENT'
   | 'QUEUE_ENTRY_REVISION_CONFLICT'
+  | 'QUEUE_ENTRY_REORDER_CONFLICT'
   | 'QUEUE_PAUSE_CHANGED'
   | 'ACTIVE_INPUT_NOT_DELIVERED'
   | 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
@@ -147,6 +148,19 @@ export interface QueueEntryDeleteCommandRequest {
   clientRequestId: string;
   chatId: string;
   entryId: string;
+}
+
+export type QueueEntryPlacement = 'before' | 'after';
+
+export interface QueueEntryMoveCommandRequest {
+  clientRequestId: string;
+  chatId: string;
+  entryId: string;
+  targetEntryId: string;
+  placement: QueueEntryPlacement;
+  expectedReorderRevision: number;
+  expectedSourceRevision: number;
+  expectedTargetRevision: number;
 }
 
 export interface QueueEntryCommandResponse extends CommandAcceptedResponse {
@@ -457,6 +471,46 @@ export function parseQueueEntryDeleteCommandRequest(value: unknown): QueueEntryD
     clientRequestId: requiredString(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     entryId: requiredString(body, 'entryId'),
+  };
+}
+
+export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMoveCommandRequest {
+  const body = requestRecord(value);
+  const entryId = requiredString(body, 'entryId');
+  const targetEntryId = requiredString(body, 'targetEntryId');
+  if (entryId === targetEntryId) {
+    throw new CommandRequestValidationError('entryId and targetEntryId must differ');
+  }
+  if (body.placement !== 'before' && body.placement !== 'after') {
+    throw new CommandRequestValidationError('placement must be before or after');
+  }
+  if (
+    !Number.isSafeInteger(body.expectedReorderRevision)
+    || Number(body.expectedReorderRevision) < 0
+  ) {
+    throw new CommandRequestValidationError(
+      'expectedReorderRevision must be a non-negative integer',
+    );
+  }
+  if (
+    !Number.isSafeInteger(body.expectedSourceRevision)
+    || Number(body.expectedSourceRevision) < 1
+    || !Number.isSafeInteger(body.expectedTargetRevision)
+    || Number(body.expectedTargetRevision) < 1
+  ) {
+    throw new CommandRequestValidationError(
+      'expected source and target revisions must be positive integers',
+    );
+  }
+  return {
+    clientRequestId: requiredString(body, 'clientRequestId'),
+    chatId: requiredChatId(body, 'chatId'),
+    entryId,
+    targetEntryId,
+    placement: body.placement,
+    expectedReorderRevision: Number(body.expectedReorderRevision),
+    expectedSourceRevision: Number(body.expectedSourceRevision),
+    expectedTargetRevision: Number(body.expectedTargetRevision),
   };
 }
 

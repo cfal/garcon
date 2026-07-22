@@ -13,6 +13,7 @@ function makeQueue(overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
+		reorderRevision: 0,
 		...overrides,
 	};
 }

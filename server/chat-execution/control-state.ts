@@ -19,7 +19,7 @@ export interface StoredQueueEntry extends QueueEntry {
   delivery?: StoredQueueDeliveryIdentity;
 }
 
-export type StoredQueueCommandOperation = 'create' | 'replace' | 'delete';
+export type StoredQueueCommandOperation = 'create' | 'replace' | 'delete' | 'move';
 
 export interface StoredAppliedQueueCommand {
   key: string;
@@ -34,6 +34,7 @@ export interface StoredChatExecutionControlState {
   appliedCommands: StoredAppliedQueueCommand[];
   pause: QueuePause | null;
   resumePauses?: QueuePause[];
+  reorderRevision: number;
   version: number;
   updatedAt: string | null;
 }
@@ -46,6 +47,7 @@ export function emptyStoredChatExecutionControl(): StoredChatExecutionControlSta
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
+    reorderRevision: 0,
     version: 0,
     updatedAt: null,
   };
@@ -85,6 +87,7 @@ export function toClientChatExecutionControlState(
         .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)
         .map((entry) => ({ ...entry })),
       pause: control.pause ? { ...control.pause } : null,
+      reorderRevision: control.reorderRevision,
     },
     version: control.version,
     updatedAt: control.updatedAt,

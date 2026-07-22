@@ -18,6 +18,7 @@ function queue(entries: QueueEntry[], overrides: Partial<ChatQueueState> = {}): 
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
+		reorderRevision: 0,
 		...overrides,
 	};
 }
@@ -65,7 +66,11 @@ describe('QueuedInputEditorState', () => {
 		expect(editor.phase).toBe('dispatching');
 
 		host.queue = queue([], {
-			recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
+			recentlyDispatched: [{
+				entryId: 'entry-1',
+				revision: 1,
+				dispatchedAt: '2026-07-16T00:01:00.000Z',
+			}],
 		});
 		expect(editor.phase).toBe('sent');
 		expect(editor.draft).toBe('Recover this draft');

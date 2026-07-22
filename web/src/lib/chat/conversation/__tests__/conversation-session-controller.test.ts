@@ -128,6 +128,7 @@ function emptyControl(): ChatExecutionControlState {
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
+			reorderRevision: 0,
 		},
 		version: 0,
 		updatedAt: null,
@@ -695,6 +696,7 @@ describe('ConversationSessionController', () => {
 				],
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
+				reorderRevision: 0,
 				pause: {
 					id: 'pause-1',
 					kind: 'manual' as const,
@@ -1618,7 +1620,11 @@ describe('ConversationSessionController', () => {
 				entries: [],
 				dispatchingEntryId: 'entry-sending',
 				recentlyDispatched: [
-					{ entryId: 'entry-sending', dispatchedAt: '2026-05-14T00:00:00.000Z' },
+					{
+						entryId: 'entry-sending',
+						revision: 1,
+						dispatchedAt: '2026-05-14T00:00:00.000Z',
+					},
 				],
 				pause: null,
 			},
@@ -1910,7 +1916,11 @@ describe('ConversationSessionController', () => {
 			{
 				entries: [],
 				dispatchingEntryId: null,
-				recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' }],
+				recentlyDispatched: [{
+					entryId: 'entry-1',
+					revision: 1,
+					dispatchedAt: '2026-07-16T00:00:00.000Z',
+				}],
 				pause: null,
 			},
 			{

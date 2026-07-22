@@ -3,12 +3,19 @@
 	import QueuedInputsDialog from '../QueuedInputsDialog.svelte';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte';
 	import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
+	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 
 	interface Props {
 		initialQueue: ChatQueueState;
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 		onDelete: (entryId: string) => Promise<void>;
+		onMove: (
+			source: QueueEntry,
+			target: QueueEntry,
+			placement: QueueEntryPlacement,
+			reorderRevision: number,
+		) => Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
 	}
@@ -18,6 +25,7 @@
 		onCreate,
 		onReplace,
 		onDelete,
+		onMove,
 		onPause,
 		onResume,
 	}: Props = $props();
@@ -55,6 +63,7 @@
 		{onCreate}
 		{onReplace}
 		{onDelete}
+		{onMove}
 		{onPause}
 		{onResume}
 		onClose={closeDialog}

@@ -93,6 +93,7 @@ describe('persistence lifecycle', () => {
           dispatchingEntryId: null,
           recentlyDispatched: [],
           pause: null,
+          reorderRevision: 0,
         },
         version: 0,
         updatedAt: null,

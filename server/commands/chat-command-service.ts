@@ -3,6 +3,7 @@ import type {
   ForkChatCommandRequest,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
+  QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import {
@@ -89,6 +90,10 @@ export class ChatCommandService {
 
   submitQueueEntryDelete(input: QueueEntryDeleteCommandRequest) {
     return this.#queue.submitQueueEntryDelete(input);
+  }
+
+  submitQueueEntryMove(input: QueueEntryMoveCommandRequest) {
+    return this.#queue.submitQueueEntryMove(input);
   }
 
   submitActiveInput(input: ActiveInputCommandRequest) {
