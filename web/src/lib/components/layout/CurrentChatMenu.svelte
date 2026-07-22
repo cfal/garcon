@@ -25,6 +25,7 @@
 		shadow?: boolean;
 		onToggleSplitMode: () => void;
 		onToggleDesktopFullscreen?: () => void;
+		onOpenUserMessageNavigator?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
 		onReload: () => void;
@@ -48,6 +49,7 @@
 		shadow = false,
 		onToggleSplitMode,
 		onToggleDesktopFullscreen,
+		onOpenUserMessageNavigator,
 		onRename,
 		onDetails,
 		onReload,
@@ -95,6 +97,7 @@
 			{canForkNow}
 			{onToggleSplitMode}
 			{onToggleDesktopFullscreen}
+			{onOpenUserMessageNavigator}
 			{onRename}
 			{onDetails}
 			{onReload}

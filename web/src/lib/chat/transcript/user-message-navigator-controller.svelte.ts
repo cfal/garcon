@@ -17,6 +17,8 @@ export interface UserMessageNavigatorTarget {
 
 export type UserMessageNavigatorLoadError = 'older-page-failed';
 export type UserMessageNavigatorSelectionError = 'target-unavailable';
+export type UserMessageNavigatorCommand = () => void;
+export type UserMessageNavigatorRegistration = UserMessageNavigatorCommand | null;
 
 export interface UserMessageNavigatorTranscriptPort {
 	readonly activeChatId: string | null;

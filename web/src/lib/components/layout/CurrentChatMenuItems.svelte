@@ -6,6 +6,7 @@
 	import Info from '@lucide/svelte/icons/info';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
+	import ListIcon from '@lucide/svelte/icons/list';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -25,6 +26,7 @@
 		canForkNow,
 		onToggleSplitMode,
 		onToggleDesktopFullscreen,
+		onOpenUserMessageNavigator,
 		onRename,
 		onDetails,
 		onReload,
@@ -44,6 +46,7 @@
 		canForkNow: boolean;
 		onToggleSplitMode: () => void;
 		onToggleDesktopFullscreen?: () => void;
+		onOpenUserMessageNavigator?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
 		onReload: () => void;
@@ -77,6 +80,12 @@
 	<DropdownMenuSeparator />
 {/if}
 
+{#if onOpenUserMessageNavigator}
+	<DropdownMenuItem onclick={onOpenUserMessageNavigator}>
+		<ListIcon />
+		{m.chat_user_message_navigator_menu()}
+	</DropdownMenuItem>
+{/if}
 <DropdownMenuItem onclick={onShare}>
 	<Share2 />
 	{m.share_button()}

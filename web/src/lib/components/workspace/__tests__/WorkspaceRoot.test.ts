@@ -21,6 +21,8 @@ import {
 } from '$lib/workspace/surface-types.js';
 import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
 import type { DesktopLayoutOrder } from '$lib/layout/desktop-layout.js';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
+import * as m from '$lib/paraglide/messages.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 
@@ -200,6 +202,31 @@ function mobileCommitSnapshot(): WorkspaceLayoutSnapshot {
 	return {
 		...canonicalWorkspaceSnapshot(),
 		mobileActiveSurfaceId: 'singleton:commit',
+	};
+}
+
+function selectedChat(): ChatSessionRecord {
+	return {
+		id: 'chat-1',
+		projectPath: '/workspace/project',
+		effectiveProjectKey: '/workspace/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
+		title: 'Chat',
+		agentId: 'claude',
+		model: 'sonnet',
+		permissionMode: 'default',
+		thinkingMode: 'none',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+		createdAt: null,
+		lastActivityAt: null,
+		lastReadAt: null,
+		isPinned: false,
+		isArchived: false,
+		isProcessing: false,
+		isUnread: false,
+		status: 'draft',
+		tags: [],
 	};
 }
 
@@ -388,6 +415,44 @@ describe('PortableSurfaceContent', () => {
 });
 
 describe('WorkspaceRoot', () => {
+	it('opens the user-message navigator from the active Chat taskbar menu', async () => {
+		installContext(canonicalWorkspaceSnapshot());
+		testContext.current!.workspaceContext = {
+			currentProject: '/workspace/project',
+			canUpdateProjectPath: true,
+		};
+		testContext.current!.sessions = { selectedChat: selectedChat() };
+		render(WorkspaceRoot, { isMobile: false, chatActions });
+		const chatSurface = screen.getByTestId('chat-surface-stub');
+		await waitFor(() => expect(chatSurface.dataset.navigatorOpenCount).toBe('0'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+		await fireEvent.click(
+			screen.getByRole('menuitem', { name: m.chat_user_message_navigator_menu() }),
+		);
+
+		await waitFor(() => expect(chatSurface.dataset.navigatorOpenCount).toBe('1'));
+	});
+
+	it('does not expose the user-message navigator when Chat is not the active main surface', async () => {
+		installContext(minimalGitSnapshot());
+		testContext.current!.workspaceContext = {
+			currentProject: '/workspace/project',
+			canUpdateProjectPath: true,
+		};
+		testContext.current!.sessions = { selectedChat: selectedChat() };
+		render(WorkspaceRoot, { isMobile: false, chatActions });
+		await waitFor(() =>
+			expect(screen.getByTestId('chat-surface-stub').dataset.navigatorOpenCount).toBe('0'),
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+
+		expect(
+			screen.queryByRole('menuitem', { name: m.chat_user_message_navigator_menu() }),
+		).toBeNull();
+	});
+
 	it.each([
 		[['chat-list', 'main', 'workspace-sidebar']],
 		[['chat-list', 'workspace-sidebar', 'main']],

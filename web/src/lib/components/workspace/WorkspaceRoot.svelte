@@ -24,6 +24,10 @@
 		getSurfaceFrames,
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
+	import type {
+		UserMessageNavigatorCommand,
+		UserMessageNavigatorRegistration,
+	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
 	import { CHAT_SURFACE_ID, type HostId } from '$lib/workspace/surface-types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -95,6 +99,7 @@
 	const surfaceFrames = getSurfaceFrames();
 	let openSidebarButton: HTMLButtonElement | null = $state(null);
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
+	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	const snapshot = $derived(workspace.layout.snapshot);
 	const activeMain = $derived(snapshot.main.activeId ?? CHAT_SURFACE_ID);
 	const mobileActive = $derived(snapshot.mobileActiveSurfaceId);
@@ -265,6 +270,7 @@
 			canForkNow={canForkSelectedChatNow}
 			onToggleSplitMode={() => toggleChatSplitMode(splitLayout, sessions, selectedChat)}
 			{onToggleDesktopFullscreen}
+			onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
 			onRename={() => chatActions.requestRename(selectedChat)}
 			onDetails={() => chatActions.requestDetails(selectedChat)}
 			onReload={() => chatActions.reload(selectedChat)}
@@ -396,6 +402,8 @@
 							{onToggleDesktopFullscreen}
 							{onRegisterReload}
 							onRegisterSubmit={(submit) => (chatSubmit = submit)}
+							onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
+								(openUserMessageNavigator = command)}
 							{chatActions}
 						/>
 					</div>
