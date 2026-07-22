@@ -33,7 +33,7 @@
 	// edge; feed/queue reservation still owns the vertical space above.
 	const trayClass = cn('absolute bottom-full left-0 right-0 z-10 translate-y-3');
 	const panelClass = cn(
-		'pointer-events-auto flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-card px-3 pb-5 pt-2 shadow-none sm:px-4',
+		'pointer-events-auto flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-card px-3 pb-5 pt-2 sm:px-4',
 	);
 	const hasChanges = $derived(Boolean(summary && summary.changedFiles > 0));
 	const hasDiffStats = $derived(

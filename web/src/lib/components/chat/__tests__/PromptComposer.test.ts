@@ -261,31 +261,36 @@ describe('PromptComposer focus', () => {
 		expect(frame?.className).toContain('composer-reduce-motion');
 	});
 
-	it('uses a static processing highlight when reduced motion is preferred', () => {
-		const reducedMotionRule = appCss.match(
-			/@media \(prefers-reduced-motion: reduce\)\s*\{(?<body>[\s\S]*)\}\s*$/,
+	it('defaults to static and pulses only when motion is allowed', () => {
+		const staticTreatmentRule = appCss.match(
+			/\.composer-thinking-active\s*\{(?<body>[\s\S]*?)\n\}/,
+		);
+		const motionAllowedRule = appCss.match(
+			/@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.composer-thinking-active:not\(\.composer-reduce-motion\)\s*\{(?<body>[\s\S]*?)\n\t\}\s*\}/,
 		);
 
 		expect(appCss).toContain('@keyframes composer-thinking-border-pulse');
-		expect(appCss).toContain('.composer-thinking-active.composer-reduce-motion');
 		expect(appCss).toMatch(
 			/@keyframes composer-thinking-border-pulse\s*\{[\s\S]*?border-color: hsl\(var\(--border\)\);[\s\S]*?border-color: hsl\(var\(--composer-thinking-pulse-emphasis\)\);[\s\S]*?\}/,
 		);
-		expect(reducedMotionRule?.groups?.body).toContain(
+		expect(staticTreatmentRule?.groups?.body).toContain(
 			'--composer-thinking-animation: none;',
 		);
-		expect(reducedMotionRule?.groups?.body).toContain(
+		expect(staticTreatmentRule?.groups?.body).toContain(
 			'linear-gradient(hsl(var(--card)) 0 0) padding-box,',
 		);
-		expect(reducedMotionRule?.groups?.body).toContain('to bottom,');
-		expect(reducedMotionRule?.groups?.body).toContain(
+		expect(staticTreatmentRule?.groups?.body).toContain('to bottom,');
+		expect(staticTreatmentRule?.groups?.body).toContain(
 			'hsl(var(--composer-thinking-static-start)) 0%,',
 		);
-		expect(reducedMotionRule?.groups?.body).not.toContain('var(--status-processing)');
-		expect(reducedMotionRule?.groups?.body).toContain('hsl(var(--border)) 100%');
-		expect(reducedMotionRule?.groups?.body).toContain(
+		expect(staticTreatmentRule?.groups?.body).toContain('hsl(var(--border)) 100%');
+		expect(staticTreatmentRule?.groups?.body).toContain(
 			'--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));',
 		);
+		expect(motionAllowedRule?.groups?.body).toContain(
+			'--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;',
+		);
+		expect(motionAllowedRule?.groups?.body).not.toContain('composer-thinking-static-start');
 	});
 
 	it('shows quick commit before stop while the selected chat is processing', async () => {

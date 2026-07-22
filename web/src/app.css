@@ -942,9 +942,8 @@
 	filter: brightness(1.08) saturate(1.08);
 }
 
-/* Thinking pulse: the real 1px borders change color together without altering
-   their geometry. The local and system reduced-motion preferences replace the
-   pulse with a static, theme-neutral treatment. */
+/* Thinking treatment defaults to static. The real 1px borders pulse only when
+   the system allows motion and the local Reduce motion setting is off. */
 @keyframes composer-thinking-border-pulse {
 	0%,
 	100% {
@@ -957,13 +956,6 @@
 }
 
 .composer-thinking-active {
-	--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;
-	--composer-thinking-composer-background: hsl(var(--card));
-	--composer-thinking-composer-border: hsl(var(--border));
-	--composer-thinking-status-border: hsl(var(--border));
-}
-
-.composer-thinking-active.composer-reduce-motion {
 	--composer-thinking-animation: none;
 	--composer-thinking-composer-background:
 		linear-gradient(hsl(var(--card)) 0 0) padding-box,
@@ -975,6 +967,15 @@
 		border-box;
 	--composer-thinking-composer-border: transparent;
 	--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.composer-thinking-active:not(.composer-reduce-motion) {
+		--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;
+		--composer-thinking-composer-background: hsl(var(--card));
+		--composer-thinking-composer-border: hsl(var(--border));
+		--composer-thinking-status-border: hsl(var(--border));
+	}
 }
 
 .composer-thinking-active [data-composer],
@@ -989,20 +990,4 @@
 
 .composer-thinking-active [data-slot='chat-processing-status'] {
 	border-color: var(--composer-thinking-status-border);
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.composer-thinking-active {
-		--composer-thinking-animation: none;
-		--composer-thinking-composer-background:
-			linear-gradient(hsl(var(--card)) 0 0) padding-box,
-			linear-gradient(
-				to bottom,
-				hsl(var(--composer-thinking-static-start)) 0%,
-				hsl(var(--border)) 100%
-			)
-			border-box;
-		--composer-thinking-composer-border: transparent;
-		--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));
-	}
 }

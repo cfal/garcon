@@ -556,7 +556,6 @@
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
-	const thinkingTreatmentActive = $derived(selectedIsProcessing);
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const forkCapabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDraftStartupSubmitting = $derived(
@@ -855,7 +854,7 @@
 	<!-- The processing classes keep the composer and loading tray borders synchronized. -->
 	<div
 		class="relative"
-		class:composer-thinking-active={thinkingTreatmentActive}
+		class:composer-thinking-active={selectedIsProcessing}
 		class:composer-reduce-motion={thinkingReducedMotion}
 	>
 		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
