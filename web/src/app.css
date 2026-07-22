@@ -204,7 +204,8 @@
 	--destructive: 0 84.2% 60.2%;
 	--destructive-foreground: 0 0% 98%;
 	--border: 0 0% 90%;
-	--composer-thinking-shimmer-start: 0 0% 85%;
+	--composer-thinking-static-start: 0 0% 85%;
+	--composer-thinking-pulse-emphasis: 0 0% 80%;
 	--input: 0 0% 90%;
 	--ring: 0 0% 40%;
 	--radius: 0.5rem;
@@ -422,7 +423,8 @@
 	--destructive: 0 62.8% 30.6%;
 	--destructive-foreground: 0 0% 95%;
 	--border: 0 0% 20%;
-	--composer-thinking-shimmer-start: 0 0% 25%;
+	--composer-thinking-static-start: 0 0% 25%;
+	--composer-thinking-pulse-emphasis: 0 0% 30%;
 	--input: 0 0% 40%;
 	--ring: 0 0% 60%;
 	--transient-backdrop-color: 0 0% 0%;
@@ -940,85 +942,67 @@
 	filter: brightness(1.08) saturate(1.08);
 }
 
-/* Thinking shimmer: a bright band travels around the combined outline of the
-   chat composer and its processing status tray. The angle custom property is
-   registered so one animation on the frame wrapper keeps the gradients of both
-   elements in sync; unregistered browsers degrade to a static gradient ring.
-   Rules stay unlayered so they override Tailwind border utilities without
-   !important. */
-@property --composer-thinking-shimmer-angle {
-	syntax: '<angle>';
-	inherits: true;
-	initial-value: 0deg;
-}
+/* Thinking pulse: the real 1px borders change color together without altering
+   their geometry. The local and system reduced-motion preferences replace the
+   pulse with a static, theme-neutral treatment. */
+@keyframes composer-thinking-border-pulse {
+	0%,
+	100% {
+		border-color: hsl(var(--border));
+	}
 
-@keyframes composer-thinking-shimmer-rotate {
-	to {
-		--composer-thinking-shimmer-angle: 360deg;
+	50% {
+		border-color: hsl(var(--composer-thinking-pulse-emphasis));
 	}
 }
 
-.composer-thinking-shimmer {
-	/* Fallback for browsers without @property (Firefox < 128): keeps the angle
-	   valid so the ring renders statically instead of dropping the gradient. */
-	--composer-thinking-shimmer-angle: 0deg;
-	animation: composer-thinking-shimmer-rotate 3.2s linear infinite;
+.composer-thinking-active {
+	--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;
+	--composer-thinking-composer-background: hsl(var(--card));
+	--composer-thinking-composer-border: hsl(var(--border));
+	--composer-thinking-status-border: hsl(var(--border));
 }
 
-.composer-thinking-shimmer [data-composer],
-.composer-thinking-shimmer [data-slot='chat-processing-status'] {
-	border-color: transparent;
-}
-
-.composer-thinking-shimmer [data-composer]::before,
-.composer-thinking-shimmer [data-slot='chat-processing-status']::before {
-	content: '';
-	position: absolute;
-	inset: 0;
-	padding: 1px;
-	background: conic-gradient(
-		from var(--composer-thinking-shimmer-angle),
-		hsl(var(--status-processing)) 0deg,
-		hsl(var(--status-processing) / 0.3) 80deg,
-		hsl(var(--border)) 170deg,
-		hsl(var(--border)) 360deg
-	);
-	-webkit-mask:
-		linear-gradient(#fff 0 0) content-box,
-		linear-gradient(#fff 0 0);
-	-webkit-mask-composite: xor;
-	mask:
-		linear-gradient(#fff 0 0) content-box,
-		linear-gradient(#fff 0 0);
-	mask-composite: exclude;
-	pointer-events: none;
-}
-
-/* Radii mirror rounded-2xl on the composer surface and rounded-t-2xl on the
-   status tray. */
-.composer-thinking-shimmer [data-composer]::before {
-	border-radius: calc(var(--radius) * 2);
-}
-
-.composer-thinking-shimmer [data-slot='chat-processing-status']::before {
-	border-radius: calc(var(--radius) * 2) calc(var(--radius) * 2) 0 0;
-}
-
-/* Preserves a visible processing cue without motion. */
-@media (prefers-reduced-motion: reduce) {
-	.composer-thinking-shimmer {
-		animation: none;
-	}
-
-	.composer-thinking-shimmer [data-composer]::before {
-		background: linear-gradient(
+.composer-thinking-active.composer-reduce-motion {
+	--composer-thinking-animation: none;
+	--composer-thinking-composer-background:
+		linear-gradient(hsl(var(--card)) 0 0) padding-box,
+		linear-gradient(
 			to bottom,
-			hsl(var(--composer-thinking-shimmer-start)) 0%,
+			hsl(var(--composer-thinking-static-start)) 0%,
 			hsl(var(--border)) 100%
-		);
-	}
+		)
+		border-box;
+	--composer-thinking-composer-border: transparent;
+	--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));
+}
 
-	.composer-thinking-shimmer [data-slot='chat-processing-status']::before {
-		background: hsl(var(--composer-thinking-shimmer-start));
+.composer-thinking-active [data-composer],
+.composer-thinking-active [data-slot='chat-processing-status'] {
+	animation: var(--composer-thinking-animation);
+}
+
+.composer-thinking-active [data-composer] {
+	border-color: var(--composer-thinking-composer-border);
+	background: var(--composer-thinking-composer-background);
+}
+
+.composer-thinking-active [data-slot='chat-processing-status'] {
+	border-color: var(--composer-thinking-status-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.composer-thinking-active {
+		--composer-thinking-animation: none;
+		--composer-thinking-composer-background:
+			linear-gradient(hsl(var(--card)) 0 0) padding-box,
+			linear-gradient(
+				to bottom,
+				hsl(var(--composer-thinking-static-start)) 0%,
+				hsl(var(--border)) 100%
+			)
+			border-box;
+		--composer-thinking-composer-border: transparent;
+		--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));
 	}
 }

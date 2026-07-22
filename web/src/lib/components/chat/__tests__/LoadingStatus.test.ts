@@ -19,6 +19,7 @@ describe('LoadingStatus', () => {
 		});
 
 		expect(screen.getByRole('status').className).toContain('min-h-14');
+		expect(screen.getByRole('status').className).toContain('shadow-none');
 		expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
 
 		await rerender({

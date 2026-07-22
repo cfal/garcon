@@ -17,7 +17,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.sidebarSortMode).toBe('manual');
-		expect(store.composerThinkingShimmer).toBe(true);
+		expect(store.reduceMotion).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
 		expect(store.textEditorOpenPlacement).toBe('source');
 		expect(store.imageViewerOpenPlacement).toBe('source');
@@ -348,7 +348,7 @@ describe('LocalSettingsStore', () => {
 		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarCompactChatItems', true);
 		store.set('showQuickCommitTray', false);
-		store.toggle('composerThinkingShimmer');
+		store.toggle('reduceMotion');
 
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
@@ -358,11 +358,11 @@ describe('LocalSettingsStore', () => {
 			sidebarGroupNestedProjectPaths: true,
 			sidebarCompactChatItems: true,
 			showQuickCommitTray: false,
-			composerThinkingShimmer: false,
+			reduceMotion: true,
 		});
 
 		const restored = createLocalSettingsStore();
-		expect(restored.composerThinkingShimmer).toBe(false);
+		expect(restored.reduceMotion).toBe(true);
 		restored.destroy();
 
 		store.destroy();

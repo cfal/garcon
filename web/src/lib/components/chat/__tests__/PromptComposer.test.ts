@@ -53,6 +53,18 @@ describe('PromptComposer focus', () => {
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
 	});
 
+	it('renders without a surface shadow', () => {
+		const { container } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+		});
+		const composer = container.querySelector('[data-composer]');
+
+		expect(composer?.className).toContain('shadow-none');
+		expect(composer?.className).not.toContain('shadow-sm');
+	});
+
 	it('focuses the composer after disabled chat startup and on each next selected chat', async () => {
 		const outsideButton = document.createElement('button');
 		outsideButton.dataset.testid = 'outside-focus';
@@ -215,35 +227,38 @@ describe('PromptComposer focus', () => {
 		expect(gitTray.className).toContain('pb-5');
 	});
 
-	it('shimmers the composer frame only while processing and the setting is on', async () => {
+	it('always decorates processing and uses the static treatment when motion is reduced', async () => {
 		const { container, rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: false,
 			isSubmitting: false,
-			composerThinkingShimmer: true,
+			reduceMotion: false,
 		});
 		const frame = container.querySelector('[data-composer]')?.parentElement;
 
-		expect(frame?.className).not.toContain('composer-thinking-shimmer');
+		expect(frame?.className).not.toContain('composer-thinking-active');
+		expect(frame?.className).not.toContain('composer-reduce-motion');
 
 		await rerender({
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: true,
 			isSubmitting: false,
-			composerThinkingShimmer: true,
+			reduceMotion: false,
 		});
-		expect(frame?.className).toContain('composer-thinking-shimmer');
+		expect(frame?.className).toContain('composer-thinking-active');
+		expect(frame?.className).not.toContain('composer-reduce-motion');
 
 		await rerender({
 			selectedChatId: 'chat-1',
 			selectedStatus: 'running',
 			selectedIsProcessing: true,
 			isSubmitting: false,
-			composerThinkingShimmer: false,
+			reduceMotion: true,
 		});
-		expect(frame?.className).not.toContain('composer-thinking-shimmer');
+		expect(frame?.className).toContain('composer-thinking-active');
+		expect(frame?.className).toContain('composer-reduce-motion');
 	});
 
 	it('uses a static processing highlight when reduced motion is preferred', () => {
@@ -251,16 +266,25 @@ describe('PromptComposer focus', () => {
 			/@media \(prefers-reduced-motion: reduce\)\s*\{(?<body>[\s\S]*)\}\s*$/,
 		);
 
-		expect(reducedMotionRule?.groups?.body).toContain('animation: none;');
-		expect(reducedMotionRule?.groups?.body).toContain('background: linear-gradient(');
+		expect(appCss).toContain('@keyframes composer-thinking-border-pulse');
+		expect(appCss).toContain('.composer-thinking-active.composer-reduce-motion');
+		expect(appCss).toMatch(
+			/@keyframes composer-thinking-border-pulse\s*\{[\s\S]*?border-color: hsl\(var\(--border\)\);[\s\S]*?border-color: hsl\(var\(--composer-thinking-pulse-emphasis\)\);[\s\S]*?\}/,
+		);
+		expect(reducedMotionRule?.groups?.body).toContain(
+			'--composer-thinking-animation: none;',
+		);
+		expect(reducedMotionRule?.groups?.body).toContain(
+			'linear-gradient(hsl(var(--card)) 0 0) padding-box,',
+		);
 		expect(reducedMotionRule?.groups?.body).toContain('to bottom,');
 		expect(reducedMotionRule?.groups?.body).toContain(
-			'hsl(var(--composer-thinking-shimmer-start)) 0%,',
+			'hsl(var(--composer-thinking-static-start)) 0%,',
 		);
 		expect(reducedMotionRule?.groups?.body).not.toContain('var(--status-processing)');
 		expect(reducedMotionRule?.groups?.body).toContain('hsl(var(--border)) 100%');
-		expect(reducedMotionRule?.groups?.body).toMatch(
-			/\[data-slot='chat-processing-status'\]::before\s*\{\s*background: hsl\(var\(--composer-thinking-shimmer-start\)\);/,
+		expect(reducedMotionRule?.groups?.body).toContain(
+			'--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));',
 		);
 	});
 

@@ -38,7 +38,7 @@
 		focusRequestToken?: number;
 		selectableAgents?: SessionAgentId[];
 		recentAgentSettings?: RecentAgentSetting[];
-		composerThinkingShimmer?: boolean;
+		reduceMotion?: boolean;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
@@ -58,7 +58,7 @@
 		focusRequestToken = 0,
 		selectableAgents = ['claude'],
 		recentAgentSettings = [],
-		composerThinkingShimmer = true,
+		reduceMotion = false,
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
@@ -179,8 +179,8 @@
 		get sendByShiftEnter() {
 			return false;
 		},
-		get composerThinkingShimmer() {
-			return composerThinkingShimmer;
+		get reduceMotion() {
+			return reduceMotion;
 		},
 		get showQuickCommitTray() {
 			return true;

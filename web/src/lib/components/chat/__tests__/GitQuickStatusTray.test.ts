@@ -50,6 +50,7 @@ describe('GitQuickStatusTray', () => {
 		const tray = screen.getByRole('status', { name: 'Loading...' });
 		expect(tray.getAttribute('aria-busy')).toBe('true');
 		expect(tray.className).toContain('min-h-14');
+		expect(tray.className).toContain('shadow-none');
 		expect(screen.queryByRole('button')).toBeNull();
 		expect(screen.queryByTestId('commit-file-summary')).toBeNull();
 		expect(container.querySelector('.animate-spin')).toBeTruthy();

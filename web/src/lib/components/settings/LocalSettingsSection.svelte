@@ -181,9 +181,9 @@
 				ls.toggle('showThinking'),
 			)}
 			{@render settingRow(
-				m.settings_chat_composer_thinking_shimmer(),
-				ls.composerThinkingShimmer,
-				() => ls.toggle('composerThinkingShimmer'),
+				m.settings_chat_reduce_motion(),
+				ls.reduceMotion,
+				() => ls.toggle('reduceMotion'),
 			)}
 			<div class="py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_hidden_tools()}</div>

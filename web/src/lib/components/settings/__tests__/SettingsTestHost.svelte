@@ -192,7 +192,7 @@
 		},
 		autoExpandTools: false,
 		showThinking: true,
-		composerThinkingShimmer: true,
+		reduceMotion: false,
 		hiddenToolTypes: [],
 		showQuickCommitTray: true,
 		autoScrollToBottom: true,

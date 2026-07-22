@@ -556,9 +556,8 @@
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
-	const thinkingShimmerActive = $derived(
-		selectedIsProcessing && localSettings.composerThinkingShimmer,
-	);
+	const thinkingTreatmentActive = $derived(selectedIsProcessing);
+	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const forkCapabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDraftStartupSubmitting = $derived(
 		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
@@ -620,7 +619,7 @@
 	const composerFrameWrapperClass = $derived(
 		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[localSettings.chatMaxWidth]),
 	);
-	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS);
+	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS, 'shadow-none');
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
 		cn(
@@ -853,9 +852,12 @@
 {/snippet}
 
 {#snippet composerFrame()}
-	<!-- The shimmer class animates the border gradient of both the composer
-	     surface and the loading tray via a shared registered custom property. -->
-	<div class="relative" class:composer-thinking-shimmer={thinkingShimmerActive}>
+	<!-- The processing classes keep the composer and loading tray borders synchronized. -->
+	<div
+		class="relative"
+		class:composer-thinking-active={thinkingTreatmentActive}
+		class:composer-reduce-motion={thinkingReducedMotion}
+	>
 		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
 		     so the upward-opening menu is not cut off. -->
 		<SlashCommandMenu
