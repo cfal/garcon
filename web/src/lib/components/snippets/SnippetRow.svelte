@@ -1,6 +1,4 @@
 <script lang="ts">
-	import ArrowDown from '@lucide/svelte/icons/arrow-down';
-	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { Button } from '$lib/components/ui/button';
@@ -10,25 +8,12 @@
 
 	interface Props {
 		snippet: Snippet;
-		index: number;
-		total: number;
 		disabled?: boolean;
 		onEdit: () => void;
 		onRemove: () => void;
-		onMoveUp: () => void;
-		onMoveDown: () => void;
 	}
 
-	let {
-		snippet,
-		index,
-		total,
-		disabled = false,
-		onEdit,
-		onRemove,
-		onMoveUp,
-		onMoveDown,
-	}: Props = $props();
+	let { snippet, disabled = false, onEdit, onRemove }: Props = $props();
 </script>
 
 <article class="rounded-md border border-border bg-card p-3">
@@ -39,27 +24,7 @@
 				{snippetPreview(snippet)}
 			</p>
 		</div>
-		<div class="grid shrink-0 grid-cols-2 gap-1 sm:flex">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				onclick={onMoveUp}
-				disabled={disabled || index === 0}
-				title={m.snippets_move_up({ name: snippet.shortName })}
-				aria-label={m.snippets_move_up({ name: snippet.shortName })}
-			>
-				<ArrowUp class="size-4" />
-			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				onclick={onMoveDown}
-				disabled={disabled || index === total - 1}
-				title={m.snippets_move_down({ name: snippet.shortName })}
-				aria-label={m.snippets_move_down({ name: snippet.shortName })}
-			>
-				<ArrowDown class="size-4" />
-			</Button>
+		<div class="flex shrink-0 gap-1">
 			<Button
 				variant="ghost"
 				size="icon-sm"

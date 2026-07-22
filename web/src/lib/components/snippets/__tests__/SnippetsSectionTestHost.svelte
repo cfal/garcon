@@ -4,7 +4,7 @@
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
-	import type { Snippet, SnippetsSnapshot } from '$shared/snippets';
+	import { sortSnippetsByShortName, type Snippet, type SnippetsSnapshot } from '$shared/snippets';
 
 	interface Props {
 		blockRefresh?: boolean;
@@ -25,7 +25,10 @@
 
 	let current: SnippetsSnapshot = {
 		revision: 1,
-		snippets: [entry('one', 'review', 'Review this'), entry('two', 'summarize', 'Summarize this')],
+		snippets: sortSnippetsByShortName([
+			entry('two', 'summarize', 'Summarize this'),
+			entry('one', 'review', 'Review this'),
+		]),
 	};
 	let loadCount = 0;
 	let releaseRefresh: (() => void) | null = null;
@@ -48,20 +51,22 @@
 			}
 			current = {
 				revision: current.revision + 1,
-				snippets: [
+				snippets: sortSnippetsByShortName([
 					...current.snippets,
 					entry(`created-${current.revision}`, request.snippet.shortName, request.snippet.template),
-				],
+				]),
 			};
 			return { success: true, snapshot: current };
 		},
 		update: async (request) => {
 			current = {
 				revision: current.revision + 1,
-				snippets: current.snippets.map((snippet) =>
-					snippet.id === request.id
-						? { ...snippet, ...request.snippet, updatedAt: '2026-01-02T00:00:00.000Z' }
-						: snippet,
+				snippets: sortSnippetsByShortName(
+					current.snippets.map((snippet) =>
+						snippet.id === request.id
+							? { ...snippet, ...request.snippet, updatedAt: '2026-01-02T00:00:00.000Z' }
+							: snippet,
+					),
 				),
 			};
 			return { success: true, snapshot: current };
@@ -70,14 +75,6 @@
 			current = {
 				revision: current.revision + 1,
 				snippets: current.snippets.filter((snippet) => snippet.id !== request.id),
-			};
-			return { success: true, snapshot: current };
-		},
-		reorder: async (request) => {
-			const byId = new Map(current.snippets.map((snippet) => [snippet.id, snippet]));
-			current = {
-				revision: current.revision + 1,
-				snippets: request.orderedSnippetIds.map((id) => byId.get(id)!),
 			};
 			return { success: true, snapshot: current };
 		},
