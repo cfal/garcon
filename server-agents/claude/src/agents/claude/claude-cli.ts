@@ -33,6 +33,7 @@ import { isManualBypassMode, providerStartupPermissionMode } from '@garcon/serve
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { runClaudeSingleQueryProcess } from './single-query-process.js';
+import { pipeClaudeProcessOutput } from './cli-stdio.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -959,49 +960,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  async #readStdout(session: ClaudeRunningSession, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
-    if (!proc.stdout || typeof proc.stdout === 'number') return;
-    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const routeLine = (line: string) => {
-      if (!line.trim()) return;
-      let msg: CLIMessage;
-      try {
-        msg = JSON.parse(line);
-      } catch {
-        this.#dependencies.logger.warn('Claude CLI emitted invalid JSON', {
-          sessionId: session.id.slice(0, 8),
-          processId: proc.pid ?? null,
-        });
-        return;
-      }
-      this.#routeCLIMessage(session, proc, msg);
-    };
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop()!;
-
-        for (const line of lines) routeLine(line);
-      }
-      buffer += decoder.decode();
-      routeLine(buffer);
-    } catch (err: unknown) {
-      if (!proc.killed) {
-        this.#dependencies.logger.error('Claude CLI stdout read failed', {
-          sessionId: session.id.slice(0, 8),
-          error: errorMessage(err),
-        });
-      }
-    }
-  }
-
   #handleProcessExit(session: ClaudeRunningSession, proc: ReturnType<typeof Bun.spawn>, exitCode: number): void {
     if (session.process !== proc) {
       return;
@@ -1049,41 +1007,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async #pipeStderr(sessionId: string, proc: ReturnType<typeof Bun.spawn>): Promise<void> {
-    if (!proc.stderr || typeof proc.stderr === 'number') return;
-    const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const logLine = (line: string) => {
-      if (!line.trim()) return;
-      this.#dependencies.logger.info('Claude CLI stderr', {
-        sessionId: sessionId.slice(0, 8),
-        processId: proc.pid ?? null,
-        line,
-      });
-    };
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop()!;
-        for (const line of lines) logLine(line);
-      }
-      buffer += decoder.decode();
-      logLine(buffer);
-    } catch (error) {
-      if (!proc.killed) {
-        this.#dependencies.logger.warn('Claude CLI stderr read failed', {
-          sessionId: sessionId.slice(0, 8),
-          processId: proc.pid ?? null,
-          error: errorMessage(error),
-        });
-      }
-    }
-  }
-
   // Stays synchronous so callers can check process liveness and spawn without
   // an interleaving await; the legacy-flag probe is resolved by callers first.
   #spawnCLI(session: ClaudeRunningSession, options: ClaudeSessionOptions, resume: boolean, supportsLegacyThinkingFlag: boolean): ReturnType<typeof Bun.spawn> {
@@ -1109,8 +1032,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.currentClaudeThinkingMode = normalizeClaudeThinkingModeForState(options.claudeThinkingMode);
     session.currentModel = options.model || '';
     session.currentEnvOverrides = options.envOverrides;
-    this.#readStdout(session, proc);
-    this.#pipeStderr(session.id, proc);
+    pipeClaudeProcessOutput<CLIMessage>({
+      process: proc,
+      logger: this.#dependencies.logger,
+      sessionId: session.id,
+      onMessage: msg => this.#routeCLIMessage(session, proc, msg),
+    });
 
     proc.exited.then((exitCode: number) => {
       const exitedDuringTurn = session.process === proc
