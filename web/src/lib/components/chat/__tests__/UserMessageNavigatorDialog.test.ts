@@ -81,12 +81,15 @@ describe('UserMessageNavigatorDialog', () => {
 
 	it('loads one older page when the list approaches its bottom', async () => {
 		const loadOlder = vi.fn(async () => ({ hasMore: false }));
-		const { container } = render(UserMessageNavigatorDialogTestHost, {
+		render(UserMessageNavigatorDialogTestHost, {
 			initialItems: [item('generation-1:3', 'Recent')],
 			initialHasMore: true,
 			onLoadOlder: loadOlder,
 		});
-		const list = container.querySelector<HTMLElement>('[data-user-message-navigator-list]')!;
+		const list = screen
+			.getByRole('dialog')
+			.querySelector<HTMLElement>('[data-user-message-navigator-list]');
+		if (!list) throw new Error('Missing user-message navigator list');
 		Object.defineProperty(list, 'scrollTop', { value: 250, writable: true });
 
 		await fireEvent.scroll(list);

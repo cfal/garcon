@@ -44,11 +44,16 @@
 		const element = listElement;
 		if (!open || isLoading || !hasMore || loadError || !element) return;
 		const itemCount = controller.items.length;
+		let cancelled = false;
 
 		void tick().then(() => {
-			if (listElement !== element || controller.items.length < itemCount) return;
+			if (cancelled || listElement !== element || controller.items.length < itemCount) return;
 			maybeLoadOlder();
 		});
+
+		return () => {
+			cancelled = true;
+		};
 	});
 </script>
 
