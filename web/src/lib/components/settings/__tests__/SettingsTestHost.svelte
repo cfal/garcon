@@ -192,6 +192,7 @@
 		},
 		autoExpandTools: false,
 		showThinking: true,
+		reduceMotion: false,
 		hiddenToolTypes: [],
 		showQuickCommitTray: true,
 		autoScrollToBottom: true,

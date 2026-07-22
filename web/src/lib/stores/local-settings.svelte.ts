@@ -88,6 +88,7 @@ export interface LocalSettingsSnapshot {
 	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
 	showThinking: boolean;
+	reduceMotion: boolean;
 	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
@@ -118,6 +119,7 @@ type BooleanLocalSettingKey =
 	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
 	| 'showThinking'
+	| 'reduceMotion'
 	| 'showQuickCommitTray'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
@@ -135,6 +137,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
 	showThinking: true,
+	reduceMotion: false,
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
@@ -226,6 +229,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
+		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
@@ -305,6 +309,7 @@ export class LocalSettingsStore {
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	showThinking = $state(DEFAULTS.showThinking);
+	reduceMotion = $state(DEFAULTS.reduceMotion);
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
@@ -383,6 +388,7 @@ export class LocalSettingsStore {
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
 			showThinking: this.showThinking,
+			reduceMotion: this.reduceMotion,
 			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
@@ -415,6 +421,7 @@ export class LocalSettingsStore {
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.showThinking = snap.showThinking;
+		this.reduceMotion = snap.reduceMotion;
 		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;

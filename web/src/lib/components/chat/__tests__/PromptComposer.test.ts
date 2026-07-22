@@ -1,9 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
+
+const appCss = readFileSync('src/app.css', 'utf8');
 
 vi.mock('$lib/api/snippets', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
@@ -48,6 +51,18 @@ describe('PromptComposer focus', () => {
 		cleanup();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
+	});
+
+	it('renders without a surface shadow', () => {
+		const { container } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+		});
+		const composer = container.querySelector('[data-composer]');
+
+		expect(composer?.className).toContain('shadow-none');
+		expect(composer?.className).not.toContain('shadow-sm');
 	});
 
 	it('focuses the composer after disabled chat startup and on each next selected chat', async () => {
@@ -210,6 +225,72 @@ describe('PromptComposer focus', () => {
 		expect(gitTray.className).toContain('min-h-14');
 		expect(gitTray.className).toContain('border-b-0');
 		expect(gitTray.className).toContain('pb-5');
+	});
+
+	it('always decorates processing and uses the static treatment when motion is reduced', async () => {
+		const { container, rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: false,
+			isSubmitting: false,
+			reduceMotion: false,
+		});
+		const frame = container.querySelector('[data-composer]')?.parentElement;
+
+		expect(frame?.className).not.toContain('composer-thinking-active');
+		expect(frame?.className).not.toContain('composer-reduce-motion');
+
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			reduceMotion: false,
+		});
+		expect(frame?.className).toContain('composer-thinking-active');
+		expect(frame?.className).not.toContain('composer-reduce-motion');
+
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			reduceMotion: true,
+		});
+		expect(frame?.className).toContain('composer-thinking-active');
+		expect(frame?.className).toContain('composer-reduce-motion');
+	});
+
+	it('defaults to static and pulses only when motion is allowed', () => {
+		const staticTreatmentRule = appCss.match(
+			/\.composer-thinking-active\s*\{(?<body>[\s\S]*?)\n\}/,
+		);
+		const motionAllowedRule = appCss.match(
+			/@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.composer-thinking-active:not\(\.composer-reduce-motion\)\s*\{(?<body>[\s\S]*?)\n\t\}\s*\}/,
+		);
+
+		expect(appCss).toContain('@keyframes composer-thinking-border-pulse');
+		expect(appCss).toMatch(
+			/@keyframes composer-thinking-border-pulse\s*\{[\s\S]*?border-color: hsl\(var\(--border\)\);[\s\S]*?border-color: hsl\(var\(--composer-thinking-pulse-emphasis\)\);[\s\S]*?\}/,
+		);
+		expect(staticTreatmentRule?.groups?.body).toContain(
+			'--composer-thinking-animation: none;',
+		);
+		expect(staticTreatmentRule?.groups?.body).toContain(
+			'linear-gradient(hsl(var(--card)) 0 0) padding-box,',
+		);
+		expect(staticTreatmentRule?.groups?.body).toContain('to bottom,');
+		expect(staticTreatmentRule?.groups?.body).toContain(
+			'hsl(var(--composer-thinking-static-start)) 0%,',
+		);
+		expect(staticTreatmentRule?.groups?.body).toContain('hsl(var(--border)) 100%');
+		expect(staticTreatmentRule?.groups?.body).toContain(
+			'--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));',
+		);
+		expect(motionAllowedRule?.groups?.body).toContain(
+			'--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;',
+		);
+		expect(motionAllowedRule?.groups?.body).not.toContain('composer-thinking-static-start');
 	});
 
 	it('shows quick commit before stop while the selected chat is processing', async () => {

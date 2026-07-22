@@ -183,6 +183,10 @@ describe('Settings', () => {
 				screen.getByRole('button', { name: 'Move Main view down' }),
 			);
 			expect(screen.getByText('Max chat width')).toBeTruthy();
+			const reduceMotion = screen.getByRole('switch', { name: 'Reduce motion' });
+			expect(reduceMotion.getAttribute('aria-checked')).toBe('false');
+			await fireEvent.click(reduceMotion);
+			expect(onLocalToggle).toHaveBeenCalledWith('reduceMotion');
 			expect(screen.getByText('Hide tool calls')).toBeTruthy();
 			expect(screen.getByRole('switch', { name: 'Bash' })).toBeTruthy();
 			expect(screen.getByRole('switch', { name: 'Exec' })).toBeTruthy();

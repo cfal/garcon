@@ -204,6 +204,8 @@
 	--destructive: 0 84.2% 60.2%;
 	--destructive-foreground: 0 0% 98%;
 	--border: 0 0% 90%;
+	--composer-thinking-static-start: 0 0% 85%;
+	--composer-thinking-pulse-emphasis: 0 0% 80%;
 	--input: 0 0% 90%;
 	--ring: 0 0% 40%;
 	--radius: 0.5rem;
@@ -421,6 +423,8 @@
 	--destructive: 0 62.8% 30.6%;
 	--destructive-foreground: 0 0% 95%;
 	--border: 0 0% 20%;
+	--composer-thinking-static-start: 0 0% 25%;
+	--composer-thinking-pulse-emphasis: 0 0% 30%;
 	--input: 0 0% 40%;
 	--ring: 0 0% 60%;
 	--transient-backdrop-color: 0 0% 0%;
@@ -936,4 +940,54 @@
 
 .rainbow-ultra-surface:hover {
 	filter: brightness(1.08) saturate(1.08);
+}
+
+/* Thinking treatment defaults to static. The real 1px borders pulse only when
+   the system allows motion and the local Reduce motion setting is off. */
+@keyframes composer-thinking-border-pulse {
+	0%,
+	100% {
+		border-color: hsl(var(--border));
+	}
+
+	50% {
+		border-color: hsl(var(--composer-thinking-pulse-emphasis));
+	}
+}
+
+.composer-thinking-active {
+	--composer-thinking-animation: none;
+	--composer-thinking-composer-background:
+		linear-gradient(hsl(var(--card)) 0 0) padding-box,
+		linear-gradient(
+			to bottom,
+			hsl(var(--composer-thinking-static-start)) 0%,
+			hsl(var(--border)) 100%
+		)
+		border-box;
+	--composer-thinking-composer-border: transparent;
+	--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.composer-thinking-active:not(.composer-reduce-motion) {
+		--composer-thinking-animation: composer-thinking-border-pulse 2.4s ease-in-out infinite;
+		--composer-thinking-composer-background: hsl(var(--card));
+		--composer-thinking-composer-border: hsl(var(--border));
+		--composer-thinking-status-border: hsl(var(--border));
+	}
+}
+
+.composer-thinking-active [data-composer],
+.composer-thinking-active [data-slot='chat-processing-status'] {
+	animation: var(--composer-thinking-animation);
+}
+
+.composer-thinking-active [data-composer] {
+	border-color: var(--composer-thinking-composer-border);
+	background: var(--composer-thinking-composer-background);
+}
+
+.composer-thinking-active [data-slot='chat-processing-status'] {
+	border-color: var(--composer-thinking-status-border);
 }
