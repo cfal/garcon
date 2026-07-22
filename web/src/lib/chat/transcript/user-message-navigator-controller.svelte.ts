@@ -34,7 +34,21 @@ export interface UserMessageNavigatorOptions {
 	jumpToRow: (target: UserMessageNavigatorTarget) => Promise<boolean>;
 }
 
-export class UserMessageNavigatorController {
+export interface UserMessageNavigatorDialogController {
+	readonly open: boolean;
+	readonly items: readonly UserMessageNavigatorItem[];
+	readonly hasMore: boolean;
+	readonly isInitialLoading: boolean;
+	readonly isLoadingOlder: boolean;
+	readonly loadError: UserMessageNavigatorLoadError | null;
+	readonly selectionError: UserMessageNavigatorSelectionError | null;
+	close(): void;
+	loadOlder(): Promise<void>;
+	retryLoadOlder(): Promise<void>;
+	select(item: UserMessageNavigatorItem): Promise<void>;
+}
+
+export class UserMessageNavigatorController implements UserMessageNavigatorDialogController {
 	open = $state(false);
 	openedChatId = $state<string | null>(null);
 	openedGenerationId = $state<string | null>(null);
