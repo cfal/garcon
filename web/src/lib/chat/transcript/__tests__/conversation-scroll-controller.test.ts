@@ -275,6 +275,36 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(false);
 	});
 
+	it('jumps to a pending row before the first transcript generation exists', async () => {
+		const scroller = {
+			scrollTop: 0,
+			scrollHeight: 800,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 0 }),
+		} as HTMLDivElement;
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatRowId = 'pending:request-1';
+		row.getBoundingClientRect = vi.fn(() => ({ top: 100, height: 100 }) as DOMRect);
+		content.append(row);
+		const chatState = { generationId: '', isUserScrolledUp: false };
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		expect(
+			await controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: '',
+				rowId: 'pending:request-1',
+			}),
+		).toBe(true);
+	});
+
 	it('rejects stale or missing message-row targets without changing pin state', async () => {
 		const scroller = { scrollTop: 200, scrollHeight: 1_200, clientHeight: 400 } as HTMLDivElement;
 		const content = document.createElement('div');

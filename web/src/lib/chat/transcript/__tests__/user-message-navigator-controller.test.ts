@@ -201,6 +201,37 @@ describe('UserMessageNavigatorController', () => {
 		expect(controller.items).toEqual([]);
 	});
 
+	it('jumps to a pending draft row before a transcript generation is established', async () => {
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.upsertPendingUserInput({
+			chatId: 'chat-1',
+			clientRequestId: 'request-1',
+			content: 'First message',
+			createdAt: TS,
+			deliveryStatus: 'submitting',
+			attachments: [],
+		});
+		const jumpToRow = vi.fn(async () => true);
+		const controller = new UserMessageNavigatorController({
+			transcript,
+			getSelectedChatId: () => 'chat-1',
+			reloadTranscript: vi.fn(async () => undefined),
+			loadOlderMessages: vi.fn(async () => false),
+			jumpToRow,
+		});
+		controller.openForActiveChat();
+
+		await controller.select(controller.items[0]);
+
+		expect(jumpToRow).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			generationId: '',
+			rowId: 'pending:request-1',
+		});
+		expect(controller.open).toBe(false);
+	});
+
 	it('exposes an initial load failure and retries the active chat', async () => {
 		const transcript = new ActiveTranscriptState();
 		transcript.activateChat('chat-1');

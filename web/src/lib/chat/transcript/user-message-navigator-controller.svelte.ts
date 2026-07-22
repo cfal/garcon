@@ -210,8 +210,8 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 
 	#targetFor(rowId: string): UserMessageNavigatorTarget | null {
 		const chatId = this.openedChatId;
-		const generationId = this.openedGenerationId;
-		if (!this.open || !chatId || !generationId) return null;
+		const generationId = this.openedGenerationId ?? this.options.transcript.generationId;
+		if (!this.open || !chatId) return null;
 		if (!this.#matchesActiveTranscript(chatId, generationId)) return null;
 		return { chatId, generationId, rowId };
 	}
