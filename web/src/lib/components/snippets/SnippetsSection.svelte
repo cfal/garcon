@@ -24,9 +24,7 @@
 	let removeSnippet = $state<Snippet | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
-	let movingSnippetId = $state<string | null>(null);
-	let operationError = $state<string | null>(null);
-	const operationLocked = $derived(movingSnippetId !== null || removing || snippets.isRefreshing);
+	const operationLocked = $derived(removing || snippets.isRefreshing);
 
 	$effect(() => {
 		if (active) void snippets.ensureLoaded().catch(() => undefined);
@@ -40,14 +38,12 @@
 	function openCreate(): void {
 		if (operationLocked) return;
 		editingSnippet = null;
-		operationError = null;
 		formOpen = true;
 	}
 
 	function openEdit(snippet: Snippet): void {
 		if (operationLocked) return;
 		editingSnippet = snippet;
-		operationError = null;
 		formOpen = true;
 	}
 
@@ -67,19 +63,6 @@
 			removeError = m.snippets_remove_error({ detail: errorDetail(error) });
 		} finally {
 			removing = false;
-		}
-	}
-
-	async function move(snippet: Snippet, direction: 'up' | 'down'): Promise<void> {
-		if (operationLocked) return;
-		movingSnippetId = snippet.id;
-		operationError = null;
-		try {
-			await snippets.move(snippet.id, direction);
-		} catch (error) {
-			operationError = m.snippets_reorder_error({ detail: errorDetail(error) });
-		} finally {
-			movingSnippetId = null;
 		}
 	}
 </script>
@@ -112,11 +95,6 @@
 	{#if snippets.hasLoaded && snippets.snippets.length >= SNIPPET_MAX_COUNT}
 		<p class="text-xs text-muted-foreground">{m.snippets_limit_reached()}</p>
 	{/if}
-	{#if operationError}
-		<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-			{operationError}
-		</p>
-	{/if}
 	{#if snippets.hasLoaded && snippets.error}
 		<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
 			{snippets.error}
@@ -148,20 +126,16 @@
 		</div>
 	{:else}
 		<div class="space-y-2" aria-live="polite">
-			{#each snippets.snippets as snippet, index (snippet.id)}
+			{#each snippets.snippets as snippet (snippet.id)}
 				<svelte:boundary>
 					<SnippetRow
 						{snippet}
-						{index}
-						total={snippets.snippets.length}
 						disabled={operationLocked}
 						onEdit={() => openEdit(snippet)}
 						onRemove={() => {
 							removeError = null;
 							removeSnippet = snippet;
 						}}
-						onMoveUp={() => void move(snippet, 'up')}
-						onMoveDown={() => void move(snippet, 'down')}
 					/>
 					{#snippet failed()}
 						<div class="rounded-md border border-destructive/50 p-3 text-sm text-destructive">

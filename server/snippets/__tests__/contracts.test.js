@@ -3,6 +3,7 @@ import { runInNewContext } from 'node:vm';
 import {
   SNIPPET_ARGUMENTS_MAX_LENGTH,
   SNIPPET_EXPANDED_MAX_LENGTH,
+  compareSnippetShortNames,
   normalizeExpandSnippetRequest,
   normalizeExpandSnippetResponse,
   normalizeSnippetDefinitionInput,
@@ -22,6 +23,17 @@ function snippet(overrides = {}) {
 }
 
 describe('snippet contracts', () => {
+  it('compares names case-insensitively with numeric segments', () => {
+    const names = ['Zulu', 'alpha-10', 'Alpha-2', 'beta'];
+
+    expect(names.sort(compareSnippetShortNames)).toEqual([
+      'Alpha-2',
+      'alpha-10',
+      'beta',
+      'Zulu',
+    ]);
+  });
+
   it('preserves valid names and multiline template whitespace without normalization', () => {
     expect(
       normalizeSnippetDefinitionInput({
@@ -66,6 +78,19 @@ describe('snippet contracts', () => {
         snippets: [snippet(), snippet({ shortName: 'other' })],
       }),
     ).toBeNull();
+  });
+
+  it('normalizes snapshots into canonical name order', () => {
+    expect(
+      normalizeSnippetsSnapshot({
+        revision: 1,
+        snippets: [
+          snippet({ id: 'snippet-10', shortName: 'item-10' }),
+          snippet({ id: 'snippet-2', shortName: 'item-2' }),
+          snippet({ id: 'snippet-a', shortName: 'alpha' }),
+        ],
+      })?.snippets.map(({ shortName }) => shortName),
+    ).toEqual(['alpha', 'item-2', 'item-10']);
   });
 
   it('accepts plain records from another JavaScript realm', () => {
