@@ -1,5 +1,5 @@
 import { UserMessage } from '$shared/chat-types';
-import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
+import type { ChatDisplayRow, ChatLoadStatus } from './active-transcript-state.svelte.js';
 
 export interface UserMessageNavigatorItem {
 	id: string;
@@ -16,6 +16,7 @@ export interface UserMessageNavigatorTarget {
 }
 
 export type UserMessageNavigatorLoadError = 'older-page-failed';
+export type UserMessageNavigatorInitialLoadError = 'initial-load-failed';
 export type UserMessageNavigatorSelectionError = 'target-unavailable';
 export type UserMessageNavigatorCommand = () => void;
 export type UserMessageNavigatorRegistration = UserMessageNavigatorCommand | null;
@@ -26,12 +27,14 @@ export interface UserMessageNavigatorTranscriptPort {
 	readonly displayRows: readonly ChatDisplayRow[];
 	readonly hasMoreMessages: boolean;
 	readonly isLoadingMessages: boolean;
+	readonly loadStatus: ChatLoadStatus;
 	revealAllLoadedMessages(): void;
 }
 
 export interface UserMessageNavigatorOptions {
 	transcript: UserMessageNavigatorTranscriptPort;
 	getSelectedChatId: () => string | null;
+	reloadTranscript: (chatId: string) => Promise<void>;
 	loadOlderMessages: (chatId: string) => Promise<boolean>;
 	jumpToRow: (target: UserMessageNavigatorTarget) => Promise<boolean>;
 }
@@ -41,10 +44,12 @@ export interface UserMessageNavigatorDialogController {
 	readonly items: readonly UserMessageNavigatorItem[];
 	readonly hasMore: boolean;
 	readonly isInitialLoading: boolean;
+	readonly initialLoadError: UserMessageNavigatorInitialLoadError | null;
 	readonly isLoadingOlder: boolean;
 	readonly loadError: UserMessageNavigatorLoadError | null;
 	readonly selectionError: UserMessageNavigatorSelectionError | null;
 	close(): void;
+	retryInitialLoad(): Promise<void>;
 	loadOlder(): Promise<void>;
 	retryLoadOlder(): Promise<void>;
 	select(item: UserMessageNavigatorItem): Promise<void>;
@@ -88,8 +93,17 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 
 	get isInitialLoading(): boolean {
 		return (
-			this.open && (this.openedGenerationId === null || this.options.transcript.isLoadingMessages)
+			this.open && this.openedGenerationId === null && this.options.transcript.isLoadingMessages
 		);
+	}
+
+	get initialLoadError(): UserMessageNavigatorInitialLoadError | null {
+		return this.open &&
+			this.openedGenerationId === null &&
+			!this.options.transcript.isLoadingMessages &&
+			this.options.transcript.loadStatus === 'error'
+			? 'initial-load-failed'
+			: null;
 	}
 
 	openForActiveChat(): void {
@@ -123,6 +137,20 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 			return;
 		}
 		if (generationId !== this.openedGenerationId) this.close();
+	}
+
+	async retryInitialLoad(): Promise<void> {
+		const chatId = this.openedChatId;
+		if (
+			!this.open ||
+			!chatId ||
+			this.openedGenerationId !== null ||
+			this.options.transcript.isLoadingMessages
+		) {
+			return;
+		}
+
+		await this.options.reloadTranscript(chatId);
 	}
 
 	async loadOlder(): Promise<void> {
@@ -162,8 +190,9 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 	async select(item: UserMessageNavigatorItem): Promise<void> {
 		const target = this.#targetFor(item.id);
 		if (!target) return;
-		const lifecycleEpoch = this.#lifecycleEpoch;
+		const lifecycleEpoch = ++this.#lifecycleEpoch;
 
+		this.isLoadingOlder = false;
 		this.selectionError = null;
 		this.options.transcript.revealAllLoadedMessages();
 		this.open = false;

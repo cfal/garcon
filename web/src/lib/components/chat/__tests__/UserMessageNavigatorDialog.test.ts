@@ -79,6 +79,22 @@ describe('UserMessageNavigatorDialog', () => {
 		expect(screen.queryByRole('status')).toBeNull();
 	});
 
+	it('surfaces an initial transcript failure and retries it', async () => {
+		const retry = vi.fn(async () => undefined);
+		render(UserMessageNavigatorDialogTestHost, {
+			initialTranscriptError: 'initial-load-failed',
+			onRetryInitialLoad: retry,
+		});
+
+		expect(screen.getByRole('alert').textContent).toContain(m.chat_feed_failed_to_load());
+		expect(screen.queryByText(m.chat_user_message_navigator_empty())).toBeNull();
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.chat_user_message_navigator_retry() }),
+		);
+
+		await waitFor(() => expect(retry).toHaveBeenCalledOnce());
+	});
+
 	it('loads one older page when the list approaches its bottom', async () => {
 		const loadOlder = vi.fn(async () => ({ hasMore: false }));
 		render(UserMessageNavigatorDialogTestHost, {

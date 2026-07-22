@@ -311,13 +311,6 @@
 		chatState,
 		sessions,
 	});
-	const userMessageNavigator = new UserMessageNavigatorController({
-		transcript: chatState,
-		getSelectedChatId: () => sessions.selectedChatId,
-		loadOlderMessages: (chatId) => scroll.loadMoreMessagesForNavigator(chatId),
-		jumpToRow: (target) => scroll.jumpToMessageRow(target),
-	});
-
 	function scrollToBottomAndFill(): void {
 		scroll.scrollToBottom();
 		void scroll.fillUnderfilledViewport();
@@ -347,6 +340,13 @@
 		},
 		setInitialBottomRestorePending: (chatId) => scroll.prepareInitialBottomRestore(chatId),
 		scrollToBottom: scrollToBottomAndFill,
+	});
+	const userMessageNavigator = new UserMessageNavigatorController({
+		transcript: chatState,
+		getSelectedChatId: () => sessions.selectedChatId,
+		reloadTranscript: (chatId) => controller.loadChat(chatId),
+		loadOlderMessages: (chatId) => scroll.loadMoreMessagesForNavigator(chatId),
+		jumpToRow: (target) => scroll.jumpToMessageRow(target),
 	});
 
 	// Expose the submit function to sibling components (runs once on mount).

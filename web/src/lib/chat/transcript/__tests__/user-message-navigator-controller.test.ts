@@ -41,17 +41,20 @@ function setup(messages: ChatViewMessage[] = [entry(1, user('first'))]) {
 		hasMore: false,
 	});
 	let selectedChatId: string | null = 'chat-1';
+	const reloadTranscript = vi.fn(async () => undefined);
 	const loadOlderMessages = vi.fn(async () => true);
 	const jumpToRow = vi.fn(async (_target: UserMessageNavigatorTarget) => true);
 	const controller = new UserMessageNavigatorController({
 		transcript,
 		getSelectedChatId: () => selectedChatId,
+		reloadTranscript,
 		loadOlderMessages,
 		jumpToRow,
 	});
 	return {
 		controller,
 		transcript,
+		reloadTranscript,
 		loadOlderMessages,
 		jumpToRow,
 		selectChat(chatId: string | null) {
@@ -162,6 +165,7 @@ describe('UserMessageNavigatorController', () => {
 		const controller = new UserMessageNavigatorController({
 			transcript,
 			getSelectedChatId: () => 'chat-1',
+			reloadTranscript: vi.fn(async () => undefined),
 			loadOlderMessages: vi.fn(async () => false),
 			jumpToRow: vi.fn(async () => false),
 		});
@@ -177,6 +181,55 @@ describe('UserMessageNavigatorController', () => {
 
 		expect(controller.openedGenerationId).toBe('generation-1');
 		expect(controller.isInitialLoading).toBe(false);
+	});
+
+	it('shows an empty draft without waiting for a transcript generation', () => {
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		const controller = new UserMessageNavigatorController({
+			transcript,
+			getSelectedChatId: () => 'chat-1',
+			reloadTranscript: vi.fn(async () => undefined),
+			loadOlderMessages: vi.fn(async () => false),
+			jumpToRow: vi.fn(async () => false),
+		});
+
+		controller.openForActiveChat();
+
+		expect(controller.isInitialLoading).toBe(false);
+		expect(controller.initialLoadError).toBeNull();
+		expect(controller.items).toEqual([]);
+	});
+
+	it('exposes an initial load failure and retries the active chat', async () => {
+		const transcript = new ActiveTranscriptState();
+		transcript.activateChat('chat-1');
+		transcript.loadStatus = 'error';
+		const reloadTranscript = vi.fn(async () => undefined);
+		const controller = new UserMessageNavigatorController({
+			transcript,
+			getSelectedChatId: () => 'chat-1',
+			reloadTranscript,
+			loadOlderMessages: vi.fn(async () => false),
+			jumpToRow: vi.fn(async () => false),
+		});
+		controller.openForActiveChat();
+
+		expect(controller.initialLoadError).toBe('initial-load-failed');
+		await controller.retryInitialLoad();
+
+		expect(reloadTranscript).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('keeps established rows visible during background revalidation', () => {
+		const { controller, transcript } = setup();
+		transcript.beginSnapshotLoad();
+
+		controller.openForActiveChat();
+
+		expect(controller.openedGenerationId).toBe('generation-1');
+		expect(controller.isInitialLoading).toBe(false);
+		expect(controller.items).toHaveLength(1);
 	});
 
 	it('reveals loaded rows before jumping and clears identity after success', async () => {
@@ -223,6 +276,28 @@ describe('UserMessageNavigatorController', () => {
 
 		expect(controller.open).toBe(true);
 		expect(controller.selectionError).toBeNull();
+	});
+
+	it('does not retain an older-page loading state when a failed jump reopens', async () => {
+		const pendingLoad = deferred<boolean>();
+		const { controller, transcript, loadOlderMessages, jumpToRow } = setup();
+		transcript.hasMoreMessages = true;
+		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce(true);
+		jumpToRow.mockResolvedValueOnce(false);
+		controller.openForActiveChat();
+		const load = controller.loadOlder();
+
+		await controller.select(controller.items[0]);
+
+		expect(controller.open).toBe(true);
+		expect(controller.isLoadingOlder).toBe(false);
+		pendingLoad.resolve(false);
+		await load;
+		expect(controller.loadError).toBeNull();
+		expect(controller.isLoadingOlder).toBe(false);
+
+		await controller.loadOlder();
+		expect(loadOlderMessages).toHaveBeenCalledTimes(2);
 	});
 
 	it('closes when an established transcript generation changes', () => {

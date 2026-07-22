@@ -98,6 +98,21 @@
 					<Loader2 class="h-4 w-4 animate-spin" aria-hidden="true" />
 					{m.chat_user_message_navigator_loading()}
 				</div>
+			{:else if controller.initialLoadError === 'initial-load-failed'}
+				<div
+					class="flex min-h-40 flex-col items-center justify-center gap-4 px-5 py-10 text-center"
+					role="alert"
+				>
+					<p class="text-sm text-destructive">{m.chat_feed_failed_to_load()}</p>
+					<button
+						type="button"
+						class="inline-flex min-h-9 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => void controller.retryInitialLoad()}
+					>
+						<RefreshCw class="h-4 w-4" aria-hidden="true" />
+						{m.chat_user_message_navigator_retry()}
+					</button>
+				</div>
 			{:else if controller.items.length === 0 && !controller.hasMore}
 				<div
 					class="flex min-h-40 items-center justify-center px-5 py-10 text-center text-sm text-muted-foreground"

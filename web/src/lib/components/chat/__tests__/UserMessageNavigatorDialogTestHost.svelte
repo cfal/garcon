@@ -3,6 +3,7 @@
 	import UserMessageNavigatorDialog from '../UserMessageNavigatorDialog.svelte';
 	import type {
 		UserMessageNavigatorDialogController,
+		UserMessageNavigatorInitialLoadError,
 		UserMessageNavigatorItem,
 		UserMessageNavigatorLoadError,
 		UserMessageNavigatorSelectionError,
@@ -18,9 +19,11 @@
 		initialItems?: readonly UserMessageNavigatorItem[];
 		initialHasMore?: boolean;
 		initialLoading?: boolean;
+		initialTranscriptError?: UserMessageNavigatorInitialLoadError | null;
 		initialLoadError?: UserMessageNavigatorLoadError | null;
 		initialSelectionError?: UserMessageNavigatorSelectionError | null;
 		onLoadOlder?: (attempt: number) => Promise<NavigatorLoadUpdate | void>;
+		onRetryInitialLoad?: () => Promise<void>;
 		onSelect?: (item: UserMessageNavigatorItem) => void;
 		onClose?: () => void;
 	}
@@ -29,9 +32,11 @@
 		initialItems = [],
 		initialHasMore = false,
 		initialLoading = false,
+		initialTranscriptError = null,
 		initialLoadError = null,
 		initialSelectionError = null,
 		onLoadOlder = async () => undefined,
+		onRetryInitialLoad = async () => undefined,
 		onSelect = () => {},
 		onClose = () => {},
 	}: Props = $props();
@@ -40,6 +45,9 @@
 	let items = $state<readonly UserMessageNavigatorItem[]>(untrack(() => initialItems));
 	let hasMore = $state(untrack(() => initialHasMore));
 	let isInitialLoading = $state(untrack(() => initialLoading));
+	let transcriptLoadError = $state<UserMessageNavigatorInitialLoadError | null>(
+		untrack(() => initialTranscriptError),
+	);
 	let isLoadingOlder = $state(false);
 	let loadError = $state<UserMessageNavigatorLoadError | null>(untrack(() => initialLoadError));
 	let selectionError = $state<UserMessageNavigatorSelectionError | null>(
@@ -71,6 +79,9 @@
 		get isInitialLoading() {
 			return isInitialLoading;
 		},
+		get initialLoadError() {
+			return transcriptLoadError;
+		},
 		get isLoadingOlder() {
 			return isLoadingOlder;
 		},
@@ -83,6 +94,12 @@
 		close() {
 			open = false;
 			onClose();
+		},
+		async retryInitialLoad() {
+			transcriptLoadError = null;
+			isInitialLoading = true;
+			await onRetryInitialLoad();
+			isInitialLoading = false;
 		},
 		loadOlder,
 		async retryLoadOlder() {
