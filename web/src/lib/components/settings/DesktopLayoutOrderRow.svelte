@@ -46,11 +46,11 @@
 	let dropIndicatorEdge = $state<Edge | null>(null);
 
 	async function move(delta: -1 | 1): Promise<void> {
-		const destination = index + delta;
+		const requestedButton = delta === -1 ? upButtonElement : downButtonElement;
+		const fallbackButton = delta === -1 ? downButtonElement : upButtonElement;
 		onMove(pane, delta);
 		await tick();
-		if (destination === 0) downButtonElement?.focus();
-		if (destination === count - 1) upButtonElement?.focus();
+		(requestedButton?.matches(':disabled') ? fallbackButton : requestedButton)?.focus();
 	}
 
 	function isDesktopLayoutDragData(

@@ -141,6 +141,28 @@ describe('Settings', () => {
 					}) as HTMLButtonElement
 				).disabled,
 			).toBe(true);
+			const moveChatDown = screen.getByRole('button', { name: 'Move Chat list down' });
+			const moveChatDownFocus = vi.spyOn(moveChatDown, 'focus');
+			moveChatDown.focus();
+			await fireEvent.click(moveChatDown);
+			await waitFor(() => {
+				expect(
+					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
+						row.getAttribute('data-desktop-layout-setting-pane'),
+					),
+				).toEqual(['main', 'chat-list', 'workspace-sidebar']);
+			});
+			expect(moveChatDownFocus).toHaveBeenCalled();
+			expect(document.activeElement).toBe(moveChatDown);
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Move Chat list up' }));
+			await waitFor(() => {
+				expect(
+					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
+						row.getAttribute('data-desktop-layout-setting-pane'),
+					),
+				).toEqual(['chat-list', 'main', 'workspace-sidebar']);
+			});
 			const moveMainUp = screen.getByRole('button', { name: 'Move Main view up' });
 			moveMainUp.focus();
 			await fireEvent.click(moveMainUp);
