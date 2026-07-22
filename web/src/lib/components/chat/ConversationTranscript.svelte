@@ -144,6 +144,7 @@
 			<svelte:boundary>
 				<ConversationMessage
 					{message}
+					rowId={item.id}
 					index={item.index}
 					forkUpToSeq={item.seq}
 					prevMessage={item.prevMessage}

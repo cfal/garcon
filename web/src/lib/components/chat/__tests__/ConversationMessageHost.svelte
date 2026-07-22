@@ -15,6 +15,7 @@
 
 	interface Props {
 		message: ChatMessage;
+		rowId?: string;
 		openAuto?: (input: OpenAutoInput) => void;
 		projectBasePath?: string;
 		chatProjectPath?: string;
@@ -28,6 +29,7 @@
 
 	let {
 		message,
+		rowId,
 		openAuto = () => {},
 		projectBasePath = '/workspace',
 		chatProjectPath = '/workspace/project',
@@ -87,6 +89,7 @@
 
 <ConversationMessage
 	{message}
+	{rowId}
 	index={0}
 	{forkUpToSeq}
 	prevMessage={null}

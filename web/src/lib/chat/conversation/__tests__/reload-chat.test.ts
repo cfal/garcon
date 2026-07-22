@@ -74,7 +74,7 @@ describe('reloadChatFromNative', () => {
 		]);
 		expect(chat.transcriptCache.get('chat-1')?.lastSeq).toBe(4);
 
-		await expect(chat.loadMoreMessages('chat-1')).resolves.toBe(true);
+		await expect(chat.loadMoreMessages('chat-1')).resolves.toBe('loaded');
 
 		expect(getChatMessages).toHaveBeenCalledWith({
 			chatId: 'chat-1',
