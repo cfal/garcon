@@ -254,7 +254,12 @@ export class ConversationScrollController {
 		).find((element) => element.dataset.chatRowId === target.rowId);
 		if (!row) return false;
 
-		row.scrollIntoView({ block: 'center', behavior: 'instant' });
+		const scroller = this.deps.getScrollContainer();
+		if (!scroller) return false;
+		const scrollerRect = scroller.getBoundingClientRect();
+		const rowRect = row.getBoundingClientRect();
+		const rowTop = scroller.scrollTop + rowRect.top - scrollerRect.top;
+		scroller.scrollTop = Math.max(0, rowTop - (scroller.clientHeight - rowRect.height) / 2);
 		const nearBottom = this.isNearBottom();
 		this.deps.chatState.isUserScrolledUp = !nearBottom;
 		this.setPinnedToBottom(nearBottom);

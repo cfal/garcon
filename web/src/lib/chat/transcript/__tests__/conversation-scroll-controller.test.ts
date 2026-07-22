@@ -241,13 +241,16 @@ describe('ConversationScrollController', () => {
 	});
 
 	it('centers a generation-scoped message row inside the active feed', async () => {
-		const scroller = { scrollTop: 200, scrollHeight: 1_200, clientHeight: 400 } as HTMLDivElement;
+		const scroller = {
+			scrollTop: 200,
+			scrollHeight: 1_200,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 100 }),
+		} as HTMLDivElement;
 		const content = document.createElement('div');
 		const row = document.createElement('div');
 		row.dataset.chatRowId = 'generation-1:7';
-		row.scrollIntoView = vi.fn(() => {
-			scroller.scrollTop = 300;
-		});
+		row.getBoundingClientRect = vi.fn(() => ({ top: 350, height: 100 }) as DOMRect);
 		content.append(row);
 		const chatState = { generationId: 'generation-1', isUserScrolledUp: false };
 		const controller = new ConversationScrollController({
@@ -267,7 +270,7 @@ describe('ConversationScrollController', () => {
 			}),
 		).toBe(true);
 
-		expect(row.scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' });
+		expect(scroller.scrollTop).toBe(300);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
 	});
