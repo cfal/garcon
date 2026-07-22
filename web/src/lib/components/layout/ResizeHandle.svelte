@@ -58,10 +58,7 @@
 	)}
 >
 	<div
-		class={cn(
-			'absolute inset-y-0 -left-2 w-4 cursor-col-resize group select-none touch-none pointer-events-auto',
-			isDragging && 'bg-primary/10',
-		)}
+		class="absolute inset-y-0 -left-2 w-4 cursor-col-resize group select-none touch-none pointer-events-auto"
 		onpointerdown={handlePointerDown}
 		role="separator"
 		aria-orientation="vertical"

@@ -34,4 +34,15 @@ describe('ResizeHandle', () => {
 
 		expect(onResize).toHaveBeenCalledWith(expectedWidth);
 	});
+
+	it('uses a line-only active indicator while resizing', async () => {
+		render(ResizeHandle, { width: 400, onResize: vi.fn() });
+		const separator = screen.getByRole('separator') as HTMLElement;
+		separator.setPointerCapture = vi.fn();
+
+		await fireEvent.pointerDown(separator, { pointerId: 6, clientX: 500 });
+
+		expect(separator.classList).not.toContain('bg-primary/10');
+		expect(separator.firstElementChild?.classList).toContain('bg-primary/30');
+	});
 });
