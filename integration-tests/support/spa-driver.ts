@@ -328,6 +328,41 @@ export class SpaDriver {
     );
   }
 
+  async trackChatScrollAssignments(): Promise<void> {
+    await this.#page.$eval('[role="log"][aria-label="Chat messages"]', (element) => {
+      const feed = element as HTMLElement;
+      let current = feed.scrollTop;
+      feed.dataset.testScrollAssignments = '[]';
+      Object.defineProperty(feed, 'scrollTop', {
+        configurable: true,
+        get: () => current,
+        set: (value: number) => {
+          current = Number(value);
+          const assignments = JSON.parse(feed.dataset.testScrollAssignments ?? '[]') as number[];
+          assignments.push(current);
+          feed.dataset.testScrollAssignments = JSON.stringify(assignments);
+        },
+      });
+    });
+  }
+
+  async waitForChatScrollAssignmentDifferentFrom(
+    initial: number,
+    timeout = 20_000,
+  ): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => {
+        const feed = document.querySelector<HTMLElement>(
+          '[role="log"][aria-label="Chat messages"]',
+        );
+        const assignments = JSON.parse(feed?.dataset.testScrollAssignments ?? '[]') as number[];
+        return assignments.some((value) => value !== expected);
+      },
+      { timeout },
+      initial,
+    );
+  }
+
   async waitForChatScrollTopGreaterThan(minimum: number, timeout = 20_000): Promise<void> {
     await this.#page.waitForFunction(
       (expected) => {
