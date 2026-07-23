@@ -209,7 +209,7 @@ describe('GitHistoryController', () => {
 			'/project',
 			'doc-abcdef123',
 			'abcdef123',
-			['a.ts'],
+			[{ path: 'a.ts' }],
 			expect.objectContaining({ parent: 'parent', context: 5 }),
 		);
 		expect(history.fileBodies['a.ts']?.bodyState).toBe('loaded');
@@ -256,7 +256,7 @@ describe('GitHistoryController', () => {
 			expect(history.fileBodies['file-0.ts']?.bodyState).toBe('loaded');
 			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
 		});
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[3]).toEqual(['file-8.ts']);
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[3]).toEqual([{ path: 'file-8.ts' }]);
 	});
 
 	it('still aborts an active body batch when leaving commit details', async () => {

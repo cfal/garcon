@@ -302,13 +302,11 @@ export class GitHistoryController {
 							: 'the empty tree',
 					},
 					loadBodies: (_snapshot, files, signal) =>
-						getGitCommitFileBodies(
-							projectPath,
-							result.documentId,
-							result.commit.hash,
-							files.map((file) => file.path),
-							{ parent: result.selectedParent, context: this.contextLines, signal },
-						),
+						getGitCommitFileBodies(projectPath, result.documentId, result.commit.hash, files, {
+							parent: result.selectedParent,
+							context: this.contextLines,
+							signal,
+						}),
 					onError: (detail) => {
 						this.commitError = m.git_history_load_diff_rows_failed({ detail });
 					},

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { chunkGitPathspecs } from '../pathspecs.js';
+import { chunkGitPathspecs, literalGitPathspec } from '../pathspecs.js';
+
+describe('literalGitPathspec', () => {
+  it('disables pathspec magic for user-controlled paths', () => {
+    expect(literalGitPathspec('src/[draft]*.ts')).toBe(':(literal)src/[draft]*.ts');
+  });
+});
 
 describe('chunkGitPathspecs', () => {
   it('keeps ordinary selections in one git command', () => {

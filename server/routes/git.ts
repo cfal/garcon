@@ -18,6 +18,7 @@ import { jsonError } from '../lib/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { createGitComparisonRoutes } from './git-comparisons.js';
 import { traceGitJsonResponse } from './git-route-response.js';
+import { parseGitDiffFileRequests } from './git-diff-file-requests.js';
 
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
@@ -345,7 +346,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       const commit = nonEmptyString(input.commit);
       const parent = nonEmptyString(input.parent);
       const context = validContextLines(input.context ?? 5);
-      const files = stringArray(input.files);
+      const files = parseGitDiffFileRequests(input.files);
 
       if (!project || !documentId || !commit || !files || files.length === 0) {
         return gitRouteError('Missing required parameters: project, documentId, commit, and files.', 400);

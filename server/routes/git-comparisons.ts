@@ -5,7 +5,6 @@ import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
   type GitComparisonBodyTarget,
-  type GitComparisonFileRequest,
   type GitComparisonFromEndpoint,
   type GitComparisonMode,
   type GitComparisonToEndpoint,
@@ -15,6 +14,7 @@ import { jsonError } from '../lib/http-error.js';
 import { withJsonBody } from '../lib/json-route.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { traceGitJsonResponse } from './git-route-response.js';
+import { parseGitDiffFileRequests } from './git-diff-file-requests.js';
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -59,20 +59,6 @@ function validComparisonBodyTarget(value: unknown): GitComparisonBodyTarget | nu
     return fingerprint ? { kind: 'working-tree', fingerprint } : null;
   }
   return null;
-}
-
-function validComparisonFiles(value: unknown): GitComparisonFileRequest[] | null {
-  if (!Array.isArray(value)) return null;
-  const files: GitComparisonFileRequest[] = [];
-  for (const candidate of value) {
-    if (!isRecord(candidate)) return null;
-    const path = nonEmptyString(candidate.path);
-    const originalPath = candidate.originalPath === undefined ? undefined : nonEmptyString(candidate.originalPath);
-    if (!path || path.includes('\0') || (candidate.originalPath !== undefined && !originalPath)) return null;
-    if (originalPath?.includes('\0')) return null;
-    files.push({ path, ...(originalPath ? { originalPath } : {}) });
-  }
-  return files;
 }
 
 function routeError(error: string): Response {
@@ -136,7 +122,7 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
       const effectiveFromHash = nonEmptyString(input.effectiveFromHash);
       const to = validComparisonBodyTarget(input.to);
       const context = validContextLines(input.context ?? 5);
-      const files = validComparisonFiles(input.files);
+      const files = parseGitDiffFileRequests(input.files);
       if (!project || !documentId || !effectiveFromHash || !to || !files || files.length === 0) {
         return routeError('Missing or invalid comparison body parameters.');
       }

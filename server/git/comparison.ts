@@ -17,6 +17,7 @@ import {
 } from './rendered-diff.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { assertSafeRef } from './ref-validation.js';
+import { literalGitPathspec } from './pathspecs.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
@@ -636,7 +637,7 @@ async function loadComparisonBody({
   }
   const endpoints = toHash ? [effectiveFromHash, toHash] : [effectiveFromHash];
   const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).map(
-    literalPathspec,
+    literalGitPathspec,
   );
   const { stdout } = await runGitTraced(
     projectPath,
@@ -688,7 +689,7 @@ async function getComparisonFileBodies(
           '-z',
           '-uall',
           '--',
-          ...requestedFiles.map((file) => literalPathspec(file.path)),
+          ...requestedFiles.map((file) => literalGitPathspec(file.path)),
         ],
         trace,
         readOnlyGitOptions({ signal }),
@@ -753,8 +754,4 @@ export function createComparisonOperations(
     getComparisonFileBodies: (options: GitComparisonFileBodiesOptions) =>
       getComparisonFileBodies(options, assertProjectPathAllowed),
   };
-}
-
-function literalPathspec(filePath: string): string {
-  return `:(literal)${filePath}`;
 }

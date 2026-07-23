@@ -479,12 +479,17 @@ export interface GitCommitSnapshotOptions extends ProjectOptions {
   bodyCandidateCount?: number;
 }
 
+export interface GitDiffFileRequest {
+  path: string;
+  originalPath?: string;
+}
+
 export interface GitCommitFileBodiesOptions extends ProjectOptions {
   documentId: string;
   commit: string;
   parent?: string | null;
   context?: number;
-  files: string[];
+  files: GitDiffFileRequest[];
 }
 
 export interface GitCommitFileBodiesResponse {
@@ -580,10 +585,7 @@ export interface GitComparisonSnapshotOptions extends ProjectOptions {
   bodyCandidateCount?: number;
 }
 
-export interface GitComparisonFileRequest {
-  path: string;
-  originalPath?: string;
-}
+export type GitComparisonFileRequest = GitDiffFileRequest;
 
 export interface GitComparisonRevisionBodyTarget {
   kind: 'revision';

@@ -561,7 +561,7 @@ describe("commit history operations", () => {
         commit: snapshot.commit.hash,
         parent: snapshot.selectedParent,
         context: 5,
-        files: ["a.txt"],
+        files: [{ path: "a.txt" }],
       });
       const body = bodies.files["a.txt"];
 
@@ -669,7 +669,7 @@ describe("commit history operations", () => {
     }
   });
 
-  it("preserves renamed paths in commit summaries", async () => {
+  it("preserves renamed paths in commit summaries and bodies", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-rename-"),
     );
@@ -680,8 +680,15 @@ describe("commit history operations", () => {
 
     try {
       await initRepoWithCommit(projectPath);
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "one\ntwo\nthree\nfour\n",
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["commit", "-am", "expand file"]);
       await runGitCommand(projectPath, ["mv", "a.txt", "renamed file.txt"]);
-      await runGitCommand(projectPath, ["commit", "-m", "rename file"]);
+      await fs.appendFile(path.join(projectPath, "renamed file.txt"), "five\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "rename file"]);
 
       const snapshot = await git.getCommitSnapshot({
         projectPath,
@@ -695,8 +702,63 @@ describe("commit history operations", () => {
           path: "renamed file.txt",
           originalPath: "a.txt",
           status: "renamed",
-          additions: 0,
+          additions: 1,
         }),
+      );
+
+      const renamedFile = snapshot.files.find((file) => file.path === "renamed file.txt");
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: renamedFile.path, originalPath: renamedFile.originalPath }],
+      });
+      const addedRows = bodies.files[renamedFile.path].rows.filter((row) => row.kind === "add");
+
+      expect(addedRows).toEqual([expect.objectContaining({ text: "five" })]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("loads historical bodies for paths containing pathspec metacharacters", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-literal-path-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+    const filePath = "wild[slug].txt";
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, filePath), "one\n", "utf-8");
+      await runGitCommand(projectPath, ["add", filePath]);
+      await runGitCommand(projectPath, ["commit", "-m", "add literal path"]);
+      await fs.appendFile(path.join(projectPath, filePath), "two\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "change literal path"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+        context: 5,
+      });
+      expect(snapshot.status).toBe("ready");
+
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: filePath }],
+      });
+
+      expect(bodies.files[filePath].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
       );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });

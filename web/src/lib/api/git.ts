@@ -431,6 +431,11 @@ export interface GitCommitSnapshotNotFound {
 
 export type GitCommitSnapshotResponse = GitCommitSnapshotReady | GitCommitSnapshotNotFound;
 
+export interface GitDiffFileRequest {
+	path: string;
+	originalPath?: string;
+}
+
 export interface GitCommitFileBodiesResponse {
 	documentId: string;
 	files: Record<string, GitCommitFileBody>;
@@ -644,7 +649,7 @@ export async function getGitCommitFileBodies(
 	project: string,
 	documentId: string,
 	commit: string,
-	files: string[],
+	files: GitDiffFileRequest[],
 	options?: ApiFetchOptions & {
 		parent?: string | null;
 		context?: number;

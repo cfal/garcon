@@ -4,6 +4,7 @@ import {
 	getGitCommitFileBodies,
 	getGitCommitSnapshot,
 	getGitHistoryCommits,
+	type GitDiffFileRequest,
 } from '$lib/api/git.js';
 import {
 	installResizeObserverHarness,
@@ -146,6 +147,10 @@ function bodiesForPaths(paths: string[]) {
 	};
 }
 
+function requestedPaths(files: GitDiffFileRequest[]): string[] {
+	return files.map((file) => file.path);
+}
+
 function deferred<T>() {
 	let resolve!: (value: T) => void;
 	let reject!: (reason?: unknown) => void;
@@ -174,7 +179,7 @@ describe('GitHistoryView', () => {
 		});
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot());
 		vi.mocked(getGitCommitFileBodies).mockImplementation(
-			async (_project, _documentId, _commit, files) => bodiesForPaths(files),
+			async (_project, _documentId, _commit, files) => bodiesForPaths(requestedPaths(files)),
 		);
 	});
 
@@ -383,7 +388,9 @@ describe('GitHistoryView', () => {
 		});
 		vi.mocked(getGitCommitFileBodies)
 			.mockReturnValueOnce(firstBatch.promise)
-			.mockImplementation(async (_project, _documentId, _commit, paths) => bodiesForPaths(paths));
+			.mockImplementation(async (_project, _documentId, _commit, files) =>
+				bodiesForPaths(requestedPaths(files)),
+			);
 		const { container } = render(GitHistoryView, {
 			props: {
 				history: new GitHistoryController(),
@@ -418,7 +425,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedNinthFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('file-8.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('file-8.ts'));
 			expect(requestedNinthFile).toBe(false);
 			expect(firstSignal?.aborted).toBe(false);
 		});
@@ -429,7 +436,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedNinthFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('file-8.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('file-8.ts'));
 			expect(requestedNinthFile).toBe(true);
 		});
 	});
@@ -468,7 +475,7 @@ describe('GitHistoryView', () => {
 
 		const requestedLaterBeforeSelection = vi
 			.mocked(getGitCommitFileBodies)
-			.mock.calls.some(([, , , paths]) => paths.includes('later.ts'));
+			.mock.calls.some(([, , , files]) => requestedPaths(files).includes('later.ts'));
 		expect(requestedLaterBeforeSelection).toBe(false);
 
 		await fireEvent.click(within(filesPane).getByRole('button', { name: /later\.ts/ }));
@@ -476,7 +483,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedLaterFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('later.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('later.ts'));
 			expect(requestedLaterFile).toBe(true);
 		});
 		ResizeObserverHarness.emit(diffRoot, 480, 720);
@@ -490,8 +497,9 @@ describe('GitHistoryView', () => {
 		const laterBodies = deferred<ReturnType<typeof bodiesForPaths>>();
 		vi.mocked(getGitCommitFileBodies).mockImplementation(
 			async (_project, _documentId, _commit, files) => {
-				if (files.includes('later.ts')) return laterBodies.promise;
-				return bodiesForPaths(files);
+				const paths = requestedPaths(files);
+				if (paths.includes('later.ts')) return laterBodies.promise;
+				return bodiesForPaths(paths);
 			},
 		);
 		const { container } = render(GitHistoryView, {
@@ -532,7 +540,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedLaterFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('later.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('later.ts'));
 			expect(requestedLaterFile).toBe(true);
 		});
 		ResizeObserverHarness.emit(diffRoot, 480, 720);

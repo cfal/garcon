@@ -1,6 +1,7 @@
 import { apiPost, type ApiFetchOptions } from './client.js';
 import type {
 	GitCommitFileSummary,
+	GitDiffFileRequest,
 	GitReviewCollectionLimit,
 	GitReviewDocumentLimits,
 	GitReviewFileBodiesResponse,
@@ -85,10 +86,7 @@ export type GitComparisonSnapshotResponse =
 	| GitComparisonSnapshotNoMergeBase
 	| GitComparisonSnapshotWorkingTreeChanging;
 
-export interface GitComparisonFileRequest {
-	path: string;
-	originalPath?: string;
-}
+export type GitComparisonFileRequest = GitDiffFileRequest;
 
 export type GitComparisonBodyTarget =
 	{ kind: 'revision'; hash: string } | { kind: 'working-tree'; fingerprint: string };

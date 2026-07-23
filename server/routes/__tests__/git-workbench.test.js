@@ -465,7 +465,7 @@ describe('POST /api/v1/git/history routes', () => {
         context: 5,
         files: Array.from(
           { length: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 },
-          (_, index) => `f${index}.ts`,
+          (_, index) => ({ path: `f${index}.ts` }),
         ),
       }),
     );
@@ -506,7 +506,7 @@ describe('POST /api/v1/git/history routes', () => {
           commit: snapshot.commit.hash,
           parent: snapshot.selectedParent,
           context: 5,
-          files: ['a.txt'],
+          files: [{ path: 'a.txt' }],
         }),
       );
       const filesResponse = await filesHandler(makeRequest({}));

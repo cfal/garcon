@@ -621,7 +621,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
 		const controller = new AbortController();
 
-		await getGitCommitFileBodies('/project', 'doc', 'abc', ['a.ts'], {
+		await getGitCommitFileBodies('/project', 'doc', 'abc', [{ path: 'renamed.ts', originalPath: 'a.ts' }], {
 			parent: null,
 			context: 4,
 			signal: controller.signal,
@@ -637,7 +637,7 @@ describe('git API contract', () => {
 			commit: 'abc',
 			parent: null,
 			context: 4,
-			files: ['a.ts'],
+			files: [{ path: 'renamed.ts', originalPath: 'a.ts' }],
 		});
 	});
 
