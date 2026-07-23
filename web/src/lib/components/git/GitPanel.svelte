@@ -242,6 +242,16 @@
 	}
 
 	function handleSetContextLines(lines: number): void {
+		const activeDocument =
+			activeView === 'comparison'
+				? comparison.document
+				: activeView === 'history' && history.screen === 'commit'
+					? history.document
+					: null;
+		if (lines !== review.contextLines && activeDocument?.commentComposer.open) {
+			activeDocument.markContextChangeBlocked();
+			return;
+		}
 		wb.setContextLines(lines);
 		if (activeView === 'comparison' && activeProjectPath) {
 			comparison.setDisplayOptions(activeProjectPath, review.diffMode, lines);

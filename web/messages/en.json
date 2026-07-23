@@ -551,6 +551,7 @@
 	"git_comment_chat_required": "Open a chat before adding this comment.",
 	"git_comment_already_in_chat": "Already in the Chat composer.",
 	"git_comment_added_to_chat": "Added to the Chat composer.",
+	"git_comment_finish_before_context_change": "Add or close this comment before changing context lines.",
 	"git_comment_severity_blocker": "blocker",
 	"git_comment_severity_note": "note",
 	"git_comment_severity_warning": "warning",

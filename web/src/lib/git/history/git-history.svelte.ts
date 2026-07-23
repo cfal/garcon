@@ -95,6 +95,10 @@ export class GitHistoryController {
 			? Math.max(0, Math.round(contextLines))
 			: DEFAULT_CONTEXT_LINES;
 		const contextChanged = this.document.contextLines !== normalizedContext;
+		if (contextChanged && this.document.commentComposer.open) {
+			this.document.markContextChangeBlocked();
+			return;
+		}
 		this.document.setDisplayOptions(diffMode, normalizedContext);
 		if (contextChanged && projectPath && this.screen === 'commit' && this.selectedCommitHash) {
 			this.loadCommitSnapshot(projectPath, this.selectedCommitHash, this.selectedParentHash);

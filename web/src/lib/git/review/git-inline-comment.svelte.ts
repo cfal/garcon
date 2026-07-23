@@ -83,6 +83,12 @@ export class GitInlineCommentState {
 		this.clearError();
 	}
 
+	markContextChangeBlocked(): void {
+		if (!this.composer.open) return;
+		this.error = m.git_comment_finish_before_context_change();
+		this.copyText = null;
+	}
+
 	appendBlock(append: ChatDraftAppend | undefined, block: string): ChatDraftAppendResult {
 		if (!this.canSubmit) return 'unavailable';
 		if (!append) return this.markUnavailable(block);

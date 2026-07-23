@@ -216,6 +216,31 @@ describe('GitHistoryController', () => {
 		expect(history.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
 	});
 
+	it('keeps an open comment when a context change is requested', async () => {
+		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+		history.openCommit('/project', 'abcdef123');
+		await flushPromises();
+		await flushPromises();
+		history.document.openCommentComposer('a.ts', 'after', 1);
+		history.document.setCommentBody('Keep this draft');
+		history.document.setCommentSeverity('warning');
+
+		history.setDisplayOptions('/project', 'unified', 12);
+
+		expect(getGitCommitSnapshot).toHaveBeenCalledOnce();
+		expect(history.contextLines).toBe(5);
+		expect(history.document.commentComposer).toMatchObject({
+			open: true,
+			body: 'Keep this draft',
+			severity: 'warning',
+		});
+		expect(history.document.commentError).toBe(
+			'Add or close this comment before changing context lines.',
+		);
+	});
+
 	it('finishes the initial body batch when visible demand adds another file', async () => {
 		const files = Array.from({ length: 9 }, (_, index) => commitFile(`file-${index}.ts`));
 		const firstBodyCandidates = files.slice(0, 8).map((file) => file.path);

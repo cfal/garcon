@@ -150,6 +150,10 @@ export class GitComparisonController {
 
 	setDisplayOptions(projectPath: string, diffMode: DiffMode, contextLines: number): void {
 		const contextChanged = this.contextLines !== contextLines;
+		if (contextChanged && this.document.commentComposer.open) {
+			this.document.markContextChangeBlocked();
+			return;
+		}
 		this.diffMode = diffMode;
 		this.contextLines = contextLines;
 		this.document.setDisplayOptions(

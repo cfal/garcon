@@ -254,6 +254,10 @@ export class GitDiffDocumentController {
 		this.inlineComment.setSeverity(severity);
 	}
 
+	markContextChangeBlocked(): void {
+		this.inlineComment.markContextChangeBlocked();
+	}
+
 	submitComment(append: ChatDraftAppend | undefined): ChatDraftAppendResult {
 		const composer = this.commentComposer;
 		const source = this.commentSource;

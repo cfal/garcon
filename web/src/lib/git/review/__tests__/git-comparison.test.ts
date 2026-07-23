@@ -84,6 +84,19 @@ function workingTreeSnapshotWithFile(): GitComparisonSnapshotReady {
 	};
 }
 
+function revisionSnapshotWithFile(): GitComparisonSnapshotReady {
+	return {
+		...workingTreeSnapshotWithFile(),
+		to: {
+			kind: 'revision',
+			requestedRevision: 'feature',
+			label: 'feature',
+			hash: 'b'.repeat(40),
+			shortHash: 'bbbbbbb',
+		},
+	};
+}
+
 function deferred<T>() {
 	let resolve!: (value: T) => void;
 	let reject!: (reason?: unknown) => void;
@@ -348,6 +361,34 @@ describe('GitComparisonController', () => {
 		await comparison.refresh('/project');
 		expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[1]?.[4]).toMatchObject({ context: 12 });
+	});
+
+	it('keeps an open revision comment when a context change is requested', async () => {
+		const snapshot = revisionSnapshotWithFile();
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		const comparison = new GitComparisonController();
+		comparison.openDialog({
+			fromRevision: 'main',
+			toKind: 'revision',
+			toRevision: 'feature',
+		});
+		await comparison.compare('/project');
+		comparison.document.openCommentComposer('src/a.ts', 'after', 1);
+		comparison.document.setCommentBody('Keep this draft');
+		comparison.document.setCommentSeverity('blocker');
+
+		comparison.setDisplayOptions('/project', 'unified', 12);
+
+		expect(getGitComparisonSnapshot).toHaveBeenCalledOnce();
+		expect(comparison.document.contextLines).toBe(5);
+		expect(comparison.document.commentComposer).toMatchObject({
+			open: true,
+			body: 'Keep this draft',
+			severity: 'blocker',
+		});
+		expect(comparison.document.commentError).toBe(
+			'Add or close this comment before changing context lines.',
+		);
 	});
 
 	it('preserves stale Working Tree content and an open comment across context changes', async () => {
