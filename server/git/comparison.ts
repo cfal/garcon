@@ -648,6 +648,8 @@ async function loadComparisonBody({
       'diff',
       '--patch-with-raw',
       '-z',
+      '--no-color',
+      '--no-ext-diff',
       `-U${context}`,
       '--find-renames',
       '--submodule=short',

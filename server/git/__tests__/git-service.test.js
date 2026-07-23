@@ -765,6 +765,59 @@ describe("commit history operations", () => {
     }
   });
 
+  it("ignores user diff renderers when loading exact historical bodies", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-normalized-diff-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.appendFile(path.join(projectPath, "a.txt"), "two\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "change file"]);
+      await runGitCommand(projectPath, ["config", "diff.external", "/bin/true"]);
+      await runGitCommand(projectPath, ["config", "color.ui", "always"]);
+
+      const snapshot = await git.getCommitSnapshot({ projectPath, commit: "HEAD" });
+      expect(snapshot.status).toBe("ready");
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        files: [{ path: "a.txt" }],
+      });
+      expect(bodies.files["a.txt"].bodyState).toBe("loaded");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
+      );
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: "a.txt" }],
+      });
+      expect(comparisonBodies.files["a.txt"].bodyState).toBe("loaded");
+      expect(comparisonBodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a file body separate when the same path becomes a directory", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-file-to-directory-"),
