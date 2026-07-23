@@ -2,15 +2,18 @@
 	import { untrack } from 'svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import type { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitPorcelainPanelProps {
 		projectPath: string;
 		selectedFile: string | null;
 		porcelain: GitPorcelainState;
+		onCompareRevisions: () => void;
 	}
 
-	let { projectPath, selectedFile, porcelain }: GitPorcelainPanelProps = $props();
+	let { projectPath, selectedFile, porcelain, onCompareRevisions }: GitPorcelainPanelProps = $props();
 	let pendingConfirmation = $state<
 		| { type: 'accept-conflict'; scopeKey: string; filePath: string; side: 'ours' | 'theirs' }
 		| { type: 'drop-stash'; scopeKey: string; stashRef: string }
@@ -296,38 +299,15 @@
 					</div>
 				{/if}
 			{:else if porcelain.inspectorView === 'graph'}
-				<div class="mb-3 flex flex-wrap items-center gap-2">
-					<input
-						type="text"
-						bind:value={porcelain.compareBase}
-						class="w-28 rounded border border-border bg-muted px-2 py-1 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					/>
-					<span class="text-muted-foreground">...</span>
-					<input
-						type="text"
-						bind:value={porcelain.compareHead}
-						class="w-28 rounded border border-border bg-muted px-2 py-1 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					/>
+				<div class="mb-3 flex justify-end">
 					<button
 						type="button"
-						class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-						onclick={() => porcelain.compareRefs(projectPath)}
+						class="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						onclick={onCompareRevisions}
 					>
-						Compare
+						<GitCompareArrows class="h-3.5 w-3.5" /> {m.git_compare_title()}
 					</button>
 				</div>
-				{#if porcelain.compareFiles.length > 0}
-					<div class="mb-3 space-y-1">
-						{#each porcelain.compareFiles as file}
-							<div class="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted">
-								<span class="w-8 shrink-0 font-mono text-muted-foreground">{file.status}</span>
-								<span class="min-w-0 flex-1 truncate font-mono text-foreground">{file.path}</span>
-								<span class="text-git-added">+{file.additions}</span>
-								<span class="text-git-deleted">-{file.deletions}</span>
-							</div>
-						{/each}
-					</div>
-				{/if}
 				<div class="space-y-1">
 					{#each porcelain.graphCommits.slice(0, 30) as commit}
 						<div class="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded px-2 py-1 hover:bg-muted">

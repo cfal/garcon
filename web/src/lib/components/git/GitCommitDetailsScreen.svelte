@@ -1,17 +1,12 @@
 <script lang="ts">
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { GitCommitFileSummary, GitCommitSnapshotReady } from '$lib/api/git.js';
-	import {
-		containerPresentationForWidth,
-		observeContainerWidth,
-		type ContainerPresentation,
-	} from '$lib/components/shared/container-presentation.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
-	import { cn } from '$lib/utils/cn';
-	import GitCommitChangedFileList from './GitCommitChangedFileList.svelte';
+	import type { GitReviewCommentDraft } from '$lib/api/git.js';
+	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import GitCommitDetailsHeader from './GitCommitDetailsHeader.svelte';
-	import GitCommitVirtualDiffSurface from './GitCommitVirtualDiffSurface.svelte';
-	import { gitContainerBreakpoints } from './git-container-presentation.js';
+	import GitDiffDocumentScreen from './GitDiffDocumentScreen.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitCommitDetailsScreenProps {
 		snapshot: GitCommitSnapshotReady | null;
@@ -25,170 +20,92 @@
 		focusedFilePath: string | null;
 		isMobile: boolean;
 		fontSize: number;
+		diffMode: DiffMode;
+		contextLines: number;
+		diffFontSize: string;
 		onBack: () => void;
 		onRetry: () => void;
 		onSelectParent: (parent: string | null) => void;
 		onRevertCommit: () => void;
+		onCompare: () => void;
+		onSetDiffMode: (mode: DiffMode) => void;
+		onSetContextLines: (lines: number) => void;
+		onSetDiffFontSize: (size: string) => void;
 		onSelectFile: (file: string) => void;
 		onFileFilterChange: (value: string) => void;
 		onVisibleRowsChange: (rows: GitVirtualReviewRow[]) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
+		composerState: CommentComposerState;
+		commentFeedback: {
+			filePath: string;
+			side: 'before' | 'after';
+			line: number;
+			message: string;
+		} | null;
+		commentError: string | null;
+		commentCopyText: string | null;
+		onAddComment: (filePath: string, side: 'before' | 'after', line: number) => void;
+		onComposerBodyChange: (body: string) => void;
+		onComposerSeverityChange: (severity: GitReviewCommentDraft['severity']) => void;
+		onComposerSubmit: () => void;
+		onComposerClose: () => void;
+		onComposerFocusHandled: () => void;
+		onOpenChat: () => void;
 	}
 
-	let {
-		snapshot,
-		files,
-		isLoading,
-		error,
-		rows,
-		fileRowIndex,
-		scrollRequest,
-		fileFilter,
-		focusedFilePath,
-		isMobile,
-		fontSize,
-		onBack,
-		onRetry,
-		onSelectParent,
-		onRevertCommit,
-		onSelectFile,
-		onFileFilterChange,
-		onVisibleRowsChange,
-		onOpenInEditor,
-	}: GitCommitDetailsScreenProps = $props();
-
-	type SinglePane = 'files' | 'diff';
-	let containerWidth = $state(0);
-	let singlePane = $state<SinglePane>('files');
-	const observeDetailsWidth = observeContainerWidth((width) => {
-		containerWidth = width;
-	});
-	let containerPresentation = $derived<ContainerPresentation>(
-		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, gitContainerBreakpoints),
-	);
-	let isSinglePane = $derived(containerPresentation === 'narrow');
-
-	function singlePaneClass(pane: SinglePane): string {
-		return singlePane === pane
-			? 'text-interactive-accent border-b-2 border-interactive-accent'
-			: 'text-muted-foreground hover:text-foreground';
-	}
-
-	function handleSelectFile(filePath: string): void {
-		onSelectFile(filePath);
-		if (isSinglePane) singlePane = 'diff';
-	}
+	let props: GitCommitDetailsScreenProps = $props();
 </script>
 
-<div
-	class="flex min-h-0 flex-1 flex-col bg-background"
-	data-git-history-details
-	data-git-history-layout={containerPresentation}
-	{@attach observeDetailsWidth}
->
-	{#if snapshot}
-		<GitCommitDetailsHeader {snapshot} {onBack} {onSelectParent} {onRevertCommit} />
-		{#if error}
-			<div
-				class="border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
-			>
-				{error}
-			</div>
-		{/if}
-		{#if isLoading}
-			<div
-				class="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted-foreground"
-			>
-				<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-				Loading commit details
-			</div>
-		{/if}
-		{#if isSinglePane}
-			<div class="flex shrink-0 border-b border-border" data-git-history-segmented-navigation>
-				{#each ['files', 'diff'] as const as pane}
-					<button
-						type="button"
-						class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {singlePaneClass(pane)}"
-						aria-pressed={singlePane === pane}
-						onclick={() => {
-							singlePane = pane;
-						}}
-					>
-						{pane === 'files' ? 'Files' : 'Diff'}
-						{#if pane === 'files'}
-							<span class="text-[10px] opacity-70">({files.length})</span>
-						{/if}
-					</button>
-				{/each}
-			</div>
-		{/if}
-		<div class="relative flex min-h-0 flex-1 overflow-hidden">
-			<div
-				class={cn(
-					'flex min-h-0 flex-col overflow-hidden bg-background',
-					isSinglePane ? 'absolute inset-0' : 'w-72 shrink-0 border-r border-border',
-					isSinglePane && singlePane !== 'files' && 'invisible pointer-events-none',
-				)}
-				aria-hidden={isSinglePane && singlePane !== 'files'}
-				inert={isSinglePane && singlePane !== 'files'}
-				data-git-history-files-pane
-			>
-				<GitCommitChangedFileList
-					{files}
-					{fileFilter}
-					{focusedFilePath}
-					{onFileFilterChange}
-					onSelectFile={handleSelectFile}
-				/>
-			</div>
-			<div
-				class={cn(
-					'flex min-h-0 min-w-0 flex-col overflow-hidden',
-					isSinglePane ? 'absolute inset-0' : 'flex-1',
-					isSinglePane && singlePane !== 'diff' && 'invisible pointer-events-none',
-				)}
-				aria-hidden={isSinglePane && singlePane !== 'diff'}
-				inert={isSinglePane && singlePane !== 'diff'}
-				data-git-history-diff-pane
-			>
-				<GitCommitVirtualDiffSurface
-					{rows}
-					{fileRowIndex}
-					{fontSize}
-					scrollToRequest={scrollRequest}
-					overscan={isSinglePane ? 3 : 18}
-					{onVisibleRowsChange}
-					onSelectFile={handleSelectFile}
-					{onOpenInEditor}
-				/>
-			</div>
-		</div>
-	{:else if isLoading}
-		<div class="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
-			<LoaderCircle class="h-5 w-5 animate-spin" />
-			Loading commit
-		</div>
-	{:else}
-		<div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-			<div class="max-w-md text-sm text-status-error-foreground">
-				{error ?? 'Commit was not found.'}
-			</div>
-			<div class="flex items-center gap-2">
-				<button
-					type="button"
-					class="rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					onclick={onBack}
-				>
-					Back
-				</button>
-				<button
-					type="button"
-					class="rounded bg-interactive-accent px-3 py-1.5 text-sm text-interactive-accent-foreground hover:bg-interactive-accent/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					onclick={onRetry}
-				>
-					Retry
-				</button>
-			</div>
-		</div>
+{#snippet header()}
+	{#if props.snapshot}
+		<GitCommitDetailsHeader
+			snapshot={props.snapshot}
+			onBack={props.onBack}
+			onSelectParent={props.onSelectParent}
+			onRevertCommit={props.onRevertCommit}
+			onCompare={props.onCompare}
+			diffMode={props.diffMode}
+			contextLines={props.contextLines}
+			diffFontSize={props.diffFontSize}
+			onSetDiffMode={props.onSetDiffMode}
+			onSetContextLines={props.onSetContextLines}
+			onSetDiffFontSize={props.onSetDiffFontSize}
+		/>
 	{/if}
-</div>
+{/snippet}
+
+<GitDiffDocumentScreen
+	{header}
+	documentId={props.snapshot?.documentId ?? null}
+	documentAvailable={Boolean(props.snapshot)}
+	files={props.files}
+	isLoading={props.isLoading}
+	error={props.error}
+	rows={props.rows}
+	fileRowIndex={props.fileRowIndex}
+	scrollRequest={props.scrollRequest}
+	fileFilter={props.fileFilter}
+	focusedFilePath={props.focusedFilePath}
+	isMobile={props.isMobile}
+	fontSize={props.fontSize}
+	loadingLabel={m.git_commit_details_loading()}
+	emptyErrorLabel={m.git_commit_not_found()}
+	emptyDocumentLabel={m.git_commit_no_changes()}
+	onBack={props.onBack}
+	onRetry={props.onRetry}
+	onSelectFile={props.onSelectFile}
+	onFileFilterChange={props.onFileFilterChange}
+	onVisibleRowsChange={props.onVisibleRowsChange}
+	onOpenInEditor={props.onOpenInEditor}
+	composerState={props.composerState}
+	commentFeedback={props.commentFeedback}
+	commentError={props.commentError}
+	commentCopyText={props.commentCopyText}
+	onAddComment={props.onAddComment}
+	onComposerBodyChange={props.onComposerBodyChange}
+	onComposerSeverityChange={props.onComposerSeverityChange}
+	onComposerSubmit={props.onComposerSubmit}
+	onComposerClose={props.onComposerClose}
+	onComposerFocusHandled={props.onComposerFocusHandled}
+	onOpenChat={props.onOpenChat}
+/>

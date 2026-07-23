@@ -110,6 +110,8 @@ function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => 
 					category: 'normal' as const,
 					isBinary: false,
 					isTooLarge: false,
+					renderedRowCount: 2,
+					patchBytes: 64,
 					rows: [
 						{
 							key: `hunk-0:${path}`,
@@ -171,6 +173,25 @@ describe('GitHistoryController', () => {
 				offset: 0,
 			}),
 		);
+	});
+
+	it('preserves loaded pages when the History view remounts', async () => {
+		vi.mocked(getGitHistoryCommits).mockResolvedValue({
+			project: '/project',
+			ref: 'HEAD',
+			commits: [commit('abcdef123', 'initial')],
+			nextOffset: null,
+		});
+		const history = new GitHistoryController();
+
+		history.ensureInitialLoaded('/project');
+		await flushPromises();
+		history.commits = [...history.commits, commit('older1234', 'older page')];
+
+		history.ensureInitialLoaded('/project');
+
+		expect(getGitHistoryCommits).toHaveBeenCalledOnce();
+		expect(history.commits.map((entry) => entry.subject)).toEqual(['initial', 'older page']);
 	});
 
 	it('opens a commit screen and loads first body candidates', async () => {

@@ -19,7 +19,7 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 // Mock the git API module
 vi.mock('$lib/api/git.js', () => ({
 	getGitWorkbenchSnapshot: vi.fn(),
-	getGitWorkbenchFingerprint: vi.fn(),
+	getGitWorkingTreeFingerprint: vi.fn(),
 	getGitReviewFileBodies: vi.fn(),
 	getGitConflicts: vi.fn(),
 	getGitConflictDetails: vi.fn(),
@@ -33,7 +33,6 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitFileHistory: vi.fn(),
 	getGitBlame: vi.fn(),
 	getGitGraph: vi.fn(),
-	getGitCompare: vi.fn(),
 	gitStageSelection: vi.fn(),
 	gitStageHunk: vi.fn(),
 	gitStagePaths: vi.fn(),
@@ -122,6 +121,8 @@ function makeReviewBody(
 		category: 'normal',
 		isBinary: false,
 		isTooLarge: false,
+		renderedRowCount: text ? 2 : 0,
+		patchBytes: text.length,
 		rows: text
 			? [
 					{
@@ -285,7 +286,7 @@ describe('GitWorkbenchStore', () => {
 		wb = new GitWorkbenchStore();
 		vi.clearAllMocks();
 		mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
-		mockedApi.getGitWorkbenchFingerprint.mockResolvedValue(makeFingerprint('v1:baseline'));
+		mockedApi.getGitWorkingTreeFingerprint.mockResolvedValue(makeFingerprint('v1:baseline'));
 		mockedApi.getGitReviewFileBodies.mockResolvedValue({
 			documentId: 'doc',
 			files: { 'a.ts': makeReviewBody('a.ts') },
@@ -433,7 +434,7 @@ describe('GitWorkbenchStore', () => {
 					workbenchFingerprint: 'v1:loaded',
 				}),
 			);
-			mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+			mockedApi.getGitWorkingTreeFingerprint.mockResolvedValue({
 				status: 'ready',
 				project: '/project',
 				fingerprintVersion: 1,
@@ -460,7 +461,7 @@ describe('GitWorkbenchStore', () => {
 					workbenchFingerprint: 'v1:loaded',
 				}),
 			);
-			mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+			mockedApi.getGitWorkingTreeFingerprint.mockResolvedValue({
 				status: 'ready',
 				project: '/project',
 				fingerprintVersion: 1,
@@ -483,7 +484,7 @@ describe('GitWorkbenchStore', () => {
 
 		it('ignores stale freshness responses after target changes', async () => {
 			const staleFingerprint =
-				deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
+				deferred<Awaited<ReturnType<typeof gitApi.getGitWorkingTreeFingerprint>>>();
 			mockedApi.getGitWorkbenchSnapshot
 				.mockResolvedValueOnce(
 					makeWorkbenchSnapshot({
@@ -497,7 +498,7 @@ describe('GitWorkbenchStore', () => {
 						workbenchFingerprint: 'v1:b',
 					}),
 				);
-			mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(staleFingerprint.promise);
+			mockedApi.getGitWorkingTreeFingerprint.mockReturnValueOnce(staleFingerprint.promise);
 
 			await wb.setTarget({
 				projectPath: '/project-a',
@@ -546,13 +547,13 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
 
 			await wb.setTarget(makeTarget());
-			mockedApi.getGitWorkbenchFingerprint.mockClear();
+			mockedApi.getGitWorkingTreeFingerprint.mockClear();
 
 			const stage = wb.staging.stageHunk('/project', makeActionTarget(), 0);
 
 			expect(wb.isReconcilingLocalGitMutation).toBe(true);
 			await wb.checkFreshness('/project');
-			expect(mockedApi.getGitWorkbenchFingerprint).not.toHaveBeenCalled();
+			expect(mockedApi.getGitWorkingTreeFingerprint).not.toHaveBeenCalled();
 
 			stageResult.resolve({ success: true });
 			await stage;
@@ -563,7 +564,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('ignores an in-flight freshness response after a local mutation begins', async () => {
-			const freshness = deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
+			const freshness = deferred<Awaited<ReturnType<typeof gitApi.getGitWorkingTreeFingerprint>>>();
 			const stageResult = deferred<Awaited<ReturnType<typeof gitApi.gitStageHunk>>>();
 			mockedApi.getGitWorkbenchSnapshot
 				.mockResolvedValueOnce(
@@ -576,7 +577,7 @@ describe('GitWorkbenchStore', () => {
 						workbenchFingerprint: 'v1:changed',
 					}),
 				);
-			mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(freshness.promise);
+			mockedApi.getGitWorkingTreeFingerprint.mockReturnValueOnce(freshness.promise);
 			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
 
 			await wb.setTarget(makeTarget());
@@ -657,14 +658,14 @@ describe('GitWorkbenchStore', () => {
 					workbenchFingerprint: 'v1:old',
 				}),
 			);
-			mockedApi.getGitWorkbenchFingerprint.mockResolvedValueOnce(makeFingerprint('v1:changed'));
+			mockedApi.getGitWorkingTreeFingerprint.mockResolvedValueOnce(makeFingerprint('v1:changed'));
 
 			await wb.setTarget(makeTarget());
 
 			await wb.runLocalGitMutation('/project', async () => true);
 
 			await vi.waitFor(() => {
-				expect(mockedApi.getGitWorkbenchFingerprint).toHaveBeenCalledWith(
+				expect(mockedApi.getGitWorkingTreeFingerprint).toHaveBeenCalledWith(
 					'/project',
 					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				);

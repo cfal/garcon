@@ -48,6 +48,11 @@ export interface GitDiffComposerDraft {
 	severity: GitDiffSeverity;
 }
 
+export type GitDiffComposerTarget = Pick<
+	GitDiffComposerDraft,
+	'open' | 'filePath' | 'side' | 'line'
+>;
+
 export interface GitDiffLineContextTarget {
 	side: GitDiffSide;
 	line: number;
@@ -103,7 +108,7 @@ interface BuildUnifiedRowViewsOptions {
 	readOnly: boolean;
 	selectedLineKeys: Set<string>;
 	commentsByLineKey: Map<string, GitReviewCommentDraft[]>;
-	composerTarget: GitDiffComposerDraft | null;
+	composerTarget: GitDiffComposerTarget | null;
 }
 
 interface BuildSplitRowViewsOptions {
@@ -113,7 +118,7 @@ interface BuildSplitRowViewsOptions {
 	readOnly: boolean;
 	selectedLineKeys: Set<string>;
 	commentsByLineKey: Map<string, GitReviewCommentDraft[]>;
-	composerTarget: GitDiffComposerDraft | null;
+	composerTarget: GitDiffComposerTarget | null;
 }
 
 export function buildUnifiedDiffRows(reviewData: GitFileReviewData | null): RenderedDiffRow[] {
@@ -423,7 +428,7 @@ function getSplitRowComments(
 
 function isComposerForUnifiedRow(
 	row: RenderedDiffRow,
-	composerTarget: GitDiffComposerDraft | null,
+	composerTarget: GitDiffComposerTarget | null,
 ): boolean {
 	if (row.kind === 'del') return isComposerForCell('before', row.beforeLine, composerTarget);
 	if (row.kind === 'add') return isComposerForCell('after', row.afterLine, composerTarget);
@@ -438,7 +443,7 @@ function isComposerForUnifiedRow(
 
 function isComposerForSplitRow(
 	row: SplitDiffRow,
-	composerTarget: GitDiffComposerDraft | null,
+	composerTarget: GitDiffComposerTarget | null,
 ): boolean {
 	return (
 		isComposerForCell('before', row.left?.line ?? null, composerTarget) ||
@@ -449,7 +454,7 @@ function isComposerForSplitRow(
 function isComposerForCell(
 	side: GitDiffSide,
 	line: number | null,
-	composerTarget: GitDiffComposerDraft | null,
+	composerTarget: GitDiffComposerTarget | null,
 ): boolean {
 	if (!composerTarget?.open || line === null) return false;
 	return composerTarget.side === side && composerTarget.line === line;

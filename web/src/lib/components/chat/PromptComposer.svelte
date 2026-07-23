@@ -256,6 +256,28 @@
 		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
 	}
 
+	// Reveals blocks appended from another surface without moving focus away from that surface.
+	$effect(() => {
+		const request = composerState.draftAppendRequest;
+		const selectedChatId = sessions.selectedChatId;
+		const target = textarea;
+		const visible = isVisible;
+		if (!request || request.chatId !== selectedChatId || !target || !visible) return;
+		const frameId = requestAnimationFrame(() => {
+			if (
+				composerState.draftAppendRequest?.requestId !== request.requestId ||
+				sessions.selectedChatId !== request.chatId ||
+				!textarea ||
+				!isVisible
+			) {
+				return;
+			}
+			autoResize();
+			textarea.scrollTop = textarea.scrollHeight;
+		});
+		return () => cancelAnimationFrame(frameId);
+	});
+
 	// Updates the "@" file-mention and "/" slash-command triggers. The two are
 	// mutually exclusive; an active file mention suppresses the slash menu.
 	function updateTriggers(value: string, caret: number) {

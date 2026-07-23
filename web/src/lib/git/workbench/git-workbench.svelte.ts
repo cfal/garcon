@@ -1,5 +1,5 @@
 import {
-	getGitWorkbenchFingerprint,
+	getGitWorkingTreeFingerprint,
 	getGitWorkbenchSnapshot,
 	type GitDiffTab,
 	type GitTreeNode,
@@ -309,7 +309,7 @@ export class GitWorkbenchStore {
 		this.isCheckingFreshness = true;
 
 		try {
-			const result = await getGitWorkbenchFingerprint(projectPath, { signal: controller.signal });
+			const result = await getGitWorkingTreeFingerprint(projectPath, { signal: controller.signal });
 			if (!this.isCurrentFreshnessLoad(requestTargetKey, requestProjectPath, generation)) return;
 			if (this.isReconcilingLocalGitMutation) return;
 			if (result.status !== 'ready') {

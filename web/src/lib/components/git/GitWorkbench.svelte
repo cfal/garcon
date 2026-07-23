@@ -45,6 +45,7 @@
 		diffFontSize: number;
 		onSendToChat?: (message: string) => Promise<boolean>;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
+		onCompareRevisions?: () => void;
 	}
 
 	let {
@@ -55,6 +56,7 @@
 		diffFontSize,
 		onSendToChat,
 		onOpenInEditor,
+		onCompareRevisions = () => undefined,
 	}: GitWorkbenchProps = $props();
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
@@ -404,6 +406,7 @@
 		projectPath={activeProjectPath ?? ''}
 		selectedFile={files.selectedFile}
 		{porcelain}
+		{onCompareRevisions}
 	/>
 	<GitVirtualDiffSurface
 		rows={review.virtualRows}
@@ -414,6 +417,7 @@
 		operationPending={staging.hasPendingOperations || wb.isExternallyStale}
 		scrollToRequest={review.scrollRequest}
 		composerState={drafts.commentComposer}
+		showInlineCommentComposer={!isMobile}
 		{overscan}
 		onVisibleRowsChange={handleVisibleRowsChange}
 		onSelectFile={handleSelectFile}
@@ -436,6 +440,7 @@
 		}}
 		onComposerSubmit={() => drafts.commitCommentComposer()}
 		onComposerClose={() => drafts.closeCommentComposer()}
+		onComposerFocusHandled={() => drafts.markCommentComposerFocused()}
 		{onOpenInEditor}
 	/>
 	{#if selection.hasSelection}
@@ -652,8 +657,9 @@
 				drafts.commentComposer = { ...drafts.commentComposer, body: b };
 			}}
 			onSeverityChange={(s) => {
-				drafts.commentComposer = { ...drafts.commentComposer, severity: s };
-			}}
+					drafts.commentComposer = { ...drafts.commentComposer, severity: s };
+				}}
+			onFocusHandled={() => drafts.markCommentComposerFocused()}
 			onSubmit={() => drafts.commitCommentComposer()}
 			onClose={() => drafts.closeCommentComposer()}
 		/>

@@ -65,6 +65,23 @@ describe('PromptComposer focus', () => {
 		expect(composer?.className).not.toContain('shadow-sm');
 	});
 
+	it('resizes and reveals a draft block appended from another surface', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-append',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 420 });
+		textarea.style.height = '48px';
+
+		await fireEvent.click(screen.getByTestId('append-draft'));
+		await nextAnimationFrame();
+
+		expect(textarea.value).toBe('Appended review block');
+		expect(textarea.style.height).toBe('300px');
+		expect(textarea.scrollTop).toBe(420);
+	});
+
 	it('focuses the composer after disabled chat startup and on each next selected chat', async () => {
 		const outsideButton = document.createElement('button');
 		outsideButton.dataset.testid = 'outside-focus';
@@ -273,9 +290,7 @@ describe('PromptComposer focus', () => {
 		expect(appCss).toMatch(
 			/@keyframes composer-thinking-border-pulse\s*\{[\s\S]*?border-color: hsl\(var\(--border\)\);[\s\S]*?border-color: hsl\(var\(--composer-thinking-pulse-emphasis\)\);[\s\S]*?\}/,
 		);
-		expect(staticTreatmentRule?.groups?.body).toContain(
-			'--composer-thinking-animation: none;',
-		);
+		expect(staticTreatmentRule?.groups?.body).toContain('--composer-thinking-animation: none;');
 		expect(staticTreatmentRule?.groups?.body).toContain(
 			'linear-gradient(hsl(var(--card)) 0 0) padding-box,',
 		);

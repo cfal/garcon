@@ -8,6 +8,7 @@
 	import History from '@lucide/svelte/icons/history';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import Upload from '@lucide/svelte/icons/upload';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Folder from '@lucide/svelte/icons/folder';
@@ -23,7 +24,7 @@
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	type ToolbarActionId = 'history' | 'review' | 'commit' | 'push' | 'refresh' | 'changes';
+	type ToolbarActionId = 'history' | 'compare' | 'review' | 'commit' | 'push' | 'refresh' | 'changes';
 
 	interface ToolbarAction {
 		id: ToolbarActionId;
@@ -63,6 +64,7 @@
 		onViewCommits: () => void;
 		onViewChanges: () => void;
 		onOpenReview: () => void;
+		onOpenComparison: () => void;
 		onCommit: () => void;
 		onPush: () => void;
 		onSetDiffMode: (mode: DiffMode) => void;
@@ -99,6 +101,7 @@
 		onViewCommits,
 		onViewChanges,
 		onOpenReview,
+		onOpenComparison,
 		onCommit,
 		onPush,
 		onSetDiffMode,
@@ -112,6 +115,7 @@
 	let actionRailWidth = $state(0);
 	let actionWidths = $state<Record<ToolbarActionId, number>>({
 		history: 0,
+		compare: 0,
 		review: 0,
 		commit: 0,
 		push: 0,
@@ -161,6 +165,14 @@
 				disabled: false,
 				priority: 4,
 				onclick: onViewCommits,
+			},
+			{
+				id: 'compare',
+				label: m.git_compare_action(),
+				title: m.git_compare_title(),
+				disabled: false,
+				priority: 5,
+				onclick: onOpenComparison,
 			},
 			{
 				id: 'review',
@@ -309,6 +321,7 @@
 
 		const nextWidths: Record<ToolbarActionId, number> = {
 			history: 0,
+			compare: 0,
 			review: 0,
 			commit: 0,
 			push: 0,
@@ -394,6 +407,8 @@
 {#snippet actionIcon(actionId: ToolbarActionId)}
 	{#if actionId === 'history'}
 		<History class="w-4 h-4" />
+	{:else if actionId === 'compare'}
+		<GitCompareArrows class="w-4 h-4" />
 	{:else if actionId === 'review'}
 		<MessageSquare class="w-4 h-4" />
 	{:else if actionId === 'push'}

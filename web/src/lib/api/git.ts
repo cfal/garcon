@@ -6,18 +6,14 @@ import { apiGet, apiPost, type ApiFetchOptions } from './client.js';
 // Workbench contract types
 
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
-export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!';
+export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | 'U' | '?' | '!';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
 export type GitStageMode = 'stage' | 'unstage';
 export const GIT_FRESHNESS_POLL_MS = 15_000;
-export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
+export const GIT_WORKING_TREE_FINGERPRINT_VERSION = 1;
 export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
 export type GitDiffLimitReason =
-	| 'patch-too-large'
-	| 'too-many-rows'
-	| 'line-too-long'
-	| 'binary'
-	| 'unsupported-file-kind';
+	'patch-too-large' | 'too-many-rows' | 'line-too-long' | 'binary' | 'unsupported-file-kind';
 
 export interface GitChangeStats {
 	additions: number;
@@ -60,7 +56,8 @@ export interface GitChangesTreeResult {
 
 export type GitDiffTab = 'unstaged' | 'staged';
 export type GitFileReviewMode = 'working' | 'staged';
-export type GitReviewBodyState = 'unloaded' | 'loading' | 'loaded' | 'binary' | 'too-large' | 'error';
+export type GitReviewBodyState =
+	'unloaded' | 'loading' | 'loaded' | 'binary' | 'too-large' | 'error';
 export type GitReviewLimitReason =
 	| 'collection-too-many-files'
 	| 'collection-too-many-rows'
@@ -138,6 +135,7 @@ export interface GitReviewFileSummary {
 	category: GitFileReviewCategory;
 	additions: number;
 	deletions: number;
+	statsKnown?: boolean;
 	estimatedRows: number;
 	bodyState: GitReviewBodyState;
 	bodyFingerprint: string;
@@ -165,6 +163,8 @@ export interface GitReviewFileBody {
 	category: GitFileReviewCategory;
 	isBinary: boolean;
 	isTooLarge: boolean;
+	renderedRowCount: number;
+	patchBytes: number;
 	rows: GitRenderedDiffRow[];
 	hunks: GitRenderedHunk[];
 	limitReason?: GitReviewLimitReason;
@@ -211,42 +211,39 @@ export interface GitWorkbenchSnapshotNotRepository {
 }
 
 export type GitWorkbenchSnapshotResponse =
-	| GitWorkbenchSnapshotReady
-	| GitWorkbenchSnapshotNotRepository;
+	GitWorkbenchSnapshotReady | GitWorkbenchSnapshotNotRepository;
 
-export type GitWorkbenchFingerprintResponse =
-	| GitWorkbenchFingerprintReady
-	| GitWorkbenchFingerprintNotRepository
-	| GitWorkbenchFingerprintUnknown;
+export type GitWorkingTreeFingerprintResponse =
+	| GitWorkingTreeFingerprintReady
+	| GitWorkingTreeFingerprintNotRepository
+	| GitWorkingTreeFingerprintUnknown;
 
-export interface GitWorkbenchFingerprintReady {
+export interface GitWorkingTreeFingerprintReady {
 	status: 'ready';
 	project: string;
-	fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+	fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
 	fingerprint: string;
 	changedPathCount: number;
 }
 
-export interface GitWorkbenchFingerprintNotRepository {
+export interface GitWorkingTreeFingerprintNotRepository {
 	status: 'not-git-repository';
 	project: string;
-	fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+	fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
 	fingerprint: null;
 	message: string;
 }
 
-export interface GitWorkbenchFingerprintUnknown {
+export interface GitWorkingTreeFingerprintUnknown {
 	status: 'unknown';
 	project: string;
-	fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+	fingerprintVersion: typeof GIT_WORKING_TREE_FINGERPRINT_VERSION;
 	fingerprint: null;
 	message: string;
 }
 
 export type GitQuickSummaryResponse =
-	| GitQuickSummaryReady
-	| GitQuickSummaryNotRepository
-	| GitQuickSummaryUnknown;
+	GitQuickSummaryReady | GitQuickSummaryNotRepository | GitQuickSummaryUnknown;
 
 export interface GitQuickSummaryReady {
 	status: 'ready';
@@ -389,13 +386,7 @@ export interface GitCommitParentOption {
 }
 
 export type GitCommitFileStatus =
-	| 'added'
-	| 'modified'
-	| 'deleted'
-	| 'renamed'
-	| 'copied'
-	| 'type-changed'
-	| 'unknown';
+	'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type-changed' | 'unknown';
 
 export interface GitCommitFileSummary {
 	path: string;
@@ -405,6 +396,7 @@ export interface GitCommitFileSummary {
 	category: GitFileReviewCategory;
 	additions: number;
 	deletions: number;
+	statsKnown?: boolean;
 	estimatedRows: number;
 	bodyState: GitReviewBodyState;
 	bodyFingerprint: string;
@@ -437,9 +429,7 @@ export interface GitCommitSnapshotNotFound {
 	message: string;
 }
 
-export type GitCommitSnapshotResponse =
-	| GitCommitSnapshotReady
-	| GitCommitSnapshotNotFound;
+export type GitCommitSnapshotResponse = GitCommitSnapshotReady | GitCommitSnapshotNotFound;
 
 export interface GitCommitFileBodiesResponse {
 	documentId: string;
@@ -518,14 +508,6 @@ export interface GitGraphCommit {
 	author: string;
 	date: string;
 	subject: string;
-}
-
-export interface GitCompareFile {
-	path: string;
-	status: string;
-	originalPath?: string;
-	additions: number;
-	deletions: number;
 }
 
 interface SuccessResponse {
@@ -650,12 +632,7 @@ export async function getGitCommitSnapshot(
 		bodyCandidateCount?: number;
 	},
 ): Promise<GitCommitSnapshotResponse> {
-	const {
-		parent = null,
-		context = 5,
-		bodyCandidateCount = 8,
-		...fetchOptions
-	} = options ?? {};
+	const { parent = null, context = 5, bodyCandidateCount = 8, ...fetchOptions } = options ?? {};
 	return apiPost<GitCommitSnapshotResponse>(
 		'/api/v1/git/history/commit/snapshot',
 		{ project, commit, parent, context, bodyCandidateCount },
@@ -685,11 +662,7 @@ export async function generateCommitMessage(
 	project: string,
 	files: string[],
 ): Promise<GenerateCommitMessageResponse> {
-	return apiPost(
-		'/api/v1/git/generate-commit-message',
-		{ project, files },
-		{ timeoutMs: 120_000 },
-	);
+	return apiPost('/api/v1/git/generate-commit-message', { project, files }, { timeoutMs: 120_000 });
 }
 
 export async function getRemoteStatus(project: string): Promise<GitRemoteStatus> {
@@ -759,12 +732,12 @@ export async function getGitWorkbenchSnapshot(
 	);
 }
 
-export async function getGitWorkbenchFingerprint(
+export async function getGitWorkingTreeFingerprint(
 	project: string,
 	options?: ApiFetchOptions,
-): Promise<GitWorkbenchFingerprintResponse> {
-	return apiPost<GitWorkbenchFingerprintResponse>(
-		'/api/v1/git/workbench/fingerprint',
+): Promise<GitWorkingTreeFingerprintResponse> {
+	return apiPost<GitWorkingTreeFingerprintResponse>(
+		'/api/v1/git/working-tree/fingerprint',
 		{ project },
 		options,
 	);
@@ -899,23 +872,14 @@ export async function getGitGraph(
 	);
 }
 
-export async function getGitCompare(
-	project: string,
-	base: string,
-	head: string,
-	options?: ApiFetchOptions,
-): Promise<{ files: GitCompareFile[] }> {
-	return apiGet<{ files: GitCompareFile[] }>(
-		`/api/v1/git/compare?${projectParam(project)}&base=${encodeURIComponent(base)}&head=${encodeURIComponent(head)}`,
-		options,
-	);
-}
-
 export async function getGitTargetCandidates(
 	project: string,
 	options?: ApiFetchOptions,
 ): Promise<{ targets: GitTargetCandidate[] }> {
-	return apiGet<{ targets: GitTargetCandidate[] }>(`/api/v1/git/targets?${projectParam(project)}`, options);
+	return apiGet<{ targets: GitTargetCandidate[] }>(
+		`/api/v1/git/targets?${projectParam(project)}`,
+		options,
+	);
 }
 
 export async function gitStageSelection(

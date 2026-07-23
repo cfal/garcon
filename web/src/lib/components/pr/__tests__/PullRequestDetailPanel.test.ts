@@ -55,6 +55,8 @@ function makeDetail(withThread = false): PullRequestDetail {
 						category: 'normal',
 						isBinary: false,
 						isTooLarge: false,
+						renderedRowCount: 0,
+						patchBytes: 0,
 						rows: [],
 						hunks: [],
 					},

@@ -5,8 +5,8 @@ import GitCommitVirtualDiffSurface from '../GitCommitVirtualDiffSurface.svelte';
 
 const file = {
 	path: 'a.ts',
-		indexStatus: 'M' as const,
-		workTreeStatus: ' ' as const,
+	indexStatus: 'M' as const,
+	workTreeStatus: ' ' as const,
 	category: 'normal' as const,
 	additions: 1,
 	deletions: 0,
@@ -33,13 +33,8 @@ const rows: GitVirtualReviewRow[] = [
 		filePath: 'a.ts',
 		estimatedHeight: 22,
 		file,
-		actionTarget: {
-			filePath: 'a.ts',
-			tab: 'staged',
-			mode: 'unstage',
-			contextLines: 5,
-		},
-		selectableLineKeys: ['line:a'],
+		actionTarget: null,
+		selectableLineKeys: [],
 		view: {
 			key: 'add',
 			row: {
@@ -64,22 +59,56 @@ const rows: GitVirtualReviewRow[] = [
 			comments: [],
 			showComposer: false,
 			beforeContextTarget: null,
-			afterContextTarget: null,
-			rowContextTarget: null,
+			afterContextTarget: {
+				side: 'after',
+				line: 1,
+				hunkIndex: 0,
+				diffLineIndex: 0,
+				rowKind: 'add',
+			},
+			rowContextTarget: {
+				side: 'after',
+				line: 1,
+				hunkIndex: 0,
+				diffLineIndex: 0,
+				rowKind: 'add',
+			},
 		},
 	},
 ];
 
 describe('GitCommitVirtualDiffSurface', () => {
 	it('renders commit diffs through one virtual root without worktree actions', async () => {
+		const onAddComment = vi.fn();
 		const { container } = render(GitCommitVirtualDiffSurface, {
 			props: {
+				documentId: 'doc',
 				rows,
 				fileRowIndex: new Map([['a.ts', 0]]),
 				fontSize: 12,
 				scrollToRequest: null,
+				composerState: {
+					open: false,
+					focusPending: false,
+					filePath: '',
+					side: 'after',
+					line: 0,
+					body: '',
+					severity: 'note',
+				},
+				commentFeedback: null,
+				commentError: null,
+				commentCopyText: null,
 				onVisibleRowsChange: vi.fn(),
 				onSelectFile: vi.fn(),
+				onAddComment,
+				onComposerBodyChange: vi.fn(),
+				onComposerSeverityChange: vi.fn(),
+				onComposerSubmit: vi.fn(),
+				onComposerClose: vi.fn(),
+				onComposerFocusHandled: vi.fn(),
+				onOpenChat: vi.fn(),
+				emptyMessage: 'No changes in this commit.',
 			},
 		});
 
@@ -90,7 +119,8 @@ describe('GitCommitVirtualDiffSurface', () => {
 		expect(container.querySelectorAll('[data-git-virtual-diff-root]')).toHaveLength(1);
 		expect(screen.queryByRole('button', { name: /stage/i })).toBeNull();
 		expect(screen.queryByRole('button', { name: /unstage/i })).toBeNull();
-		expect(screen.queryByRole('button', { name: /comment/i })).toBeNull();
 		expect(screen.getByText('+added line')).toBeTruthy();
+		await screen.getByText('+added line').click();
+		expect(onAddComment).toHaveBeenCalledWith('a.ts', 'after', 1);
 	});
 });

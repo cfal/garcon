@@ -7,29 +7,31 @@
 	import { getTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
-	interface ComposerState {
-		open: boolean;
-		filePath: string;
-		side: 'before' | 'after';
-		line: number;
-		body: string;
-		severity: 'note' | 'warning' | 'blocker';
-	}
+	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
 
 	interface Props {
-		composer: ComposerState;
+		composer: CommentComposerState;
 		onBodyChange: (body: string) => void;
 		onSeverityChange: (severity: 'note' | 'warning' | 'blocker') => void;
 		onSubmit: () => void;
 		onClose: () => void;
+		onFocusHandled: () => void;
 	}
 
-	let { composer, onBodyChange, onSeverityChange, onSubmit, onClose }: Props = $props();
+	let { composer, onBodyChange, onSeverityChange, onSubmit, onClose, onFocusHandled }: Props =
+		$props();
 	const transientLayers = getTransientLayers();
 	const focusReturnTarget =
 		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
 			? document.activeElement
 			: null;
+	let textareaElement = $state<HTMLTextAreaElement | null>(null);
+
+	$effect(() => {
+		if (!textareaElement || !composer.focusPending) return;
+		textareaElement.focus();
+		onFocusHandled();
+	});
 
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') {
@@ -91,6 +93,7 @@
 
 		<!-- Body -->
 		<textarea
+			bind:this={textareaElement}
 			value={composer.body}
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
 			placeholder={m.git_comment_placeholder()}

@@ -2,23 +2,47 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import type { GitCommitSnapshotReady } from '$lib/api/git.js';
+	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
+	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitCommitDetailsHeaderProps {
 		snapshot: GitCommitSnapshotReady;
 		onBack: () => void;
 		onSelectParent: (parentHash: string | null) => void;
 		onRevertCommit: () => void;
+		onCompare: () => void;
+		diffMode: DiffMode;
+		contextLines: number;
+		diffFontSize: string;
+		onSetDiffMode: (mode: DiffMode) => void;
+		onSetContextLines: (lines: number) => void;
+		onSetDiffFontSize: (size: string) => void;
 	}
 
-	let { snapshot, onBack, onSelectParent, onRevertCommit }: GitCommitDetailsHeaderProps = $props();
+	let {
+		snapshot,
+		onBack,
+		onSelectParent,
+		onRevertCommit,
+		onCompare,
+		diffMode,
+		contextLines,
+		diffFontSize,
+		onSetDiffMode,
+		onSetContextLines,
+		onSetDiffFontSize,
+	}: GitCommitDetailsHeaderProps = $props();
 
 	let copied = $state(false);
 	let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	let additions = $derived(snapshot.files.reduce((sum, file) => sum + file.additions, 0));
 	let deletions = $derived(snapshot.files.reduce((sum, file) => sum + file.deletions, 0));
+	let statsKnown = $derived(snapshot.files.every((file) => file.statsKnown !== false));
 	let fullMessage = $derived.by(() => {
 		const body = snapshot.commit.body.trim();
 		return body ? `${snapshot.commit.subject}\n\n${body}` : snapshot.commit.subject;
@@ -103,8 +127,8 @@
 	<div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
 		<div class="flex min-w-0 flex-wrap items-center gap-2">
 			<span>{snapshot.files.length} changed files</span>
-			<span class="text-git-added">+{additions}</span>
-			<span class="text-git-deleted">-{deletions}</span>
+			<span class="text-git-added">+{statsKnown ? additions : '?'}</span>
+			<span class="text-git-deleted">-{statsKnown ? deletions : '?'}</span>
 			{#if snapshot.parentOptions.length > 1}
 				<label class="inline-flex items-center gap-1">
 					<span>Diff against</span>
@@ -120,13 +144,31 @@
 				</label>
 			{/if}
 		</div>
-		<button
-			type="button"
-			class="inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			onclick={onRevertCommit}
-		>
-			<Undo2 class="h-3.5 w-3.5" />
-			Revert
-		</button>
+		<div class="flex items-center gap-2">
+			<GitDiffSettingsMenu
+				{diffMode}
+				{contextLines}
+				{diffFontSize}
+				{onSetDiffMode}
+				{onSetContextLines}
+				{onSetDiffFontSize}
+			/>
+			<button
+				type="button"
+				class="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				onclick={onCompare}
+			>
+				<GitCompareArrows class="h-3.5 w-3.5" />
+				{m.git_compare_action()}
+			</button>
+			<button
+				type="button"
+				class="inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				onclick={onRevertCommit}
+			>
+				<Undo2 class="h-3.5 w-3.5" />
+				Revert
+			</button>
+		</div>
 	</div>
 </div>

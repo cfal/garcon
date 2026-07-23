@@ -1,5 +1,5 @@
-// Owns repository status, branch and remote metadata, view state, and
-// repository actions used by the Git surface.
+// Owns repository status, branch and remote metadata, and repository actions
+// used by the Git surface.
 
 import * as m from '$lib/paraglide/messages.js';
 import {
@@ -43,7 +43,6 @@ export class GitRepositoryController {
 	isCommitting = $state(false);
 	wrapText = $state(true);
 	showLegend = $state(false);
-	activeView = $state<'changes' | 'history'>('changes');
 	remoteStatus = $state<GitRemoteStatus | null>(null);
 	isFetching = $state(false);
 	isPulling = $state(false);

@@ -79,6 +79,8 @@ function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
 		category: 'normal',
 		isBinary: false,
 		isTooLarge: false,
+		renderedRowCount: renderedRows.length,
+		patchBytes: 128,
 		rows: renderedRows,
 		hunks: [],
 	};
@@ -86,7 +88,6 @@ function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
 		summary: {
 			documentId: 'document-1',
 			project: '/project',
-			mode: 'working',
 			context: 5,
 			files: [file],
 			limits: {
@@ -106,50 +107,62 @@ function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
 		loadingBodies: new Set(),
 		focusedFilePath: file.path,
 		diffMode,
-		activeTab: 'unstaged',
 		contextLines: 5,
-		commentsByFile: {},
-		composerState: {
-			open: false,
-			filePath: '',
-			side: 'after',
-			line: 0,
-			body: '',
-			severity: 'note',
+		interaction: {
+			kind: 'workbench',
+			activeTab: 'unstaged',
+			composerState: {
+				open: false,
+				focusPending: false,
+				filePath: '',
+				side: 'after',
+				line: 0,
+				body: '',
+				severity: 'note',
+			},
+			selectedLineKeys: new Set(),
 		},
-		selectedLineKeys: new Set(),
 	}).filter((row): row is DiffContentRow => row.kind === 'unified-row' || row.kind === 'split-row');
 }
 
-function renderRow(row: DiffContentRow, overrides: Partial<GitVirtualDiffRowProps> = {}) {
-	const props: GitVirtualDiffRowProps = {
-		row,
+function renderRowInteraction(): Extract<
+	GitVirtualDiffRowProps['interaction'],
+	{ kind: 'workbench' }
+> {
+	return {
+		kind: 'workbench',
+		showInlineCommentComposer: true,
 		activeTab: 'unstaged',
-		fontSize: 12,
 		selectedLineKeys: new Set(),
 		operationPending: false,
 		composerState: {
 			open: false,
+			focusPending: false,
 			filePath: '',
 			side: 'after',
 			line: 0,
 			body: '',
 			severity: 'note',
 		},
-		editingCommentId: null,
-		editBody: '',
-		onStartEdit: vi.fn(),
-		onCancelEdit: vi.fn(),
-		onEditBodyChange: vi.fn(),
-		onSaveEdit: vi.fn(),
-		onRemoveComment: vi.fn(),
+		commentFeedback: null,
+		commentError: null,
+		commentCopyText: null,
 		onToggleLineSelection: vi.fn(),
 		onSelectLineRange: vi.fn(),
 		onStageHunk: vi.fn(),
 		onUnstageHunk: vi.fn(),
 		onStageLine: vi.fn(),
 		onUnstageLine: vi.fn(),
-		onAddCommentForFile: vi.fn(),
+		onAddComment: vi.fn(),
+		onOpenChat: vi.fn(),
+	};
+}
+
+function renderRow(row: DiffContentRow, overrides: Partial<GitVirtualDiffRowProps> = {}) {
+	const props: GitVirtualDiffRowProps = {
+		row,
+		fontSize: 12,
+		interaction: renderRowInteraction(),
 		...overrides,
 	};
 	return { ...render(GitVirtualDiffRow, { props }), props };
@@ -173,21 +186,46 @@ describe('GitVirtualDiffRow', () => {
 		const addedRow = findUnifiedRow('add');
 		const contextRow = findUnifiedRow('context');
 
-		const added = renderRow(addedRow, { onAddCommentForFile });
+		const added = renderRow(addedRow, {
+			interaction: { ...renderRowInteraction(), onAddComment: onAddCommentForFile },
+		});
 		await fireEvent.click(screen.getByText('+new line'));
 		expect(onAddCommentForFile).toHaveBeenLastCalledWith('src/example.ts', 'after', 1);
 		added.unmount();
 
-		renderRow(contextRow, { onAddCommentForFile });
+		renderRow(contextRow, {
+			interaction: { ...renderRowInteraction(), onAddComment: onAddCommentForFile },
+		});
 		await fireEvent.click(screen.getByText(/shared line/));
 		expect(onAddCommentForFile).toHaveBeenLastCalledWith('src/example.ts', 'after', 2);
+	});
+
+	it('targets the before side from the old-line gutter in unified mode', async () => {
+		const onAddCommentForFile = vi.fn();
+		const contextRow = findUnifiedRow('context');
+		const { container } = renderRow(contextRow, {
+			interaction: { ...renderRowInteraction(), onAddComment: onAddCommentForFile },
+		});
+		const lineButtons = container.querySelectorAll<HTMLElement>(
+			'[data-git-diff-review-row] > button',
+		);
+
+		await fireEvent.click(lineButtons[0]!);
+
+		expect(onAddCommentForFile).toHaveBeenCalledWith('src/example.ts', 'before', 2);
 	});
 
 	it('keeps modifier-click line selection without opening review', async () => {
 		const addedRow = findUnifiedRow('add');
 		const onAddCommentForFile = vi.fn();
 		const onToggleLineSelection = vi.fn();
-		renderRow(addedRow, { onAddCommentForFile, onToggleLineSelection });
+		renderRow(addedRow, {
+			interaction: {
+				...renderRowInteraction(),
+				onAddComment: onAddCommentForFile,
+				onToggleLineSelection,
+			},
+		});
 
 		await fireEvent.click(screen.getByText('+new line'), { ctrlKey: true });
 
@@ -199,7 +237,13 @@ describe('GitVirtualDiffRow', () => {
 		const addedRow = findUnifiedRow('add');
 		const onAddCommentForFile = vi.fn();
 		const onStageLine = vi.fn();
-		renderRow(addedRow, { onAddCommentForFile, onStageLine });
+		renderRow(addedRow, {
+			interaction: {
+				...renderRowInteraction(),
+				onAddComment: onAddCommentForFile,
+				onStageLine,
+			},
+		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Stage line' }));
 
@@ -218,11 +262,37 @@ describe('GitVirtualDiffRow', () => {
 		expect(container.querySelector('[data-git-diff-review-row]')).not.toBeNull();
 	});
 
+	it('does not render the inline composer when the workbench uses its mobile modal', () => {
+		const addedRow = findUnifiedRow('add');
+		addedRow.view = { ...addedRow.view, showComposer: true };
+		const interaction = renderRowInteraction();
+		interaction.showInlineCommentComposer = false;
+		interaction.composerState = {
+			open: true,
+			focusPending: true,
+			filePath: addedRow.file.path,
+			side: 'after',
+			line: 1,
+			body: '',
+			severity: 'note',
+		};
+
+		const { container } = renderRow(addedRow, { interaction });
+
+		expect(container.querySelector('[data-git-comment-composer]')).toBeNull();
+	});
+
 	it('opens the correct review side in split mode and isolates staging', async () => {
 		const splitRow = findSplitChangeRow();
 		const onAddCommentForFile = vi.fn();
 		const onStageLine = vi.fn();
-		renderRow(splitRow, { onAddCommentForFile, onStageLine });
+		renderRow(splitRow, {
+			interaction: {
+				...renderRowInteraction(),
+				onAddComment: onAddCommentForFile,
+				onStageLine,
+			},
+		});
 
 		await fireEvent.click(screen.getByText('-old line'));
 		expect(onAddCommentForFile).toHaveBeenLastCalledWith('src/example.ts', 'before', 1);
@@ -237,8 +307,11 @@ describe('GitVirtualDiffRow', () => {
 
 	it('uses native buttons for keyboard-reachable review activation', () => {
 		const addedRow = findUnifiedRow('add');
-		renderRow(addedRow);
+		const { container } = renderRow(addedRow);
 
 		expect(screen.getByText('+new line').closest('button')).not.toBeNull();
+		for (const button of container.querySelectorAll('button')) {
+			expect(button.textContent?.trim() || button.getAttribute('aria-label')).toBeTruthy();
+		}
 	});
 });

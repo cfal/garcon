@@ -2,11 +2,11 @@ import {
 	getGitReviewFileBodies,
 	type GitDiffTab,
 	type GitRenderedDiffRow,
-	type GitReviewCommentDraft,
 	type GitReviewDocumentSummary,
 	type GitReviewFileBody,
 	type GitReviewFileSummary,
 	type GitReviewLimitReason,
+	type GitReviewCommentDraft,
 } from '$lib/api/git.js';
 import {
 	buildCommentsByLineKey,
@@ -55,14 +55,14 @@ export interface GitVirtualFileLimitRow extends GitVirtualRowBase {
 	file: GitReviewFileSummary;
 	title: string;
 	message: string;
-	reason: GitReviewLimitReason;
+	reason: GitReviewLimitReason | 'stale-document';
 }
 
 export interface GitVirtualUnifiedRow extends GitVirtualRowBase {
 	kind: 'unified-row';
 	file: GitReviewFileSummary;
 	view: UnifiedDiffRowView;
-	actionTarget: GitDiffActionTarget;
+	actionTarget: GitDiffActionTarget | null;
 	selectableLineKeys: string[];
 }
 
@@ -70,7 +70,7 @@ export interface GitVirtualSplitRow extends GitVirtualRowBase {
 	kind: 'split-row';
 	file: GitReviewFileSummary;
 	view: SplitDiffRowView;
-	actionTarget: GitDiffActionTarget;
+	actionTarget: GitDiffActionTarget | null;
 	selectableLineKeys: string[];
 }
 
@@ -87,25 +87,37 @@ export interface GitVirtualReviewDocumentDeps {
 	visibleFilePaths: () => string[];
 	selectedFile: () => string | null;
 	selectedLineKeys: () => Set<string>;
-	commentsByFile: () => Record<string, GitReviewCommentDraft[]>;
+	commentsByFile?: () => Record<string, GitReviewCommentDraft[]>;
 	composerState: () => CommentComposerState;
 	surfaceError: (message: string) => void;
 	markExternallyStale: () => void;
 }
 
+export type GitVirtualDocumentSummary = Pick<
+	GitReviewDocumentSummary,
+	'documentId' | 'project' | 'context' | 'files' | 'limits' | 'collectionLimit'
+>;
+
+export type GitVirtualRowInteraction =
+	| {
+			kind: 'workbench';
+			activeTab: GitDiffTab;
+			selectedLineKeys: Set<string>;
+			composerState: CommentComposerState;
+	  }
+	| { kind: 'commentable'; composerState: CommentComposerState }
+	| { kind: 'read-only' };
+
 export interface BuildVirtualRowsOptions {
-	summary: GitReviewDocumentSummary;
+	summary: GitVirtualDocumentSummary;
 	visibleFilePaths: string[];
 	fileBodies: Record<string, GitReviewFileBody>;
 	loadingBodies: Set<string>;
 	focusedFilePath: string | null;
 	diffMode: DiffMode;
-	activeTab: GitDiffTab;
 	contextLines: number;
-	commentsByFile: Record<string, GitReviewCommentDraft[]>;
-	composerState: CommentComposerState;
-	selectedLineKeys: Set<string>;
-	readOnly?: boolean;
+	interaction: GitVirtualRowInteraction;
+	commentsByFile?: Record<string, GitReviewCommentDraft[]>;
 }
 
 type BodyCacheKey = `${string}|${GitDiffTab}|${number}|${string}|${string}`;
@@ -137,12 +149,14 @@ export class GitVirtualReviewDocumentController {
 			loadingBodies: this.loadingBodies,
 			focusedFilePath: this.deps.selectedFile(),
 			diffMode: this.diffMode,
-			activeTab: this.deps.activeTab(),
 			contextLines: this.contextLines,
-			commentsByFile: this.deps.commentsByFile(),
-			composerState: this.deps.composerState(),
-			selectedLineKeys: this.deps.selectedLineKeys(),
-			readOnly: false,
+			interaction: {
+				kind: 'workbench',
+				activeTab: this.deps.activeTab(),
+				selectedLineKeys: this.deps.selectedLineKeys(),
+				composerState: this.deps.composerState(),
+			},
+			commentsByFile: this.deps.commentsByFile?.() ?? {},
 		});
 	});
 
@@ -425,7 +439,7 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 	for (const file of orderedFiles) {
 		rows.push({
 			kind: 'file-header',
-			id: fileHeaderRowId(file.path),
+			id: fileHeaderRowId(options.summary.documentId, file.path),
 			filePath: file.path,
 			estimatedHeight: 42,
 			file,
@@ -433,9 +447,23 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 		});
 
 		const body = options.fileBodies[file.path];
+		const limitReason = body?.limitReason ?? file.limitReason;
+		if (limitReason === 'unsupported-file-kind') {
+			rows.push(
+				fileLimitRow(
+					options.summary.documentId,
+					file,
+					limitReason,
+					m.git_virtual_diff_unavailable(),
+					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_large_diff_unavailable(),
+				),
+			);
+			continue;
+		}
 		if (file.isBinary || body?.bodyState === 'binary') {
 			rows.push(
 				fileLimitRow(
+					options.summary.documentId,
 					file,
 					'binary',
 					m.git_virtual_binary_file(),
@@ -447,8 +475,9 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 		if (file.isTooLarge || body?.bodyState === 'too-large') {
 			rows.push(
 				fileLimitRow(
+					options.summary.documentId,
 					file,
-					body?.limitReason ?? file.limitReason ?? 'file-too-many-rows',
+					limitReason ?? 'file-too-many-rows',
 					m.git_virtual_large_diff(),
 					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_large_diff_unavailable(),
 				),
@@ -458,7 +487,7 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 		if (!body) {
 			rows.push({
 				kind: 'file-placeholder',
-				id: filePlaceholderRowId(file.path),
+				id: filePlaceholderRowId(options.summary.documentId, file.path),
 				filePath: file.path,
 				estimatedHeight: Math.max(96, Math.min(720, file.estimatedRows * DEFAULT_ROW_HEIGHT)),
 				file,
@@ -469,6 +498,7 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 		if (body.error || body.bodyState === 'error') {
 			rows.push(
 				fileLimitRow(
+					options.summary.documentId,
 					file,
 					'git-timeout',
 					m.git_virtual_diff_failed(),
@@ -483,7 +513,7 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 	if (options.summary.collectionLimit) {
 		rows.push({
 			kind: 'collection-limit',
-			id: 'collection-limit',
+			id: `${options.summary.documentId}:collection-limit`,
 			filePath: '',
 			estimatedHeight: 112,
 			title: m.git_virtual_diff_limit_reached(),
@@ -499,39 +529,47 @@ function bodyRows(
 	renderedRows: GitRenderedDiffRow[],
 	options: BuildVirtualRowsOptions,
 ): GitVirtualReviewRow[] {
-	const actionTarget: GitDiffActionTarget = {
-		filePath: file.path,
-		tab: options.activeTab,
-		mode: options.activeTab === 'unstaged' ? 'stage' : 'unstage',
-		contextLines: options.contextLines,
-	};
-	const commentsByLineKey = buildCommentsByLineKey(options.commentsByFile[file.path] ?? []);
+	const workbenchInteraction =
+		options.interaction.kind === 'workbench' ? options.interaction : null;
+	const activeTab = workbenchInteraction?.activeTab ?? 'staged';
+	const actionTarget: GitDiffActionTarget | null = workbenchInteraction
+		? {
+				filePath: file.path,
+				tab: activeTab,
+				mode: activeTab === 'unstaged' ? 'stage' : 'unstage',
+				contextLines: options.contextLines,
+			}
+		: null;
+	const composerState =
+		options.interaction.kind === 'read-only' ? null : options.interaction.composerState;
 	const composerTarget =
-		options.composerState.open && options.composerState.filePath === file.path
+		composerState?.open && composerState.filePath === file.path
 			? {
-					open: options.composerState.open,
-					filePath: options.composerState.filePath,
-					side: options.composerState.side,
-					line: options.composerState.line,
-					body: options.composerState.body,
-					severity: options.composerState.severity,
+					open: composerState.open,
+					filePath: composerState.filePath,
+					side: composerState.side,
+					line: composerState.line,
 				}
 			: null;
 	const unifiedRows = buildUnifiedDiffRowsFromRenderedRows(renderedRows);
-	const selectableLineKeys = getSelectableLineKeys(unifiedRows, file.path, options.activeTab);
+	const selectableLineKeys = workbenchInteraction
+		? getSelectableLineKeys(unifiedRows, file.path, activeTab)
+		: [];
+	const selectedLineKeys = workbenchInteraction?.selectedLineKeys ?? new Set<string>();
+	const commentsByLineKey = buildCommentsByLineKey(options.commentsByFile?.[file.path] ?? []);
 
 	if (options.diffMode === 'split') {
 		return buildSplitDiffRowViews({
 			rows: buildSplitDiffRows(unifiedRows),
 			filePath: file.path,
-			activeTab: options.activeTab,
-			readOnly: options.readOnly === true,
-			selectedLineKeys: options.selectedLineKeys,
+			activeTab,
+			readOnly: !workbenchInteraction,
+			selectedLineKeys,
 			commentsByLineKey,
 			composerTarget,
 		}).map((view) => ({
 			kind: 'split-row',
-			id: diffRowId(file.path, view.key, 'split'),
+			id: diffRowId(options.summary.documentId, file.path, view.key, 'split'),
 			filePath: file.path,
 			estimatedHeight: estimateViewHeight(
 				view.isHunkHeader,
@@ -548,14 +586,14 @@ function bodyRows(
 	return buildUnifiedDiffRowViews({
 		rows: unifiedRows,
 		filePath: file.path,
-		activeTab: options.activeTab,
-		readOnly: options.readOnly === true,
-		selectedLineKeys: options.selectedLineKeys,
+		activeTab,
+		readOnly: !workbenchInteraction,
+		selectedLineKeys,
 		commentsByLineKey,
 		composerTarget,
 	}).map((view) => ({
 		kind: 'unified-row',
-		id: diffRowId(file.path, view.key, 'unified'),
+		id: diffRowId(options.summary.documentId, file.path, view.key, 'unified'),
 		filePath: file.path,
 		estimatedHeight: estimateViewHeight(view.isHunkHeader, view.comments.length, view.showComposer),
 		file,
@@ -566,14 +604,15 @@ function bodyRows(
 }
 
 function fileLimitRow(
+	documentId: string,
 	file: GitReviewFileSummary,
-	reason: GitReviewLimitReason,
+	reason: GitReviewLimitReason | 'stale-document',
 	title: string,
 	message: string,
 ): GitVirtualFileLimitRow {
 	return {
 		kind: 'file-limit',
-		id: `file:${encodeURIComponent(file.path)}:limit:${reason}`,
+		id: `${documentId}:file:${encodeURIComponent(file.path)}:limit:${reason}`,
 		filePath: file.path,
 		estimatedHeight: 112,
 		file,
@@ -591,16 +630,16 @@ function estimateViewHeight(
 	return (isHunkHeader ? 28 : DEFAULT_ROW_HEIGHT) + comments * 72 + (showComposer ? 180 : 0);
 }
 
-function fileHeaderRowId(filePath: string): string {
-	return `file:${encodeURIComponent(filePath)}:header`;
+function fileHeaderRowId(documentId: string, filePath: string): string {
+	return `${documentId}:file:${encodeURIComponent(filePath)}:header`;
 }
 
-function filePlaceholderRowId(filePath: string): string {
-	return `file:${encodeURIComponent(filePath)}:placeholder`;
+function filePlaceholderRowId(documentId: string, filePath: string): string {
+	return `${documentId}:file:${encodeURIComponent(filePath)}:placeholder`;
 }
 
-function diffRowId(filePath: string, rowKey: string, mode: DiffMode): string {
-	return `file:${encodeURIComponent(filePath)}:${mode}:row:${rowKey}`;
+function diffRowId(documentId: string, filePath: string, rowKey: string, mode: DiffMode): string {
+	return `${documentId}:file:${encodeURIComponent(filePath)}:${mode}:row:${rowKey}`;
 }
 
 function unique(values: string[]): string[] {

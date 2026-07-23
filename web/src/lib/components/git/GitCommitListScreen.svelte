@@ -1,7 +1,9 @@
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import History from '@lucide/svelte/icons/history';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -20,6 +22,16 @@
 		onRevertCommit: (commit: GitHistoryCommitListItem) => void;
 		onLoadMore: () => void;
 		onScrollSave: (top: number) => void;
+		comparisonSelectionActive: boolean;
+		comparisonSelectionSlot: 'from' | 'to';
+		comparisonFrom: string | null;
+		comparisonTo: string | null;
+		onBeginComparison: () => void;
+		onCancelComparison: () => void;
+		onSelectComparisonCommit: (hash: string) => void;
+		onSelectComparisonSlot: (slot: 'from' | 'to') => void;
+		onOpenComparison: () => void;
+		onOpenSelectedComparison: () => void;
 	}
 
 	let {
@@ -33,6 +45,16 @@
 		onRevertCommit,
 		onLoadMore,
 		onScrollSave,
+		comparisonSelectionActive,
+		comparisonSelectionSlot,
+		comparisonFrom,
+		comparisonTo,
+		onBeginComparison,
+		onCancelComparison,
+		onSelectComparisonCommit,
+		onSelectComparisonSlot,
+		onOpenComparison,
+		onOpenSelectedComparison,
 	}: GitCommitListScreenProps = $props();
 
 	let listRef = $state<HTMLDivElement | null>(null);
@@ -77,6 +99,67 @@
 	class="flex-1 overflow-y-auto bg-background {isMobile ? 'pb-16' : ''}"
 	onscroll={(event) => onScrollSave(event.currentTarget.scrollTop)}
 >
+	<div class="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">
+		{#if comparisonSelectionActive}
+			<div class="flex flex-wrap items-center gap-2 text-xs">
+				<button
+					type="button"
+					class="rounded border px-2 py-1 font-medium {comparisonSelectionSlot === 'from'
+						? 'border-interactive-accent bg-interactive-accent/10 text-interactive-accent'
+						: 'border-border text-muted-foreground'}"
+					aria-pressed={comparisonSelectionSlot === 'from'}
+					onclick={() => onSelectComparisonSlot('from')}
+					>{m.git_compare_from()}
+					<span class="font-mono"
+						>{comparisonFrom?.slice(0, 8) ?? m.git_compare_select_revision()}</span
+					></button
+				>
+				<ArrowRight class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+				<button
+					type="button"
+					class="rounded border px-2 py-1 font-medium {comparisonSelectionSlot === 'to'
+						? 'border-interactive-accent bg-interactive-accent/10 text-interactive-accent'
+						: 'border-border text-muted-foreground'}"
+					aria-pressed={comparisonSelectionSlot === 'to'}
+					onclick={() => onSelectComparisonSlot('to')}
+					>{m.git_compare_to()}
+					<span class="font-mono"
+						>{comparisonTo?.slice(0, 8) ?? m.git_compare_select_revision()}</span
+					></button
+				>
+				<span class="min-w-0 flex-1 text-muted-foreground">{m.git_compare_selection_order()}</span>
+				<button
+					type="button"
+					class="rounded bg-muted px-2.5 py-1 font-medium text-muted-foreground hover:text-foreground"
+					onclick={onCancelComparison}>{m.git_confirm_cancel()}</button
+				>
+				<button
+					type="button"
+					class="rounded bg-interactive-accent px-2.5 py-1 font-medium text-interactive-accent-foreground disabled:opacity-50"
+					disabled={!comparisonFrom || !comparisonTo}
+					onclick={onOpenSelectedComparison}>{m.git_compare_action()}</button
+				>
+			</div>
+		{:else}
+			<div class="flex flex-wrap items-center gap-2">
+				<button
+					type="button"
+					class="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+					onclick={onOpenComparison}
+				>
+					<GitCompareArrows class="h-3.5 w-3.5" />
+					{m.git_compare_title()}
+				</button>
+				<button
+					type="button"
+					class="rounded px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+					onclick={onBeginComparison}
+				>
+					{m.git_compare_select_commits()}
+				</button>
+			</div>
+		{/if}
+	</div>
 	{#if error}
 		<div
 			class="m-3 rounded border border-status-error-border bg-status-error/10 px-3 py-2 text-sm text-status-error-foreground"
@@ -97,12 +180,20 @@
 	{:else}
 		<div class="divide-y divide-border">
 			{#each commits as commit (commit.hash)}
-				<div class="group px-3 py-2 hover:bg-muted/40">
+				<div
+					class="group px-3 py-2 hover:bg-muted/40 {comparisonFrom === commit.hash ||
+					comparisonTo === commit.hash
+						? 'bg-interactive-accent/10'
+						: ''}"
+				>
 					<div class="flex items-stretch gap-2">
 						<button
 							type="button"
 							class="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-							onclick={() => onOpenCommit(commit.hash)}
+							onclick={() =>
+								comparisonSelectionActive
+									? onSelectComparisonCommit(commit.hash)
+									: onOpenCommit(commit.hash)}
 						>
 							<div class="flex min-w-0 items-center gap-2">
 								<span class="min-w-0 truncate text-sm font-medium text-foreground">
@@ -141,16 +232,16 @@
 						</button>
 						<ChevronRight class="self-center h-4 w-4 shrink-0 text-muted-foreground" />
 					</div>
-					<div class="mt-2 flex justify-end">
-						<button
-							type="button"
-							class="inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-							onclick={() => onRevertCommit(commit)}
-						>
-							<Undo2 class="h-3.5 w-3.5" />
-							Revert
-						</button>
-					</div>
+					{#if !comparisonSelectionActive}<div class="mt-2 flex justify-end">
+							<button
+								type="button"
+								class="inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+								onclick={() => onRevertCommit(commit)}
+							>
+								<Undo2 class="h-3.5 w-3.5" />
+								Revert
+							</button>
+						</div>{/if}
 				</div>
 			{/each}
 		</div>

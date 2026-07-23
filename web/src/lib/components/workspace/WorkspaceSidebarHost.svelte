@@ -19,6 +19,7 @@
 	import WorkspaceSidebarResizeHandle from './WorkspaceSidebarResizeHandle.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
 	import type { DesktopLayoutEdge, MainInlineInsets } from '$lib/layout/desktop-layout.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	let {
 		presented,
@@ -31,6 +32,7 @@
 		presentations,
 		labelFor,
 		onSendToChat,
+		onAppendToChatDraft,
 		frameBridge,
 		surfaceStyle,
 		getOpenSidebarButton,
@@ -49,6 +51,7 @@
 		presentations: readonly RenderedPortablePresentation[];
 		labelFor: (surfaceId: string) => string;
 		onSendToChat: (message: string) => Promise<boolean>;
+		onAppendToChatDraft: ChatDraftAppend;
 		frameBridge: (surfaceId: string) => SurfaceFrameBridge;
 		surfaceStyle: (presentation: HostId | 'mobile') => string;
 		getOpenSidebarButton: () => HTMLButtonElement | null;
@@ -260,6 +263,7 @@
 							visible={item.visible}
 							style={surfaceStyle(item.presentation)}
 							{onSendToChat}
+							{onAppendToChatDraft}
 							frameBridge={frameBridge(surface.id)}
 						/>
 					{/key}

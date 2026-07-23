@@ -47,6 +47,8 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		virtualRows: [],
 		fileRowIndex: new Map<string, number>(),
 		scrollRequest: null,
+		summary: null,
+		fileBodies: {},
 	};
 	const selection = {
 		selectedLineKeys: new Set<string>(),
@@ -78,12 +80,9 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		isCreatingInitialCommit: false,
 	};
 	const drafts = {
-		reviewModalOpen: false,
-		reviewComments: [],
-		reviewSummary: '',
-		commentsByFile: {},
 		commentComposer: {
 			open: false,
+			focusPending: false,
 			filePath: '',
 			side: 'after',
 			line: 0,
@@ -91,12 +90,13 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 			severity: 'note',
 		},
 		openCommentComposer: vi.fn(),
-		finalizeReviewToAgent: vi.fn(),
-		buildFinalizedReviewMessage: vi.fn(),
-		updateDraftComment: vi.fn(),
-		removeDraftComment: vi.fn(),
-		commitCommentComposer: vi.fn(),
+		markCommentComposerFocused: vi.fn(),
+		setCommentBody: vi.fn(),
+		setCommentSeverity: vi.fn(),
+		appendComment: vi.fn(),
 		closeCommentComposer: vi.fn(),
+		commentFeedback: null,
+		commentError: null,
 	};
 	const porcelain = {
 		inspectorView: 'none',
@@ -117,18 +117,6 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		repositoryError: null,
 		isInitialLoadPending: false,
 		isExternallyStale: false,
-		reviewModalOpen: false,
-		reviewComments: [],
-		reviewSummary: '',
-		commentsByFile: {},
-		commentComposer: {
-			open: false,
-			filePath: '',
-			side: 'after',
-			line: 0,
-			body: '',
-			severity: 'note',
-		},
 		pendingDiscardFile: null,
 		setTarget: vi.fn().mockResolvedValue(undefined),
 		selectFile: vi.fn().mockResolvedValue(undefined),

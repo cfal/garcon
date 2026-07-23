@@ -9,6 +9,7 @@ import {
 	type ChatDraftStorageKey,
 } from '$lib/utils/local-persistence';
 import { isSupportedChatAttachment } from '$lib/chat/composer/image-attachment.svelte.js';
+import type { ChatDraftAppendResult } from '$lib/chat/composer/chat-draft-append.js';
 
 const DEFAULT_DRAFT_SAVE_DELAY_MS = 250;
 
@@ -31,9 +32,31 @@ export class ComposerState {
 	images = $state<File[]>([]);
 	isSubmitting = $state(false);
 	isDragActive = $state(false);
+	draftAppendRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	#draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	#pendingDraftSave: { chatId: string; text: string } | null = null;
 	#draftImagesByChatId = new Map<string, File[]>();
+	#nextDraftAppendRequestId = 0;
+
+	/** Appends an editable block to the active draft without submitting it. */
+	appendDraftBlock(chatId: string, block: string): ChatDraftAppendResult {
+		if (!chatId || !block.trim()) return 'unavailable';
+		if (this.inputText.includes(block)) return 'duplicate';
+		const separator =
+			this.inputText.length === 0
+				? ''
+				: this.inputText.endsWith('\n\n')
+					? ''
+					: this.inputText.endsWith('\n')
+						? '\n'
+						: '\n\n';
+		this.inputText = `${this.inputText}${separator}${block}`;
+		this.#nextDraftAppendRequestId += 1;
+		this.draftAppendRequest = { chatId, requestId: this.#nextDraftAppendRequestId };
+		this.cancelDraftSave(chatId);
+		this.saveDraft(chatId);
+		return 'appended';
+	}
 
 	/** Saves the current text and in-memory attachments as a draft keyed by chat ID. */
 	saveDraft(chatId: string): void {
