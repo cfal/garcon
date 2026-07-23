@@ -607,6 +607,7 @@ async function loadComparisonBody({
   context,
   file,
   workingTreeStatus,
+  pathsTrackedAtFrom,
   unmergedPaths,
   trace,
   signal,
@@ -618,6 +619,7 @@ async function loadComparisonBody({
   context: number;
   file: GitComparisonFileRequest;
   workingTreeStatus: Map<string, { indexStatus: string; workTreeStatus: string }>;
+  pathsTrackedAtFrom: Set<string>;
   unmergedPaths: Set<string>;
   trace?: GitCommandTrace[];
   signal?: AbortSignal;
@@ -632,12 +634,12 @@ async function loadComparisonBody({
     );
   }
   const status = workingTreeStatus.get(file.path);
-  if (!toHash && status?.indexStatus === '?') {
+  if (!toHash && status?.indexStatus === '?' && !pathsTrackedAtFrom.has(file.path)) {
     return loadUntrackedComparisonBody(projectPath, file, fingerprint, signal);
   }
   const endpoints = toHash ? [effectiveFromHash, toHash] : [effectiveFromHash];
-  const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).flatMap(
-    exactGitPathspecs,
+  const pathspecs = exactGitPathspecs(
+    file.originalPath ? [file.originalPath, file.path] : [file.path],
   );
   const { stdout } = await runGitTraced(
     projectPath,
@@ -678,9 +680,10 @@ async function getComparisonFileBodies(
   }
 
   let workingTreeStatus = new Map<string, { indexStatus: string; workTreeStatus: string }>();
+  let pathsTrackedAtFrom = new Set<string>();
   let unmergedPaths = new Set<string>();
   if (to.kind === 'working-tree') {
-    const [status, unmerged] = await Promise.all([
+    const [status, unmerged, trackedAtFrom] = await Promise.all([
       runGitTraced(
         repoRoot,
         [
@@ -695,9 +698,24 @@ async function getComparisonFileBodies(
         readOnlyGitOptions({ signal }),
       ),
       runGitTraced(repoRoot, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
+      runGitTraced(
+        repoRoot,
+        [
+          'ls-tree',
+          '-r',
+          '-z',
+          '--name-only',
+          effectiveFromHash,
+          '--',
+          ...requestedFiles.map((file) => literalGitPathspec(file.path)),
+        ],
+        trace,
+        readOnlyGitOptions({ signal }),
+      ),
     ]);
     workingTreeStatus = indexPorcelainStatusByPath(parsePorcelainV1Z(status.stdout));
     unmergedPaths = parseUnmergedPaths(unmerged.stdout);
+    pathsTrackedAtFrom = new Set(trackedAtFrom.stdout.split('\0').filter(Boolean));
   }
 
   const parsedFiles: Record<string, GitReviewFileBody> = {};
@@ -715,6 +733,7 @@ async function getComparisonFileBodies(
           context,
           file,
           workingTreeStatus,
+          pathsTrackedAtFrom,
           unmergedPaths,
           trace,
           signal,

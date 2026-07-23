@@ -811,6 +811,60 @@ describe("commit history operations", () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("preserves a rename when one endpoint path prefixes the other", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-prefix-rename-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+    const content = "one\ntwo\nthree\nfour\nfive\n";
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, "bin"));
+      await fs.writeFile(path.join(projectPath, "bin", "tool"), content, "utf-8");
+      await runGitCommand(projectPath, ["add", "."]);
+      await runGitCommand(projectPath, ["commit", "-m", "add tool file"]);
+      await fs.rm(path.join(projectPath, "bin", "tool"));
+      await fs.mkdir(path.join(projectPath, "bin", "tool"));
+      await fs.writeFile(path.join(projectPath, "bin", "tool", "main.sh"), content, "utf-8");
+      await runGitCommand(projectPath, ["add", "-A"]);
+      await runGitCommand(projectPath, ["commit", "-m", "move tool below directory"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+        context: 5,
+      });
+      expect(snapshot.status).toBe("ready");
+      const renamedFile = snapshot.files.find((file) => file.path === "bin/tool/main.sh");
+      expect(renamedFile).toMatchObject({
+        status: "renamed",
+        originalPath: "bin/tool",
+        additions: 0,
+        deletions: 0,
+      });
+
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: renamedFile.path, originalPath: renamedFile.originalPath }],
+      });
+
+      expect(bodies.files[renamedFile.path]).toMatchObject({
+        bodyState: "loaded",
+        rows: [],
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("comparison operations", () => {
@@ -1359,6 +1413,51 @@ describe("comparison operations", () => {
       expect(bodies.files["a.txt"].rows.some((row) => row.kind === "add")).toBe(
         false,
       );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps files tracked only at From as deletions when they are now untracked", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-historical-deletion-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const { stdout: fromHash } = await runGitCommand(projectPath, ["rev-parse", "HEAD"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "a.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "stop tracking file"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "changed\n", "utf-8");
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: fromHash.trim() },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.files).toEqual([
+        expect.objectContaining({ path: "a.txt", status: "deleted" }),
+      ]);
+
+      const bodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        effectiveFromHash: snapshot.effectiveFromHash,
+        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
+        files: [{ path: "a.txt" }],
+      });
+
+      expect(bodies.status).toBe("ready");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: "one" }),
+      );
+      expect(bodies.files["a.txt"].rows.some((row) => row.kind === "add")).toBe(false);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

@@ -7,9 +7,17 @@ describe('literalGitPathspec', () => {
   });
 
   it('excludes descendants when selecting one exact file', () => {
-    expect(exactGitPathspecs('bin/tool')).toEqual([
+    expect(exactGitPathspecs(['bin/tool'])).toEqual([
       ':(literal)bin/tool',
       ':(exclude,literal)bin/tool/',
+    ]);
+  });
+
+  it('does not exclude another requested rename path', () => {
+    expect(exactGitPathspecs(['bin/tool', 'bin/tool/main.sh'])).toEqual([
+      ':(literal)bin/tool',
+      ':(literal)bin/tool/main.sh',
+      ':(exclude,literal)bin/tool/main.sh/',
     ]);
   });
 });

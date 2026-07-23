@@ -5,8 +5,15 @@ export function literalGitPathspec(filePath: string): string {
   return `:(literal)${filePath}`;
 }
 
-export function exactGitPathspecs(filePath: string): string[] {
-  return [literalGitPathspec(filePath), `:(exclude,literal)${filePath}/`];
+export function exactGitPathspecs(filePaths: string[]): string[] {
+  const paths = Array.from(new Set(filePaths));
+  const excludes = paths
+    .map((filePath) => `${filePath}/`)
+    .filter((prefix) => !paths.some((otherPath) => otherPath.startsWith(prefix)));
+  return [
+    ...paths.map(literalGitPathspec),
+    ...excludes.map((prefix) => `:(exclude,literal)${prefix}`),
+  ];
 }
 
 export function chunkGitPathspecs(paths: string[]): string[][] {

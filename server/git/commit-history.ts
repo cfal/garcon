@@ -405,8 +405,8 @@ async function getCommitFileBodies({
   const errors: GitCommitFileBodiesResponse['errors'] = {};
 
   await mapWithConcurrency(requestedFiles, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
-    const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).flatMap(
-      exactGitPathspecs,
+    const pathspecs = exactGitPathspecs(
+      file.originalPath ? [file.originalPath, file.path] : [file.path],
     );
     try {
       const { stdout } = await runGitTraced(
