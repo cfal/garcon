@@ -21,7 +21,7 @@ import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { AgentDirectory } from './directory.js';
-import type { AgentEventBus } from './event-bus.js';
+import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
 import type {
   AgentChatEntry,
   AgentExecutionAdmission,
@@ -211,15 +211,23 @@ export class AgentRuntimeRouter {
     });
     await this.#validateEndpoint(integration, selection);
     const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
-    this.#events.trackTurn(chatId, operationMetadata(operation));
-    return integration.execution.submitActiveInput({
-      ...this.#executionContext(chatId, entry, selection, operation, opts),
-      agentSessionId: entry.agentSessionId,
-      nativeSession: entry.nativeSession ?? null,
-      prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
-      attachments: attachments(opts.images),
-      beforeDelivery,
-    });
+    const previousTurn = this.#events.getActiveTurn(chatId);
+    this.#events.replaceTurn(chatId, operationMetadata(operation));
+    try {
+      const handled = await integration.execution.submitActiveInput({
+        ...this.#executionContext(chatId, entry, selection, operation, opts),
+        agentSessionId: entry.agentSessionId,
+        nativeSession: entry.nativeSession ?? null,
+        prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
+        attachments: attachments(opts.images),
+        beforeDelivery,
+      });
+      if (!handled) this.#restoreTurn(chatId, previousTurn);
+      return handled;
+    } catch (error) {
+      this.#restoreTurn(chatId, previousTurn);
+      throw error;
+    }
   }
 
   async compactSession(chatId: string, opts: {
@@ -256,6 +264,11 @@ export class AgentRuntimeRouter {
       this.#events.clearTurn(chatId);
       throw error;
     }
+  }
+
+  #restoreTurn(chatId: string, turn: TurnEventMetadata | undefined): void {
+    if (turn) this.#events.replaceTurn(chatId, turn);
+    else this.#events.clearTurn(chatId);
   }
 
   async prepareProjectPathUpdate(

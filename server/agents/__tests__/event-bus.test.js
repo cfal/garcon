@@ -60,28 +60,32 @@ describe('AgentEventBus', () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     bus.markTurnAbortable('chat-1', operation('turn-1'));
-    bus.trackTurn('chat-1', operation('turn-2'));
+    bus.replaceTurn('chat-1', operation('turn-2'));
     const controller = new AbortController();
     const waiting = bus.waitUntilTurnAbortable('chat-1', operation('turn-2'), controller.signal);
     controller.abort();
     await expect(waiting).resolves.toBe(false);
   });
 
-  it('returns a defensive snapshot and warns before overwriting active identity', () => {
-    process.env.GARCON_LOG_LEVEL = 'warn';
-    console.warn = mock(() => undefined);
+  it('returns a defensive snapshot and rejects an active identity overwrite', () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     const snapshot = bus.getActiveTurn('chat-1');
     snapshot.turnId = 'mutated';
-    bus.trackTurn('chat-1', operation('turn-2'));
+
+    expect(() => bus.trackTurn('chat-1', operation('turn-2'))).toThrow(
+      'Cannot track a new turn while chat chat-1 has an active turn',
+    );
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
+  });
+
+  it('allows an explicit active-input identity replacement', () => {
+    const { bus } = makeBus();
+    bus.trackTurn('chat-1', operation('turn-1'));
+
+    bus.replaceTurn('chat-1', operation('turn-2'));
 
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
-    expect(console.warn).toHaveBeenCalledWith(
-      '[agents:event-bus]',
-      'agents: overwriting in-flight turn metadata for chat',
-      'chat-1',
-    );
   });
 
   it('retains exact identity through duplicate terminal events until settlement', () => {
