@@ -650,6 +650,7 @@ async function loadComparisonBody({
       '-z',
       `-U${context}`,
       '--find-renames',
+      '--submodule=short',
       ...(file.originalPath ? ['--diff-filter=RC'] : []),
       ...endpoints,
       '--',

@@ -945,6 +945,7 @@ describe("commit history operations", () => {
       await runGitCommand(submodulePath, ["checkout", submoduleHashOutput.trim()]);
       await runGitCommand(projectPath, ["add", "vendor/sub"]);
       await runGitCommand(projectPath, ["commit", "-m", "advance submodule"]);
+      await runGitCommand(projectPath, ["config", "diff.submodule", "log"]);
 
       const snapshot = await git.getCommitSnapshot({
         projectPath,
