@@ -7,6 +7,10 @@ mock.module('../utils.js', () => ({
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
 import { ChatRunningError } from '../../chats/errors.js';
+import { ChatExecutionCoordinator } from '../../chat-execution/chat-execution-coordinator.js';
+import { ChatNativeReloader } from '../../chats/chat-native-reload.js';
+import { ChatViewStore } from '../../chats/chat-view-store.js';
+import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 
 const chatViewMessage = {
   seq: 1,
@@ -466,6 +470,84 @@ describe('chat WebSocket handler', () => {
     });
     expect(ws.publish.mock.calls[0][0]).toBe('chat');
     expect(ws.publish.mock.calls[0][2]).toBe(true);
+  });
+
+  it('reconciles missed terminal history through public reload after restart', async () => {
+    const chatId = '123';
+    const coordinatorDeps = [
+      {
+        runAgentTurn: mock(async () => undefined),
+        abortSession: mock(async () => false),
+        isChatRunning: mock(() => false),
+        waitUntilTurnAbortable: mock(async () => false),
+      },
+      {
+        register: mock(async () => undefined),
+        discard: mock(() => true),
+        markFailed: mock(() => true),
+        markUnconfirmed: mock(() => true),
+      },
+      { appendMessages: mock(async () => ({ generationId: 'generation-live', messages: [] })) },
+      () => ({}),
+      () => true,
+    ];
+    const liveQueue = new ChatExecutionCoordinator('/tmp/chat-reload-live', ...coordinatorDeps);
+    liveQueue.reserveDirectTurn(chatId, {
+      clientRequestId: 'req-interrupted',
+      turnId: 'turn-interrupted',
+    });
+    await liveQueue.createChatQueueEntry(chatId, 'ephemeral successor');
+    expect(liveQueue.hasChatExecutionOwner(chatId)).toBe(true);
+    expect((await liveQueue.readChatExecutionControl(chatId)).entries).toHaveLength(1);
+
+    const nativeHistory = [
+      new UserMessage('2026-07-23T00:00:00.000Z', 'interrupted prompt'),
+      new AssistantMessage('2026-07-23T00:00:01.000Z', 'terminal persisted after disconnect'),
+    ];
+    const restartedQueue = new ChatExecutionCoordinator('/tmp/chat-reload-live', ...coordinatorDeps);
+    const restartedViews = new ChatViewStore(() => restartedQueue.hasChatExecutionOwner(chatId));
+    const nativeReloader = new ChatNativeReloader(
+      restartedViews,
+      { loadNativeMessages: mock(async () => nativeHistory) },
+      (requestedChatId) => restartedQueue.hasChatExecutionOwner(requestedChatId),
+    );
+    const handler = new ChatHandler({
+      agents: mockAgents,
+      chatViews: restartedViews,
+      nativeReloader,
+      queue: restartedQueue,
+      pendingInputs: mockPendingInputs,
+      registry: mockRegistry,
+    }).createHandler();
+
+    expect(restartedQueue.hasChatExecutionOwner(chatId)).toBe(false);
+    expect(await restartedQueue.readChatExecutionControl(chatId)).toMatchObject({ entries: [] });
+
+    await handler.message(ws, {
+      type: 'chat-reload',
+      chatId,
+      clientRequestId: 'req-restart-reload',
+    });
+
+    expect(lastSentPayload()).toMatchObject({
+      type: 'chat-reloaded',
+      clientRequestId: 'req-restart-reload',
+      chatId,
+      messages: [
+        expect.objectContaining({
+          message: expect.objectContaining({ content: 'interrupted prompt' }),
+        }),
+        expect.objectContaining({
+          message: expect.objectContaining({ content: 'terminal persisted after disconnect' }),
+        }),
+      ],
+    });
+    expect(lastPublishedPayload(ws)).toMatchObject({
+      type: 'chat-generation-reset',
+      chatId,
+      reason: 'manual-reload',
+      lastSeq: 2,
+    });
   });
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {

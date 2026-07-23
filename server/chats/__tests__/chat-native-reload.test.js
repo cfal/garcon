@@ -34,31 +34,6 @@ describe('ChatNativeReloader', () => {
     expect(nativeSource.loadNativeMessages).toHaveBeenCalledWith('chat-1');
   });
 
-  it('recovers a terminal native turn missed before restart', async () => {
-    const liveViews = new ChatViewStore(() => true);
-    await liveViews.appendAfterEnsuringGeneration(
-      'chat-1',
-      async () => [],
-      [user('interrupted prompt')],
-    );
-    const restartedViews = new ChatViewStore(() => false);
-    const nativeSource = {
-      loadNativeMessages: mock(async () => [
-        user('interrupted prompt'),
-        assistant('native completion after disconnect'),
-      ]),
-    };
-    const reloader = new ChatNativeReloader(restartedViews, nativeSource, () => false);
-
-    const recovered = await reloader.reloadFromNative('chat-1', 'manual-reload');
-
-    expect(contents(recovered)).toEqual([
-      'interrupted prompt',
-      'native completion after disconnect',
-    ]);
-    expect(restartedViews.readPage('chat-1', 20).messages).toHaveLength(2);
-  });
-
   it('logs the reload mode as the generation replacement reason', async () => {
     const originalInfo = console.info;
     const info = mock(() => undefined);
