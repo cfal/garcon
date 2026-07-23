@@ -431,7 +431,15 @@ async function buildWorkingTreeSnapshot(
 ): Promise<GitComparisonSnapshotResponse> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = await workingTreeFingerprint(repoRoot, trace, signal);
-    const summary = await loadDiffSummary(repoRoot, from.hash, null, trace, signal);
+    let summary: Awaited<ReturnType<typeof loadDiffSummary>>;
+    try {
+      summary = await loadDiffSummary(repoRoot, from.hash, null, trace, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const afterFailure = await workingTreeFingerprint(repoRoot, trace, signal);
+      if (before !== afterFailure) continue;
+      throw error;
+    }
     const summarized = await summarizeComparisonFiles({
       projectPath: repoRoot,
       effectiveFromHash: from.hash,
