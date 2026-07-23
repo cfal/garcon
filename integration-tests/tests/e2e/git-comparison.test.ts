@@ -193,4 +193,88 @@ describe('Lightpanda Git comparison', () => {
       fixture.assertNoBrowserErrors();
     });
   });
+
+  test('freezes revision rows until a rewritten HEAD is explicitly refreshed', async () => {
+    await withE2eFixture('git-comparison-ref-freshness', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      await runGit(project, ['init', '-b', 'main']);
+      await runGit(project, ['config', 'user.email', 'test@example.com']);
+      await runGit(project, ['config', 'user.name', 'E2E Test']);
+      await writeFile(join(project, 'review.txt'), 'base marker\n', 'utf8');
+      await runGit(project, ['add', 'review.txt']);
+      await runGit(project, ['commit', '-m', 'base']);
+      await runGit(project, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      await writeFile(join(project, 'review.txt'), 'before rewrite marker\n', 'utf8');
+      await runGit(project, ['commit', '-am', 'feature']);
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-revision-freshness-seed');
+      await app.waitForText('echo:git-revision-freshness-seed');
+      await fixture.page.evaluate(() => {
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }),
+        );
+      });
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
+      await fixture.page.evaluate(() => {
+        const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+          .find((button) => button.textContent?.includes('Switch to Git'));
+        if (!option) throw new Error('Missing Switch to Git command.');
+        option.click();
+      });
+      await app.waitForButton('Compare revisions');
+      await app.clickButton('Compare revisions');
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      await app.fill('#git-comparison-from', 'origin/main');
+      await app.clickDialogButton('Revision');
+      await app.fill('#git-comparison-to', 'HEAD');
+      await app.clickDialogButton('Compare');
+      await fixture.page.waitForFunction(
+        () => !document.querySelector('[role="dialog"][aria-label="Compare revisions"]'),
+        { timeout: 20_000 },
+      );
+      await fixture.page.waitForSelector('[data-git-diff-document]');
+      await app.fill('[data-git-history-files-pane] input[type="search"]', 'review.txt');
+      await fixture.page.waitForSelector(
+        '[data-git-history-files-pane] [title="review.txt"]',
+      );
+      await fixture.page.evaluate(() => {
+        const label = document.querySelector<HTMLElement>(
+          '[data-git-history-files-pane] [title="review.txt"]',
+        );
+        const row = label?.closest<HTMLButtonElement>('[data-git-file-list-row]');
+        if (!row) throw new Error('Missing review.txt comparison row.');
+        row.click();
+      });
+      await fixture.page.waitForSelector('[data-git-history-diff-pane][aria-hidden="false"]');
+      await app.waitForText('before rewrite marker');
+
+      await writeFile(join(project, 'review.txt'), 'after rewrite marker\n', 'utf8');
+      await runGit(project, ['add', 'review.txt']);
+      await runGit(project, ['commit', '--amend', '--no-edit']);
+      await fixture.page.waitForFunction(
+        () => document.body.textContent?.includes('A selected revision moved.'),
+        { timeout: 25_000 },
+      );
+      expect(await fixture.page.$eval('body', (element) => element.textContent)).toContain(
+        'before rewrite marker',
+      );
+      expect(await fixture.page.$eval('body', (element) => element.textContent)).not.toContain(
+        'after rewrite marker',
+      );
+
+      await app.clickButton('Refresh comparison');
+      await fixture.page.waitForFunction(
+        () => !document.body.textContent?.includes('A selected revision moved.'),
+        { timeout: 20_000 },
+      );
+      await app.waitForText('after rewrite marker');
+      expect(await fixture.page.$eval('body', (element) => element.textContent)).not.toContain(
+        'before rewrite marker',
+      );
+      fixture.assertNoBrowserErrors();
+    });
+  });
 });

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	getGitComparisonFreshness,
 	getGitComparisonFileBodies,
 	getGitComparisonSnapshot,
 	type GitComparisonSnapshotReady,
 } from '$lib/api/git-comparison.js';
-import { getGitWorkingTreeFingerprint } from '$lib/api/git.js';
 import {
 	GIT_EMPTY_TREE_REVISION,
 	GitComparisonController,
@@ -15,15 +15,11 @@ vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
 	return {
 		...actual,
+		getGitComparisonFreshness: vi.fn(),
 		getGitComparisonSnapshot: vi.fn(),
 		getGitComparisonFileBodies: vi.fn(),
 	};
 });
-
-vi.mock('$lib/api/git.js', async (importOriginal) => ({
-	...(await importOriginal<typeof import('$lib/api/git.js')>()),
-	getGitWorkingTreeFingerprint: vi.fn(),
-}));
 
 const limits = {
 	maxSummaryFiles: 10_000,
@@ -151,12 +147,12 @@ describe('GitComparisonController', () => {
 			files: {},
 			errors: {},
 		});
-		vi.mocked(getGitWorkingTreeFingerprint).mockResolvedValue({
+		vi.mocked(getGitComparisonFreshness).mockResolvedValue({
 			status: 'ready',
 			project: '/project',
-			fingerprintVersion: 1,
-			fingerprint: 'v1:new',
-			changedPathCount: 1,
+			changedEndpoints: ['to'],
+			fromHash: snapshot.from.hash,
+			to: { kind: 'working-tree', fingerprint: 'v1:new' },
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
@@ -165,20 +161,105 @@ describe('GitComparisonController', () => {
 		expect(comparison.snapshot?.documentId).toBe('comparison-doc');
 		expect(comparison.dialogOpen).toBe(false);
 		await comparison.checkFreshness('/project');
-		expect(getGitWorkingTreeFingerprint).toHaveBeenCalledWith('/repo');
+		expect(getGitComparisonFreshness).toHaveBeenCalledWith(
+			'/repo',
+			{ kind: 'revision', revision: 'main', hash: 'a'.repeat(40) },
+			{ kind: 'working-tree', fingerprint: 'v1:old' },
+		);
 		expect(comparison.staleMessage).toContain('Working Tree changed');
 	});
 
-	it('does not report operational fingerprint failures as content staleness', async () => {
+	it('marks a frozen revision comparison stale when HEAD moves', async () => {
+		const original = revisionSnapshotWithFile();
+		const snapshot = {
+			...original,
+			from: {
+				...original.from,
+				requestedRevision: 'origin/main',
+				label: 'origin/main',
+			},
+			to: {
+				kind: 'revision' as const,
+				requestedRevision: 'HEAD',
+				label: 'HEAD',
+				hash: 'b'.repeat(40),
+				shortHash: 'bbbbbbb',
+			},
+		};
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		vi.mocked(getGitComparisonFreshness).mockResolvedValue({
+			status: 'ready',
+			project: '/project',
+			changedEndpoints: ['to'],
+			fromHash: snapshot.from.hash,
+			to: { kind: 'revision', hash: 'c'.repeat(40) },
+		});
+		const comparison = new GitComparisonController();
+		comparison.openDialog({
+			fromRevision: 'origin/main',
+			toKind: 'revision',
+			toRevision: 'HEAD',
+		});
+
+		expect(await comparison.compare('/project')).toBe(true);
+		await comparison.checkFreshness('/project');
+
+		expect(getGitComparisonFreshness).toHaveBeenCalledWith(
+			'/project',
+			{ kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
+			{ kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
+		);
+		expect(comparison.document.isStale).toBe(true);
+		expect(comparison.staleMessage).toContain('selected revision moved');
+	});
+
+	it('detects a moved From revision in a Working Tree comparison', async () => {
 		const snapshot = workingTreeSnapshot();
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
-		vi.mocked(getGitWorkingTreeFingerprint).mockResolvedValue({
-			status: 'unknown',
+		vi.mocked(getGitComparisonFreshness).mockResolvedValue({
+			status: 'ready',
 			project: '/project',
-			fingerprintVersion: 1,
-			fingerprint: null,
-			message: 'Fingerprint unavailable.',
+			changedEndpoints: ['from'],
+			fromHash: 'c'.repeat(40),
+			to: { kind: 'working-tree', fingerprint: 'v1:old' },
 		});
+		const comparison = new GitComparisonController();
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
+
+		await comparison.compare('/project');
+		await comparison.checkFreshness('/project');
+
+		expect(comparison.document.isStale).toBe(true);
+		expect(comparison.staleMessage).toContain('selected revision moved');
+	});
+
+	it('does not poll a revision comparison whose requested values are resolved hashes', async () => {
+		const original = revisionSnapshotWithFile();
+		if (original.to.kind !== 'revision') throw new Error('Expected a revision snapshot.');
+		const snapshot = {
+			...original,
+			from: { ...original.from, requestedRevision: original.from.hash },
+			to: { ...original.to, requestedRevision: original.to.hash },
+		};
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		const comparison = new GitComparisonController();
+		comparison.openDialog({
+			fromRevision: snapshot.from.hash,
+			toKind: 'revision',
+			toRevision: snapshot.to.hash,
+		});
+
+		await comparison.compare('/project');
+		await comparison.checkFreshness('/project');
+
+		expect(getGitComparisonFreshness).not.toHaveBeenCalled();
+		expect(comparison.document.isStale).toBe(false);
+	});
+
+	it('does not report operational freshness failures as content staleness', async () => {
+		const snapshot = workingTreeSnapshot();
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		vi.mocked(getGitComparisonFreshness).mockRejectedValue(new Error('Freshness unavailable.'));
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
@@ -272,12 +353,12 @@ describe('GitComparisonController', () => {
 			project: '/project',
 			message: 'The Working Tree is still changing.',
 		});
-		vi.mocked(getGitWorkingTreeFingerprint).mockResolvedValue({
+		vi.mocked(getGitComparisonFreshness).mockResolvedValue({
 			status: 'ready',
 			project: '/project',
-			fingerprintVersion: 1,
-			fingerprint: 'v1:new',
-			changedPathCount: 1,
+			changedEndpoints: ['to'],
+			fromHash: snapshot.from.hash,
+			to: { kind: 'working-tree', fingerprint: 'v1:new' },
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
@@ -398,12 +479,12 @@ describe('GitComparisonController', () => {
 	it('preserves stale Working Tree content and an open comment across context changes', async () => {
 		const snapshot = workingTreeSnapshotWithFile();
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
-		vi.mocked(getGitWorkingTreeFingerprint).mockResolvedValue({
+		vi.mocked(getGitComparisonFreshness).mockResolvedValue({
 			status: 'ready',
 			project: '/project',
-			fingerprintVersion: 1,
-			fingerprint: 'v1:new',
-			changedPathCount: 1,
+			changedEndpoints: ['to'],
+			fromHash: snapshot.from.hash,
+			to: { kind: 'working-tree', fingerprint: 'v1:new' },
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
@@ -423,12 +504,12 @@ describe('GitComparisonController', () => {
 	it('upgrades a context refresh notice when the Working Tree later changes', async () => {
 		const snapshot = workingTreeSnapshotWithFile();
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
-		vi.mocked(getGitWorkingTreeFingerprint).mockResolvedValue({
+		vi.mocked(getGitComparisonFreshness).mockResolvedValue({
 			status: 'ready',
 			project: '/project',
-			fingerprintVersion: 1,
-			fingerprint: 'v1:new',
-			changedPathCount: 1,
+			changedEndpoints: ['to'],
+			fromHash: snapshot.from.hash,
+			to: { kind: 'working-tree', fingerprint: 'v1:new' },
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });

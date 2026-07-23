@@ -593,6 +593,8 @@
 	"git_compare_load_rows_failed": "Failed to load comparison rows: {detail}",
 	"git_diff_document_changed": "The diff changed while loading.",
 	"git_compare_working_tree_changed": "The Working Tree changed. Refresh to review the latest content.",
+	"git_compare_revision_changed": "A selected revision moved. Refresh to review the latest commits.",
+	"git_compare_revision_unavailable": "A selected revision no longer resolves. Edit the comparison or refresh after restoring the ref.",
 	"git_diff_document_files": "Files",
 	"git_diff_document_diff": "Diff",
 	"git_diff_document_file_tree_item": "{status}, {name}",
