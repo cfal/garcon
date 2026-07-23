@@ -14,6 +14,7 @@ import {
   errorFileBody,
   limitedFileBody,
   limitedRenderedPatch,
+  selectFilePatchFromRawDiff,
 } from './rendered-diff.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { assertSafeRef } from './ref-validation.js';
@@ -643,11 +644,25 @@ async function loadComparisonBody({
   );
   const { stdout } = await runGitTraced(
     projectPath,
-    ['diff', `-U${context}`, '--find-renames', ...endpoints, '--', ...pathspecs],
+    [
+      'diff',
+      '--patch-with-raw',
+      '-z',
+      `-U${context}`,
+      '--find-renames',
+      ...(file.originalPath ? ['--diff-filter=RC'] : []),
+      ...endpoints,
+      '--',
+      ...pathspecs,
+    ],
     trace,
     readOnlyGitOptions({ signal }),
   );
-  return limitedRenderedPatch(file.path, fingerprint, stdout);
+  return limitedRenderedPatch(
+    file.path,
+    fingerprint,
+    selectFilePatchFromRawDiff(stdout, file.path),
+  );
 }
 
 async function getComparisonFileBodies(

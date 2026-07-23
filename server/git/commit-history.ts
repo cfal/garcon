@@ -5,7 +5,12 @@ import { mapWithConcurrency } from '../lib/concurrency.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';
 import { exactGitPathspecs } from './pathspecs.js';
-import { categoryForPath, errorFileBody, limitedRenderedPatch } from './rendered-diff.js';
+import {
+  categoryForPath,
+  errorFileBody,
+  limitedRenderedPatch,
+  selectFilePatchFromRawDiff,
+} from './rendered-diff.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
@@ -411,12 +416,27 @@ async function getCommitFileBodies({
     try {
       const { stdout } = await runGitTraced(
         projectPath,
-        ['diff', `-U${context}`, '--find-renames', base, details.hash, '--', ...pathspecs],
+        [
+          'diff',
+          '--patch-with-raw',
+          '-z',
+          `-U${context}`,
+          '--find-renames',
+          ...(file.originalPath ? ['--diff-filter=RC'] : []),
+          base,
+          details.hash,
+          '--',
+          ...pathspecs,
+        ],
         trace,
         readOnlyGitOptions({ signal }),
       );
       const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
-      parsedFiles[file.path] = limitedRenderedPatch(file.path, fingerprint, stdout);
+      parsedFiles[file.path] = limitedRenderedPatch(
+        file.path,
+        fingerprint,
+        selectFilePatchFromRawDiff(stdout, file.path),
+      );
     } catch (error) {
       if (signal?.aborted) throw error;
       const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);

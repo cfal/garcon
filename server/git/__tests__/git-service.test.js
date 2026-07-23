@@ -812,7 +812,7 @@ describe("commit history operations", () => {
     }
   });
 
-  it("preserves a rename when one endpoint path prefixes the other", async () => {
+  it("isolates prefix-path rename bodies from changed siblings", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-prefix-rename-"),
     );
@@ -820,7 +820,8 @@ describe("commit history operations", () => {
       agents: mockAgents,
       classifyGitError: mockClassifyGitError,
     });
-    const content = "one\ntwo\nthree\nfour\nfive\n";
+    const content = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n";
+    const renamedContent = "one\ntwo\nthree\nfour\nCHANGED\nsix\nseven\neight\n";
 
     try {
       await initRepoWithCommit(projectPath);
@@ -830,7 +831,20 @@ describe("commit history operations", () => {
       await runGitCommand(projectPath, ["commit", "-m", "add tool file"]);
       await fs.rm(path.join(projectPath, "bin", "tool"));
       await fs.mkdir(path.join(projectPath, "bin", "tool"));
-      await fs.writeFile(path.join(projectPath, "bin", "tool", "main.sh"), content, "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool", "main.sh"),
+        renamedContent,
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool", "aaa.sh"),
+        "sibling-alpha\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool", "zzz.bin"),
+        Buffer.from([0, 1, 2, 3]),
+      );
       await runGitCommand(projectPath, ["add", "-A"]);
       await runGitCommand(projectPath, ["commit", "-m", "move tool below directory"]);
 
@@ -844,8 +858,8 @@ describe("commit history operations", () => {
       expect(renamedFile).toMatchObject({
         status: "renamed",
         originalPath: "bin/tool",
-        additions: 0,
-        deletions: 0,
+        additions: 1,
+        deletions: 1,
       });
 
       const bodies = await git.getCommitFileBodies({
@@ -857,10 +871,34 @@ describe("commit history operations", () => {
         files: [{ path: renamedFile.path, originalPath: renamedFile.originalPath }],
       });
 
-      expect(bodies.files[renamedFile.path]).toMatchObject({
-        bodyState: "loaded",
-        rows: [],
+      const body = bodies.files[renamedFile.path];
+      expect(body.bodyState).toBe("loaded");
+      expect(body.rows).toContainEqual(expect.objectContaining({ kind: "add", text: "CHANGED" }));
+      expect(body.rows.some((row) => row.text === "sibling-alpha")).toBe(false);
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
       });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonRename = comparisonSnapshot.files.find(
+        (file) => file.path === "bin/tool/main.sh",
+      );
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: comparisonRename.path, originalPath: comparisonRename.originalPath }],
+      });
+      const comparisonBody = comparisonBodies.files[comparisonRename.path];
+      expect(comparisonBody.bodyState).toBe("loaded");
+      expect(comparisonBody.rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "CHANGED" }),
+      );
+      expect(comparisonBody.rows.some((row) => row.text === "sibling-alpha")).toBe(false);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
