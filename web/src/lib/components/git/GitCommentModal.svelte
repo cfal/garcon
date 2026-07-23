@@ -6,30 +6,43 @@
 	import { gitCommentSeverityLabel } from './git-comment-labels';
 	import { getTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
+	import GitCommentAppendError from './GitCommentAppendError.svelte';
 
-	interface ComposerState {
-		open: boolean;
-		filePath: string;
-		side: 'before' | 'after';
-		line: number;
-		body: string;
-		severity: 'note' | 'warning' | 'blocker';
-	}
+	import type { CommentComposerState } from '$lib/git/review/git-inline-comment.svelte.js';
 
 	interface Props {
-		composer: ComposerState;
+		composer: CommentComposerState;
 		onBodyChange: (body: string) => void;
 		onSeverityChange: (severity: 'note' | 'warning' | 'blocker') => void;
 		onSubmit: () => void;
 		onClose: () => void;
+		onFocusHandled: () => void;
+		error?: string | null;
+		copyText?: string | null;
 	}
 
-	let { composer, onBodyChange, onSeverityChange, onSubmit, onClose }: Props = $props();
+	let {
+		composer,
+		onBodyChange,
+		onSeverityChange,
+		onSubmit,
+		onClose,
+		onFocusHandled,
+		error = null,
+		copyText = null,
+	}: Props = $props();
 	const transientLayers = getTransientLayers();
 	const focusReturnTarget =
 		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
 			? document.activeElement
 			: null;
+	let textareaElement = $state<HTMLTextAreaElement | null>(null);
+
+	$effect(() => {
+		if (!textareaElement || !composer.focusPending) return;
+		textareaElement.focus();
+		onFocusHandled();
+	});
 
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') {
@@ -49,7 +62,7 @@
 	role="dialog"
 	tabindex="-1"
 	aria-modal="true"
-	aria-label={m.git_comment_add()}
+	aria-label={m.git_comment_add_to_chat()}
 	onkeydown={handleKeydown}
 	use:transientLayer={{
 		registry: transientLayers,
@@ -62,7 +75,7 @@
 >
 	<!-- Header -->
 	<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-		<h2 class="text-sm font-medium text-foreground">{m.git_comment_add()}</h2>
+		<h2 class="text-sm font-medium text-foreground">{m.git_comment_add_to_chat()}</h2>
 		<button onclick={onClose} class="p-1 rounded hover:bg-muted transition-colors">
 			<X class="w-4 h-4 text-muted-foreground" />
 		</button>
@@ -91,11 +104,13 @@
 
 		<!-- Body -->
 		<textarea
+			bind:this={textareaElement}
 			value={composer.body}
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
 			placeholder={m.git_comment_placeholder()}
 			class="w-full p-3 text-base sm:pointer-fine:text-sm bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			rows="6"></textarea>
+		{#if error}<GitCommentAppendError {error} {copyText} />{/if}
 	</div>
 
 	<!-- Sticky actions -->
@@ -114,7 +129,7 @@
 				? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
 				: 'bg-muted text-muted-foreground cursor-not-allowed'}"
 		>
-			{m.git_comment_add()}
+			{m.git_comment_add_to_chat()}
 		</button>
 	</div>
 </div>

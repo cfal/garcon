@@ -6,9 +6,9 @@ import type {
 } from '$lib/api/git.js';
 import { buildVirtualRows } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
-function makeSummary(files: GitReviewFileSummary[]): GitReviewDocumentSummary {
+function makeSummary(files: GitReviewFileSummary[], documentId = 'doc'): GitReviewDocumentSummary {
 	return {
-		documentId: 'doc',
+		documentId,
 		project: '/project',
 		mode: 'working',
 		context: 5,
@@ -53,6 +53,8 @@ function makeBody(path: string): GitReviewFileBody {
 		category: 'normal',
 		isBinary: false,
 		isTooLarge: false,
+		renderedRowCount: 4,
+		patchBytes: 128,
 		rows: [
 			{
 				key: 'hunk:0',
@@ -98,22 +100,35 @@ function baseOptions(summary: GitReviewDocumentSummary) {
 		loadingBodies: new Set<string>(),
 		focusedFilePath: null,
 		diffMode: 'unified' as const,
-		activeTab: 'unstaged' as const,
 		contextLines: 5,
-		commentsByFile: {},
-		composerState: {
-			open: false,
-			filePath: '',
-			side: 'after' as const,
-			line: 0,
-			body: '',
-			severity: 'note' as const,
+		interaction: {
+			kind: 'workbench' as const,
+			activeTab: 'unstaged' as const,
+			composerState: {
+				open: false,
+				focusPending: false,
+				filePath: '',
+				side: 'after' as const,
+				line: 0,
+				body: '',
+				severity: 'note' as const,
+			},
+			selectedLineKeys: new Set<string>(),
 		},
-		selectedLineKeys: new Set<string>(),
 	};
 }
 
 describe('buildVirtualRows', () => {
+	it('scopes every virtual row identity to the document', () => {
+		const file = makeFile('a.ts');
+		const first = buildVirtualRows(baseOptions(makeSummary([file], 'doc-a')));
+		const second = buildVirtualRows(baseOptions(makeSummary([file], 'doc-b')));
+
+		expect(first.every((row) => row.id.startsWith('doc-a:'))).toBe(true);
+		expect(second.every((row) => row.id.startsWith('doc-b:'))).toBe(true);
+		expect(first.map((row) => row.id)).not.toEqual(second.map((row) => row.id));
+	});
+
 	it('flattens loaded file rows into one document row stream', () => {
 		const summary = makeSummary([makeFile('a.ts')]);
 		const rows = buildVirtualRows({
@@ -127,7 +142,25 @@ describe('buildVirtualRows', () => {
 		if (rows[2].kind === 'unified-row') {
 			expect(rows[2].view.text).toBe('new line');
 			expect(rows[2].selectableLineKeys).toHaveLength(1);
+			expect(rows[2].actionTarget).toMatchObject({ tab: 'unstaged', mode: 'stage' });
 		}
+	});
+
+	it('does not synthesize workbench actions for commentable documents', () => {
+		const summary = makeSummary([makeFile('a.ts')]);
+		const options = baseOptions(summary);
+		const rows = buildVirtualRows({
+			...options,
+			fileBodies: { 'a.ts': makeBody('a.ts') },
+			interaction: {
+				kind: 'commentable',
+				composerState: options.interaction.composerState,
+			},
+		});
+		const content = rows.filter((row) => row.kind === 'unified-row' || row.kind === 'split-row');
+
+		expect(content.every((row) => row.actionTarget === null)).toBe(true);
+		expect(content.every((row) => row.selectableLineKeys.length === 0)).toBe(true);
 	});
 
 	it('uses placeholders for unloaded files and limit rows for binary files', () => {
@@ -151,6 +184,27 @@ describe('buildVirtualRows', () => {
 			'file-limit',
 		]);
 		expect(rows[3]).toMatchObject({ kind: 'file-limit', filePath: 'image.png', reason: 'binary' });
+	});
+
+	it('describes unsupported conflict bodies instead of mislabeling them as binary', () => {
+		const summary = makeSummary([
+			makeFile('conflicted.dat', {
+				category: 'binary',
+				bodyState: 'too-large',
+				isBinary: true,
+				isTooLarge: true,
+				limitReason: 'unsupported-file-kind',
+				limitMessage: 'Resolve this conflict before reviewing its comparison diff.',
+			}),
+		]);
+
+		const rows = buildVirtualRows(baseOptions(summary));
+
+		expect(rows[1]).toMatchObject({
+			kind: 'file-limit',
+			title: 'Diff unavailable',
+			reason: 'unsupported-file-kind',
+		});
 	});
 
 	it('falls back to summary order when visible file paths are not ready', () => {

@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
-  GIT_WORKBENCH_FINGERPRINT_VERSION,
+  GIT_WORKING_TREE_FINGERPRINT_VERSION,
 } from './types.js';
 import { GitDomainError } from './git-types.js';
 import type {
@@ -16,8 +16,8 @@ import type {
   GitReviewFileBodiesResponse,
   GitReviewFileBody,
   GitReviewFileSummary,
-  GitWorkbenchFingerprintOptions,
-  GitWorkbenchFingerprintResponse,
+  GitWorkingTreeFingerprintOptions,
+  GitWorkingTreeFingerprintResponse,
   GitWorkbenchSnapshotOptions,
   GitWorkbenchSnapshotResponse,
   GitReviewMode,
@@ -59,7 +59,8 @@ import {
   hasWorkTreeChange,
   parsePorcelainV1Z,
 } from './porcelain-status.js';
-import { chunkGitPathspecs } from './pathspecs.js';
+import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
+import { buildFullFileAddedPatch } from './full-file-patch.js';
 import { mapWithConcurrency, mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 function buildFacet(
@@ -228,11 +229,6 @@ function buildTreeFromChangeEntries(
   }
 
   return { root: mapTreeToArray(rootMap), hasCommits, statsState };
-}
-
-function buildFullFileAddedPatch(contentAfter: string): string {
-  const lines = contentAfter.split('\n');
-  return `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
 }
 
 function buildFullFileDeletedPatch(contentBefore: string | null): string {
@@ -435,10 +431,11 @@ function buildHunkHeader(rawHeader: string, bodyLines: string[], startOffset: nu
 // The same diff is used for both display and `git apply --cached`.
 function tabDiffArgs(contextLines: number, file: string, isUnstage: boolean): string[] {
   const ctx = `-U${contextLines}`;
+  const pathspec = literalGitPathspec(file);
   if (isUnstage) {
-    return ['diff', '--cached', ctx, '--', file];
+    return ['diff', '--cached', ctx, '--', pathspec];
   }
-  return ['diff', ctx, '--', file];
+  return ['diff', ctx, '--', pathspec];
 }
 
 
@@ -487,7 +484,7 @@ async function indexFingerprint(projectPath: string, file: string, signal?: Abor
   try {
     const { stdout } = await runGit(
       projectPath,
-      ['ls-files', '-s', '--', file],
+      ['ls-files', '-s', '--', literalGitPathspec(file)],
       readOnlyGitOptions({ signal }),
     );
     return stdout.trim();
@@ -657,8 +654,8 @@ async function buildWorkbenchFingerprintFromInputs({
     loadFingerprintWorktreeStats(projectPath, statusEntries),
   ]);
 
-  const fingerprint = `v${GIT_WORKBENCH_FINGERPRINT_VERSION}:${hashString([
-    `git-workbench-fingerprint-v${GIT_WORKBENCH_FINGERPRINT_VERSION}`,
+  const fingerprint = `v${GIT_WORKING_TREE_FINGERPRINT_VERSION}:${hashString([
+		`git-working-tree-fingerprint-v${GIT_WORKING_TREE_FINGERPRINT_VERSION}`,
     projectPath,
     repoRoot,
     branch,
@@ -894,9 +891,10 @@ async function getReviewFileBody({
     const contentAfter = await fs.readFile(filePath, 'utf-8');
     diffText = buildFullFileAddedPatch(contentAfter);
   } else {
+    const pathspec = literalGitPathspec(file);
     const args = effectiveMode === 'staged'
-      ? ['diff', '--cached', `-U${context}`, '--', file]
-      : ['diff', `-U${context}`, '--', file];
+      ? ['diff', '--cached', `-U${context}`, '--', pathspec]
+      : ['diff', `-U${context}`, '--', pathspec];
     try {
       const { stdout } = await runGit(projectPath, args, readOnlyGitOptions({ signal }));
       diffText = stdout;
@@ -1099,21 +1097,21 @@ function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotRespons
   };
 }
 
-function notRepositoryFingerprint(projectPath: string): GitWorkbenchFingerprintResponse {
+function notRepositoryFingerprint(projectPath: string): GitWorkingTreeFingerprintResponse {
   return {
     status: 'not-git-repository',
     project: projectPath,
-    fingerprintVersion: GIT_WORKBENCH_FINGERPRINT_VERSION,
+    fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
     fingerprint: null,
     message: 'Git is not initialized in this directory.',
   };
 }
 
-async function getWorkbenchFingerprint({
+export async function getWorkingTreeFingerprint({
   projectPath,
   trace,
   signal,
-}: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse> {
+}: GitWorkingTreeFingerprintOptions): Promise<GitWorkingTreeFingerprintResponse> {
   try {
     await fs.access(projectPath);
   } catch {
@@ -1171,7 +1169,7 @@ async function getWorkbenchFingerprint({
   return {
     status: 'ready',
     project: projectPath,
-    fingerprintVersion: GIT_WORKBENCH_FINGERPRINT_VERSION,
+    fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
     fingerprint,
     changedPathCount,
   };
@@ -1357,7 +1355,7 @@ async function stageSelection({
   // For untracked files, create an empty index entry so git diff works.
   let didIntentToAdd = false;
   if (!reverse && await isFileUntracked(projectPath, file)) {
-    await runGit(projectPath, ['add', '-N', '--', file]);
+    await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
     didIntentToAdd = true;
   }
 
@@ -1409,7 +1407,7 @@ async function stageSelection({
     return { success: true };
   } catch (err) {
     if (didIntentToAdd) {
-      try { await runGit(projectPath, ['reset', '--', file]); } catch { /* best effort */ }
+      try { await runGit(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
     }
     throw err;
   }
@@ -1431,7 +1429,7 @@ async function stageHunk({
 
   let didIntentToAdd = false;
   if (!isUnstage && await isFileUntracked(projectPath, file)) {
-    await runGit(projectPath, ['add', '-N', '--', file]);
+    await runGit(projectPath, ['add', '-N', '--', literalGitPathspec(file)]);
     didIntentToAdd = true;
   }
 
@@ -1458,7 +1456,7 @@ async function stageHunk({
     return { success: true };
   } catch (err) {
     if (didIntentToAdd) {
-      try { await runGit(projectPath, ['reset', '--', file]); } catch { /* best effort */ }
+      try { await runGit(projectPath, ['reset', '--', literalGitPathspec(file)]); } catch { /* best effort */ }
     }
     throw err;
   }
@@ -1468,7 +1466,7 @@ async function stageHunk({
 export function createDiffEngine() {
   return {
     getWorkbenchSnapshot,
-    getWorkbenchFingerprint,
+    getWorkingTreeFingerprint,
     getReviewFileBodies,
     stageSelection,
     stageHunk,

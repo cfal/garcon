@@ -21,6 +21,7 @@
 	import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
 	import type { SplitPanePreviewCursor } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
@@ -79,6 +80,7 @@
 
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
+		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		transcriptCache?: ChatTranscriptCache;
@@ -103,6 +105,7 @@
 
 	let {
 		onRegisterSubmit,
+		onRegisterAppendToDraft,
 		onRegisterReload,
 		onRegisterUserMessageNavigator,
 		transcriptCache: providedTranscriptCache,
@@ -352,6 +355,7 @@
 	// Expose the submit function to sibling components (runs once on mount).
 	onMount(() => {
 		onRegisterSubmit?.(submitToActiveChat);
+		onRegisterAppendToDraft?.(appendToActiveDraft);
 		onRegisterReload?.(reloadSelectedChat);
 		onRegisterUserMessageNavigator?.(() => userMessageNavigator.openForActiveChat());
 
@@ -553,6 +557,10 @@
 		} catch {
 			return false;
 		}
+	}
+
+	function appendToActiveDraft(block: string) {
+		return composerState.appendDraftBlock(sessions.selectedChatId ?? '', block);
 	}
 
 	async function reloadSelectedChat(chatId: string): Promise<void> {

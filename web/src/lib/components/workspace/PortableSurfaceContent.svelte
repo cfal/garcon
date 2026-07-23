@@ -33,18 +33,21 @@
 	import X from '@lucide/svelte/icons/x';
 	import ProjectSurfaceGate from './ProjectSurfaceGate.svelte';
 	import SurfaceErrorState from './SurfaceErrorState.svelte';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	let {
 		surface,
 		presentation,
 		visible,
 		onSendToChat,
+		onAppendToChatDraft,
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
 		presentation: HostId | 'mobile';
 		visible: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
+		onAppendToChatDraft: ChatDraftAppend;
 		frameBridge: SurfaceFrameBridge;
 	} = $props();
 	setSurfaceFrameBridge(() => frameBridge);
@@ -132,7 +135,7 @@
 					isMobile={presentation === 'mobile'}
 					{presentation}
 					isVisible={visible}
-					{onSendToChat}
+					{onAppendToChatDraft}
 				/>
 			{/await}
 		</ProjectSurfaceGate>

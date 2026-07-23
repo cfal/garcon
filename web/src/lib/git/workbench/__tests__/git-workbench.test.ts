@@ -19,7 +19,7 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 // Mock the git API module
 vi.mock('$lib/api/git.js', () => ({
 	getGitWorkbenchSnapshot: vi.fn(),
-	getGitWorkbenchFingerprint: vi.fn(),
+	getGitWorkingTreeFingerprint: vi.fn(),
 	getGitReviewFileBodies: vi.fn(),
 	getGitConflicts: vi.fn(),
 	getGitConflictDetails: vi.fn(),
@@ -33,7 +33,6 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitFileHistory: vi.fn(),
 	getGitBlame: vi.fn(),
 	getGitGraph: vi.fn(),
-	getGitCompare: vi.fn(),
 	gitStageSelection: vi.fn(),
 	gitStageHunk: vi.fn(),
 	gitStagePaths: vi.fn(),
@@ -122,6 +121,8 @@ function makeReviewBody(
 		category: 'normal',
 		isBinary: false,
 		isTooLarge: false,
+		renderedRowCount: text ? 2 : 0,
+		patchBytes: text.length,
 		rows: text
 			? [
 					{
@@ -285,7 +286,7 @@ describe('GitWorkbenchStore', () => {
 		wb = new GitWorkbenchStore();
 		vi.clearAllMocks();
 		mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
-		mockedApi.getGitWorkbenchFingerprint.mockResolvedValue(makeFingerprint('v1:baseline'));
+		mockedApi.getGitWorkingTreeFingerprint.mockResolvedValue(makeFingerprint('v1:baseline'));
 		mockedApi.getGitReviewFileBodies.mockResolvedValue({
 			documentId: 'doc',
 			files: { 'a.ts': makeReviewBody('a.ts') },
@@ -433,7 +434,7 @@ describe('GitWorkbenchStore', () => {
 					workbenchFingerprint: 'v1:loaded',
 				}),
 			);
-			mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+			mockedApi.getGitWorkingTreeFingerprint.mockResolvedValue({
 				status: 'ready',
 				project: '/project',
 				fingerprintVersion: 1,
@@ -460,7 +461,7 @@ describe('GitWorkbenchStore', () => {
 					workbenchFingerprint: 'v1:loaded',
 				}),
 			);
-			mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+			mockedApi.getGitWorkingTreeFingerprint.mockResolvedValue({
 				status: 'ready',
 				project: '/project',
 				fingerprintVersion: 1,
@@ -483,7 +484,7 @@ describe('GitWorkbenchStore', () => {
 
 		it('ignores stale freshness responses after target changes', async () => {
 			const staleFingerprint =
-				deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
+				deferred<Awaited<ReturnType<typeof gitApi.getGitWorkingTreeFingerprint>>>();
 			mockedApi.getGitWorkbenchSnapshot
 				.mockResolvedValueOnce(
 					makeWorkbenchSnapshot({
@@ -497,7 +498,7 @@ describe('GitWorkbenchStore', () => {
 						workbenchFingerprint: 'v1:b',
 					}),
 				);
-			mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(staleFingerprint.promise);
+			mockedApi.getGitWorkingTreeFingerprint.mockReturnValueOnce(staleFingerprint.promise);
 
 			await wb.setTarget({
 				projectPath: '/project-a',
@@ -546,13 +547,13 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
 
 			await wb.setTarget(makeTarget());
-			mockedApi.getGitWorkbenchFingerprint.mockClear();
+			mockedApi.getGitWorkingTreeFingerprint.mockClear();
 
 			const stage = wb.staging.stageHunk('/project', makeActionTarget(), 0);
 
 			expect(wb.isReconcilingLocalGitMutation).toBe(true);
 			await wb.checkFreshness('/project');
-			expect(mockedApi.getGitWorkbenchFingerprint).not.toHaveBeenCalled();
+			expect(mockedApi.getGitWorkingTreeFingerprint).not.toHaveBeenCalled();
 
 			stageResult.resolve({ success: true });
 			await stage;
@@ -563,7 +564,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('ignores an in-flight freshness response after a local mutation begins', async () => {
-			const freshness = deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
+			const freshness = deferred<Awaited<ReturnType<typeof gitApi.getGitWorkingTreeFingerprint>>>();
 			const stageResult = deferred<Awaited<ReturnType<typeof gitApi.gitStageHunk>>>();
 			mockedApi.getGitWorkbenchSnapshot
 				.mockResolvedValueOnce(
@@ -576,7 +577,7 @@ describe('GitWorkbenchStore', () => {
 						workbenchFingerprint: 'v1:changed',
 					}),
 				);
-			mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(freshness.promise);
+			mockedApi.getGitWorkingTreeFingerprint.mockReturnValueOnce(freshness.promise);
 			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
 
 			await wb.setTarget(makeTarget());
@@ -657,14 +658,14 @@ describe('GitWorkbenchStore', () => {
 					workbenchFingerprint: 'v1:old',
 				}),
 			);
-			mockedApi.getGitWorkbenchFingerprint.mockResolvedValueOnce(makeFingerprint('v1:changed'));
+			mockedApi.getGitWorkingTreeFingerprint.mockResolvedValueOnce(makeFingerprint('v1:changed'));
 
 			await wb.setTarget(makeTarget());
 
 			await wb.runLocalGitMutation('/project', async () => true);
 
 			await vi.waitFor(() => {
-				expect(mockedApi.getGitWorkbenchFingerprint).toHaveBeenCalledWith(
+				expect(mockedApi.getGitWorkingTreeFingerprint).toHaveBeenCalledWith(
 					'/project',
 					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				);
@@ -1595,108 +1596,26 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('review comments', () => {
-		it('adds, updates, and removes draft comments', () => {
-			wb.drafts.addDraftComment({
-				filePath: 'a.ts',
-				side: 'after',
-				line: 10,
-				body: 'Needs refactoring',
-				severity: 'warning',
-			});
+		it('appends a comment to Chat and clears the inline composer on success', () => {
+			wb.drafts.openCommentComposer('a.ts', 'after', 10);
+			wb.drafts.setCommentBody('Needs refactoring');
+			const append = vi.fn(() => 'appended' as const);
 
-			expect(wb.drafts.reviewComments).toHaveLength(1);
-			const id = wb.drafts.reviewComments[0].id;
-			expect(wb.drafts.reviewComments[0].body).toBe('Needs refactoring');
+			const result = wb.drafts.appendComment(append, 'formatted comment');
 
-			wb.drafts.updateDraftComment(id, { body: 'Updated comment' });
-			expect(wb.drafts.reviewComments[0].body).toBe('Updated comment');
-
-			wb.drafts.removeDraftComment(id);
-			expect(wb.drafts.reviewComments).toHaveLength(0);
+			expect(result).toBe('appended');
+			expect(append).toHaveBeenCalledWith('formatted comment');
+			expect(wb.drafts.commentComposer.open).toBe(false);
+			expect(wb.drafts.commentFeedback?.message).toContain('Added');
 		});
 
-		it('groups comments by file', () => {
-			wb.drafts.addDraftComment({
-				filePath: 'a.ts',
-				side: 'after',
-				line: 1,
-				body: 'one',
-				severity: 'note',
-			});
-			wb.drafts.addDraftComment({
-				filePath: 'b.ts',
-				side: 'after',
-				line: 2,
-				body: 'two',
-				severity: 'note',
-			});
-			wb.drafts.addDraftComment({
-				filePath: 'a.ts',
-				side: 'before',
-				line: 5,
-				body: 'three',
-				severity: 'blocker',
-			});
+		it('preserves the inline comment when no Chat draft is available', () => {
+			wb.drafts.openCommentComposer('a.ts', 'before', 4);
+			wb.drafts.setCommentBody('Keep this text');
 
-			const grouped = wb.drafts.commentsByFile;
-			expect(Object.keys(grouped)).toEqual(['a.ts', 'b.ts']);
-			expect(grouped['a.ts']).toHaveLength(2);
-			expect(grouped['b.ts']).toHaveLength(1);
-		});
-
-		it('builds finalized review message', () => {
-			wb.drafts.reviewSummary = 'Overall good';
-			wb.drafts.addDraftComment({
-				filePath: 'a.ts',
-				side: 'after',
-				line: 10,
-				body: 'Fix this',
-				severity: 'warning',
-			});
-
-			const msg = wb.drafts.buildFinalizedReviewMessage();
-
-			expect(msg).toContain('Summary:');
-			expect(msg).toContain('Overall good');
-			expect(msg).toContain('[warning] a.ts:10');
-			expect(msg).toContain('Fix this');
-		});
-
-		it('finalizeReviewToAgent calls send and clears on success', async () => {
-			wb.drafts.addDraftComment({
-				filePath: 'a.ts',
-				side: 'after',
-				line: 1,
-				body: 'test',
-				severity: 'note',
-			});
-			wb.drafts.reviewSummary = 'summary';
-			const send = vi.fn().mockResolvedValue(true);
-
-			const result = await wb.drafts.finalizeReviewToAgent(send);
-
-			expect(result).toBe(true);
-			expect(send).toHaveBeenCalledOnce();
-			expect(wb.drafts.reviewComments).toHaveLength(0);
-			expect(wb.drafts.reviewSummary).toBe('');
-		});
-
-		it('keeps the review draft when chat submission is rejected', async () => {
-			wb.drafts.addDraftComment({
-				filePath: 'a.ts',
-				side: 'after',
-				line: 1,
-				body: 'test',
-				severity: 'note',
-			});
-			wb.drafts.reviewSummary = 'summary';
-			const send = vi.fn().mockResolvedValue(false);
-
-			const result = await wb.drafts.finalizeReviewToAgent(send);
-
-			expect(result).toBe(false);
-			expect(wb.drafts.reviewComments).toHaveLength(1);
-			expect(wb.drafts.reviewSummary).toBe('summary');
+			expect(wb.drafts.appendComment(undefined, 'formatted comment')).toBe('unavailable');
+			expect(wb.drafts.commentComposer.body).toBe('Keep this text');
+			expect(wb.drafts.commentError).toContain('Open a chat');
 		});
 	});
 
@@ -1743,14 +1662,17 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.files.activeTab).toBe('unstaged');
 		});
 
-		it('setActiveTab switches tab and clears selection', () => {
+		it('setActiveTab switches tab and clears selection and the line composer', () => {
 			wb.selection.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
+			wb.drafts.openCommentComposer('a.ts', 'after', 10);
 			expect(wb.selection.hasSelection).toBe(true);
+			expect(wb.drafts.commentComposer.open).toBe(true);
 
 			wb.setActiveTab('staged');
 
 			expect(wb.files.activeTab).toBe('staged');
 			expect(wb.selection.hasSelection).toBe(false);
+			expect(wb.drafts.commentComposer.open).toBe(false);
 		});
 
 		it('setActiveTab is no-op when same tab', () => {

@@ -9,16 +9,25 @@
 	import GitWorkbench from './GitWorkbench.svelte';
 	import GitFreshnessBanner from './GitFreshnessBanner.svelte';
 	import GitHistoryView from './GitHistoryView.svelte';
+	import GitComparisonScreen from './GitComparisonScreen.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitPushModal from './GitPushModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
+	import GitComparisonDialog from './GitComparisonDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
+	import { resolveGitEditorRoot } from '$lib/git/surface/git-editor-root.js';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
 	import type { GitHistoryRevertTarget } from '$lib/git/history/git-history.svelte.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
+	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import type { HostId } from '$lib/workspace/surface-types.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+	import {
+		GIT_EMPTY_TREE_REVISION,
+		recentCommitComparisonDefaults,
+	} from '$lib/git/review/git-comparison.svelte.js';
 	import {
 		getLocalSettings,
 		getFileSessions,
@@ -26,7 +35,9 @@
 		getTransientLayers,
 		getSingletonSurfaces,
 		getWorkspaceCoordinator,
+		getWorkspaceShortcuts,
 	} from '$lib/context';
+	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 
 	interface GitPanelProps {
 		projectPath: string | null;
@@ -34,7 +45,7 @@
 		isMobile: boolean;
 		presentation: HostId | 'mobile';
 		isVisible?: boolean;
-		onSendToChat?: (message: string) => Promise<boolean>;
+		onAppendToChatDraft?: ChatDraftAppend;
 	}
 
 	let {
@@ -43,7 +54,7 @@
 		isMobile,
 		presentation,
 		isVisible = true,
-		onSendToChat,
+		onAppendToChatDraft,
 	}: GitPanelProps = $props();
 
 	const localSettings = getLocalSettings();
@@ -51,22 +62,27 @@
 	const remoteSettings = getRemoteSettings();
 	const transientLayers = getTransientLayers();
 	const workspace = getWorkspaceCoordinator();
+	const workspaceShortcuts = getWorkspaceShortcuts();
 	const gitSurface = getSingletonSurfaces().git();
 	const repository = gitSurface.repository;
 	const wb = gitSurface.workbench;
 	const history = gitSurface.history;
+	const comparison = gitSurface.comparison;
 	let presentationVisible = $derived(
 		isVisible && gitSurface.presentationVisible && !gitSurface.projectIdentityPending,
 	);
 	let files = $derived(wb.files);
 	let review = $derived(wb.review);
 	let commit = $derived(wb.commit);
-	let drafts = $derived(wb.drafts);
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $derived(gitSurface.targets);
 	let activeTarget = $derived(gitSurface.activeTarget);
 	let isLoadingTargets = $derived(gitSurface.isLoadingTargets);
 	let fallbackTarget = $derived(gitSurface.fallbackTarget);
+	let activeView = $derived(gitSurface.activeView);
+	let toolbarView = $derived<'changes' | 'history'>(
+		activeView === 'history' ? 'history' : 'changes',
+	);
 	let activeProjectPath = $derived(gitSurface.activeProjectPath);
 	let activeWorktreePath = $derived(gitSurface.activeWorktreePath);
 	let projectBasePath = $derived(remoteSettings.snapshot?.projectBasePath ?? projectPath ?? '/');
@@ -78,7 +94,7 @@
 			(!repository.remoteStatus.hasUpstream || repository.remoteStatus.ahead > 0),
 	);
 	let showTopToolbar = $derived(
-		!(repository.activeView === 'history' && history.screen === 'commit'),
+		activeView !== 'comparison' && !(activeView === 'history' && history.screen !== 'list'),
 	);
 
 	$effect(() => {
@@ -87,6 +103,15 @@
 		});
 	});
 
+	$effect(() =>
+		workspaceShortcuts.registerSurface(singletonSurfaceId('git'), (event) => {
+			if (!comparison.historySelectionActive || event.key !== 'Escape') return false;
+			event.preventDefault();
+			comparison.cancelHistorySelection();
+			return true;
+		}),
+	);
+
 	$effect(() => {
 		if (!presentationVisible) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
@@ -94,7 +119,13 @@
 		return startGitFreshnessPolling({
 			projectPath: nextTarget.projectPath,
 			checkFreshness: (projectToCheck) => {
-				untrack(() => void wb.checkFreshness(projectToCheck));
+				untrack(() => {
+					if (activeView === 'comparison') {
+						void comparison.checkFreshness(projectToCheck);
+					} else {
+						void wb.checkFreshness(projectToCheck);
+					}
+				});
 			},
 		});
 	});
@@ -107,6 +138,9 @@
 		const version = gitProjectInvalidations.version(invalidationKey);
 		if (!gitSurface.takeInvalidationRefresh(invalidationKey, version)) return;
 		untrack(() => {
+			if (activeView === 'comparison') {
+				void comparison.checkFreshness(projectToRefresh);
+			}
 			void wb.refresh({
 				reason: 'git-action',
 				preserveSelection: true,
@@ -155,12 +189,75 @@
 	}
 
 	function handleViewCommits(): void {
-		repository.activeView = 'history';
+		gitSurface.showHistory();
 	}
 
 	function handleViewChanges(): void {
-		history.backToList();
-		repository.activeView = 'changes';
+		gitSurface.showChanges();
+	}
+
+	function openComparisonDialog(defaults: Parameters<typeof comparison.openDialog>[0]): void {
+		if (activeProjectPath && repository.refs.length === 0 && !repository.isLoadingBranches) {
+			void repository.fetchRefs(activeProjectPath);
+		}
+		transientLayers.open('main-inert', () =>
+			comparison.openDialog(defaults, {
+				diffMode: review.diffMode,
+				contextLines: review.contextLines,
+			}),
+		);
+	}
+
+	function handleOpenChangesComparison(): void {
+		openComparisonDialog({
+			fromRevision: files.hasCommits ? 'HEAD' : GIT_EMPTY_TREE_REVISION,
+			toKind: 'working-tree',
+		});
+	}
+
+	function handleOpenGraphComparison(): void {
+		openComparisonDialog(recentCommitComparisonDefaults(wb.porcelain.graphCommits));
+	}
+
+	async function handleCompare(): Promise<void> {
+		if (!activeProjectPath) return;
+		const loaded = await comparison.compare(activeProjectPath);
+		if (!loaded || !comparison.snapshot) return;
+		gitSurface.showComparison();
+	}
+
+	function handleRefreshComparison(): void {
+		if (activeProjectPath) void comparison.refresh(activeProjectPath);
+	}
+
+	function handleSetDiffMode(mode: DiffMode): void {
+		review.diffMode = mode;
+		if (activeView === 'comparison' && activeProjectPath) {
+			comparison.setDisplayOptions(activeProjectPath, mode, review.contextLines);
+		}
+	}
+
+	function handleSetContextLines(lines: number): void {
+		const activeDocument =
+			activeView === 'changes'
+				? wb.drafts
+				: activeView === 'comparison'
+				? comparison.document
+				: activeView === 'history' && history.screen === 'commit'
+					? history.document
+					: null;
+		if (lines !== review.contextLines && activeDocument?.commentComposer.open) {
+			activeDocument.markContextChangeBlocked();
+			return;
+		}
+		wb.setContextLines(lines);
+		if (activeView === 'comparison' && activeProjectPath) {
+			comparison.setDisplayOptions(activeProjectPath, review.diffMode, lines);
+		}
+	}
+
+	function handleSetDiffFontSize(size: string): void {
+		localSettings.set('gitDiffFontSize', size);
 	}
 
 	async function handleRevert(): Promise<void> {
@@ -198,8 +295,15 @@
 
 	function handleOpenInEditor(relativePath: string, line: number): void {
 		if (!activeProjectPath) return;
+		const target = activeTarget ?? fallbackTarget;
+		const fileRootPath = resolveGitEditorRoot({
+			activeProjectPath,
+			targetRepoRoot: target?.repoRoot,
+			activeView,
+			comparisonRepoRoot: comparison.snapshot?.repoRoot,
+		});
 		void fileSessions.open({
-			fileRootPath: activeProjectPath,
+			fileRootPath,
 			relativePath,
 			mode: 'code',
 			origin: presentation,
@@ -226,7 +330,7 @@
 		{#if showTopToolbar}
 			<GitTopToolbar
 				{isMobile}
-				activeView={repository.activeView}
+				activeView={toolbarView}
 				currentBranch={repository.currentBranch}
 				refs={repository.refs}
 				remoteStatus={repository.remoteStatus}
@@ -237,7 +341,6 @@
 				isLoadingBranches={repository.isLoadingBranches}
 				isLoading={repository.isLoading || files.isLoadingTree}
 				isPushing={repository.isPushing}
-				reviewCount={drafts.reviewComments.length}
 				isCommitting={commit.isCommitting}
 				{canPush}
 				diffMode={review.diffMode}
@@ -280,18 +383,12 @@
 				}}
 				onViewCommits={handleViewCommits}
 				onViewChanges={handleViewChanges}
-				onOpenReview={() => {
-					transientLayers.open('main-inert', () => {
-						drafts.reviewModalOpen = true;
-					});
-				}}
+				onOpenComparison={handleOpenChangesComparison}
 				onCommit={handleOpenCommit}
 				onPush={() => void handleOpenPush()}
-				onSetDiffMode={(mode) => {
-					review.diffMode = mode;
-				}}
-				onSetContextLines={(n) => wb.setContextLines(n)}
-				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
+				onSetDiffMode={handleSetDiffMode}
+				onSetContextLines={handleSetContextLines}
+				onSetDiffFontSize={handleSetDiffFontSize}
 				onRefresh={handleRefresh}
 			/>
 		{/if}
@@ -320,20 +417,23 @@
 			<GitFreshnessBanner isRefreshing={files.isLoadingTree} onRefresh={handleStaleRefresh} />
 		{/if}
 
-		{#if repository.activeView === 'changes'}
+		{#if activeView === 'changes'}
 			<GitWorkbench
 				target={activeTarget ?? fallbackTarget}
 				{isMobile}
 				{wb}
-				{onSendToChat}
+				{onAppendToChatDraft}
+				onOpenChat={() => void workspace.focusChat()}
+				onCompareRevisions={handleOpenGraphComparison}
 				diffFontSize={gitDiffFontSize}
 				onOpenInEditor={handleOpenInEditor}
 			/>
 		{/if}
 
-		{#if repository.activeView === 'history'}
+		{#if activeView === 'history'}
 			<GitHistoryView
 				{history}
+				{comparison}
 				projectPath={activeProjectPath}
 				{effectiveProjectKey}
 				{isMobile}
@@ -343,6 +443,31 @@
 				refreshToken={gitSurface.historyRefreshToken}
 				onRevertCommit={requestRevertCommit}
 				onOpenInEditor={handleOpenInEditor}
+				onOpenComparison={openComparisonDialog}
+				{onAppendToChatDraft}
+				onOpenChat={() => void workspace.focusChat()}
+				onSetDiffMode={handleSetDiffMode}
+				onSetContextLines={handleSetContextLines}
+				onSetDiffFontSize={handleSetDiffFontSize}
+			/>
+		{/if}
+
+		{#if activeView === 'comparison'}
+			<GitComparisonScreen
+				{comparison}
+				{isMobile}
+				fontSize={gitDiffFontSize}
+				diffMode={review.diffMode}
+				contextLines={review.contextLines}
+				diffFontSize={localSettings.gitDiffFontSize}
+				onBack={() => gitSurface.returnFromComparison()}
+				onRefresh={handleRefreshComparison}
+				onOpenInEditor={handleOpenInEditor}
+				{onAppendToChatDraft}
+				onOpenChat={() => void workspace.focusChat()}
+				onSetDiffMode={handleSetDiffMode}
+				onSetContextLines={handleSetContextLines}
+				onSetDiffFontSize={handleSetDiffFontSize}
 			/>
 		{/if}
 
@@ -403,6 +528,19 @@
 				onClose={() => {
 					gitSurface.showTargetDialog = false;
 				}}
+			/>
+		{/if}
+
+		{#if comparison.dialogOpen}
+			<GitComparisonDialog
+				{comparison}
+				refs={repository.refs}
+				isLoadingRefs={repository.isLoadingBranches}
+				onSearchRefs={(query) => {
+					if (activeProjectPath) void repository.fetchRefs(activeProjectPath, query);
+				}}
+				onCompare={() => void handleCompare()}
+				onClose={() => comparison.closeDialog()}
 			/>
 		{/if}
 	</div>

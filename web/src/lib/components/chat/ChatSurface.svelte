@@ -31,6 +31,7 @@
 		type SplitDropZone,
 	} from './split-drop-controller.svelte';
 	import { resolveChatSurfacePresentation } from './chat-surface-presentation.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	interface WorkspaceChatActions {
 		requestDelete: (chat: ChatSessionRecord) => void;
@@ -63,6 +64,7 @@
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
+		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
 		chatActions?: WorkspaceChatActions;
 	}
 
@@ -77,6 +79,7 @@
 		onRegisterReload,
 		onRegisterSubmit,
 		onRegisterUserMessageNavigator,
+		onRegisterAppendToDraft,
 		chatActions = noopChatActions,
 	}: ChatSurfaceProps = $props();
 
@@ -140,6 +143,10 @@
 	function handleRegisterUserMessageNavigator(command: UserMessageNavigatorRegistration): void {
 		openUserMessageNavigator = command;
 		onRegisterUserMessageNavigator?.(command);
+	}
+
+	function handleRegisterAppendToDraft(fn: ChatDraftAppend): void {
+		onRegisterAppendToDraft?.(fn);
 	}
 
 	function toggleSplitMode() {
@@ -396,6 +403,7 @@
 				<ConversationWorkspace
 					onRegisterSubmit={handleRegisterSubmit}
 					onRegisterUserMessageNavigator={handleRegisterUserMessageNavigator}
+					onRegisterAppendToDraft={handleRegisterAppendToDraft}
 					{onRegisterReload}
 					transcriptCache={chatTranscriptCache}
 					reserveTopFloatingToolbar={reserveConversationTopFloatingToolbar}

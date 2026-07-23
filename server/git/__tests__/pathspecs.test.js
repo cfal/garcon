@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'bun:test';
-import { chunkGitPathspecs } from '../pathspecs.js';
+import { chunkGitPathspecs, exactGitPathspecs, literalGitPathspec } from '../pathspecs.js';
+
+describe('literalGitPathspec', () => {
+  it('disables pathspec magic for user-controlled paths', () => {
+    expect(literalGitPathspec('src/[draft]*.ts')).toBe(':(literal)src/[draft]*.ts');
+  });
+
+  it('excludes descendants when selecting one exact file', () => {
+    expect(exactGitPathspecs(['bin/tool'])).toEqual([
+      ':(literal)bin/tool',
+      ':(exclude,glob)bin/tool/**',
+    ]);
+  });
+
+  it('does not exclude another requested rename path', () => {
+    expect(exactGitPathspecs(['bin/tool', 'bin/tool/main.sh'])).toEqual([
+      ':(literal)bin/tool',
+      ':(literal)bin/tool/main.sh',
+      ':(exclude,glob)bin/tool/main.sh/**',
+    ]);
+  });
+
+  it('quotes glob metacharacters in descendant exclusions', () => {
+    expect(exactGitPathspecs(['src/[draft]*?.ts'])).toEqual([
+      ':(literal)src/[draft]*?.ts',
+      ':(exclude,glob)src/\\[draft\\]\\*\\?.ts/**',
+    ]);
+  });
+});
 
 describe('chunkGitPathspecs', () => {
   it('keeps ordinary selections in one git command', () => {

@@ -1,10 +1,8 @@
 import { GitDomainError } from './git-types.js';
-import {
-  COMMIT_MESSAGE_ERROR_MAP,
-  isCommitMessageErrorCode,
-} from './commit-message.js';
+import { COMMIT_MESSAGE_ERROR_MAP, isCommitMessageErrorCode } from './commit-message.js';
 import { createDiffEngine } from './diff-engine.js';
 import { createCommitHistoryOperations } from './commit-history.js';
+import { createComparisonOperations } from './comparison.js';
 import { createPorcelainOperations } from './porcelain.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
@@ -32,15 +30,22 @@ function gitDomainErrorToResponse(error: GitDomainError): Response {
 }
 
 function classifiedGitErrorToResponse(classified: ClassifiedGitError): Response {
-  const body: { error: string; details?: unknown } = { error: classified.message };
+  const body: { error: string; details?: unknown } = {
+    error: classified.message,
+  };
   if (classified.details) body.details = classified.details;
   return Response.json(body, { status: classified.status });
 }
 
-export function createGitService({ agents, classifyGitError }: CreateGitServiceOptions): GitService {
+export function createGitService({
+  agents,
+  classifyGitError,
+  assertProjectPathAllowed,
+}: CreateGitServiceOptions): GitService {
   const status = createStatusOperations(agents);
   const diff = createDiffEngine();
   const commitHistory = createCommitHistoryOperations();
+  const comparison = createComparisonOperations(assertProjectPathAllowed);
   const porcelain = createPorcelainOperations();
   const worktrees = createWorktreeOperations();
   const quickSummary = createQuickSummaryOperations();
@@ -49,6 +54,7 @@ export function createGitService({ agents, classifyGitError }: CreateGitServiceO
     ...status,
     ...diff,
     ...commitHistory,
+    ...comparison,
     ...porcelain,
     ...worktrees,
     ...quickSummary,

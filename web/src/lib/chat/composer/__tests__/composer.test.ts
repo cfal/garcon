@@ -127,4 +127,37 @@ describe('ComposerState', () => {
 		composer.restoreDraft('beta');
 		expect(composer.images).toEqual([]);
 	});
+
+	it('appends an editable block and persists it immediately without changing attachments', () => {
+		const composer = new ComposerState();
+		const image = new File(['a'], 'a.png', { type: 'image/png' });
+		composer.inputText = 'Existing draft\n';
+		composer.addImages([image]);
+
+		const result = composer.appendDraftBlock('chat-1', 'Git review comment');
+
+		expect(result).toBe('appended');
+		expect(composer.inputText).toBe('Existing draft\n\nGit review comment');
+		expect(composer.images).toEqual([image]);
+		expect(composer.draftAppendRequest).toEqual({ chatId: 'chat-1', requestId: 1 });
+		expect(localStorage.getItem(chatDraftStorageKey('chat-1'))).toBe(composer.inputText);
+	});
+
+	it('does not duplicate an unchanged block and allows an edited block to be appended again', () => {
+		const composer = new ComposerState();
+		expect(composer.appendDraftBlock('chat-1', 'Review block')).toBe('appended');
+		expect(composer.appendDraftBlock('chat-1', 'Review block')).toBe('duplicate');
+		expect(composer.draftAppendRequest?.requestId).toBe(1);
+
+		composer.inputText = 'Edited review block';
+
+		expect(composer.appendDraftBlock('chat-1', 'Review block')).toBe('appended');
+		expect(composer.draftAppendRequest?.requestId).toBe(2);
+	});
+
+	it('reports unavailable when no chat is active', () => {
+		const composer = new ComposerState();
+		expect(composer.appendDraftBlock('', 'Review block')).toBe('unavailable');
+		expect(composer.inputText).toBe('');
+	});
 });

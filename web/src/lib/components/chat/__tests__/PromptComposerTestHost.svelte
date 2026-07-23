@@ -297,6 +297,13 @@
 	{onQuickCommit}
 />
 
+<button
+	type="button"
+	data-testid="append-draft"
+	onclick={() => composer.appendDraftBlock(selectedChatId, 'Appended review block')}
+	>Append draft</button
+>
+
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
 {#each notifications.items as notification (notification.id)}
 	<div data-testid="notification">{notification.message}</div>

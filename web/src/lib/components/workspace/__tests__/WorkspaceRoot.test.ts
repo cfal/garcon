@@ -398,6 +398,7 @@ describe('PortableSurfaceContent', () => {
 			presentation: 'main' as const,
 			visible: true,
 			onSendToChat: vi.fn(async () => true),
+			onAppendToChatDraft: vi.fn(() => 'appended' as const),
 			frameBridge: new SurfaceFrameBridge(),
 		};
 

@@ -41,6 +41,7 @@ function renderSurface(
 	overrides: Partial<GitVirtualDiffSurfaceProps> = {},
 ) {
 	const props = {
+		documentId: 'doc',
 		rows,
 		fileRowIndex: new Map(rows.map((row, index) => [row.filePath, index])),
 		activeTab: 'unstaged' as const,
@@ -50,12 +51,14 @@ function renderSurface(
 		scrollToRequest: null,
 		composerState: {
 			open: false,
+			focusPending: false,
 			filePath: '',
 			side: 'after' as const,
 			line: 0,
 			body: '',
 			severity: 'note' as const,
 		},
+		showInlineCommentComposer: true,
 		onVisibleRowsChange: vi.fn(),
 		onSelectFile: vi.fn(),
 		onToggleLineSelection: vi.fn(),
@@ -67,7 +70,10 @@ function renderSurface(
 		onStageFile: vi.fn(),
 		onUnstageFile: vi.fn(),
 		onAddCommentForFile: vi.fn(),
-		onEditComment: vi.fn(),
+		commentFeedback: null,
+		commentError: null,
+		commentCopyText: null,
+		onOpenChat: vi.fn(),
 		...overrides,
 	};
 	return {

@@ -4,7 +4,13 @@ import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js'
 import { mapWithConcurrency } from '../lib/concurrency.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';
-import { categoryForPath, errorFileBody, limitedRenderedPatch } from './rendered-diff.js';
+import { exactGitPathspecs } from './pathspecs.js';
+import {
+  categoryForPath,
+  errorFileBody,
+  limitedRenderedPatch,
+  selectFilePatchFromRawDiff,
+} from './rendered-diff.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
@@ -16,6 +22,7 @@ import {
   type GitCommitSnapshotOptions,
   type GitCommitSnapshotResponse,
   type GitCommitSnapshotReady,
+  type GitDiffFileRequest,
   type GitHistoryCommitListItem,
   type GitHistoryCommitListOptions,
   type GitHistoryCommitListResponse,
@@ -186,14 +193,15 @@ function commitFileFingerprint(
   commit: string,
   parent: string | null,
   context: number,
-  filePath: string,
+  file: GitDiffFileRequest,
 ): string {
   return hashString([
     'commit-file',
     commit,
     parent ?? EMPTY_TREE,
     context,
-    filePath,
+    file.originalPath ?? '',
+    file.path,
   ].join('\x1f'));
 }
 
@@ -250,7 +258,7 @@ function summarizeCommitFiles(
           }
         : {}),
     };
-    summary.bodyFingerprint = commitFileFingerprint(commit, parent, context, summary.path);
+    summary.bodyFingerprint = commitFileFingerprint(commit, parent, context, summary);
     return summary;
   });
 }
@@ -402,25 +410,42 @@ async function getCommitFileBodies({
   const errors: GitCommitFileBodiesResponse['errors'] = {};
 
   await mapWithConcurrency(requestedFiles, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
+    const pathspecs = exactGitPathspecs(
+      file.originalPath ? [file.originalPath, file.path] : [file.path],
+    );
     try {
       const { stdout } = await runGitTraced(
         projectPath,
-        ['diff', `-U${context}`, '--find-renames', base, details.hash, '--', file],
+        [
+          'diff',
+          '--patch-with-raw',
+          '-z',
+          '--no-color',
+          '--no-ext-diff',
+          `-U${context}`,
+          '--find-renames',
+          '--submodule=short',
+          ...(file.originalPath ? ['--diff-filter=RC'] : []),
+          base,
+          details.hash,
+          '--',
+          ...pathspecs,
+        ],
         trace,
         readOnlyGitOptions({ signal }),
       );
       const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
-      parsedFiles[file] = limitedRenderedPatch(file, fingerprint, stdout);
+      parsedFiles[file.path] = limitedRenderedPatch(
+        file.path,
+        fingerprint,
+        selectFilePatchFromRawDiff(stdout, file.path),
+        { allowMultipleFileSections: true },
+      );
     } catch (error) {
-      const fingerprint = hashString([
-        'commit-body-error',
-        details.hash,
-        selectedParent ?? EMPTY_TREE,
-        context,
-        file,
-      ].join('\x1f'));
-      parsedFiles[file] = errorFileBody(file, fingerprint, error instanceof Error ? error.message : String(error));
-      errors[file] = error instanceof Error ? error.message : String(error);
+      if (signal?.aborted) throw error;
+      const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
+      parsedFiles[file.path] = errorFileBody(file.path, fingerprint, error instanceof Error ? error.message : String(error));
+      errors[file.path] = error instanceof Error ? error.message : String(error);
     }
   });
 

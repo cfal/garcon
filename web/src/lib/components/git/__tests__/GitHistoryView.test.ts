@@ -4,6 +4,7 @@ import {
 	getGitCommitFileBodies,
 	getGitCommitSnapshot,
 	getGitHistoryCommits,
+	type GitDiffFileRequest,
 } from '$lib/api/git.js';
 import {
 	installResizeObserverHarness,
@@ -13,6 +14,10 @@ import {
 	GitHistoryController,
 	type GitHistoryRevertTarget,
 } from '$lib/git/history/git-history.svelte.js';
+import {
+	GIT_EMPTY_TREE_REVISION,
+	GitComparisonController,
+} from '$lib/git/review/git-comparison.svelte.js';
 import GitHistoryView from '../GitHistoryView.svelte';
 
 vi.mock('$lib/api/git.js', () => ({
@@ -109,6 +114,8 @@ function bodyForPath(path: string) {
 		category: 'normal' as const,
 		isBinary: false,
 		isTooLarge: false,
+		renderedRowCount: 2,
+		patchBytes: 64,
 		rows: [
 			{
 				key: `hunk:${path}`,
@@ -143,6 +150,10 @@ function bodiesForPaths(paths: string[]) {
 	};
 }
 
+function requestedPaths(files: GitDiffFileRequest[]): string[] {
+	return files.map((file) => file.path);
+}
+
 function deferred<T>() {
 	let resolve!: (value: T) => void;
 	let reject!: (reason?: unknown) => void;
@@ -155,12 +166,14 @@ function deferred<T>() {
 
 describe('GitHistoryView', () => {
 	let onRevertCommit: ReturnType<typeof vi.fn<(commit: GitHistoryRevertTarget) => void>>;
+	let comparison: GitComparisonController;
 	let restoreResizeObserver: () => void;
 
 	beforeEach(() => {
 		restoreResizeObserver = installResizeObserverHarness();
 		vi.clearAllMocks();
 		onRevertCommit = vi.fn<(commit: GitHistoryRevertTarget) => void>();
+		comparison = new GitComparisonController();
 		vi.mocked(getGitHistoryCommits).mockResolvedValue({
 			project: '/project',
 			ref: 'HEAD',
@@ -169,7 +182,7 @@ describe('GitHistoryView', () => {
 		});
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot());
 		vi.mocked(getGitCommitFileBodies).mockImplementation(
-			async (_project, _documentId, _commit, files) => bodiesForPaths(files),
+			async (_project, _documentId, _commit, files) => bodiesForPaths(requestedPaths(files)),
 		);
 	});
 
@@ -182,6 +195,9 @@ describe('GitHistoryView', () => {
 		render(GitHistoryView, {
 			props: {
 				history,
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 				isMobile: false,
@@ -202,6 +218,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			expect(getGitCommitFileBodies).toHaveBeenCalled();
 		});
+		expect(screen.getByRole('button', { name: /diff settings/i })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: /stage/i })).toBeNull();
 		expect(screen.getAllByText('a.ts').length).toBeGreaterThan(0);
 		await fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
@@ -221,6 +238,9 @@ describe('GitHistoryView', () => {
 		const history = new GitHistoryController();
 		const props = {
 			history,
+			comparison,
+			onOpenComparison: vi.fn(),
+			onOpenChat: vi.fn(),
 			projectPath: '/project',
 			effectiveProjectKey: 'alpha',
 			isMobile: false,
@@ -246,6 +266,9 @@ describe('GitHistoryView', () => {
 		const { container } = render(GitHistoryView, {
 			props: {
 				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 				isMobile: true,
@@ -260,7 +283,7 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
 
 		await screen.findByText('Commit detail');
-		const details = container.querySelector<HTMLElement>('[data-git-history-details]');
+		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		expect(details).toBeTruthy();
 		if (!details) return;
 		ResizeObserverHarness.emit(details, 1_100);
@@ -300,6 +323,9 @@ describe('GitHistoryView', () => {
 		const { container } = render(GitHistoryView, {
 			props: {
 				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 				isMobile: false,
@@ -314,7 +340,7 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
 		await screen.findByText('Commit detail');
 
-		const details = container.querySelector<HTMLElement>('[data-git-history-details]');
+		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		expect(details).toBeTruthy();
 		if (!details) return;
 		ResizeObserverHarness.emit(details, 480);
@@ -365,10 +391,15 @@ describe('GitHistoryView', () => {
 		});
 		vi.mocked(getGitCommitFileBodies)
 			.mockReturnValueOnce(firstBatch.promise)
-			.mockImplementation(async (_project, _documentId, _commit, paths) => bodiesForPaths(paths));
+			.mockImplementation(async (_project, _documentId, _commit, files) =>
+				bodiesForPaths(requestedPaths(files)),
+			);
 		const { container } = render(GitHistoryView, {
 			props: {
 				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 				isMobile: false,
@@ -384,7 +415,7 @@ describe('GitHistoryView', () => {
 		await screen.findByText('Commit detail');
 		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1));
 		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
-		const details = container.querySelector<HTMLElement>('[data-git-history-details]');
+		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		const diffRoot = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
 		expect(details).toBeTruthy();
 		expect(diffRoot).toBeTruthy();
@@ -397,7 +428,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedNinthFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('file-8.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('file-8.ts'));
 			expect(requestedNinthFile).toBe(false);
 			expect(firstSignal?.aborted).toBe(false);
 		});
@@ -408,7 +439,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedNinthFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('file-8.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('file-8.ts'));
 			expect(requestedNinthFile).toBe(true);
 		});
 	});
@@ -417,6 +448,9 @@ describe('GitHistoryView', () => {
 		const { container } = render(GitHistoryView, {
 			props: {
 				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 				isMobile: false,
@@ -431,7 +465,7 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
 		await screen.findByText('Commit detail');
 
-		const details = container.querySelector<HTMLElement>('[data-git-history-details]');
+		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		const filesPane = container.querySelector<HTMLElement>('[data-git-history-files-pane]');
 		const diffRoot = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
 		expect(details).toBeTruthy();
@@ -444,7 +478,7 @@ describe('GitHistoryView', () => {
 
 		const requestedLaterBeforeSelection = vi
 			.mocked(getGitCommitFileBodies)
-			.mock.calls.some(([, , , paths]) => paths.includes('later.ts'));
+			.mock.calls.some(([, , , files]) => requestedPaths(files).includes('later.ts'));
 		expect(requestedLaterBeforeSelection).toBe(false);
 
 		await fireEvent.click(within(filesPane).getByRole('button', { name: /later\.ts/ }));
@@ -452,7 +486,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedLaterFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('later.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('later.ts'));
 			expect(requestedLaterFile).toBe(true);
 		});
 		ResizeObserverHarness.emit(diffRoot, 480, 720);
@@ -466,13 +500,17 @@ describe('GitHistoryView', () => {
 		const laterBodies = deferred<ReturnType<typeof bodiesForPaths>>();
 		vi.mocked(getGitCommitFileBodies).mockImplementation(
 			async (_project, _documentId, _commit, files) => {
-				if (files.includes('later.ts')) return laterBodies.promise;
-				return bodiesForPaths(files);
+				const paths = requestedPaths(files);
+				if (paths.includes('later.ts')) return laterBodies.promise;
+				return bodiesForPaths(paths);
 			},
 		);
 		const { container } = render(GitHistoryView, {
 			props: {
 				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 				isMobile: false,
@@ -487,7 +525,7 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
 		await screen.findByText('Commit detail');
 
-		const details = container.querySelector<HTMLElement>('[data-git-history-details]');
+		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		const filesPane = container.querySelector<HTMLElement>('[data-git-history-files-pane]');
 		const diffPane = container.querySelector<HTMLElement>('[data-git-history-diff-pane]');
 		const diffRoot = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
@@ -505,7 +543,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => {
 			const requestedLaterFile = vi
 				.mocked(getGitCommitFileBodies)
-				.mock.calls.some(([, , , paths]) => paths.includes('later.ts'));
+				.mock.calls.some(([, , , files]) => requestedPaths(files).includes('later.ts'));
 			expect(requestedLaterFile).toBe(true);
 		});
 		ResizeObserverHarness.emit(diffRoot, 480, 720);
@@ -524,6 +562,9 @@ describe('GitHistoryView', () => {
 		render(GitHistoryView, {
 			props: {
 				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 				isMobile: false,
@@ -543,5 +584,116 @@ describe('GitHistoryView', () => {
 			subject: 'List commit',
 		});
 		expect(getGitCommitSnapshot).not.toHaveBeenCalled();
+	});
+
+	it('routes History and commit comparison intents through the parent opener', async () => {
+		const history = new GitHistoryController();
+		const onOpenComparison = vi.fn();
+		comparison.beginHistorySelection();
+		comparison.selectHistoryCommit('older');
+		comparison.selectHistoryCommit('newer');
+		render(GitHistoryView, {
+			props: {
+				history,
+				comparison,
+				onOpenComparison,
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+				isMobile: false,
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+		expect(onOpenComparison).toHaveBeenLastCalledWith({
+			fromRevision: 'older',
+			toKind: 'revision',
+			toRevision: 'newer',
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
+		await screen.findByText('Commit detail');
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+		expect(onOpenComparison).toHaveBeenLastCalledWith({
+			fromRevision: 'parent',
+			toKind: 'revision',
+			toRevision: 'abcdef1234567890',
+		});
+	});
+
+	it('opens editable revision endpoints or explicit commit selection from History', async () => {
+		const history = new GitHistoryController();
+		const onOpenComparison = vi.fn();
+		render(GitHistoryView, {
+			props: {
+				history,
+				comparison,
+				onOpenComparison,
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+				isMobile: false,
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare revisions' }));
+		expect(onOpenComparison).toHaveBeenCalledWith({
+			fromRevision: 'parent',
+			toKind: 'revision',
+			toRevision: 'abcdef1234567890',
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Select commits' }));
+		expect(comparison.historySelectionActive).toBe(true);
+		const commitButton = screen.getByRole('button', { name: 'Select List commit as From' });
+		expect(commitButton.getAttribute('aria-pressed')).toBe('false');
+		await fireEvent.click(commitButton);
+		expect(
+			screen.getByRole('button', { name: 'Select List commit as To', pressed: true }),
+		).toBeTruthy();
+	});
+
+	it('defaults an empty History comparison to the empty tree', async () => {
+		vi.mocked(getGitHistoryCommits).mockResolvedValue({
+			project: '/project',
+			ref: 'HEAD',
+			commits: [],
+			nextOffset: null,
+		});
+		const onOpenComparison = vi.fn();
+		render(GitHistoryView, {
+			props: {
+				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison,
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+				isMobile: false,
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('No commits found');
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare revisions' }));
+
+		expect(onOpenComparison).toHaveBeenCalledWith({
+			fromRevision: GIT_EMPTY_TREE_REVISION,
+			toKind: 'revision',
+			toRevision: 'HEAD',
+		});
 	});
 });

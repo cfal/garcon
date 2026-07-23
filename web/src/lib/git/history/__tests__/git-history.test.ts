@@ -110,6 +110,8 @@ function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => 
 					category: 'normal' as const,
 					isBinary: false,
 					isTooLarge: false,
+					renderedRowCount: 2,
+					patchBytes: 64,
 					rows: [
 						{
 							key: `hunk-0:${path}`,
@@ -173,6 +175,25 @@ describe('GitHistoryController', () => {
 		);
 	});
 
+	it('preserves loaded pages when the History view remounts', async () => {
+		vi.mocked(getGitHistoryCommits).mockResolvedValue({
+			project: '/project',
+			ref: 'HEAD',
+			commits: [commit('abcdef123', 'initial')],
+			nextOffset: null,
+		});
+		const history = new GitHistoryController();
+
+		history.ensureInitialLoaded('/project');
+		await flushPromises();
+		history.commits = [...history.commits, commit('older1234', 'older page')];
+
+		history.ensureInitialLoaded('/project');
+
+		expect(getGitHistoryCommits).toHaveBeenCalledOnce();
+		expect(history.commits.map((entry) => entry.subject)).toEqual(['initial', 'older page']);
+	});
+
 	it('opens a commit screen and loads first body candidates', async () => {
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
 		const history = new GitHistoryController();
@@ -188,11 +209,36 @@ describe('GitHistoryController', () => {
 			'/project',
 			'doc-abcdef123',
 			'abcdef123',
-			['a.ts'],
+			[{ path: 'a.ts' }],
 			expect.objectContaining({ parent: 'parent', context: 5 }),
 		);
 		expect(history.fileBodies['a.ts']?.bodyState).toBe('loaded');
 		expect(history.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
+	});
+
+	it('keeps an open comment when a context change is requested', async () => {
+		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+		history.openCommit('/project', 'abcdef123');
+		await flushPromises();
+		await flushPromises();
+		history.document.openCommentComposer('a.ts', 'after', 1);
+		history.document.setCommentBody('Keep this draft');
+		history.document.setCommentSeverity('warning');
+
+		history.setDisplayOptions('/project', 'unified', 12);
+
+		expect(getGitCommitSnapshot).toHaveBeenCalledOnce();
+		expect(history.contextLines).toBe(5);
+		expect(history.document.commentComposer).toMatchObject({
+			open: true,
+			body: 'Keep this draft',
+			severity: 'warning',
+		});
+		expect(history.document.commentError).toBe(
+			'Add or close this comment before changing context lines.',
+		);
 	});
 
 	it('finishes the initial body batch when visible demand adds another file', async () => {
@@ -235,7 +281,7 @@ describe('GitHistoryController', () => {
 			expect(history.fileBodies['file-0.ts']?.bodyState).toBe('loaded');
 			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
 		});
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[3]).toEqual(['file-8.ts']);
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[3]).toEqual([{ path: 'file-8.ts' }]);
 	});
 
 	it('still aborts an active body batch when leaving commit details', async () => {

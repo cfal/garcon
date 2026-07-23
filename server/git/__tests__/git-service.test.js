@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,11 @@ import { createGitService } from "../git-service.js";
 import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
+import { GIT_EMPTY_TREE } from "../comparison.js";
+import {
+  isUnresolvedRevision,
+  needsRevisionFailureDiagnostics,
+} from "../comparison-errors.js";
 import { GIT_REVIEW_DOCUMENT_LIMITS } from "../types.js";
 import { serializeWorktreeMtime } from "../worktrees.js";
 
@@ -57,6 +63,22 @@ async function runGitCommand(cwd, args) {
       reject(new Error(`git ${args.join(" ")} failed: ${stderr || stdout}`));
     });
   });
+}
+
+function mutateAfterComparisonSummaries(filePath, contents) {
+  const trace = [];
+  let summaryCount = 0;
+  trace.push = function (...entries) {
+    const length = Array.prototype.push.apply(this, entries);
+    for (const entry of entries) {
+      if (!entry.args.includes("--name-status")) continue;
+      const content = contents[summaryCount];
+      summaryCount += 1;
+      if (content !== undefined) writeFileSync(filePath, content, "utf-8");
+    }
+    return length;
+  };
+  return { trace, summaryCount: () => summaryCount };
 }
 
 async function initRepoWithCommit(projectPath) {
@@ -143,6 +165,8 @@ describe("createGitService", () => {
       "getHistoryCommits",
       "getCommitSnapshot",
       "getCommitFileBodies",
+      "getComparisonSnapshot",
+      "getComparisonFileBodies",
       "generateCommitMessageForFiles",
       "getRemoteStatus",
       "getRemotes",
@@ -152,7 +176,7 @@ describe("createGitService", () => {
       "discard",
       "deleteUntracked",
       "getWorkbenchSnapshot",
-      "getWorkbenchFingerprint",
+      "getWorkingTreeFingerprint",
       "getQuickSummary",
       "getReviewFileBodies",
       "stageSelection",
@@ -176,7 +200,6 @@ describe("createGitService", () => {
       "getFileHistory",
       "getBlame",
       "getGraph",
-      "getCompare",
       "toHttpError",
     ];
     for (const method of expectedMethods) {
@@ -538,7 +561,7 @@ describe("commit history operations", () => {
         commit: snapshot.commit.hash,
         parent: snapshot.selectedParent,
         context: 5,
-        files: ["a.txt"],
+        files: [{ path: "a.txt" }],
       });
       const body = bodies.files["a.txt"];
 
@@ -646,7 +669,7 @@ describe("commit history operations", () => {
     }
   });
 
-  it("preserves renamed paths in commit summaries", async () => {
+  it("preserves renamed paths in commit summaries and bodies", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-rename-"),
     );
@@ -657,8 +680,15 @@ describe("commit history operations", () => {
 
     try {
       await initRepoWithCommit(projectPath);
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "one\ntwo\nthree\nfour\n",
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["commit", "-am", "expand file"]);
       await runGitCommand(projectPath, ["mv", "a.txt", "renamed file.txt"]);
-      await runGitCommand(projectPath, ["commit", "-m", "rename file"]);
+      await fs.appendFile(path.join(projectPath, "renamed file.txt"), "five\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "rename file"]);
 
       const snapshot = await git.getCommitSnapshot({
         projectPath,
@@ -672,9 +702,1185 @@ describe("commit history operations", () => {
           path: "renamed file.txt",
           originalPath: "a.txt",
           status: "renamed",
-          additions: 0,
+          additions: 1,
         }),
       );
+
+      const renamedFile = snapshot.files.find((file) => file.path === "renamed file.txt");
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: renamedFile.path, originalPath: renamedFile.originalPath }],
+      });
+      const addedRows = bodies.files[renamedFile.path].rows.filter((row) => row.kind === "add");
+
+      expect(addedRows).toEqual([expect.objectContaining({ text: "five" })]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("loads historical bodies for paths containing pathspec metacharacters", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-literal-path-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+    const filePath = "wild[slug].txt";
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, filePath), "one\n", "utf-8");
+      await runGitCommand(projectPath, ["add", filePath]);
+      await runGitCommand(projectPath, ["commit", "-m", "add literal path"]);
+      await fs.appendFile(path.join(projectPath, filePath), "two\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "change literal path"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+        context: 5,
+      });
+      expect(snapshot.status).toBe("ready");
+
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: filePath }],
+      });
+
+      expect(bodies.files[filePath].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores user diff renderers when loading exact historical bodies", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-normalized-diff-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.appendFile(path.join(projectPath, "a.txt"), "two\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "change file"]);
+      await runGitCommand(projectPath, ["config", "diff.external", "/bin/true"]);
+      await runGitCommand(projectPath, ["config", "color.ui", "always"]);
+
+      const snapshot = await git.getCommitSnapshot({ projectPath, commit: "HEAD" });
+      expect(snapshot.status).toBe("ready");
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        files: [{ path: "a.txt" }],
+      });
+      expect(bodies.files["a.txt"].bodyState).toBe("loaded");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
+      );
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: "a.txt" }],
+      });
+      expect(comparisonBodies.files["a.txt"].bodyState).toBe("loaded");
+      expect(comparisonBodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a file body separate when the same path becomes a directory", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-file-to-directory-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, "bin"));
+      await fs.writeFile(path.join(projectPath, "bin", "tool"), "old\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "."]);
+      await runGitCommand(projectPath, ["commit", "-m", "add tool file"]);
+      await fs.rm(path.join(projectPath, "bin", "tool"));
+      await fs.mkdir(path.join(projectPath, "bin", "tool"));
+      await fs.writeFile(path.join(projectPath, "bin", "tool", "main.sh"), "new\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "-A"]);
+      await runGitCommand(projectPath, ["commit", "-m", "replace tool with directory"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+        context: 5,
+      });
+      expect(snapshot.status).toBe("ready");
+      const deletedFile = snapshot.files.find((file) => file.path === "bin/tool");
+      expect(deletedFile).toMatchObject({ status: "deleted" });
+
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: "bin/tool" }],
+      });
+      const body = bodies.files["bin/tool"];
+
+      expect(body.rows).toContainEqual(expect.objectContaining({ kind: "del", text: "old" }));
+      expect(body.rows).not.toContainEqual(expect.objectContaining({ kind: "add", text: "new" }));
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("isolates prefix-path rename bodies from changed siblings", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-prefix-rename-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+    const content = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n";
+    const renamedContent = "one\ntwo\nthree\nfour\nCHANGED\nsix\nseven\neight\n";
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, "bin"));
+      await fs.writeFile(path.join(projectPath, "bin", "tool"), content, "utf-8");
+      await runGitCommand(projectPath, ["add", "."]);
+      await runGitCommand(projectPath, ["commit", "-m", "add tool file"]);
+      await fs.rm(path.join(projectPath, "bin", "tool"));
+      await fs.mkdir(path.join(projectPath, "bin", "tool"));
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool", "main.sh"),
+        renamedContent,
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool", "aaa.sh"),
+        "sibling-alpha\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool", "zzz.bin"),
+        Buffer.from([0, 1, 2, 3]),
+      );
+      await runGitCommand(projectPath, ["add", "-A"]);
+      await runGitCommand(projectPath, ["commit", "-m", "move tool below directory"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+        context: 5,
+      });
+      expect(snapshot.status).toBe("ready");
+      const renamedFile = snapshot.files.find((file) => file.path === "bin/tool/main.sh");
+      expect(renamedFile).toMatchObject({
+        status: "renamed",
+        originalPath: "bin/tool",
+        additions: 1,
+        deletions: 1,
+      });
+
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: renamedFile.path, originalPath: renamedFile.originalPath }],
+      });
+
+      const body = bodies.files[renamedFile.path];
+      expect(body.bodyState).toBe("loaded");
+      expect(body.rows).toContainEqual(expect.objectContaining({ kind: "add", text: "CHANGED" }));
+      expect(body.rows.some((row) => row.text === "sibling-alpha")).toBe(false);
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonRename = comparisonSnapshot.files.find(
+        (file) => file.path === "bin/tool/main.sh",
+      );
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: comparisonRename.path, originalPath: comparisonRename.originalPath }],
+      });
+      const comparisonBody = comparisonBodies.files[comparisonRename.path];
+      expect(comparisonBody.bodyState).toBe("loaded");
+      expect(comparisonBody.rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "CHANGED" }),
+      );
+      expect(comparisonBody.rows.some((row) => row.text === "sibling-alpha")).toBe(false);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("loads historical and comparison bodies for submodule changes", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-submodule-"),
+    );
+    const submoduleSource = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-submodule-source-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await initRepoWithCommit(submoduleSource);
+      await runGitCommand(projectPath, [
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        submoduleSource,
+        "vendor/sub",
+      ]);
+      await runGitCommand(projectPath, ["commit", "-am", "add submodule"]);
+
+      await fs.appendFile(path.join(submoduleSource, "a.txt"), "two\n", "utf-8");
+      await runGitCommand(submoduleSource, ["commit", "-am", "update submodule"]);
+      const { stdout: submoduleHashOutput } = await runGitCommand(submoduleSource, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      const submodulePath = path.join(projectPath, "vendor", "sub");
+      await runGitCommand(submodulePath, [
+        "-c",
+        "protocol.file.allow=always",
+        "fetch",
+        "origin",
+      ]);
+      await runGitCommand(submodulePath, ["checkout", submoduleHashOutput.trim()]);
+      await runGitCommand(projectPath, ["add", "vendor/sub"]);
+      await runGitCommand(projectPath, ["commit", "-m", "advance submodule"]);
+      await runGitCommand(projectPath, ["config", "diff.submodule", "log"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+      });
+      expect(snapshot.status).toBe("ready");
+      const submoduleFile = snapshot.files.find((file) => file.path === "vendor/sub");
+      expect(submoduleFile).toMatchObject({ status: "modified", additions: 1, deletions: 1 });
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        files: [{ path: "vendor/sub" }],
+      });
+      expect(bodies.files["vendor/sub"].bodyState).toBe("loaded");
+      expect(bodies.files["vendor/sub"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: expect.stringContaining("Subproject commit") }),
+      );
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: "vendor/sub" }],
+      });
+      expect(comparisonBodies.files["vendor/sub"].bodyState).toBe("loaded");
+      expect(comparisonBodies.files["vendor/sub"].rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: expect.stringContaining("Subproject commit") }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+      await fs.rm(submoduleSource, { recursive: true, force: true });
+    }
+  });
+
+  it("renders both sides when a historical file changes type", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-type-change-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      await fs.symlink("target.txt", path.join(projectPath, "a.txt"));
+      await runGitCommand(projectPath, ["add", "-A"]);
+      await runGitCommand(projectPath, ["commit", "-m", "replace file with link"]);
+
+      const snapshot = await git.getCommitSnapshot({ projectPath, commit: "HEAD" });
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.files.find((file) => file.path === "a.txt")).toMatchObject({
+        status: "type-changed",
+      });
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        files: [{ path: "a.txt" }],
+      });
+      expect(bodies.files["a.txt"].bodyState).toBe("loaded");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: "one" }),
+      );
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "target.txt" }),
+      );
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: "a.txt" }],
+      });
+      expect(comparisonBodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "target.txt" }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("comparison operations", () => {
+  it("distinguishes a missing revision from a repository failure", () => {
+    expect(isUnresolvedRevision({ code: 1 })).toBe(true);
+    expect(isUnresolvedRevision({ code: 128 })).toBe(false);
+    expect(
+      needsRevisionFailureDiagnostics({ code: 128, stdout: "", stderr: "" }),
+    ).toBe(true);
+    expect(
+      isUnresolvedRevision({
+        code: 128,
+        stderr: "fatal: log for 'HEAD' only has 1 entries\n",
+      }),
+    ).toBe(true);
+    expect(
+      isUnresolvedRevision({ code: 128, stderr: "fatal: bad object HEAD" }),
+    ).toBe(false);
+    expect(isUnresolvedRevision({ code: 1, timedOut: true })).toBe(false);
+    expect(isUnresolvedRevision({ code: 1, aborted: true })).toBe(false);
+  });
+
+  it("reports invalid revision syntax through the typed endpoint error", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-invalid-revision-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "main..feature" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+
+      expect(snapshot).toMatchObject({
+        status: "not-found",
+        endpoint: "from",
+        revision: "main..feature",
+      });
+
+      const missingReflogSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD@{9999}" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(missingReflogSnapshot).toMatchObject({
+        status: "not-found",
+        endpoint: "from",
+        revision: "HEAD@{9999}",
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("propagates repository failures while resolving comparison revisions", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-corrupt-ref-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const { stdout: headHash } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      const objectHash = headHash.trim();
+      const objectPath = path.join(
+        projectPath,
+        ".git",
+        "objects",
+        objectHash.slice(0, 2),
+        objectHash.slice(2),
+      );
+      await fs.chmod(objectPath, 0o600);
+      await fs.writeFile(objectPath, "corrupt-object\n");
+
+      await expect(
+        git.getComparisonSnapshot({
+          projectPath,
+          from: { kind: "revision", revision: "HEAD" },
+          to: { kind: "revision", revision: "HEAD" },
+          mode: "direct",
+        }),
+      ).rejects.toMatchObject({ code: 128 });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("compares resolved revisions and lazily loads bodies", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-revisions-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const { stdout: fromHash } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "one\ntwo\n",
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["commit", "-am", "add second line"]);
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: fromHash.trim() },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+        context: 5,
+      });
+
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.from.hash).toBe(fromHash.trim());
+      expect(snapshot.to.hash).not.toBe(fromHash.trim());
+      expect(snapshot.files).toContainEqual(
+        expect.objectContaining({
+          path: "a.txt",
+          additions: 1,
+          bodyState: "unloaded",
+        }),
+      );
+
+      const bodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        effectiveFromHash: snapshot.effectiveFromHash,
+        to: { kind: "revision", hash: snapshot.to.hash },
+        context: 5,
+        files: [{ path: "a.txt" }],
+      });
+      expect(bodies.status).toBe("ready");
+      expect(bodies.files["a.txt"].bodyFingerprint).toBe(
+        snapshot.files[0].bodyFingerprint,
+      );
+      expect(bodies.files["a.txt"].renderedRowCount).toBeGreaterThan(0);
+      expect(bodies.files["a.txt"].patchBytes).toBeGreaterThan(0);
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the common ancestor only when requested", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-merge-base-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "-b", "feature"]);
+      await fs.writeFile(
+        path.join(projectPath, "feature.txt"),
+        "feature\n",
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["add", "feature.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "feature"]);
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "main.txt"), "main\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "main.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "main"]);
+
+      const direct = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "master" },
+        to: { kind: "revision", revision: "feature" },
+        mode: "direct",
+      });
+      const sinceCommonAncestor = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "master" },
+        to: { kind: "revision", revision: "feature" },
+        mode: "merge-base",
+      });
+
+      expect(direct.status).toBe("ready");
+      expect(direct.files.map((file) => file.path).sort()).toEqual([
+        "feature.txt",
+        "main.txt",
+      ]);
+      expect(sinceCommonAncestor.status).toBe("ready");
+      expect(sinceCommonAncestor.mergeBaseHash).toBeTruthy();
+      expect(sinceCommonAncestor.files.map((file) => file.path)).toEqual([
+        "feature.txt",
+      ]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a typed no-merge-base status for the empty tree", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-empty-tree-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: GIT_EMPTY_TREE },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "merge-base",
+      });
+
+      expect(snapshot).toMatchObject({
+        status: "no-merge-base",
+        from: { hash: GIT_EMPTY_TREE },
+        message: "These revisions do not have a common ancestor.",
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("retries a Working Tree snapshot once when content changes during its summary", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-working-tree-retry-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const filePath = path.join(projectPath, "a.txt");
+      await fs.writeFile(filePath, "first edit\n", "utf-8");
+      const mutation = mutateAfterComparisonSummaries(filePath, [
+        "second edit\n",
+      ]);
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+        trace: mutation.trace,
+      });
+
+      expect(snapshot.status).toBe("ready");
+      expect(mutation.summaryCount()).toBe(2);
+      expect(snapshot.files).toContainEqual(
+        expect.objectContaining({ path: "a.txt", additions: 1 }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("returns working-tree-changing after two unstable snapshot attempts", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-working-tree-changing-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const filePath = path.join(projectPath, "a.txt");
+      await fs.writeFile(filePath, "first edit\n", "utf-8");
+      const mutation = mutateAfterComparisonSummaries(filePath, [
+        "second edit\n",
+        "third edit\n",
+      ]);
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+        trace: mutation.trace,
+      });
+
+      expect(snapshot).toMatchObject({
+        status: "working-tree-changing",
+        project: projectPath,
+      });
+      expect(mutation.summaryCount()).toBe(2);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("limits conflicted Working Tree paths instead of requesting their bodies", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-conflict-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "-b", "conflict-side"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "side\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "side"]);
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "main"]);
+      await expect(
+        runGitCommand(projectPath, ["merge", "conflict-side"]),
+      ).rejects.toThrow();
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.files).toContainEqual(
+        expect.objectContaining({
+          path: "a.txt",
+          bodyState: "too-large",
+          limitReason: "unsupported-file-kind",
+        }),
+      );
+      expect(snapshot.firstBodyCandidates).not.toContain("a.txt");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("compares a revision to staged, unstaged, and untracked Working Tree content", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-working-tree-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(
+        path.join(projectPath, ".gitignore"),
+        "ignored.txt\n",
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["add", ".gitignore"]);
+      await runGitCommand(projectPath, ["commit", "-m", "ignore fixture"]);
+      const { stdout: fromHash } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "a.txt"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "final\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "new.txt"),
+        "new\nsecond\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "wild[slug].txt"),
+        "literal pathspec\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "ignored.txt"),
+        "ignored\n",
+        "utf-8",
+      );
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: fromHash.trim() },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.to.kind).toBe("working-tree");
+      expect(snapshot.files.map((file) => file.path)).toEqual([
+        "a.txt",
+        "new.txt",
+        "wild[slug].txt",
+      ]);
+      expect(snapshot.files.some((file) => file.path === "ignored.txt")).toBe(
+        false,
+      );
+      expect(
+        snapshot.files.find((file) => file.path === "new.txt")?.additions,
+      ).toBe(2);
+
+      const bodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        effectiveFromHash: snapshot.effectiveFromHash,
+        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
+        files: snapshot.files.map((file) => ({
+          path: file.path,
+          originalPath: file.originalPath,
+        })),
+      });
+      expect(bodies.status).toBe("ready");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "final" }),
+      );
+      expect(bodies.files["new.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "new" }),
+      );
+      expect(bodies.files["wild[slug].txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "literal pathspec" }),
+      );
+
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "changed again\n",
+        "utf-8",
+      );
+      const stale = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        effectiveFromHash: snapshot.effectiveFromHash,
+        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
+        files: [{ path: "a.txt" }],
+      });
+      expect(stale.status).toBe("stale");
+      expect(stale.actualFingerprint).not.toBe(snapshot.to.fingerprint);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Working Tree bodies when content changes while a body is loading", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-body-race-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const filePath = path.join(projectPath, "a.txt");
+      await fs.writeFile(filePath, "before body load\n", "utf-8");
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+      expect(snapshot.status).toBe("ready");
+
+      const trace = [];
+      let mutated = false;
+      trace.push = function (...entries) {
+        const length = Array.prototype.push.apply(this, entries);
+        for (const entry of entries) {
+          if (mutated || !entry.args.some((arg) => arg.startsWith("-U")))
+            continue;
+          mutated = true;
+          writeFileSync(filePath, "changed during body load\n", "utf-8");
+        }
+        return length;
+      };
+
+      const bodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        effectiveFromHash: snapshot.effectiveFromHash,
+        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
+        files: [{ path: "a.txt" }],
+        trace,
+      });
+
+      expect(mutated).toBe(true);
+      expect(bodies.status).toBe("stale");
+      expect(bodies.actualFingerprint).not.toBe(snapshot.to.fingerprint);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps index-deleted tracked files as deletions when they are also untracked", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-index-deleted-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["rm", "--cached", "a.txt"]);
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.files).toEqual([
+        expect.objectContaining({ path: "a.txt", status: "deleted" }),
+      ]);
+      const bodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        effectiveFromHash: snapshot.effectiveFromHash,
+        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
+        files: [{ path: "a.txt" }],
+      });
+
+      expect(bodies.status).toBe("ready");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: "one" }),
+      );
+      expect(bodies.files["a.txt"].rows.some((row) => row.kind === "add")).toBe(
+        false,
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps files tracked only at From as deletions when they are now untracked", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-historical-deletion-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const { stdout: fromHash } = await runGitCommand(projectPath, ["rev-parse", "HEAD"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "a.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "stop tracking file"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "changed\n", "utf-8");
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: fromHash.trim() },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.files).toEqual([
+        expect.objectContaining({ path: "a.txt", status: "deleted" }),
+      ]);
+
+      const bodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        effectiveFromHash: snapshot.effectiveFromHash,
+        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
+        files: [{ path: "a.txt" }],
+      });
+
+      expect(bodies.status).toBe("ready");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: "one" }),
+      );
+      expect(bodies.files["a.txt"].rows.some((row) => row.kind === "add")).toBe(false);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("compares the empty tree to an unborn Working Tree", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-unborn-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await runGitCommand(projectPath, ["init"]);
+      await fs.writeFile(path.join(projectPath, "new.txt"), "new\n", "utf-8");
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: GIT_EMPTY_TREE },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+
+      expect(snapshot).toMatchObject({
+        status: "ready",
+        to: { kind: "working-tree", headHash: null },
+      });
+      expect(snapshot.files).toContainEqual(
+        expect.objectContaining({ path: "new.txt", status: "added" }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("returns an empty document for equal endpoints", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-equal-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+
+      expect(snapshot).toMatchObject({
+        status: "ready",
+        files: [],
+        firstBodyCandidates: [],
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a typed status when revisions have no common ancestor", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-unrelated-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "--orphan", "unrelated"]);
+      await runGitCommand(projectPath, ["rm", "-rf", "."]);
+      await fs.writeFile(
+        path.join(projectPath, "unrelated.txt"),
+        "unrelated\n",
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["add", "unrelated.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "unrelated"]);
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "master" },
+        to: { kind: "revision", revision: "unrelated" },
+        mode: "merge-base",
+      });
+
+      expect(snapshot).toMatchObject({
+        status: "no-merge-base",
+        message: "These revisions do not have a common ancestor.",
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("limits unsupported, binary, and oversized untracked files", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-untracked-limits-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(
+        path.join(projectPath, "binary.dat"),
+        Buffer.from([0, 1, 2]),
+      );
+      await fs.writeFile(
+        path.join(projectPath, "oversized.txt"),
+        Buffer.alloc(GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes + 1, 0x61),
+      );
+      await fs.symlink("a.txt", path.join(projectPath, "linked.txt"));
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+
+      expect(snapshot.status).toBe("ready");
+      expect(
+        snapshot.files.find((file) => file.path === "binary.dat"),
+      ).toMatchObject({
+        bodyState: "binary",
+        limitReason: "binary",
+      });
+      expect(
+        snapshot.files.find((file) => file.path === "oversized.txt"),
+      ).toMatchObject({
+        bodyState: "too-large",
+        limitReason: "file-too-many-bytes",
+      });
+      expect(
+        snapshot.files.find((file) => file.path === "linked.txt"),
+      ).toMatchObject({
+        bodyState: "too-large",
+        limitReason: "unsupported-file-kind",
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("bounds untracked line counting across the comparison summary", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-untracked-budget-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      for (const name of ["one.txt", "two.txt", "three.txt"]) {
+        await fs.writeFile(
+          path.join(projectPath, name),
+          Buffer.alloc(4_000_000, 0x61),
+        );
+      }
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+
+      expect(snapshot.status).toBe("ready");
+      expect(
+        snapshot.files.filter((file) => file.statsKnown === false),
+      ).toHaveLength(1);
+      expect(
+        snapshot.files
+          .filter((file) => file.statsKnown !== false)
+          .map((file) => file.additions),
+      ).toEqual([1, 1]);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1545,7 +2751,7 @@ describe("getWorkbenchSnapshot", () => {
   });
 });
 
-describe("getWorkbenchFingerprint", () => {
+describe("getWorkingTreeFingerprint", () => {
   it("matches the ready snapshot baseline for the same workbench state", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-freshness-baseline-"),
@@ -1568,7 +2774,7 @@ describe("getWorkbenchFingerprint", () => {
         mode: "working",
         context: 5,
       });
-      const current = await git.getWorkbenchFingerprint({ projectPath });
+      const current = await git.getWorkingTreeFingerprint({ projectPath });
 
       expect(snapshot.status).toBe("ready");
       expect(current.status).toBe("ready");
@@ -1589,7 +2795,7 @@ describe("getWorkbenchFingerprint", () => {
 
     try {
       await initRepoWithCommit(projectPath);
-      const base = await git.getWorkbenchFingerprint({ projectPath });
+      const base = await git.getWorkingTreeFingerprint({ projectPath });
       expect(base.status).toBe("ready");
 
       await fs.writeFile(
@@ -1597,7 +2803,7 @@ describe("getWorkbenchFingerprint", () => {
         "one\nfirst modified state\n",
         "utf-8",
       );
-      const modified = await git.getWorkbenchFingerprint({ projectPath });
+      const modified = await git.getWorkingTreeFingerprint({ projectPath });
       expect(modified.status).toBe("ready");
       expect(modified.fingerprint).not.toBe(base.fingerprint);
 
@@ -1606,7 +2812,7 @@ describe("getWorkbenchFingerprint", () => {
         "one\nsecond modified state with more bytes\n",
         "utf-8",
       );
-      const sameStatusModified = await git.getWorkbenchFingerprint({
+      const sameStatusModified = await git.getWorkingTreeFingerprint({
         projectPath,
       });
       expect(sameStatusModified.status).toBe("ready");
@@ -1617,7 +2823,7 @@ describe("getWorkbenchFingerprint", () => {
         "new\n",
         "utf-8",
       );
-      const untracked = await git.getWorkbenchFingerprint({ projectPath });
+      const untracked = await git.getWorkingTreeFingerprint({ projectPath });
       expect(untracked.status).toBe("ready");
       expect(untracked.fingerprint).not.toBe(sameStatusModified.fingerprint);
 
@@ -1626,19 +2832,19 @@ describe("getWorkbenchFingerprint", () => {
         "new\nchanged\n",
         "utf-8",
       );
-      const editedUntracked = await git.getWorkbenchFingerprint({
+      const editedUntracked = await git.getWorkingTreeFingerprint({
         projectPath,
       });
       expect(editedUntracked.status).toBe("ready");
       expect(editedUntracked.fingerprint).not.toBe(untracked.fingerprint);
 
       await runGitCommand(projectPath, ["add", "a.txt"]);
-      const staged = await git.getWorkbenchFingerprint({ projectPath });
+      const staged = await git.getWorkingTreeFingerprint({ projectPath });
       expect(staged.status).toBe("ready");
       expect(staged.fingerprint).not.toBe(editedUntracked.fingerprint);
 
       await runGitCommand(projectPath, ["commit", "-m", "update tracked file"]);
-      const committed = await git.getWorkbenchFingerprint({ projectPath });
+      const committed = await git.getWorkingTreeFingerprint({ projectPath });
       expect(committed.status).toBe("ready");
       expect(committed.fingerprint).not.toBe(staged.fingerprint);
     } finally {
@@ -1656,7 +2862,7 @@ describe("getWorkbenchFingerprint", () => {
     });
 
     try {
-      const result = await git.getWorkbenchFingerprint({ projectPath });
+      const result = await git.getWorkingTreeFingerprint({ projectPath });
       expect(result).toMatchObject({
         status: "not-git-repository",
         project: projectPath,
@@ -2360,7 +3566,7 @@ describe("porcelain ref validation", () => {
     }
   });
 
-  it("verifies compare refs before running the compare diff", async () => {
+  it("reports a missing comparison endpoint without running a diff", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-compare-"),
     );
@@ -2372,11 +3578,16 @@ describe("porcelain ref validation", () => {
     try {
       await initRepoWithCommit(projectPath);
 
-      await expect(
-        git.getCompare({ projectPath, base: "missing-ref", head: "HEAD" }),
-      ).rejects.toMatchObject({
-        code: "INVALID_INPUT",
-        message: "Invalid base ref.",
+      const comparison = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "missing-ref" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparison).toMatchObject({
+        status: "not-found",
+        endpoint: "from",
+        revision: "missing-ref",
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -2384,7 +3595,7 @@ describe("porcelain ref validation", () => {
   });
 });
 
-describe("porcelain conflict and compare robustness", () => {
+describe("porcelain conflict and comparison robustness", () => {
   it("returns bounded conflict details for large conflicted files", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-conflict-limit-"),
@@ -2441,6 +3652,19 @@ describe("porcelain conflict and compare robustness", () => {
         limitReason: "content-too-large",
       });
       expect(details.working.byteLength).toBeGreaterThan(0);
+
+      const comparison = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+      expect(
+        comparison.files.find((file) => file.path === "a.txt"),
+      ).toMatchObject({
+        bodyState: "too-large",
+        limitReason: "unsupported-file-kind",
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -2477,20 +3701,38 @@ describe("porcelain conflict and compare robustness", () => {
       );
       await runGitCommand(projectPath, ["commit", "-am", "rename tabbed path"]);
 
-      const compare = await git.getCompare({
+      const compare = await git.getComparisonSnapshot({
         projectPath,
-        base: "master",
-        head: "next",
+        from: { kind: "revision", revision: "master" },
+        to: { kind: "revision", revision: "next" },
+        mode: "direct",
       });
 
+      expect(compare.status).toBe("ready");
       expect(compare.files).toContainEqual(
         expect.objectContaining({
-          status: expect.stringMatching(/^R/),
+          status: "renamed",
+          rawStatus: expect.stringMatching(/^R/),
           originalPath: tabbedPath,
           path: renamedPath,
           additions: 1,
           deletions: 0,
         }),
+      );
+
+      const bodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: compare.documentId,
+        effectiveFromHash: compare.effectiveFromHash,
+        to: { kind: "revision", hash: compare.to.hash },
+        files: [{ path: renamedPath, originalPath: tabbedPath }],
+      });
+      expect(bodies.files[renamedPath]).toMatchObject({
+        path: renamedPath,
+        bodyFingerprint: compare.files[0].bodyFingerprint,
+      });
+      expect(bodies.files[renamedPath].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "two" }),
       );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });

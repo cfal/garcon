@@ -140,6 +140,7 @@
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
+	let handledDraftAppendRequestId = 0;
 	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
@@ -255,6 +256,37 @@
 		textarea.style.height = 'auto';
 		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
 	}
+
+	// Reveals blocks appended from another surface without moving focus away from that surface.
+	$effect(() => {
+		const request = composerState.draftAppendRequest;
+		const selectedChatId = sessions.selectedChatId;
+		const target = textarea;
+		const visible = isVisible;
+		if (
+			!request ||
+			request.requestId === handledDraftAppendRequestId ||
+			request.chatId !== selectedChatId ||
+			!target ||
+			!visible
+		) {
+			return;
+		}
+		const frameId = requestAnimationFrame(() => {
+			if (
+				composerState.draftAppendRequest?.requestId !== request.requestId ||
+				sessions.selectedChatId !== request.chatId ||
+				!textarea ||
+				!isVisible
+			) {
+				return;
+			}
+			autoResize();
+			textarea.scrollTop = textarea.scrollHeight;
+			handledDraftAppendRequestId = request.requestId;
+		});
+		return () => cancelAnimationFrame(frameId);
+	});
 
 	// Updates the "@" file-mention and "/" slash-command triggers. The two are
 	// mutually exclusive; an active file mention suppresses the slash menu.

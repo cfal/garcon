@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { untrack, type Snippet } from 'svelte';
+	import { tick, untrack, type Snippet } from 'svelte';
 	import { createVirtualizer } from '@tanstack/svelte-virtual';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
 	interface GitVirtualDiffViewportProps {
+		documentId?: string | null;
 		rows: GitVirtualReviewRow[];
 		fileRowIndex: Map<string, number>;
 		fontSize: number;
@@ -15,6 +16,7 @@
 	}
 
 	let {
+		documentId = null,
 		rows,
 		fileRowIndex,
 		fontSize,
@@ -28,6 +30,10 @@
 	let viewportRef = $state<HTMLDivElement | null>(null);
 	let lastVisibleRequestKey = '';
 	let lastScrollRequestKey = '';
+	let servicedScrollRequestId = '';
+	let servicedScrollRequestState: 'pending' | 'resolved' | 'terminal' | null = null;
+	let completedScrollRequestId = '';
+	let measuredDocumentId: string | null = null;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
 
 	interface VirtualRowItem {
@@ -83,6 +89,22 @@
 	);
 
 	$effect(() => {
+		const nextDocumentId = documentId;
+		const scrollElement = viewportRef;
+		if (!scrollElement || nextDocumentId === measuredDocumentId) return;
+		measuredDocumentId = nextDocumentId;
+		lastVisibleRequestKey = '';
+		lastScrollRequestKey = '';
+		servicedScrollRequestId = '';
+		servicedScrollRequestState = null;
+		completedScrollRequestId = '';
+		untrack(() => {
+			scrollElement.scrollTop = 0;
+			$virtualizer.measure();
+		});
+	});
+
+	$effect(() => {
 		const count = rows.length;
 		const scrollElement = viewportRef;
 		const rowOverscan = overscan;
@@ -117,9 +139,25 @@
 
 	$effect(() => {
 		if (!scrollToRequest) return;
+		const requestId = `${scrollToRequest.token}\0${scrollToRequest.filePath}`;
+		if (requestId === completedScrollRequestId) return;
 		const targetIndex = fileRowIndex.get(scrollToRequest.filePath);
 		if (targetIndex === undefined) return;
-		const requestKey = `${scrollToRequest.token}\0${scrollToRequest.filePath}\0${targetIndex}`;
+		let targetState: 'pending' | 'resolved' | 'terminal' = 'terminal';
+		for (const row of rows) {
+			if (row.filePath !== scrollToRequest.filePath) continue;
+			if (row.kind === 'file-placeholder') targetState = 'pending';
+			if (row.kind === 'unified-row' || row.kind === 'split-row') targetState = 'resolved';
+		}
+		if (
+			targetState === 'terminal' &&
+			servicedScrollRequestId === requestId &&
+			servicedScrollRequestState === 'pending'
+		) {
+			completedScrollRequestId = requestId;
+			return;
+		}
+		const requestKey = `${requestId}\0${targetIndex}\0${targetState}`;
 		if (requestKey === lastScrollRequestKey) return;
 		lastScrollRequestKey = requestKey;
 		const start = Math.max(0, targetIndex - 6);
@@ -127,7 +165,16 @@
 		const priorityRows = rows.slice(start, end);
 		untrack(() => {
 			onVisibleRowsChange(priorityRows);
-			$virtualizer.scrollToIndex(targetIndex, { align: 'start' });
+			void tick().then(() => {
+				if (lastScrollRequestKey !== requestKey) return;
+				const scrollElement = viewportRef;
+				if (!scrollElement) return;
+				$virtualizer.scrollToIndex(targetIndex, { align: 'start' });
+				scrollElement.dispatchEvent(new Event('scroll'));
+				servicedScrollRequestId = requestId;
+				servicedScrollRequestState = targetState;
+				if (targetState !== 'pending') completedScrollRequestId = requestId;
+			});
 		});
 	});
 

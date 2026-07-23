@@ -31,6 +31,7 @@
 	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
 	import { CHAT_SURFACE_ID, type HostId } from '$lib/workspace/surface-types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatDraftAppend, ChatDraftAppendResult } from '$lib/chat/composer/chat-draft-append.js';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action';
 	import {
 		renderedPortablePresentations,
@@ -100,6 +101,7 @@
 	let openSidebarButton: HTMLButtonElement | null = $state(null);
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
+	let chatDraftAppend: ChatDraftAppend | null = null;
 	const snapshot = $derived(workspace.layout.snapshot);
 	const activeMain = $derived(snapshot.main.activeId ?? CHAT_SURFACE_ID);
 	const mobileActive = $derived(snapshot.mobileActiveSurfaceId);
@@ -254,6 +256,10 @@
 	async function sendToChat(message: string): Promise<boolean> {
 		return chatSubmit ? chatSubmit(message) : false;
 	}
+
+	function appendToChatDraft(block: string): ChatDraftAppendResult {
+		return chatDraftAppend ? chatDraftAppend(block) : 'unavailable';
+	}
 </script>
 
 {#snippet mainMenuItems()}
@@ -298,6 +304,7 @@
 				mainInert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
 				style={rootState.surfaceStyle(presentation)}
 				onSendToChat={sendToChat}
+				onAppendToChatDraft={appendToChatDraft}
 				frameBridge={rootState.frameBridge(surface.id)}
 			/>
 		{/key}
@@ -404,6 +411,7 @@
 							onRegisterSubmit={(submit) => (chatSubmit = submit)}
 							onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
 								(openUserMessageNavigator = command)}
+							onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
 							{chatActions}
 						/>
 					</div>
@@ -424,6 +432,7 @@
 				presentations={renderedSidebarPresentations}
 				labelFor={label}
 				onSendToChat={sendToChat}
+				onAppendToChatDraft={appendToChatDraft}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
 				surfaceStyle={(presentation) => rootState.surfaceStyle(presentation)}
 				getOpenSidebarButton={() => openSidebarButton}

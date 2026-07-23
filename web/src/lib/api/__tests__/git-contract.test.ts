@@ -16,7 +16,7 @@ import {
 	gitDiscard,
 	gitDeleteUntracked,
 	getGitWorkbenchSnapshot,
-	getGitWorkbenchFingerprint,
+	getGitWorkingTreeFingerprint,
 	getGitQuickSummary,
 	getGitReviewFileBodies,
 	getGitHistoryCommits,
@@ -34,6 +34,7 @@ import {
 	gitRemoveWorktree,
 	gitRevertCommit,
 } from '../git';
+import { getGitComparisonFileBodies, getGitComparisonSnapshot } from '../git-comparison';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -323,7 +324,7 @@ describe('git API contract', () => {
 		expect(body.bodyCandidateCount).toBe(8);
 	});
 
-	it('getGitWorkbenchFingerprint posts the current workbench fingerprint request', async () => {
+	it('getGitWorkingTreeFingerprint posts the current Working Tree fingerprint request', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({
 			status: 'ready',
 			project: '/project',
@@ -332,7 +333,7 @@ describe('git API contract', () => {
 			changedPathCount: 2,
 		}));
 
-		const result = await getGitWorkbenchFingerprint('/project');
+		const result = await getGitWorkingTreeFingerprint('/project');
 
 		expect(result.status).toBe('ready');
 		if (result.status === 'ready') {
@@ -340,7 +341,7 @@ describe('git API contract', () => {
 			expect(result.changedPathCount).toBe(2);
 		}
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/workbench/fingerprint');
+		expect(url).toBe('/api/v1/git/working-tree/fingerprint');
 		expect(opts.method).toBe('POST');
 		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
 	});
@@ -620,7 +621,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
 		const controller = new AbortController();
 
-		await getGitCommitFileBodies('/project', 'doc', 'abc', ['a.ts'], {
+		await getGitCommitFileBodies('/project', 'doc', 'abc', [{ path: 'renamed.ts', originalPath: 'a.ts' }], {
 			parent: null,
 			context: 4,
 			signal: controller.signal,
@@ -636,7 +637,67 @@ describe('git API contract', () => {
 			commit: 'abc',
 			parent: null,
 			context: 4,
-			files: ['a.ts'],
+			files: [{ path: 'renamed.ts', originalPath: 'a.ts' }],
+		});
+	});
+
+	it('getGitComparisonSnapshot posts typed comparison endpoints', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'working-tree-changing',
+			project: '/project',
+			message: 'The Working Tree is changing.',
+		}));
+		const controller = new AbortController();
+
+		await getGitComparisonSnapshot(
+			'/project',
+			{ kind: 'revision', revision: 'main' },
+			{ kind: 'working-tree' },
+			'direct',
+			{ context: 7, bodyCandidateCount: 4, signal: controller.signal },
+		);
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/comparisons/snapshot');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			from: { kind: 'revision', revision: 'main' },
+			to: { kind: 'working-tree' },
+			mode: 'direct',
+			context: 7,
+			bodyCandidateCount: 4,
+		});
+	});
+
+	it('getGitComparisonFileBodies posts frozen endpoint identity and rename paths', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'stale',
+			documentId: 'comparison-doc',
+			expectedFingerprint: 'v1:old',
+			actualFingerprint: 'v1:new',
+			message: 'The Working Tree changed.',
+		}));
+
+		const result = await getGitComparisonFileBodies(
+			'/project',
+			'comparison-doc',
+			'from-hash',
+			{ kind: 'working-tree', fingerprint: 'v1:old' },
+			[{ path: 'new.ts', originalPath: 'old.ts' }],
+			{ context: 3 },
+		);
+
+		expect(result.status).toBe('stale');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/comparisons/files');
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			documentId: 'comparison-doc',
+			effectiveFromHash: 'from-hash',
+			to: { kind: 'working-tree', fingerprint: 'v1:old' },
+			files: [{ path: 'new.ts', originalPath: 'old.ts' }],
+			context: 3,
 		});
 	});
 

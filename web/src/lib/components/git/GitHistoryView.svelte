@@ -2,15 +2,23 @@
 	import { untrack } from 'svelte';
 	import History from '@lucide/svelte/icons/history';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import {
 		type GitHistoryRevertTarget,
 		type GitHistoryController,
 	} from '$lib/git/history/git-history.svelte.js';
+	import {
+		GIT_EMPTY_TREE_REVISION,
+		recentCommitComparisonDefaults,
+		type GitComparisonController,
+		type GitComparisonDialogDefaults,
+	} from '$lib/git/review/git-comparison.svelte.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
 
 	interface GitHistoryViewProps {
 		history: GitHistoryController;
+		comparison: GitComparisonController;
 		projectPath: string | null;
 		effectiveProjectKey: string | null;
 		isMobile: boolean;
@@ -20,10 +28,17 @@
 		refreshToken?: number;
 		onRevertCommit: (commit: GitHistoryRevertTarget) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
+		onOpenComparison: (defaults: GitComparisonDialogDefaults) => void;
+		onAppendToChatDraft?: ChatDraftAppend;
+		onOpenChat: () => void;
+		onSetDiffMode?: (mode: DiffMode) => void;
+		onSetContextLines?: (lines: number) => void;
+		onSetDiffFontSize?: (size: string) => void;
 	}
 
 	let {
 		history,
+		comparison,
 		projectPath,
 		effectiveProjectKey,
 		isMobile,
@@ -33,6 +48,12 @@
 		refreshToken = 0,
 		onRevertCommit,
 		onOpenInEditor,
+		onOpenComparison,
+		onAppendToChatDraft,
+		onOpenChat,
+		onSetDiffMode = () => undefined,
+		onSetContextLines = () => undefined,
+		onSetDiffFontSize = () => undefined,
 	}: GitHistoryViewProps = $props();
 
 	let loadedProjectPath = $state<string | null>(null);
@@ -55,7 +76,7 @@
 			loadedProjectPath = project;
 			loadedEffectiveProjectKey = projectKey;
 			if (identityChanged) history.resetForProject(project);
-			history.loadInitial(project);
+			history.ensureInitialLoaded(project);
 		});
 	});
 
@@ -65,6 +86,7 @@
 		const context = contextLines;
 		untrack(() => {
 			history.setDisplayOptions(project, mode, context);
+			if (project) comparison.setDisplayOptions(project, mode, context);
 		});
 	});
 
@@ -85,6 +107,15 @@
 			subject: commit.subject,
 		});
 	}
+
+	function openSelectedHistoryRange(): void {
+		const defaults = comparison.takeSelectedHistoryRange();
+		if (defaults) onOpenComparison(defaults);
+	}
+
+	function openHistoryComparison(): void {
+		onOpenComparison(recentCommitComparisonDefaults(history.commits));
+	}
 </script>
 
 {#if !projectPath}
@@ -104,6 +135,16 @@
 		onRevertCommit={revertListCommit}
 		onLoadMore={() => history.loadMore(projectPath)}
 		onScrollSave={(top) => history.saveListScrollTop(top)}
+		comparisonSelectionActive={comparison.historySelectionActive}
+		comparisonSelectionSlot={comparison.historySelectionSlot}
+		comparisonFrom={comparison.historySelectionFrom}
+		comparisonTo={comparison.historySelectionTo}
+		onBeginComparison={() => comparison.beginHistorySelection()}
+		onCancelComparison={() => comparison.cancelHistorySelection()}
+		onSelectComparisonCommit={(hash) => comparison.selectHistoryCommit(hash)}
+		onSelectComparisonSlot={(slot) => comparison.setHistorySelectionSlot(slot)}
+		onOpenComparison={openHistoryComparison}
+		onOpenSelectedComparison={openSelectedHistoryRange}
 	/>
 {:else}
 	<GitCommitDetailsScreen
@@ -118,15 +159,42 @@
 		focusedFilePath={history.focusedFilePath}
 		{isMobile}
 		fontSize={Number(diffFontSize) || 12}
+		{diffMode}
+		{contextLines}
+		diffFontSize={String(diffFontSize)}
 		onBack={() => history.backToList()}
 		onRetry={() => history.retryCommit(projectPath)}
 		onSelectParent={(parent) => history.selectParent(projectPath, parent)}
 		onRevertCommit={() => {
 			if (history.commitSnapshot) revertListCommit(history.commitSnapshot.commit);
 		}}
+		onCompare={() => {
+			const snapshot = history.commitSnapshot;
+			if (!snapshot) return;
+			onOpenComparison({
+				fromRevision: snapshot.selectedParent ?? GIT_EMPTY_TREE_REVISION,
+				toKind: 'revision',
+				toRevision: snapshot.commit.hash,
+			});
+		}}
+		{onSetDiffMode}
+		{onSetContextLines}
+		{onSetDiffFontSize}
 		onSelectFile={(file) => history.focusFile(projectPath, file)}
 		onFileFilterChange={(value) => history.setFileFilter(value)}
 		onVisibleRowsChange={(rows) => history.setVisibleRows(projectPath, rows)}
 		{onOpenInEditor}
+		composerState={history.document.commentComposer}
+		commentFeedback={history.document.commentFeedback}
+		commentError={history.document.commentError}
+		commentCopyText={history.document.commentCopyText}
+		onAddComment={(filePath, side, line) =>
+			history.document.openCommentComposer(filePath, side, line)}
+		onComposerBodyChange={(body) => history.document.setCommentBody(body)}
+		onComposerSeverityChange={(severity) => history.document.setCommentSeverity(severity)}
+		onComposerSubmit={() => history.document.submitComment(onAppendToChatDraft)}
+		onComposerClose={() => history.document.closeCommentComposer()}
+		onComposerFocusHandled={() => history.document.markCommentComposerFocused()}
+		{onOpenChat}
 	/>
 {/if}

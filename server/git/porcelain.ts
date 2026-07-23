@@ -5,17 +5,15 @@ import {
   resolvePathWithinProject,
   runGit,
 } from './run.js';
-import { parseCompareFilesZ, parseNumstatZ } from './diff-file-list.js';
+import { parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef } from './ref-validation.js';
 import type {
   BlameOptions,
-  CompareOptions,
   ConflictAcceptOptions,
   ConflictDetailsOptions,
   FileHistoryOptions,
   FileOptions,
   GitBlameLine,
-  GitCompareFile,
   GitConflictContent,
   GitConflictDetails,
   GitConflictFile,
@@ -439,33 +437,6 @@ async function getGraph({
   return { commits: parseGraph(stdout) };
 }
 
-async function getCompare({
-  projectPath,
-  base,
-  head,
-  signal,
-}: CompareOptions): Promise<{ files: GitCompareFile[] }> {
-  await assertGitRepository(projectPath);
-  await Promise.all([
-    assertExistingCommitRef(projectPath, base, 'base', signal),
-    assertExistingCommitRef(projectPath, head, 'head', signal),
-  ]);
-  const range = `${base}...${head}`;
-  const [nameStatus, numstat] = await Promise.all([
-    runGit(
-      projectPath,
-      ['diff', '--name-status', '-z', '--find-renames', range],
-      readOnlyGitOptions({ signal }),
-    ),
-    runGit(
-      projectPath,
-      ['diff', '--numstat', '-z', '--find-renames', range],
-      readOnlyGitOptions({ signal }),
-    ),
-  ]);
-  return { files: parseCompareFilesZ(nameStatus.stdout, parseNumstatZ(numstat.stdout)) };
-}
-
 export function createPorcelainOperations() {
   return {
     getConflicts,
@@ -480,6 +451,5 @@ export function createPorcelainOperations() {
     getFileHistory,
     getBlame,
     getGraph,
-    getCompare,
   };
 }

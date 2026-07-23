@@ -34,7 +34,6 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		showBranchDropdown: false,
 		isLoading: false,
 		isPushing: false,
-		reviewCount: 0,
 		isCommitting: false,
 		canPush: false,
 		diffMode: 'unified',
@@ -46,7 +45,7 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		onSwitchBranch: vi.fn(),
 		onViewCommits: vi.fn(),
 		onViewChanges: vi.fn(),
-		onOpenReview: vi.fn(),
+		onOpenComparison: vi.fn(),
 		onCommit: vi.fn(),
 		onPush: vi.fn(),
 		onSetDiffMode: vi.fn(),
@@ -61,7 +60,7 @@ function installToolbarMeasurement(initialRailWidth: number) {
 	let railWidth = initialRailWidth;
 	const actionWidths: Record<string, number> = {
 		history: 64,
-		review: 58,
+		compare: 72,
 		commit: 72,
 		push: 44,
 		refresh: 36,
@@ -237,6 +236,16 @@ describe('GitTopToolbar', () => {
 		expect(onCommit).toHaveBeenCalledOnce();
 	});
 
+	it('opens the shared comparison workflow from Changes', async () => {
+		const onOpenComparison = vi.fn();
+		renderToolbar({ onOpenComparison });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare revisions' }));
+
+		expect(onOpenComparison).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('button', { name: 'Review changes' })).toBeNull();
+	});
+
 	it('keeps actions inline when the action rail has enough space', async () => {
 		const measurement = installToolbarMeasurement(420);
 		try {
@@ -248,6 +257,22 @@ describe('GitTopToolbar', () => {
 
 			expect(screen.getByRole('button', { name: m.git_view_commit_history() })).toBeTruthy();
 			expect(screen.getByRole('button', { name: m.git_header_refresh() })).toBeTruthy();
+		} finally {
+			measurement.restore();
+		}
+	});
+
+	it('keeps Compare visible before History when one Changes action must overflow', async () => {
+		const measurement = installToolbarMeasurement(300);
+		try {
+			renderToolbar({ isMobile: true, canPush: true });
+
+			await waitFor(() => {
+				expect(screen.getByRole('button', { name: 'More Git actions' })).toBeTruthy();
+			});
+
+			expect(screen.getByRole('button', { name: m.git_compare_title() })).toBeTruthy();
+			expect(screen.queryByRole('button', { name: m.git_view_commit_history() })).toBeNull();
 		} finally {
 			measurement.restore();
 		}

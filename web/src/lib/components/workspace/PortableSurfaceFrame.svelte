@@ -9,6 +9,7 @@
 	import type { HostId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
 	import PortableSurfaceContent from './PortableSurfaceContent.svelte';
 	import SurfaceErrorState from './SurfaceErrorState.svelte';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	let {
 		surface,
@@ -17,6 +18,7 @@
 		mainInert = false,
 		style,
 		onSendToChat,
+		onAppendToChatDraft,
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
@@ -25,6 +27,7 @@
 		mainInert?: boolean;
 		style: string;
 		onSendToChat: (message: string) => Promise<boolean>;
+		onAppendToChatDraft: ChatDraftAppend;
 		frameBridge: SurfaceFrameBridge;
 	} = $props();
 
@@ -94,10 +97,10 @@
 				</button>
 			</div>
 			<div class="min-h-0 flex-1 overflow-hidden">
-				<PortableSurfaceContent {surface} {presentation} {visible} {onSendToChat} {frameBridge} />
+				<PortableSurfaceContent {surface} {presentation} {visible} {onSendToChat} {onAppendToChatDraft} {frameBridge} />
 			</div>
 		</div>
 	{:else}
-		<PortableSurfaceContent {surface} {presentation} {visible} {onSendToChat} {frameBridge} />
+		<PortableSurfaceContent {surface} {presentation} {visible} {onSendToChat} {onAppendToChatDraft} {frameBridge} />
 	{/if}
 </div>

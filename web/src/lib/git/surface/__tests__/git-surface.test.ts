@@ -65,6 +65,20 @@ afterEach(() => {
 });
 
 describe('GitSurfaceController project snapshots', () => {
+	it('returns comparisons to the default workbench', () => {
+		const git = controller();
+		const checkFreshness = vi.spyOn(git.workbench, 'checkFreshness').mockResolvedValue();
+		git.setContext('/projects/alpha', 'alpha');
+		git.history.screen = 'commit';
+		git.showComparison();
+
+		git.returnFromComparison();
+
+		expect(git.activeView).toBe('changes');
+		expect(git.history.screen).toBe('list');
+		expect(checkFreshness).toHaveBeenCalledWith('/projects/alpha');
+	});
+
 	it('retains its context and suppresses activation while project identity resolves', () => {
 		const git = controller();
 		const ensureTargets = vi.spyOn(git, 'ensureTargets').mockResolvedValue();
@@ -98,6 +112,18 @@ describe('GitSurfaceController project snapshots', () => {
 		expect(git.projectIdentityPending).toBe(false);
 		expect(git.history.screen).toBe('commit');
 		expect(ensureTargets).toHaveBeenCalledOnce();
+	});
+
+	it('preserves History navigation when the initial target finishes applying', async () => {
+		const git = controller();
+		const setTarget = vi.spyOn(git.workbench, 'setTarget').mockResolvedValue();
+		git.setContext('/projects/alpha', 'alpha');
+		git.activeView = 'comparison';
+
+		git.setPresentationVisible(true);
+
+		await vi.waitFor(() => expect(setTarget).toHaveBeenCalledOnce());
+		expect(git.activeView).toBe('comparison');
 	});
 
 	it.each([
@@ -143,7 +169,7 @@ describe('GitSurfaceController project snapshots', () => {
 			branch: 'feature',
 			source: 'worktree',
 		};
-		git.repository.activeView = 'history';
+		git.activeView = 'history';
 		git.history.screen = 'commit';
 		git.workbench.files.activeTab = 'staged';
 		git.workbench.files.selectedFile = 'src/alpha.ts';
@@ -151,13 +177,13 @@ describe('GitSurfaceController project snapshots', () => {
 		expect(git.history.screen).toBe('commit');
 
 		git.setContext('/projects/beta', 'beta');
-		expect(git.repository.activeView).toBe('changes');
+		expect(git.activeView).toBe('changes');
 		expect(git.history.screen).toBe('list');
 
 		git.setContext('/projects/alpha', 'alpha');
 
 		expect(git.activeTarget?.worktreePath).toBe('/projects/alpha/worktree');
-		expect(git.repository.activeView).toBe('history');
+		expect(git.activeView).toBe('history');
 		expect(git.history.screen).toBe('list');
 		expect(git.workbench.files.activeTab).toBe('staged');
 	});
@@ -203,5 +229,56 @@ describe('GitSurfaceController project snapshots', () => {
 		]);
 		expect(fetchRemoteStatus).toHaveBeenCalledOnce();
 		expect(fetchRemoteStatus).toHaveBeenCalledWith('/projects/alpha');
+	});
+
+	it('returns a Changes comparison to the workbench when the active worktree changes', async () => {
+		const git = controller();
+		vi.spyOn(git.workbench, 'setTarget').mockResolvedValue();
+		vi.spyOn(git.repository, 'fetchRemoteStatus').mockResolvedValue();
+		const loadInitial = vi.spyOn(git.history, 'loadInitial').mockImplementation(() => {});
+		git.setContext('/projects/alpha', 'alpha');
+		git.presentationVisible = true;
+		await git.applyActiveTarget();
+		git.activeView = 'comparison';
+
+		git.activeTarget = {
+			projectPath: '/projects/alpha-feature',
+			repoRoot: '/projects/alpha',
+			worktreePath: '/projects/alpha-feature',
+			label: 'feature',
+			branch: 'feature',
+			source: 'worktree',
+		};
+		await git.applyActiveTarget();
+
+		expect(git.history.screen).toBe('list');
+		expect(git.comparison.snapshot).toBeNull();
+		expect(git.activeView).toBe('changes');
+		expect(loadInitial).not.toHaveBeenCalled();
+	});
+
+	it('reloads History when its active worktree changes', async () => {
+		const git = controller();
+		vi.spyOn(git.workbench, 'setTarget').mockResolvedValue();
+		vi.spyOn(git.repository, 'fetchRemoteStatus').mockResolvedValue();
+		const loadInitial = vi.spyOn(git.history, 'loadInitial').mockImplementation(() => {});
+		git.setContext('/projects/alpha', 'alpha');
+		git.presentationVisible = true;
+		await git.applyActiveTarget();
+		git.activeView = 'history';
+
+		git.activeTarget = {
+			projectPath: '/projects/alpha-feature',
+			repoRoot: '/projects/alpha',
+			worktreePath: '/projects/alpha-feature',
+			label: 'feature',
+			branch: 'feature',
+			source: 'worktree',
+		};
+		await git.applyActiveTarget();
+
+		expect(git.activeView).toBe('history');
+		expect(git.history.screen).toBe('list');
+		expect(loadInitial).toHaveBeenCalledWith('/projects/alpha-feature');
 	});
 });
