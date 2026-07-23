@@ -964,7 +964,7 @@ describe('ChatCommandService', () => {
     await successorStarted.promise;
 
     queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, predecessorTurn);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await queueService.triggerDrain(SOURCE_CHAT_ID);
     expect(successorLaunches).toBe(1);
 
     successorResult.resolve();

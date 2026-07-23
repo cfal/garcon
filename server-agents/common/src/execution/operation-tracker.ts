@@ -8,6 +8,27 @@ export class AgentOperationTracker {
     this.#operations.set(chatId, operation);
   }
 
+  async handoff(
+    chatId: string,
+    predecessor: AgentOperationIdentity | null,
+    successor: AgentOperationIdentity,
+    commit: () => Promise<void>,
+  ): Promise<void> {
+    if ((this.#operations.get(chatId) ?? null) !== predecessor) {
+      throw new Error(`Cannot hand off operation for chat ${chatId} after its active operation changed`);
+    }
+    this.#operations.set(chatId, successor);
+    try {
+      await commit();
+    } catch (error) {
+      if (this.#operations.get(chatId) === successor) {
+        if (predecessor) this.#operations.set(chatId, predecessor);
+        else this.#operations.delete(chatId);
+      }
+      throw error;
+    }
+  }
+
   current(
     chatId: string,
     metadata?: RuntimeEventMetadata,

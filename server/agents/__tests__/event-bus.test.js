@@ -60,7 +60,7 @@ describe('AgentEventBus', () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     bus.markTurnAbortable('chat-1', operation('turn-1'));
-    bus.replaceTurn('chat-1', operation('turn-2'));
+    await bus.handoffTurn('chat-1', operation('turn-1'), operation('turn-2'), async () => undefined);
     const controller = new AbortController();
     const waiting = bus.waitUntilTurnAbortable('chat-1', operation('turn-2'), controller.signal);
     controller.abort();
@@ -79,13 +79,46 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
   });
 
-  it('allows an explicit active-input identity replacement', () => {
+  it('commits an explicit active-input identity handoff at its delivery boundary', async () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
 
-    bus.replaceTurn('chat-1', operation('turn-2'));
+    await bus.handoffTurn('chat-1', operation('turn-1'), operation('turn-2'), async () => {
+      expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
+    });
 
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
+  });
+
+  it('restores the predecessor only when the delivery boundary fails while the successor owns it', async () => {
+    const { bus } = makeBus();
+    bus.trackTurn('chat-1', operation('turn-1'));
+    bus.markTurnAbortable('chat-1', operation('turn-1'));
+
+    await expect(bus.handoffTurn(
+      'chat-1',
+      operation('turn-1'),
+      operation('turn-2'),
+      async () => { throw new Error('registration failed'); },
+    )).rejects.toThrow('registration failed');
+
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
+    await expect(bus.waitUntilTurnAbortable('chat-1', operation('turn-1'))).resolves.toBe(true);
+  });
+
+  it('rejects a handoff after the predecessor identity has changed', async () => {
+    const { bus } = makeBus();
+    bus.trackTurn('chat-1', operation('turn-1'));
+    bus.settleTurn('chat-1', operation('turn-1'));
+    bus.trackTurn('chat-1', operation('turn-3'));
+
+    await expect(bus.handoffTurn(
+      'chat-1',
+      operation('turn-1'),
+      operation('turn-2'),
+      async () => undefined,
+    )).rejects.toThrow('active turn changed');
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-3');
   });
 
   it('retains exact identity through duplicate terminal events until settlement', () => {

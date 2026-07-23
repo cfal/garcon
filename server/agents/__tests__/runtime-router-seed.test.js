@@ -31,6 +31,7 @@ function makeRouter(overrides = {}) {
     agentSessionId: 'native-1',
     nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
   }));
+  const resume = overrides.resume ?? mock(async () => undefined);
   const submitActiveInput = overrides.submitActiveInput ?? mock(async () => true);
   const integration = {
     descriptor: {
@@ -38,7 +39,7 @@ function makeRouter(overrides = {}) {
       supportedPermissionModes: ['default'],
       supportedThinkingModes: ['none'],
     },
-    execution: { start, submitActiveInput, isRunning: () => false, runningSessions: () => [] },
+    execution: { start, resume, submitActiveInput, isRunning: () => false, runningSessions: () => [] },
     settings: { defaults: () => settings, parse: (input) => input },
   };
   const registry = {
@@ -48,8 +49,20 @@ function makeRouter(overrides = {}) {
   };
   let activeTurn = overrides.activeTurn;
   const events = {
-    trackTurn: mock(() => undefined),
-    replaceTurn: mock((_chatId, turn) => { activeTurn = turn; }),
+    trackTurn: mock((_chatId, turn) => {
+      if (activeTurn && activeTurn.turnId !== turn.turnId) throw new Error('active turn changed');
+      activeTurn = turn;
+    }),
+    handoffTurn: mock(async (_chatId, predecessor, successor, commit) => {
+      if (activeTurn?.turnId !== predecessor?.turnId) throw new Error('active turn changed');
+      activeTurn = successor;
+      try {
+        await commit();
+      } catch (error) {
+        if (activeTurn === successor) activeTurn = predecessor;
+        throw error;
+      }
+    }),
     clearTurn: mock(() => { activeTurn = undefined; }),
     getActiveTurn: mock(() => activeTurn),
     markTurnAbortable: mock(() => undefined),
@@ -78,7 +91,7 @@ function makeRouter(overrides = {}) {
     getCarryOverRevision: () => 'carry-1',
     loadCarryOver: () => carryOver,
   });
-  return { router, start, submitActiveInput, registry, events, carryOver };
+  return { router, start, resume, submitActiveInput, registry, events, carryOver };
 }
 
 describe('AgentRuntimeRouter fresh-session boundary', () => {
@@ -137,16 +150,19 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it('restores predecessor metadata when active input is not delivered', async () => {
+  it('keeps a pre-boundary decline from hiding the predecessor terminal or blocking a successor', async () => {
     const predecessor = {
       clientRequestId: 'request-predecessor',
       commandType: 'chat-start',
       turnId: 'turn-predecessor',
     };
-    const { router, events } = makeRouter({
+    const { router, events, submitActiveInput, resume } = makeRouter({
       entry: { agentSessionId: 'native-1' },
       activeTurn: predecessor,
-      submitActiveInput: mock(async () => false),
+    });
+    submitActiveInput.mockImplementation(async () => {
+      events.clearTurn('chat-1');
+      return false;
     });
 
     await expect(router.submitActiveInput('chat-1', 'steer', {
@@ -154,22 +170,27 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       turnId: 'turn-steer',
     }, async () => undefined)).resolves.toBe(false);
 
-    expect(events.replaceTurn.mock.calls).toEqual([
-      ['chat-1', expect.objectContaining({ turnId: 'turn-steer' })],
-      ['chat-1', predecessor],
-    ]);
+    expect(events.handoffTurn).not.toHaveBeenCalled();
+    await router.runAgentTurn('chat-1', 'successor', {
+      clientRequestId: 'request-successor',
+      turnId: 'turn-successor',
+    });
+    expect(resume).toHaveBeenCalledOnce();
   });
 
-  it('restores predecessor metadata when active input delivery fails', async () => {
+  it('keeps a pre-boundary failure from hiding the predecessor terminal or blocking a successor', async () => {
     const predecessor = {
       clientRequestId: 'request-predecessor',
       commandType: 'chat-start',
       turnId: 'turn-predecessor',
     };
-    const { router, events } = makeRouter({
+    const { router, events, submitActiveInput, resume } = makeRouter({
       entry: { agentSessionId: 'native-1' },
       activeTurn: predecessor,
-      submitActiveInput: mock(async () => { throw new Error('delivery failed'); }),
+    });
+    submitActiveInput.mockImplementation(async () => {
+      events.clearTurn('chat-1');
+      throw new Error('delivery failed');
     });
 
     await expect(router.submitActiveInput('chat-1', 'steer', {
@@ -177,6 +198,34 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       turnId: 'turn-steer',
     }, async () => undefined)).rejects.toThrow('delivery failed');
 
-    expect(events.replaceTurn.mock.calls.at(-1)).toEqual(['chat-1', predecessor]);
+    expect(events.handoffTurn).not.toHaveBeenCalled();
+    await router.runAgentTurn('chat-1', 'successor', {
+      clientRequestId: 'request-successor',
+      turnId: 'turn-successor',
+    });
+    expect(resume).toHaveBeenCalledOnce();
+  });
+
+  it('retains successor metadata after a post-boundary delivery failure', async () => {
+    const predecessor = {
+      clientRequestId: 'request-predecessor',
+      commandType: 'chat-start',
+      turnId: 'turn-predecessor',
+    };
+    const { router, events, submitActiveInput } = makeRouter({
+      entry: { agentSessionId: 'native-1' },
+      activeTurn: predecessor,
+    });
+    submitActiveInput.mockImplementation(async (request) => {
+      await request.beforeDelivery();
+      throw new Error('delivery outcome unknown');
+    });
+
+    await expect(router.submitActiveInput('chat-1', 'steer', {
+      clientRequestId: 'request-steer',
+      turnId: 'turn-steer',
+    }, async () => undefined)).rejects.toThrow('delivery outcome unknown');
+
+    expect(events.getActiveTurn()).toMatchObject({ turnId: 'turn-steer' });
   });
 });

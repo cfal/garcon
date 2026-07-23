@@ -67,6 +67,20 @@ function startRequest(overrides = {}) {
   };
 }
 
+function activeInputRequest(operation, beforeDelivery = async () => undefined) {
+  return startRequest({
+    agentSessionId: 'thread-1',
+    nativeSession: {
+      ownerId: 'codex',
+      schemaVersion: 1,
+      value: { path: '/tmp/thread-1.jsonl', agentSessionId: 'thread-1' },
+    },
+    operation,
+    beforeDelivery,
+    carryOver: undefined,
+  });
+}
+
 describe('CodexExecution', () => {
   it('preserves admission, endpoint configuration, session identity, and event identity', async () => {
     const runtime = createRuntime();
@@ -169,5 +183,73 @@ describe('CodexExecution', () => {
 
     await expect(execution.start(startRequest({ prompt: '/goal clear' })))
       .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+  });
+
+  for (const outcome of ['decline', 'failure']) {
+    it(`keeps the predecessor operation visible when active input has a pre-boundary ${outcome}`, async () => {
+      const runtime = createRuntime();
+      const execution = new CodexExecution(
+        createHost(),
+        runtime,
+        createPathNativeSessionCodec('codex'),
+        createConfig(),
+      );
+      const predecessor = startRequest().operation;
+      const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
+      const next = { ...predecessor, clientRequestId: 'request-3', turnId: 'turn-3' };
+      const events = [];
+      execution.subscribe((event) => events.push(event));
+      await execution.start(startRequest());
+      runtime.submitActiveInput.mockImplementation(async () => {
+        runtime.emitFinished('chat-1', 0, {
+          clientRequestId: predecessor.clientRequestId,
+          turnId: predecessor.turnId,
+        });
+        if (outcome === 'failure') throw new Error('failed before delivery boundary');
+        return false;
+      });
+
+      const activeInput = execution.submitActiveInput(activeInputRequest(successor));
+      if (outcome === 'failure') await expect(activeInput).rejects.toThrow('failed before delivery boundary');
+      else await expect(activeInput).resolves.toBe(false);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'finished',
+        operation: predecessor,
+      }));
+
+      await execution.resume(activeInputRequest(next));
+      expect(runtime.runTurn).toHaveBeenCalledOnce();
+    });
+  }
+
+  it('retains successor ownership after a post-boundary delivery failure', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const predecessor = startRequest().operation;
+    const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
+    const events = [];
+    execution.subscribe((event) => events.push(event));
+    await execution.start(startRequest());
+    runtime.submitActiveInput.mockImplementation(async (_request, beforeDelivery) => {
+      await beforeDelivery();
+      throw new Error('delivery outcome unknown');
+    });
+
+    await expect(execution.submitActiveInput(activeInputRequest(successor)))
+      .rejects.toThrow('delivery outcome unknown');
+    runtime.emitFailed('chat-1', 'delivery failed', {
+      clientRequestId: successor.clientRequestId,
+      turnId: successor.turnId,
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'failed',
+      operation: successor,
+    }));
   });
 });
