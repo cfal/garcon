@@ -24,6 +24,8 @@ import {
   type GitCommandTrace,
   type GitCommitFileStatus,
   type GitCommitFileSummary,
+  type GitComparisonFreshnessOptions,
+  type GitComparisonFreshnessResponse,
   type GitComparisonFileBodiesOptions,
   type GitComparisonFileBodiesResponse,
   type GitComparisonFileRequest,
@@ -608,6 +610,70 @@ function assertResolvedHash(hash: string, field: string): void {
   }
 }
 
+async function getComparisonFreshness(
+  {
+    projectPath,
+    from: fromExpectation,
+    to: toExpectation,
+    trace,
+    signal,
+  }: GitComparisonFreshnessOptions,
+  assertProjectPathAllowed: (projectPath: string) => Promise<string>,
+): Promise<GitComparisonFreshnessResponse> {
+  await assertGitRepository(projectPath);
+  const repoRoot = await assertProjectPathAllowed(
+    await resolveRepositoryRoot(projectPath, trace, signal),
+  );
+  assertResolvedHash(fromExpectation.hash, 'from.hash');
+  if (toExpectation.kind === 'revision') {
+    assertResolvedHash(toExpectation.hash, 'to.hash');
+  }
+
+  const from = await resolveRevision(repoRoot, fromExpectation.revision, trace, signal);
+  if (!from) {
+    return {
+      status: 'not-found',
+      project: projectPath,
+      endpoint: 'from',
+      revision: fromExpectation.revision,
+      message: 'The From revision is no longer available in this repository.',
+    };
+  }
+
+  const changedEndpoints: Array<'from' | 'to'> = [];
+  if (from.hash !== fromExpectation.hash) changedEndpoints.push('from');
+  if (toExpectation.kind === 'revision') {
+    const to = await resolveRevision(repoRoot, toExpectation.revision, trace, signal);
+    if (!to) {
+      return {
+        status: 'not-found',
+        project: projectPath,
+        endpoint: 'to',
+        revision: toExpectation.revision,
+        message: 'The To revision is no longer available in this repository.',
+      };
+    }
+    if (to.hash !== toExpectation.hash) changedEndpoints.push('to');
+    return {
+      status: 'ready',
+      project: projectPath,
+      changedEndpoints,
+      fromHash: from.hash,
+      to: { kind: 'revision', hash: to.hash },
+    };
+  }
+
+  const fingerprint = await workingTreeFingerprint(repoRoot, trace, signal);
+  if (fingerprint !== toExpectation.fingerprint) changedEndpoints.push('to');
+  return {
+    status: 'ready',
+    project: projectPath,
+    changedEndpoints,
+    fromHash: from.hash,
+    to: { kind: 'working-tree', fingerprint },
+  };
+}
+
 async function loadComparisonBody({
   projectPath,
   effectiveFromHash,
@@ -797,6 +863,8 @@ export function createComparisonOperations(
   return {
     getComparisonSnapshot: (options: GitComparisonSnapshotOptions) =>
       getComparisonSnapshot(options, assertProjectPathAllowed),
+    getComparisonFreshness: (options: GitComparisonFreshnessOptions) =>
+      getComparisonFreshness(options, assertProjectPathAllowed),
     getComparisonFileBodies: (options: GitComparisonFileBodiesOptions) =>
       getComparisonFileBodies(options, assertProjectPathAllowed),
   };

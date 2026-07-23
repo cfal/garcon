@@ -12,6 +12,7 @@ const { createGitComparisonRoutes } = await import('../git-comparisons.js');
 
 const snapshotCalls = [];
 const bodyCalls = [];
+const freshnessCalls = [];
 const git = {
   getComparisonSnapshot: mock(async (options) => {
     snapshotCalls.push(options);
@@ -33,11 +34,24 @@ const git = {
       message: 'Working Tree changed.',
     };
   }),
+  getComparisonFreshness: mock(async (options) => {
+    freshnessCalls.push(options);
+    return {
+      status: 'ready',
+      project: options.projectPath,
+      changedEndpoints: ['to'],
+      fromHash: options.from.hash,
+      to: options.to.kind === 'revision'
+        ? { kind: 'revision', hash: 'c'.repeat(40) }
+        : { kind: 'working-tree', fingerprint: 'changed' },
+    };
+  }),
   toHttpError: (error) => Response.json({ error: String(error) }, { status: 500 }),
 };
 const routes = createGitComparisonRoutes(git);
 const snapshotHandler = routes['/api/v1/git/comparisons/snapshot'].POST;
 const filesHandler = routes['/api/v1/git/comparisons/files'].POST;
+const freshnessHandler = routes['/api/v1/git/comparisons/freshness'].POST;
 
 function request(path, body, signal) {
   return new Request(`http://localhost${path}`, {
@@ -52,8 +66,10 @@ describe('Git comparison route contracts', () => {
   beforeEach(() => {
     snapshotCalls.length = 0;
     bodyCalls.length = 0;
+    freshnessCalls.length = 0;
     git.getComparisonSnapshot.mockClear();
     git.getComparisonFileBodies.mockClear();
+    git.getComparisonFreshness.mockClear();
   });
 
 	it('forwards a typed snapshot request and its abort signal', async () => {
@@ -165,6 +181,56 @@ describe('Git comparison route contracts', () => {
       expect(git.getComparisonFileBodies).not.toHaveBeenCalled();
     },
   );
+
+  it('forwards frozen revision identities to the freshness operation', async () => {
+    const controller = new AbortController();
+    const inputRequest = request('/api/v1/git/comparisons/freshness', {
+      project: '/project',
+      from: { kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
+      to: { kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
+    }, controller.signal);
+    const response = await freshnessHandler(inputRequest);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: 'ready',
+      changedEndpoints: ['to'],
+    });
+    expect(freshnessCalls[0]).toMatchObject({
+      projectPath: '/project',
+      from: { kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
+      to: { kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
+    });
+    expect(freshnessCalls[0].signal).toBe(inputRequest.signal);
+  });
+
+  it.each([
+    [
+      { kind: 'revision', revision: 'main', hash: 'short' },
+      { kind: 'working-tree', fingerprint: 'fp' },
+    ],
+    [
+      { kind: 'revision', revision: '', hash: 'a'.repeat(40) },
+      { kind: 'working-tree', fingerprint: 'fp' },
+    ],
+    [
+      { kind: 'revision', revision: 'main', hash: 'a'.repeat(40) },
+      { kind: 'revision', revision: 'HEAD', hash: 'bad' },
+    ],
+    [
+      { kind: 'revision', revision: 'main', hash: 'a'.repeat(40) },
+      { kind: 'working-tree', fingerprint: '' },
+    ],
+  ])('rejects malformed comparison freshness identities', async (from, to) => {
+    const response = await freshnessHandler(request('/api/v1/git/comparisons/freshness', {
+      project: '/project',
+      from,
+      to,
+    }));
+
+    expect(response.status).toBe(400);
+    expect(git.getComparisonFreshness).not.toHaveBeenCalled();
+  });
 
 	it('serializes typed body statuses and forwards the abort signal', async () => {
 		const controller = new AbortController();

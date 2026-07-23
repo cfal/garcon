@@ -5,8 +5,10 @@ import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
   type GitComparisonBodyTarget,
+  type GitComparisonFreshnessToExpectation,
   type GitComparisonFromEndpoint,
   type GitComparisonMode,
+  type GitComparisonRevisionExpectation,
   type GitComparisonToEndpoint,
 } from '../git/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -59,6 +61,27 @@ function validComparisonBodyTarget(value: unknown): GitComparisonBodyTarget | nu
     return fingerprint ? { kind: 'working-tree', fingerprint } : null;
   }
   return null;
+}
+
+function validResolvedHash(value: unknown): string | null {
+  return typeof value === 'string' && /^[0-9a-f]{40,64}$/.test(value) ? value : null;
+}
+
+function validComparisonRevisionExpectation(
+  value: unknown,
+): GitComparisonRevisionExpectation | null {
+  if (!isRecord(value) || value.kind !== 'revision') return null;
+  const revision = nonEmptyString(value.revision);
+  const hash = validResolvedHash(value.hash);
+  return revision && hash ? { kind: 'revision', revision, hash } : null;
+}
+
+function validComparisonFreshnessTo(value: unknown): GitComparisonFreshnessToExpectation | null {
+  const revision = validComparisonRevisionExpectation(value);
+  if (revision) return revision;
+  if (!isRecord(value) || value.kind !== 'working-tree') return null;
+  const fingerprint = nonEmptyString(value.fingerprint);
+  return fingerprint ? { kind: 'working-tree', fingerprint } : null;
 }
 
 function routeError(error: string): Response {
@@ -147,8 +170,32 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
     });
   }
 
+  async function postFreshness(body: JsonBody, request: Request): Promise<Response> {
+    return gitJson(git, async () => {
+      const input = asJsonBody(body);
+      const project = nonEmptyString(input.project);
+      const from = validComparisonRevisionExpectation(input.from);
+      const to = validComparisonFreshnessTo(input.to);
+      if (!project || !from || !to) {
+        return routeError('Missing or invalid comparison freshness identities or project.');
+      }
+
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getComparisonFreshness({
+        projectPath: project,
+        from,
+        to,
+        trace,
+        signal: request.signal,
+      });
+      return traceGitJsonResponse('comparison-freshness', startedAt, trace, result);
+    });
+  }
+
   return {
     '/api/v1/git/comparisons/snapshot': { POST: withJsonBody(postSnapshot) },
     '/api/v1/git/comparisons/files': { POST: withJsonBody(postFiles) },
+    '/api/v1/git/comparisons/freshness': { POST: withJsonBody(postFreshness) },
   };
 }

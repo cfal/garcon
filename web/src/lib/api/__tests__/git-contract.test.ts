@@ -34,7 +34,11 @@ import {
 	gitRemoveWorktree,
 	gitRevertCommit,
 } from '../git';
-import { getGitComparisonFileBodies, getGitComparisonSnapshot } from '../git-comparison';
+import {
+	getGitComparisonFileBodies,
+	getGitComparisonFreshness,
+	getGitComparisonSnapshot,
+} from '../git-comparison';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -698,6 +702,35 @@ describe('git API contract', () => {
 			to: { kind: 'working-tree', fingerprint: 'v1:old' },
 			files: [{ path: 'new.ts', originalPath: 'old.ts' }],
 			context: 3,
+		});
+	});
+
+	it('getGitComparisonFreshness posts frozen labels and resolved identities', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'ready',
+				project: '/project',
+				changedEndpoints: ['to'],
+				fromHash: 'a'.repeat(40),
+				to: { kind: 'revision', hash: 'c'.repeat(40) },
+			}),
+		);
+		const controller = new AbortController();
+
+		await getGitComparisonFreshness(
+			'/project',
+			{ kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
+			{ kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
+			{ signal: controller.signal },
+		);
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/comparisons/freshness');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			from: { kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
+			to: { kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
 		});
 	});
 

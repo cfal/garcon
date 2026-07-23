@@ -161,4 +161,69 @@ describe('Git comparison HTTP API', () => {
       });
     });
   });
+
+  test('reports a rewritten HEAD without replacing the frozen comparison snapshot', async () => {
+    await withIntegrationFixture('git-comparison-ref-freshness', async (fixture) => {
+      const project = fixture.dirs.project;
+      await runGit(project, ['init', '-b', 'main']);
+      await runGit(project, ['config', 'user.email', 'test@example.com']);
+      await runGit(project, ['config', 'user.name', 'Integration Test']);
+      await writeFile(join(project, 'review.txt'), 'base\n', 'utf8');
+      await runGit(project, ['add', 'review.txt']);
+      await runGit(project, ['commit', '-m', 'base']);
+      await runGit(project, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      await writeFile(join(project, 'review.txt'), 'before rewrite\n', 'utf8');
+      await runGit(project, ['commit', '-am', 'feature']);
+
+      const snapshot = await postJson<{
+        status: 'ready';
+        documentId: string;
+        from: { requestedRevision: string; hash: string };
+        to: { kind: 'revision'; requestedRevision: string; hash: string };
+      }>(fixture.garcon.baseUrl, '/api/v1/git/comparisons/snapshot', {
+        project,
+        from: { kind: 'revision', revision: 'origin/main' },
+        to: { kind: 'revision', revision: 'HEAD' },
+        mode: 'direct',
+        context: 5,
+      });
+      const request = {
+        project,
+        from: {
+          kind: 'revision',
+          revision: snapshot.from.requestedRevision,
+          hash: snapshot.from.hash,
+        },
+        to: {
+          kind: 'revision',
+          revision: snapshot.to.requestedRevision,
+          hash: snapshot.to.hash,
+        },
+      };
+      const fresh = await postJson<{
+        status: 'ready';
+        changedEndpoints: Array<'from' | 'to'>;
+      }>(fixture.garcon.baseUrl, '/api/v1/git/comparisons/freshness', request);
+      expect(fresh.changedEndpoints).toEqual([]);
+
+      await writeFile(join(project, 'review.txt'), 'after rewrite\n', 'utf8');
+      await runGit(project, ['add', 'review.txt']);
+      await runGit(project, ['commit', '--amend', '--no-edit']);
+      const rewrittenHead = await runGit(project, ['rev-parse', 'HEAD']);
+      const stale = await postJson<{
+        status: 'ready';
+        changedEndpoints: Array<'from' | 'to'>;
+        fromHash: string;
+        to: { kind: 'revision'; hash: string };
+      }>(fixture.garcon.baseUrl, '/api/v1/git/comparisons/freshness', request);
+
+      expect(stale).toMatchObject({
+        status: 'ready',
+        changedEndpoints: ['to'],
+        fromHash: snapshot.from.hash,
+        to: { kind: 'revision', hash: rewrittenHead },
+      });
+      expect(snapshot.documentId).toBeTruthy();
+    });
+  });
 });
