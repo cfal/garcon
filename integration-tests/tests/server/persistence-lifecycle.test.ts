@@ -69,7 +69,7 @@ describe('persistence lifecycle', () => {
     await withIntegrationFixture('ephemeral-queue-restart', async (fixture) => {
       const chatId = fixture.newChatId();
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'ephemeral-active' });
-      await fixture.client.startDirectChat({
+      const active = await fixture.client.startDirectChat({
         chatId,
         content: 'ephemeral-active',
         projectPath: fixture.dirs.project,
@@ -80,14 +80,45 @@ describe('persistence lifecycle', () => {
       const paused = await fixture.client.pauseQueue(chatId);
       expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual(['discard-on-restart']);
       expect(paused.control.queue.pause?.kind).toBe('manual');
+      expect((await fixture.client.reconnectState([chatId])).processing).toEqual({
+        outcome: 'snapshot',
+        runningChatIds: [chatId],
+      });
 
       const activeAborted = held.expectAbort();
-      await fixture.restartGarcon();
+      await fixture.restartGarcon({
+        beforeStart: () => fixture.appendDirectOpenAiNativeMessage({
+          chatId,
+          role: 'assistant',
+          content: 'terminal persisted after disconnect',
+          clientRequestId: active.clientRequestId,
+          turnId: active.turnId,
+        }),
+      });
       await activeAborted;
       held.releaseTruncatedStream();
 
-      const control = await fixture.client.getExecutionControl(chatId);
-      expect(control).toEqual({
+      const restarted = await fixture.client.reconnectState([chatId]);
+      expect(restarted.processing).toEqual({
+        outcome: 'snapshot',
+        runningChatIds: [],
+      });
+      expect(restarted.controlResults).toEqual([{
+        chatId,
+        outcome: 'snapshot',
+        control: {
+          queue: {
+            entries: [],
+            dispatchingEntryId: null,
+            recentlyDispatched: [],
+            pause: null,
+            reorderRevision: 0,
+          },
+          version: 0,
+          updatedAt: null,
+        },
+      }]);
+      expect(await fixture.client.getExecutionControl(chatId)).toEqual({
         queue: {
           entries: [],
           dispatchingEntryId: null,
@@ -98,9 +129,12 @@ describe('persistence lifecycle', () => {
         version: 0,
         updatedAt: null,
       });
+      const reloaded = await fixture.client.reloadChat(chatId);
+      expect(assistantContents(reloaded.messages)).toContain('terminal persisted after disconnect');
       const restored = await fixture.client.getMessages(chatId);
       expect(restored.pendingUserInputs).toEqual([]);
       expect(countUserContent(restored.messages, 'discard-on-restart')).toBe(0);
+      expect(assistantContents(restored.messages)).toContain('terminal persisted after disconnect');
 
       const next = await fixture.client.runDirectChat({
         chatId,

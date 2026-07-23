@@ -53,12 +53,30 @@ export class AgentEventBus {
     this.#setTurn(chatId, turn);
   }
 
-  replaceTurn(chatId: string, opts: TurnEventMetadata): void {
-    if (!opts.clientRequestId && !opts.commandType && !opts.turnId) {
-      this.clearTurn(chatId);
-      return;
+  async handoffTurn(
+    chatId: string,
+    predecessor: TurnEventMetadata | undefined,
+    successor: TurnEventMetadata,
+    commit: () => Promise<void>,
+  ): Promise<void> {
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (!sameTurnIdentity(active, predecessor)) {
+      throw new Error(`Cannot hand off turn for chat ${chatId} after its active turn changed`);
     }
-    this.#setTurn(chatId, turnMetadata(opts));
+    const next = turnMetadata(successor);
+    const previousAbortable = this.#abortableTurnByChatId.get(chatId);
+    this.#setTurn(chatId, next);
+    try {
+      await commit();
+    } catch (error) {
+      if (this.#turnMetadataByChatId.get(chatId) === next) {
+        if (active) this.#turnMetadataByChatId.set(chatId, active);
+        else this.#turnMetadataByChatId.delete(chatId);
+        if (previousAbortable) this.#abortableTurnByChatId.set(chatId, previousAbortable);
+        else this.#abortableTurnByChatId.delete(chatId);
+      }
+      throw error;
+    }
   }
 
   #setTurn(chatId: string, turn: TurnEventMetadata): void {
@@ -189,4 +207,11 @@ function turnMetadata(opts: TurnEventMetadata): TurnEventMetadata {
     ...(opts.commandType ? { commandType: opts.commandType } : {}),
     ...(opts.turnId ? { turnId: opts.turnId } : {}),
   };
+}
+
+function sameTurnIdentity(
+  left: TurnEventMetadata | undefined,
+  right: TurnEventMetadata | undefined,
+): boolean {
+  return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
 }
