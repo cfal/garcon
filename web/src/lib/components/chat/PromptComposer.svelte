@@ -140,6 +140,7 @@
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
+	let handledDraftAppendRequestId = 0;
 	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
@@ -262,7 +263,15 @@
 		const selectedChatId = sessions.selectedChatId;
 		const target = textarea;
 		const visible = isVisible;
-		if (!request || request.chatId !== selectedChatId || !target || !visible) return;
+		if (
+			!request ||
+			request.requestId === handledDraftAppendRequestId ||
+			request.chatId !== selectedChatId ||
+			!target ||
+			!visible
+		) {
+			return;
+		}
 		const frameId = requestAnimationFrame(() => {
 			if (
 				composerState.draftAppendRequest?.requestId !== request.requestId ||
@@ -274,6 +283,7 @@
 			}
 			autoResize();
 			textarea.scrollTop = textarea.scrollHeight;
+			handledDraftAppendRequestId = request.requestId;
 		});
 		return () => cancelAnimationFrame(frameId);
 	});

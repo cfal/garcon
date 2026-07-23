@@ -71,7 +71,7 @@ export class GitComparisonController {
 		this.fromRevision = defaults.fromRevision;
 		this.toKind = defaults.toKind;
 		this.toRevision = defaults.toRevision ?? 'HEAD';
-		this.mode = defaults.toKind === 'working-tree' ? 'direct' : defaults.mode ?? 'direct';
+		this.mode = defaults.toKind === 'working-tree' ? 'direct' : (defaults.mode ?? 'direct');
 		this.origin = defaults.origin;
 		this.clearError();
 		this.dialogOpen = true;
@@ -84,7 +84,12 @@ export class GitComparisonController {
 	}
 
 	closeDialog(): void {
-		if (this.isLoading) return;
+		if (this.isLoading) {
+			this.snapshotAbort?.abort();
+			this.snapshotAbort = null;
+			this.generation += 1;
+			this.isLoading = false;
+		}
 		this.restoreInputsFromSnapshot();
 		this.dialogOpen = false;
 		this.clearError();
@@ -147,7 +152,10 @@ export class GitComparisonController {
 		const contextChanged = this.contextLines !== contextLines;
 		this.diffMode = diffMode;
 		this.contextLines = contextLines;
-		this.document.setDisplayOptions(diffMode, this.snapshot ? this.loadedContextLines : contextLines);
+		this.document.setDisplayOptions(
+			diffMode,
+			this.snapshot ? this.loadedContextLines : contextLines,
+		);
 		if (!contextChanged || !this.snapshot) return;
 		if (this.snapshot.to.kind === 'working-tree') {
 			if (contextLines !== this.loadedContextLines) {
@@ -177,9 +185,10 @@ export class GitComparisonController {
 		this.activeProjectPath = projectPath;
 		this.snapshotAbort = controller;
 		this.isLoading = true;
-		const to = this.toKind === 'working-tree'
-			? ({ kind: 'working-tree' } as const)
-			: ({ kind: 'revision', revision: toRevision } as const);
+		const to =
+			this.toKind === 'working-tree'
+				? ({ kind: 'working-tree' } as const)
+				: ({ kind: 'revision', revision: toRevision } as const);
 		const mode = this.toKind === 'working-tree' ? 'direct' : this.mode;
 		const requestContextLines = this.contextLines;
 
@@ -211,9 +220,8 @@ export class GitComparisonController {
 					fromLabel: result.from.label,
 					fromIdentity: result.from.shortHash,
 					toLabel: result.to.label,
-					toIdentity: result.to.kind === 'revision'
-						? result.to.shortHash
-						: result.to.shortFingerprint,
+					toIdentity:
+						result.to.kind === 'revision' ? result.to.shortHash : result.to.shortFingerprint,
 					mode: result.mode,
 					...(result.mergeBaseHash ? { mergeBaseHash: result.mergeBaseHash } : {}),
 				},
@@ -263,7 +271,7 @@ export class GitComparisonController {
 			!snapshot ||
 			this.activeProjectPath !== projectPath ||
 			snapshot.to.kind !== 'working-tree' ||
-			this.staleMessage
+			this.document.isStale
 		)
 			return;
 		try {
@@ -272,8 +280,7 @@ export class GitComparisonController {
 			if (result.status !== 'ready') return;
 			if (result.fingerprint !== snapshot.to.fingerprint) {
 				const message = m.git_compare_working_tree_changed();
-				this.staleMessage = message;
-				this.document.markStale();
+				this.document.markStale(message);
 			}
 		} catch {
 			// Freshness polling remains quiet until the next scheduled check.
@@ -311,9 +318,7 @@ export class GitComparisonController {
 
 	private isCurrent(generation: number, projectPath: string, signal: AbortSignal): boolean {
 		return (
-			!signal.aborted &&
-			generation === this.generation &&
-			this.activeProjectPath === projectPath
+			!signal.aborted && generation === this.generation && this.activeProjectPath === projectPath
 		);
 	}
 

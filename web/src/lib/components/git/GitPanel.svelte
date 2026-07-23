@@ -137,6 +137,9 @@
 		const version = gitProjectInvalidations.version(invalidationKey);
 		if (!gitSurface.takeInvalidationRefresh(invalidationKey, version)) return;
 		untrack(() => {
+			if (activeView === 'comparison') {
+				void comparison.checkFreshness(projectToRefresh);
+			}
 			void wb.refresh({
 				reason: 'git-action',
 				preserveSelection: true,

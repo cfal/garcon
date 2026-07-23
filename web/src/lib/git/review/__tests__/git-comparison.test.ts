@@ -84,6 +84,16 @@ function workingTreeSnapshotWithFile(): GitComparisonSnapshotReady {
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve, reject };
+}
+
 describe('GitComparisonController', () => {
 	beforeEach(() => vi.clearAllMocks());
 
@@ -219,13 +229,11 @@ describe('GitComparisonController', () => {
 
 	it('keeps the frozen stale document visible when refresh fails', async () => {
 		const snapshot = workingTreeSnapshot();
-		vi.mocked(getGitComparisonSnapshot)
-			.mockResolvedValueOnce(snapshot)
-			.mockResolvedValueOnce({
-				status: 'working-tree-changing',
-				project: '/project',
-				message: 'The Working Tree is still changing.',
-			});
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValueOnce(snapshot).mockResolvedValueOnce({
+			status: 'working-tree-changing',
+			project: '/project',
+			message: 'The Working Tree is still changing.',
+		});
 		vi.mocked(getGitWorkingTreeFingerprint).mockResolvedValue({
 			status: 'ready',
 			project: '/project',
@@ -261,6 +269,25 @@ describe('GitComparisonController', () => {
 			kind: 'revision',
 			revision: 'main',
 		});
+	});
+
+	it('aborts and closes an in-flight comparison from the dialog close action', async () => {
+		const pending = deferred<GitComparisonSnapshotReady>();
+		vi.mocked(getGitComparisonSnapshot).mockReturnValue(pending.promise);
+		const comparison = new GitComparisonController();
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+
+		const request = comparison.compare('/project');
+		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledOnce());
+		const signal = vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]?.signal;
+		comparison.closeDialog();
+
+		expect(signal?.aborted).toBe(true);
+		expect(comparison.dialogOpen).toBe(false);
+		expect(comparison.isLoading).toBe(false);
+		pending.resolve(workingTreeSnapshot());
+		expect(await request).toBe(false);
+		expect(comparison.snapshot).toBeNull();
 	});
 
 	it('uses caller display options for the first snapshot request', async () => {
@@ -325,5 +352,27 @@ describe('GitComparisonController', () => {
 		expect(comparison.document.isStale).toBe(true);
 		expect(comparison.staleMessage).toContain('Working Tree changed');
 		expect(comparison.document.commentComposer.body).toBe('Keep this draft');
+	});
+
+	it('upgrades a context refresh notice when the Working Tree later changes', async () => {
+		const snapshot = workingTreeSnapshotWithFile();
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		vi.mocked(getGitWorkingTreeFingerprint).mockResolvedValue({
+			status: 'ready',
+			project: '/project',
+			fingerprintVersion: 1,
+			fingerprint: 'v1:new',
+			changedPathCount: 1,
+		});
+		const comparison = new GitComparisonController();
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		await comparison.compare('/project');
+		comparison.setDisplayOptions('/project', 'unified', 12);
+
+		expect(comparison.staleMessage).toContain('Refresh the comparison');
+		await comparison.checkFreshness('/project');
+
+		expect(comparison.document.isStale).toBe(true);
+		expect(comparison.staleMessage).toContain('Working Tree changed');
 	});
 });

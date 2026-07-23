@@ -1,5 +1,6 @@
 import type {
 	GitCommitFileSummary,
+	GitDiffFileRequest,
 	GitReviewCollectionLimit,
 	GitReviewDocumentLimits,
 	GitReviewFileBodiesResponse,
@@ -7,11 +8,12 @@ import type {
 	GitReviewFileSummary,
 	GitStatusCode,
 } from '$lib/api/git.js';
-import type {
-	GitComparisonFileBodiesResponse,
-	GitComparisonFileRequest,
-} from '$lib/api/git-comparison.js';
-import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+import type { GitComparisonFileBodiesResponse } from '$lib/api/git-comparison.js';
+import {
+	GitInlineCommentState,
+	type CommentComposerState,
+	type GitDiffSeverity,
+} from '$lib/git/review/git-inline-comment.svelte.js';
 import {
 	buildVirtualRows,
 	type GitVirtualReviewRow,
@@ -43,7 +45,7 @@ export type GitDiffDocumentBodyResponse =
 
 export type GitDiffDocumentBodyLoader = (
 	snapshot: GitDiffDocumentSnapshot,
-	files: GitComparisonFileRequest[],
+	files: GitDiffFileRequest[],
 	signal: AbortSignal,
 ) => Promise<GitDiffDocumentBodyResponse>;
 
@@ -56,17 +58,8 @@ export interface GitDiffDocumentOpenOptions {
 	commentSource?: GitReviewCommentSource;
 }
 
-const CLOSED_COMPOSER: CommentComposerState = {
-	open: false,
-	focusPending: false,
-	filePath: '',
-	side: 'after',
-	line: 0,
-	body: '',
-	severity: 'note',
-};
-
 export class GitDiffDocumentController {
+	readonly inlineComment = new GitInlineCommentState();
 	snapshot = $state<GitDiffDocumentSnapshot | null>(null);
 	fileBodies = $state<Record<string, GitReviewFileBody>>({});
 	loadingBodies = $state(new Set<string>());
@@ -76,15 +69,6 @@ export class GitDiffDocumentController {
 	diffMode = $state<DiffMode>('unified');
 	contextLines = $state(5);
 	aggregateLimit = $state<GitReviewCollectionLimit | null>(null);
-	commentComposer = $state<CommentComposerState>({ ...CLOSED_COMPOSER });
-	commentFeedback = $state<{
-		filePath: string;
-		side: 'before' | 'after';
-		line: number;
-		message: string;
-	} | null>(null);
-	commentError = $state<string | null>(null);
-	commentCopyText = $state<string | null>(null);
 	isStale = $state(false);
 	staleMessage = $state<string | null>(null);
 
@@ -100,7 +84,22 @@ export class GitDiffDocumentController {
 	private onError: ((message: string) => void) | null = null;
 	private onStale: ((message: string) => void) | null = null;
 	private commentSource: GitReviewCommentSource | null = null;
-	private feedbackTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	get commentComposer(): CommentComposerState {
+		return this.inlineComment.composer;
+	}
+
+	get commentFeedback() {
+		return this.inlineComment.feedback;
+	}
+
+	get commentError(): string | null {
+		return this.inlineComment.error;
+	}
+
+	get commentCopyText(): string | null {
+		return this.inlineComment.copyText;
+	}
 
 	visibleFiles = $derived.by<GitCommitFileSummary[]>(() => {
 		const snapshot = this.snapshot;
@@ -235,47 +234,25 @@ export class GitDiffDocumentController {
 
 	openCommentComposer(filePath: string, side: 'before' | 'after', line: number): void {
 		if (!this.commentSource) return;
-		if (
-			this.commentComposer.open &&
-			this.commentComposer.filePath === filePath &&
-			this.commentComposer.side === side &&
-			this.commentComposer.line === line
-		) {
-			return;
-		}
-		this.commentComposer = {
-			open: true,
-			focusPending: true,
-			filePath,
-			side,
-			line,
-			body: '',
-			severity: 'note',
-		};
-		this.commentError = null;
+		this.inlineComment.open(filePath, side, line);
 	}
 
 	markCommentComposerFocused(): void {
-		if (!this.commentComposer.open || !this.commentComposer.focusPending) return;
-		this.commentComposer.focusPending = false;
+		this.inlineComment.markFocused();
 	}
 
 	setCommentBody(body: string): void {
-		if (!this.commentComposer.open) return;
-		this.commentComposer.body = body;
-		this.clearCommentError();
+		this.inlineComment.setBody(body);
 	}
 
-	setCommentSeverity(severity: CommentComposerState['severity']): void {
-		if (!this.commentComposer.open) return;
-		this.commentComposer.severity = severity;
-		this.clearCommentError();
+	setCommentSeverity(severity: GitDiffSeverity): void {
+		this.inlineComment.setSeverity(severity);
 	}
 
 	submitComment(append: ChatDraftAppend | undefined): ChatDraftAppendResult {
 		const composer = this.commentComposer;
 		const source = this.commentSource;
-		if (!composer.open || !composer.body.trim() || !source) {
+		if (!this.inlineComment.canSubmit || !source) {
 			return 'unavailable';
 		}
 		const file = this.summaryForFile(composer.filePath);
@@ -290,39 +267,15 @@ export class GitDiffDocumentController {
 			body: composer.body,
 			severity: composer.severity,
 		});
-		if (!append) {
-			this.commentError = m.git_comment_chat_required();
-			this.commentCopyText = block;
-			return 'unavailable';
-		}
-		const result = append(block);
-		if (result === 'unavailable') {
-			this.commentError = m.git_comment_chat_required();
-			this.commentCopyText = block;
-			return result;
-		}
-		this.commentFeedback = {
-			filePath: composer.filePath,
-			side: composer.side,
-			line: composer.line,
-			message:
-				result === 'duplicate' ? m.git_comment_already_in_chat() : m.git_comment_added_to_chat(),
-		};
-		this.closeCommentComposer();
-		if (this.feedbackTimeout) clearTimeout(this.feedbackTimeout);
-		this.feedbackTimeout = setTimeout(() => this.clearCommentFeedback(), 4000);
-		return result;
+		return this.inlineComment.appendBlock(append, block);
 	}
 
 	closeCommentComposer(): void {
-		this.commentComposer = { ...CLOSED_COMPOSER };
-		this.clearCommentError();
+		this.inlineComment.close();
 	}
 
 	clearCommentFeedback(): void {
-		if (this.feedbackTimeout) clearTimeout(this.feedbackTimeout);
-		this.feedbackTimeout = null;
-		this.commentFeedback = null;
+		this.inlineComment.clearFeedback();
 	}
 
 	markStale(message?: string): void {
@@ -541,11 +494,6 @@ export class GitDiffDocumentController {
 
 	private cacheKey(file: GitCommitFileSummary): string {
 		return `${this.snapshot?.documentId ?? ''}|${file.bodyFingerprint}|${file.path}`;
-	}
-
-	private clearCommentError(): void {
-		this.commentError = null;
-		this.commentCopyText = null;
 	}
 
 	private cacheBody(file: GitCommitFileSummary, body: GitReviewFileBody, byteLimit: number): void {

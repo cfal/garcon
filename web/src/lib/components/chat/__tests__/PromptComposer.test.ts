@@ -66,7 +66,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('resizes and reveals a draft block appended from another surface', async () => {
-		render(PromptComposerTestHost, {
+		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-append',
 			selectedStatus: 'running',
 		});
@@ -80,6 +80,21 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('Appended review block');
 		expect(textarea.style.height).toBe('300px');
 		expect(textarea.scrollTop).toBe(420);
+
+		textarea.scrollTop = 100;
+		await rerender({
+			selectedChatId: 'chat-append',
+			selectedStatus: 'running',
+			isVisible: false,
+		});
+		await rerender({
+			selectedChatId: 'chat-append',
+			selectedStatus: 'running',
+			isVisible: true,
+		});
+		await nextAnimationFrame();
+
+		expect(textarea.scrollTop).toBe(100);
 	});
 
 	it('focuses the composer after disabled chat startup and on each next selected chat', async () => {
