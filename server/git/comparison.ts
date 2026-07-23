@@ -1,24 +1,21 @@
 import { createHash } from 'crypto';
-import { promises as fs } from 'fs';
 import { mapWithConcurrency } from '../lib/concurrency.js';
 import { getWorkingTreeFingerprint } from './diff-engine.js';
-import { buildFullFileAddedPatch, countFullFileAddedLines } from './full-file-patch.js';
-import { isExpectedMissingGitResult } from './comparison-errors.js';
+import {
+  isExpectedMissingGitResult,
+  isUnresolvedRevision,
+  needsRevisionFailureDiagnostics,
+} from './comparison-errors.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { GitDomainError } from './git-types.js';
-import { parsePorcelainV1Z } from './porcelain-status.js';
+import { indexPorcelainStatusByPath, parsePorcelainV1Z } from './porcelain-status.js';
 import {
   categoryForPath,
   errorFileBody,
   limitedFileBody,
   limitedRenderedPatch,
 } from './rendered-diff.js';
-import {
-  assertGitRepository,
-  readOnlyGitOptions,
-  resolvePathWithinProject,
-  runGitTraced,
-} from './run.js';
+import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { assertSafeRef } from './ref-validation.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
@@ -35,6 +32,12 @@ import {
   type GitResolvedComparisonRevision,
   type GitResolvedComparisonWorkingTree,
 } from './types.js';
+import {
+  createUntrackedSummaryBudget,
+  loadUntrackedComparisonBody,
+  summarizeUntrackedFile,
+  type UntrackedSummaryBudget,
+} from './working-tree-comparison.js';
 
 export const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
@@ -68,7 +71,12 @@ async function resolveRevision(
   trace?: GitCommandTrace[],
   signal?: AbortSignal,
 ): Promise<GitResolvedComparisonRevision | null> {
-  assertSafeRef(revision, 'revision');
+  try {
+    assertSafeRef(revision, 'revision');
+  } catch (error) {
+    if (error instanceof GitDomainError && error.code === 'INVALID_INPUT') return null;
+    throw error;
+  }
   if (revision === GIT_EMPTY_TREE) {
     return {
       kind: 'revision',
@@ -78,26 +86,36 @@ async function resolveRevision(
       shortHash: shortHash(revision),
     };
   }
-  try {
+  const resolveHash = async (quiet: boolean): Promise<string> => {
     const { stdout } = await runGitTraced(
       projectPath,
-      ['rev-parse', '--verify', '--quiet', `${revision}^{commit}`],
+      ['rev-parse', '--verify', ...(quiet ? ['--quiet'] : []), `${revision}^{commit}`],
       trace,
       readOnlyGitOptions({ signal }),
     );
-    const hash = stdout.trim();
-    if (!hash) return null;
-    return {
-      kind: 'revision',
-      requestedRevision: revision,
-      label: revision,
-      hash,
-      shortHash: shortHash(hash),
-    };
+    return stdout.trim();
+  };
+  let hash: string;
+  try {
+    hash = await resolveHash(true);
   } catch (error) {
-    if (isExpectedMissingGitResult(error)) return null;
-    throw error;
+    if (isUnresolvedRevision(error)) return null;
+    if (!needsRevisionFailureDiagnostics(error)) throw error;
+    try {
+      hash = await resolveHash(false);
+    } catch (diagnosticError) {
+      if (isUnresolvedRevision(diagnosticError)) return null;
+      throw diagnosticError;
+    }
   }
+  if (!hash) return null;
+  return {
+    kind: 'revision',
+    requestedRevision: revision,
+    label: revision,
+    hash,
+    shortHash: shortHash(hash),
+  };
 }
 
 async function findMergeBase(
@@ -150,76 +168,30 @@ function comparisonFileFingerprint(
   context: number,
   file: GitComparisonFileRequest,
 ): string {
-  return hashString([
-    'comparison-file',
-    effectiveFromHash,
-    targetIdentity,
-    context,
-    file.originalPath ?? '',
-    file.path,
-  ].join('\x1f'));
+  return hashString(
+    [
+      'comparison-file',
+      effectiveFromHash,
+      targetIdentity,
+      context,
+      file.originalPath ?? '',
+      file.path,
+    ].join('\x1f'),
+  );
 }
 
-async function untrackedFileLimits(projectPath: string, filePath: string, signal?: AbortSignal): Promise<{
-  isBinary: boolean;
-  isTooLarge: boolean;
-  unsupported: boolean;
-  additions: number;
-}> {
-  try {
-    const result = await readUntrackedFile(projectPath, filePath, signal);
-    return {
-      isBinary: result.status === 'binary',
-      isTooLarge: result.status === 'too-large',
-      unsupported: result.status === 'unsupported',
-      additions: result.status === 'text' ? countFullFileAddedLines(result.content) : 0,
-    };
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    return { isBinary: false, isTooLarge: false, unsupported: true, additions: 0 };
-  }
-}
-
-type UntrackedFileRead =
-  | { status: 'text'; content: string }
-  | { status: 'binary' }
-  | { status: 'too-large' }
-  | { status: 'unsupported' };
-
-async function readUntrackedFile(
-  projectPath: string,
-  filePath: string,
-  signal?: AbortSignal,
-): Promise<UntrackedFileRead> {
-  signal?.throwIfAborted();
-  const resolvedPath = resolvePathWithinProject(projectPath, filePath);
-  const pathStats = await fs.lstat(resolvedPath);
-  signal?.throwIfAborted();
-  if (!pathStats.isFile()) return { status: 'unsupported' };
-
-  const handle = await fs.open(resolvedPath, 'r');
-  try {
-    signal?.throwIfAborted();
-    const stats = await handle.stat();
-    if (!stats.isFile()) return { status: 'unsupported' };
-    const byteLimit = GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes;
-    if (stats.size > byteLimit) return { status: 'too-large' };
-
-    const buffer = Buffer.alloc(byteLimit + 1);
-    let bytesRead = 0;
-    while (bytesRead < buffer.length) {
-      signal?.throwIfAborted();
-      const result = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
-      if (result.bytesRead === 0) break;
-      bytesRead += result.bytesRead;
-    }
-    if (bytesRead > byteLimit) return { status: 'too-large' };
-    const content = buffer.subarray(0, bytesRead);
-    if (content.includes(0x00)) return { status: 'binary' };
-    return { status: 'text', content: content.toString('utf8') };
-  } finally {
-    await handle.close();
-  }
+function staleFileBodiesResponse(
+  documentId: string,
+  expectedFingerprint: string,
+  actualFingerprint: string,
+): GitComparisonFileBodiesResponse {
+  return {
+    status: 'stale',
+    documentId,
+    expectedFingerprint,
+    actualFingerprint,
+    message: 'The Working Tree changed. Refresh the comparison to review the latest content.',
+  };
 }
 
 async function summarizeComparisonFiles({
@@ -255,23 +227,33 @@ async function summarizeComparisonFiles({
   const candidates = parsed.slice(0, GIT_REVIEW_DOCUMENT_LIMITS.maxSummaryFiles);
   const unmergedPaths = parseUnmergedPaths(unmergedOutput ?? '');
   const summaries: GitCommitFileSummary[] = [];
+  const untrackedSummaryBudget: UntrackedSummaryBudget = createUntrackedSummaryBudget();
 
   await mapWithConcurrency(candidates, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
     signal?.throwIfAborted();
     const isUntracked = file.status === '?';
     const untrackedLimits = isUntracked
-      ? await untrackedFileLimits(projectPath, file.path, signal)
-      : { isBinary: false, isTooLarge: false, unsupported: false, additions: 0 };
+      ? await summarizeUntrackedFile(projectPath, file.path, untrackedSummaryBudget, signal)
+      : {
+          isBinary: false,
+          isTooLarge: false,
+          unsupported: false,
+          additions: 0,
+          statsKnown: true,
+        };
     const isConflicted = unmergedPaths.has(file.path);
     const isBinary = file.isBinary === true || untrackedLimits.isBinary;
     const additions = isUntracked ? untrackedLimits.additions : file.additions;
     const estimatedRows = Math.max(1, additions + file.deletions + 1);
-    const isTooLarge = !isBinary && (
-      untrackedLimits.isTooLarge || estimatedRows > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows
-    );
+    const isTooLarge =
+      !isBinary &&
+      (untrackedLimits.isTooLarge || estimatedRows > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows);
     const unsupported = untrackedLimits.unsupported || isConflicted;
     const category = categoryForPath(file.path);
-    const request = { path: file.path, ...(file.originalPath ? { originalPath: file.originalPath } : {}) };
+    const request = {
+      path: file.path,
+      ...(file.originalPath ? { originalPath: file.originalPath } : {}),
+    };
     let limitReason: GitCommitFileSummary['limitReason'];
     let limitMessage: string | undefined;
     if (isConflicted) {
@@ -298,9 +280,15 @@ async function summarizeComparisonFiles({
       category: isBinary ? 'binary' : isTooLarge || unsupported ? 'large' : category,
       additions,
       deletions: file.deletions,
+      ...(isUntracked && !untrackedLimits.statsKnown ? { statsKnown: false } : {}),
       estimatedRows,
       bodyState: isBinary ? 'binary' : isTooLarge || unsupported ? 'too-large' : 'unloaded',
-      bodyFingerprint: comparisonFileFingerprint(effectiveFromHash, targetIdentity, context, request),
+      bodyFingerprint: comparisonFileFingerprint(
+        effectiveFromHash,
+        targetIdentity,
+        context,
+        request,
+      ),
       isGenerated: category === 'generated',
       isBinary,
       isTooLarge: isTooLarge || unsupported,
@@ -322,14 +310,16 @@ function comparisonDocumentId(
   context: number,
   files: GitCommitFileSummary[],
 ): string {
-  return hashString([
-    'comparison-document',
-    projectPath,
-    effectiveFromHash,
-    targetIdentity,
-    context,
-    ...files.map((file) => `${file.path}:${file.bodyFingerprint}`),
-  ].join('\x1f'));
+  return hashString(
+    [
+      'comparison-document',
+      projectPath,
+      effectiveFromHash,
+      targetIdentity,
+      context,
+      ...files.map((file) => `${file.path}:${file.bodyFingerprint}`),
+    ].join('\x1f'),
+  );
 }
 
 function firstBodyCandidates(files: GitCommitFileSummary[], count: number): string[] {
@@ -388,7 +378,11 @@ async function workingTreeFingerprint(
   trace?: GitCommandTrace[],
   signal?: AbortSignal,
 ): Promise<string> {
-  const result = await getWorkingTreeFingerprint({ projectPath, trace, signal });
+  const result = await getWorkingTreeFingerprint({
+    projectPath,
+    trace,
+    signal,
+  });
   if (result.status === 'ready') return result.fingerprint;
   if (result.status === 'not-git-repository') {
     throw new GitDomainError('NOT_REPO', result.message);
@@ -404,11 +398,15 @@ async function loadWorkingTreeIdentity(
 ): Promise<GitResolvedComparisonWorkingTree> {
   const [branch, head] = await Promise.all([
     runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(projectPath, ['rev-parse', '--verify', '--quiet', 'HEAD'], trace, readOnlyGitOptions({ signal }))
-      .catch((error) => {
-        if (isExpectedMissingGitResult(error)) return { stdout: '' };
-        throw error;
-      }),
+    runGitTraced(
+      projectPath,
+      ['rev-parse', '--verify', '--quiet', 'HEAD'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ).catch((error) => {
+      if (isExpectedMissingGitResult(error)) return { stdout: '' };
+      throw error;
+    }),
   ]);
   return {
     kind: 'working-tree',
@@ -432,10 +430,6 @@ async function buildWorkingTreeSnapshot(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = await workingTreeFingerprint(repoRoot, trace, signal);
     const summary = await loadDiffSummary(repoRoot, from.hash, null, trace, signal);
-    const identity = await loadWorkingTreeIdentity(repoRoot, before, trace, signal);
-    const after = await workingTreeFingerprint(repoRoot, trace, signal);
-    if (before !== after) continue;
-
     const summarized = await summarizeComparisonFiles({
       projectPath: repoRoot,
       effectiveFromHash: from.hash,
@@ -447,8 +441,9 @@ async function buildWorkingTreeSnapshot(
       unmergedOutput: summary.unmerged,
       signal,
     });
-    const finalized = await workingTreeFingerprint(repoRoot, trace, signal);
-    if (before !== finalized) continue;
+    const identity = await loadWorkingTreeIdentity(repoRoot, before, trace, signal);
+    const after = await workingTreeFingerprint(repoRoot, trace, signal);
+    if (before !== after) continue;
     const files = summarized.files;
     return {
       status: 'ready',
@@ -477,24 +472,33 @@ async function buildWorkingTreeSnapshot(
   return {
     status: 'working-tree-changing',
     project: requestedProjectPath,
-    message: 'The Working Tree changed while the comparison was loading. Try again when current edits settle.',
+    message:
+      'The Working Tree changed while the comparison was loading. Try again when current edits settle.',
   };
 }
 
-async function getComparisonSnapshot({
-  projectPath,
-  from: fromInput,
-  to: toInput,
-  mode,
-  context: requestedContext,
-  bodyCandidateCount = 8,
-  trace,
-  signal,
-}: GitComparisonSnapshotOptions): Promise<GitComparisonSnapshotResponse> {
+async function getComparisonSnapshot(
+  {
+    projectPath,
+    from: fromInput,
+    to: toInput,
+    mode,
+    context: requestedContext,
+    bodyCandidateCount = 8,
+    trace,
+    signal,
+  }: GitComparisonSnapshotOptions,
+  assertProjectPathAllowed: (projectPath: string) => Promise<string>,
+): Promise<GitComparisonSnapshotResponse> {
   await assertGitRepository(projectPath);
-  const repoRoot = await resolveRepositoryRoot(projectPath, trace, signal);
+  const repoRoot = await assertProjectPathAllowed(
+    await resolveRepositoryRoot(projectPath, trace, signal),
+  );
   const context = safeContext(requestedContext);
-  const candidateCount = Math.max(0, Math.min(bodyCandidateCount, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles));
+  const candidateCount = Math.max(
+    0,
+    Math.min(bodyCandidateCount, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles),
+  );
   const from = await resolveRevision(repoRoot, fromInput.revision, trace, signal);
   if (!from) {
     return {
@@ -509,7 +513,15 @@ async function getComparisonSnapshot({
     if (mode !== 'direct') {
       throw new GitDomainError('INVALID_INPUT', 'Working Tree comparisons require direct mode.');
     }
-    return buildWorkingTreeSnapshot(repoRoot, projectPath, from, context, candidateCount, trace, signal);
+    return buildWorkingTreeSnapshot(
+      repoRoot,
+      projectPath,
+      from,
+      context,
+      candidateCount,
+      trace,
+      signal,
+    );
   }
 
   const to = await resolveRevision(repoRoot, toInput.revision, trace, signal);
@@ -531,9 +543,8 @@ async function getComparisonSnapshot({
       message: 'These revisions do not have a common ancestor.',
     };
   }
-  const mergeBaseHash = mode === 'merge-base'
-    ? await findMergeBase(repoRoot, from.hash, to.hash, trace, signal)
-    : null;
+  const mergeBaseHash =
+    mode === 'merge-base' ? await findMergeBase(repoRoot, from.hash, to.hash, trace, signal) : null;
   if (mode === 'merge-base' && !mergeBaseHash) {
     return {
       status: 'no-merge-base',
@@ -587,39 +598,6 @@ function assertResolvedHash(hash: string, field: string): void {
   }
 }
 
-async function untrackedFileBody(
-  projectPath: string,
-  file: GitComparisonFileRequest,
-  fingerprint: string,
-  signal?: AbortSignal,
-) {
-  const result = await readUntrackedFile(projectPath, file.path, signal);
-  if (result.status === 'unsupported') {
-    return limitedFileBody(
-      file.path,
-      fingerprint,
-      'unsupported-file-kind',
-      'Only regular untracked files can be displayed.',
-    );
-  }
-  if (result.status === 'too-large') {
-    return limitedFileBody(
-      file.path,
-      fingerprint,
-      'file-too-many-bytes',
-      `File exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`,
-    );
-  }
-  if (result.status === 'binary') {
-    return limitedFileBody(file.path, fingerprint, 'binary', 'Binary diff is not available.');
-  }
-  return limitedRenderedPatch(
-    file.path,
-    fingerprint,
-    buildFullFileAddedPatch(result.content),
-  );
-}
-
 async function loadComparisonBody({
   projectPath,
   effectiveFromHash,
@@ -654,10 +632,12 @@ async function loadComparisonBody({
   }
   const status = workingTreeStatus.get(file.path);
   if (!toHash && status?.indexStatus === '?') {
-    return untrackedFileBody(projectPath, file, fingerprint, signal);
+    return loadUntrackedComparisonBody(projectPath, file, fingerprint, signal);
   }
   const endpoints = toHash ? [effectiveFromHash, toHash] : [effectiveFromHash];
-  const pathspecs = file.originalPath ? [file.originalPath, file.path] : [file.path];
+  const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).map(
+    literalPathspec,
+  );
   const { stdout } = await runGitTraced(
     projectPath,
     ['diff', `-U${context}`, '--find-renames', ...endpoints, '--', ...pathspecs],
@@ -667,18 +647,23 @@ async function loadComparisonBody({
   return limitedRenderedPatch(file.path, fingerprint, stdout);
 }
 
-async function getComparisonFileBodies({
-  projectPath,
-  documentId,
-  effectiveFromHash,
-  to,
-  context: requestedContext,
-  files,
-  trace,
-  signal,
-}: GitComparisonFileBodiesOptions): Promise<GitComparisonFileBodiesResponse> {
+async function getComparisonFileBodies(
+  {
+    projectPath,
+    documentId,
+    effectiveFromHash,
+    to,
+    context: requestedContext,
+    files,
+    trace,
+    signal,
+  }: GitComparisonFileBodiesOptions,
+  assertProjectPathAllowed: (projectPath: string) => Promise<string>,
+): Promise<GitComparisonFileBodiesResponse> {
   await assertGitRepository(projectPath);
-  const repoRoot = await resolveRepositoryRoot(projectPath, trace, signal);
+  const repoRoot = await assertProjectPathAllowed(
+    await resolveRepositoryRoot(projectPath, trace, signal),
+  );
   assertResolvedHash(effectiveFromHash, 'effectiveFromHash');
   if (to.kind === 'revision') assertResolvedHash(to.hash, 'to.hash');
   const context = safeContext(requestedContext);
@@ -687,13 +672,7 @@ async function getComparisonFileBodies({
   if (expectedFingerprint) {
     const actualFingerprint = await workingTreeFingerprint(repoRoot, trace, signal);
     if (actualFingerprint !== expectedFingerprint) {
-      return {
-        status: 'stale',
-        documentId,
-        expectedFingerprint,
-        actualFingerprint,
-        message: 'The Working Tree changed. Refresh the comparison to review the latest content.',
-      };
+      return staleFileBodiesResponse(documentId, expectedFingerprint, actualFingerprint);
     }
   }
 
@@ -703,64 +682,79 @@ async function getComparisonFileBodies({
     const [status, unmerged] = await Promise.all([
       runGitTraced(
         repoRoot,
-        ['status', '--porcelain=v1', '-z', '-uall', '--', ...requestedFiles.map((file) => file.path)],
+        [
+          'status',
+          '--porcelain=v1',
+          '-z',
+          '-uall',
+          '--',
+          ...requestedFiles.map((file) => literalPathspec(file.path)),
+        ],
         trace,
         readOnlyGitOptions({ signal }),
       ),
       runGitTraced(repoRoot, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
     ]);
-    workingTreeStatus = new Map(parsePorcelainV1Z(status.stdout).map((entry) => [entry.path, entry]));
+    workingTreeStatus = indexPorcelainStatusByPath(parsePorcelainV1Z(status.stdout));
     unmergedPaths = parseUnmergedPaths(unmerged.stdout);
   }
 
   const parsedFiles: Record<string, GitReviewFileBody> = {};
   const errors: Record<string, string> = {};
-  await mapWithConcurrency(requestedFiles, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
-    try {
-      parsedFiles[file.path] = await loadComparisonBody({
-        projectPath: repoRoot,
-        effectiveFromHash,
-        targetIdentity: to.kind === 'revision' ? to.hash : to.fingerprint,
-        toHash: to.kind === 'revision' ? to.hash : null,
-        context,
-        file,
-        workingTreeStatus,
-        unmergedPaths,
-        trace,
-        signal,
-      });
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      const fingerprint = comparisonFileFingerprint(
-        effectiveFromHash,
-        to.kind === 'revision' ? to.hash : to.fingerprint,
-        context,
-        file,
-      );
-      parsedFiles[file.path] = errorFileBody(file.path, fingerprint, message);
-      errors[file.path] = message;
-    }
-  });
+  await mapWithConcurrency(
+    requestedFiles,
+    GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency,
+    async (file) => {
+      try {
+        parsedFiles[file.path] = await loadComparisonBody({
+          projectPath: repoRoot,
+          effectiveFromHash,
+          targetIdentity: to.kind === 'revision' ? to.hash : to.fingerprint,
+          toHash: to.kind === 'revision' ? to.hash : null,
+          context,
+          file,
+          workingTreeStatus,
+          unmergedPaths,
+          trace,
+          signal,
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const fingerprint = comparisonFileFingerprint(
+          effectiveFromHash,
+          to.kind === 'revision' ? to.hash : to.fingerprint,
+          context,
+          file,
+        );
+        parsedFiles[file.path] = errorFileBody(file.path, fingerprint, message);
+        errors[file.path] = message;
+      }
+    },
+  );
 
   if (expectedFingerprint) {
     const actualFingerprint = await workingTreeFingerprint(repoRoot, trace, signal);
     if (actualFingerprint !== expectedFingerprint) {
-      return {
-        status: 'stale',
-        documentId,
-        expectedFingerprint,
-        actualFingerprint,
-        message: 'The Working Tree changed. Refresh the comparison to review the latest content.',
-      };
+      return staleFileBodiesResponse(documentId, expectedFingerprint, actualFingerprint);
     }
   }
+
   return { status: 'ready', documentId, files: parsedFiles, errors };
 }
 
-export function createComparisonOperations() {
+export function createComparisonOperations(
+  assertProjectPathAllowed: (projectPath: string) => Promise<string> = async (projectPath) =>
+    projectPath,
+) {
   return {
-    getComparisonSnapshot,
-    getComparisonFileBodies,
+    getComparisonSnapshot: (options: GitComparisonSnapshotOptions) =>
+      getComparisonSnapshot(options, assertProjectPathAllowed),
+    getComparisonFileBodies: (options: GitComparisonFileBodiesOptions) =>
+      getComparisonFileBodies(options, assertProjectPathAllowed),
   };
+}
+
+function literalPathspec(filePath: string): string {
+  return `:(literal)${filePath}`;
 }

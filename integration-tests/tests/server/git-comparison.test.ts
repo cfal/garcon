@@ -26,11 +26,35 @@ async function postJson<T>(baseUrl: string, path: string, body: unknown): Promis
     body: JSON.stringify(body),
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(`${path} returned ${response.status}: ${JSON.stringify(payload)}`);
+  if (!response.ok)
+    throw new Error(`${path} returned ${response.status}: ${JSON.stringify(payload)}`);
   return payload as T;
 }
 
 describe('Git comparison HTTP API', () => {
+  test('rejects a repository root outside the configured project base', async () => {
+    await withIntegrationFixture('git-comparison-boundary', async (fixture) => {
+      await runGit(fixture.dirs.root, ['init', '-b', 'main']);
+
+      const response = await fetch(`${fixture.garcon.baseUrl}/api/v1/git/comparisons/snapshot`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          project: fixture.dirs.project,
+          from: { kind: 'revision', revision: 'HEAD' },
+          to: { kind: 'working-tree' },
+          mode: 'direct',
+          context: 5,
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        errorCode: 'outside_project_base',
+      });
+    });
+  });
+
   test('compares revisions, merge bases, and a mutable Working Tree through lazy bodies', async () => {
     await withIntegrationFixture('git-comparison-api', async (fixture) => {
       const project = fixture.dirs.project;
@@ -118,16 +142,19 @@ describe('Git comparison HTTP API', () => {
         files: [{ path: 'untracked.txt' }],
       });
       expect(bodies.status).toBe('ready');
-      expect(bodies.files['untracked.txt']?.rows).toEqual(expect.arrayContaining([
-        expect.objectContaining({ kind: 'add', text: 'first' }),
-        expect.objectContaining({ kind: 'add', text: 'second' }),
-      ]));
-
-      const fingerprint = await postJson<{ status: string; fingerprint: string }>(
-        fixture.garcon.baseUrl,
-        '/api/v1/git/working-tree/fingerprint',
-        { project },
+      expect(bodies.files['untracked.txt']?.rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: 'add', text: 'first' }),
+          expect.objectContaining({ kind: 'add', text: 'second' }),
+        ]),
       );
+
+      const fingerprint = await postJson<{
+        status: string;
+        fingerprint: string;
+      }>(fixture.garcon.baseUrl, '/api/v1/git/working-tree/fingerprint', {
+        project,
+      });
       expect(fingerprint).toMatchObject({
         status: 'ready',
         fingerprint: workingTree.to.fingerprint,

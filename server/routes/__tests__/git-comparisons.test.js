@@ -111,6 +111,27 @@ describe('Git comparison route contracts', () => {
   });
 
   it.each([
+    [{ context: -1 }, 'negative context'],
+    [{ context: GIT_REVIEW_DOCUMENT_LIMITS.maxContextLines + 1 }, 'excessive context'],
+    [{ bodyCandidateCount: 0 }, 'empty eager batch'],
+    [
+      { bodyCandidateCount: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 },
+      'excessive eager batch',
+    ],
+  ])('rejects invalid snapshot limits: %s', async (limits) => {
+    const response = await snapshotHandler(request('/api/v1/git/comparisons/snapshot', {
+      project: '/project',
+      from: { kind: 'revision', revision: 'main' },
+      to: { kind: 'working-tree' },
+      mode: 'direct',
+      ...limits,
+    }));
+
+    expect(response.status).toBe(400);
+    expect(git.getComparisonSnapshot).not.toHaveBeenCalled();
+  });
+
+  it.each([
     [[], 'empty batch'],
     [[{ path: 'bad\0path' }], 'NUL path'],
     [Array.from({ length: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 }, (_, index) => ({ path: `file-${index}` })), 'oversized batch'],
@@ -127,6 +148,23 @@ describe('Git comparison route contracts', () => {
     expect(response.status).toBe(400);
     expect(git.getComparisonFileBodies).not.toHaveBeenCalled();
   });
+
+  it.each([-1, GIT_REVIEW_DOCUMENT_LIMITS.maxContextLines + 1])(
+    'rejects an invalid body context: %s',
+    async (context) => {
+      const response = await filesHandler(request('/api/v1/git/comparisons/files', {
+        project: '/project',
+        documentId: 'document',
+        effectiveFromHash: 'a'.repeat(40),
+        to: { kind: 'working-tree', fingerprint: 'fingerprint' },
+        context,
+        files: [{ path: 'a.ts' }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect(git.getComparisonFileBodies).not.toHaveBeenCalled();
+    },
+  );
 
 	it('serializes typed body statuses and forwards the abort signal', async () => {
 		const controller = new AbortController();

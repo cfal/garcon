@@ -13,10 +13,8 @@ import {
 import type { RouteMap } from '../lib/http-route-types.js';
 import { jsonError } from '../lib/http-error.js';
 import { withJsonBody } from '../lib/json-route.js';
-import { createLogger } from '../lib/log.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
-
-const logger = createLogger('routes:git');
+import { traceGitJsonResponse } from './git-route-response.js';
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -69,9 +67,7 @@ function validComparisonFiles(value: unknown): GitComparisonFileRequest[] | null
   for (const candidate of value) {
     if (!isRecord(candidate)) return null;
     const path = nonEmptyString(candidate.path);
-    const originalPath = candidate.originalPath === undefined
-      ? undefined
-      : nonEmptyString(candidate.originalPath);
+    const originalPath = candidate.originalPath === undefined ? undefined : nonEmptyString(candidate.originalPath);
     if (!path || path.includes('\0') || (candidate.originalPath !== undefined && !originalPath)) return null;
     if (originalPath?.includes('\0')) return null;
     files.push({ path, ...(originalPath ? { originalPath } : {}) });
@@ -81,19 +77,6 @@ function validComparisonFiles(value: unknown): GitComparisonFileRequest[] | null
 
 function routeError(error: string): Response {
   return jsonError(error, 400);
-}
-
-function traceJsonResponse(route: string, startedAt: number, trace: GitCommandTrace[], body: unknown): Response {
-  const responseBytes = Buffer.byteLength(JSON.stringify(body));
-  const slowestCommand = [...trace].sort((left, right) => right.durationMs - left.durationMs)[0];
-  logger.debug('git workbench route', {
-    route,
-    durationMs: Math.round(performance.now() - startedAt),
-    commandCount: trace.length,
-    slowestCommand,
-    responseBytes,
-  });
-  return Response.json(body);
 }
 
 async function gitJson(git: GitService, action: () => Promise<Response | unknown>): Promise<Response> {
@@ -141,7 +124,7 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
         trace,
         signal: request.signal,
       });
-      return traceJsonResponse('comparison-snapshot', startedAt, trace, result);
+      return traceGitJsonResponse('comparison-snapshot', startedAt, trace, result);
     });
   }
 
@@ -174,7 +157,7 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
         trace,
         signal: request.signal,
       });
-      return traceJsonResponse('comparison-files', startedAt, trace, result);
+      return traceGitJsonResponse('comparison-files', startedAt, trace, result);
     });
   }
 

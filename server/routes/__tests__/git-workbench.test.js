@@ -815,7 +815,6 @@ describe('route registration', () => {
       '/api/v1/git/commit-index': 'POST',
       '/api/v1/git/stage-paths': 'POST',
       '/api/v1/git/workbench/snapshot': 'POST',
-      '/api/v1/git/workbench/fingerprint': 'POST',
       '/api/v1/git/working-tree/fingerprint': 'POST',
       '/api/v1/git/review-document/files': 'POST',
       '/api/v1/git/history/commits': 'POST',
@@ -843,7 +842,6 @@ describe('route registration', () => {
       '/api/v1/git/file-history': 'GET',
       '/api/v1/git/blame': 'GET',
       '/api/v1/git/graph': 'GET',
-      '/api/v1/git/compare': 'GET',
     };
 
     for (const [route, method] of Object.entries(expectedRoutes)) {

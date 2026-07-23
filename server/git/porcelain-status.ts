@@ -47,3 +47,14 @@ export function parsePorcelainV1Z(output: string): PorcelainStatusEntry[] {
 
   return entries;
 }
+
+export function indexPorcelainStatusByPath(
+  entries: PorcelainStatusEntry[],
+): Map<string, PorcelainStatusEntry> {
+  const byPath = new Map<string, PorcelainStatusEntry>();
+  for (const entry of entries) {
+    const existing = byPath.get(entry.path);
+    if (!existing || existing.indexStatus === '?') byPath.set(entry.path, entry);
+  }
+  return byPath;
+}

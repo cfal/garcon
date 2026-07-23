@@ -1,4 +1,4 @@
-import type { DiffStats, GitCompareFile, NumstatMap } from './types.js';
+import type { DiffStats, NumstatMap } from './types.js';
 
 export interface ParsedDiffFile {
   path: string;
@@ -64,14 +64,4 @@ export function parseNameStatusZ(output: string, stats: NumstatMap): ParsedDiffF
     });
   }
 	return files;
-}
-
-export function parseCompareFilesZ(output: string, stats: NumstatMap): GitCompareFile[] {
-  return parseNameStatusZ(output, stats).map((file) => ({
-    path: file.path,
-    status: file.status,
-    ...(file.originalPath ? { originalPath: file.originalPath } : {}),
-    additions: file.additions,
-    deletions: file.deletions,
-  }));
 }
