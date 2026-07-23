@@ -393,6 +393,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       session.activeDeliveryReservations += 1;
       try {
         await beforeDelivery();
+        session.eventMetadata = codexEventMetadata(request);
         if (hasTerminalPendingFinish(session) || isTerminalSessionStatus(session.status)) {
           throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before active input delivery');
         }
