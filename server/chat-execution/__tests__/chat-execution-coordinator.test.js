@@ -1382,6 +1382,151 @@ describe('orchestration', () => {
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
+    it('settles a retained predecessor under the accepted active-input identity', async () => {
+      let running = false;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        return true;
+      });
+      const settled = [];
+      orchQueue.onTurnSettled((_chatId, turn) => settled.push(turn));
+      const predecessor = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-a',
+        turnId: 'turn-a',
+      });
+      running = true;
+      await orchQueue.completeDirectTurn(predecessor);
+
+      await expect(orchQueue.deliverActiveInput(
+        'c1',
+        'active successor',
+        activeInputOptions('request-b'),
+      )).resolves.toBe(true);
+      await orchQueue.createChatQueueEntry('c1', 'later queued input');
+      await orchQueue.triggerDrain('c1');
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      expect(settled).toEqual([{
+        clientRequestId: 'request-b',
+        turnId: 'request-b-turn',
+      }]);
+      await orchQueue.checkChatIdle('c1');
+
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
+        'c1',
+        'later queued input',
+        expect.any(Object),
+      );
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
+    });
+
+    it('restores a retained predecessor when the active-input boundary fails', async () => {
+      let running = false;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        return true;
+      });
+      const predecessor = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-a',
+        turnId: 'turn-a',
+      });
+      running = true;
+      await orchQueue.completeDirectTurn(predecessor);
+
+      await expect(orchQueue.deliverActiveInput(
+        'c1',
+        'rejected successor',
+        activeInputOptions('request-b'),
+        async () => { throw new Error('boundary failed'); },
+      )).rejects.toMatchObject({
+        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        deliveryAccepted: false,
+      });
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      orchQueue.onAgentTurnTerminal('c1', {
+        clientRequestId: 'request-a',
+        turnId: 'turn-a',
+      });
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+    });
+
+    it('does not overwrite a replacement attempt captured before active delivery', async () => {
+      let running = false;
+      let replacement;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      const predecessor = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-a',
+        turnId: 'turn-a',
+      });
+      running = true;
+      await orchQueue.completeDirectTurn(predecessor);
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        running = false;
+        await orchQueue.deleteChatQueueFile('c1');
+        replacement = orchQueue.reserveDirectTurn('c1', {
+          clientRequestId: 'request-c',
+          turnId: 'turn-c',
+        });
+        running = true;
+        await beforeDelivery();
+        return true;
+      });
+
+      await expect(orchQueue.deliverActiveInput(
+        'c1',
+        'stale successor',
+        activeInputOptions('request-b'),
+      )).rejects.toMatchObject({
+        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        deliveryAccepted: false,
+      });
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      await orchQueue.releaseDirectTurn(replacement);
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+    });
+
+    it('rejects restored-session delivery when a new attempt appears before its boundary', async () => {
+      let running = true;
+      let replacement;
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        running = false;
+        replacement = orchQueue.reserveDirectTurn('c1', {
+          clientRequestId: 'request-c',
+          turnId: 'turn-c',
+        });
+        running = true;
+        await beforeDelivery();
+        return true;
+      });
+
+      await expect(orchQueue.deliverActiveInput(
+        'c1',
+        'stale restored successor',
+        activeInputOptions('request-b'),
+      )).rejects.toMatchObject({
+        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        deliveryAccepted: false,
+      });
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      await orchQueue.releaseDirectTurn(replacement);
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+    });
+
     it('marks a registered input failed when durable admission fails before live delivery', async () => {
       let delivered = false;
       mockAgents.isChatRunning.mockReturnValue(true);

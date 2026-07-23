@@ -119,6 +119,71 @@ describe('QueueExecutionAttempt', () => {
     expect(() => attempt.replaceReservedTurn({ turnId: 't3' })).toThrow();
   });
 
+  test('hands off identity without resetting lifecycle signals', async () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' }, 'e1');
+    attempt.markRegistered();
+    attempt.allowLaunch();
+    attempt.markAbortable();
+    attempt.expectAbort('stop-1');
+    attempt.markRunSettled();
+    attempt.markTerminalObserved();
+
+    await attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { clientRequestId: 'request-b', turnId: 'turn-b' },
+      async () => undefined,
+    );
+
+    expect(attempt.identity()).toEqual({ clientRequestId: 'request-b', turnId: 'turn-b' });
+    expect(attempt.isExpectedAbort).toBe(true);
+    expect(attempt.isRunSettled).toBe(true);
+    expect(attempt.isSettlementReady).toBe(true);
+    expect(await attempt.waitUntilAbortable()).toBe(true);
+  });
+
+  test('restores the predecessor when the handoff callback fails', async () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' }, 'e1');
+
+    await expect(attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { turnId: 'turn-b' },
+      async () => { throw new Error('boundary failed'); },
+    )).rejects.toThrow('boundary failed');
+
+    expect(attempt.identity()).toEqual({ turnId: 'turn-a' });
+  });
+
+  test('rejects a stale handoff without changing the current identity', async () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-b' }, 'e1');
+
+    await expect(attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { turnId: 'turn-c' },
+      async () => undefined,
+    )).rejects.toThrow('active turn changed');
+
+    expect(attempt.identity()).toEqual({ turnId: 'turn-b' });
+  });
+
+  test('does not roll back over a newer successful handoff', async () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' }, 'e1');
+
+    await expect(attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { turnId: 'turn-b' },
+      async () => {
+        await attempt.handoffTurn(
+          { turnId: 'turn-b' },
+          { turnId: 'turn-c' },
+          async () => undefined,
+        );
+        throw new Error('older boundary failed');
+      },
+    )).rejects.toThrow('older boundary failed');
+
+    expect(attempt.identity()).toEqual({ turnId: 'turn-c' });
+  });
+
   test('matches compares turn identity', () => {
     const attempt = new QueueExecutionAttempt({ turnId: 't', clientRequestId: 'r' }, 'e1');
     expect(attempt.matches({ turnId: 't' })).toBe(true);
