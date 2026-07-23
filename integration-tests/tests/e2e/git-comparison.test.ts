@@ -106,7 +106,7 @@ describe('Lightpanda Git comparison', () => {
         '[data-git-virtual-row]',
 				(rows) => rows.length,
 			);
-			expect(mountedRows).toBeLessThan(60);
+			expect(mountedRows).toBeLessThan(30);
 
 			await writeFile(join(project, 'large.txt'), `${refreshed}\n`, 'utf8');
 			await fixture.page.waitForFunction(

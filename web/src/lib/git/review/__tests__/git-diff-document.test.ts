@@ -369,6 +369,52 @@ describe('GitDiffDocumentController', () => {
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(3));
 	});
 
+	it('bounds zero-byte limited bodies by cache entry count', async () => {
+		const controller = new GitDiffDocumentController();
+		const loadBodies = vi.fn(
+			async (snapshot: { documentId: string }, files: Array<{ path: string }>) => ({
+				documentId: snapshot.documentId,
+				files: Object.fromEntries(
+					files.map(({ path }) => [
+						path,
+						{
+							...body(path),
+							bodyState: 'binary' as const,
+							category: 'binary' as const,
+							isBinary: true,
+							renderedRowCount: 0,
+							patchBytes: 0,
+						},
+					]),
+				),
+				errors: {},
+			}),
+		);
+		const open = (index: number) => {
+			const path = `binary-${index}.dat`;
+			controller.open(
+				{
+					project: '/project',
+					documentId: `doc-${index}`,
+					files: [file(path)],
+					limits,
+					firstBodyCandidates: [path],
+				},
+				{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			);
+		};
+
+		for (let index = 0; index < 129; index += 1) {
+			open(index);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(loadBodies).toHaveBeenCalledTimes(index + 1);
+		}
+		open(0);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(loadBodies).toHaveBeenCalledTimes(130);
+	});
+
 	it('stops lazy body requests after a Working Tree response becomes stale', async () => {
 		const controller = new GitDiffDocumentController();
 		const loadBodies = vi.fn(async () => ({

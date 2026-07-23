@@ -31,6 +31,8 @@ import { buildGitReviewCommentContext } from '$lib/git/review/git-review-comment
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 
+const MAX_CACHED_FILE_BODIES = 128;
+
 export interface GitDiffDocumentSnapshot {
 	project: string;
 	documentId: string;
@@ -508,7 +510,10 @@ export class GitDiffDocumentController {
 		this.bodyCache.delete(key);
 		this.bodyCache.set(key, body);
 		this.bodyCacheBytes += body.patchBytes;
-		while (this.bodyCacheBytes > byteLimit && this.bodyCache.size > 0) {
+		while (
+			(this.bodyCacheBytes > byteLimit || this.bodyCache.size > MAX_CACHED_FILE_BODIES) &&
+			this.bodyCache.size > 0
+		) {
 			const oldestKey = this.bodyCache.keys().next().value;
 			if (oldestKey === undefined) break;
 			const evicted = this.bodyCache.get(oldestKey);
