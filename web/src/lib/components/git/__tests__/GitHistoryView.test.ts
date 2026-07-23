@@ -277,7 +277,7 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }));
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('true');
 		expect(filesPane?.hasAttribute('inert')).toBe(true);
-		expect(panes?.style.gridTemplateColumns).toContain('0px 0px');
+		expect(panes?.style.gridTemplateColumns).toBe('0px minmax(0,1fr)');
 		expect(screen.queryByRole('slider', { name: /Resize file tree/ })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Show file tree' }));

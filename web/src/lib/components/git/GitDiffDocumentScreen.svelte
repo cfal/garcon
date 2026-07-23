@@ -201,7 +201,7 @@
 		<div
 			class={cn('relative min-h-0 flex-1 overflow-hidden', isWide ? 'grid' : 'flex')}
 			style={isWide
-				? `grid-template-columns: ${fileTreeVisible ? `${treePaneWidthPx}px 6px` : '0px 0px'} minmax(0,1fr); grid-template-rows: minmax(0,1fr);`
+				? `grid-template-columns: ${fileTreeVisible ? `${treePaneWidthPx}px 6px minmax(0,1fr)` : '0px minmax(0,1fr)'}; grid-template-rows: minmax(0,1fr);`
 				: undefined}
 			data-git-diff-document-panes
 		>
