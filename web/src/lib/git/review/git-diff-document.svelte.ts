@@ -120,7 +120,7 @@ export class GitDiffDocumentController {
 	private virtualSummary = $derived.by(() => {
 		const snapshot = this.snapshot;
 		if (!snapshot) return null;
-		const collectionLimit = this.aggregateLimit ?? snapshot.collectionLimit;
+			const collectionLimit = snapshot.collectionLimit ?? this.aggregateLimit;
 		return {
 			documentId: snapshot.documentId,
 			project: snapshot.project,

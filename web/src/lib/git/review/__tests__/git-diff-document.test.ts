@@ -276,6 +276,12 @@ describe('GitDiffDocumentController', () => {
 				documentId: 'doc',
 				files: [file('a.ts'), file('b.ts'), file('c.ts')],
 				limits: { ...limits, maxBodyBatchFiles: 2 },
+				collectionLimit: {
+					reason: 'collection-too-many-files',
+					message: 'Showing 3 of 30,000 changed files.',
+					visibleFiles: 3,
+					totalFilesKnown: 30_000,
+				},
 				firstBodyCandidates: ['a.ts', 'b.ts', 'c.ts'],
 			},
 			{
@@ -300,7 +306,10 @@ describe('GitDiffDocumentController', () => {
 		controller.setFileFilter('c.ts');
 
 		expect(controller.virtualRows).toContainEqual(
-			expect.objectContaining({ kind: 'collection-limit' }),
+			expect.objectContaining({
+				kind: 'collection-limit',
+				message: 'Showing 3 of 30,000 changed files.',
+			}),
 		);
 	});
 
