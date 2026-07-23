@@ -35,10 +35,12 @@ const SCHEDULED_CHAT_ID = '1783725900000002';
 
 function deferred() {
   let resolve;
-  const promise = new Promise((resolvePromise) => {
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 async function waitForCheckpoint(checkpoint, operation, operationName) {
@@ -53,6 +55,23 @@ async function waitForCheckpoint(checkpoint, operation, operationName) {
       },
     ),
   ]);
+}
+
+async function completeWithin(operation, operationName, timeoutMs = 1_000) {
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`${operationName} did not complete within ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function directReservation(chatId) {
@@ -845,6 +864,129 @@ describe('ChatCommandService', () => {
     startGate.resolve();
     await Promise.all([start, stop]);
     expect(events).toEqual(['start-entered', 'start-finished', 'stop']);
+  });
+
+  it('settles Send now through the command lock before launching its successor once', async () => {
+    const firstTurnStarted = deferred();
+    const firstTurnResult = deferred();
+    const firstTurnSettled = deferred();
+    const successorStarted = deferred();
+    const successorResult = deferred();
+    const abortStarted = deferred();
+    const enqueueStarted = deferred();
+    const enqueueAllowed = deferred();
+    let runtimeRunning = false;
+    let predecessorTurn;
+    let successorLaunches = 0;
+    let queueService;
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const abortSession = mock(async () => {
+      abortStarted.resolve();
+      return true;
+    });
+    const runAgentTurn = mock(async (chatId, content, options) => {
+      options.executionAdmission?.markStarted();
+      runtimeRunning = true;
+      if (content === 'active predecessor') {
+        predecessorTurn = options;
+        firstTurnStarted.resolve();
+        try {
+          await firstTurnResult.promise;
+        } finally {
+          firstTurnSettled.resolve();
+        }
+        return;
+      }
+      successorLaunches += 1;
+      successorStarted.resolve();
+      try {
+        await successorResult.promise;
+      } finally {
+        runtimeRunning = false;
+        queueService.onAgentTurnTerminal(chatId, options);
+      }
+    });
+    queueService = makeRealQueue(pendingInputsService, {
+      runAgentTurn,
+      abortSession,
+      isChatRunning: mock(() => runtimeRunning),
+      waitUntilTurnAbortable: mock(async () => true),
+    });
+    const enqueueAccepted = queueService.enqueueAccepted.bind(queueService);
+    queueService.enqueueAccepted = mock(async (input) => {
+      enqueueStarted.resolve();
+      await enqueueAllowed.promise;
+      return enqueueAccepted(input);
+    });
+    const { service, forkChatFileCopy } = makeService({
+      queueService,
+      pendingInputsService,
+    });
+
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'active predecessor',
+      clientRequestId: 'req-send-now-predecessor',
+      clientMessageId: 'msg-send-now-predecessor',
+    });
+    await firstTurnStarted.promise;
+
+    const enqueue = service.submitQueueEntryCreate({
+      chatId: SOURCE_CHAT_ID,
+      content: 'send now successor',
+      clientRequestId: 'req-send-now-successor',
+    });
+    await enqueueStarted.promise;
+    const interrupt = service.submitInterruptAndSend({
+      chatId: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      clientRequestId: 'req-send-now-interrupt',
+    });
+    await Promise.resolve();
+    expect(abortSession).not.toHaveBeenCalled();
+
+    enqueueAllowed.resolve();
+    await enqueue;
+    await abortStarted.promise;
+    expect(successorLaunches).toBe(0);
+
+    firstTurnResult.reject(new Error('interrupted by Send now'));
+    await firstTurnSettled.promise;
+    await Promise.resolve();
+    expect(successorLaunches).toBe(0);
+
+    runtimeRunning = false;
+    queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, predecessorTurn);
+    await expect(interrupt).resolves.toMatchObject({ stopped: true });
+    await successorStarted.promise;
+
+    queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, predecessorTurn);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(successorLaunches).toBe(1);
+
+    successorResult.resolve();
+    await completeWithin(queueService.waitForExecutionOwners(), 'successor settlement');
+    const [pause, fork] = await completeWithin(Promise.all([
+      service.mutateQueue({ chatId: SOURCE_CHAT_ID, action: 'pause' }),
+      service.forkChat({
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        upToSeq: 1,
+      }),
+    ]), 'post-interrupt mutations');
+
+    expect(pause.success).toBe(true);
+    expect(pause.control.queue).toMatchObject({
+      entries: [],
+      dispatchingEntryId: null,
+      pause: null,
+    });
+    expect(fork.success).toBe(true);
+    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(runAgentTurn.mock.calls.filter(([, content]) => content === 'send now successor')).toHaveLength(1);
   });
 
   it('orders queue creation after an in-progress Stop command', async () => {
