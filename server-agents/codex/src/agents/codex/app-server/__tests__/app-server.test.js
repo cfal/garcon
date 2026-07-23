@@ -4465,7 +4465,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
-  it('declines active delivery before acceptance when a terminal finish is pending', async () => {
+  it('adopts active-input metadata before flushing a terminal finish pending at delivery', async () => {
     let fake;
     fake = new FakeClient({
       getThreadGoal: async () => ({ goal: null }),
@@ -4478,16 +4478,23 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const failed = new Promise((resolve) => provider.onFailed(
+      (chatId, message, metadata) => resolve({ chatId, message, metadata }),
+    ));
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
+      clientRequestId: 'request-a',
       codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
       nativePath: null,
+      turnId: 'turn-a',
     }));
 
     const first = provider.submitActiveInput(makeRequest({
       agentSessionId: 'thread-1',
+      clientRequestId: 'request-b',
       command: 'First input',
       nativePath: null,
+      turnId: 'turn-b',
     }), async () => {
       fake.emit('notification', {
         method: 'error',
@@ -4500,6 +4507,14 @@ describe('CodexAppServerRuntime', () => {
       });
     });
     await expect(first).rejects.toThrow('terminal failure');
+    await expect(failed).resolves.toEqual({
+      chatId: 'chat-1',
+      message: 'terminal failure',
+      metadata: {
+        clientRequestId: 'request-b',
+        turnId: 'turn-b',
+      },
+    });
     let accepted = false;
     await expect(provider.submitActiveInput(makeRequest({
       agentSessionId: 'thread-1',
