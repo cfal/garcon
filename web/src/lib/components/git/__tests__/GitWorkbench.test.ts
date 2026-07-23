@@ -36,6 +36,7 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		stagedFiles: [],
 		stagedFileNodes: [],
 		setTreePaneWidth: vi.fn(),
+		previewTreePaneWidth: vi.fn(),
 		toggleDirCollapsed: vi.fn(),
 		firstVisibleFileInDirectory: vi.fn(() => null),
 		previousVisibleFile: vi.fn(() => null),

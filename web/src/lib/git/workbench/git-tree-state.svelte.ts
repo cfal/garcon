@@ -4,6 +4,12 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
+import {
+	clampGitFileTreeWidth,
+	DEFAULT_GIT_FILE_TREE_WIDTH,
+	persistGitFileTreeWidth,
+	readGitFileTreeWidth,
+} from '$lib/git/surface/git-file-tree-preferences.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export class GitTreeState {
@@ -13,7 +19,7 @@ export class GitTreeState {
 	hasCommits = $state(true);
 	statsState = $state<GitTreeStatsState>('pending');
 	collapsedDirs = $state(new Set<string>());
-	treePaneWidthPx = $state(300);
+	treePaneWidthPx = $state(DEFAULT_GIT_FILE_TREE_WIDTH);
 	selectedFile = $state<string | null>(null);
 	activeTab = $state<GitDiffTab>('unstaged');
 	hideGenerated = $state(false);
@@ -89,15 +95,16 @@ export class GitTreeState {
 	}
 
 	setTreePaneWidth(next: number): void {
-		const clamped = Math.max(220, Math.min(560, Math.round(next)));
-		this.treePaneWidthPx = clamped;
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx, String(clamped));
+		this.treePaneWidthPx = persistGitFileTreeWidth(next);
+	}
+
+	previewTreePaneWidth(next: number): void {
+		this.treePaneWidthPx = clampGitFileTreeWidth(next);
 	}
 
 	loadTreePaneWidth(): void {
-		const raw = getLocalStorageItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
-		const width = raw ? Number(raw) : NaN;
-		if (Number.isFinite(width)) this.setTreePaneWidth(width);
+		const width = readGitFileTreeWidth();
+		if (width !== null) this.previewTreePaneWidth(width);
 	}
 
 	setHideGenerated(value: boolean): void {

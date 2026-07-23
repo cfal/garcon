@@ -13,14 +13,25 @@
 		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import {
+		clampGitFileTreeWidth,
+		DEFAULT_GIT_FILE_TREE_WIDTH,
+		persistGitDiffDocumentFileTreeVisible,
+		persistGitFileTreeWidth,
+		readGitDiffDocumentFileTreeVisible,
+		readGitFileTreeWidth,
+	} from '$lib/git/surface/git-file-tree-preferences.js';
 	import { cn } from '$lib/utils/cn';
-	import GitCommitChangedFileList from './GitCommitChangedFileList.svelte';
+	import GitChangedFileTree from './GitChangedFileTree.svelte';
 	import GitCommitVirtualDiffSurface from './GitCommitVirtualDiffSurface.svelte';
+	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
 	import { gitContainerBreakpoints } from './git-container-presentation.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitDiffDocumentScreenProps {
-		header: Snippet;
+		header: Snippet<
+			[showFileTreeToggle: boolean, fileTreeVisible: boolean, onToggleFileTree: () => void]
+		>;
 		documentId: string | null;
 		documentAvailable: boolean;
 		files: GitCommitFileSummary[];
@@ -101,6 +112,8 @@
 	type SinglePane = 'files' | 'diff';
 	let containerWidth = $state(0);
 	let singlePane = $state<SinglePane>('files');
+	let treePaneWidthPx = $state(readGitFileTreeWidth() ?? DEFAULT_GIT_FILE_TREE_WIDTH);
+	let fileTreeVisible = $state(readGitDiffDocumentFileTreeVisible());
 	const observeDetailsWidth = observeContainerWidth((width) => {
 		containerWidth = width;
 	});
@@ -108,6 +121,10 @@
 		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, gitContainerBreakpoints),
 	);
 	let isSinglePane = $derived(containerPresentation === 'narrow');
+	let isWide = $derived(containerPresentation === 'wide');
+	let filePaneHidden = $derived(
+		(isSinglePane && singlePane !== 'files') || (isWide && !fileTreeVisible),
+	);
 	let virtualEmptyMessage = $derived(
 		fileFilter.trim() ? m.git_diff_document_no_filter_matches() : emptyDocumentLabel,
 	);
@@ -122,6 +139,19 @@
 		onSelectFile(filePath);
 		if (isSinglePane) singlePane = 'diff';
 	}
+
+	function previewTreePaneWidth(width: number): void {
+		treePaneWidthPx = clampGitFileTreeWidth(width);
+	}
+
+	function commitTreePaneWidth(width: number): void {
+		treePaneWidthPx = persistGitFileTreeWidth(width);
+	}
+
+	function toggleFileTree(): void {
+		fileTreeVisible = !fileTreeVisible;
+		persistGitDiffDocumentFileTreeVisible(fileTreeVisible);
+	}
 </script>
 
 <div
@@ -131,7 +161,7 @@
 	{@attach observeDetailsWidth}
 >
 	{#if documentAvailable}
-		{@render header()}
+		{@render header(isWide, fileTreeVisible, toggleFileTree)}
 		{#if error}
 			<div
 				class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
@@ -168,18 +198,26 @@
 				{/each}
 			</div>
 		{/if}
-		<div class="relative flex min-h-0 flex-1 overflow-hidden">
+		<div
+			class={cn('relative min-h-0 flex-1 overflow-hidden', isWide ? 'grid' : 'flex')}
+			style={isWide
+				? `grid-template-columns: ${fileTreeVisible ? `${treePaneWidthPx}px 6px` : '0px 0px'} minmax(0,1fr); grid-template-rows: minmax(0,1fr);`
+				: undefined}
+			data-git-diff-document-panes
+		>
 			<div
 				class={cn(
 					'flex min-h-0 flex-col overflow-hidden bg-background',
-					isSinglePane ? 'absolute inset-0' : 'w-72 shrink-0 border-r border-border',
-					isSinglePane && singlePane !== 'files' && 'invisible pointer-events-none',
+					!isSinglePane && !isWide && 'w-72 shrink-0 border-r border-border',
+					isWide && fileTreeVisible && 'border-r border-border',
+					isSinglePane && 'absolute inset-0',
+					filePaneHidden && 'invisible pointer-events-none',
 				)}
-				aria-hidden={isSinglePane && singlePane !== 'files'}
-				inert={isSinglePane && singlePane !== 'files'}
+				aria-hidden={filePaneHidden}
+				inert={filePaneHidden}
 				data-git-history-files-pane
 			>
-				<GitCommitChangedFileList
+				<GitChangedFileTree
 					{files}
 					{fileFilter}
 					{focusedFilePath}
@@ -187,6 +225,13 @@
 					onSelectFile={handleSelectFile}
 				/>
 			</div>
+			{#if isWide && fileTreeVisible}
+				<GitFileTreeResizeHandle
+					width={treePaneWidthPx}
+					onResize={previewTreePaneWidth}
+					onResizeCommit={commitTreePaneWidth}
+				/>
+			{/if}
 			<div
 				class={cn(
 					'flex min-h-0 min-w-0 flex-col overflow-hidden',

@@ -18,6 +18,7 @@ import {
 	GIT_EMPTY_TREE_REVISION,
 	GitComparisonController,
 } from '$lib/git/review/git-comparison.svelte.js';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import GitHistoryView from '../GitHistoryView.svelte';
 
 vi.mock('$lib/api/git.js', () => ({
@@ -172,6 +173,8 @@ describe('GitHistoryView', () => {
 	beforeEach(() => {
 		restoreResizeObserver = installResizeObserverHarness();
 		vi.clearAllMocks();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 		onRevertCommit = vi.fn<(commit: GitHistoryRevertTarget) => void>();
 		comparison = new GitComparisonController();
 		vi.mocked(getGitHistoryCommits).mockResolvedValue({
@@ -188,6 +191,8 @@ describe('GitHistoryView', () => {
 
 	afterEach(() => {
 		restoreResizeObserver();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
 
 	it('navigates from commit list to details and back', async () => {
@@ -232,6 +237,53 @@ describe('GitHistoryView', () => {
 
 		expect(await screen.findByText('List commit')).toBeTruthy();
 		expect(history.screen).toBe('list');
+	});
+
+	it('resizes, hides, and restores the wide changed-file tree', async () => {
+		const { container } = render(GitHistoryView, {
+			props: {
+				history: new GitHistoryController(),
+				comparison,
+				onOpenComparison: vi.fn(),
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+				isMobile: false,
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
+		await screen.findByText('Commit detail');
+		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
+		expect(details).toBeTruthy();
+		if (!details) return;
+		ResizeObserverHarness.emit(details, 1_100);
+		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('wide'));
+
+		const panes = container.querySelector<HTMLElement>('[data-git-diff-document-panes]');
+		const filesPane = container.querySelector<HTMLElement>('[data-git-history-files-pane]');
+		const resizer = screen.getByRole('slider', { name: 'Resize file tree, 300 pixels' });
+		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
+
+		await fireEvent.keyDown(resizer, { key: 'ArrowRight' });
+		expect(panes?.style.gridTemplateColumns).toContain('316px 6px');
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx)).toBe('316');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }));
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(filesPane?.hasAttribute('inert')).toBe(true);
+		expect(panes?.style.gridTemplateColumns).toContain('0px 0px');
+		expect(screen.queryByRole('slider', { name: /Resize file tree/ })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show file tree' }));
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(panes?.style.gridTemplateColumns).toContain('316px 6px');
+		expect(screen.getByRole('slider', { name: 'Resize file tree, 316 pixels' })).toBeTruthy();
 	});
 
 	it('reloads the list when effective project identity changes at the same path', async () => {
@@ -308,7 +360,7 @@ describe('GitHistoryView', () => {
 			expect(getGitCommitFileBodies).toHaveBeenCalled();
 		});
 		if (!filesPane) return;
-		await fireEvent.click(within(filesPane).getByRole('button', { name: /a.ts/ }));
+		await fireEvent.click(within(filesPane).getByRole('treeitem', { name: /a.ts/ }));
 
 		await screen.findAllByText('+added line');
 		expect(filesPane.getAttribute('aria-hidden')).toBe('true');
@@ -481,7 +533,7 @@ describe('GitHistoryView', () => {
 			.mock.calls.some(([, , , files]) => requestedPaths(files).includes('later.ts'));
 		expect(requestedLaterBeforeSelection).toBe(false);
 
-		await fireEvent.click(within(filesPane).getByRole('button', { name: /later\.ts/ }));
+		await fireEvent.click(within(filesPane).getByRole('treeitem', { name: /later\.ts/ }));
 
 		await waitFor(() => {
 			const requestedLaterFile = vi
@@ -539,7 +591,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => expect(screen.queryAllByText('+added line').length).toBeGreaterThan(0));
 		vi.mocked(getGitCommitFileBodies).mockClear();
 
-		await fireEvent.click(within(filesPane).getByRole('button', { name: /later\.ts/ }));
+		await fireEvent.click(within(filesPane).getByRole('treeitem', { name: /later\.ts/ }));
 		await waitFor(() => {
 			const requestedLaterFile = vi
 				.mocked(getGitCommitFileBodies)

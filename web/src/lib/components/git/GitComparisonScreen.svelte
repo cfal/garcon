@@ -42,7 +42,11 @@
 	}: GitComparisonScreenProps = $props();
 </script>
 
-{#snippet header()}
+{#snippet header(
+	showFileTreeToggle: boolean,
+	fileTreeVisible: boolean,
+	onToggleFileTree: () => void,
+)}
 	{#if comparison.snapshot}
 		<GitComparisonHeader
 			snapshot={comparison.snapshot}
@@ -56,6 +60,9 @@
 			{onSetDiffMode}
 			{onSetContextLines}
 			{onSetDiffFontSize}
+			{showFileTreeToggle}
+			{fileTreeVisible}
+			{onToggleFileTree}
 		/>
 		{#if comparison.staleMessage}
 			<div

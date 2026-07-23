@@ -13,6 +13,7 @@
 	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import GitFileTree from './GitFileTree.svelte';
+	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
 	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
@@ -167,23 +168,6 @@
 	function handleInitialCommit(): void {
 		if (!activeProjectPath) return;
 		commit.createInitialCommit(activeProjectPath);
-	}
-
-	function startTreeResize(e: PointerEvent): void {
-		const startX = e.clientX;
-		const startWidth = files.treePaneWidthPx;
-		const target = e.currentTarget as HTMLElement;
-		target.setPointerCapture(e.pointerId);
-
-		function onMove(ev: PointerEvent): void {
-			files.setTreePaneWidth(startWidth + (ev.clientX - startX));
-		}
-		function onUp(): void {
-			target.removeEventListener('pointermove', onMove);
-			target.removeEventListener('pointerup', onUp);
-		}
-		target.addEventListener('pointermove', onMove);
-		target.addEventListener('pointerup', onUp);
 	}
 
 	function handleStageFile(filePath: string): void {
@@ -611,23 +595,11 @@
 					</div>
 				</div>
 				{#if containerPresentation === 'wide'}
-					<button
-						type="button"
-						aria-label={m.git_resize_file_tree()}
-						data-git-tree-resizer
-						class="m-0 cursor-col-resize rounded-none border-none bg-border/60 p-0 transition-colors hover:bg-interactive-accent/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						onpointerdown={startTreeResize}
-						onkeydown={(event) => {
-							if (event.key === 'ArrowLeft') {
-								event.preventDefault();
-								files.setTreePaneWidth(files.treePaneWidthPx - 16);
-							}
-							if (event.key === 'ArrowRight') {
-								event.preventDefault();
-								files.setTreePaneWidth(files.treePaneWidthPx + 16);
-							}
-						}}
-					></button>
+					<GitFileTreeResizeHandle
+						width={files.treePaneWidthPx}
+						onResize={(width) => files.previewTreePaneWidth(width)}
+						onResizeCommit={(width) => files.setTreePaneWidth(width)}
+					/>
 				{/if}
 				<div
 					class={cn(
