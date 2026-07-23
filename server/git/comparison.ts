@@ -17,7 +17,7 @@ import {
 } from './rendered-diff.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { assertSafeRef } from './ref-validation.js';
-import { literalGitPathspec } from './pathspecs.js';
+import { exactGitPathspecs, literalGitPathspec } from './pathspecs.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
@@ -636,8 +636,8 @@ async function loadComparisonBody({
     return loadUntrackedComparisonBody(projectPath, file, fingerprint, signal);
   }
   const endpoints = toHash ? [effectiveFromHash, toHash] : [effectiveFromHash];
-  const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).map(
-    literalGitPathspec,
+  const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).flatMap(
+    exactGitPathspecs,
   );
   const { stdout } = await runGitTraced(
     projectPath,

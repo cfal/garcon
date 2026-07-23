@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-import { chunkGitPathspecs, literalGitPathspec } from '../pathspecs.js';
+import { chunkGitPathspecs, exactGitPathspecs, literalGitPathspec } from '../pathspecs.js';
 
 describe('literalGitPathspec', () => {
   it('disables pathspec magic for user-controlled paths', () => {
     expect(literalGitPathspec('src/[draft]*.ts')).toBe(':(literal)src/[draft]*.ts');
+  });
+
+  it('excludes descendants when selecting one exact file', () => {
+    expect(exactGitPathspecs('bin/tool')).toEqual([
+      ':(literal)bin/tool',
+      ':(exclude,literal)bin/tool/',
+    ]);
   });
 });
 

@@ -764,6 +764,53 @@ describe("commit history operations", () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("keeps a file body separate when the same path becomes a directory", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-file-to-directory-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, "bin"));
+      await fs.writeFile(path.join(projectPath, "bin", "tool"), "old\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "."]);
+      await runGitCommand(projectPath, ["commit", "-m", "add tool file"]);
+      await fs.rm(path.join(projectPath, "bin", "tool"));
+      await fs.mkdir(path.join(projectPath, "bin", "tool"));
+      await fs.writeFile(path.join(projectPath, "bin", "tool", "main.sh"), "new\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "-A"]);
+      await runGitCommand(projectPath, ["commit", "-m", "replace tool with directory"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+        context: 5,
+      });
+      expect(snapshot.status).toBe("ready");
+      const deletedFile = snapshot.files.find((file) => file.path === "bin/tool");
+      expect(deletedFile).toMatchObject({ status: "deleted" });
+
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: [{ path: "bin/tool" }],
+      });
+      const body = bodies.files["bin/tool"];
+
+      expect(body.rows).toContainEqual(expect.objectContaining({ kind: "del", text: "old" }));
+      expect(body.rows).not.toContainEqual(expect.objectContaining({ kind: "add", text: "new" }));
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("comparison operations", () => {

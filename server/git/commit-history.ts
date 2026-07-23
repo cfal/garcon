@@ -4,7 +4,7 @@ import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js'
 import { mapWithConcurrency } from '../lib/concurrency.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';
-import { literalGitPathspec } from './pathspecs.js';
+import { exactGitPathspecs } from './pathspecs.js';
 import { categoryForPath, errorFileBody, limitedRenderedPatch } from './rendered-diff.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
@@ -405,8 +405,8 @@ async function getCommitFileBodies({
   const errors: GitCommitFileBodiesResponse['errors'] = {};
 
   await mapWithConcurrency(requestedFiles, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
-    const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).map(
-      literalGitPathspec,
+    const pathspecs = (file.originalPath ? [file.originalPath, file.path] : [file.path]).flatMap(
+      exactGitPathspecs,
     );
     try {
       const { stdout } = await runGitTraced(

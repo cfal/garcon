@@ -5,6 +5,10 @@ export function literalGitPathspec(filePath: string): string {
   return `:(literal)${filePath}`;
 }
 
+export function exactGitPathspecs(filePath: string): string[] {
+  return [literalGitPathspec(filePath), `:(exclude,literal)${filePath}/`];
+}
+
 export function chunkGitPathspecs(paths: string[]): string[][] {
   const chunks: string[][] = [];
   let current: string[] = [];

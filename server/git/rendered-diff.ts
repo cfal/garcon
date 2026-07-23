@@ -20,10 +20,16 @@ export function parseUnifiedPatchToRenderedRows(diffText: string): ParsedRendere
   let afterLine = 0;
   let diffLineIndex = 0;
   let currentHunkIndex = -1;
+  let sawFileHeader = false;
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex];
     if (line === '' && lineIndex === lines.length - 1) continue;
+    if (line.startsWith('diff --git ')) {
+      if (sawFileHeader) break;
+      sawFileHeader = true;
+      continue;
+    }
 
     const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
     if (hunkMatch) {
