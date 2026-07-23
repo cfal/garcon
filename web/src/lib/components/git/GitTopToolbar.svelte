@@ -171,7 +171,7 @@
 				label: m.git_compare_action(),
 				title: m.git_compare_title(),
 				disabled: false,
-				priority: 5,
+				priority: 2,
 				onclick: onOpenComparison,
 			},
 			{

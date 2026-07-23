@@ -611,7 +611,6 @@ describe('GitHistoryView', () => {
 			fromRevision: 'older',
 			toKind: 'revision',
 			toRevision: 'newer',
-			origin: 'history',
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
@@ -621,7 +620,6 @@ describe('GitHistoryView', () => {
 			fromRevision: 'parent',
 			toKind: 'revision',
 			toRevision: 'abcdef1234567890',
-			origin: 'commit',
 		});
 	});
 
@@ -650,7 +648,6 @@ describe('GitHistoryView', () => {
 			fromRevision: 'parent',
 			toKind: 'revision',
 			toRevision: 'abcdef1234567890',
-			origin: 'history',
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Select commits' }));
@@ -694,7 +691,6 @@ describe('GitHistoryView', () => {
 			fromRevision: 'HEAD~1',
 			toKind: 'revision',
 			toRevision: 'HEAD',
-			origin: 'history',
 		});
 	});
 });

@@ -11,7 +11,6 @@ import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 
-export type GitComparisonOrigin = 'changes' | 'history' | 'commit' | 'graph';
 export type GitComparisonToKind = 'revision' | 'working-tree';
 export type GitComparisonSelectionSlot = 'from' | 'to';
 export const GIT_EMPTY_TREE_REVISION = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -21,7 +20,6 @@ export interface GitComparisonDialogDefaults {
 	toKind: GitComparisonToKind;
 	toRevision?: string;
 	mode?: GitComparisonMode;
-	origin: GitComparisonOrigin;
 }
 
 export interface GitComparisonDisplayOptions {
@@ -36,7 +34,6 @@ export class GitComparisonController {
 	toKind = $state<GitComparisonToKind>('working-tree');
 	toRevision = $state('HEAD');
 	mode = $state<GitComparisonMode>('direct');
-	origin = $state<GitComparisonOrigin>('changes');
 	snapshot = $state<GitComparisonSnapshotReady | null>(null);
 	isLoading = $state(false);
 	error = $state<string | null>(null);
@@ -77,7 +74,6 @@ export class GitComparisonController {
 		this.toKind = defaults.toKind;
 		this.toRevision = defaults.toRevision ?? 'HEAD';
 		this.mode = defaults.toKind === 'working-tree' ? 'direct' : (defaults.mode ?? 'direct');
-		this.origin = defaults.origin;
 		this.clearError();
 		this.dialogOpen = true;
 	}
@@ -147,7 +143,6 @@ export class GitComparisonController {
 			fromRevision: this.historySelectionFrom,
 			toKind: 'revision',
 			toRevision: this.historySelectionTo,
-			origin: 'history',
 		};
 		this.cancelHistorySelection();
 		return defaults;

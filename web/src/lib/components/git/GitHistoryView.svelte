@@ -118,7 +118,6 @@
 			fromRevision: history.commits[1]?.hash ?? toCommit?.parents[0] ?? 'HEAD~1',
 			toKind: 'revision',
 			toRevision: toCommit?.hash ?? 'HEAD',
-			origin: 'history',
 		});
 	}
 </script>
@@ -180,7 +179,6 @@
 				fromRevision: snapshot.selectedParent ?? GIT_EMPTY_TREE_REVISION,
 				toKind: 'revision',
 				toRevision: snapshot.commit.hash,
-				origin: 'commit',
 			});
 		}}
 		{onSetDiffMode}

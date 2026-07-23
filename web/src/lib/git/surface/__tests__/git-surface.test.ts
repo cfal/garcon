@@ -65,23 +65,19 @@ afterEach(() => {
 });
 
 describe('GitSurfaceController project snapshots', () => {
-	it.each(['changes', 'graph', 'history', 'commit'] as const)(
-		'returns $origin comparisons to the default workbench',
-		(origin) => {
-			const git = controller();
-			const checkFreshness = vi.spyOn(git.workbench, 'checkFreshness').mockResolvedValue();
-			git.setContext('/projects/alpha', 'alpha');
-			git.history.screen = 'commit';
-			git.comparison.origin = origin;
-			git.showComparison();
+	it('returns comparisons to the default workbench', () => {
+		const git = controller();
+		const checkFreshness = vi.spyOn(git.workbench, 'checkFreshness').mockResolvedValue();
+		git.setContext('/projects/alpha', 'alpha');
+		git.history.screen = 'commit';
+		git.showComparison();
 
-			git.returnFromComparison();
+		git.returnFromComparison();
 
-			expect(git.activeView).toBe('changes');
-			expect(git.history.screen).toBe('list');
-			expect(checkFreshness).toHaveBeenCalledWith('/projects/alpha');
-		},
-	);
+		expect(git.activeView).toBe('changes');
+		expect(git.history.screen).toBe('list');
+		expect(checkFreshness).toHaveBeenCalledWith('/projects/alpha');
+	});
 
 	it('retains its context and suppresses activation while project identity resolves', () => {
 		const git = controller();
@@ -123,13 +119,11 @@ describe('GitSurfaceController project snapshots', () => {
 		const setTarget = vi.spyOn(git.workbench, 'setTarget').mockResolvedValue();
 		git.setContext('/projects/alpha', 'alpha');
 		git.activeView = 'comparison';
-		git.comparison.origin = 'history';
 
 		git.setPresentationVisible(true);
 
 		await vi.waitFor(() => expect(setTarget).toHaveBeenCalledOnce());
 		expect(git.activeView).toBe('comparison');
-		expect(git.comparison.origin).toBe('history');
 	});
 
 	it.each([
@@ -246,7 +240,6 @@ describe('GitSurfaceController project snapshots', () => {
 		git.presentationVisible = true;
 		await git.applyActiveTarget();
 		git.activeView = 'comparison';
-		git.comparison.origin = 'changes';
 
 		git.activeTarget = {
 			projectPath: '/projects/alpha-feature',

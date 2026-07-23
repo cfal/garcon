@@ -102,7 +102,6 @@ describe('GitComparisonController', () => {
 		comparison.openDialog({
 			fromRevision: 'HEAD',
 			toKind: 'working-tree',
-			origin: 'changes',
 		});
 
 		expect(comparison.dialogOpen).toBe(true);
@@ -143,7 +142,7 @@ describe('GitComparisonController', () => {
 			changedPathCount: 1,
 		});
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
 		expect(await comparison.compare('/project')).toBe(true);
 		expect(comparison.snapshot?.documentId).toBe('comparison-doc');
@@ -164,7 +163,7 @@ describe('GitComparisonController', () => {
 			message: 'Fingerprint unavailable.',
 		});
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
 		expect(await comparison.compare('/project')).toBe(true);
 		await comparison.checkFreshness('/project');
@@ -188,7 +187,7 @@ describe('GitComparisonController', () => {
 				errors: {},
 			});
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
 		await comparison.compare('/project');
 		await vi.waitFor(() => expect(comparison.bodyError).toContain('temporary network failure'));
@@ -204,12 +203,11 @@ describe('GitComparisonController', () => {
 		comparison.selectHistoryCommit('newer');
 		const defaults = comparison.takeSelectedHistoryRange();
 
-		expect(defaults).toEqual({
-			fromRevision: 'older',
-			toKind: 'revision',
-			toRevision: 'newer',
-			origin: 'history',
-		});
+			expect(defaults).toEqual({
+				fromRevision: 'older',
+				toKind: 'revision',
+				toRevision: 'newer',
+			});
 		expect(comparison.historySelectionActive).toBe(false);
 	});
 
@@ -241,7 +239,6 @@ describe('GitComparisonController', () => {
 			toKind: 'revision',
 			toRevision: 'other',
 			mode: 'merge-base',
-			origin: 'history',
 		});
 
 		expect(await comparison.compare('/project')).toBe(false);
@@ -266,7 +263,7 @@ describe('GitComparisonController', () => {
 			changedPathCount: 1,
 		});
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 		await comparison.compare('/project');
 		await comparison.checkFreshness('/project');
 
@@ -280,7 +277,7 @@ describe('GitComparisonController', () => {
 		const snapshot = workingTreeSnapshot();
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 		await comparison.compare('/project');
 
 		comparison.editComparison();
@@ -299,7 +296,7 @@ describe('GitComparisonController', () => {
 		const pending = deferred<GitComparisonSnapshotReady>();
 		vi.mocked(getGitComparisonSnapshot).mockReturnValue(pending.promise);
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
 		const request = comparison.compare('/project');
 		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledOnce());
@@ -318,7 +315,7 @@ describe('GitComparisonController', () => {
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(workingTreeSnapshot());
 		const comparison = new GitComparisonController();
 		comparison.openDialog(
-			{ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' },
+			{ fromRevision: 'main', toKind: 'working-tree' },
 			{ diffMode: 'split', contextLines: 12 },
 		);
 
@@ -338,7 +335,7 @@ describe('GitComparisonController', () => {
 			errors: {},
 		});
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 		await comparison.compare('/project');
 
 		comparison.setDisplayOptions('/project', 'unified', 12);
@@ -364,7 +361,7 @@ describe('GitComparisonController', () => {
 			changedPathCount: 1,
 		});
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 		await comparison.compare('/project');
 		comparison.document.openCommentComposer('src/a.ts', 'after', 1);
 		comparison.document.setCommentBody('Keep this draft');
@@ -389,7 +386,7 @@ describe('GitComparisonController', () => {
 			changedPathCount: 1,
 		});
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 		await comparison.compare('/project');
 		comparison.setDisplayOptions('/project', 'unified', 12);
 

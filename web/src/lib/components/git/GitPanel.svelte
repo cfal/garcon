@@ -211,7 +211,6 @@
 		openComparisonDialog({
 			fromRevision: 'HEAD',
 			toKind: 'working-tree',
-			origin: 'changes',
 		});
 	}
 
@@ -220,7 +219,6 @@
 			fromRevision: 'HEAD~1',
 			toKind: 'revision',
 			toRevision: 'HEAD',
-			origin: 'graph',
 		});
 	}
 

@@ -29,7 +29,7 @@ describe('GitComparisonDialog', () => {
 
 	it('explains the complete Working Tree target and hides merge-base controls', () => {
 		const comparison = new GitComparisonController();
-		comparison.openDialog({ fromRevision: 'HEAD', toKind: 'working-tree', origin: 'changes' });
+		comparison.openDialog({ fromRevision: 'HEAD', toKind: 'working-tree' });
 		renderDialog(comparison);
 
 		expect(screen.getByText(/staged, unstaged, untracked/)).toBeTruthy();
@@ -43,7 +43,6 @@ describe('GitComparisonDialog', () => {
 			fromRevision: 'main',
 			toKind: 'revision',
 			toRevision: 'feature',
-			origin: 'history',
 		});
 		renderDialog(comparison);
 
@@ -61,7 +60,6 @@ describe('GitComparisonDialog', () => {
 			toKind: 'revision',
 			toRevision: 'unrelated',
 			mode: 'merge-base',
-			origin: 'history',
 		});
 		comparison.error = 'These revisions do not have a common ancestor.';
 		comparison.errorStatus = 'no-merge-base';
@@ -79,7 +77,6 @@ describe('GitComparisonDialog', () => {
 			fromRevision: '',
 			toKind: 'revision',
 			toRevision: 'v1',
-			origin: 'history',
 		});
 		const { onSearchRefs } = renderDialog(comparison);
 		const from = screen.getByRole('combobox', { name: 'From' });

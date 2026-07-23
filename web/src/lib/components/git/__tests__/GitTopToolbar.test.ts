@@ -264,6 +264,22 @@ describe('GitTopToolbar', () => {
 		}
 	});
 
+	it('keeps Compare visible before History when one Changes action must overflow', async () => {
+		const measurement = installToolbarMeasurement(300);
+		try {
+			renderToolbar({ isMobile: true, canPush: true });
+
+			await waitFor(() => {
+				expect(screen.getByRole('button', { name: 'More Git actions' })).toBeTruthy();
+			});
+
+			expect(screen.getByRole('button', { name: m.git_compare_title() })).toBeTruthy();
+			expect(screen.queryByRole('button', { name: m.git_view_commit_history() })).toBeNull();
+		} finally {
+			measurement.restore();
+		}
+	});
+
 	it('moves lower priority actions into More when the action rail is narrow', async () => {
 		const measurement = installToolbarMeasurement(160);
 		try {
