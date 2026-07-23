@@ -40,6 +40,7 @@ export class GitComparisonController {
 	snapshot = $state<GitComparisonSnapshotReady | null>(null);
 	isLoading = $state(false);
 	error = $state<string | null>(null);
+	bodyError = $state<string | null>(null);
 	errorStatus = $state<'not-found' | 'no-merge-base' | 'working-tree-changing' | null>(null);
 	errorEndpoint = $state<'from' | 'to' | null>(null);
 	staleMessage = $state<string | null>(null);
@@ -47,6 +48,10 @@ export class GitComparisonController {
 	historySelectionSlot = $state<GitComparisonSelectionSlot>('from');
 	historySelectionFrom = $state<string | null>(null);
 	historySelectionTo = $state<string | null>(null);
+
+	get documentError(): string | null {
+		return this.bodyError ?? (this.dialogOpen ? null : this.error);
+	}
 
 	private snapshotAbort: AbortController | null = null;
 	private generation = 0;
@@ -209,6 +214,7 @@ export class GitComparisonController {
 			}
 
 			this.snapshot = result;
+			this.bodyError = null;
 			this.loadedContextLines = requestContextLines;
 			this.staleMessage = null;
 			this.dialogOpen = false;
@@ -237,7 +243,10 @@ export class GitComparisonController {
 						{ context: requestContextLines, signal },
 					),
 				onError: (detail) => {
-					this.error = m.git_compare_load_rows_failed({ detail });
+					this.bodyError = m.git_compare_load_rows_failed({ detail });
+				},
+				onBodyLoadSuccess: () => {
+					this.bodyError = null;
 				},
 				onStale: (message) => {
 					this.staleMessage = message;
@@ -308,12 +317,18 @@ export class GitComparisonController {
 		this.snapshot = null;
 		this.isLoading = false;
 		this.error = null;
+		this.bodyError = null;
 		this.errorStatus = null;
 		this.errorEndpoint = null;
 		this.staleMessage = null;
 		this.loadedContextLines = this.contextLines;
 		this.cancelHistorySelection();
 		this.document.clear();
+	}
+
+	dismissDocumentError(): void {
+		this.bodyError = null;
+		if (!this.dialogOpen) this.clearError();
 	}
 
 	private isCurrent(generation: number, projectPath: string, signal: AbortSignal): boolean {

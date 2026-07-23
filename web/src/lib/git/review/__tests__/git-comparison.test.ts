@@ -173,6 +173,30 @@ describe('GitComparisonController', () => {
 		expect(comparison.document.isStale).toBe(false);
 	});
 
+	it('clears a transient body load error after a successful retry', async () => {
+		const snapshot = {
+			...workingTreeSnapshotWithFile(),
+			firstBodyCandidates: ['src/a.ts'],
+		};
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
+		vi.mocked(getGitComparisonFileBodies)
+			.mockRejectedValueOnce(new Error('temporary network failure'))
+			.mockResolvedValueOnce({
+				status: 'ready',
+				documentId: snapshot.documentId,
+				files: {},
+				errors: {},
+			});
+		const comparison = new GitComparisonController();
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree', origin: 'changes' });
+
+		await comparison.compare('/project');
+		await vi.waitFor(() => expect(comparison.bodyError).toContain('temporary network failure'));
+		comparison.focusFile('src/a.ts');
+		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(comparison.bodyError).toBeNull());
+	});
+
 	it('fills explicit From and To slots from History selection', () => {
 		const comparison = new GitComparisonController();
 		comparison.beginHistorySelection();

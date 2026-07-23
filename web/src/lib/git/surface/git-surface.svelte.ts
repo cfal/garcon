@@ -9,10 +9,7 @@ import {
 	GitHistoryController,
 	type GitHistoryRevertTarget,
 } from '$lib/git/history/git-history.svelte.js';
-import {
-	GitComparisonController,
-	type GitComparisonOrigin,
-} from '$lib/git/review/git-comparison.svelte.js';
+import { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
@@ -215,9 +212,11 @@ export class GitSurfaceController implements PortableSingletonController {
 	}
 
 	returnFromComparison(): void {
-		const origin = this.comparison.origin;
+		const projectPath = this.activeProjectPath;
 		this.comparison.reset();
-		this.activeView = comparisonFallbackView(origin);
+		this.history.backToList();
+		this.activeView = 'changes';
+		if (projectPath) void this.workbench.checkFreshness(projectPath);
 	}
 
 	takeInvalidationRefresh(effectiveProjectKey: string, version: number): boolean {
@@ -300,10 +299,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		this.#appliedTargetKey = targetKey;
 		const projectPath = target?.projectPath ?? null;
 		if (replacesAppliedTarget) {
-			const nextView =
-				this.activeView === 'comparison'
-					? comparisonFallbackView(this.comparison.origin)
-					: this.activeView;
+			const nextView = this.activeView === 'comparison' ? 'changes' : this.activeView;
 			this.comparison.reset();
 			this.history.resetForProject(projectPath);
 			this.activeView = nextView;
@@ -382,10 +378,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		if (!projectKey) return;
 		storeMostRecent(this.#projectSnapshots, projectKey, {
 			activeTarget: this.activeTarget ? { ...this.activeTarget } : null,
-			activeView:
-				this.activeView === 'comparison'
-					? comparisonFallbackView(this.comparison.origin)
-					: this.activeView,
+			activeView: this.activeView === 'comparison' ? 'changes' : this.activeView,
 			selectedFile: this.workbench.files.selectedFile,
 			diffTab: this.workbench.files.activeTab,
 		});
@@ -398,10 +391,6 @@ export class GitSurfaceController implements PortableSingletonController {
 	#isCurrentTargetRequest(generation: number, signal: AbortSignal): boolean {
 		return !signal.aborted && generation === this.#targetRequestGeneration;
 	}
-}
-
-function comparisonFallbackView(origin: GitComparisonOrigin): GitRestorableSurfaceView {
-	return origin === 'history' || origin === 'commit' ? 'history' : 'changes';
 }
 
 function toWorkbenchTarget(candidate: GitTargetCandidate): GitWorkbenchTarget {

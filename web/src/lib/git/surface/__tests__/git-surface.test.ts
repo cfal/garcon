@@ -65,22 +65,23 @@ afterEach(() => {
 });
 
 describe('GitSurfaceController project snapshots', () => {
-	it.each([
-		{ origin: 'changes' as const, expectedView: 'changes' as const },
-		{ origin: 'graph' as const, expectedView: 'changes' as const },
-		{ origin: 'history' as const, expectedView: 'history' as const },
-		{ origin: 'commit' as const, expectedView: 'history' as const },
-	])('returns $origin comparisons to their entry projection', ({ origin, expectedView }) => {
-		const git = controller();
-		git.history.screen = 'commit';
-		git.comparison.origin = origin;
-		git.showComparison();
+	it.each(['changes', 'graph', 'history', 'commit'] as const)(
+		'returns $origin comparisons to the default workbench',
+		(origin) => {
+			const git = controller();
+			const checkFreshness = vi.spyOn(git.workbench, 'checkFreshness').mockResolvedValue();
+			git.setContext('/projects/alpha', 'alpha');
+			git.history.screen = 'commit';
+			git.comparison.origin = origin;
+			git.showComparison();
 
-		git.returnFromComparison();
+			git.returnFromComparison();
 
-		expect(git.activeView).toBe(expectedView);
-		expect(git.history.screen).toBe('commit');
-	});
+			expect(git.activeView).toBe('changes');
+			expect(git.history.screen).toBe('list');
+			expect(checkFreshness).toHaveBeenCalledWith('/projects/alpha');
+		},
+	);
 
 	it('retains its context and suppresses activation while project identity resolves', () => {
 		const git = controller();

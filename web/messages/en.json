@@ -594,6 +594,7 @@
 	"git_compare_merge_base": "base {hash}",
 	"git_compare_select_revision": "Select revision",
 	"git_compare_select_commits": "Select commits",
+	"git_compare_select_commit_for": "Select {commit} as {endpoint}",
 	"git_compare_selection_order": "Choose commits in explicit From and To order.",
 	"git_compare_choose_endpoints": "Choose both comparison endpoints.",
 	"git_compare_load_rows_failed": "Failed to load comparison rows: {detail}",

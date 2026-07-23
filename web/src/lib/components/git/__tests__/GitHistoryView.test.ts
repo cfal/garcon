@@ -655,6 +655,12 @@ describe('GitHistoryView', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Select commits' }));
 		expect(comparison.historySelectionActive).toBe(true);
+		const commitButton = screen.getByRole('button', { name: 'Select List commit as From' });
+		expect(commitButton.getAttribute('aria-pressed')).toBe('false');
+		await fireEvent.click(commitButton);
+		expect(
+			screen.getByRole('button', { name: 'Select List commit as To', pressed: true }),
+		).toBeTruthy();
 	});
 
 	it('defaults an empty History comparison to the previous HEAD revision', async () => {

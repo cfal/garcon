@@ -190,6 +190,18 @@
 						<button
 							type="button"
 							class="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+							aria-pressed={comparisonSelectionActive
+								? comparisonFrom === commit.hash || comparisonTo === commit.hash
+								: undefined}
+							aria-label={comparisonSelectionActive
+								? m.git_compare_select_commit_for({
+										commit: commit.subject || commit.shortHash,
+										endpoint:
+											comparisonSelectionSlot === 'from'
+												? m.git_compare_from()
+												: m.git_compare_to(),
+									})
+								: undefined}
 							onclick={() =>
 								comparisonSelectionActive
 									? onSelectComparisonCommit(commit.hash)

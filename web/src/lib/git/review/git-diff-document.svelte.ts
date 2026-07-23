@@ -54,6 +54,7 @@ export interface GitDiffDocumentOpenOptions {
 	diffMode: DiffMode;
 	loadBodies: GitDiffDocumentBodyLoader;
 	onError: (message: string) => void;
+	onBodyLoadSuccess?: () => void;
 	onStale?: (message: string) => void;
 	commentSource?: GitReviewCommentSource;
 }
@@ -82,6 +83,7 @@ export class GitDiffDocumentController {
 	private scrollToken = 0;
 	private loadBodies: GitDiffDocumentBodyLoader | null = null;
 	private onError: ((message: string) => void) | null = null;
+	private onBodyLoadSuccess: (() => void) | null = null;
 	private onStale: ((message: string) => void) | null = null;
 	private commentSource: GitReviewCommentSource | null = null;
 
@@ -192,6 +194,7 @@ export class GitDiffDocumentController {
 		this.summariesByPath = new Map(snapshot.files.map((file) => [file.path, file]));
 		this.loadBodies = options.loadBodies;
 		this.onError = options.onError;
+		this.onBodyLoadSuccess = options.onBodyLoadSuccess ?? null;
 		this.onStale = options.onStale ?? null;
 		this.commentSource = options.commentSource ?? null;
 		this.diffMode = options.diffMode;
@@ -309,6 +312,7 @@ export class GitDiffDocumentController {
 		this.clearCommentFeedback();
 		this.loadBodies = null;
 		this.onError = null;
+		this.onBodyLoadSuccess = null;
 		this.onStale = null;
 		this.commentSource = null;
 		if (!options.preserveCache) this.clearBodyCache();
@@ -358,6 +362,7 @@ export class GitDiffDocumentController {
 					this.markStale(result.message);
 					return;
 				}
+				this.onBodyLoadSuccess?.();
 				const next = { ...this.fileBodies };
 				for (const filePath of batch) {
 					const file = this.summaryForFile(filePath);

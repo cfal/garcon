@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { GitReviewCommentDraft } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { gitCommentSeverityLabel } from './git-comment-labels';
@@ -30,12 +31,26 @@
 	}: GitVirtualCommentComposerProps = $props();
 
 	let composerElement = $state<HTMLDivElement | null>(null);
+	let focusReturnTarget: HTMLElement | null = null;
+	let focusReturnTargetCaptured = false;
 
 	$effect(() => {
 		if (!composerElement || !focusPending) return;
+		if (!focusReturnTargetCaptured) {
+			const activeElement = document.activeElement;
+			focusReturnTarget =
+				activeElement instanceof HTMLElement && activeElement !== document.body
+					? activeElement
+					: null;
+			focusReturnTargetCaptured = true;
+		}
 		composerElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 		composerElement.querySelector('textarea')?.focus();
 		onFocusHandled?.();
+	});
+
+	onDestroy(() => {
+		if (focusReturnTarget?.isConnected) focusReturnTarget.focus({ preventScroll: true });
 	});
 
 	function handleKeydown(event: KeyboardEvent): void {

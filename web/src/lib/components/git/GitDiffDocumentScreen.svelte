@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import X from '@lucide/svelte/icons/x';
 	import type { GitCommitFileSummary } from '$lib/api/git.js';
 	import type { GitReviewCommentDraft } from '$lib/api/git.js';
 	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
@@ -23,6 +24,7 @@
 		files: GitCommitFileSummary[];
 		isLoading: boolean;
 		error: string | null;
+		onDismissError?: () => void;
 		rows: GitVirtualReviewRow[];
 		fileRowIndex: Map<string, number>;
 		scrollRequest: { filePath: string; token: number } | null;
@@ -64,6 +66,7 @@
 		files,
 		isLoading,
 		error,
+		onDismissError,
 		rows,
 		fileRowIndex,
 		scrollRequest,
@@ -129,9 +132,15 @@
 		{@render header()}
 		{#if error}
 			<div
-				class="border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
+				class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
 			>
-				{error}
+				<span class="min-w-0 flex-1">{error}</span>
+				{#if onDismissError}<button
+						type="button"
+						class="rounded p-1 hover:bg-status-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-status-error-border"
+						aria-label={m.git_action_dismiss_error()}
+						onclick={onDismissError}><X class="h-3.5 w-3.5" /></button
+					>{/if}
 			</div>
 		{/if}
 		{#if isLoading}

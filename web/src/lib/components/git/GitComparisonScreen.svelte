@@ -81,7 +81,8 @@
 	documentAvailable={Boolean(comparison.snapshot)}
 	files={comparison.document.visibleFiles}
 	isLoading={comparison.isLoading}
-	error={comparison.error}
+	error={comparison.documentError}
+	onDismissError={() => comparison.dismissDocumentError()}
 	rows={comparison.document.virtualRows}
 	fileRowIndex={comparison.document.fileRowIndex}
 	scrollRequest={comparison.document.scrollRequest}
