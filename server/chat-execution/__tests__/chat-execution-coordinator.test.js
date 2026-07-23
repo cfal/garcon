@@ -931,6 +931,63 @@ describe('orchestration', () => {
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
+    it('settles an interrupted direct predecessor before launching its queued successor', async () => {
+      let running = false;
+      const successorStarted = deferred();
+      const finishSuccessor = deferred();
+      mockAgents.isChatRunning.mockImplementation(() => running);
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command, options) => {
+        if (command !== 'successor') return;
+        running = true;
+        successorStarted.resolve(options);
+        await finishSuccessor.promise;
+      });
+      mockAgents.abortSession.mockResolvedValue(true);
+
+      const predecessor = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-predecessor',
+        turnId: 'turn-predecessor',
+      });
+      running = true;
+      await orchQueue.completeDirectTurn(predecessor);
+      await orchQueue.createChatQueueEntry('c1', 'successor');
+
+      let interruptSettled = false;
+      const interrupt = orchQueue.interruptActiveTurn('c1').then((result) => {
+        interruptSettled = true;
+        return result;
+      });
+      await Promise.resolve();
+      expect(interruptSettled).toBe(false);
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', {
+        clientRequestId: 'request-predecessor',
+        turnId: 'turn-predecessor',
+      });
+      await expect(interrupt).resolves.toBe(true);
+      const successorOptions = await successorStarted.promise;
+
+      orchQueue.onAgentTurnTerminal('c1', {
+        clientRequestId: 'request-predecessor',
+        turnId: 'turn-predecessor',
+      });
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+
+      running = false;
+      orchQueue.onAgentTurnTerminal('c1', {
+        clientRequestId: successorOptions.clientRequestId,
+        turnId: successorOptions.turnId,
+      });
+      finishSuccessor.resolve();
+      await orchQueue.waitForExecutionOwners();
+
+      expect((await orchQueue.pauseChatQueue('c1')).pause).toBeNull();
+      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
+    });
+
     it('retries an interrupt drain when the active turn finishes before abort is acknowledged', async () => {
       const directStarted = deferred();
       const finishDirect = deferred();

@@ -577,6 +577,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       this.#ownership.hasDirect(chatId)
       || this.#ownership.hasTranscriptSnapshot(chatId)
       || this.#ownership.isDraining(chatId)
+      || this.#ownership.hasAttempt(chatId)
     ) {
       this.#ownership.requestDrain(chatId);
       return;
@@ -596,6 +597,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       || this.#ownership.isDraining(chatId)
       || this.#ownership.hasDirect(chatId)
       || this.#ownership.hasTranscriptSnapshot(chatId)
+      || this.#ownership.hasAttempt(chatId)
       || this.#isDrainSuppressed(chatId)
       || this.#ownership.stop(chatId) !== undefined
     ) return;
@@ -781,9 +783,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   async #interruptActiveTurn(chatId: string): Promise<boolean> {
+    const interruptedAttempt = this.#ownership.attempt(chatId);
     try {
       const stopped = await this.#abortStop(chatId, 'interrupt-and-send');
       if (stopped) this.#ownership.clearAbortSuppression(chatId);
+      if (stopped && interruptedAttempt && !interruptedAttempt.entryId) {
+        await interruptedAttempt.waitUntilSettled();
+      }
       return stopped;
     } finally {
       this.#requestDrain(chatId, 'interrupt');

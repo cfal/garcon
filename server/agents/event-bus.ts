@@ -45,14 +45,23 @@ export class AgentEventBus {
       this.clearTurn(chatId);
       return;
     }
-    if (this.#turnMetadataByChatId.has(chatId)) {
-      logger.warn('agents: overwriting in-flight turn metadata for chat', chatId);
+    const turn = turnMetadata(opts);
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (active && !matchesTurnIdentity(active, turn)) {
+      throw new Error(`Cannot track a new turn while chat ${chatId} has an active turn`);
     }
-    const turn = {
-      ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
-      ...(opts.commandType ? { commandType: opts.commandType } : {}),
-      ...(opts.turnId ? { turnId: opts.turnId } : {}),
-    };
+    this.#setTurn(chatId, turn);
+  }
+
+  replaceTurn(chatId: string, opts: TurnEventMetadata): void {
+    if (!opts.clientRequestId && !opts.commandType && !opts.turnId) {
+      this.clearTurn(chatId);
+      return;
+    }
+    this.#setTurn(chatId, turnMetadata(opts));
+  }
+
+  #setTurn(chatId: string, turn: TurnEventMetadata): void {
     const abortable = this.#abortableTurnByChatId.get(chatId);
     if (abortable && !matchesTurnIdentity(turn, abortable)) {
       this.#abortableTurnByChatId.delete(chatId);
@@ -171,5 +180,13 @@ function operationMetadata(operation: AgentOperationIdentity): TurnEventMetadata
     commandType: operation.commandType,
     ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
     turnId: operation.turnId,
+  };
+}
+
+function turnMetadata(opts: TurnEventMetadata): TurnEventMetadata {
+  return {
+    ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
+    ...(opts.commandType ? { commandType: opts.commandType } : {}),
+    ...(opts.turnId ? { turnId: opts.turnId } : {}),
   };
 }
