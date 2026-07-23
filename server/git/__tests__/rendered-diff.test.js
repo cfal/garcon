@@ -70,5 +70,8 @@ describe('selectFilePatchFromRawDiff', () => {
 
     expect(body.rows).toContainEqual(expect.objectContaining({ kind: 'del', text: 'old' }));
     expect(body.rows).toContainEqual(expect.objectContaining({ kind: 'add', text: 'target' }));
+    expect(body.rows.map((row) => row.text)).not.toContain('-- /dev/null');
+    expect(body.rows.map((row) => row.text)).not.toContain('++ b/link');
+    expect(body.rows.every((row) => row.kind !== 'add' || row.afterLine > 0)).toBe(true);
   });
 });

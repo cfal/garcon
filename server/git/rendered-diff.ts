@@ -87,12 +87,13 @@ export function parseUnifiedPatchToRenderedRows(
     if (line.startsWith('diff --git ')) {
       if (sawFileHeader && !options.allowMultipleFileSections) break;
       sawFileHeader = true;
+      currentHunkIndex = -1;
       continue;
     }
 
     const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
     if (hunkMatch) {
-      currentHunkIndex += 1;
+      currentHunkIndex = hunks.length;
       beforeLine = Number(hunkMatch[1]);
       afterLine = Number(hunkMatch[3]);
       const hunkId = `hunk-${currentHunkIndex}`;
