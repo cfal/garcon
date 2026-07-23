@@ -24,6 +24,7 @@
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import type { HostId } from '$lib/workspace/surface-types.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+	import { GIT_EMPTY_TREE_REVISION } from '$lib/git/review/git-comparison.svelte.js';
 	import {
 		getLocalSettings,
 		getFileSessions,
@@ -209,7 +210,7 @@
 
 	function handleOpenChangesComparison(): void {
 		openComparisonDialog({
-			fromRevision: 'HEAD',
+			fromRevision: files.hasCommits ? 'HEAD' : GIT_EMPTY_TREE_REVISION,
 			toKind: 'working-tree',
 		});
 	}
