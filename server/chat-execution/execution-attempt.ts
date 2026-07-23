@@ -92,6 +92,25 @@ export class QueueExecutionAttempt {
     this.#turn = { ...turn };
   }
 
+  async handoffTurn(
+    predecessor: TurnIdentity,
+    successor: TurnIdentity,
+    commit: () => Promise<void>,
+  ): Promise<void> {
+    if (!sameTurnIdentity(this.#turn, predecessor)) {
+      throw new Error('Cannot hand off an execution attempt after its active turn changed');
+    }
+    const previous = this.#turn;
+    const next = { ...successor };
+    this.#turn = next;
+    try {
+      await commit();
+    } catch (error) {
+      if (this.#turn === next) this.#turn = previous;
+      throw error;
+    }
+  }
+
   markRegistered(): void {
     if (this.#phase !== 'registering') return;
     this.#phase = 'registered';
@@ -166,4 +185,8 @@ export class QueueExecutionAttempt {
       return true;
     });
   }
+}
+
+function sameTurnIdentity(left: TurnIdentity, right: TurnIdentity): boolean {
+  return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
 }
