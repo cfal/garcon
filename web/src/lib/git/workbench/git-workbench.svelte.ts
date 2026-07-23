@@ -98,7 +98,6 @@ export class GitWorkbenchStore {
 			visibleFilePaths: () => this.treeState.visibleFilePaths,
 			selectedFile: () => this.treeState.selectedFile,
 			selectedLineKeys: () => this.lineSelection.selectedLineKeys,
-			commentsByFile: () => this.reviewDrafts.commentsByFile,
 			composerState: () => this.reviewDrafts.commentComposer,
 			surfaceError: (message) => this.surfaceError(message),
 			markExternallyStale: () => this.markExternallyStale(),
@@ -246,7 +245,6 @@ export class GitWorkbenchStore {
 		if (nextTarget) {
 			await this.refresh({
 				reason: 'mount',
-				preserveDrafts: false,
 				preserveSelection: false,
 			});
 		}
@@ -286,7 +284,6 @@ export class GitWorkbenchStore {
 		if (!this.target) return;
 		await this.refresh({
 			reason: 'manual',
-			preserveDrafts: true,
 			preserveSelection: true,
 			preferSelectedFile: true,
 		});
@@ -393,6 +390,7 @@ export class GitWorkbenchStore {
 		if (tab === this.treeState.activeTab) return;
 		this.treeState.activeTab = tab;
 		this.lineSelection.clearSelection();
+		this.reviewDrafts.closeCommentComposer();
 		this.virtualReview.clearForDisplayChange();
 		this.selectFirstVisibleFileForActiveTab();
 		if (this.target)

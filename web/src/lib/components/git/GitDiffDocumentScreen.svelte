@@ -3,8 +3,10 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import X from '@lucide/svelte/icons/x';
 	import type { GitCommitFileSummary } from '$lib/api/git.js';
-	import type { GitReviewCommentDraft } from '$lib/api/git.js';
-	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+	import type {
+		CommentComposerState,
+		GitDiffSeverity,
+	} from '$lib/git/review/git-inline-comment.svelte.js';
 	import {
 		containerPresentationForWidth,
 		observeContainerWidth,
@@ -52,7 +54,7 @@
 		commentCopyText: string | null;
 		onAddComment: (filePath: string, side: 'before' | 'after', line: number) => void;
 		onComposerBodyChange: (body: string) => void;
-		onComposerSeverityChange: (severity: GitReviewCommentDraft['severity']) => void;
+		onComposerSeverityChange: (severity: GitDiffSeverity) => void;
 		onComposerSubmit: () => void;
 		onComposerClose: () => void;
 		onComposerFocusHandled: () => void;

@@ -15,7 +15,6 @@
 	import GitFileTree from './GitFileTree.svelte';
 	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
-	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
@@ -26,7 +25,9 @@
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import type { GitInspectorView } from '$lib/git/workbench/git-porcelain.svelte.js';
 	import type { ConfirmAction } from '$lib/api/git.js';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+	import { buildGitWorkbenchCommentMessage } from '$lib/git/workbench/git-workbench-comment-message.js';
+	import { buildGitReviewCommentContext } from '$lib/git/review/git-review-comment-context.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers, getWorkspaceShortcuts } from '$lib/context';
@@ -43,7 +44,8 @@
 		isMobile: boolean;
 		wb: GitWorkbenchStore;
 		diffFontSize: number;
-		onSendToChat?: (message: string) => Promise<boolean>;
+		onAppendToChatDraft?: ChatDraftAppend;
+		onOpenChat?: () => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 		onCompareRevisions?: () => void;
 	}
@@ -54,7 +56,8 @@
 		isMobile,
 		wb,
 		diffFontSize,
-		onSendToChat,
+		onAppendToChatDraft,
+		onOpenChat = () => undefined,
 		onOpenInEditor,
 		onCompareRevisions = () => undefined,
 	}: GitWorkbenchProps = $props();
@@ -71,6 +74,11 @@
 	);
 	let activeTarget = $derived(target ?? fallbackTarget);
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? null);
+	let viewportDocumentId = $derived(
+		activeTarget
+			? `workbench:${JSON.stringify([activeTarget.repoRoot, activeTarget.worktreePath])}`
+			: null,
+	);
 	let isWorkbenchTargetCurrent = $derived(
 		Boolean(
 			activeTarget &&
@@ -132,20 +140,28 @@
 		drafts.openCommentComposer(filePath, side, line);
 	}
 
-	async function handleFinalizeReview(): Promise<void> {
-		if (onSendToChat) {
-			await drafts.finalizeReviewToAgent(onSendToChat);
-		} else {
-			const message = drafts.buildFinalizedReviewMessage();
-			const copied = await copyToClipboard(message);
-			if (copied) {
-				drafts.reviewComments = [];
-				drafts.reviewSummary = '';
-			} else {
-				wb.lastError = m.git_review_copy_failed();
-			}
-		}
-		drafts.reviewModalOpen = false;
+	function handleAppendComment(): void {
+		const composer = drafts.commentComposer;
+		if (!composer.open || !composer.body.trim()) return;
+		const file = review.summary?.files.find((candidate) => candidate.path === composer.filePath);
+		const loadedBody = review.fileBodies[composer.filePath];
+		drafts.appendComment(
+			onAppendToChatDraft,
+			buildGitWorkbenchCommentMessage({
+				filePath: composer.filePath,
+				...(file?.originalPath ? { originalPath: file.originalPath } : {}),
+				tab: files.activeTab,
+				side: composer.side,
+				line: composer.line,
+				contextLines: buildGitReviewCommentContext(
+					loadedBody?.rows ?? [],
+					composer.side,
+					composer.line,
+				),
+				body: composer.body,
+				severity: composer.severity,
+			}),
+		);
 	}
 
 	function handleInitialCommit(): void {
@@ -409,6 +425,7 @@
 		{onCompareRevisions}
 	/>
 	<GitVirtualDiffSurface
+		documentId={viewportDocumentId}
 		rows={review.virtualRows}
 		fileRowIndex={review.fileRowIndex}
 		activeTab={files.activeTab}
@@ -430,18 +447,20 @@
 		onStageFile={handleStageFile}
 		onUnstageFile={handleUnstageFile}
 		onAddCommentForFile={handleAddCommentForFile}
-		onEditComment={(id, patch) => drafts.updateDraftComment(id, patch)}
-		onRemoveComment={(id) => drafts.removeDraftComment(id)}
+		commentFeedback={drafts.commentFeedback}
+		commentError={drafts.commentError}
+		commentCopyText={drafts.commentCopyText}
 		onComposerBodyChange={(body) => {
-			drafts.commentComposer = { ...drafts.commentComposer, body };
+			drafts.setCommentBody(body);
 		}}
 		onComposerSeverityChange={(severity) => {
-			drafts.commentComposer = { ...drafts.commentComposer, severity };
+			drafts.setCommentSeverity(severity);
 		}}
-		onComposerSubmit={() => drafts.commitCommentComposer()}
+		onComposerSubmit={handleAppendComment}
 		onComposerClose={() => drafts.closeCommentComposer()}
 		onComposerFocusHandled={() => drafts.markCommentComposerFocused()}
 		{onOpenInEditor}
+		{onOpenChat}
 	/>
 	{#if selection.hasSelection}
 		<div class="flex shrink-0 gap-2 border-t border-border bg-background px-3 py-2">
@@ -632,35 +651,19 @@
 		{/if}
 	</div>
 
-	{#if drafts.reviewModalOpen}
-		<GitReviewChangesModal
-			commentsByFile={drafts.commentsByFile}
-			commentCount={drafts.reviewComments.length}
-			reviewSummary={drafts.reviewSummary}
-			{isMobile}
-			onSummaryChange={(s) => {
-				drafts.reviewSummary = s;
-			}}
-			onUpdateComment={(id, patch) => drafts.updateDraftComment(id, patch)}
-			onRemoveComment={(id) => drafts.removeDraftComment(id)}
-			onSend={handleFinalizeReview}
-			onClose={() => {
-				drafts.reviewModalOpen = false;
-			}}
-		/>
-	{/if}
-
 	{#if drafts.commentComposer.open && isMobile}
 		<GitCommentModal
 			composer={drafts.commentComposer}
 			onBodyChange={(b) => {
-				drafts.commentComposer = { ...drafts.commentComposer, body: b };
+				drafts.setCommentBody(b);
 			}}
 			onSeverityChange={(s) => {
-					drafts.commentComposer = { ...drafts.commentComposer, severity: s };
-				}}
+				drafts.setCommentSeverity(s);
+			}}
+			error={drafts.commentError}
+			copyText={drafts.commentCopyText}
 			onFocusHandled={() => drafts.markCommentComposerFocused()}
-			onSubmit={() => drafts.commitCommentComposer()}
+			onSubmit={handleAppendComment}
 			onClose={() => drafts.closeCommentComposer()}
 		/>
 	{/if}

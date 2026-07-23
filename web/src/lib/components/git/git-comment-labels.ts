@@ -1,7 +1,7 @@
-import type { GitReviewCommentDraft } from '$lib/api/git.js';
+import type { GitDiffSeverity } from '$lib/git/review/git-inline-comment.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
-export function gitCommentSeverityLabel(severity: GitReviewCommentDraft['severity']): string {
+export function gitCommentSeverityLabel(severity: GitDiffSeverity): string {
 	switch (severity) {
 		case 'blocker':
 			return m.git_comment_severity_blocker();

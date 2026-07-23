@@ -1,5 +1,8 @@
-import type { GitDiffTab, GitReviewCommentDraft } from '$lib/api/git.js';
-import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+import type { GitDiffTab } from '$lib/api/git.js';
+import type {
+	CommentComposerState,
+	GitDiffSeverity,
+} from '$lib/git/review/git-inline-comment.svelte.js';
 import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
 
 export interface GitDiffCommentInteraction {
@@ -14,7 +17,7 @@ export interface GitDiffCommentInteraction {
 	commentCopyText: string | null;
 	onAddComment: (filePath: string, side: 'before' | 'after', line: number) => void;
 	onComposerBodyChange?: (body: string) => void;
-	onComposerSeverityChange?: (severity: GitReviewCommentDraft['severity']) => void;
+	onComposerSeverityChange?: (severity: GitDiffSeverity) => void;
 	onComposerSubmit?: () => void;
 	onComposerClose?: () => void;
 	onComposerFocusHandled?: () => void;
@@ -33,15 +36,6 @@ export interface GitDiffWorkbenchInteraction extends GitDiffCommentInteraction {
 	onUnstageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
 	onStageLine: (target: GitDiffActionTarget, diffLineIndex: number) => void;
 	onUnstageLine: (target: GitDiffActionTarget, diffLineIndex: number) => void;
-	aggregateReview?: {
-		editingCommentId: string | null;
-		editBody: string;
-		onStartEdit: (comment: GitReviewCommentDraft) => void;
-		onCancelEdit: () => void;
-		onEditBodyChange: (body: string) => void;
-		onSaveEdit: (commentId: string) => void;
-		onRemoveComment?: (id: string) => void;
-	};
 }
 
 export interface GitDiffCommentableInteraction extends GitDiffCommentInteraction {

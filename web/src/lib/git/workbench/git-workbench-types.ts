@@ -37,7 +37,6 @@ export interface GitWorkbenchRefreshOptions {
 		| 'worktree-change'
 		| 'tab-change'
 		| 'context-change';
-	preserveDrafts?: boolean;
 	preserveSelection?: boolean;
 	preferSelectedFile?: boolean;
 }
@@ -56,7 +55,6 @@ export interface GitWorkbenchLoadGuard {
 }
 
 export const DEFAULT_REFRESH_OPTIONS = {
-	preserveDrafts: true,
 	preserveSelection: true,
 	preferSelectedFile: true,
 };

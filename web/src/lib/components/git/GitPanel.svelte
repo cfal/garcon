@@ -45,7 +45,6 @@
 		isMobile: boolean;
 		presentation: HostId | 'mobile';
 		isVisible?: boolean;
-		onSendToChat?: (message: string) => Promise<boolean>;
 		onAppendToChatDraft?: ChatDraftAppend;
 	}
 
@@ -55,7 +54,6 @@
 		isMobile,
 		presentation,
 		isVisible = true,
-		onSendToChat,
 		onAppendToChatDraft,
 	}: GitPanelProps = $props();
 
@@ -76,7 +74,6 @@
 	let files = $derived(wb.files);
 	let review = $derived(wb.review);
 	let commit = $derived(wb.commit);
-	let drafts = $derived(wb.drafts);
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $derived(gitSurface.targets);
 	let activeTarget = $derived(gitSurface.activeTarget);
@@ -242,7 +239,9 @@
 
 	function handleSetContextLines(lines: number): void {
 		const activeDocument =
-			activeView === 'comparison'
+			activeView === 'changes'
+				? wb.drafts
+				: activeView === 'comparison'
 				? comparison.document
 				: activeView === 'history' && history.screen === 'commit'
 					? history.document
@@ -342,7 +341,6 @@
 				isLoadingBranches={repository.isLoadingBranches}
 				isLoading={repository.isLoading || files.isLoadingTree}
 				isPushing={repository.isPushing}
-				reviewCount={drafts.reviewComments.length}
 				isCommitting={commit.isCommitting}
 				{canPush}
 				diffMode={review.diffMode}
@@ -385,11 +383,6 @@
 				}}
 				onViewCommits={handleViewCommits}
 				onViewChanges={handleViewChanges}
-				onOpenReview={() => {
-					transientLayers.open('main-inert', () => {
-						drafts.reviewModalOpen = true;
-					});
-				}}
 				onOpenComparison={handleOpenChangesComparison}
 				onCommit={handleOpenCommit}
 				onPush={() => void handleOpenPush()}
@@ -429,7 +422,8 @@
 				target={activeTarget ?? fallbackTarget}
 				{isMobile}
 				{wb}
-				{onSendToChat}
+				{onAppendToChatDraft}
+				onOpenChat={() => void workspace.focusChat()}
 				onCompareRevisions={handleOpenGraphComparison}
 				diffFontSize={gitDiffFontSize}
 				onOpenInEditor={handleOpenInEditor}

@@ -34,7 +34,6 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		showBranchDropdown: false,
 		isLoading: false,
 		isPushing: false,
-		reviewCount: 0,
 		isCommitting: false,
 		canPush: false,
 		diffMode: 'unified',
@@ -46,7 +45,6 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		onSwitchBranch: vi.fn(),
 		onViewCommits: vi.fn(),
 		onViewChanges: vi.fn(),
-		onOpenReview: vi.fn(),
 		onOpenComparison: vi.fn(),
 		onCommit: vi.fn(),
 		onPush: vi.fn(),
@@ -63,7 +61,6 @@ function installToolbarMeasurement(initialRailWidth: number) {
 	const actionWidths: Record<string, number> = {
 		history: 64,
 		compare: 72,
-		review: 58,
 		commit: 72,
 		push: 44,
 		refresh: 36,
@@ -246,6 +243,7 @@ describe('GitTopToolbar', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare revisions' }));
 
 		expect(onOpenComparison).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('button', { name: 'Review changes' })).toBeNull();
 	});
 
 	it('keeps actions inline when the action rail has enough space', async () => {

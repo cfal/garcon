@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
-	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
-	import type { GitReviewCommentDraft } from '$lib/api/git.js';
+	import type {
+		CommentComposerState,
+		GitDiffSeverity,
+	} from '$lib/git/review/git-inline-comment.svelte.js';
 	import GitVirtualDiffRow from './GitVirtualDiffRow.svelte';
 	import GitCommitVirtualFileHeader from './GitCommitVirtualFileHeader.svelte';
 	import GitVirtualDiffViewport from './GitVirtualDiffViewport.svelte';
@@ -29,7 +31,7 @@
 		commentCopyText: string | null;
 		onAddComment: (filePath: string, side: 'before' | 'after', line: number) => void;
 		onComposerBodyChange: (body: string) => void;
-		onComposerSeverityChange: (severity: GitReviewCommentDraft['severity']) => void;
+		onComposerSeverityChange: (severity: GitDiffSeverity) => void;
 		onComposerSubmit: () => void;
 		onComposerClose: () => void;
 		onComposerFocusHandled: () => void;

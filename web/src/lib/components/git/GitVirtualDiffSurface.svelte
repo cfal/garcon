@@ -1,8 +1,11 @@
 <script lang="ts">
-	import type { GitDiffTab, GitReviewCommentDraft } from '$lib/api/git.js';
+	import type { GitDiffTab } from '$lib/api/git.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
-	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+	import type {
+		CommentComposerState,
+		GitDiffSeverity,
+	} from '$lib/git/review/git-inline-comment.svelte.js';
 	import GitVirtualDiffRow from './GitVirtualDiffRow.svelte';
 	import GitVirtualDiffViewport from './GitVirtualDiffViewport.svelte';
 	import GitVirtualFileHeader from './GitVirtualFileHeader.svelte';
@@ -10,7 +13,7 @@
 	import type { GitDiffRowInteraction } from './git-diff-row-interaction.js';
 
 	interface GitVirtualDiffSurfaceProps {
-		documentId?: string | null;
+		documentId: string | null;
 		rows: GitVirtualReviewRow[];
 		fileRowIndex: Map<string, number>;
 		activeTab: GitDiffTab;
@@ -32,27 +35,25 @@
 		onStageFile: (filePath: string) => void;
 		onUnstageFile: (filePath: string) => void;
 		onAddCommentForFile: (filePath: string, side: 'before' | 'after', line: number) => void;
-		onEditComment?: (id: string, patch: Partial<GitReviewCommentDraft>) => void;
-		onRemoveComment?: (id: string) => void;
-		commentFeedback?: {
+		commentFeedback: {
 			filePath: string;
 			side: 'before' | 'after';
 			line: number;
 			message: string;
 		} | null;
-		commentError?: string | null;
-		commentCopyText?: string | null;
+		commentError: string | null;
+		commentCopyText: string | null;
 		onComposerBodyChange?: (body: string) => void;
-		onComposerSeverityChange?: (severity: GitReviewCommentDraft['severity']) => void;
+		onComposerSeverityChange?: (severity: GitDiffSeverity) => void;
 		onComposerSubmit?: () => void;
 		onComposerClose?: () => void;
 		onComposerFocusHandled?: () => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
-		onOpenChat?: () => void;
+		onOpenChat: () => void;
 	}
 
 	let {
-		documentId = null,
+		documentId,
 		rows,
 		fileRowIndex,
 		activeTab,
@@ -74,37 +75,17 @@
 		onStageFile,
 		onUnstageFile,
 		onAddCommentForFile,
-		onEditComment,
-		onRemoveComment,
-		commentFeedback = null,
-		commentError = null,
-		commentCopyText = null,
+		commentFeedback,
+		commentError,
+		commentCopyText,
 		onComposerBodyChange,
 		onComposerSeverityChange,
 		onComposerSubmit,
 		onComposerClose,
 		onComposerFocusHandled,
 		onOpenInEditor,
-		onOpenChat = () => undefined,
+		onOpenChat,
 	}: GitVirtualDiffSurfaceProps = $props();
-
-	let editingCommentId = $state<string | null>(null);
-	let editBody = $state('');
-
-	function startEditComment(comment: GitReviewCommentDraft): void {
-		editingCommentId = comment.id;
-		editBody = comment.body;
-	}
-
-	function cancelEditComment(): void {
-		editingCommentId = null;
-		editBody = '';
-	}
-
-	function saveEditComment(commentId: string): void {
-		onEditComment?.(commentId, { body: editBody });
-		cancelEditComment();
-	}
 
 	let rowInteraction = $derived.by<GitDiffRowInteraction>(() => ({
 		kind: 'workbench',
@@ -129,21 +110,6 @@
 		onComposerClose,
 		onComposerFocusHandled,
 		onOpenChat,
-		...(onEditComment
-			? {
-					aggregateReview: {
-						editingCommentId,
-						editBody,
-						onStartEdit: startEditComment,
-						onCancelEdit: cancelEditComment,
-						onEditBodyChange: (body: string) => {
-							editBody = body;
-						},
-						onSaveEdit: saveEditComment,
-						onRemoveComment,
-					},
-				}
-			: {}),
 	}));
 </script>
 

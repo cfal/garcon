@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { GitFileReviewData, GitReviewCommentDraft } from '$lib/api/git';
+import type { GitFileReviewData } from '$lib/api/git';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
 import {
-	buildCommentsByLineKey,
 	buildSplitDiffRows,
 	buildSplitDiffRowViews,
 	buildUnifiedDiffRows,
@@ -94,18 +93,6 @@ function makeReviewData(): GitFileReviewData {
 	};
 }
 
-function makeComment(id: string, side: 'before' | 'after', line: number): GitReviewCommentDraft {
-	return {
-		id,
-		filePath: 'src/app.ts',
-		side,
-		line,
-		body: `comment ${id}`,
-		severity: 'note',
-		createdAt: '2026-01-01T00:00:00.000Z',
-	};
-}
-
 describe('git diff rows', () => {
 	it('builds unified rows from review data with stable line keys', () => {
 		const rows = buildUnifiedDiffRows(makeReviewData());
@@ -154,9 +141,8 @@ describe('git diff rows', () => {
 		]);
 	});
 
-	it('decorates unified rows with comments, composer targets, and selection classes', () => {
+	it('decorates unified rows with composer targets and selection classes', () => {
 		const rows = buildUnifiedDiffRows(makeReviewData());
-		const commentsByLineKey = buildCommentsByLineKey([makeComment('a', 'after', 2)]);
 		const selectedLineKeys = new Set([makeLineSelectionKey('src/app.ts', 'unstaged', 'after', 2)]);
 		const composerTarget: GitDiffComposerDraft = {
 			open: true,
@@ -173,19 +159,16 @@ describe('git diff rows', () => {
 			activeTab: 'unstaged',
 			readOnly: false,
 			selectedLineKeys,
-			commentsByLineKey,
 			composerTarget,
 		});
 
-		expect(views[3].comments).toHaveLength(1);
 		expect(views[3].bgClass).toBe('bg-interactive-accent/20');
 		expect(views[4].showComposer).toBe(true);
 		expect(views[4].bgClass).toBe('bg-interactive-accent/10');
 	});
 
-	it('decorates split cells with side-specific comments and selection targets', () => {
+	it('decorates split cells with side-specific selection targets', () => {
 		const rows = buildSplitDiffRows(buildUnifiedDiffRows(makeReviewData()));
-		const commentsByLineKey = buildCommentsByLineKey([makeComment('b', 'before', 2)]);
 		const selectedLineKeys = new Set([makeLineSelectionKey('src/app.ts', 'unstaged', 'before', 1)]);
 
 		const views = buildSplitDiffRowViews({
@@ -194,11 +177,9 @@ describe('git diff rows', () => {
 			activeTab: 'unstaged',
 			readOnly: false,
 			selectedLineKeys,
-			commentsByLineKey,
 			composerTarget: null,
 		});
 
-		expect(views[2].comments).toHaveLength(1);
 		expect(views[2].left?.selectionKey).toBe(
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'before', 1),
 		);

@@ -7,7 +7,6 @@
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import History from '@lucide/svelte/icons/history';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import Upload from '@lucide/svelte/icons/upload';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -24,7 +23,7 @@
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	type ToolbarActionId = 'history' | 'compare' | 'review' | 'commit' | 'push' | 'refresh' | 'changes';
+	type ToolbarActionId = 'history' | 'compare' | 'commit' | 'push' | 'refresh' | 'changes';
 
 	interface ToolbarAction {
 		id: ToolbarActionId;
@@ -49,7 +48,6 @@
 		isLoadingBranches?: boolean;
 		isLoading: boolean;
 		isPushing: boolean;
-		reviewCount: number;
 		isCommitting: boolean;
 		canPush: boolean;
 		diffMode: DiffMode;
@@ -63,7 +61,6 @@
 		onOpenWorktrees?: () => void;
 		onViewCommits: () => void;
 		onViewChanges: () => void;
-		onOpenReview: () => void;
 		onOpenComparison: () => void;
 		onCommit: () => void;
 		onPush: () => void;
@@ -86,7 +83,6 @@
 		isLoadingBranches = false,
 		isLoading,
 		isPushing,
-		reviewCount,
 		isCommitting,
 		canPush,
 		diffMode,
@@ -100,7 +96,6 @@
 		onOpenWorktrees,
 		onViewCommits,
 		onViewChanges,
-		onOpenReview,
 		onOpenComparison,
 		onCommit,
 		onPush,
@@ -116,7 +111,6 @@
 	let actionWidths = $state<Record<ToolbarActionId, number>>({
 		history: 0,
 		compare: 0,
-		review: 0,
 		commit: 0,
 		push: 0,
 		refresh: 0,
@@ -175,14 +169,6 @@
 				onclick: onOpenComparison,
 			},
 			{
-				id: 'review',
-				label: 'Review',
-				title: m.git_review_changes(),
-				disabled: false,
-				priority: 2,
-				onclick: onOpenReview,
-			},
-			{
 				id: 'commit',
 				label: 'Commit',
 				title: m.git_changes_commit(),
@@ -234,14 +220,6 @@
 	}
 
 	function actionButtonClass(action: ToolbarAction): string {
-		if (action.id === 'review') {
-			return `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-all duration-200 ${
-				reviewCount > 0
-					? 'bg-interactive-accent/10 text-interactive-accent border-interactive-accent/30 hover:bg-interactive-accent/20'
-					: 'border-border bg-background text-muted-foreground hover:text-foreground'
-			}`;
-		}
-
 		if (action.id === 'commit') {
 			return `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-200 ${
 				!isCommitting
@@ -322,7 +300,6 @@
 		const nextWidths: Record<ToolbarActionId, number> = {
 			history: 0,
 			compare: 0,
-			review: 0,
 			commit: 0,
 			push: 0,
 			refresh: 0,
@@ -409,24 +386,12 @@
 		<History class="w-4 h-4" />
 	{:else if actionId === 'compare'}
 		<GitCompareArrows class="w-4 h-4" />
-	{:else if actionId === 'review'}
-		<MessageSquare class="w-4 h-4" />
 	{:else if actionId === 'push'}
 		<Upload class="w-4 h-4 {isPushing ? 'animate-pulse' : ''}" />
 	{:else if actionId === 'refresh'}
 		<RefreshCw class="w-4 h-4 {isLoading ? 'animate-spin' : ''}" />
 	{:else if actionId === 'changes'}
 		<ArrowLeft class="w-4 h-4" />
-	{/if}
-{/snippet}
-
-{#snippet actionBadge(action: ToolbarAction)}
-	{#if action.id === 'review' && reviewCount > 0}
-		<span
-			class="px-1.5 py-0 text-[10px] rounded-full bg-interactive-accent text-interactive-accent-foreground font-medium"
-		>
-			{reviewCount}
-		</span>
 	{/if}
 {/snippet}
 
@@ -445,7 +410,6 @@
 		{#if action.showMobileLabel || (!isMobile && action.id !== 'refresh')}
 			<span>{action.label}</span>
 		{/if}
-		{@render actionBadge(action)}
 	</button>
 {/snippet}
 
@@ -535,9 +499,6 @@
 						<DropdownMenuItem disabled={action.disabled} onclick={action.onclick}>
 							{@render actionIcon(action.id)}
 							<span>{action.label}</span>
-							{#if action.id === 'review' && reviewCount > 0}
-								<span class="ml-auto text-xs text-muted-foreground">{reviewCount}</span>
-							{/if}
 						</DropdownMenuItem>
 					{/each}
 				</DropdownMenuContent>

@@ -1,17 +1,17 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import type { GitReviewCommentDraft } from '$lib/api/git.js';
+	import type { GitDiffSeverity } from '$lib/git/review/git-inline-comment.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { gitCommentSeverityLabel } from './git-comment-labels';
 
-	const severityOptions: GitReviewCommentDraft['severity'][] = ['note', 'warning', 'blocker'];
+	const severityOptions: GitDiffSeverity[] = ['note', 'warning', 'blocker'];
 
 	interface GitVirtualCommentComposerProps {
 		body: string;
-		severity: GitReviewCommentDraft['severity'];
+		severity: GitDiffSeverity;
 		focusPending: boolean;
 		onBodyChange?: (body: string) => void;
-		onSeverityChange?: (severity: GitReviewCommentDraft['severity']) => void;
+		onSeverityChange?: (severity: GitDiffSeverity) => void;
 		onSubmit?: () => void;
 		onClose?: () => void;
 		onFocusHandled?: () => void;

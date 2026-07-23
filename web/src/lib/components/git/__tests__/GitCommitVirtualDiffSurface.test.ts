@@ -56,7 +56,6 @@ const rows: GitVirtualReviewRow[] = [
 			textClass: 'text-diff-add-fg',
 			textPrefix: '+',
 			text: 'added line',
-			comments: [],
 			showComposer: false,
 			beforeContextTarget: null,
 			afterContextTarget: {

@@ -6,10 +6,8 @@ import {
 	type GitReviewFileBody,
 	type GitReviewFileSummary,
 	type GitReviewLimitReason,
-	type GitReviewCommentDraft,
 } from '$lib/api/git.js';
 import {
-	buildCommentsByLineKey,
 	buildSplitDiffRows,
 	buildSplitDiffRowViews,
 	buildUnifiedDiffRowsFromRenderedRows,
@@ -21,7 +19,7 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { DiffMode, GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
-import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+import type { CommentComposerState } from '$lib/git/review/git-inline-comment.svelte.js';
 import type { GitWorkbenchLoadGuard } from '$lib/git/workbench/git-workbench-types.js';
 
 export type GitVirtualReviewRow =
@@ -87,7 +85,6 @@ export interface GitVirtualReviewDocumentDeps {
 	visibleFilePaths: () => string[];
 	selectedFile: () => string | null;
 	selectedLineKeys: () => Set<string>;
-	commentsByFile?: () => Record<string, GitReviewCommentDraft[]>;
 	composerState: () => CommentComposerState;
 	surfaceError: (message: string) => void;
 	markExternallyStale: () => void;
@@ -117,7 +114,6 @@ export interface BuildVirtualRowsOptions {
 	diffMode: DiffMode;
 	contextLines: number;
 	interaction: GitVirtualRowInteraction;
-	commentsByFile?: Record<string, GitReviewCommentDraft[]>;
 }
 
 type BodyCacheKey = `${string}|${GitDiffTab}|${number}|${string}|${string}`;
@@ -156,7 +152,6 @@ export class GitVirtualReviewDocumentController {
 				selectedLineKeys: this.deps.selectedLineKeys(),
 				composerState: this.deps.composerState(),
 			},
-			commentsByFile: this.deps.commentsByFile?.() ?? {},
 		});
 	});
 
@@ -556,7 +551,6 @@ function bodyRows(
 		? getSelectableLineKeys(unifiedRows, file.path, activeTab)
 		: [];
 	const selectedLineKeys = workbenchInteraction?.selectedLineKeys ?? new Set<string>();
-	const commentsByLineKey = buildCommentsByLineKey(options.commentsByFile?.[file.path] ?? []);
 
 	if (options.diffMode === 'split') {
 		return buildSplitDiffRowViews({
@@ -565,17 +559,12 @@ function bodyRows(
 			activeTab,
 			readOnly: !workbenchInteraction,
 			selectedLineKeys,
-			commentsByLineKey,
 			composerTarget,
 		}).map((view) => ({
 			kind: 'split-row',
 			id: diffRowId(options.summary.documentId, file.path, view.key, 'split'),
 			filePath: file.path,
-			estimatedHeight: estimateViewHeight(
-				view.isHunkHeader,
-				view.comments.length,
-				view.showComposer,
-			),
+			estimatedHeight: estimateViewHeight(view.isHunkHeader, view.showComposer),
 			file,
 			view,
 			actionTarget,
@@ -589,13 +578,12 @@ function bodyRows(
 		activeTab,
 		readOnly: !workbenchInteraction,
 		selectedLineKeys,
-		commentsByLineKey,
 		composerTarget,
 	}).map((view) => ({
 		kind: 'unified-row',
 		id: diffRowId(options.summary.documentId, file.path, view.key, 'unified'),
 		filePath: file.path,
-		estimatedHeight: estimateViewHeight(view.isHunkHeader, view.comments.length, view.showComposer),
+		estimatedHeight: estimateViewHeight(view.isHunkHeader, view.showComposer),
 		file,
 		view,
 		actionTarget,
@@ -622,12 +610,8 @@ function fileLimitRow(
 	};
 }
 
-function estimateViewHeight(
-	isHunkHeader: boolean,
-	comments: number,
-	showComposer: boolean,
-): number {
-	return (isHunkHeader ? 28 : DEFAULT_ROW_HEIGHT) + comments * 72 + (showComposer ? 180 : 0);
+function estimateViewHeight(isHunkHeader: boolean, showComposer: boolean): number {
+	return (isHunkHeader ? 28 : DEFAULT_ROW_HEIGHT) + (showComposer ? 180 : 0);
 }
 
 function fileHeaderRowId(documentId: string, filePath: string): string {

@@ -135,7 +135,6 @@
 					isMobile={presentation === 'mobile'}
 					{presentation}
 					isVisible={visible}
-					{onSendToChat}
 					{onAppendToChatDraft}
 				/>
 			{/await}

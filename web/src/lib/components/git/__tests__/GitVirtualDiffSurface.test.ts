@@ -41,6 +41,7 @@ function renderSurface(
 	overrides: Partial<GitVirtualDiffSurfaceProps> = {},
 ) {
 	const props = {
+		documentId: 'doc',
 		rows,
 		fileRowIndex: new Map(rows.map((row, index) => [row.filePath, index])),
 		activeTab: 'unstaged' as const,
@@ -69,7 +70,10 @@ function renderSurface(
 		onStageFile: vi.fn(),
 		onUnstageFile: vi.fn(),
 		onAddCommentForFile: vi.fn(),
-		onEditComment: vi.fn(),
+		commentFeedback: null,
+		commentError: null,
+		commentCopyText: null,
+		onOpenChat: vi.fn(),
 		...overrides,
 	};
 	return {

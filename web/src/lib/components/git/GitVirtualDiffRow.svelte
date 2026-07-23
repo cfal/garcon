@@ -10,7 +10,6 @@
 		SplitDiffRowView,
 	} from '$lib/git/review/git-diff-rows.js';
 	import GitVirtualCommentComposer from './GitVirtualCommentComposer.svelte';
-	import GitVirtualCommentThread from './GitVirtualCommentThread.svelte';
 	import GitCommentAppendError from './GitCommentAppendError.svelte';
 	import type {
 		GitDiffCommentInteraction,
@@ -34,7 +33,6 @@
 	let headerFontSize = $derived(Math.max(10, Math.round(fontSize * 0.82)));
 	let commentControls = $derived(commentInteraction());
 	let workbenchControls = $derived(workbenchInteraction());
-	let aggregateReview = $derived(workbenchControls?.aggregateReview ?? null);
 
 	function selectLine(
 		event: MouseEvent | KeyboardEvent,
@@ -107,7 +105,6 @@
 
 	function reviewTargetLabel(target: GitDiffLineContextTarget | null): string | undefined {
 		if (!target) return undefined;
-		if (aggregateReview) return m.git_comment_add();
 		return target.side === 'before'
 			? m.git_comment_add_old_line_to_chat({ line: target.line })
 			: m.git_comment_add_new_line_to_chat({ line: target.line });
@@ -149,8 +146,8 @@
 			type="button"
 			data-git-comment-affordance
 			class="absolute right-1 top-1/2 z-10 inline-flex -translate-y-1/2 items-center justify-center rounded border border-border bg-background/95 p-0.5 text-muted-foreground opacity-100 shadow-sm transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/diff-cell:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/diff-cell:opacity-100"
-			title={aggregateReview ? m.git_comment_add() : m.git_comment_add_to_chat()}
-			aria-label={aggregateReview ? m.git_comment_add() : m.git_comment_add_to_chat()}
+			title={m.git_comment_add_to_chat()}
+			aria-label={m.git_comment_add_to_chat()}
 			onclick={() => openReview(filePath, target)}
 		>
 			<MessageSquarePlus class="h-3 w-3" />
@@ -230,8 +227,12 @@
 								row.selectableLineKeys,
 							)}
 						ondblclick={() => openEditor(row.file.path, row.view.row.beforeLine)}
-						title={reviewTargetLabel(row.view.beforeContextTarget)}
-						aria-label={reviewTargetLabel(row.view.beforeContextTarget)}
+						title={m.git_comment_add_old_line_to_chat({
+							line: row.view.beforeContextTarget.line,
+						})}
+						aria-label={m.git_comment_add_old_line_to_chat({
+							line: row.view.beforeContextTarget.line,
+						})}
 					>
 						{row.view.row.beforeLine}
 					</button>
@@ -256,8 +257,10 @@
 								row.selectableLineKeys,
 							)}
 						ondblclick={() => openEditor(row.file.path, row.view.row.afterLine)}
-						title={reviewTargetLabel(row.view.afterContextTarget)}
-						aria-label={reviewTargetLabel(row.view.afterContextTarget)}
+						title={m.git_comment_add_new_line_to_chat({ line: row.view.afterContextTarget.line })}
+						aria-label={m.git_comment_add_new_line_to_chat({
+							line: row.view.afterContextTarget.line,
+						})}
 					>
 						{row.view.row.afterLine}
 					</button>
@@ -272,8 +275,8 @@
 					<button
 						type="button"
 						class="cursor-pointer whitespace-pre-wrap break-all pl-2 pr-8 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
-						title={aggregateReview ? m.git_comment_add() : m.git_comment_add_to_chat()}
-						aria-label={aggregateReview ? m.git_comment_add() : m.git_comment_add_to_chat()}
+						title={m.git_comment_add_to_chat()}
+						aria-label={m.git_comment_add_to_chat()}
 						onclick={(event) =>
 							handleReviewClick(
 								event,
@@ -297,24 +300,12 @@
 				{@render reviewAffordance(row.file.path, defaultTarget)}
 			</div>
 		{/if}
-		{#if aggregateReview}
-			<GitVirtualCommentThread
-				comments={row.view.comments}
-				editingCommentId={aggregateReview.editingCommentId}
-				editBody={aggregateReview.editBody}
-				onStartEdit={aggregateReview.onStartEdit}
-				onCancelEdit={aggregateReview.onCancelEdit}
-				onEditBodyChange={aggregateReview.onEditBodyChange}
-				onSaveEdit={aggregateReview.onSaveEdit}
-				onRemoveComment={aggregateReview.onRemoveComment}
-			/>
-		{/if}
 		{#if row.view.showComposer && commentControls?.composerState.open && (interaction.kind !== 'workbench' || interaction.showInlineCommentComposer)}
 			<GitVirtualCommentComposer
 				body={commentControls.composerState.body}
 				severity={commentControls.composerState.severity}
 				focusPending={commentControls.composerState.focusPending}
-				submitLabel={aggregateReview ? m.git_comment_add() : m.git_comment_add_to_chat()}
+				submitLabel={m.git_comment_add_to_chat()}
 				onBodyChange={commentControls.onComposerBodyChange}
 				onSeverityChange={commentControls.onComposerSeverityChange}
 				onSubmit={commentControls.onComposerSubmit}
@@ -326,7 +317,7 @@
 					copyText={commentControls.commentCopyText}
 				/>{/if}
 		{/if}
-		{#if commentControls && !aggregateReview && (feedbackMatches(row.view.beforeContextTarget) || feedbackMatches(row.view.afterContextTarget))}<div
+		{#if commentControls && (feedbackMatches(row.view.beforeContextTarget) || feedbackMatches(row.view.afterContextTarget))}<div
 				class="flex items-center gap-2 border-t border-border bg-interactive-accent/10 px-3 py-1.5 text-xs text-interactive-accent"
 				role="status"
 			>
@@ -465,24 +456,12 @@
 				{/each}
 			</div>
 		{/if}
-		{#if aggregateReview}
-			<GitVirtualCommentThread
-				comments={row.view.comments}
-				editingCommentId={aggregateReview.editingCommentId}
-				editBody={aggregateReview.editBody}
-				onStartEdit={aggregateReview.onStartEdit}
-				onCancelEdit={aggregateReview.onCancelEdit}
-				onEditBodyChange={aggregateReview.onEditBodyChange}
-				onSaveEdit={aggregateReview.onSaveEdit}
-				onRemoveComment={aggregateReview.onRemoveComment}
-			/>
-		{/if}
 		{#if row.view.showComposer && commentControls?.composerState.open && (interaction.kind !== 'workbench' || interaction.showInlineCommentComposer)}
 			<GitVirtualCommentComposer
 				body={commentControls.composerState.body}
 				severity={commentControls.composerState.severity}
 				focusPending={commentControls.composerState.focusPending}
-				submitLabel={aggregateReview ? m.git_comment_add() : m.git_comment_add_to_chat()}
+				submitLabel={m.git_comment_add_to_chat()}
 				onBodyChange={commentControls.onComposerBodyChange}
 				onSeverityChange={commentControls.onComposerSeverityChange}
 				onSubmit={commentControls.onComposerSubmit}
@@ -494,7 +473,7 @@
 					copyText={commentControls.commentCopyText}
 				/>{/if}
 		{/if}
-		{#if commentControls && !aggregateReview && (feedbackMatches(row.view.left?.contextTarget ?? null) || feedbackMatches(row.view.right?.contextTarget ?? null))}<div
+		{#if commentControls && (feedbackMatches(row.view.left?.contextTarget ?? null) || feedbackMatches(row.view.right?.contextTarget ?? null))}<div
 				class="flex items-center gap-2 border-t border-border bg-interactive-accent/10 px-3 py-1.5 text-xs text-interactive-accent"
 				role="status"
 			>

@@ -278,17 +278,6 @@ export interface GitQuickSummaryUnknown {
 	message: string;
 }
 
-export interface GitReviewCommentDraft {
-	id: string;
-	filePath: string;
-	side: 'before' | 'after';
-	line: number;
-	lineEnd?: number;
-	body: string;
-	severity: 'note' | 'warning' | 'blocker';
-	createdAt: string;
-}
-
 export interface GitWorktreeItem {
 	name: string;
 	path: string;
