@@ -9,6 +9,7 @@
 	} from '$lib/git/history/git-history.svelte.js';
 	import {
 		GIT_EMPTY_TREE_REVISION,
+		recentCommitComparisonDefaults,
 		type GitComparisonController,
 		type GitComparisonDialogDefaults,
 	} from '$lib/git/review/git-comparison.svelte.js';
@@ -113,12 +114,7 @@
 	}
 
 	function openHistoryComparison(): void {
-		const toCommit = history.commits[0];
-		onOpenComparison({
-			fromRevision: history.commits[1]?.hash ?? toCommit?.parents[0] ?? 'HEAD~1',
-			toKind: 'revision',
-			toRevision: toCommit?.hash ?? 'HEAD',
-		});
+		onOpenComparison(recentCommitComparisonDefaults(history.commits));
 	}
 </script>
 

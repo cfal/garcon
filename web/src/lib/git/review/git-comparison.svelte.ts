@@ -22,6 +22,22 @@ export interface GitComparisonDialogDefaults {
 	mode?: GitComparisonMode;
 }
 
+interface GitComparisonCommitCandidate {
+	hash: string;
+	parents: string[];
+}
+
+export function recentCommitComparisonDefaults(
+	commits: GitComparisonCommitCandidate[],
+): GitComparisonDialogDefaults {
+	const toCommit = commits[0];
+	return {
+		fromRevision: commits[1]?.hash ?? toCommit?.parents[0] ?? GIT_EMPTY_TREE_REVISION,
+		toKind: 'revision',
+		toRevision: toCommit?.hash ?? 'HEAD',
+	};
+}
+
 export interface GitComparisonDisplayOptions {
 	diffMode: DiffMode;
 	contextLines: number;

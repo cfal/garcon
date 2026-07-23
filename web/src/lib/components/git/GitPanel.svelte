@@ -24,7 +24,10 @@
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import type { HostId } from '$lib/workspace/surface-types.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
-	import { GIT_EMPTY_TREE_REVISION } from '$lib/git/review/git-comparison.svelte.js';
+	import {
+		GIT_EMPTY_TREE_REVISION,
+		recentCommitComparisonDefaults,
+	} from '$lib/git/review/git-comparison.svelte.js';
 	import {
 		getLocalSettings,
 		getFileSessions,
@@ -216,11 +219,7 @@
 	}
 
 	function handleOpenGraphComparison(): void {
-		openComparisonDialog({
-			fromRevision: 'HEAD~1',
-			toKind: 'revision',
-			toRevision: 'HEAD',
-		});
+		openComparisonDialog(recentCommitComparisonDefaults(wb.porcelain.graphCommits));
 	}
 
 	async function handleCompare(): Promise<void> {

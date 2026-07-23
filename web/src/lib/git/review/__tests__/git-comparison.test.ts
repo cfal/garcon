@@ -5,7 +5,11 @@ import {
 	type GitComparisonSnapshotReady,
 } from '$lib/api/git-comparison.js';
 import { getGitWorkingTreeFingerprint } from '$lib/api/git.js';
-import { GitComparisonController } from '../git-comparison.svelte.js';
+import {
+	GIT_EMPTY_TREE_REVISION,
+	GitComparisonController,
+	recentCommitComparisonDefaults,
+} from '../git-comparison.svelte.js';
 
 vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
@@ -436,5 +440,24 @@ describe('GitComparisonController', () => {
 
 		expect(comparison.document.isStale).toBe(true);
 		expect(comparison.staleMessage).toContain('Working Tree changed');
+	});
+});
+
+describe('recentCommitComparisonDefaults', () => {
+	it('compares adjacent commits when both are available', () => {
+		expect(
+			recentCommitComparisonDefaults([
+				{ hash: 'new', parents: ['parent'] },
+				{ hash: 'old', parents: ['older'] },
+			]),
+		).toEqual({ fromRevision: 'old', toKind: 'revision', toRevision: 'new' });
+	});
+
+	it('compares a root commit to the empty tree', () => {
+		expect(recentCommitComparisonDefaults([{ hash: 'root', parents: [] }])).toEqual({
+			fromRevision: GIT_EMPTY_TREE_REVISION,
+			toKind: 'revision',
+			toRevision: 'root',
+		});
 	});
 });

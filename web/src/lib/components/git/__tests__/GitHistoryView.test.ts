@@ -14,7 +14,10 @@ import {
 	GitHistoryController,
 	type GitHistoryRevertTarget,
 } from '$lib/git/history/git-history.svelte.js';
-import { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
+import {
+	GIT_EMPTY_TREE_REVISION,
+	GitComparisonController,
+} from '$lib/git/review/git-comparison.svelte.js';
 import GitHistoryView from '../GitHistoryView.svelte';
 
 vi.mock('$lib/api/git.js', () => ({
@@ -660,7 +663,7 @@ describe('GitHistoryView', () => {
 		).toBeTruthy();
 	});
 
-	it('defaults an empty History comparison to the previous HEAD revision', async () => {
+	it('defaults an empty History comparison to the empty tree', async () => {
 		vi.mocked(getGitHistoryCommits).mockResolvedValue({
 			project: '/project',
 			ref: 'HEAD',
@@ -688,7 +691,7 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare revisions' }));
 
 		expect(onOpenComparison).toHaveBeenCalledWith({
-			fromRevision: 'HEAD~1',
+			fromRevision: GIT_EMPTY_TREE_REVISION,
 			toKind: 'revision',
 			toRevision: 'HEAD',
 		});
