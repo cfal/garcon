@@ -662,6 +662,7 @@ async function loadComparisonBody({
     file.path,
     fingerprint,
     selectFilePatchFromRawDiff(stdout, file.path),
+    { allowMultipleFileSections: true },
   );
 }
 

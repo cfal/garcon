@@ -436,6 +436,7 @@ async function getCommitFileBodies({
         file.path,
         fingerprint,
         selectFilePatchFromRawDiff(stdout, file.path),
+        { allowMultipleFileSections: true },
       );
     } catch (error) {
       if (signal?.aborted) throw error;

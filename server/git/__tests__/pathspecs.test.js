@@ -9,7 +9,7 @@ describe('literalGitPathspec', () => {
   it('excludes descendants when selecting one exact file', () => {
     expect(exactGitPathspecs(['bin/tool'])).toEqual([
       ':(literal)bin/tool',
-      ':(exclude,literal)bin/tool/',
+      ':(exclude,glob)bin/tool/**',
     ]);
   });
 
@@ -17,7 +17,14 @@ describe('literalGitPathspec', () => {
     expect(exactGitPathspecs(['bin/tool', 'bin/tool/main.sh'])).toEqual([
       ':(literal)bin/tool',
       ':(literal)bin/tool/main.sh',
-      ':(exclude,literal)bin/tool/main.sh/',
+      ':(exclude,glob)bin/tool/main.sh/**',
+    ]);
+  });
+
+  it('quotes glob metacharacters in descendant exclusions', () => {
+    expect(exactGitPathspecs(['src/[draft]*?.ts'])).toEqual([
+      ':(literal)src/[draft]*?.ts',
+      ':(exclude,glob)src/\\[draft\\]\\*\\?.ts/**',
     ]);
   });
 });

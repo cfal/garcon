@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  limitedRenderedPatch,
   parseUnifiedPatchToRenderedRows,
   selectFilePatchFromRawDiff,
 } from '../rendered-diff.js';
@@ -29,6 +30,12 @@ new file mode 100644
 });
 
 describe('selectFilePatchFromRawDiff', () => {
+  it('rejects an empty result instead of presenting a silently empty body', () => {
+    expect(() => selectFilePatchFromRawDiff('', 'missing.ts')).toThrow(
+      'Git diff output omitted missing.ts.',
+    );
+  });
+
   it('selects the requested destination using NUL-delimited raw metadata', () => {
     const rawPatch = [
       ':000000 100644 0000000 1111111 A\0bin/tool/aaa.sh\0',
@@ -46,5 +53,22 @@ describe('selectFilePatchFromRawDiff', () => {
     expect(selected).toContain('+new');
     expect(selected).not.toContain('sibling');
     expect(selected).not.toContain('Binary files');
+  });
+
+  it('selects both patch sections for a file type change', () => {
+    const rawPatch = [
+      ':100644 120000 1111111 2222222 T\0link\0',
+      '\0',
+      'diff --git a/link b/link\ndeleted file mode 100644\n--- a/link\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n',
+      'diff --git a/link b/link\nnew file mode 120000\n--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+target\n',
+    ].join('');
+
+    const selected = selectFilePatchFromRawDiff(rawPatch, 'link');
+    const body = limitedRenderedPatch('link', 'fingerprint', selected, {
+      allowMultipleFileSections: true,
+    });
+
+    expect(body.rows).toContainEqual(expect.objectContaining({ kind: 'del', text: 'old' }));
+    expect(body.rows).toContainEqual(expect.objectContaining({ kind: 'add', text: 'target' }));
   });
 });

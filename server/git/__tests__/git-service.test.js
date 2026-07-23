@@ -903,6 +903,149 @@ describe("commit history operations", () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("loads historical and comparison bodies for submodule changes", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-submodule-"),
+    );
+    const submoduleSource = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-submodule-source-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await initRepoWithCommit(submoduleSource);
+      await runGitCommand(projectPath, [
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        submoduleSource,
+        "vendor/sub",
+      ]);
+      await runGitCommand(projectPath, ["commit", "-am", "add submodule"]);
+
+      await fs.appendFile(path.join(submoduleSource, "a.txt"), "two\n", "utf-8");
+      await runGitCommand(submoduleSource, ["commit", "-am", "update submodule"]);
+      const { stdout: submoduleHashOutput } = await runGitCommand(submoduleSource, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      const submodulePath = path.join(projectPath, "vendor", "sub");
+      await runGitCommand(submodulePath, [
+        "-c",
+        "protocol.file.allow=always",
+        "fetch",
+        "origin",
+      ]);
+      await runGitCommand(submodulePath, ["checkout", submoduleHashOutput.trim()]);
+      await runGitCommand(projectPath, ["add", "vendor/sub"]);
+      await runGitCommand(projectPath, ["commit", "-m", "advance submodule"]);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+      });
+      expect(snapshot.status).toBe("ready");
+      const submoduleFile = snapshot.files.find((file) => file.path === "vendor/sub");
+      expect(submoduleFile).toMatchObject({ status: "modified", additions: 1, deletions: 1 });
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        files: [{ path: "vendor/sub" }],
+      });
+      expect(bodies.files["vendor/sub"].bodyState).toBe("loaded");
+      expect(bodies.files["vendor/sub"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: expect.stringContaining("Subproject commit") }),
+      );
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: "vendor/sub" }],
+      });
+      expect(comparisonBodies.files["vendor/sub"].bodyState).toBe("loaded");
+      expect(comparisonBodies.files["vendor/sub"].rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: expect.stringContaining("Subproject commit") }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+      await fs.rm(submoduleSource, { recursive: true, force: true });
+    }
+  });
+
+  it("renders both sides when a historical file changes type", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-history-type-change-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      await fs.symlink("target.txt", path.join(projectPath, "a.txt"));
+      await runGitCommand(projectPath, ["add", "-A"]);
+      await runGitCommand(projectPath, ["commit", "-m", "replace file with link"]);
+
+      const snapshot = await git.getCommitSnapshot({ projectPath, commit: "HEAD" });
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.files.find((file) => file.path === "a.txt")).toMatchObject({
+        status: "type-changed",
+      });
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        files: [{ path: "a.txt" }],
+      });
+      expect(bodies.files["a.txt"].bodyState).toBe("loaded");
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: "one" }),
+      );
+      expect(bodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "target.txt" }),
+      );
+
+      const comparisonSnapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "HEAD~1" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(comparisonSnapshot.status).toBe("ready");
+      const comparisonBodies = await git.getComparisonFileBodies({
+        projectPath,
+        documentId: comparisonSnapshot.documentId,
+        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
+        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
+        files: [{ path: "a.txt" }],
+      });
+      expect(comparisonBodies.files["a.txt"].rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "target.txt" }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("comparison operations", () => {

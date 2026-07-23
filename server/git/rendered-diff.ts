@@ -12,9 +12,14 @@ export interface ParsedRenderedPatch {
   hunks: GitRenderedHunk[];
 }
 
-function rawDiffDestinationPaths(rawText: string): string[] {
+interface RawDiffFileEntry {
+  path: string;
+  patchSectionCount: number;
+}
+
+function rawDiffFileEntries(rawText: string): RawDiffFileEntry[] {
   const fields = rawText.split('\0');
-  const paths: string[] = [];
+  const entries: RawDiffFileEntry[] = [];
   let index = 0;
 
   while (index < fields.length) {
@@ -29,34 +34,44 @@ function rawDiffDestinationPaths(rawText: string): string[] {
     if (status === 'R' || status === 'C') {
       const destinationPath = fields[index++];
       if (!destinationPath) throw new Error('Git raw diff metadata omitted a destination path.');
-      paths.push(destinationPath);
+      entries.push({ path: destinationPath, patchSectionCount: 1 });
     } else {
-      paths.push(firstPath);
+      entries.push({ path: firstPath, patchSectionCount: status === 'T' ? 2 : 1 });
     }
   }
 
-  return paths;
+  return entries;
 }
 
 export function selectFilePatchFromRawDiff(rawPatchText: string, path: string): string {
-  if (!rawPatchText) return '';
+  if (!rawPatchText) throw new Error(`Git diff output omitted ${path}.`);
   const patchMarker = '\0\0diff --git ';
   const patchStart = rawPatchText.indexOf(patchMarker);
   if (patchStart < 0) throw new Error('Git diff output omitted raw file metadata.');
 
-  const paths = rawDiffDestinationPaths(rawPatchText.slice(0, patchStart));
+  const entries = rawDiffFileEntries(rawPatchText.slice(0, patchStart));
   const sections = rawPatchText.slice(patchStart + 2).split(/\n(?=diff --git )/);
-  if (paths.length !== sections.length) {
+  const expectedSectionCount = entries.reduce((total, entry) => total + entry.patchSectionCount, 0);
+  if (expectedSectionCount !== sections.length) {
     throw new Error('Git diff metadata did not match its patch sections.');
   }
 
-  const sectionIndex = paths.indexOf(path);
-  if (sectionIndex < 0) throw new Error(`Git diff output omitted ${path}.`);
-  const section = sections[sectionIndex];
-  return section.endsWith('\n') ? section : `${section}\n`;
+  let sectionIndex = 0;
+  for (const entry of entries) {
+    const selected = sections.slice(sectionIndex, sectionIndex + entry.patchSectionCount);
+    if (entry.path === path) {
+      const patch = selected.join('\n');
+      return patch.endsWith('\n') ? patch : `${patch}\n`;
+    }
+    sectionIndex += entry.patchSectionCount;
+  }
+  throw new Error(`Git diff output omitted ${path}.`);
 }
 
-export function parseUnifiedPatchToRenderedRows(diffText: string): ParsedRenderedPatch {
+export function parseUnifiedPatchToRenderedRows(
+  diffText: string,
+  options: { allowMultipleFileSections?: boolean } = {},
+): ParsedRenderedPatch {
   const lines = diffText.split('\n');
   const rows: GitRenderedDiffRow[] = [];
   const hunks: GitRenderedHunk[] = [];
@@ -70,7 +85,7 @@ export function parseUnifiedPatchToRenderedRows(diffText: string): ParsedRendere
     const line = lines[lineIndex];
     if (line === '' && lineIndex === lines.length - 1) continue;
     if (line.startsWith('diff --git ')) {
-      if (sawFileHeader) break;
+      if (sawFileHeader && !options.allowMultipleFileSections) break;
       sawFileHeader = true;
       continue;
     }
@@ -221,6 +236,7 @@ export function limitedRenderedPatch(
   path: string,
   bodyFingerprint: string,
   patchText: string,
+  options: { allowMultipleFileSections?: boolean } = {},
 ): GitReviewFileBody {
   if (hasBinaryPatchMarker(patchText)) {
     return limitedFileBody(
@@ -252,7 +268,7 @@ export function limitedRenderedPatch(
     }
   }
 
-  const { rows, hunks } = parseUnifiedPatchToRenderedRows(patchText);
+  const { rows, hunks } = parseUnifiedPatchToRenderedRows(patchText, options);
   if (rows.length > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows) {
     return limitedFileBody(
       path,

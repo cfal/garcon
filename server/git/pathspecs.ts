@@ -5,14 +5,18 @@ export function literalGitPathspec(filePath: string): string {
   return `:(literal)${filePath}`;
 }
 
+function globPathspecLiteral(filePath: string): string {
+  return filePath.replace(/[\\*?[\]]/g, '\\$&');
+}
+
 export function exactGitPathspecs(filePaths: string[]): string[] {
   const paths = Array.from(new Set(filePaths));
   const excludes = paths
-    .map((filePath) => `${filePath}/`)
-    .filter((prefix) => !paths.some((otherPath) => otherPath.startsWith(prefix)));
+    .filter((filePath) => !paths.some((otherPath) => otherPath.startsWith(`${filePath}/`)))
+    .map((filePath) => `:(exclude,glob)${globPathspecLiteral(filePath)}/**`);
   return [
     ...paths.map(literalGitPathspec),
-    ...excludes.map((prefix) => `:(exclude,literal)${prefix}`),
+    ...excludes,
   ];
 }
 
