@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { TRANSCRIPT_UNAVAILABLE_MESSAGE } from '../../lib/domain-error.js';
 
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
@@ -179,7 +180,7 @@ describe('GET /api/v1/chats/messages', () => {
   it('returns a retryable transcript error instead of an empty successful page', async () => {
     const failure = new AgentIntegrationError(
       'TRANSCRIPT_UNAVAILABLE',
-      'Codex native transcript could not be resolved',
+      'Cannot open /home/private/.codex/sessions/rollout-secret.jsonl',
       true,
     );
     const { pendingInputs, routes } = createRoutesFixture({
@@ -197,7 +198,7 @@ describe('GET /api/v1/chats/messages', () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       success: false,
-      error: failure.message,
+      error: TRANSCRIPT_UNAVAILABLE_MESSAGE,
       errorCode: 'TRANSCRIPT_UNAVAILABLE',
       retryable: true,
     });

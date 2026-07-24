@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -40,7 +41,7 @@ import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
-import { DomainError } from '../../lib/domain-error.js';
+import { DomainError, TRANSCRIPT_UNAVAILABLE_MESSAGE } from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
   QueuePauseChangedError,
@@ -1226,6 +1227,31 @@ describe('REST chat command routes', () => {
     expect(body.errorCode).toBe('SESSION_BUSY');
     expect(body.error).toBe('Stop the current turn before switching agents.');
     expect(body.retryable).toBe(false);
+  });
+
+  it('PATCH /agent-model maps unavailable source transcripts without exposing provider details', async () => {
+    const agent = createRouteAgent();
+    agent.agentSwitch.switchAgentModel.mockRejectedValueOnce(
+      new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'Cannot open /home/private/.codex/sessions/rollout-secret.jsonl',
+        true,
+      ),
+    );
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/agent-model'].PATCH,
+      { chatId: CHAT_ID, agentId: 'codex', model: 'gpt-5' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      success: false,
+      error: TRANSCRIPT_UNAVAILABLE_MESSAGE,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+    });
   });
 
   it('PATCH /project-path validates, prepares the agent, and patches the registry', async () => {

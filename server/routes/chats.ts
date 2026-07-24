@@ -33,7 +33,12 @@ import type {
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
-import { ActiveInputDeliveryError, DomainError, ValidationDomainError } from '../lib/domain-error.js';
+import {
+  ActiveInputDeliveryError,
+  DomainError,
+  TRANSCRIPT_UNAVAILABLE_MESSAGE,
+  ValidationDomainError,
+} from '../lib/domain-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
 import type { ReorderResult } from '../settings/types.js';
@@ -222,6 +227,9 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 function chatSettingsPatchErrorResponse(error: unknown): Response {
   if (error instanceof AgentSwitchError) {
     return jsonError(error.message, error.status, error.code, error.retryable);
+  }
+  if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
+    return jsonError(TRANSCRIPT_UNAVAILABLE_MESSAGE, 503, error.code, error.retryable);
   }
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
@@ -550,7 +558,7 @@ export default function createChatRoutes({
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-        return jsonError(error.message, 503, error.code, error.retryable);
+        return jsonError(TRANSCRIPT_UNAVAILABLE_MESSAGE, 503, error.code, error.retryable);
       }
       return jsonErrorFromUnknown(error);
     }

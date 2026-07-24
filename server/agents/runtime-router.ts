@@ -19,7 +19,7 @@ import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolve
 import { getMaxSessions } from '../config.js';
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
-import { DomainError } from '../lib/domain-error.js';
+import { DomainError, TRANSCRIPT_UNAVAILABLE_MESSAGE } from '../lib/domain-error.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus } from './event-bus.js';
 import type {
@@ -430,7 +430,12 @@ export class AgentRuntimeRouter {
         throw new DomainError('SOURCE_REVISION_CHANGED', error.message, 409, error.retryable);
       }
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-        throw new DomainError('TRANSCRIPT_UNAVAILABLE', error.message, 422, error.retryable);
+        throw new DomainError(
+          'TRANSCRIPT_UNAVAILABLE',
+          TRANSCRIPT_UNAVAILABLE_MESSAGE,
+          422,
+          error.retryable,
+        );
       }
       throw error;
     }

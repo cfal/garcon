@@ -70,11 +70,15 @@ export class PaginatedCodexHistorySource {
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof AgentIntegrationError) throw error;
-      const message = error instanceof Error ? error.message : String(error);
       throw new AgentIntegrationError(
         'TRANSCRIPT_UNAVAILABLE',
-        `Codex paginated history is unavailable: ${message}`,
+        'Codex paginated history is unavailable',
         true,
+        {
+          operation: 'load-paginated-history',
+          provider: 'codex',
+          reason: 'provider-error',
+        },
       );
     } finally {
       client.shutdown();

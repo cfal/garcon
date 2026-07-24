@@ -95,6 +95,32 @@ describe('inspectCodexHistoryProfile', () => {
     }, 'July 20, 2026');
   });
 
+  it('does not include native paths in read failures', async () => {
+    const nativePath = '/home/private/.codex/sessions/rollout-secret.jsonl';
+
+    let failure;
+    try {
+      await inspectCodexHistoryProfile({
+        nativePath,
+        signal: new AbortController().signal,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toMatchObject({
+      code: 'TRANSCRIPT_UNAVAILABLE',
+      message: 'Codex session metadata is unavailable',
+      details: {
+        operation: 'inspect-history',
+        provider: 'codex',
+        reason: 'read-failed',
+        causeCode: 'ENOENT',
+      },
+    });
+    expect(failure.message).not.toContain(nativePath);
+  });
+
   it('rejects an oversized first record without loading the rollout', async () => {
     await withProfile({
       id: 'thread-1',

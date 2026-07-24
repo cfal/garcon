@@ -191,9 +191,8 @@ function transcriptUnavailable(
   cause: unknown,
   reason: 'read-failed' | 'invalid-metadata' | 'thread-mismatch',
 ): AgentIntegrationError {
-  const suffix = cause instanceof Error && cause.message ? `: ${cause.message}` : '';
   const causeCode = errorCode(cause);
-  return new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', `${message}${suffix}`, false, {
+  return new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', message, false, {
     operation: 'inspect-history',
     provider: 'codex',
     reason,

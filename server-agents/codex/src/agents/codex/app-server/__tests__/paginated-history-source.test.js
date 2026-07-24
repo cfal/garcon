@@ -100,7 +100,13 @@ describe('PaginatedCodexHistorySource', () => {
 
     await expect(source.load(new AbortController().signal)).rejects.toMatchObject({
       code: 'TRANSCRIPT_UNAVAILABLE',
+      message: 'Codex paginated history is unavailable',
       retryable: true,
+      details: {
+        operation: 'load-paginated-history',
+        provider: 'codex',
+        reason: 'provider-error',
+      },
     });
     expect(shutdown).toHaveBeenCalledTimes(1);
   });
