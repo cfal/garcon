@@ -137,20 +137,23 @@ async function runGitCommand(cwd, args) {
   });
 }
 
-function mutateAfterComparisonSummaries(filePath, contents) {
+function mutateDuringComparisonValidations(filePath, contents) {
   const trace = [];
-  let summaryCount = 0;
+  let statusCount = 0;
+  let validationCount = 0;
   trace.push = function (...entries) {
     const length = Array.prototype.push.apply(this, entries);
     for (const entry of entries) {
-      if (!entry.args.includes("--name-status")) continue;
-      const content = contents[summaryCount];
-      summaryCount += 1;
+      if (!entry.args.includes("--porcelain=v1")) continue;
+      statusCount += 1;
+      if (statusCount % 2 !== 0) continue;
+      const content = contents[validationCount];
+      validationCount += 1;
       if (content !== undefined) writeFileSync(filePath, content, "utf-8");
     }
     return length;
   };
-  return { trace, summaryCount: () => summaryCount };
+  return { trace, validationCount: () => validationCount };
 }
 
 async function initRepoWithCommit(projectPath) {
@@ -1578,7 +1581,7 @@ describe("comparison operations", () => {
     }
   });
 
-  it("retries a Working Tree snapshot once when content changes during its summary", async () => {
+  it("retries a Working Tree snapshot once when content changes before validation", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-retry-"),
     );
@@ -1591,7 +1594,7 @@ describe("comparison operations", () => {
       await initRepoWithCommit(projectPath);
       const filePath = path.join(projectPath, "a.txt");
       await fs.writeFile(filePath, "first edit\n", "utf-8");
-      const mutation = mutateAfterComparisonSummaries(filePath, [
+      const mutation = mutateDuringComparisonValidations(filePath, [
         "second edit\n",
       ]);
 
@@ -1604,7 +1607,7 @@ describe("comparison operations", () => {
       });
 
       expect(snapshot.status).toBe("ready");
-      expect(mutation.summaryCount()).toBe(2);
+      expect(mutation.validationCount()).toBe(2);
       expect(snapshot.files).toContainEqual(
         expect.objectContaining({ path: "a.txt", additions: 1 }),
       );
@@ -1626,7 +1629,7 @@ describe("comparison operations", () => {
       await initRepoWithCommit(projectPath);
       const filePath = path.join(projectPath, "a.txt");
       await fs.writeFile(filePath, "first edit\n", "utf-8");
-      const mutation = mutateAfterComparisonSummaries(filePath, [
+      const mutation = mutateDuringComparisonValidations(filePath, [
         "second edit\n",
         "third edit\n",
       ]);
@@ -1643,7 +1646,7 @@ describe("comparison operations", () => {
         status: "working-tree-changing",
         project: projectPath,
       });
-      expect(mutation.summaryCount()).toBe(2);
+      expect(mutation.validationCount()).toBe(2);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
