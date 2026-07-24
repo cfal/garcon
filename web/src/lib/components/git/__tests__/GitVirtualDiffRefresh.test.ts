@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import type { PartialKeys, VirtualizerOptions } from '@tanstack/svelte-virtual';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
 	GitVirtualFileHeaderRow,
@@ -8,7 +9,16 @@ import type {
 	GitVirtualUnifiedRow,
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { measureVirtualRow } from '../git-virtual-row-measurement.js';
 
+type TestInitialVirtualizerOptions = PartialKeys<
+	VirtualizerOptions<HTMLElement, HTMLDivElement>,
+	'observeElementRect' | 'observeElementOffset' | 'scrollToFn'
+>;
+type TestRefreshedVirtualizerOptions = Partial<VirtualizerOptions<HTMLElement, HTMLDivElement>>;
+
+let initialVirtualizerOptions: TestInitialVirtualizerOptions | null;
+let refreshedVirtualizerOptions: TestRefreshedVirtualizerOptions | null;
 let measureCalls: number;
 let scrollToIndexCalls: number[];
 
@@ -24,14 +34,21 @@ vi.mock('@tanstack/svelte-virtual', async () => {
 	const virtualizer = {
 		getVirtualItems: () => virtualItems,
 		getTotalSize: () => 126,
-		setOptions: () => undefined,
+		setOptions: (options: TestRefreshedVirtualizerOptions) => {
+			refreshedVirtualizerOptions = options;
+		},
 		measureElement: () => undefined,
 		scrollToIndex: (index: number) => scrollToIndexCalls.push(index),
 		measure: () => {
 			measureCalls += 1;
 		},
 	};
-	return { createVirtualizer: () => readable(virtualizer) };
+	return {
+		createVirtualizer: (options: TestInitialVirtualizerOptions) => {
+			initialVirtualizerOptions = options;
+			return readable(virtualizer);
+		},
+	};
 });
 
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
@@ -137,11 +154,13 @@ function fileIndexes(rows: GitVirtualReviewRow[]): Map<string, number> {
 
 describe('Git virtual diff refresh', () => {
 	beforeEach(() => {
+		initialVirtualizerOptions = null;
+		refreshedVirtualizerOptions = null;
 		measureCalls = 0;
 		scrollToIndexCalls = [];
 	});
 
-	it('keeps the virtualizer snapshot keys while the refreshed rows reconcile', async () => {
+	it('keeps shared measurement options while refreshed rows reconcile', async () => {
 		const initialRows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
 		const replacementRows = [makeHeaderRow(2)];
 		const props = {
@@ -181,6 +200,10 @@ describe('Git virtual diff refresh', () => {
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 300;
+		expect(initialVirtualizerOptions?.measureElement).toBe(measureVirtualRow);
+		await waitFor(() => {
+			expect(refreshedVirtualizerOptions?.measureElement).toBe(measureVirtualRow);
+		});
 		await waitFor(() => expect(measureCalls).toBe(1));
 
 		await rerender({
@@ -369,10 +392,7 @@ describe('Git virtual diff refresh', () => {
 		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
 		await rerender({
 			...props,
-			source: arrayGitVirtualReviewRowSource([
-				...initialRows.slice(0, -1),
-				makeLimitRow(2),
-			]),
+			source: arrayGitVirtualReviewRowSource([...initialRows.slice(0, -1), makeLimitRow(2)]),
 		});
 
 		expect(scrollToIndexCalls).toEqual([4]);

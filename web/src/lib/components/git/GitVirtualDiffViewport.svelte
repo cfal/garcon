@@ -7,6 +7,7 @@
 		markGitReviewFirstRow,
 		markGitReviewViewportReady,
 	} from '$lib/git/review/git-review-performance.js';
+	import { measureVirtualRow } from './git-virtual-row-measurement.js';
 
 	interface GitVirtualDiffViewportProps {
 		documentId?: string | null;
@@ -49,7 +50,7 @@
 		count: untrack(() => source.rowCount),
 		getScrollElement: () => viewportRef,
 		estimateSize: estimateRowHeight,
-		measureElement: (element) => element.getBoundingClientRect().height,
+		measureElement: measureVirtualRow,
 		initialRect: { width: 0, height: 720 },
 		overscan: 18,
 		getItemKey: (index) => source.rowKey(index),
@@ -94,7 +95,7 @@
 				estimateSize: (index) => {
 					return activeSource.estimateRowHeight(index, lineHeight);
 				},
-				measureElement: (element) => element.getBoundingClientRect().height,
+				measureElement: measureVirtualRow,
 				initialRect: { width: 0, height: 720 },
 				overscan: rowOverscan,
 				getItemKey: (index) => activeSource.rowKey(index),
