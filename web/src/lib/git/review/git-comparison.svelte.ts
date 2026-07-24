@@ -1,10 +1,10 @@
 import {
+	getGitComparisonFreshness,
 	getGitComparisonFileBodies,
 	getGitComparisonSnapshot,
 	type GitComparisonMode,
 	type GitComparisonSnapshotReady,
 } from '$lib/api/git-comparison.js';
-import { getGitWorkingTreeFingerprint } from '$lib/api/git.js';
 import { GitDiffDocumentController } from '$lib/git/review/git-diff-document.svelte.js';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
@@ -291,21 +291,44 @@ export class GitComparisonController {
 
 	async checkFreshness(projectPath: string): Promise<void> {
 		const snapshot = this.snapshot;
+		if (!snapshot || this.activeProjectPath !== projectPath || this.document.isStale) return;
 		if (
-			!snapshot ||
-			this.activeProjectPath !== projectPath ||
-			snapshot.to.kind !== 'working-tree' ||
-			this.document.isStale
+			snapshot.to.kind === 'revision' &&
+			snapshot.from.requestedRevision === snapshot.from.hash &&
+			snapshot.to.requestedRevision === snapshot.to.hash
 		)
 			return;
 		try {
-			const result = await getGitWorkingTreeFingerprint(snapshot.repoRoot);
+			const result = await getGitComparisonFreshness(
+				snapshot.repoRoot,
+				{
+					kind: 'revision',
+					revision: snapshot.from.requestedRevision,
+					hash: snapshot.from.hash,
+				},
+				snapshot.to.kind === 'revision'
+					? {
+							kind: 'revision',
+							revision: snapshot.to.requestedRevision,
+							hash: snapshot.to.hash,
+						}
+					: { kind: 'working-tree', fingerprint: snapshot.to.fingerprint },
+			);
 			if (this.snapshot?.documentId !== snapshot.documentId) return;
-			if (result.status !== 'ready') return;
-			if (result.fingerprint !== snapshot.to.fingerprint) {
-				const message = m.git_compare_working_tree_changed();
-				this.document.markStale(message);
+			if (result.status === 'not-found') {
+				this.document.markStale(m.git_compare_revision_unavailable());
+				return;
 			}
+			if (result.changedEndpoints.length === 0) return;
+			const onlyWorkingTreeChanged =
+				snapshot.to.kind === 'working-tree' &&
+				result.changedEndpoints.length === 1 &&
+				result.changedEndpoints[0] === 'to';
+			this.document.markStale(
+				onlyWorkingTreeChanged
+					? m.git_compare_working_tree_changed()
+					: m.git_compare_revision_changed(),
+			);
 		} catch {
 			// Freshness polling remains quiet until the next scheduled check.
 		}

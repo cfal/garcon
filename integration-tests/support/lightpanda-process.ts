@@ -8,6 +8,33 @@ const LOG_CAPACITY = 2_000;
 
 type LightpandaChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
 
+export interface LightpandaStopChild {
+  exited: Promise<number>;
+  kill(signal: 'SIGTERM' | 'SIGKILL'): void;
+}
+
+export async function stopLightpandaChild(
+  child: LightpandaStopChild,
+  describeLogs: () => string,
+  timeoutMs = 10_000,
+): Promise<void> {
+  child.kill('SIGTERM');
+  try {
+    await withTimeout(
+      child.exited,
+      timeoutMs,
+      () => `Lightpanda did not stop after SIGTERM.\n${describeLogs()}`,
+    );
+  } catch {
+    child.kill('SIGKILL');
+    await withTimeout(
+      child.exited,
+      timeoutMs,
+      () => `Lightpanda did not exit after forced teardown.\n${describeLogs()}`,
+    );
+  }
+}
+
 async function pump(
   stream: ReadableStream<Uint8Array>,
   channel: 'stdout' | 'stderr',
@@ -158,23 +185,7 @@ export class LightpandaProcess {
   async stop(): Promise<void> {
     if (this.#exitCode !== null) return;
     this.#expectedExit = true;
-    this.#child.kill('SIGTERM');
-    try {
-      await withTimeout(
-        this.#child.exited,
-        10_000,
-        () => `Lightpanda did not stop after SIGTERM.\n${this.describeLogs()}`,
-      );
-    } catch (gracefulError) {
-      this.#child.kill('SIGKILL');
-      await withTimeout(
-        this.#child.exited,
-        10_000,
-        () => `Lightpanda did not exit after forced teardown.\n${this.describeLogs()}`,
-      );
-      await Promise.allSettled([this.#stdoutPump, this.#stderrPump]);
-      throw gracefulError;
-    }
+    await stopLightpandaChild(this.#child, () => this.describeLogs());
     await Promise.allSettled([this.#stdoutPump, this.#stderrPump]);
   }
 

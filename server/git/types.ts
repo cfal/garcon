@@ -600,6 +600,44 @@ export interface GitComparisonWorkingTreeBodyTarget {
 export type GitComparisonBodyTarget =
   GitComparisonRevisionBodyTarget | GitComparisonWorkingTreeBodyTarget;
 
+export interface GitComparisonRevisionExpectation {
+  kind: 'revision';
+  revision: string;
+  hash: string;
+}
+
+export interface GitComparisonWorkingTreeExpectation {
+  kind: 'working-tree';
+  fingerprint: string;
+}
+
+export type GitComparisonFreshnessToExpectation =
+  GitComparisonRevisionExpectation | GitComparisonWorkingTreeExpectation;
+
+export interface GitComparisonFreshnessOptions extends ProjectOptions {
+  from: GitComparisonRevisionExpectation;
+  to: GitComparisonFreshnessToExpectation;
+}
+
+export interface GitComparisonFreshnessReady {
+  status: 'ready';
+  project: string;
+  changedEndpoints: Array<'from' | 'to'>;
+  fromHash: string;
+  to: { kind: 'revision'; hash: string } | { kind: 'working-tree'; fingerprint: string };
+}
+
+export interface GitComparisonFreshnessNotFound {
+  status: 'not-found';
+  project: string;
+  endpoint: 'from' | 'to';
+  revision: string;
+  message: string;
+}
+
+export type GitComparisonFreshnessResponse =
+  GitComparisonFreshnessReady | GitComparisonFreshnessNotFound;
+
 export interface GitComparisonFileBodiesOptions extends ProjectOptions {
   documentId: string;
   effectiveFromHash: string;
@@ -930,6 +968,9 @@ export interface GitService {
   getComparisonSnapshot(
     options: GitComparisonSnapshotOptions,
   ): Promise<GitComparisonSnapshotResponse>;
+  getComparisonFreshness(
+    options: GitComparisonFreshnessOptions,
+  ): Promise<GitComparisonFreshnessResponse>;
   getComparisonFileBodies(
     options: GitComparisonFileBodiesOptions,
   ): Promise<GitComparisonFileBodiesResponse>;

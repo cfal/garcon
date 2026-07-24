@@ -86,6 +86,39 @@ export type GitComparisonSnapshotResponse =
 	| GitComparisonSnapshotNoMergeBase
 	| GitComparisonSnapshotWorkingTreeChanging;
 
+export interface GitComparisonRevisionExpectation {
+	kind: 'revision';
+	revision: string;
+	hash: string;
+}
+
+export interface GitComparisonWorkingTreeExpectation {
+	kind: 'working-tree';
+	fingerprint: string;
+}
+
+export type GitComparisonFreshnessToExpectation =
+	GitComparisonRevisionExpectation | GitComparisonWorkingTreeExpectation;
+
+export interface GitComparisonFreshnessReady {
+	status: 'ready';
+	project: string;
+	changedEndpoints: Array<'from' | 'to'>;
+	fromHash: string;
+	to: { kind: 'revision'; hash: string } | { kind: 'working-tree'; fingerprint: string };
+}
+
+export interface GitComparisonFreshnessNotFound {
+	status: 'not-found';
+	project: string;
+	endpoint: 'from' | 'to';
+	revision: string;
+	message: string;
+}
+
+export type GitComparisonFreshnessResponse =
+	GitComparisonFreshnessReady | GitComparisonFreshnessNotFound;
+
 export type GitComparisonFileRequest = GitDiffFileRequest;
 
 export type GitComparisonBodyTarget =
@@ -118,6 +151,19 @@ export async function getGitComparisonSnapshot(
 		'/api/v1/git/comparisons/snapshot',
 		{ project, from, to, mode, context, bodyCandidateCount },
 		fetchOptions,
+	);
+}
+
+export async function getGitComparisonFreshness(
+	project: string,
+	from: GitComparisonRevisionExpectation,
+	to: GitComparisonFreshnessToExpectation,
+	options?: ApiFetchOptions,
+): Promise<GitComparisonFreshnessResponse> {
+	return apiPost<GitComparisonFreshnessResponse>(
+		'/api/v1/git/comparisons/freshness',
+		{ project, from, to },
+		options,
 	);
 }
 

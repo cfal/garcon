@@ -822,6 +822,7 @@ describe('route registration', () => {
       '/api/v1/git/history/commit/files': 'POST',
       '/api/v1/git/comparisons/snapshot': 'POST',
       '/api/v1/git/comparisons/files': 'POST',
+      '/api/v1/git/comparisons/freshness': 'POST',
       '/api/v1/git/stage-selection': 'POST',
       '/api/v1/git/stage-hunk': 'POST',
       '/api/v1/git/revert-commit': 'POST',

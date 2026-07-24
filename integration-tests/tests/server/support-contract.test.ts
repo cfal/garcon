@@ -7,6 +7,10 @@ import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-s
 import { GarconTestClient } from '../../support/garcon-client.js';
 import { fakeAnthropicRequestHeaders } from '../../support/anthropic-test-contract.js';
 import { fakeOpenAiRequestHeaders } from '../../support/openai-test-contract.js';
+import {
+  stopLightpandaChild,
+  type LightpandaStopChild,
+} from '../../support/lightpanda-process.js';
 
 class ControlledWebSocket extends EventTarget {
   readyState = 0;
@@ -62,6 +66,22 @@ describe('integration support contracts', () => {
     log.push(2);
     log.push(3);
     expect(log.values()).toEqual([2, 3]);
+  });
+
+  test('forces a stuck Lightpanda process down without failing the scenario', async () => {
+    const exited = new Deferred<number>();
+    const signals: Array<'SIGTERM' | 'SIGKILL'> = [];
+    const child = {
+      exited: exited.promise,
+      kill(signal) {
+        signals.push(signal);
+        if (signal === 'SIGKILL') exited.resolve(137);
+      },
+    } satisfies LightpandaStopChild;
+
+    await stopLightpandaChild(child, () => '(test logs)', 1);
+
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
   });
 
   test('serves models and deterministic streaming echoes', async () => {

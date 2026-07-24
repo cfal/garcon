@@ -1264,6 +1264,170 @@ describe("comparison operations", () => {
     }
   });
 
+  it("detects moved requested revisions without changing frozen comparison identities", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-revision-freshness-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const { stdout: baseOutput } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      const baseHash = baseOutput.trim();
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/remotes/origin/main",
+        baseHash,
+      ]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "feature\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "feature"]);
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "origin/main" },
+        to: { kind: "revision", revision: "HEAD" },
+        mode: "direct",
+      });
+      expect(snapshot.status).toBe("ready");
+
+      const fresh = await git.getComparisonFreshness({
+        projectPath,
+        from: {
+          kind: "revision",
+          revision: snapshot.from.requestedRevision,
+          hash: snapshot.from.hash,
+        },
+        to: {
+          kind: "revision",
+          revision: snapshot.to.requestedRevision,
+          hash: snapshot.to.hash,
+        },
+      });
+      expect(fresh).toMatchObject({
+        status: "ready",
+        changedEndpoints: [],
+        fromHash: baseHash,
+        to: { kind: "revision", hash: snapshot.to.hash },
+      });
+
+      await fs.writeFile(path.join(projectPath, "a.txt"), "rewritten\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "a.txt"]);
+      await runGitCommand(projectPath, ["commit", "--amend", "--no-edit"]);
+      const { stdout: rewrittenOutput } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      const rewrittenHash = rewrittenOutput.trim();
+
+      const stale = await git.getComparisonFreshness({
+        projectPath,
+        from: {
+          kind: "revision",
+          revision: snapshot.from.requestedRevision,
+          hash: snapshot.from.hash,
+        },
+        to: {
+          kind: "revision",
+          revision: snapshot.to.requestedRevision,
+          hash: snapshot.to.hash,
+        },
+      });
+      expect(stale).toMatchObject({
+        status: "ready",
+        changedEndpoints: ["to"],
+        fromHash: baseHash,
+        to: { kind: "revision", hash: rewrittenHash },
+      });
+
+      const literalHashes = await git.getComparisonFreshness({
+        projectPath,
+        from: { kind: "revision", revision: baseHash, hash: baseHash },
+        to: {
+          kind: "revision",
+          revision: rewrittenHash,
+          hash: rewrittenHash,
+        },
+      });
+      expect(literalHashes).toMatchObject({
+        status: "ready",
+        changedEndpoints: [],
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("detects a moved From revision in a Working Tree comparison", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-comparison-working-tree-base-freshness-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const { stdout: baseOutput } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      const baseHash = baseOutput.trim();
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/remotes/origin/main",
+        baseHash,
+      ]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "feature\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "feature"]);
+
+      const snapshot = await git.getComparisonSnapshot({
+        projectPath,
+        from: { kind: "revision", revision: "origin/main" },
+        to: { kind: "working-tree" },
+        mode: "direct",
+      });
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.to.kind).toBe("working-tree");
+
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/remotes/origin/main",
+        snapshot.to.headHash,
+      ]);
+      const freshness = await git.getComparisonFreshness({
+        projectPath,
+        from: {
+          kind: "revision",
+          revision: snapshot.from.requestedRevision,
+          hash: snapshot.from.hash,
+        },
+        to: {
+          kind: "working-tree",
+          fingerprint: snapshot.to.fingerprint,
+        },
+      });
+
+      expect(freshness).toMatchObject({
+        status: "ready",
+        changedEndpoints: ["from"],
+        fromHash: snapshot.to.headHash,
+        to: {
+          kind: "working-tree",
+          fingerprint: snapshot.to.fingerprint,
+        },
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("uses the common ancestor only when requested", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-merge-base-"),
