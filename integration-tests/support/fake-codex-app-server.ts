@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { createCodexRolloutFileName, parseCodexRolloutFileName } from './codex-rollout-filename.js';
 
 export {};
 
@@ -40,11 +41,18 @@ function respond(line: string): void {
   if (request.method === 'thread/list') {
     const threadId = process.env.INTEGRATION_CODEX_THREAD_ID;
     const nativePath = process.env.INTEGRATION_CODEX_NATIVE_PATH;
-    const discovered = process.env.INTEGRATION_CODEX_DISCOVER_JSONL === '1'
-      ? discoverCodexThreads()
-      : [];
+    const discovered = discoverCodexThreads();
+    const explicit = threadId && nativePath ? [{ id: threadId, path: nativePath }] : [];
     write(request.id, {
-      data: threadId && nativePath ? [{ id: threadId, path: nativePath }, ...discovered] : discovered,
+      data: [
+        ...explicit,
+        ...discovered.filter(
+          (thread) =>
+            !explicit.some(
+              (candidate) => candidate.id === thread.id || candidate.path === thread.path,
+            ),
+        ),
+      ],
       nextCursor: null,
       backwardsCursor: null,
     });
@@ -108,7 +116,10 @@ function forkJsonlThread(id: number, params: Record<string, unknown> | undefined
 
   try {
     const targetThreadId = randomUUID();
-    const targetPath = join(dirname(sourcePath), `${targetThreadId}.jsonl`);
+    const targetPath = join(
+      dirname(sourcePath),
+      createCodexRolloutFileName(targetThreadId, new Date()),
+    );
     const lines = readFileSync(sourcePath, 'utf8').split('\n');
     const metadataIndex = lines.findIndex((entry) => entry.trim());
     const metadata = JSON.parse(lines[metadataIndex]!) as {
@@ -148,17 +159,21 @@ function write(id: number, result: unknown): void {
 function discoverCodexThreads(): Array<{ id: string; path: string }> {
   const codexHome = process.env.CODEX_HOME;
   if (!codexHome) return [];
-  const files: string[] = [];
-  collectJsonlFiles(join(codexHome, 'sessions'), files);
-  return files.flatMap((path) => {
+  const files: Array<{ id: string; path: string }> = [];
+  collectRolloutFiles(join(codexHome, 'sessions'), files);
+  return files.flatMap((candidate) => {
     try {
-      const firstLine = readFileSync(path, 'utf8').split('\n').find((line) => line.trim());
-      const entry = firstLine ? JSON.parse(firstLine) as {
+      const firstLine = readFileSync(candidate.path, 'utf8')
+        .split('\n')
+        .find((line) => line.trim());
+      const entry = firstLine
+        ? (JSON.parse(firstLine) as {
         type?: unknown;
         payload?: { id?: unknown };
-      } : null;
-      return entry?.type === 'session_meta' && typeof entry.payload?.id === 'string'
-        ? [{ id: entry.payload.id, path }]
+          })
+        : null;
+      return entry?.type === 'session_meta' && entry.payload?.id === candidate.id
+        ? [candidate]
         : [];
     } catch {
       return [];
@@ -166,12 +181,17 @@ function discoverCodexThreads(): Array<{ id: string; path: string }> {
   });
 }
 
-function collectJsonlFiles(directory: string, files: string[]): void {
+function collectRolloutFiles(directory: string, files: Array<{ id: string; path: string }>): void {
   try {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) collectJsonlFiles(path, files);
-      else if (entry.isFile() && entry.name.endsWith('.jsonl')) files.push(path);
+      const filePath = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        collectRolloutFiles(filePath, files);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const parsed = parseCodexRolloutFileName(entry.name);
+      if (parsed) files.push({ id: parsed.threadId, path: filePath });
     }
   } catch {
     return;

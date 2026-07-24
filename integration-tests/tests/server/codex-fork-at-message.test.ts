@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
@@ -21,7 +21,6 @@ describe('Codex fork at message', () => {
         import.meta.url,
       )),
       PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
-      INTEGRATION_CODEX_DISCOVER_JSONL: '1',
       INTEGRATION_CODEX_FORK_JSONL: '1',
       INTEGRATION_CODEX_FORK_PARAMS_LOG: '',
     };
@@ -86,6 +85,9 @@ describe('Codex fork at message', () => {
       expect(targetLines.some((line) => line.includes('"name":"exec"'))).toBe(true);
       expect(targetLines.some((line) => line.includes('"name":"wait"'))).toBe(true);
       expect(targetNativePath).not.toBe(sourceNativePath);
+      expect(basename(targetNativePath)).toMatch(
+        /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[0-9a-f-]{36}\.jsonl$/,
+      );
 
       const codex = new CodexAppServerClient({
         env: {

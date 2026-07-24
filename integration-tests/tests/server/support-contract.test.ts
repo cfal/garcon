@@ -6,6 +6,10 @@ import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
 import { fakeAnthropicRequestHeaders } from '../../support/anthropic-test-contract.js';
+import {
+  createCodexRolloutFileName,
+  parseCodexRolloutFileName,
+} from '../../support/codex-rollout-filename.js';
 import { fakeOpenAiRequestHeaders } from '../../support/openai-test-contract.js';
 import {
   stopLightpandaChild,
@@ -66,6 +70,18 @@ describe('integration support contracts', () => {
     log.push(2);
     log.push(3);
     expect(log.values()).toEqual([2, 3]);
+  });
+
+  test('matches the pinned Codex rollout filename contract', () => {
+    const threadId = 'ec12a984-cbd3-4b3b-9203-9377c3ec665e';
+    const fileName = createCodexRolloutFileName(threadId, new Date('2026-07-24T11:26:22.999Z'));
+
+    expect(fileName).toBe(`rollout-2026-07-24T11-26-22-${threadId}.jsonl`);
+    expect(parseCodexRolloutFileName(fileName)).toMatchObject({ threadId });
+    expect(parseCodexRolloutFileName(`${threadId}.jsonl`)).toBeNull();
+    expect(parseCodexRolloutFileName(`rollout-invalid-${threadId}.jsonl`)).toBeNull();
+    expect(parseCodexRolloutFileName('rollout-2026-07-24T11-26-22-not-a-uuid.jsonl')).toBeNull();
+    expect(parseCodexRolloutFileName(`rollout-2026-02-30T11-26-22-${threadId}.jsonl`)).toBeNull();
   });
 
   test('forces a stuck Lightpanda process down without failing the scenario', async () => {
