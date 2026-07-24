@@ -11,6 +11,7 @@ export interface GitCommandOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   disableOptionalLocks?: boolean;
+  maxStdoutBytes?: number;
 }
 
 export interface GitCommandTrace {
@@ -371,6 +372,54 @@ export interface GitReviewFileBody {
   limitMessage?: string;
   error?: string;
 }
+
+export interface GitReviewFilePatchBody {
+  path: string;
+  bodyFingerprint: string;
+  bodyState: GitReviewBodyState;
+  category: GitFileReviewCategory;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  renderedRowCount: number;
+  patchBytes: number;
+  patch: string | null;
+  limitReason?: GitReviewLimitReason;
+  limitMessage?: string;
+  error?: string;
+}
+
+export type GitReviewBodyPurpose = 'visible' | 'prefetch';
+
+export interface GitReviewDocumentFileBodiesOptions extends ProjectOptions {
+  documentId: string;
+  files: string[];
+  purpose: GitReviewBodyPurpose;
+}
+
+export interface GitReviewDocumentFileBodiesReady {
+  status: 'ready';
+  documentId: string;
+  files: Record<string, GitReviewFilePatchBody>;
+  errors: Record<string, string>;
+}
+
+export interface GitReviewDocumentFileBodiesStale {
+  status: 'stale';
+  documentId: string;
+  changedPaths: string[];
+  message: string;
+}
+
+export interface GitReviewDocumentFileBodiesExpired {
+  status: 'document-expired';
+  documentId: string;
+  message: string;
+}
+
+export type GitReviewDocumentFileBodiesResponse =
+  | GitReviewDocumentFileBodiesReady
+  | GitReviewDocumentFileBodiesStale
+  | GitReviewDocumentFileBodiesExpired;
 
 export interface GitReviewFileBodiesResponse {
   documentId: string;
