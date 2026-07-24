@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { GitDomainError } from '../git-types.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 
 function reviewFile(path, bodyFingerprint = `fingerprint:${path}`) {
@@ -150,9 +151,16 @@ describe('GitReviewDocumentRegistry', () => {
     const first = registry.register(registration(undefined, 'source:first'));
     const lease = registry.acquire('/repo', first.id);
 
-    expect(() => registry.register(registration(undefined, 'source:second'))).toThrow(
-      'Too many active Git review documents',
-    );
+    try {
+      registry.register(registration(undefined, 'source:second'));
+      throw new Error('Expected registry admission to fail.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(GitDomainError);
+      expect(error).toMatchObject({
+        code: 'SERVICE_BUSY',
+        message: expect.stringContaining('Too many active Git review documents'),
+      });
+    }
     lease?.release();
   });
 

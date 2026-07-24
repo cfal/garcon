@@ -4000,6 +4000,17 @@ describe("toHttpError", () => {
     expect(response.status).toBe(401);
   });
 
+  it("maps SERVICE_BUSY GitDomainError to a retryable 503", async () => {
+    const err = new GitDomainError("SERVICE_BUSY", "Try again shortly");
+    const response = git.toHttpError(err);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Try again shortly",
+      errorCode: "SERVICE_BUSY",
+      retryable: true,
+    });
+  });
+
   it("maps unknown GitDomainError codes to 500", async () => {
     const err = new GitDomainError("SOME_OTHER", "Other error");
     const response = git.toHttpError(err);

@@ -207,7 +207,9 @@ export function createReviewDocumentOperations(registry: GitReviewDocumentRegist
                 };
               }
             }
-            lease.setBodies(loaded.bodies.filter((body) => !isGitReviewCollectionLimitBody(body)));
+            lease.setBodies(loaded.bodies.filter(
+              (body) => body.bodyState !== 'error' && !isGitReviewCollectionLimitBody(body),
+            ));
           }
 
           const responseBodies = limitGitReviewResponseBodies(

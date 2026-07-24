@@ -28,6 +28,12 @@ function gitDomainErrorToResponse(error: GitDomainError): Response {
   if (code === 'INVALID_INPUT') return Response.json({ error: error.message }, { status: 400 });
   if (code === 'NOT_REPO') return Response.json({ error: error.message }, { status: 400 });
   if (code === 'AUTH_FAILED') return Response.json({ error: error.message }, { status: 401 });
+  if (code === 'SERVICE_BUSY') {
+    return Response.json(
+      { error: error.message, errorCode: code, retryable: true },
+      { status: 503 },
+    );
+  }
   return Response.json({ error: error.message }, { status: 500 });
 }
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { GitDomainError } from './git-types.js';
 import type {
   GitCommitFileStatus,
   GitCommitFileSummary,
@@ -192,7 +193,10 @@ export class GitReviewDocumentRegistry {
       this.evictIdle(this.documents.size - this.maxTotalDocuments + 1);
     }
     if (this.documents.size >= this.maxTotalDocuments) {
-      throw new Error('Too many active Git review documents. Try again shortly.');
+      throw new GitDomainError(
+        'SERVICE_BUSY',
+        'Too many active Git review documents. Try again shortly.',
+      );
     }
 
     if (previous) previous.superseded = true;

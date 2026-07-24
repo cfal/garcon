@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createGitService } from '../git-service.js';
+import { GitReviewDocumentRegistry } from '../review-document-registry.js';
+import { createReviewDocumentOperations } from '../review-document-service.js';
 
 const temporaryDirectories = [];
 
@@ -169,6 +171,54 @@ describe('Git review documents', () => {
       limitReason: 'collection-too-many-rows',
     });
     expect(cachedTrace.filter((entry) => entry.args[0] === 'diff')).toHaveLength(0);
+  });
+
+  it('retries transient body errors instead of caching them', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-review-document-'));
+    temporaryDirectories.push(projectPath);
+    const registry = new GitReviewDocumentRegistry();
+    const document = registry.register({
+      sourceCacheKey: 'comparison:transient-body',
+      projectPath,
+      repoRoot: projectPath,
+      context: 3,
+      source: {
+        kind: 'comparison-revisions',
+        effectiveFromHash: 'base',
+        toHash: 'target',
+      },
+      files: [{
+        path: 'retry.txt',
+        change: { kind: 'tree-diff', status: 'added', rawStatus: '?' },
+        category: 'untracked',
+        additions: 1,
+        deletions: 0,
+        estimatedRows: 2,
+        bodyState: 'unloaded',
+        bodyFingerprint: 'fingerprint:retry.txt',
+        isBinary: false,
+        isTooLarge: false,
+      }],
+    });
+    const operations = createReviewDocumentOperations(registry);
+    const options = {
+      projectPath,
+      documentId: document.id,
+      files: ['retry.txt'],
+      purpose: 'visible',
+    };
+
+    const failed = await operations.getReviewDocumentFileBodies(options);
+    expect(failed.status).toBe('ready');
+    if (failed.status !== 'ready') return;
+    expect(failed.files['retry.txt']).toMatchObject({ bodyState: 'error' });
+
+    await fs.writeFile(path.join(projectPath, 'retry.txt'), 'available now\n');
+    const retried = await operations.getReviewDocumentFileBodies(options);
+    expect(retried.status).toBe('ready');
+    if (retried.status !== 'ready') return;
+    expect(retried.files['retry.txt']).toMatchObject({ bodyState: 'loaded' });
+    expect(retried.files['retry.txt'].patch).toContain('+available now');
   });
 
   it('validates only requested working-tree paths', async () => {
