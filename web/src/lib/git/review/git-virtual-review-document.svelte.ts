@@ -220,6 +220,7 @@ export class GitVirtualReviewDocumentController {
 	}
 
 	focusFile(projectPath: string, filePath: string): void {
+		this.discardErrorBody(filePath);
 		this.requestBodies(projectPath, [filePath], 'visible');
 		this.requestScrollToFile(filePath);
 	}
@@ -337,12 +338,24 @@ export class GitVirtualReviewDocumentController {
 		this.fileBodies = Object.fromEntries(
 			Object.entries(this.fileBodies).filter(([filePath, body]) => {
 				const file = files.get(filePath);
-				return Boolean(file && file.bodyFingerprint === body.bodyFingerprint);
+				return Boolean(
+					file &&
+						body.bodyState !== 'error' &&
+						file.bodyFingerprint === body.bodyFingerprint,
+				);
 			}),
 		);
 		for (const filePath of this.bodyPurposes.keys()) {
 			if (!this.fileBodies[filePath]) this.bodyPurposes.delete(filePath);
 		}
+	}
+
+	private discardErrorBody(filePath: string): void {
+		if (this.fileBodies[filePath]?.bodyState !== 'error') return;
+		this.fileBodies = Object.fromEntries(
+			Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+		);
+		this.bodyPurposes.delete(filePath);
 	}
 
 	private shouldLoadBody(filePath: string, guard: GitWorkbenchLoadGuard): boolean {
@@ -462,7 +475,7 @@ export class GitVirtualReviewDocumentController {
 				this.setAggregateLimit(decision, Object.keys(next).length);
 				break;
 			}
-			this.cacheSet(file, guard, body);
+			if (body.bodyState !== 'error') this.cacheSet(file, guard, body);
 			next[filePath] = body;
 			this.bodyPurposes.set(filePath, purpose);
 		}

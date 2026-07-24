@@ -222,6 +222,7 @@ export class GitDiffDocumentController {
 
 	focusFile(filePath: string): void {
 		this.focusedFilePath = filePath;
+		this.discardErrorBody(filePath);
 		this.requestBodies([filePath], 'visible');
 		this.scrollToken += 1;
 		this.scrollRequest = { filePath, token: this.scrollToken };
@@ -476,6 +477,14 @@ export class GitDiffDocumentController {
 
 	private summaryForFile(filePath: string): GitCommitFileSummary | null {
 		return this.summariesByPath.get(filePath) ?? null;
+	}
+
+	private discardErrorBody(filePath: string): void {
+		if (this.fileBodies[filePath]?.bodyState !== 'error') return;
+		this.fileBodies = Object.fromEntries(
+			Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
+		);
+		this.bodyPurposes.delete(filePath);
 	}
 
 	private shouldLoadBody(filePath: string): boolean {

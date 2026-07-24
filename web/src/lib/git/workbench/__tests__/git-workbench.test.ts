@@ -132,6 +132,22 @@ function makeReviewBody(
 	};
 }
 
+function makeReviewErrorBody(path = 'a.ts'): GitReviewFileBody {
+	return {
+		path,
+		bodyFingerprint: `fingerprint:${path}`,
+		bodyState: 'error',
+		category: 'normal',
+		isBinary: false,
+		isTooLarge: false,
+		renderedRowCount: 0,
+		patchBytes: 0,
+		patch: null,
+		patchIndex: null,
+		error: 'Transient diff failure',
+	};
+}
+
 function makeReviewBodies(paths: string[]) {
 	return {
 		status: 'ready' as const,
@@ -816,6 +832,59 @@ describe('GitWorkbenchStore', () => {
 			});
 			expect(mockedApi.getGitReviewFileBodies.mock.calls[2]?.[2]).toEqual([paths[8]]);
 			prefetch.resolve(makeReviewBodies(firstBodyCandidates.slice(1)));
+		});
+
+		it('retries a transient body error after a same-fingerprint summary refresh', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: [makeTreeFile('a.ts')],
+					summary: makeReviewSummary(['a.ts']),
+					firstBodyCandidates: ['a.ts'],
+				}),
+			);
+			mockedApi.getGitReviewFileBodies
+				.mockResolvedValueOnce({
+					status: 'ready',
+					documentId: 'doc',
+					files: { 'a.ts': makeReviewErrorBody() },
+					errors: { 'a.ts': 'Transient diff failure' },
+				})
+				.mockResolvedValueOnce(makeReviewBodies(['a.ts']));
+
+			await wb.setTarget(makeTarget());
+			await vi.waitFor(() => expect(wb.review.fileBodies['a.ts']?.bodyState).toBe('error'));
+
+			wb.review.applySummary(makeReviewSummary(['a.ts']));
+			wb.review.requestBodies('/project', ['a.ts']);
+
+			await vi.waitFor(() => expect(wb.review.fileBodies['a.ts']?.bodyState).toBe('loaded'));
+			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2);
+		});
+
+		it('retries a transient body error when the file is focused again', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: [makeTreeFile('a.ts')],
+					summary: makeReviewSummary(['a.ts']),
+					firstBodyCandidates: ['a.ts'],
+				}),
+			);
+			mockedApi.getGitReviewFileBodies
+				.mockResolvedValueOnce({
+					status: 'ready',
+					documentId: 'doc',
+					files: { 'a.ts': makeReviewErrorBody() },
+					errors: { 'a.ts': 'Transient diff failure' },
+				})
+				.mockResolvedValueOnce(makeReviewBodies(['a.ts']));
+
+			await wb.setTarget(makeTarget());
+			await vi.waitFor(() => expect(wb.review.fileBodies['a.ts']?.bodyState).toBe('error'));
+
+			wb.review.focusFile('/project', 'a.ts');
+
+			await vi.waitFor(() => expect(wb.review.fileBodies['a.ts']?.bodyState).toBe('loaded'));
+			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2);
 		});
 
 		it('keeps the selected body when a speculative body consumes the aggregate budget first', async () => {

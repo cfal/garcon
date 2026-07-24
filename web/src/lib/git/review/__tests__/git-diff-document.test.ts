@@ -482,6 +482,50 @@ describe('GitDiffDocumentController', () => {
 		expect(controller.fileBodies['a.ts']?.error).toBe('Unable to read this path.');
 	});
 
+	it('retries a transient body error when the file is focused again', async () => {
+		const controller = new GitDiffDocumentController();
+		const failedBody: GitReviewFileBody = {
+			...body('a.ts'),
+			bodyState: 'error',
+			renderedRowCount: 0,
+			patchBytes: 0,
+			patch: null,
+			patchIndex: null,
+			error: 'Transient diff failure',
+		};
+		const loadBodies = vi
+			.fn()
+			.mockResolvedValueOnce({
+				status: 'ready',
+				documentId: 'doc',
+				files: { 'a.ts': failedBody },
+				errors: { 'a.ts': 'Transient diff failure' },
+			})
+			.mockResolvedValueOnce({
+				status: 'ready',
+				documentId: 'doc',
+				files: { 'a.ts': body('a.ts') },
+				errors: {},
+			});
+
+		controller.open(
+			{
+				project: '/project',
+				documentId: 'doc',
+				files: [file('a.ts')],
+				limits,
+				firstBodyCandidates: ['a.ts'],
+			},
+			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+		);
+		await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('error'));
+
+		controller.focusFile('a.ts');
+
+		await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded'));
+		expect(loadBodies).toHaveBeenCalledTimes(2);
+	});
+
 	it('bounds cached bodies across document changes', async () => {
 		const controller = new GitDiffDocumentController();
 		const boundedLimits = { ...limits, maxLoadedPatchBytes: 150 };
