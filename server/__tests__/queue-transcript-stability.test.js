@@ -30,6 +30,7 @@ describe('queue and transcript stability', () => {
   it('settles an aborted nonblocking direct start before admitting its successor', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-direct-abort-'));
     const streamResult = deferred();
+    const abortStarted = deferred();
     class HeldDirectRuntime extends DirectChatRuntimeBase {
       constructor() {
         super({
@@ -71,9 +72,10 @@ describe('queue and transcript stability', () => {
         workspaceDir,
         {
           runAgentTurn: mock(async () => undefined),
-          abortSession: mock(async () => (
-            agentSessionId ? runtime.abort(agentSessionId) : false
-          )),
+          abortSession: mock(async () => {
+            abortStarted.resolve();
+            return agentSessionId ? runtime.abort(agentSessionId) : false;
+          }),
           isChatRunning: mock(() => (
             agentSessionId ? runtime.isRunning(agentSessionId) : false
           )),
@@ -117,8 +119,10 @@ describe('queue and transcript stability', () => {
         turnId: 'turn-b',
       })).toThrow('Another chat turn already owns execution');
 
-      await expect(queue.interruptActiveTurn('chat-direct')).resolves.toBe(true);
+      const interrupt = queue.interruptActiveTurn('chat-direct');
+      await abortStarted.promise;
       streamResult.reject(new Error('request aborted'));
+      await expect(interrupt).resolves.toBe(true);
       await expect(settled.promise).resolves.toEqual({
         chatId: 'chat-direct',
         turn: { clientRequestId: 'req-a', turnId: 'turn-a' },

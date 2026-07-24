@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -258,14 +258,35 @@ export class IntegrationFixture {
     await this.#startReplacementGarcon();
   }
 
-  async #removeFinalNativeUserRow(input: { chatId: string; clientRequestId: string }): Promise<void> {
+  async appendDirectOpenAiNativeMessage(input: {
+    chatId: string;
+    role: 'user' | 'assistant';
+    content: string;
+    clientRequestId?: string;
+    turnId?: string;
+  }): Promise<void> {
+    const nativePath = await this.#directOpenAiNativePath(input.chatId);
+    const raw = await readFile(nativePath, 'utf8');
+    if (raw.length > 0 && !raw.endsWith('\n')) {
+      throw new Error('Direct native transcript has an incomplete tail.');
+    }
+    await appendFile(nativePath, `${JSON.stringify({
+      role: input.role,
+      content: input.content,
+      timestamp: new Date().toISOString(),
+      ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+    })}\n`, 'utf8');
+  }
+
+  async #directOpenAiNativePath(chatId: string): Promise<string> {
     const registry = JSON.parse(
       await readFile(join(this.dirs.workspace, 'chats.json'), 'utf8'),
     ) as { sessions?: Record<string, Record<string, unknown>> };
-    const chat = registry.sessions?.[input.chatId];
-    if (!chat) throw new Error(`Chat ${input.chatId} was not persisted before crash.`);
+    const chat = registry.sessions?.[chatId];
+    if (!chat) throw new Error(`Chat ${chatId} was not persisted before restart.`);
     if (chat.agentId !== DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
-      throw new Error(`Chat ${input.chatId} is not a direct OpenAI-compatible chat.`);
+      throw new Error(`Chat ${chatId} is not a direct OpenAI-compatible chat.`);
     }
     const nativeSession = chat.nativeSession && typeof chat.nativeSession === 'object'
       ? chat.nativeSession as Record<string, unknown>
@@ -290,9 +311,13 @@ export class IntegrationFixture {
       || !nativePath
       || resolve(nativePath) !== expectedPath
     ) {
-      throw new Error(`Chat ${input.chatId} has an unexpected native transcript path.`);
+      throw new Error(`Chat ${chatId} has an unexpected native transcript path.`);
     }
+    return expectedPath;
+  }
 
+  async #removeFinalNativeUserRow(input: { chatId: string; clientRequestId: string }): Promise<void> {
+    const expectedPath = await this.#directOpenAiNativePath(input.chatId);
     const raw = await readFile(expectedPath, 'utf8');
     if (!raw.endsWith('\n')) throw new Error('Direct native transcript has an incomplete tail.');
     const lines = raw.split('\n').filter((line) => line.length > 0);

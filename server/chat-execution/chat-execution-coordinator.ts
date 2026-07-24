@@ -402,13 +402,29 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       ...options,
     };
     assertTurnIdentifiers(activeOptions);
+    const activeAttempt = this.#ownership.attempt(chatId);
+    const predecessor = activeAttempt?.identity();
+    const successor = executionTurnIdentity(activeOptions)!;
     let pendingRegistered = false;
     let deliveryMayHaveStarted = false;
     try {
-      const handled = await this.#turnRunner.submitActiveInput!(chatId, content, activeOptions, async () => {
+      const handled = await this.#turnRunner.submitActiveInput!(chatId, content, activeOptions, async (handoff) => {
+        const validateOwner = () => {
+          if (this.#ownership.attempt(chatId) !== activeAttempt) {
+            throw new Error(`Cannot hand off execution attempt for chat ${chatId} after its owner changed`);
+          }
+        };
+        validateOwner();
+        const committedHandoff = activeAttempt && predecessor
+          ? activeAttempt.handoffTurn(predecessor, successor, handoff)
+          : handoff;
+        committedHandoff.validate();
         await this.registerPendingUserInput(chatId, content, activeOptions);
         pendingRegistered = true;
         await afterPendingRegistered?.();
+        validateOwner();
+        committedHandoff.validate();
+        committedHandoff.commit();
         deliveryMayHaveStarted = true;
       });
       if (!handled && deliveryMayHaveStarted) {
@@ -577,6 +593,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       this.#ownership.hasDirect(chatId)
       || this.#ownership.hasTranscriptSnapshot(chatId)
       || this.#ownership.isDraining(chatId)
+      || this.#ownership.hasAttempt(chatId)
     ) {
       this.#ownership.requestDrain(chatId);
       return;
@@ -596,6 +613,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       || this.#ownership.isDraining(chatId)
       || this.#ownership.hasDirect(chatId)
       || this.#ownership.hasTranscriptSnapshot(chatId)
+      || this.#ownership.hasAttempt(chatId)
       || this.#isDrainSuppressed(chatId)
       || this.#ownership.stop(chatId) !== undefined
     ) return;
@@ -781,9 +799,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   async #interruptActiveTurn(chatId: string): Promise<boolean> {
+    const interruptedAttempt = this.#ownership.attempt(chatId);
     try {
       const stopped = await this.#abortStop(chatId, 'interrupt-and-send');
       if (stopped) this.#ownership.clearAbortSuppression(chatId);
+      if (stopped && interruptedAttempt && !interruptedAttempt.entryId) {
+        await interruptedAttempt.waitUntilSettled();
+      }
       return stopped;
     } finally {
       this.#requestDrain(chatId, 'interrupt');

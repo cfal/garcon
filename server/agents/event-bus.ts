@@ -1,4 +1,5 @@
 import type {
+  AgentActiveInputHandoff,
   AgentExecutionEvent,
   AgentOperationIdentity,
 } from '@garcon/server-agent-interface';
@@ -45,14 +46,45 @@ export class AgentEventBus {
       this.clearTurn(chatId);
       return;
     }
-    if (this.#turnMetadataByChatId.has(chatId)) {
-      logger.warn('agents: overwriting in-flight turn metadata for chat', chatId);
+    const turn = turnMetadata(opts);
+    const active = this.#turnMetadataByChatId.get(chatId);
+    if (active && !matchesTurnIdentity(active, turn)) {
+      throw new Error(`Cannot track a new turn while chat ${chatId} has an active turn`);
     }
-    const turn = {
-      ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
-      ...(opts.commandType ? { commandType: opts.commandType } : {}),
-      ...(opts.turnId ? { turnId: opts.turnId } : {}),
+    this.#setTurn(chatId, turn);
+  }
+
+  handoffTurn(
+    chatId: string,
+    predecessor: TurnEventMetadata | undefined,
+    successor: TurnEventMetadata,
+    downstream: AgentActiveInputHandoff,
+  ): AgentActiveInputHandoff {
+    const next = turnMetadata(successor);
+    const validate = () => {
+      const active = this.#turnMetadataByChatId.get(chatId);
+      if (!sameTurnIdentity(active, predecessor)) {
+        throw new Error(`Cannot hand off turn for chat ${chatId} after its active turn changed`);
+      }
     };
+    validate();
+    return {
+      validate: () => {
+        validate();
+        downstream.validate();
+      },
+      commit: () => {
+        const abortable = this.#abortableTurnByChatId.get(chatId);
+        const transferAbortability = abortable !== undefined
+          && sameTurnIdentity(abortable, predecessor);
+        this.#setTurn(chatId, next);
+        if (transferAbortability) this.markTurnAbortable(chatId, next);
+        downstream.commit();
+      },
+    };
+  }
+
+  #setTurn(chatId: string, turn: TurnEventMetadata): void {
     const abortable = this.#abortableTurnByChatId.get(chatId);
     if (abortable && !matchesTurnIdentity(turn, abortable)) {
       this.#abortableTurnByChatId.delete(chatId);
@@ -172,4 +204,19 @@ function operationMetadata(operation: AgentOperationIdentity): TurnEventMetadata
     ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
     turnId: operation.turnId,
   };
+}
+
+function turnMetadata(opts: TurnEventMetadata): TurnEventMetadata {
+  return {
+    ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
+    ...(opts.commandType ? { commandType: opts.commandType } : {}),
+    ...(opts.turnId ? { turnId: opts.turnId } : {}),
+  };
+}
+
+function sameTurnIdentity(
+  left: TurnEventMetadata | undefined,
+  right: TurnEventMetadata | undefined,
+): boolean {
+  return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
 }

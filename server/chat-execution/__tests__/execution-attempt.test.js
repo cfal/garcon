@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { QueueExecutionAttempt } from '../execution-attempt.ts';
 
+const terminalHandoff = () => ({
+  validate: () => undefined,
+  commit: () => undefined,
+});
+
 // Resolves a wait promise against a sentinel so a still-pending wait is
 // observable without hanging the test.
 const PENDING = Symbol('pending');
@@ -117,6 +122,72 @@ describe('QueueExecutionAttempt', () => {
     expect(attempt.identity()).toEqual({ turnId: 't2' });
     attempt.markLaunching();
     expect(() => attempt.replaceReservedTurn({ turnId: 't3' })).toThrow();
+  });
+
+  test('hands off identity without resetting lifecycle signals', async () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' }, 'e1');
+    attempt.markRegistered();
+    attempt.allowLaunch();
+    attempt.markAbortable();
+    attempt.expectAbort('stop-1');
+    attempt.markRunSettled();
+    attempt.markTerminalObserved();
+
+    const handoff = attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { clientRequestId: 'request-b', turnId: 'turn-b' },
+      terminalHandoff(),
+    );
+    expect(attempt.identity()).toEqual({ turnId: 'turn-a' });
+    handoff.validate();
+    handoff.commit();
+
+    expect(attempt.identity()).toEqual({ clientRequestId: 'request-b', turnId: 'turn-b' });
+    expect(attempt.isExpectedAbort).toBe(true);
+    expect(attempt.isRunSettled).toBe(true);
+    expect(attempt.isSettlementReady).toBe(true);
+    expect(await attempt.waitUntilAbortable()).toBe(true);
+  });
+
+  test('leaves the predecessor unchanged when downstream validation fails', () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' }, 'e1');
+
+    const handoff = attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { turnId: 'turn-b' },
+      {
+        validate: () => { throw new Error('boundary failed'); },
+        commit: () => undefined,
+      },
+    );
+    expect(() => handoff.validate()).toThrow('boundary failed');
+
+    expect(attempt.identity()).toEqual({ turnId: 'turn-a' });
+  });
+
+  test('rejects a stale handoff without changing the current identity', () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-b' }, 'e1');
+
+    expect(() => attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { turnId: 'turn-c' },
+      terminalHandoff(),
+    )).toThrow('active turn changed');
+
+    expect(attempt.identity()).toEqual({ turnId: 'turn-b' });
+  });
+
+  test('revalidates the predecessor immediately before commit', () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' });
+    const handoff = attempt.handoffTurn(
+      { turnId: 'turn-a' },
+      { turnId: 'turn-b' },
+      terminalHandoff(),
+    );
+    attempt.replaceReservedTurn({ turnId: 'turn-c' });
+
+    expect(() => handoff.validate()).toThrow('active turn changed');
+    expect(attempt.identity()).toEqual({ turnId: 'turn-c' });
   });
 
   test('matches compares turn identity', () => {

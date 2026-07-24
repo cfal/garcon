@@ -3,6 +3,8 @@ import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { AgentEventBus } from '../../../../../../server/agents/event-bus.ts';
+import { QueueExecutionAttempt } from '../../../../../../server/chat-execution/execution-attempt.ts';
 import { CodexExecution } from '../execution.ts';
 
 function createRuntime() {
@@ -65,6 +67,25 @@ function startRequest(overrides = {}) {
     carryOver: [],
     ...overrides,
   };
+}
+
+async function commitHandoff(handoff) {
+  handoff.validate();
+  handoff.commit();
+}
+
+function activeInputRequest(operation, beforeDelivery = commitHandoff) {
+  return startRequest({
+    agentSessionId: 'thread-1',
+    nativeSession: {
+      ownerId: 'codex',
+      schemaVersion: 1,
+      value: { path: '/tmp/thread-1.jsonl', agentSessionId: 'thread-1' },
+    },
+    operation,
+    beforeDelivery,
+    carryOver: undefined,
+  });
 }
 
 describe('CodexExecution', () => {
@@ -169,5 +190,173 @@ describe('CodexExecution', () => {
 
     await expect(execution.start(startRequest({ prompt: '/goal clear' })))
       .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+  });
+
+  for (const outcome of ['decline', 'failure']) {
+    it(`keeps the predecessor operation visible when active input has a pre-boundary ${outcome}`, async () => {
+      const runtime = createRuntime();
+      const execution = new CodexExecution(
+        createHost(),
+        runtime,
+        createPathNativeSessionCodec('codex'),
+        createConfig(),
+      );
+      const predecessor = startRequest().operation;
+      const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
+      const next = { ...predecessor, clientRequestId: 'request-3', turnId: 'turn-3' };
+      const events = [];
+      execution.subscribe((event) => events.push(event));
+      await execution.start(startRequest());
+      runtime.submitActiveInput.mockImplementation(async () => {
+        runtime.emitFinished('chat-1', 0, {
+          clientRequestId: predecessor.clientRequestId,
+          turnId: predecessor.turnId,
+        });
+        if (outcome === 'failure') throw new Error('failed before delivery boundary');
+        return false;
+      });
+
+      const activeInput = execution.submitActiveInput(activeInputRequest(successor));
+      if (outcome === 'failure') await expect(activeInput).rejects.toThrow('failed before delivery boundary');
+      else await expect(activeInput).resolves.toBe(false);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'finished',
+        operation: predecessor,
+      }));
+
+      await execution.resume(activeInputRequest(next));
+      expect(runtime.runTurn).toHaveBeenCalledOnce();
+    });
+  }
+
+  it('retains successor ownership after a post-boundary delivery failure', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const predecessor = startRequest().operation;
+    const successor = { ...predecessor, clientRequestId: 'request-2', turnId: 'turn-2' };
+    const events = [];
+    execution.subscribe((event) => events.push(event));
+    await execution.start(startRequest());
+    runtime.submitActiveInput.mockImplementation(async (_request, beforeDelivery) => {
+      await beforeDelivery({
+        validate: () => undefined,
+        commit: () => undefined,
+      });
+      throw new Error('delivery outcome unknown');
+    });
+
+    await expect(execution.submitActiveInput(activeInputRequest(successor)))
+      .rejects.toThrow('delivery outcome unknown');
+    runtime.emitFailed('chat-1', 'delivery failed', {
+      clientRequestId: successor.clientRequestId,
+      turnId: successor.turnId,
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'failed',
+      operation: successor,
+    }));
+  });
+
+  it('commits retained, routed, tracked, and runtime ownership at one persistence boundary', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const bus = new AgentEventBus({ list: () => [{ execution }] });
+    const predecessor = startRequest().operation;
+    const rejected = { ...predecessor, clientRequestId: 'request-rejected', turnId: 'turn-rejected' };
+    const successor = { ...predecessor, clientRequestId: 'request-b', turnId: 'turn-b' };
+    const attempt = new QueueExecutionAttempt(predecessor);
+    const successorAbortable = mock(() => undefined);
+    let runtimeMetadata = {
+      clientRequestId: predecessor.clientRequestId,
+      turnId: predecessor.turnId,
+    };
+    const trackedMessages = [];
+    const routedMessages = [];
+    execution.subscribe((event) => {
+      if (event.type === 'messages') {
+        trackedMessages.push({ content: event.messages[0].content, turnId: event.operation.turnId });
+      }
+    });
+    bus.onMessages((_chatId, messages, metadata) => {
+      routedMessages.push({ content: messages[0].content, turnId: metadata.turnId });
+    });
+    const emitOutput = (content) => runtime.emitMessages(
+      'chat-1',
+      [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
+      runtimeMetadata,
+    );
+    const assertOwner = (turnId, content) => {
+      expect(runtimeMetadata.turnId).toBe(turnId);
+      expect(attempt.identity().turnId).toBe(turnId);
+      expect(bus.getActiveTurn('chat-1').turnId).toBe(turnId);
+      expect(trackedMessages.at(-1)).toEqual({ content, turnId });
+      expect(routedMessages.at(-1)).toEqual({ content, turnId });
+    };
+    const composeHandoff = (operationHandoff, next) => attempt.handoffTurn(
+      predecessor,
+      next,
+      bus.handoffTurn('chat-1', predecessor, next, operationHandoff),
+    );
+
+    bus.trackTurn('chat-1', predecessor);
+    bus.markTurnAbortable('chat-1', predecessor);
+    attempt.markAbortable();
+    await execution.start(startRequest());
+    runtime.submitActiveInput.mockImplementation(async (request, beforeDelivery) => {
+      await beforeDelivery({
+        validate: () => undefined,
+        commit: () => {
+          runtimeMetadata = {
+            clientRequestId: request.clientRequestId,
+            turnId: request.turnId,
+          };
+          request.onAbortable?.();
+        },
+      });
+      return true;
+    });
+
+    await expect(execution.submitActiveInput(activeInputRequest(rejected, async (operationHandoff) => {
+      const handoff = composeHandoff(operationHandoff, rejected);
+      handoff.validate();
+      await Promise.resolve();
+      emitOutput('A while persistence fails');
+      assertOwner('turn-1', 'A while persistence fails');
+      throw new Error('persistence failed');
+    }))).rejects.toThrow('persistence failed');
+    emitOutput('A after persistence failed');
+    assertOwner('turn-1', 'A after persistence failed');
+
+    await expect(execution.submitActiveInput({
+      ...activeInputRequest(successor, async (operationHandoff) => {
+        const handoff = composeHandoff(operationHandoff, successor);
+        handoff.validate();
+        await Promise.resolve();
+        emitOutput('A before persistence commits');
+        assertOwner('turn-1', 'A before persistence commits');
+        handoff.validate();
+        handoff.commit();
+        emitOutput('B after the atomic commit');
+        assertOwner('turn-b', 'B after the atomic commit');
+      }),
+      admission: {
+        signal: new AbortController().signal,
+        markStarted: mock(() => undefined),
+        markAbortable: successorAbortable,
+      },
+    })).resolves.toBe(true);
+    expect(successorAbortable).toHaveBeenCalledTimes(1);
+    await expect(bus.waitUntilTurnAbortable('chat-1', successor)).resolves.toBe(true);
   });
 });

@@ -98,23 +98,21 @@ export class CodexExecution implements AgentExecution {
   async submitActiveInput(
     request: Parameters<NonNullable<AgentExecution['submitActiveInput']>>[0],
   ): Promise<boolean> {
-    this.#operations.register(request.chatId, request.operation);
-    try {
-      const runtimeRequest = prepareResumeRequest(
-        request,
-        await this.#runtimeConfiguration(request),
-        this.nativeSessions,
-      );
-      const accepted = await this.runtime.submitActiveInput(
-        runtimeRequest,
-        request.beforeDelivery,
-      );
-      if (!accepted) this.#operations.finish(request.chatId, request.operation);
-      return accepted;
-    } catch (error) {
-      this.#operations.finish(request.chatId, request.operation);
-      throw error;
-    }
+    const predecessor = this.#operations.current(request.chatId);
+    const runtimeRequest = prepareResumeRequest(
+      request,
+      await this.#runtimeConfiguration(request),
+      this.nativeSessions,
+    );
+    return this.runtime.submitActiveInput(
+      runtimeRequest,
+      (handoff) => request.beforeDelivery(this.#operations.handoff(
+        request.chatId,
+        predecessor,
+        request.operation,
+        handoff,
+      )),
+    );
   }
 
   async compact(

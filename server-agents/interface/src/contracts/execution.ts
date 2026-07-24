@@ -52,7 +52,12 @@ export interface AgentResumeRequest extends AgentExecutionContext {
 }
 
 export interface AgentActiveInput extends AgentResumeRequest {
-  readonly beforeDelivery: () => Promise<void>;
+  readonly beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>;
+}
+
+export interface AgentActiveInputHandoff {
+  validate(): void;
+  commit(): void;
 }
 
 export interface AgentCompactRequest extends AgentResumeRequest {

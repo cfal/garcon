@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevisions,
+  type AgentActiveInputHandoff,
   type AgentExecutionContext,
   type AgentOperationIdentity,
 } from '@garcon/server-agent-interface';
@@ -196,7 +197,7 @@ export class AgentRuntimeRouter {
     chatId: string,
     prompt: string,
     opts: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
   ): Promise<boolean> {
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) return false;
@@ -211,14 +212,19 @@ export class AgentRuntimeRouter {
     });
     await this.#validateEndpoint(integration, selection);
     const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
-    this.#events.trackTurn(chatId, operationMetadata(operation));
+    const previousTurn = this.#events.getActiveTurn(chatId);
     return integration.execution.submitActiveInput({
       ...this.#executionContext(chatId, entry, selection, operation, opts),
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
       attachments: attachments(opts.images),
-      beforeDelivery,
+      beforeDelivery: (handoff) => beforeDelivery(this.#events.handoffTurn(
+        chatId,
+        previousTurn,
+        operationMetadata(operation),
+        handoff,
+      )),
     });
   }
 
