@@ -100,3 +100,18 @@
 		}
 	}}
 />
+
+<style>
+	input::-webkit-slider-thumb {
+		width: 0;
+		height: 0;
+		appearance: none;
+	}
+
+	input::-moz-range-thumb {
+		width: 0;
+		height: 0;
+		border: 0;
+		background: transparent;
+	}
+</style>
