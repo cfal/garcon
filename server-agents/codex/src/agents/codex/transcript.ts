@@ -12,7 +12,11 @@ import { resolveCodexNativePath } from './native-path.js';
 
 type CodexTranscriptRuntime = Pick<
   CodexAppServerRuntime,
-  'getPreview' | 'loadMessagePage' | 'loadMessages' | 'resolveNativePath'
+  | 'getPreview'
+  | 'loadMessagePage'
+  | 'loadMessages'
+  | 'requestNativePathDiscoveryRefresh'
+  | 'resolveNativePath'
 >;
 
 export function createCodexTranscript(
@@ -54,9 +58,6 @@ export function createCodexTranscript(
     const value = reference(chat);
     const nativePath = await resolvePath(chat, signal);
     if (value.agentSessionId && !nativePath) {
-      logger.warn('Codex transcript path could not be resolved', {
-        agentSessionId: value.agentSessionId,
-      });
       throw new AgentIntegrationError(
         'TRANSCRIPT_UNAVAILABLE',
         'Codex native transcript could not be resolved',
@@ -70,10 +71,33 @@ export function createCodexTranscript(
     }
     return { ...value, nativePath };
   };
+  const retryableReference = async (
+    chat: Parameters<AgentTranscript['load']>[0]['chat'],
+    signal: AbortSignal,
+  ) => {
+    const value = reference(chat);
+    try {
+      return await resolvedReference(chat, signal);
+    } catch (error) {
+      if (
+        error instanceof AgentIntegrationError &&
+        error.code === 'TRANSCRIPT_UNAVAILABLE' &&
+        error.details?.reason === 'not-found' &&
+        value.agentSessionId
+      ) {
+        runtime.requestNativePathDiscoveryRefresh(value.agentSessionId);
+      }
+      throw error;
+    }
+  };
   const loadMessages = async (
     chat: Parameters<AgentTranscript['load']>[0]['chat'],
     signal: AbortSignal,
   ) => runtime.loadMessages(await resolvedReference(chat, signal), signal);
+  const loadRetryableMessages = async (
+    chat: Parameters<AgentTranscript['load']>[0]['chat'],
+    signal: AbortSignal,
+  ) => runtime.loadMessages(await retryableReference(chat, signal), signal);
   const resolveIndexSource = async (
     chat: Parameters<AgentTranscript['load']>[0]['chat'],
     signal: AbortSignal,
@@ -104,7 +128,16 @@ export function createCodexTranscript(
       const agentSessionId = chat.agentSessionId ?? current.agentSessionId;
       if (!agentSessionId) return null;
       const nativePath = await resolvePath(chat, signal);
-      if (!nativePath) return null;
+      if (!nativePath) {
+        if (
+          chat.nativeSession &&
+          !current.path &&
+          current.agentSessionId === agentSessionId
+        ) {
+          return chat.nativeSession;
+        }
+        return null;
+      }
       if (current.path === nativePath && chat.nativeSession) {
         return chat.nativeSession;
       }
@@ -116,12 +149,12 @@ export function createCodexTranscript(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const messages = await loadMessages(chat, signal);
+      const messages = await loadRetryableMessages(chat, signal);
       return { messages, revision: computeAgentTranscriptRevision(messages) };
     },
     async loadPage({ chat, page, signal }) {
       signal.throwIfAborted();
-      return runtime.loadMessagePage(await resolvedReference(chat, signal), page, signal);
+      return runtime.loadMessagePage(await retryableReference(chat, signal), page, signal);
     },
     async preview({ chat, signal }) {
       signal.throwIfAborted();

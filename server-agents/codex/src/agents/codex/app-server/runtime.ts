@@ -20,6 +20,7 @@ import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isA
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import { convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
+import { NativePathDiscoveryRefreshLimiter, type NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type {
   ErrorNotification,
@@ -118,6 +119,7 @@ export interface CodexAppServerRuntimeOptions {
   materializationTimeoutMs?: number;
   capacityRetryDelaysMs?: readonly number[];
   capacityRetryDelay?: (delayMs: number) => Promise<void>;
+  nativePathDiscoveryRefresh?: NativePathDiscoveryRefreshLimiterOptions;
   logger?: AgentLogger;
   skillDiscovery?: CodexSkillDiscovery;
 }
@@ -134,6 +136,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #materializationTimeoutMs: number;
   #capacityRetryDelaysMs: readonly number[];
   #capacityRetryDelay: (delayMs: number) => Promise<void>;
+  #nativePathDiscoveryRefresh: NativePathDiscoveryRefreshLimiter;
   #logger: AgentLogger;
   #skillDiscovery: CodexSkillDiscovery;
   #history: CodexHistoryService;
@@ -155,6 +158,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#capacityRetryDelaysMs = (options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS)
       .slice(0, MAX_CAPACITY_RETRIES);
     this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
+    this.#nativePathDiscoveryRefresh =
+      new NativePathDiscoveryRefreshLimiter(options.nativePathDiscoveryRefresh);
     this.#logger = options.logger ?? NOOP_LOGGER;
     this.#history = new CodexHistoryService({
       createClient: this.#createClient,
@@ -802,18 +807,16 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async resolveNativePath(session: CodexChatEntry): Promise<string | null> {
     if (!session.agentSessionId) return null;
 
-    const hadCachedThreadList = this.#threadListCaches.has(false);
-    const cachedPath = await this.#accessibleNativePath(
-      await this.#getThreadListCache(false),
-      session.agentSessionId,
-    );
-    if (cachedPath || !hadCachedThreadList) return cachedPath;
-
-    this.#threadListCaches.delete(false);
     return this.#accessibleNativePath(
       await this.#getThreadListCache(false),
       session.agentSessionId,
     );
+  }
+
+  requestNativePathDiscoveryRefresh(agentSessionId: string): void {
+    // Bounds each session heavily while keeping unrelated chat retries responsive.
+    if (!this.#nativePathDiscoveryRefresh.accept(agentSessionId)) return;
+    this.#threadListCaches.delete(false);
   }
 
   async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {

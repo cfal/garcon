@@ -42,6 +42,7 @@ async function writeTranscript(directory, fileName, threadId = 'thread-1') {
 function createRuntime({ discoveredPath = null } = {}) {
   const calls = {
     discover: 0,
+    requestDiscoveryRefresh: [],
     load: [],
     page: [],
     preview: [],
@@ -52,6 +53,9 @@ function createRuntime({ discoveredPath = null } = {}) {
       async resolveNativePath() {
         calls.discover += 1;
         return discoveredPath;
+      },
+      requestNativePathDiscoveryRefresh(agentSessionId) {
+        calls.requestDiscoveryRefresh.push(agentSessionId);
       },
       async loadMessages(reference) {
         calls.load.push(reference);
@@ -119,6 +123,53 @@ describe('createCodexTranscript', () => {
         }),
       ).resolves.toBe(nativeSession);
       expect(fixture.calls.discover).toBe(0);
+    });
+  });
+
+  it('preserves a pathless stored reference when discovery misses', async () => {
+    await withDirectory(async (directory) => {
+      const codec = createPathNativeSessionCodec('codex');
+      const nativeSession = codec.encode({
+        path: null,
+        agentSessionId: 'thread-1',
+        modelEndpointId: 'endpoint-1',
+      });
+      const fixture = createFixture(directory, nativeSession);
+
+      await expect(
+        fixture.transcript.resolveNativeSession({
+          chat: fixture.chat,
+          signal,
+        }),
+      ).resolves.toBe(nativeSession);
+      expect(fixture.calls.discover).toBe(1);
+      expect(fixture.calls.requestDiscoveryRefresh).toEqual([]);
+    });
+  });
+
+  it('acquires a discoverable path for a pathless stored reference', async () => {
+    await withDirectory(async (directory) => {
+      const discoveredPath = await writeTranscript(directory, 'discovered.jsonl');
+      const codec = createPathNativeSessionCodec('codex');
+      const nativeSession = codec.encode({
+        path: null,
+        agentSessionId: 'thread-1',
+        modelEndpointId: 'endpoint-1',
+      });
+      const fixture = createFixture(directory, nativeSession, { discoveredPath });
+
+      await expect(
+        fixture.transcript.resolveNativeSession({
+          chat: fixture.chat,
+          signal,
+        }),
+      ).resolves.toEqual(codec.encode({
+        path: discoveredPath,
+        agentSessionId: 'thread-1',
+        modelEndpointId: 'endpoint-1',
+      }));
+      expect(fixture.calls.discover).toBe(1);
+      expect(fixture.calls.requestDiscoveryRefresh).toEqual([]);
     });
   });
 
@@ -196,7 +247,7 @@ describe('createCodexTranscript', () => {
     });
   });
 
-  it('fails every read closed and retries discovery when a known session has no path', async () => {
+  it('fails every read closed and requests refresh only for full and paged loads', async () => {
     await withDirectory(async (directory) => {
       const codec = createPathNativeSessionCodec('codex');
       const fixture = createFixture(
@@ -227,12 +278,14 @@ describe('createCodexTranscript', () => {
         });
       }
       expect(fixture.calls.discover).toBe(requests.length);
+      expect(fixture.calls.requestDiscoveryRefresh).toEqual(['thread-1', 'thread-1']);
       await expect(
         fixture.transcript.resolveNativeSession({
           chat: fixture.chat,
           signal,
         }),
-      ).resolves.toBeNull();
+      ).resolves.toBe(fixture.chat.nativeSession);
+      expect(fixture.calls.discover).toBe(requests.length + 1);
     });
   });
 
