@@ -566,7 +566,16 @@ async function loadFingerprintIndexEntries(
   paths: string[],
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const entries: string[] = [];
+  const entriesByPath = await loadFingerprintIndexEntryMap(projectPath, paths, signal);
+  return Array.from(entriesByPath, ([filePath, entry]) => `${filePath}\x00${entry}`).sort();
+}
+
+async function loadFingerprintIndexEntryMap(
+  projectPath: string,
+  paths: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const entries = new Map<string, string>();
   for (const chunk of chunkGitPathspecs(paths)) {
     try {
       const { stdout } = await runGit(
@@ -575,13 +584,13 @@ async function loadFingerprintIndexEntries(
         readOnlyGitOptions({ signal }),
       );
       for (const [filePath, entry] of parseLsFilesStageZ(stdout)) {
-        entries.push(`${filePath}\x00${entry}`);
+        entries.set(filePath, entry);
       }
     } catch {
       // Status output still captures the changed path. Missing index metadata should not make freshness fail.
     }
   }
-  return entries.sort();
+  return entries;
 }
 
 async function worktreeStatFingerprint(projectPath: string, file: string): Promise<string> {
@@ -633,6 +642,8 @@ interface WorkbenchFingerprintInput {
   cachedStatsOutput: string;
   unmergedOutput: string;
   statusEntries: PorcelainStatusEntry[];
+  indexEntriesByPath?: Map<string, string>;
+  worktreeStatTokens?: string[];
   signal?: AbortSignal;
 }
 
@@ -646,12 +657,20 @@ async function buildWorkbenchFingerprintFromInputs({
   cachedStatsOutput,
   unmergedOutput,
   statusEntries,
+  indexEntriesByPath,
+  worktreeStatTokens: loadedWorktreeStatTokens,
   signal,
 }: WorkbenchFingerprintInput): Promise<{ fingerprint: string; changedPathCount: number }> {
   const changedPaths = uniqueGitPaths(statusEntries.map((entry) => entry.path));
   const [indexEntryTokens, worktreeStatTokens] = await Promise.all([
-    loadFingerprintIndexEntries(projectPath, changedPaths, signal),
-    loadFingerprintWorktreeStats(projectPath, statusEntries),
+    indexEntriesByPath
+      ? Promise.resolve(
+          Array.from(indexEntriesByPath, ([filePath, entry]) => `${filePath}\x00${entry}`).sort(),
+        )
+      : loadFingerprintIndexEntries(projectPath, changedPaths, signal),
+    loadedWorktreeStatTokens
+      ? Promise.resolve(loadedWorktreeStatTokens)
+      : loadFingerprintWorktreeStats(projectPath, statusEntries),
   ]);
 
   const fingerprint = `v${GIT_WORKING_TREE_FINGERPRINT_VERSION}:${hashString([
@@ -674,21 +693,24 @@ async function buildWorkbenchFingerprintFromInputs({
 async function loadBatchedFingerprintInputs(
   projectPath: string,
   files: TreeNode[],
+  existingIndexEntries: Map<string, string> | undefined,
   signal?: AbortSignal,
 ): Promise<BatchedFingerprintInputs> {
   const paths = files.map((file) => file.path);
-  const indexEntriesByPath = new Map<string, string>();
+  const indexEntriesByPath = new Map(existingIndexEntries);
   const headEntriesByPath = new Map<string, string>();
   for (const chunk of chunkGitPathspecs(paths)) {
     const [indexResult, headResult] = await Promise.allSettled([
-      runGit(
-        projectPath,
-        ['ls-files', '-s', '-z', '--', ...chunk],
-        readOnlyGitOptions({ signal }),
-      ),
+      existingIndexEntries
+        ? Promise.resolve({ stdout: '' })
+        : runGit(
+            projectPath,
+            ['ls-files', '-s', '-z', '--', ...chunk],
+            readOnlyGitOptions({ signal }),
+          ),
       runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...chunk], readOnlyGitOptions({ signal })),
     ]);
-    if (indexResult.status === 'fulfilled') {
+    if (!existingIndexEntries && indexResult.status === 'fulfilled') {
       for (const [filePath, entry] of parseLsFilesStageZ(indexResult.value.stdout)) {
         indexEntriesByPath.set(filePath, entry);
       }
@@ -1020,19 +1042,26 @@ async function buildReviewDocumentSummaryFromTree({
   mode,
   context,
   treeRoot,
+  indexEntriesByPath,
   signal,
 }: {
   projectPath: string;
   mode: GitReviewMode;
   context: number;
   treeRoot: TreeNode[];
+  indexEntriesByPath?: Map<string, string>;
   signal?: AbortSignal;
 }): Promise<GitReviewDocumentSummary> {
   const effectiveMode = mode === 'staged' ? 'staged' : 'working';
   const allFiles = flattenFileNodes(treeRoot);
   const relevantFiles = allFiles.filter((node) => Boolean(facetForReviewMode(node, effectiveMode)));
   const limitedFiles = relevantFiles.slice(0, GIT_REVIEW_DOCUMENT_LIMITS.maxSummaryFiles);
-  const fingerprintInputs = await loadBatchedFingerprintInputs(projectPath, limitedFiles, signal);
+  const fingerprintInputs = await loadBatchedFingerprintInputs(
+    projectPath,
+    limitedFiles,
+    indexEntriesByPath,
+    signal,
+  );
   const summaries = (await mapWithConcurrencyResult(
     limitedFiles,
     GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency,
@@ -1107,17 +1136,29 @@ function notRepositoryFingerprint(projectPath: string): GitWorkingTreeFingerprin
   };
 }
 
-export async function getWorkingTreeFingerprint({
+export interface GitWorkingTreeObservation {
+  projectPath: string;
+  repoRoot: string;
+  branch: string;
+  head: string;
+  statusOutput: string;
+  workingStatsOutput: string;
+  cachedStatsOutput: string;
+  unmergedOutput: string;
+  statusEntries: PorcelainStatusEntry[];
+  changedPaths: string[];
+  indexEntriesByPath: Map<string, string>;
+  worktreeStatTokens: string[];
+  fingerprint: string;
+  changedPathCount: number;
+}
+
+export async function captureWorkingTreeObservation({
   projectPath,
+  repoRoot: knownRepoRoot,
   trace,
   signal,
-}: GitWorkingTreeFingerprintOptions): Promise<GitWorkingTreeFingerprintResponse> {
-  try {
-    await fs.access(projectPath);
-  } catch {
-    return notRepositoryFingerprint(projectPath);
-  }
-
+}: GitWorkingTreeFingerprintOptions & { repoRoot?: string }): Promise<GitWorkingTreeObservation> {
   const [
     repoRootResult,
     branchResult,
@@ -1127,7 +1168,14 @@ export async function getWorkingTreeFingerprint({
     cachedStatsResult,
     unmergedResult,
   ] = await Promise.allSettled([
-    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
+    knownRepoRoot
+      ? Promise.resolve({ stdout: knownRepoRoot, stderr: '' })
+      : runGitTraced(
+          projectPath,
+          ['rev-parse', '--show-toplevel'],
+          trace,
+          readOnlyGitOptions({ signal }),
+        ),
     runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
     runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
     runGitTraced(
@@ -1146,13 +1194,18 @@ export async function getWorkingTreeFingerprint({
     runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
   ]);
 
-  if (repoRootResult.status === 'rejected') return notRepositoryFingerprint(projectPath);
+  if (repoRootResult.status === 'rejected') throw repoRootResult.reason;
   if (statusResult.status === 'rejected') throw statusResult.reason;
 
   const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
   const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
   const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
   const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
+  const changedPaths = uniqueGitPaths(statusEntries.map((entry) => entry.path));
+  const [indexEntriesByPath, worktreeStatTokens] = await Promise.all([
+    loadFingerprintIndexEntryMap(projectPath, changedPaths, signal),
+    loadFingerprintWorktreeStats(projectPath, statusEntries),
+  ]);
   const { fingerprint, changedPathCount } = await buildWorkbenchFingerprintFromInputs({
     projectPath,
     repoRoot,
@@ -1163,15 +1216,120 @@ export async function getWorkingTreeFingerprint({
     cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
     unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
     statusEntries,
+    indexEntriesByPath,
+    worktreeStatTokens,
     signal,
   });
+
+  return {
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput: statusResult.value.stdout,
+    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
+    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
+    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
+    statusEntries,
+    changedPaths,
+    indexEntriesByPath,
+    worktreeStatTokens,
+    fingerprint,
+    changedPathCount,
+  };
+}
+
+export async function isWorkingTreeObservationCurrent(
+  observation: GitWorkingTreeObservation,
+  trace?: GitCommandTrace[],
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const [branchResult, headResult, statusResult, unmergedResult] = await Promise.allSettled([
+    runGitTraced(
+      observation.projectPath,
+      ['branch', '--show-current'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['rev-parse', 'HEAD'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['ls-files', '-u', '-z'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+  ]);
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
+  const unmerged = unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '';
+  if (
+    branch !== observation.branch ||
+    head !== observation.head ||
+    statusResult.value.stdout !== observation.statusOutput ||
+    unmerged !== observation.unmergedOutput
+  ) {
+    return false;
+  }
+
+  const currentEntries = await loadFingerprintIndexEntryMap(
+    observation.projectPath,
+    observation.changedPaths,
+    signal,
+  );
+  const currentEntryTokens = Array.from(
+    currentEntries,
+    ([filePath, entry]) => `${filePath}\x00${entry}`,
+  ).sort();
+  const expectedEntryTokens = Array.from(
+    observation.indexEntriesByPath,
+    ([filePath, entry]) => `${filePath}\x00${entry}`,
+  ).sort();
+  if (currentEntryTokens.join('\x1f') !== expectedEntryTokens.join('\x1f')) return false;
+
+  const currentWorktreeStats = await loadFingerprintWorktreeStats(
+    observation.projectPath,
+    observation.statusEntries,
+  );
+  return currentWorktreeStats.join('\x1f') === observation.worktreeStatTokens.join('\x1f');
+}
+
+export async function getWorkingTreeFingerprint({
+  projectPath,
+  trace,
+  signal,
+}: GitWorkingTreeFingerprintOptions): Promise<GitWorkingTreeFingerprintResponse> {
+  try {
+    await fs.access(projectPath);
+  } catch {
+    return notRepositoryFingerprint(projectPath);
+  }
+
+  let observation: GitWorkingTreeObservation;
+  try {
+    observation = await captureWorkingTreeObservation({ projectPath, trace, signal });
+  } catch {
+    return notRepositoryFingerprint(projectPath);
+  }
 
   return {
     status: 'ready',
     project: projectPath,
     fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
-    fingerprint,
-    changedPathCount,
+    fingerprint: observation.fingerprint,
+    changedPathCount: observation.changedPathCount,
   };
 }
 
@@ -1190,67 +1348,24 @@ async function getWorkbenchSnapshot({
     return notRepositorySnapshot(projectPath);
   }
 
-  const [
-    repoRootResult,
-    branchResult,
-    headResult,
-    statusResult,
-    workingStatsResult,
-    cachedStatsResult,
-    unmergedResult,
-  ] = await Promise.allSettled([
-    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(
-      projectPath,
-      ['status', '--porcelain=v1', '-z', '-uall'],
-      trace,
-      readOnlyGitOptions({ signal }),
-    ),
-    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(
-      projectPath,
-      ['diff', '--cached', '--numstat', '-z'],
-      trace,
-      readOnlyGitOptions({ signal }),
-    ),
-    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
-  ]);
-
-  if (repoRootResult.status === 'rejected') return notRepositorySnapshot(projectPath);
-  if (statusResult.status === 'rejected') throw statusResult.reason;
-
+  let observation: GitWorkingTreeObservation;
+  try {
+    observation = await captureWorkingTreeObservation({ projectPath, trace, signal });
+  } catch {
+    return notRepositorySnapshot(projectPath);
+  }
   const effectiveMode = mode === 'staged' ? 'staged' : 'working';
-  const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
-  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
-  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
-  const hasCommits = headResult.status === 'fulfilled';
-  const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
-  const workingStats = workingStatsResult.status === 'fulfilled'
-    ? parseNumstatZ(workingStatsResult.value.stdout)
-    : {};
-  const cachedStats = cachedStatsResult.status === 'fulfilled'
-    ? parseNumstatZ(cachedStatsResult.value.stdout)
-    : {};
+  const { repoRoot, branch, head, statusEntries } = observation;
+  const hasCommits = Boolean(head);
+  const workingStats = parseNumstatZ(observation.workingStatsOutput);
+  const cachedStats = parseNumstatZ(observation.cachedStatsOutput);
   const tree = buildTreeFromStatusEntries(statusEntries, workingStats, cachedStats, hasCommits, 'loaded');
   const reviewSummary = await buildReviewDocumentSummaryFromTree({
     projectPath,
     mode: effectiveMode,
     context,
     treeRoot: tree.root,
-    signal,
-  });
-  const { fingerprint } = await buildWorkbenchFingerprintFromInputs({
-    projectPath,
-    repoRoot,
-    branch,
-    head,
-    statusOutput: statusResult.value.stdout,
-    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
-    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
-    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
-    statusEntries,
+    indexEntriesByPath: observation.indexEntriesByPath,
     signal,
   });
   const selected = chooseSelectedFile(reviewSummary.files, selectedFile);
@@ -1279,7 +1394,7 @@ async function getWorkbenchSnapshot({
       Math.max(0, Math.min(bodyCandidateCount, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles)),
     ),
     snapshotId: reviewSummary.documentId,
-    workbenchFingerprint: fingerprint,
+    workbenchFingerprint: observation.fingerprint,
   };
 }
 

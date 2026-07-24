@@ -1,6 +1,10 @@
 import { createHash } from 'crypto';
 import { mapWithConcurrency } from '../lib/concurrency.js';
-import { getWorkingTreeFingerprint } from './diff-engine.js';
+import {
+  captureWorkingTreeObservation,
+  getWorkingTreeFingerprint,
+  isWorkingTreeObservationCurrent,
+} from './diff-engine.js';
 import {
   isExpectedMissingGitResult,
   isUnresolvedRevision,
@@ -339,6 +343,7 @@ async function loadDiffSummary(
   toHash: string | null,
   trace?: GitCommandTrace[],
   signal?: AbortSignal,
+  workingOutputs?: { status: string; unmerged: string },
 ) {
   const targetArgs = toHash ? [effectiveFromHash, toHash] : [effectiveFromHash];
   const commands = [
@@ -358,6 +363,15 @@ async function loadDiffSummary(
   if (toHash) {
     const [nameStatus, numstat] = await Promise.all(commands);
     return { nameStatus: nameStatus.stdout, numstat: numstat.stdout };
+  }
+  if (workingOutputs) {
+    const [nameStatus, numstat] = await Promise.all(commands);
+    return {
+      nameStatus: nameStatus.stdout,
+      numstat: numstat.stdout,
+      status: workingOutputs.status,
+      unmerged: workingOutputs.unmerged,
+    };
   }
   const [nameStatus, numstat, status, unmerged] = await Promise.all([
     ...commands,
@@ -394,34 +408,6 @@ async function workingTreeFingerprint(
   throw new Error(result.message);
 }
 
-async function loadWorkingTreeIdentity(
-  projectPath: string,
-  fingerprint: string,
-  trace?: GitCommandTrace[],
-  signal?: AbortSignal,
-): Promise<GitResolvedComparisonWorkingTree> {
-  const [branch, head] = await Promise.all([
-    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(
-      projectPath,
-      ['rev-parse', '--verify', '--quiet', 'HEAD'],
-      trace,
-      readOnlyGitOptions({ signal }),
-    ).catch((error) => {
-      if (isExpectedMissingGitResult(error)) return { stdout: '' };
-      throw error;
-    }),
-  ]);
-  return {
-    kind: 'working-tree',
-    label: 'Working Tree',
-    branch: branch.stdout.trim(),
-    headHash: head.stdout.trim() || null,
-    fingerprint,
-    shortFingerprint: fingerprint.slice(-8),
-  };
-}
-
 async function buildWorkingTreeSnapshot(
   repoRoot: string,
   requestedProjectPath: string,
@@ -432,14 +418,26 @@ async function buildWorkingTreeSnapshot(
   signal?: AbortSignal,
 ): Promise<GitComparisonSnapshotResponse> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const before = await workingTreeFingerprint(repoRoot, trace, signal);
+    const observation = await captureWorkingTreeObservation({
+      projectPath: repoRoot,
+      repoRoot,
+      trace,
+      signal,
+    });
+    const before = observation.fingerprint;
     let summary: Awaited<ReturnType<typeof loadDiffSummary>>;
     try {
-      summary = await loadDiffSummary(repoRoot, from.hash, null, trace, signal);
+      summary = await loadDiffSummary(
+        repoRoot,
+        from.hash,
+        null,
+        trace,
+        signal,
+        { status: observation.statusOutput, unmerged: observation.unmergedOutput },
+      );
     } catch (error) {
       if (signal?.aborted) throw error;
-      const afterFailure = await workingTreeFingerprint(repoRoot, trace, signal);
-      if (before !== afterFailure) continue;
+      if (!(await isWorkingTreeObservationCurrent(observation, trace, signal))) continue;
       throw error;
     }
     const summarized = await summarizeComparisonFiles({
@@ -453,9 +451,15 @@ async function buildWorkingTreeSnapshot(
       unmergedOutput: summary.unmerged,
       signal,
     });
-    const identity = await loadWorkingTreeIdentity(repoRoot, before, trace, signal);
-    const after = await workingTreeFingerprint(repoRoot, trace, signal);
-    if (before !== after) continue;
+    const identity: GitResolvedComparisonWorkingTree = {
+      kind: 'working-tree',
+      label: 'Working Tree',
+      branch: observation.branch,
+      headHash: observation.head || null,
+      fingerprint: before,
+      shortFingerprint: before.slice(-8),
+    };
+    if (!(await isWorkingTreeObservationCurrent(observation, trace, signal))) continue;
     const files = summarized.files;
     return {
       status: 'ready',
