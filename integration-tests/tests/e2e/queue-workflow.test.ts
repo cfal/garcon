@@ -21,6 +21,7 @@ describe('Lightpanda queue workflow', () => {
 			await app.sendComposer('ui-reorder-b');
 			await app.sendComposer('ui-reorder-c');
 			await app.sendComposer('ui-reorder-d');
+			await app.waitForQueuedPreview('ui-reorder-b');
 			await app.clickResponsiveAction('Edit queue');
 			await app.waitForQueuedDialogOrder(['ui-reorder-b', 'ui-reorder-c', 'ui-reorder-d']);
 
