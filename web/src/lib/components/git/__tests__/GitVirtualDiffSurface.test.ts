@@ -148,8 +148,7 @@ describe('GitVirtualDiffSurface', () => {
 			expect(element.style.top).toBe('');
 			expect(element.parentElement).toBe(rowWindow);
 		}
-		expect(rowWindow.classList.contains('absolute')).toBe(true);
-		expect(rowWindow.classList.contains('inset-x-0')).toBe(true);
+		expect(rowWindow.className).toBe('absolute inset-x-0');
 		expect(rowWindow.className).not.toMatch(/(?:^|\s)-?(?:translate|transform)(?:-|\s|$)/);
 		expect(rowWindow.style.transform).toBe('');
 	});

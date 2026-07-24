@@ -58,7 +58,6 @@
 
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
-	// Keeps adjacent diff backgrounds in one flow layout; per-row transforms create fractional-DPR paint seams.
 	let windowStart = $derived(virtualItems[0]?.start ?? 0);
 	let visibleRows = $derived.by(() =>
 		virtualItems
@@ -221,6 +220,7 @@
 		</div>
 	{:else}
 		<div class="relative w-full" style:height={`${totalHeight}px`}>
+			<!-- Keeps adjacent diff backgrounds in one flow layout; per-row transforms create fractional-DPR paint seams. -->
 			<div class="absolute inset-x-0" style:top={`${windowStart}px`} data-git-virtual-row-window>
 				{#each virtualItems as virtualItem (virtualItem.key)}
 					{@const row = source.rowAt(virtualItem.index)}

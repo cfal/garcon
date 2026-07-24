@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	measureVirtualRow,
+	type VirtualRowKey,
 	type VirtualRowMeasurementContext,
 } from '../git-virtual-row-measurement.js';
 
 function measurementContext(
-	itemSizeCache: ReadonlyMap<string | number | bigint, number> = new Map(),
+	itemSizeCache: ReadonlyMap<VirtualRowKey, number> = new Map(),
 ): VirtualRowMeasurementContext {
 	return {
 		indexFromElement: () => 7,
@@ -47,10 +48,22 @@ describe('measureVirtualRow', () => {
 	it('reuses a cached size without reading layout', () => {
 		const element = document.createElement('div');
 		const rect = vi.spyOn(element, 'getBoundingClientRect');
-		const cache = new Map<string | number | bigint, number>([['row-7', 54]]);
+		const cache = new Map<VirtualRowKey, number>([['row-7', 54]]);
 
 		expect(measureVirtualRow(element, undefined, measurementContext(cache))).toBe(54);
 		expect(rect).not.toHaveBeenCalled();
+	});
+
+	it('reads layout when an observer entry omits its border box', () => {
+		const element = document.createElement('div');
+		const rect = vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rowRect(84));
+		const cache = new Map<VirtualRowKey, number>([['row-7', 54]]);
+		const entry = {
+			borderBoxSize: [],
+		} satisfies Pick<ResizeObserverEntry, 'borderBoxSize'>;
+
+		expect(measureVirtualRow(element, entry, measurementContext(cache))).toBe(84);
+		expect(rect).toHaveBeenCalledOnce();
 	});
 
 	it('reads layout for the first measurement', () => {

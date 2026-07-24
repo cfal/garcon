@@ -7,9 +7,7 @@ import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitVirtualDiffRow from '../GitVirtualDiffRow.svelte';
 
-function buildVirtualRows(
-	options: Parameters<typeof buildGitVirtualReviewRowSource>[0],
-) {
+function buildVirtualRows(options: Parameters<typeof buildGitVirtualReviewRowSource>[0]) {
 	const source = buildGitVirtualReviewRowSource(options);
 	return source.rowsInRange(0, source.rowCount);
 }
@@ -226,6 +224,20 @@ describe('GitVirtualDiffRow', () => {
 		expect(affordance?.className).toContain('group-hover/diff-cell:opacity-100');
 		expect(container.querySelector('[data-git-diff-review-row]')).not.toBeNull();
 	});
+
+	it.each(['unified', 'split'] as const)(
+		'contains inline composer margins in the measured %s row',
+		(diffMode) => {
+			const row = buildRows(diffMode).find((candidate) => !candidate.view.isHunkHeader);
+			expect(row).toBeDefined();
+			if (!row) return;
+			const { container } = renderRow(row);
+
+			expect(
+				container.querySelector('[data-git-diff-content-row]')?.classList.contains('flow-root'),
+			).toBe(true);
+		},
+	);
 
 	it('does not render the inline composer when the workbench uses its mobile modal', () => {
 		const addedRow = findUnifiedRow('add');

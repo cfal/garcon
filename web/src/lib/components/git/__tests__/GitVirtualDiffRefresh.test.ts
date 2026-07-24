@@ -214,6 +214,12 @@ describe('Git virtual diff refresh', () => {
 		expect(screen.getByText('file-2.ts')).toBeTruthy();
 		expect(viewport.scrollTop).toBe(300);
 		expect(measureCalls).toBe(1);
+		const rowWindow = container.querySelector<HTMLElement>('[data-git-virtual-row-window]');
+		expect(rowWindow).toBeTruthy();
+		if (!rowWindow) return;
+		const mountedRows = Array.from(rowWindow.children);
+		expect(mountedRows).toHaveLength(1);
+		expect(mountedRows[0]?.parentElement).toBe(rowWindow);
 	});
 
 	it('repositions a requested file when preceding rows move its index', async () => {

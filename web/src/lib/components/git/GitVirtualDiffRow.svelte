@@ -157,7 +157,7 @@
 
 {#if row.kind === 'unified-row'}
 	<div
-		class="font-mono"
+		class="flow-root font-mono"
 		style:font-size={`${fontSize}px`}
 		style:line-height={`${rowLineHeight}px`}
 		data-git-diff-content-row
@@ -330,7 +330,7 @@
 	</div>
 {:else}
 	<div
-		class="font-mono"
+		class="flow-root font-mono"
 		style:font-size={`${fontSize}px`}
 		style:line-height={`${rowLineHeight}px`}
 		data-git-diff-content-row
@@ -358,10 +358,7 @@
 				{/if}
 			</div>
 		{:else}
-			<div
-				data-git-diff-review-row
-				class="grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)]"
-			>
+			<div data-git-diff-review-row class="grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)]">
 				{#each splitCellViews(row.view) as cellView, index}
 					<div
 						class="group/diff-cell grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ??
