@@ -221,10 +221,11 @@ describe('GitVirtualDiffRow', () => {
 		const { container } = renderRow(addedRow);
 
 		const affordance = container.querySelector<HTMLElement>('[data-git-comment-affordance]');
+		const reviewRow = container.querySelector<HTMLElement>('[data-git-diff-review-row]');
 		expect(affordance).not.toBeNull();
 		expect(affordance?.className).toContain('absolute');
 		expect(affordance?.className).toContain('group-hover/diff-cell:opacity-100');
-		expect(container.querySelector('[data-git-diff-review-row]')).not.toBeNull();
+		expect(reviewRow?.className).toContain('diff-row-paint');
 	});
 
 	it('does not render the inline composer when the workbench uses its mobile modal', () => {
@@ -251,7 +252,7 @@ describe('GitVirtualDiffRow', () => {
 		const splitRow = findSplitChangeRow();
 		const onAddCommentForFile = vi.fn();
 		const onStageLine = vi.fn();
-		renderRow(splitRow, {
+		const { container } = renderRow(splitRow, {
 			interaction: {
 				...renderRowInteraction(),
 				onAddComment: onAddCommentForFile,
@@ -268,6 +269,7 @@ describe('GitVirtualDiffRow', () => {
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Stage line' })[0]);
 		expect(onStageLine).toHaveBeenCalledWith(splitRow.actionTarget, 0);
 		expect(onAddCommentForFile).not.toHaveBeenCalled();
+		expect(container.querySelectorAll('.diff-row-paint')).toHaveLength(3);
 	});
 
 	it('uses native buttons for keyboard-reachable review activation', () => {
