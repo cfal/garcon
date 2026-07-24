@@ -3,6 +3,7 @@ import { mapWithConcurrency } from '../lib/concurrency.js';
 import {
   captureWorkingTreeObservation,
   isWorkingTreeObservationCurrent,
+  type GitWorkingTreeObservation,
 } from './diff-engine.js';
 import {
   isExpectedMissingGitResult,
@@ -351,6 +352,35 @@ async function loadDiffFileSummary(
   };
 }
 
+async function captureComparisonWorkingPathTokens(
+  repoRoot: string,
+  paths: string[],
+  observation: GitWorkingTreeObservation,
+  signal?: AbortSignal,
+) {
+  const observedPaths = new Set(observation.changedPaths);
+  const reusablePaths = paths.filter((path) => observedPaths.has(path));
+  const pathsNeedingIndexEntries = paths.filter((path) => !observedPaths.has(path));
+  const [reusedTokens, loadedTokens] = await Promise.all([
+    captureWorkingPathTokens(
+      repoRoot,
+      reusablePaths,
+      {
+        statusEntries: observation.statusEntries,
+        indexEntriesByPath: observation.indexEntriesByPath,
+      },
+      signal,
+    ),
+    captureWorkingPathTokens(
+      repoRoot,
+      pathsNeedingIndexEntries,
+      { statusEntries: observation.statusEntries },
+      signal,
+    ),
+  ]);
+  return new Map([...reusedTokens, ...loadedTokens]);
+}
+
 async function buildWorkingTreeSnapshot(
   repoRoot: string,
   requestedProjectPath: string,
@@ -406,15 +436,12 @@ async function buildWorkingTreeSnapshot(
       shortFingerprint: before.slice(-8),
     };
     const files = summarized.files;
-    const workingPathTokens = await captureWorkingPathTokens(
+    const workingPathTokens = await captureComparisonWorkingPathTokens(
       repoRoot,
       files.flatMap((file) =>
         file.originalPath ? [file.path, file.originalPath] : [file.path],
       ),
-      {
-        statusEntries: observation.statusEntries,
-        indexEntriesByPath: observation.indexEntriesByPath,
-      },
+      observation,
       signal,
     );
     if (!(await isWorkingTreeObservationCurrent(observation, trace, signal))) continue;

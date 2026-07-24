@@ -255,6 +255,36 @@ describe('Git review documents', () => {
     expect(changed).toMatchObject({ status: 'stale', changedPaths: ['a.txt'] });
   });
 
+  it('loads working-tree bodies for files that are clean against HEAD', async () => {
+    const projectPath = await createRepository();
+    const service = createService();
+    const base = await git(projectPath, ['rev-parse', 'HEAD']);
+    await fs.writeFile(path.join(projectPath, 'a.txt'), 'committed change\n');
+    await git(projectPath, ['add', 'a.txt']);
+    await git(projectPath, ['commit', '-m', 'change a']);
+    const snapshot = await service.getComparisonSnapshot({
+      projectPath,
+      from: { kind: 'revision', revision: base },
+      to: { kind: 'working-tree' },
+      mode: 'direct',
+      context: 3,
+    });
+    expect(snapshot.status).toBe('ready');
+    if (snapshot.status !== 'ready') return;
+
+    const response = await service.getReviewDocumentFileBodies({
+      projectPath,
+      documentId: snapshot.documentId,
+      files: ['a.txt'],
+      purpose: 'visible',
+    });
+
+    expect(response.status).toBe('ready');
+    if (response.status !== 'ready') return;
+    expect(response.files['a.txt']).toMatchObject({ bodyState: 'loaded' });
+    expect(response.files['a.txt'].patch).toContain('+committed change');
+  });
+
   it('validates the source path of a mutable rename', async () => {
     const projectPath = await createRepository();
     const service = createService();
