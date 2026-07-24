@@ -1,6 +1,7 @@
 // /api/chats/* route handlers. Provides CRUD for the session registry
 // and dispatches message reads to the appropriate agent parser.
 
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { promises as fs } from 'fs';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -548,6 +549,9 @@ export default function createChatRoutes({
       });
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
+        return jsonError(error.message, 503, error.code, error.retryable);
+      }
       return jsonErrorFromUnknown(error);
     }
   }

@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
@@ -173,6 +174,34 @@ describe('GET /api/v1/chats/messages', () => {
     expect(body.errorCode).toBe('VALIDATION_FAILED');
     expect(body.error).toBe('beforeSeq must be a positive integer');
     expect(chatViews.getOrCreatePage).not.toHaveBeenCalled();
+  });
+
+  it('returns a retryable transcript error instead of an empty successful page', async () => {
+    const failure = new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Codex native transcript could not be resolved',
+      true,
+    );
+    const { pendingInputs, routes } = createRoutesFixture({
+      chatViews: {
+        getOrCreatePage: mock(async () => {
+          throw failure;
+        }),
+        reconcileNativeSnapshot: mock(async () => undefined),
+      },
+    });
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123');
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: failure.message,
+      errorCode: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+    });
+    expect(pendingInputs.reconcileRetainedHistory).not.toHaveBeenCalled();
   });
 
   it('bounds native full loads across repeated reads with an unresolved conflicting echo', async () => {

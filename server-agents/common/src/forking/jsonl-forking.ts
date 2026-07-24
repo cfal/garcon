@@ -33,6 +33,7 @@ export interface JsonlForkingOptions {
   ) => unknown;
   readonly forkWholeSession?: (request: AgentForkRequest) => Promise<AgentStartedSession | null>;
   readonly transformEntries?: ForkJsonlRequest['transformEntries'];
+  readonly createTargetPath?: ForkJsonlRequest['createTargetPath'];
   readonly semanticDigest?: (messages: readonly ChatMessage[]) => string;
 }
 
@@ -150,6 +151,7 @@ async function forkJsonlAtPoint(
     sourceSnapshot,
     rewriteEntry: options.createRewriteEntry?.() ?? options.rewriteEntry,
     transformEntries: options.transformEntries,
+    createTargetPath: options.createTargetPath,
   }).catch((error) => {
     if (error instanceof JsonlSourcePrefixChangedError) throw sourceRevisionChanged();
     throw error;

@@ -44,6 +44,37 @@ describe('forkJsonlTranscript', () => {
     expect((await stat(result.nativePath)).mode & 0o777).toBe(0o600);
   });
 
+  it('uses a provider-supplied target path without changing the default session id', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    await writeFile(sourcePath, `${JSON.stringify({ type: 'message', value: 'source' })}\n`);
+    let received: {
+      sourcePath: string;
+      targetAgentSessionId: string;
+      createdAt: Date;
+    } | null = null;
+
+    const result = await forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+      createTargetPath(input) {
+        received = input;
+        return path.join(root, `custom-${input.targetAgentSessionId}.jsonl`);
+      },
+    });
+
+    expect(received).toMatchObject({
+      sourcePath,
+      targetAgentSessionId: result.agentSessionId,
+    });
+    expect(received?.createdAt).toBeInstanceOf(Date);
+    expect(result.nativePath).toBe(path.join(root, `custom-${result.agentSessionId}.jsonl`));
+    expect(await readFile(result.nativePath, 'utf8')).toContain('"value":"source"');
+    expect((await stat(result.nativePath)).mode & 0o777).toBe(0o600);
+  });
+
   it('rejects a whole-source mutation during transformation and removes the target', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
     roots.push(root);
@@ -57,6 +88,9 @@ describe('forkJsonlTranscript', () => {
       transformEntries(input) {
         writeFileSync(sourcePath, `${JSON.stringify({ type: 'message', value: 'after' })}\n`);
         return { entries: input.selectedEntries };
+      },
+      createTargetPath(input) {
+        return path.join(root, `custom-${input.targetAgentSessionId}.jsonl`);
       },
     })).rejects.toBeInstanceOf(JsonlSourcePrefixChangedError);
 

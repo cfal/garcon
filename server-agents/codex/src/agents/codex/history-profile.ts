@@ -16,6 +16,11 @@ interface CodexHistoryProfileBase {
   readonly createdAt: string;
 }
 
+export interface CodexSessionIdentity {
+  readonly threadId: string;
+  readonly createdAt: string;
+}
+
 export type CodexHistoryProfile =
   | (CodexHistoryProfileBase & { readonly mode: 'legacy' })
   | (CodexHistoryProfileBase & {
@@ -23,53 +28,34 @@ export type CodexHistoryProfile =
       readonly historyBase: CodexHistoryBase | null;
     });
 
-export async function inspectCodexHistoryProfile(input: {
+interface CodexSessionMetadata extends CodexSessionIdentity {
+  readonly payload: Record<string, unknown>;
+}
+
+interface CodexSessionIdentityInput {
   readonly nativePath: string;
   readonly expectedThreadId?: string | null;
   readonly signal: AbortSignal;
-}): Promise<CodexHistoryProfile> {
-  input.signal.throwIfAborted();
-  let firstLine: string | null = null;
-  try {
-    for await (const entry of readJsonlLineEntries(input.nativePath, {
-      completeLinesOnly: true,
-      maxLineBytes: MAX_SESSION_META_BYTES,
-      signal: input.signal,
-    })) {
-      if (!entry.line.trim()) continue;
-      firstLine = entry.line;
-      break;
-    }
-  } catch (error) {
-    input.signal.throwIfAborted();
-    throw transcriptUnavailable('Codex session metadata is unavailable', error);
-  }
-  if (!firstLine) {
-    throw transcriptUnavailable('Codex session metadata is unavailable');
-  }
+}
 
-  const parsed = parseFirstJsonlValue<unknown>(firstLine);
-  if (parsed.kind !== 'value') {
-    throw transcriptUnavailable('Codex session metadata is invalid');
-  }
-  const entry = record(parsed.value);
-  const payload = record(entry?.payload);
-  if (entry?.type !== 'session_meta' || !payload) {
-    throw transcriptUnavailable('Codex transcript does not start with session metadata');
-  }
+export async function inspectCodexSessionIdentity(
+  input: CodexSessionIdentityInput,
+): Promise<CodexSessionIdentity> {
+  const { threadId, createdAt } = await inspectCodexSessionMetadata(input);
+  return { threadId, createdAt };
+}
 
-  const threadId = nonEmptyString(payload.id);
-  if (!threadId) throw transcriptUnavailable('Codex session metadata has no thread id');
-  if (input.expectedThreadId && input.expectedThreadId !== threadId) {
-    throw transcriptUnavailable('Codex transcript belongs to a different thread');
-  }
-
-  const createdAt = rfc3339(payload.timestamp) ?? rfc3339(entry.timestamp);
-  if (!createdAt) throw transcriptUnavailable('Codex session metadata has an invalid timestamp');
-
+export async function inspectCodexHistoryProfile(
+  input: CodexSessionIdentityInput,
+): Promise<CodexHistoryProfile> {
+  const { threadId, createdAt, payload } = await inspectCodexSessionMetadata(input);
   const rawMode = payload.history_mode;
   if (rawMode !== undefined && typeof rawMode !== 'string') {
-    throw transcriptUnavailable('Codex session metadata has an invalid history mode');
+    throw transcriptUnavailable(
+      'Codex session metadata has an invalid history mode',
+      undefined,
+      'invalid-metadata',
+    );
   }
   const mode = rawMode ?? 'legacy';
   if (mode === 'legacy') {
@@ -92,6 +78,74 @@ export async function inspectCodexHistoryProfile(input: {
   );
 }
 
+async function inspectCodexSessionMetadata(
+  input: CodexSessionIdentityInput,
+): Promise<CodexSessionMetadata> {
+  input.signal.throwIfAborted();
+  let firstLine: string | null = null;
+  try {
+    for await (const entry of readJsonlLineEntries(input.nativePath, {
+      completeLinesOnly: true,
+      maxLineBytes: MAX_SESSION_META_BYTES,
+      signal: input.signal,
+    })) {
+      if (!entry.line.trim()) continue;
+      firstLine = entry.line;
+      break;
+    }
+  } catch (error) {
+    input.signal.throwIfAborted();
+    throw transcriptUnavailable('Codex session metadata is unavailable', error, 'read-failed');
+  }
+  if (!firstLine) {
+    throw transcriptUnavailable(
+      'Codex session metadata is unavailable',
+      undefined,
+      'invalid-metadata',
+    );
+  }
+
+  const parsed = parseFirstJsonlValue<unknown>(firstLine);
+  if (parsed.kind !== 'value') {
+    throw transcriptUnavailable('Codex session metadata is invalid', undefined, 'invalid-metadata');
+  }
+  const entry = record(parsed.value);
+  const payload = record(entry?.payload);
+  if (entry?.type !== 'session_meta' || !payload) {
+    throw transcriptUnavailable(
+      'Codex transcript does not start with session metadata',
+      undefined,
+      'invalid-metadata',
+    );
+  }
+
+  const threadId = nonEmptyString(payload.id);
+  if (!threadId) {
+    throw transcriptUnavailable(
+      'Codex session metadata has no thread id',
+      undefined,
+      'invalid-metadata',
+    );
+  }
+  if (input.expectedThreadId && input.expectedThreadId !== threadId) {
+    throw transcriptUnavailable(
+      'Codex transcript belongs to a different thread',
+      undefined,
+      'thread-mismatch',
+    );
+  }
+
+  const createdAt = rfc3339(payload.timestamp) ?? rfc3339(entry.timestamp);
+  if (!createdAt) {
+    throw transcriptUnavailable(
+      'Codex session metadata has an invalid timestamp',
+      undefined,
+      'invalid-metadata',
+    );
+  }
+  return { threadId, createdAt, payload };
+}
+
 function parseHistoryBase(value: unknown): CodexHistoryBase | null {
   if (value === undefined || value === null) return null;
   const raw = record(value);
@@ -99,7 +153,11 @@ function parseHistoryBase(value: unknown): CodexHistoryBase | null {
   const endOrdinalExclusive = nonNegativeSafeInteger(raw?.end_ordinal_exclusive);
   const endByteOffset = nonNegativeSafeInteger(raw?.end_byte_offset);
   if (!threadId || endOrdinalExclusive === null || endByteOffset === null) {
-    throw transcriptUnavailable('Codex session metadata has an invalid history base');
+    throw transcriptUnavailable(
+      'Codex session metadata has an invalid history base',
+      undefined,
+      'invalid-metadata',
+    );
   }
   return { threadId, endOrdinalExclusive, endByteOffset };
 }
@@ -128,7 +186,22 @@ function rfc3339(value: unknown): string | null {
   return Number.isNaN(Date.parse(value)) ? null : value;
 }
 
-function transcriptUnavailable(message: string, cause?: unknown): AgentIntegrationError {
+function transcriptUnavailable(
+  message: string,
+  cause: unknown,
+  reason: 'read-failed' | 'invalid-metadata' | 'thread-mismatch',
+): AgentIntegrationError {
   const suffix = cause instanceof Error && cause.message ? `: ${cause.message}` : '';
-  return new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', `${message}${suffix}`, false);
+  const causeCode = errorCode(cause);
+  return new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', `${message}${suffix}`, false, {
+    operation: 'inspect-history',
+    provider: 'codex',
+    reason,
+    ...(causeCode ? { causeCode } : {}),
+  });
+}
+
+function errorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) return null;
+  return typeof error.code === 'string' ? error.code : null;
 }

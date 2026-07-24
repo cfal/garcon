@@ -3,11 +3,9 @@ import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/cha
 import { CODEX_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
-  computeAgentTranscriptRevision,
   type AgentForkRequest,
   type AgentHost,
   type AgentIntegration,
-  type AgentTranscript,
 } from '@garcon/server-agent-interface';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
 import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/build/standalone-entrypoint';
@@ -25,7 +23,9 @@ import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
 import { CodexExecution } from './agents/codex/execution.js';
 import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
 import { createCodexForking } from './agents/codex/codex-forking.js';
+import { createCodexForkTargetPath } from './agents/codex/fork-target-path.js';
 import { inspectCodexHistoryProfile } from './agents/codex/history-profile.js';
+import { createCodexTranscript } from './agents/codex/transcript.js';
 import {
   buildCodexAppServerEndpointRuntime,
   buildCodexHostEnvironment,
@@ -114,7 +114,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     this.execution = new CodexExecution(host, runtime, nativeSessions, config);
-    this.transcript = createCodexTranscript(runtime, nativeSessions, config);
+    this.transcript = createCodexTranscript(runtime, nativeSessions, config, logger);
     this.catalog = createModelCatalog({
       logger: host.logger,
       defaultModel: CODEX_MODELS.DEFAULT,
@@ -148,6 +148,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       supportsAtMessageWhileRunning: true,
       transcript: this.transcript,
       nativeSessions,
+      createTargetPath: createCodexForkTargetPath,
       createRewriteEntry: createCodexForkTranscriptRewriter,
       forkWholeSession: (request) => forkWholeCodexSession(
         request,
@@ -246,102 +247,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
   }
 }
 
-function createCodexTranscript(
-  runtime: CodexAppServerRuntime,
-  nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
-  config: CodexConfig,
-): AgentTranscript {
-  const reference = (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const native = nativeSessions.decode(chat.nativeSession);
-    return {
-      projectPath: chat.projectPath,
-      model: chat.model,
-      agentSessionId: chat.agentSessionId ?? native.agentSessionId,
-      nativePath: native.path,
-    };
-  };
-  const loadMessages = (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => (
-    runtime.loadMessages(reference(chat), signal)
-  );
-  const resolvePath = async (chat: Parameters<AgentTranscript['load']>[0]['chat']) => {
-    const value = reference(chat);
-    return value.nativePath ?? runtime.resolveNativePath(value);
-  };
-  const resolveIndexSource = async (
-    chat: Parameters<AgentTranscript['load']>[0]['chat'],
-    signal: AbortSignal,
-  ) => {
-    const nativePath = await resolvePath(chat);
-    if (!nativePath) return null;
-    const value = reference(chat);
-    const profile = await inspectCodexHistoryProfile({
-      nativePath,
-      expectedThreadId: value.agentSessionId,
-      signal,
-    });
-    return {
-      ownerId: 'codex',
-      schemaVersion: 2,
-      value: {
-        nativePath,
-        threadId: profile.threadId,
-        historyMode: profile.mode,
-        codexHome: config.home(),
-      },
-    } as const;
-  };
-  return {
-    async resolveNativeSession({ chat, signal }) {
-      signal.throwIfAborted();
-      const current = nativeSessions.decode(chat.nativeSession);
-      const agentSessionId = chat.agentSessionId ?? current.agentSessionId;
-      if (!agentSessionId) return null;
-      const nativePath = await runtime.resolveNativePath(reference(chat));
-      return nativeSessions.encode({
-        path: nativePath,
-        agentSessionId,
-        modelEndpointId: current.modelEndpointId,
-      });
-    },
-    async load({ chat, signal }) {
-      signal.throwIfAborted();
-      const messages = await loadMessages(chat, signal);
-      return { messages, revision: computeAgentTranscriptRevision(messages) };
-    },
-    async loadPage({ chat, page, signal }) {
-      signal.throwIfAborted();
-      return runtime.loadMessagePage(reference(chat), page, signal);
-    },
-    async preview({ chat, signal }) {
-      signal.throwIfAborted();
-      return normalizeCodexPreview(await runtime.getPreview(reference(chat), signal));
-    },
-    async revision({ chat, signal }) {
-      signal.throwIfAborted();
-      return computeAgentTranscriptRevision(await loadMessages(chat, signal));
-    },
-    async resolveIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat, signal);
-    },
-    async refreshIndexSource({ chat, signal }) {
-      signal.throwIfAborted();
-      return resolveIndexSource(chat, signal);
-    },
-    async describeSource({ chat, signal }) {
-      signal.throwIfAborted();
-      const nativePath = await resolvePath(chat);
-      return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
-    },
-    async release({ signal }) {
-      signal.throwIfAborted();
-    },
-  };
-}
-
 async function forkWholeCodexSession(
   request: AgentForkRequest,
   host: AgentHost,
@@ -377,21 +282,6 @@ async function forkWholeCodexSession(
       agentSessionId: result.agentSessionId,
       modelEndpointId: request.endpoint?.endpointId ?? source.modelEndpointId,
     }),
-  };
-}
-
-function normalizeCodexPreview(value: unknown) {
-  const preview = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  if (!preview || typeof preview.firstMessage !== 'string') return null;
-  return {
-    firstMessage: preview.firstMessage,
-    lastMessage: typeof preview.lastMessage === 'string'
-      ? preview.lastMessage
-      : preview.firstMessage,
-    createdAt: typeof preview.createdAt === 'string' ? preview.createdAt : null,
-    lastActivity: typeof preview.lastActivity === 'string' ? preview.lastActivity : null,
   };
 }
 

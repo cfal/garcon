@@ -137,6 +137,24 @@ describe('CodexExecution', () => {
     }));
   });
 
+  it('does not emit a pathless session when transcript materialization fails', async () => {
+    const runtime = createRuntime();
+    runtime.startSession.mockImplementation(async () => {
+      throw new Error('Codex thread did not materialize transcript');
+    });
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const events = [];
+    execution.subscribe((event) => events.push(event));
+
+    await expect(execution.start(startRequest())).rejects.toThrow('did not materialize');
+    expect(events.some((event) => event.type === 'session-created')).toBe(false);
+  });
+
   it('keeps carried context separate when starting a Codex goal', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(

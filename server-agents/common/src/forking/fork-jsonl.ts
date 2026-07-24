@@ -22,6 +22,12 @@ export interface ForkTranscriptTransformResult {
   readonly expectedSemanticDigest?: string;
 }
 
+export interface ForkJsonlTargetPathInput {
+  readonly sourcePath: string;
+  readonly targetAgentSessionId: string;
+  readonly createdAt: Date;
+}
+
 export interface ForkJsonlRequest {
   readonly sourcePath: string;
   readonly sourceAgentSessionId: string;
@@ -33,6 +39,7 @@ export interface ForkJsonlRequest {
   readonly transformEntries?: (
     input: ForkTranscriptTransformInput,
   ) => ForkTranscriptTransformResult;
+  readonly createTargetPath?: (input: ForkJsonlTargetPathInput) => string;
 }
 
 export interface ForkJsonlResult {
@@ -62,7 +69,12 @@ export function jsonlSourceLineCount(snapshot: JsonlSourceSnapshot, sourcePath: 
 
 export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<ForkJsonlResult> {
   const targetAgentSessionId = crypto.randomUUID();
-  const targetPath = path.join(path.dirname(request.sourcePath), `${targetAgentSessionId}.jsonl`);
+  const targetPath =
+    request.createTargetPath?.({
+      sourcePath: request.sourcePath,
+      targetAgentSessionId,
+      createdAt: new Date(),
+    }) ?? path.join(path.dirname(request.sourcePath), `${targetAgentSessionId}.jsonl`);
   const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
   const snapshot =
     request.cutoffLine === null

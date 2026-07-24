@@ -169,6 +169,22 @@ async function createFixture() {
 }
 
 describe('createJsonlForking message validation', () => {
+  it('persists the provider-supplied target path immediately', async () => {
+    const fixture = await createFixture();
+    const forking = createJsonlForking({
+      ...fixture.options,
+      createTargetPath(input) {
+        return path.join(fixture.root, `provider-${input.targetAgentSessionId}.jsonl`);
+      },
+    });
+
+    const forked = await forking.fork(fixture.request);
+    const native = fixture.nativeSessions.decode(forked.nativeSession);
+
+    expect(native.path).toBe(path.join(fixture.root, `provider-${forked.agentSessionId}.jsonl`));
+    await expect(readFile(native.path!, 'utf8')).resolves.toContain('"content":"first"');
+  });
+
   it('allows appends after the selected provider-native prefix', async () => {
     const fixture = await createFixture();
     await writeFile(

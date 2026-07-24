@@ -4,6 +4,10 @@ import type { JsonObject } from '@garcon/common/json';
 import type { AgentTranscriptIndexSourceRef } from './transcript-index.js';
 
 export interface AgentTranscript {
+  /**
+   * Returns a provider-validated reference that is at least as recoverable as the
+   * current reference, or null when no safe update is available.
+   */
   resolveNativeSession(request: AgentTranscriptRequest): Promise<AgentNativeSessionRef | null>;
   load(request: AgentTranscriptRequest): Promise<AgentTranscriptSnapshot>;
   loadPage?(
