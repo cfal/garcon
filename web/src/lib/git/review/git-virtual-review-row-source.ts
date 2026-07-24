@@ -215,7 +215,8 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		const base = this.fileKeyBases.get(segment.file?.path ?? '') ?? 0;
 		if (segment.kind === 'header') return base;
 		if (segment.kind === 'unified' || segment.kind === 'split') {
-			return base + 100 + index - segment.start;
+			const modeOffset = segment.kind === 'split' ? 100_000 : 100;
+			return base + modeOffset + index - segment.start;
 		}
 		return base + 1;
 	}
@@ -236,7 +237,7 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 			segment.kind === 'unified'
 				? segment.body!.patchIndex!.rowKindAt(localIndex) === 'hunk'
 				: splitEntryIsHunk(segment.body!, segment.splitIndex!, localIndex);
-		return Math.max(isHunk ? 28 : DEFAULT_ROW_HEIGHT, lineHeight);
+		return isHunk ? Math.max(28, lineHeight + 8) : lineHeight;
 	}
 
 	fileStart(filePath: string): number | undefined {

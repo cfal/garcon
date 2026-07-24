@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
 	GitVirtualFileHeaderRow,
@@ -181,6 +181,7 @@ describe('Git virtual diff refresh', () => {
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 300;
+		await waitFor(() => expect(measureCalls).toBe(1));
 
 		await rerender({
 			...props,
@@ -189,6 +190,7 @@ describe('Git virtual diff refresh', () => {
 
 		expect(screen.getByText('file-2.ts')).toBeTruthy();
 		expect(viewport.scrollTop).toBe(300);
+		expect(measureCalls).toBe(1);
 	});
 
 	it('repositions a requested file when preceding rows move its index', async () => {
@@ -284,7 +286,7 @@ describe('Git virtual diff refresh', () => {
 			commentCopyText: null,
 			onOpenChat: vi.fn(),
 		};
-		const { rerender } = render(GitVirtualDiffSurface, { props });
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 
 		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
 
@@ -295,6 +297,35 @@ describe('Git virtual diff refresh', () => {
 		});
 
 		await waitFor(() => expect(scrollToIndexCalls).toEqual([4, 4]));
+
+		const shiftedRows = [
+			...expandedRows.slice(0, 2),
+			makeUnifiedRow(0, 'preceding-file-expanded'),
+			...expandedRows.slice(2),
+		];
+		await rerender({
+			...props,
+			source: arrayGitVirtualReviewRowSource(shiftedRows, fileIndexes(shiftedRows)),
+		});
+
+		await waitFor(() => expect(scrollToIndexCalls).toEqual([4, 4, 5]));
+
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
+		expect(viewport).toBeTruthy();
+		if (!viewport) return;
+		await fireEvent.wheel(viewport);
+
+		const shiftedAgainRows = [
+			...shiftedRows.slice(0, 3),
+			makeUnifiedRow(0, 'preceding-file-expanded-again'),
+			...shiftedRows.slice(3),
+		];
+		await rerender({
+			...props,
+			source: arrayGitVirtualReviewRowSource(shiftedAgainRows, fileIndexes(shiftedAgainRows)),
+		});
+
+		expect(scrollToIndexCalls).toEqual([4, 4, 5]);
 	});
 
 	it('does not replay a serviced scroll when a pending file becomes stale', async () => {

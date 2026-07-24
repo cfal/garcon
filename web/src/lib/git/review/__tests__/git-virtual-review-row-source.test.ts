@@ -113,8 +113,12 @@ describe('Git virtual review row source', () => {
 		};
 
 		const source = buildGitVirtualReviewRowSource(splitOptions);
+		const unifiedSource = buildGitVirtualReviewRowSource(
+			options([file], { 'file.txt': body }),
+		);
 
 		expect(source.rowCount).toBe(5);
+		expect(source.rowKey(1)).not.toBe(unifiedSource.rowKey(1));
 		expect(source.rowAt(2)).toMatchObject({
 			kind: 'split-row',
 			view: {
@@ -129,5 +133,16 @@ describe('Git virtual review row source', () => {
 				right: { cell: { kind: 'add', text: 'new three' } },
 			},
 		});
+	});
+
+	it('estimates ordinary rows at the rendered line height without adding vertical gaps', () => {
+		const file = summary('file.txt', 1);
+		const source = buildGitVirtualReviewRowSource(
+			options([file], { 'file.txt': indexedBody('file.txt', 1) }),
+		);
+
+		expect(source.estimateRowHeight(1, 18)).toBe(28);
+		expect(source.estimateRowHeight(2, 18)).toBe(18);
+		expect(source.estimateRowHeight(2, 24)).toBe(24);
 	});
 });

@@ -372,6 +372,7 @@ export class GitVirtualReviewDocumentController {
 		guard: GitWorkbenchLoadGuard,
 	): void {
 		const next = { ...this.fileBodies };
+		let changed = false;
 		for (const filePath of filePaths) {
 			const file = this.summaryForFile(filePath);
 			if (!file || this.fileBodies[filePath]) continue;
@@ -385,19 +386,22 @@ export class GitVirtualReviewDocumentController {
 				this.summary!.limits,
 			);
 			this.evictActiveBodies(next, decision);
+			changed ||= decision.evictedPaths.length > 0;
 			if (!decision.accept) {
 				if (purpose === 'prefetch') {
 					this.stopPrefetch();
 				} else {
 					next[filePath] = this.collectionLimitBody(cached, decision);
+					changed = true;
 					this.setAggregateLimit(decision, Object.keys(next).length);
 				}
 				continue;
 			}
 			next[filePath] = cached;
+			changed = true;
 			this.bodyPurposes.set(filePath, purpose);
 		}
-		this.fileBodies = next;
+		if (changed) this.fileBodies = next;
 	}
 
 	private ensureBodyScheduler(projectPath: string, guard: GitWorkbenchLoadGuard): void {

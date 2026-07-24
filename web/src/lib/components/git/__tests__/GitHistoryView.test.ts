@@ -344,6 +344,7 @@ describe('GitHistoryView', () => {
 		});
 		if (!filesPane) return;
 		await fireEvent.click(within(filesPane).getByRole('treeitem', { name: /a.ts/ }));
+		if (diffRoot) ResizeObserverHarness.emit(diffRoot, 480, 720);
 
 		await screen.findAllByText('+added line');
 		expect(filesPane.getAttribute('aria-hidden')).toBe('true');
@@ -540,9 +541,10 @@ describe('GitHistoryView', () => {
 				return bodiesForPaths(paths);
 			},
 		);
+		const history = new GitHistoryController();
 		const { container } = render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
+				history,
 				comparison,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
@@ -571,7 +573,8 @@ describe('GitHistoryView', () => {
 		if (!details || !filesPane || !diffPane || !diffRoot) return;
 		ResizeObserverHarness.emit(details, 480);
 		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
-		await waitFor(() => expect(screen.queryAllByText('+added line').length).toBeGreaterThan(0));
+		await waitFor(() => expect(history.document.fileBodies['a.ts']).toBeTruthy());
+		expect(diffPane.getAttribute('aria-hidden')).toBe('true');
 		vi.mocked(getGitCommitFileBodies).mockClear();
 
 		await fireEvent.click(within(filesPane).getByRole('treeitem', { name: /later\.ts/ }));

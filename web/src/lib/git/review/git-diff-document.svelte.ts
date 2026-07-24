@@ -497,6 +497,7 @@ export class GitDiffDocumentController {
 	private seedCachedBodies(filePaths: string[], purpose: GitReviewBodyPurpose): void {
 		if (this.bodyCache.size === 0) return;
 		const next = { ...this.fileBodies };
+		let changed = false;
 		for (const filePath of filePaths) {
 			const file = this.summaryForFile(filePath);
 			if (!file || this.fileBodies[filePath]) continue;
@@ -513,20 +514,23 @@ export class GitDiffDocumentController {
 					this.snapshot!.limits,
 				);
 				this.evictActiveBodies(next, decision);
+				changed ||= decision.evictedPaths.length > 0;
 				if (!decision.accept) {
 					if (purpose === 'prefetch') {
 						this.stopPrefetch();
 					} else {
 						next[filePath] = this.collectionLimitBody(cached, decision);
+						changed = true;
 						this.setAggregateLimit(decision, Object.keys(next).length);
 					}
 					continue;
 				}
 				next[filePath] = cached;
+				changed = true;
 				this.bodyPurposes.set(filePath, purpose);
 			}
 		}
-		this.fileBodies = next;
+		if (changed) this.fileBodies = next;
 	}
 
 	private markLoading(filePaths: string[], isLoading: boolean): void {

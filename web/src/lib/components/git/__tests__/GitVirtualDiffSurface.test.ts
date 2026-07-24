@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
@@ -85,6 +85,31 @@ function renderSurface(
 }
 
 describe('GitVirtualDiffSurface', () => {
+	beforeEach(() => {
+		vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1024);
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(720);
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+			this: HTMLElement,
+		) {
+			const height = this.hasAttribute('data-git-virtual-diff-root') ? 720 : 42;
+			return {
+				width: 1024,
+				height,
+				top: 0,
+				right: 1024,
+				bottom: height,
+				left: 0,
+				x: 0,
+				y: 0,
+				toJSON: () => ({}),
+			};
+		});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	it('uses one virtual diff root and mounts a bounded row window for large documents', async () => {
 		const rows = Array.from({ length: 10_000 }, (_, index) => makeHeaderRow(index));
 		const { container } = renderSurface(rows);

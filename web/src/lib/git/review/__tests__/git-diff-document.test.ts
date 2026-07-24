@@ -742,6 +742,13 @@ describe('GitDiffDocumentController', () => {
 
 		expect(controller.fileBodies['a.ts']).toEqual(body('a.ts'));
 		expect(loadBodies).toHaveBeenCalledOnce();
+
+		const loadedBodies = controller.fileBodies;
+		const visibleHeader = controller.rowSource.rowAt(0);
+		expect(visibleHeader).toBeTruthy();
+		controller.setVisibleRows([visibleHeader!]);
+
+		expect(controller.fileBodies).toBe(loadedBodies);
 	});
 
 	it('preserves unknown stats and type changes in virtual file summaries', () => {

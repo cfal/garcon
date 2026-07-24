@@ -39,21 +39,14 @@
 	let measuredDocumentId: string | null = null;
 	let performanceFrame: number | null = null;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
-
-	interface VirtualRowItem {
-		index: number;
-		key: string | number | bigint;
-		start: number;
-		size: number;
-		end: number;
-	}
+	const scrollKeys = new Set(['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' ']);
 
 	function estimateRowHeight(index: number): number {
 		return source.estimateRowHeight(index, rowLineHeight);
 	}
 
 	const virtualizer = createVirtualizer<HTMLElement, HTMLDivElement>({
-		count: 0,
+		count: untrack(() => source.rowCount),
 		getScrollElement: () => viewportRef,
 		estimateSize: estimateRowHeight,
 		measureElement: (element) => element.getBoundingClientRect().height,
@@ -63,48 +56,9 @@
 	});
 
 	let virtualItems = $derived($virtualizer.getVirtualItems());
-	let renderedVirtualItems = $derived.by<VirtualRowItem[]>(() => {
-		if (source.rowCount === 0) return virtualItems;
-		const targetIndex = scrollToRequest
-			? source.fileStart(scrollToRequest.filePath)
-			: undefined;
-		if (
-			virtualItems.length > 0 &&
-			(targetIndex === undefined ||
-				virtualItems.some((virtualItem) => virtualItem.index === targetIndex))
-		) {
-			return virtualItems;
-		}
-		const itemCount = Math.min(source.rowCount, Math.max(1, overscan * 2));
-		const firstIndex =
-			targetIndex === undefined ? 0 : Math.max(0, targetIndex - Math.floor(itemCount / 2));
-		const lastIndex = Math.min(source.rowCount, firstIndex + itemCount);
-		let start = 0;
-		for (let index = 0; index < firstIndex; index += 1) {
-			start += estimateRowHeight(index);
-		}
-		const fallbackItems = Array.from({ length: lastIndex - firstIndex }, (_, offset) => {
-			const index = firstIndex + offset;
-			const size = estimateRowHeight(index);
-			const item = {
-				index,
-				key: source.rowKey(index),
-				start,
-				size,
-				end: start + size,
-			};
-			start += size;
-			return item;
-		});
-		if (virtualItems.length === 0) return fallbackItems;
-		const fallbackIndexes = new Set(fallbackItems.map((item) => item.index));
-		return [...virtualItems.filter((item) => !fallbackIndexes.has(item.index)), ...fallbackItems].sort(
-			(left, right) => left.index - right.index,
-		);
-	});
 	let totalHeight = $derived($virtualizer.getTotalSize());
 	let visibleRows = $derived.by(() =>
-		renderedVirtualItems
+		virtualItems
 			.map((virtualItem) => source.rowAt(virtualItem.index))
 			.filter((row): row is GitVirtualReviewRow => Boolean(row)),
 	);
@@ -143,8 +97,28 @@
 				overscan: rowOverscan,
 				getItemKey: (index) => activeSource.rowKey(index),
 			});
-			$virtualizer.measure();
 		});
+	});
+
+	$effect(() => {
+		const scrollElement = viewportRef;
+		if (!scrollElement) return;
+		const completeScrollRequest = () => {
+			if (servicedScrollRequestId) completedScrollRequestId = servicedScrollRequestId;
+		};
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (scrollKeys.has(event.key)) completeScrollRequest();
+		};
+		scrollElement.addEventListener('wheel', completeScrollRequest, { passive: true });
+		scrollElement.addEventListener('touchstart', completeScrollRequest, { passive: true });
+		scrollElement.addEventListener('pointerdown', completeScrollRequest, { passive: true });
+		scrollElement.addEventListener('keydown', handleKeydown);
+		return () => {
+			scrollElement.removeEventListener('wheel', completeScrollRequest);
+			scrollElement.removeEventListener('touchstart', completeScrollRequest);
+			scrollElement.removeEventListener('pointerdown', completeScrollRequest);
+			scrollElement.removeEventListener('keydown', handleKeydown);
+		};
 	});
 
 	$effect(() => {
@@ -211,17 +185,21 @@
 				const scrollElement = viewportRef;
 				if (!scrollElement) return;
 				$virtualizer.scrollToIndex(targetIndex, { align: 'start' });
-				scrollElement.dispatchEvent(new Event('scroll'));
 				servicedScrollRequestId = requestId;
 				servicedScrollRequestState = targetState;
-				if (targetState !== 'pending') completedScrollRequestId = requestId;
 			});
 		});
 	});
 
-	function measureRow(element: HTMLDivElement): { destroy: () => void } {
+	function measureRow(
+		element: HTMLDivElement,
+		_index: number,
+	): { update: (index: number) => void; destroy: () => void } {
 		$virtualizer.measureElement(element);
 		return {
+			update() {
+				$virtualizer.measureElement(element);
+			},
 			destroy() {
 				$virtualizer.measureElement(null);
 			},
@@ -240,13 +218,13 @@
 		</div>
 	{:else}
 		<div class="relative w-full" style:height={`${totalHeight}px`}>
-			{#each renderedVirtualItems as virtualItem (virtualItem.key)}
+			{#each virtualItems as virtualItem (virtualItem.key)}
 				{@const row = source.rowAt(virtualItem.index)}
 				{#if row}
 					<div
 						data-index={virtualItem.index}
 						data-git-virtual-row
-						use:measureRow
+						use:measureRow={virtualItem.index}
 						class="absolute left-0 top-0 w-full"
 						style:transform={`translateY(${virtualItem.start}px)`}
 					>
