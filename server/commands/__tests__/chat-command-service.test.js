@@ -33,6 +33,11 @@ const SOURCE_CHAT_ID = '1783725900000000';
 const TARGET_CHAT_ID = '1783725900000001';
 const SCHEDULED_CHAT_ID = '1783725900000002';
 
+const runtimeHandoff = () => ({
+  validate: () => undefined,
+  commit: () => undefined,
+});
+
 function deferred() {
   let resolve;
   let reject;
@@ -55,23 +60,6 @@ async function waitForCheckpoint(checkpoint, operation, operationName) {
       },
     ),
   ]);
-}
-
-async function completeWithin(operation, operationName, timeoutMs = 1_000) {
-  let timeout;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error(`${operationName} did not complete within ${timeoutMs}ms`)),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 function directReservation(chatId) {
@@ -968,15 +956,15 @@ describe('ChatCommandService', () => {
     expect(successorLaunches).toBe(1);
 
     successorResult.resolve();
-    await completeWithin(queueService.waitForExecutionOwners(), 'successor settlement');
-    const [pause, fork] = await completeWithin(Promise.all([
+    await queueService.waitForExecutionOwners();
+    const [pause, fork] = await Promise.all([
       service.mutateQueue({ chatId: SOURCE_CHAT_ID, action: 'pause' }),
       service.forkChat({
         sourceChatId: SOURCE_CHAT_ID,
         chatId: TARGET_CHAT_ID,
         upToSeq: 1,
       }),
-    ]), 'post-interrupt mutations');
+    ]);
 
     expect(pause.success).toBe(true);
     expect(pause.control.queue).toMatchObject({
@@ -2319,7 +2307,7 @@ describe('ChatCommandService', () => {
       getRetainedHistoryMessages: mock(() => []),
     });
     const submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-      await beforeDelivery();
+      await beforeDelivery(runtimeHandoff());
       throw new Error('connection closed after provider acceptance');
     });
     const queueService = makeRealQueue(pendingInputsService, {

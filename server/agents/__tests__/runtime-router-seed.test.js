@@ -8,6 +8,11 @@ import { AgentRuntimeRouter } from '../runtime-router.ts';
 
 let projectDir;
 
+const terminalHandoff = () => ({
+  validate: () => undefined,
+  commit: () => undefined,
+});
+
 function makeRouter(overrides = {}) {
   const settings = { ownerId: 'test', schemaVersion: 1, values: {} };
   const entry = {
@@ -53,15 +58,21 @@ function makeRouter(overrides = {}) {
       if (activeTurn && activeTurn.turnId !== turn.turnId) throw new Error('active turn changed');
       activeTurn = turn;
     }),
-    handoffTurn: mock(async (_chatId, predecessor, successor, commit) => {
-      if (activeTurn?.turnId !== predecessor?.turnId) throw new Error('active turn changed');
-      activeTurn = successor;
-      try {
-        await commit();
-      } catch (error) {
-        if (activeTurn === successor) activeTurn = predecessor;
-        throw error;
-      }
+    handoffTurn: mock((_chatId, predecessor, successor, downstream) => {
+      const validate = () => {
+        if (activeTurn?.turnId !== predecessor?.turnId) throw new Error('active turn changed');
+      };
+      validate();
+      return {
+        validate: () => {
+          validate();
+          downstream.validate();
+        },
+        commit: () => {
+          activeTurn = successor;
+          downstream.commit();
+        },
+      };
     }),
     clearTurn: mock(() => { activeTurn = undefined; }),
     getActiveTurn: mock(() => activeTurn),
@@ -217,14 +228,17 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       activeTurn: predecessor,
     });
     submitActiveInput.mockImplementation(async (request) => {
-      await request.beforeDelivery();
+      await request.beforeDelivery(terminalHandoff());
       throw new Error('delivery outcome unknown');
     });
 
     await expect(router.submitActiveInput('chat-1', 'steer', {
       clientRequestId: 'request-steer',
       turnId: 'turn-steer',
-    }, async () => undefined)).rejects.toThrow('delivery outcome unknown');
+    }, async (handoff) => {
+      handoff.validate();
+      handoff.commit();
+    })).rejects.toThrow('delivery outcome unknown');
 
     expect(events.getActiveTurn()).toMatchObject({ turnId: 'turn-steer' });
   });

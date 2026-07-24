@@ -3,6 +3,8 @@ import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import { renderTranscriptSeed } from '@garcon/common/transcript-seed';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
+import { AgentEventBus } from '../../../../../../server/agents/event-bus.ts';
+import { QueueExecutionAttempt } from '../../../../../../server/chat-execution/execution-attempt.ts';
 import { CodexExecution } from '../execution.ts';
 
 function createRuntime() {
@@ -67,7 +69,12 @@ function startRequest(overrides = {}) {
   };
 }
 
-function activeInputRequest(operation, beforeDelivery = async () => undefined) {
+async function commitHandoff(handoff) {
+  handoff.validate();
+  handoff.commit();
+}
+
+function activeInputRequest(operation, beforeDelivery = commitHandoff) {
   return startRequest({
     agentSessionId: 'thread-1',
     nativeSession: {
@@ -236,7 +243,10 @@ describe('CodexExecution', () => {
     execution.subscribe((event) => events.push(event));
     await execution.start(startRequest());
     runtime.submitActiveInput.mockImplementation(async (_request, beforeDelivery) => {
-      await beforeDelivery();
+      await beforeDelivery({
+        validate: () => undefined,
+        commit: () => undefined,
+      });
       throw new Error('delivery outcome unknown');
     });
 
@@ -251,5 +261,102 @@ describe('CodexExecution', () => {
       type: 'failed',
       operation: successor,
     }));
+  });
+
+  it('commits retained, routed, tracked, and runtime ownership at one persistence boundary', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const bus = new AgentEventBus({ list: () => [{ execution }] });
+    const predecessor = startRequest().operation;
+    const rejected = { ...predecessor, clientRequestId: 'request-rejected', turnId: 'turn-rejected' };
+    const successor = { ...predecessor, clientRequestId: 'request-b', turnId: 'turn-b' };
+    const attempt = new QueueExecutionAttempt(predecessor);
+    const successorAbortable = mock(() => undefined);
+    let runtimeMetadata = {
+      clientRequestId: predecessor.clientRequestId,
+      turnId: predecessor.turnId,
+    };
+    const trackedMessages = [];
+    const routedMessages = [];
+    execution.subscribe((event) => {
+      if (event.type === 'messages') {
+        trackedMessages.push({ content: event.messages[0].content, turnId: event.operation.turnId });
+      }
+    });
+    bus.onMessages((_chatId, messages, metadata) => {
+      routedMessages.push({ content: messages[0].content, turnId: metadata.turnId });
+    });
+    const emitOutput = (content) => runtime.emitMessages(
+      'chat-1',
+      [new AssistantMessage('2026-07-24T00:00:00.000Z', content)],
+      runtimeMetadata,
+    );
+    const assertOwner = (turnId, content) => {
+      expect(runtimeMetadata.turnId).toBe(turnId);
+      expect(attempt.identity().turnId).toBe(turnId);
+      expect(bus.getActiveTurn('chat-1').turnId).toBe(turnId);
+      expect(trackedMessages.at(-1)).toEqual({ content, turnId });
+      expect(routedMessages.at(-1)).toEqual({ content, turnId });
+    };
+    const composeHandoff = (operationHandoff, next) => attempt.handoffTurn(
+      predecessor,
+      next,
+      bus.handoffTurn('chat-1', predecessor, next, operationHandoff),
+    );
+
+    bus.trackTurn('chat-1', predecessor);
+    bus.markTurnAbortable('chat-1', predecessor);
+    attempt.markAbortable();
+    await execution.start(startRequest());
+    runtime.submitActiveInput.mockImplementation(async (request, beforeDelivery) => {
+      await beforeDelivery({
+        validate: () => undefined,
+        commit: () => {
+          runtimeMetadata = {
+            clientRequestId: request.clientRequestId,
+            turnId: request.turnId,
+          };
+          request.onAbortable?.();
+        },
+      });
+      return true;
+    });
+
+    await expect(execution.submitActiveInput(activeInputRequest(rejected, async (operationHandoff) => {
+      const handoff = composeHandoff(operationHandoff, rejected);
+      handoff.validate();
+      await Promise.resolve();
+      emitOutput('A while persistence fails');
+      assertOwner('turn-1', 'A while persistence fails');
+      throw new Error('persistence failed');
+    }))).rejects.toThrow('persistence failed');
+    emitOutput('A after persistence failed');
+    assertOwner('turn-1', 'A after persistence failed');
+
+    await expect(execution.submitActiveInput({
+      ...activeInputRequest(successor, async (operationHandoff) => {
+        const handoff = composeHandoff(operationHandoff, successor);
+        handoff.validate();
+        await Promise.resolve();
+        emitOutput('A before persistence commits');
+        assertOwner('turn-1', 'A before persistence commits');
+        handoff.validate();
+        handoff.commit();
+        emitOutput('B after the atomic commit');
+        assertOwner('turn-b', 'B after the atomic commit');
+      }),
+      admission: {
+        signal: new AbortController().signal,
+        markStarted: mock(() => undefined),
+        markAbortable: successorAbortable,
+      },
+    })).resolves.toBe(true);
+    expect(successorAbortable).toHaveBeenCalledTimes(1);
+    await expect(bus.waitUntilTurnAbortable('chat-1', successor)).resolves.toBe(true);
   });
 });

@@ -3780,6 +3780,87 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
+  it('transfers an already-abortable active session to the successor callback at commit', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const predecessorAbortable = mock(() => undefined);
+    const successorAbortable = mock(() => undefined);
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+      onAbortable: predecessorAbortable,
+    }));
+    expect(predecessorAbortable).toHaveBeenCalledTimes(1);
+
+    await provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Take ownership now',
+      nativePath: null,
+      onAbortable: successorAbortable,
+    }), async (handoff) => {
+      expect(successorAbortable).not.toHaveBeenCalled();
+      handoff.validate();
+      handoff.commit();
+      expect(successorAbortable).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('targets a successor when the provider becomes abortable after handoff commit', async () => {
+    const turnStarted = createDeferred();
+    const fake = new FakeClient({
+      getThreadGoal: async () => ({
+        goal: makeGoal('thread-1', 'Restored work'),
+      }),
+      steerTurn: async () => ({ turnId: 'continuation-turn' }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const predecessorAbortable = mock(() => undefined);
+    const successorAbortable = mock(() => undefined);
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal status',
+      codexGoalCommand: { kind: 'status' },
+      nativePath: null,
+      onAbortable: predecessorAbortable,
+    }));
+    expect(predecessorAbortable).not.toHaveBeenCalled();
+
+    const delivery = provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Continue after restoration',
+      nativePath: null,
+      onAbortable: successorAbortable,
+    }), async (handoff) => {
+      handoff.validate();
+      handoff.commit();
+      turnStarted.resolve();
+    });
+    await turnStarted.promise;
+    expect(successorAbortable).not.toHaveBeenCalled();
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'continuation-turn', status: 'inProgress' }),
+      },
+    });
+
+    await expect(delivery).resolves.toBe(true);
+    expect(predecessorAbortable).not.toHaveBeenCalled();
+    expect(successorAbortable).toHaveBeenCalledTimes(1);
+  });
+
   it('reconciles active input through the delivered payload and native history loader', async () => {
     const content = 'Preserve active input & literal markup <exactly>';
     const nativePath = path.join(tmpDir, 'active-input.jsonl');
@@ -3819,12 +3900,14 @@ describe('CodexAppServerRuntime', () => {
       command: content,
       clientMessageId: 'message-steer',
       nativePath,
-    }), async () => {
+    }), async (handoff) => {
       await pendingInputs.register('chat-1', content, {
         clientRequestId: 'request-steer',
         clientMessageId: 'message-steer',
         createdAt: '2026-06-01T00:00:00.000Z',
       });
+      handoff.validate();
+      handoff.commit();
     })).resolves.toBe(true);
 
     expect(pendingInputs.listForChat('chat-1')).toHaveLength(1);
@@ -4364,7 +4447,11 @@ describe('CodexAppServerRuntime', () => {
         agentSessionId: 'thread-1',
         command: `Deliver after ${turnKind}`,
         nativePath: null,
-      }), async () => { accepted = true; });
+      }), async (handoff) => {
+        accepted = true;
+        handoff.validate();
+        handoff.commit();
+      });
       await nonSteerableRejected;
       expect(accepted).toBe(true);
       fake.emit('notification', {
@@ -4465,7 +4552,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
-  it('adopts active-input metadata before flushing a terminal finish pending at delivery', async () => {
+  it('keeps predecessor metadata when persistence fails with a terminal finish pending', async () => {
     let fake;
     fake = new FakeClient({
       getThreadGoal: async () => ({ goal: null }),
@@ -4505,14 +4592,15 @@ describe('CodexAppServerRuntime', () => {
           error: { message: 'terminal failure', codexErrorInfo: null, additionalDetails: null },
         },
       });
+      throw new Error('registration failed');
     });
-    await expect(first).rejects.toThrow('terminal failure');
+    await expect(first).rejects.toThrow('registration failed');
     await expect(failed).resolves.toEqual({
       chatId: 'chat-1',
       message: 'terminal failure',
       metadata: {
-        clientRequestId: 'request-b',
-        turnId: 'turn-b',
+        clientRequestId: 'request-a',
+        turnId: 'turn-a',
       },
     });
     let accepted = false;

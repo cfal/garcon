@@ -2,7 +2,7 @@ import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionR
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { AgentActiveInputHandoff, AgentLogger } from '@garcon/server-agent-interface';
 import { CodexHistoryService } from '../history-source.js';
 import {
   assertCodexExecutionOpen,
@@ -374,7 +374,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async submitActiveInput(
     request: CodexResumeRequest,
-    beforeDelivery: () => Promise<void> = async () => {},
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void> = async (handoff) => {
+      handoff.validate();
+      handoff.commit();
+    },
   ): Promise<boolean> {
     const session = this.#sessions.get(request.agentSessionId);
     if (!session || session.status === 'completed' || session.status === 'failed' || session.status === 'aborted') {
@@ -392,8 +395,27 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       ) return false;
       session.activeDeliveryReservations += 1;
       try {
-        await beforeDelivery();
-        session.eventMetadata = codexEventMetadata(request);
+        const validate = () => {
+          if (
+            this.#sessions.get(request.agentSessionId) !== session
+            || hasTerminalPendingFinish(session)
+            || isTerminalSessionStatus(session.status)
+          ) {
+            throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before active input delivery');
+          }
+        };
+        let committed = false;
+        validate();
+        await beforeDelivery({
+          validate,
+          commit: () => {
+            session.eventMetadata = codexEventMetadata(request);
+            session.onAbortable = request.onAbortable;
+            committed = true;
+            if (session.abortableNotified) session.onAbortable?.();
+          },
+        });
+        if (!committed) throw new Error('Codex active input handoff was not committed');
         if (hasTerminalPendingFinish(session) || isTerminalSessionStatus(session.status)) {
           throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before active input delivery');
         }
@@ -457,6 +479,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           const turn = await session.client.startTurn(startParams);
           if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
           session.activeTurnId = turn.turn.id;
+          this.#notifyAbortable(session);
           return;
         } catch (error) {
           const isTurnTransition = isActiveTurnConflictError(error) || isActiveTurnNotSteerableError(error);

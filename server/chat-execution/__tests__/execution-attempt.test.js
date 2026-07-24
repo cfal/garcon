@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { QueueExecutionAttempt } from '../execution-attempt.ts';
 
+const terminalHandoff = () => ({
+  validate: () => undefined,
+  commit: () => undefined,
+});
+
 // Resolves a wait promise against a sentinel so a still-pending wait is
 // observable without hanging the test.
 const PENDING = Symbol('pending');
@@ -128,11 +133,14 @@ describe('QueueExecutionAttempt', () => {
     attempt.markRunSettled();
     attempt.markTerminalObserved();
 
-    await attempt.handoffTurn(
+    const handoff = attempt.handoffTurn(
       { turnId: 'turn-a' },
       { clientRequestId: 'request-b', turnId: 'turn-b' },
-      async () => undefined,
+      terminalHandoff(),
     );
+    expect(attempt.identity()).toEqual({ turnId: 'turn-a' });
+    handoff.validate();
+    handoff.commit();
 
     expect(attempt.identity()).toEqual({ clientRequestId: 'request-b', turnId: 'turn-b' });
     expect(attempt.isExpectedAbort).toBe(true);
@@ -141,46 +149,44 @@ describe('QueueExecutionAttempt', () => {
     expect(await attempt.waitUntilAbortable()).toBe(true);
   });
 
-  test('restores the predecessor when the handoff callback fails', async () => {
+  test('leaves the predecessor unchanged when downstream validation fails', () => {
     const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' }, 'e1');
 
-    await expect(attempt.handoffTurn(
+    const handoff = attempt.handoffTurn(
       { turnId: 'turn-a' },
       { turnId: 'turn-b' },
-      async () => { throw new Error('boundary failed'); },
-    )).rejects.toThrow('boundary failed');
+      {
+        validate: () => { throw new Error('boundary failed'); },
+        commit: () => undefined,
+      },
+    );
+    expect(() => handoff.validate()).toThrow('boundary failed');
 
     expect(attempt.identity()).toEqual({ turnId: 'turn-a' });
   });
 
-  test('rejects a stale handoff without changing the current identity', async () => {
+  test('rejects a stale handoff without changing the current identity', () => {
     const attempt = new QueueExecutionAttempt({ turnId: 'turn-b' }, 'e1');
 
-    await expect(attempt.handoffTurn(
+    expect(() => attempt.handoffTurn(
       { turnId: 'turn-a' },
       { turnId: 'turn-c' },
-      async () => undefined,
-    )).rejects.toThrow('active turn changed');
+      terminalHandoff(),
+    )).toThrow('active turn changed');
 
     expect(attempt.identity()).toEqual({ turnId: 'turn-b' });
   });
 
-  test('does not roll back over a newer successful handoff', async () => {
-    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' }, 'e1');
-
-    await expect(attempt.handoffTurn(
+  test('revalidates the predecessor immediately before commit', () => {
+    const attempt = new QueueExecutionAttempt({ turnId: 'turn-a' });
+    const handoff = attempt.handoffTurn(
       { turnId: 'turn-a' },
       { turnId: 'turn-b' },
-      async () => {
-        await attempt.handoffTurn(
-          { turnId: 'turn-b' },
-          { turnId: 'turn-c' },
-          async () => undefined,
-        );
-        throw new Error('older boundary failed');
-      },
-    )).rejects.toThrow('older boundary failed');
+      terminalHandoff(),
+    );
+    attempt.replaceReservedTurn({ turnId: 'turn-c' });
 
+    expect(() => handoff.validate()).toThrow('active turn changed');
     expect(attempt.identity()).toEqual({ turnId: 'turn-c' });
   });
 

@@ -25,6 +25,13 @@ function makeBus() {
   return { bus, emit: (event) => emit(event), unsubscribe };
 }
 
+function terminalHandoff(overrides = {}) {
+  return {
+    validate: overrides.validate ?? (() => undefined),
+    commit: overrides.commit ?? (() => undefined),
+  };
+}
+
 describe('AgentEventBus', () => {
   it('resolves an abortable waiter only for its exact active operation', async () => {
     const { bus, emit } = makeBus();
@@ -56,15 +63,19 @@ describe('AgentEventBus', () => {
     await expect(waiting).resolves.toBe(false);
   });
 
-  it('does not reuse abortability across operation identities', async () => {
+  it('transfers abortability across an active-input identity handoff', async () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     bus.markTurnAbortable('chat-1', operation('turn-1'));
-    await bus.handoffTurn('chat-1', operation('turn-1'), operation('turn-2'), async () => undefined);
-    const controller = new AbortController();
-    const waiting = bus.waitUntilTurnAbortable('chat-1', operation('turn-2'), controller.signal);
-    controller.abort();
-    await expect(waiting).resolves.toBe(false);
+    const handoff = bus.handoffTurn(
+      'chat-1',
+      operation('turn-1'),
+      operation('turn-2'),
+      terminalHandoff(),
+    );
+    handoff.validate();
+    handoff.commit();
+    await expect(bus.waitUntilTurnAbortable('chat-1', operation('turn-2'))).resolves.toBe(true);
   });
 
   it('returns a defensive snapshot and rejects an active identity overwrite', () => {
@@ -79,45 +90,85 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
   });
 
-  it('commits an explicit active-input identity handoff at its delivery boundary', async () => {
+  it('commits an explicit active-input identity handoff at its delivery boundary', () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
 
-    await bus.handoffTurn('chat-1', operation('turn-1'), operation('turn-2'), async () => {
-      expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
-    });
+    const handoff = bus.handoffTurn(
+      'chat-1',
+      operation('turn-1'),
+      operation('turn-2'),
+      terminalHandoff(),
+    );
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
+    handoff.validate();
+    handoff.commit();
 
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-2');
   });
 
-  it('restores the predecessor only when the delivery boundary fails while the successor owns it', async () => {
+  it('keeps predecessor output attributable while successor persistence is pending', () => {
+    const { bus, emit } = makeBus();
+    const forwarded = [];
+    bus.onMessages((_chatId, messages, metadata) => {
+      forwarded.push({ content: messages[0].content, turnId: metadata.turnId });
+    });
+    bus.trackTurn('chat-1', operation('turn-a'));
+    bus.handoffTurn(
+      'chat-1',
+      operation('turn-a'),
+      operation('turn-b'),
+      terminalHandoff(),
+    );
+
+    emit({
+      type: 'messages',
+      chatId: 'chat-1',
+      messages: [new UserMessage('2026-07-18T00:00:00.000Z', 'predecessor output')],
+      operation: operation('turn-a'),
+    });
+    emit({
+      type: 'messages',
+      chatId: 'chat-1',
+      messages: [new UserMessage('2026-07-18T00:00:01.000Z', 'uncommitted successor output')],
+      operation: operation('turn-b'),
+    });
+
+    expect(forwarded).toEqual([{ content: 'predecessor output', turnId: 'turn-a' }]);
+    expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-a');
+  });
+
+  it('leaves the predecessor active when downstream validation fails before commit', async () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     bus.markTurnAbortable('chat-1', operation('turn-1'));
 
-    await expect(bus.handoffTurn(
+    const handoff = bus.handoffTurn(
       'chat-1',
       operation('turn-1'),
       operation('turn-2'),
-      async () => { throw new Error('registration failed'); },
-    )).rejects.toThrow('registration failed');
+      terminalHandoff({
+        validate: () => { throw new Error('registration failed'); },
+      }),
+    );
+    expect(() => handoff.validate()).toThrow('registration failed');
 
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
     await expect(bus.waitUntilTurnAbortable('chat-1', operation('turn-1'))).resolves.toBe(true);
   });
 
-  it('rejects a handoff after the predecessor identity has changed', async () => {
+  it('rejects a handoff after the predecessor identity has changed', () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     bus.settleTurn('chat-1', operation('turn-1'));
     bus.trackTurn('chat-1', operation('turn-3'));
 
-    await expect(bus.handoffTurn(
+    expect(() => bus.handoffTurn(
       'chat-1',
       operation('turn-1'),
       operation('turn-2'),
-      async () => undefined,
-    )).rejects.toThrow('active turn changed');
+      terminalHandoff(),
+    )).toThrow('active turn changed');
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-3');
   });
 

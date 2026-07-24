@@ -7,8 +7,8 @@ import { join } from 'node:path';
 // MAX_LINES or fewer, its entry must be removed, and no entry may grow past its
 // recorded ceiling. New files start under the budget.
 const MAX_LINES = 1000;
-// Includes queue staging, ordering, boundary parsing, and exact turn settlement ownership.
-const EXECUTION_FOOTPRINT_BUDGET = 7068;
+// Includes queue staging, ordering, boundary parsing, and staged active-turn settlement ownership.
+const EXECUTION_FOOTPRINT_BUDGET = 7078;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

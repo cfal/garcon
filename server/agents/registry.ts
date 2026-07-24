@@ -1,4 +1,8 @@
-import type { AgentTranscriptPage, AgentTranscriptSourceLocation } from '@garcon/server-agent-interface';
+import type {
+  AgentActiveInputHandoff,
+  AgentTranscriptPage,
+  AgentTranscriptSourceLocation,
+} from '@garcon/server-agent-interface';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
@@ -46,7 +50,12 @@ export interface AgentRegistryServiceContract {
   supportsImages(agentId: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
-  submitActiveInput(chatId: string, command: string, opts: RunAgentTurnOptions, beforeDelivery: () => Promise<void>): Promise<boolean>;
+  submitActiveInput(
+    chatId: string,
+    command: string,
+    opts: RunAgentTurnOptions,
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
+  ): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   getRunningChatIdsSnapshot(): string[];
   startSession(chatId: string, command: string, opts?: StartSessionOptions): Promise<void>;
@@ -170,7 +179,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
   }
-  submitActiveInput(chatId: string, command: string, opts: RunAgentTurnOptions, beforeDelivery: () => Promise<void>): Promise<boolean> {
+  submitActiveInput(
+    chatId: string,
+    command: string,
+    opts: RunAgentTurnOptions,
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
+  ): Promise<boolean> {
     return this.#runtime.submitActiveInput(chatId, command, opts, beforeDelivery);
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
