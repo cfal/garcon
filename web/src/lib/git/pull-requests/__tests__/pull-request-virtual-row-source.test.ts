@@ -3,7 +3,10 @@ import type { PullRequestThread } from '$lib/api/pull-requests.js';
 import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git.js';
 import { buildPullRequestVirtualRowSource } from '../pull-request-virtual-row-source.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
-import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import {
+	buildGitVirtualReviewRowSource,
+	type GitVirtualReviewRowSource,
+} from '$lib/git/review/git-virtual-review-row-source.js';
 
 const limits = {
 	maxSummaryFiles: 10_000,
@@ -107,6 +110,14 @@ function source(
 	});
 }
 
+function expectEveryRowPresent(rowSource: GitVirtualReviewRowSource): void {
+	for (let index = 0; index < rowSource.rowCount; index += 1) {
+		expect(rowSource.rowAt(index), `row ${index}`).not.toBeNull();
+	}
+	expect(rowSource.rowAt(-1)).toBeNull();
+	expect(rowSource.rowAt(rowSource.rowCount)).toBeNull();
+}
+
 describe('pull request virtual row source', () => {
 	it('inserts a thread after its matching diff line', () => {
 		const reviewFile = file('src/app.ts');
@@ -126,6 +137,7 @@ describe('pull request virtual row source', () => {
 			threadId: 'src/app.ts:2',
 			showUnanchoredLabel: false,
 		});
+		expectEveryRowPresent(rowSource);
 	});
 
 	it('places unmatched threads at file end and labels only the first one', () => {

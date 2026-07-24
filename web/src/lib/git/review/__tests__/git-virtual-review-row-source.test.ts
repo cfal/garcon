@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git.js';
+import type { BuildVirtualRowsOptions } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
-import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import {
+	buildGitVirtualReviewRowSource,
+	type GitVirtualReviewRowSource,
+} from '$lib/git/review/git-virtual-review-row-source.js';
 
 function summary(path: string, renderedRows: number): GitReviewFileSummary {
 	return {
@@ -38,7 +42,10 @@ function indexedBody(path: string, lineCount: number): GitReviewFileBody {
 	};
 }
 
-function options(files: GitReviewFileSummary[], bodies: Record<string, GitReviewFileBody>) {
+function options(
+	files: GitReviewFileSummary[],
+	bodies: Record<string, GitReviewFileBody>,
+): BuildVirtualRowsOptions {
 	return {
 		summary: {
 			documentId: 'document',
@@ -67,6 +74,14 @@ function options(files: GitReviewFileSummary[], bodies: Record<string, GitReview
 	};
 }
 
+function expectEveryRowPresent(source: GitVirtualReviewRowSource): void {
+	for (let index = 0; index < source.rowCount; index += 1) {
+		expect(source.rowAt(index), `row ${index}`).not.toBeNull();
+	}
+	expect(source.rowAt(-1)).toBeNull();
+	expect(source.rowAt(source.rowCount)).toBeNull();
+}
+
 describe('Git virtual review row source', () => {
 	it('resolves only requested rows from a 100,000-row document', () => {
 		const first = summary('first.txt', 49_999);
@@ -82,6 +97,43 @@ describe('Git virtual review row source', () => {
 		expect(source.rowsInRange(50_000, 50_020)).toHaveLength(20);
 		expect(source.fileStart('second.txt')).toBe(50_001);
 		expect(source.rowKey(50_001)).toBe(2_000_000);
+		expect(source.rowAt(0)).not.toBeNull();
+		expect(source.rowAt(50_001)).not.toBeNull();
+		expect(source.rowAt(source.rowCount - 1)).not.toBeNull();
+		expect(source.rowAt(source.rowCount)).toBeNull();
+	});
+
+	it('resolves every row in representative indexed sources', () => {
+		const pending = summary('pending.txt', 4);
+		const limited: GitReviewFileSummary = {
+			...summary('binary.dat', 0),
+			bodyState: 'binary',
+			isBinary: true,
+		};
+		const loaded = summary('loaded.txt', 2);
+		const loadedBody = indexedBody(loaded.path, 2);
+		const collectionOptions = options([pending], {});
+		collectionOptions.summary.collectionLimit = {
+			reason: 'collection-too-many-files',
+			message: 'Only a subset of files is shown.',
+			visibleFiles: 1,
+			totalFilesKnown: 2,
+		};
+
+		const splitOptions = options([loaded], { [loaded.path]: loadedBody });
+		splitOptions.diffMode = 'split';
+
+		const representativeSources = [
+			buildGitVirtualReviewRowSource(options([pending], {})),
+			buildGitVirtualReviewRowSource(options([limited], {})),
+			buildGitVirtualReviewRowSource(options([loaded], { [loaded.path]: loadedBody })),
+			buildGitVirtualReviewRowSource(splitOptions),
+			buildGitVirtualReviewRowSource(collectionOptions),
+		];
+
+		for (const source of representativeSources) {
+			expectEveryRowPresent(source);
+		}
 	});
 
 	it('aligns delete and add runs in split mode without legacy rows', () => {

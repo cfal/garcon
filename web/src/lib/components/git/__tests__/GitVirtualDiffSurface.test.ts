@@ -110,7 +110,7 @@ describe('GitVirtualDiffSurface', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('uses one virtual diff root and mounts a bounded row window for large documents', async () => {
+	it('renders one bounded contiguous row window for large documents', async () => {
 		const rows = Array.from({ length: 10_000 }, (_, index) => makeHeaderRow(index));
 		const { container } = renderSurface(rows);
 
@@ -121,7 +121,37 @@ describe('GitVirtualDiffSurface', () => {
 		await waitFor(() => {
 			expect(container.querySelectorAll('[data-git-virtual-row]').length).toBeGreaterThan(0);
 		});
-		expect(container.querySelectorAll('[data-git-virtual-row]').length).toBeLessThan(300);
+
+		const rowWindows = container.querySelectorAll<HTMLElement>('[data-git-virtual-row-window]');
+		expect(rowWindows).toHaveLength(1);
+		const rowWindow = rowWindows.item(0);
+		expect(rowWindow).toBeTruthy();
+		if (!rowWindow) return;
+
+		const mountedRows = Array.from(rowWindow.children).filter((element): element is HTMLElement =>
+			element.hasAttribute('data-git-virtual-row'),
+		);
+		expect(mountedRows).toHaveLength(rowWindow.children.length);
+		expect(mountedRows.length).toBeLessThan(300);
+
+		const indexes = mountedRows.map((element) => Number(element.dataset.index));
+		const firstIndex = indexes[0];
+		expect(firstIndex).toBeDefined();
+		if (firstIndex === undefined) return;
+		expect(indexes).toEqual(
+			Array.from({ length: indexes.length }, (_, offset) => firstIndex + offset),
+		);
+
+		for (const element of mountedRows) {
+			expect(element.className).toBe('');
+			expect(element.style.transform).toBe('');
+			expect(element.style.top).toBe('');
+			expect(element.parentElement).toBe(rowWindow);
+		}
+		expect(rowWindow.classList.contains('absolute')).toBe(true);
+		expect(rowWindow.classList.contains('inset-x-0')).toBe(true);
+		expect(rowWindow.className).not.toMatch(/(?:^|\s)-?(?:translate|transform)(?:-|\s|$)/);
+		expect(rowWindow.style.transform).toBe('');
 	});
 
 	it('reconciles a refreshed document against the virtualizer item snapshot', async () => {

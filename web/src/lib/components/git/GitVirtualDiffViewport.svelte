@@ -57,6 +57,8 @@
 
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
+	// Keeps adjacent diff backgrounds in one flow layout; per-row transforms create fractional-DPR paint seams.
+	let windowStart = $derived(virtualItems[0]?.start ?? 0);
 	let visibleRows = $derived.by(() =>
 		virtualItems
 			.map((virtualItem) => source.rowAt(virtualItem.index))
@@ -218,31 +220,31 @@
 		</div>
 	{:else}
 		<div class="relative w-full" style:height={`${totalHeight}px`}>
-			{#each virtualItems as virtualItem (virtualItem.key)}
-				{@const row = source.rowAt(virtualItem.index)}
-				{#if row}
-					<div
-						data-index={virtualItem.index}
-						data-git-virtual-row
-						use:measureRow={virtualItem.index}
-						class="absolute left-0 top-0 w-full"
-						style:transform={`translateY(${virtualItem.start}px)`}
-					>
-						<svelte:boundary>
-							{@render rowSnippet(row)}
-							{#snippet failed(error)}
-								<div
-									class="border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground"
-								>
-									Failed to render diff row: {error instanceof Error
-										? error.message
-										: String(error)}
-								</div>
-							{/snippet}
-						</svelte:boundary>
-					</div>
-				{/if}
-			{/each}
+			<div class="absolute inset-x-0" style:top={`${windowStart}px`} data-git-virtual-row-window>
+				{#each virtualItems as virtualItem (virtualItem.key)}
+					{@const row = source.rowAt(virtualItem.index)}
+					{#if row}
+						<div
+							data-index={virtualItem.index}
+							data-git-virtual-row
+							use:measureRow={virtualItem.index}
+						>
+							<svelte:boundary>
+								{@render rowSnippet(row)}
+								{#snippet failed(error)}
+									<div
+										class="border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground"
+									>
+										Failed to render diff row: {error instanceof Error
+											? error.message
+											: String(error)}
+									</div>
+								{/snippet}
+							</svelte:boundary>
+						</div>
+					{/if}
+				{/each}
+			</div>
 		</div>
 	{/if}
 </div>
