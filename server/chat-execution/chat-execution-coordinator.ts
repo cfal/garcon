@@ -408,20 +408,23 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     let pendingRegistered = false;
     let deliveryMayHaveStarted = false;
     try {
-      const handled = await this.#turnRunner.submitActiveInput!(chatId, content, activeOptions, async () => {
-        const commit = async () => {
-          await this.registerPendingUserInput(chatId, content, activeOptions);
-          pendingRegistered = true;
-          await afterPendingRegistered?.();
+      const handled = await this.#turnRunner.submitActiveInput!(chatId, content, activeOptions, async (handoff) => {
+        const validateOwner = () => {
+          if (this.#ownership.attempt(chatId) !== activeAttempt) {
+            throw new Error(`Cannot hand off execution attempt for chat ${chatId} after its owner changed`);
+          }
         };
-        if (this.#ownership.attempt(chatId) !== activeAttempt) {
-          throw new Error(`Cannot hand off execution attempt for chat ${chatId} after its owner changed`);
-        }
-        if (activeAttempt && predecessor) {
-          await activeAttempt.handoffTurn(predecessor, successor, commit);
-        } else {
-          await commit();
-        }
+        validateOwner();
+        const committedHandoff = activeAttempt && predecessor
+          ? activeAttempt.handoffTurn(predecessor, successor, handoff)
+          : handoff;
+        committedHandoff.validate();
+        await this.registerPendingUserInput(chatId, content, activeOptions);
+        pendingRegistered = true;
+        await afterPendingRegistered?.();
+        validateOwner();
+        committedHandoff.validate();
+        committedHandoff.commit();
         deliveryMayHaveStarted = true;
       });
       if (!handled && deliveryMayHaveStarted) {

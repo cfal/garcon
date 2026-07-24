@@ -1,4 +1,7 @@
-import type { AgentOperationIdentity } from '@garcon/server-agent-interface';
+import type {
+  AgentActiveInputHandoff,
+  AgentOperationIdentity,
+} from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
 
 export class AgentOperationTracker {
@@ -8,25 +11,28 @@ export class AgentOperationTracker {
     this.#operations.set(chatId, operation);
   }
 
-  async handoff(
+  handoff(
     chatId: string,
     predecessor: AgentOperationIdentity | null,
     successor: AgentOperationIdentity,
-    commit: () => Promise<void>,
-  ): Promise<void> {
-    if ((this.#operations.get(chatId) ?? null) !== predecessor) {
-      throw new Error(`Cannot hand off operation for chat ${chatId} after its active operation changed`);
-    }
-    this.#operations.set(chatId, successor);
-    try {
-      await commit();
-    } catch (error) {
-      if (this.#operations.get(chatId) === successor) {
-        if (predecessor) this.#operations.set(chatId, predecessor);
-        else this.#operations.delete(chatId);
+    downstream: AgentActiveInputHandoff,
+  ): AgentActiveInputHandoff {
+    const validate = () => {
+      if ((this.#operations.get(chatId) ?? null) !== predecessor) {
+        throw new Error(`Cannot hand off operation for chat ${chatId} after its active operation changed`);
       }
-      throw error;
-    }
+    };
+    validate();
+    return {
+      validate: () => {
+        validate();
+        downstream.validate();
+      },
+      commit: () => {
+        this.#operations.set(chatId, successor);
+        downstream.commit();
+      },
+    };
   }
 
   current(

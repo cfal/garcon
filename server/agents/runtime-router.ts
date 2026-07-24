@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevisions,
+  type AgentActiveInputHandoff,
   type AgentExecutionContext,
   type AgentOperationIdentity,
   type AgentProjectPathUpdatePreparation,
@@ -197,7 +198,7 @@ export class AgentRuntimeRouter {
     chatId: string,
     prompt: string,
     opts: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
   ): Promise<boolean> {
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) return false;
@@ -219,12 +220,12 @@ export class AgentRuntimeRouter {
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
       attachments: attachments(opts.images),
-      beforeDelivery: () => this.#events.handoffTurn(
+      beforeDelivery: (handoff) => beforeDelivery(this.#events.handoffTurn(
         chatId,
         previousTurn,
         operationMetadata(operation),
-        beforeDelivery,
-      ),
+        handoff,
+      )),
     });
   }
 

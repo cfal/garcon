@@ -8,8 +8,8 @@ import { join } from 'node:path';
 // recorded ceiling. New files start under the budget.
 const MAX_LINES = 1000;
 // Includes queue staging, ordering, boundary parsing, transcript snapshots,
-// title-icon source injection, and exact turn settlement ownership.
-const EXECUTION_FOOTPRINT_BUDGET = 7068;
+// title-icon source injection, and staged active-turn settlement ownership.
+const EXECUTION_FOOTPRINT_BUDGET = 7078;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

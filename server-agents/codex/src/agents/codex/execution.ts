@@ -106,12 +106,12 @@ export class CodexExecution implements AgentExecution {
     );
     return this.runtime.submitActiveInput(
       runtimeRequest,
-      () => this.#operations.handoff(
+      (handoff) => request.beforeDelivery(this.#operations.handoff(
         request.chatId,
         predecessor,
         request.operation,
-        request.beforeDelivery,
-      ),
+        handoff,
+      )),
     );
   }
 

@@ -9,6 +9,11 @@ import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAG
 let workspaceDir = '';
 let queue;
 
+const runtimeHandoff = () => ({
+  validate: () => undefined,
+  commit: () => undefined,
+});
+
 function createStateOnlyAgents() {
   return {
     runAgentTurn: mock(() => Promise.reject(new Error('state-only queue cannot run turns'))),
@@ -1254,7 +1259,7 @@ describe('orchestration', () => {
         order.push('registered');
       });
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         order.push('delivered');
         return true;
       });
@@ -1282,7 +1287,7 @@ describe('orchestration', () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async function (_chatId, _content, _options, beforeDelivery) {
         expect(this).toBe(mockAgents);
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         return true;
       });
 
@@ -1362,7 +1367,7 @@ describe('orchestration', () => {
     it('marks accepted input unconfirmed when live delivery throws', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         throw new Error('steer failed');
       });
 
@@ -1386,7 +1391,7 @@ describe('orchestration', () => {
       let running = false;
       mockAgents.isChatRunning.mockImplementation(() => running);
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         return true;
       });
       const settled = [];
@@ -1426,9 +1431,15 @@ describe('orchestration', () => {
 
     it('restores a retained predecessor when the active-input boundary fails', async () => {
       let running = false;
+      let runtimeOwner = 'turn-a';
       mockAgents.isChatRunning.mockImplementation(() => running);
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
+        await beforeDelivery({
+          validate: () => {
+            if (runtimeOwner !== 'turn-a') throw new Error('runtime owner changed');
+          },
+          commit: () => { runtimeOwner = 'turn-b'; },
+        });
         return true;
       });
       const predecessor = orchQueue.reserveDirectTurn('c1', {
@@ -1447,6 +1458,7 @@ describe('orchestration', () => {
         message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
         deliveryAccepted: false,
       });
+      expect(runtimeOwner).toBe('turn-a');
 
       running = false;
       orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
@@ -1476,7 +1488,7 @@ describe('orchestration', () => {
           turnId: 'turn-c',
         });
         running = true;
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         return true;
       });
 
@@ -1507,7 +1519,7 @@ describe('orchestration', () => {
           turnId: 'turn-c',
         });
         running = true;
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         return true;
       });
 
@@ -1531,7 +1543,7 @@ describe('orchestration', () => {
       let delivered = false;
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         delivered = true;
         return true;
       });
@@ -1565,7 +1577,7 @@ describe('orchestration', () => {
       });
       mockChatMessages.appendMessages.mockRejectedValue(new Error('chat append failed'));
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         delivered = true;
         return true;
       });
@@ -1594,7 +1606,7 @@ describe('orchestration', () => {
         clientRequestId: 'request-listener-failed',
       });
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-        await beforeDelivery();
+        await beforeDelivery(runtimeHandoff());
         deliveries += 1;
         return true;
       });

@@ -8,6 +8,7 @@ import type {
   UserMessageDeliveryStatus,
 } from '../../common/chat-types.ts';
 import type { ChatViewMessage } from '../../common/chat-view.ts';
+import type { AgentActiveInputHandoff } from '@garcon/server-agent-interface';
 import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/session-types.ts';
 import {
   cloneStoredChatExecutionControl,
@@ -177,7 +178,7 @@ export interface AgentTurnRunnerPort {
     chatId: string,
     command: string,
     options: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
   ): Promise<boolean>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;

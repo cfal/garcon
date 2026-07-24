@@ -1,4 +1,5 @@
 import type {
+  AgentActiveInputHandoff,
   AgentExecutionEvent,
   AgentOperationIdentity,
 } from '@garcon/server-agent-interface';
@@ -53,30 +54,34 @@ export class AgentEventBus {
     this.#setTurn(chatId, turn);
   }
 
-  async handoffTurn(
+  handoffTurn(
     chatId: string,
     predecessor: TurnEventMetadata | undefined,
     successor: TurnEventMetadata,
-    commit: () => Promise<void>,
-  ): Promise<void> {
-    const active = this.#turnMetadataByChatId.get(chatId);
-    if (!sameTurnIdentity(active, predecessor)) {
-      throw new Error(`Cannot hand off turn for chat ${chatId} after its active turn changed`);
-    }
+    downstream: AgentActiveInputHandoff,
+  ): AgentActiveInputHandoff {
     const next = turnMetadata(successor);
-    const previousAbortable = this.#abortableTurnByChatId.get(chatId);
-    this.#setTurn(chatId, next);
-    try {
-      await commit();
-    } catch (error) {
-      if (this.#turnMetadataByChatId.get(chatId) === next) {
-        if (active) this.#turnMetadataByChatId.set(chatId, active);
-        else this.#turnMetadataByChatId.delete(chatId);
-        if (previousAbortable) this.#abortableTurnByChatId.set(chatId, previousAbortable);
-        else this.#abortableTurnByChatId.delete(chatId);
+    const validate = () => {
+      const active = this.#turnMetadataByChatId.get(chatId);
+      if (!sameTurnIdentity(active, predecessor)) {
+        throw new Error(`Cannot hand off turn for chat ${chatId} after its active turn changed`);
       }
-      throw error;
-    }
+    };
+    validate();
+    return {
+      validate: () => {
+        validate();
+        downstream.validate();
+      },
+      commit: () => {
+        const abortable = this.#abortableTurnByChatId.get(chatId);
+        const transferAbortability = abortable !== undefined
+          && sameTurnIdentity(abortable, predecessor);
+        this.#setTurn(chatId, next);
+        if (transferAbortability) this.markTurnAbortable(chatId, next);
+        downstream.commit();
+      },
+    };
   }
 
   #setTurn(chatId: string, turn: TurnEventMetadata): void {
