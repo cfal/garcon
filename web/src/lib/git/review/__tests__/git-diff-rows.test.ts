@@ -1,22 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { GitFileReviewData } from '$lib/api/git';
+import type { GitRenderedDiffRow } from '$lib/git/review/git-rendered-diff-types.js';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
 import {
 	buildSplitDiffRows,
 	buildSplitDiffRowViews,
-	buildUnifiedDiffRows,
 	buildUnifiedDiffRowViews,
 	getSelectableLineKeys,
+	renderUnifiedDiffRow,
 	type GitDiffComposerDraft,
 } from '$lib/git/review/git-diff-rows.js';
 
-function makeReviewData(): GitFileReviewData {
-	return {
-		path: 'src/app.ts',
-		mode: 'working',
-		isBinary: false,
-		truncated: false,
-		rows: [
+function makeReviewData(): GitRenderedDiffRow[] {
+	return [
 			{
 				key: 'hunk:0:hunk-0',
 				kind: 'hunk',
@@ -77,20 +72,11 @@ function makeReviewData(): GitFileReviewData {
 				text: 'console.log(a);',
 				diffLineIndex: 4,
 			},
-		],
-		hunks: [
-			{
-				id: 'hunk-0',
-				header: '@@ -1,3 +1,4 @@',
-				oldStart: 1,
-				oldLines: 3,
-				newStart: 1,
-				newLines: 4,
-				rowStartIndex: 0,
-				rowEndIndex: 5,
-			},
-		],
-	};
+	];
+}
+
+function buildUnifiedDiffRows(rows: GitRenderedDiffRow[]) {
+	return rows.map(renderUnifiedDiffRow);
 }
 
 describe('git diff rows', () => {

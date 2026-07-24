@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import type {
 		CommentComposerState,
 		GitDiffSeverity,
@@ -12,8 +13,7 @@
 
 	interface GitCommitVirtualDiffSurfaceProps {
 		documentId: string | null;
-		rows: GitVirtualReviewRow[];
-		fileRowIndex: Map<string, number>;
+		source: GitVirtualReviewRowSource;
 		fontSize: number;
 		scrollToRequest: { filePath: string; token: number } | null;
 		overscan?: number;
@@ -41,8 +41,7 @@
 
 	let {
 		documentId,
-		rows,
-		fileRowIndex,
+		source,
 		fontSize,
 		scrollToRequest,
 		overscan = 18,
@@ -84,15 +83,14 @@
 		<GitCommitVirtualFileHeader {row} {onSelectFile} />
 	{:else if row.kind === 'file-placeholder' || row.kind === 'file-limit' || row.kind === 'collection-limit'}
 		<GitVirtualPlaceholderRow {row} />
-	{:else}
+	{:else if row.kind === 'unified-row' || row.kind === 'split-row'}
 		<GitVirtualDiffRow {row} {fontSize} interaction={rowInteraction} {onOpenInEditor} />
 	{/if}
 {/snippet}
 
 <GitVirtualDiffViewport
 	{documentId}
-	{rows}
-	{fileRowIndex}
+	{source}
 	{fontSize}
 	{scrollToRequest}
 	{overscan}

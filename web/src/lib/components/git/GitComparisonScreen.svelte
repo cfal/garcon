@@ -90,8 +90,7 @@
 	isLoading={comparison.isLoading}
 	error={comparison.documentError}
 	onDismissError={() => comparison.dismissDocumentError()}
-	rows={comparison.document.virtualRows}
-	fileRowIndex={comparison.document.fileRowIndex}
+	source={comparison.document.rowSource}
 	scrollRequest={comparison.document.scrollRequest}
 	fileFilter={comparison.document.fileFilter}
 	focusedFilePath={comparison.document.focusedFilePath}

@@ -6,6 +6,7 @@ import {
 	type GitCommitFileSummary,
 } from '$lib/api/git.js';
 import { GitHistoryController } from '$lib/git/history/git-history.svelte.js';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
 vi.mock('$lib/api/git.js', () => ({
@@ -99,11 +100,14 @@ function snapshot(
 
 function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => `fp-${path}`) {
 	return {
+		status: 'ready' as const,
 		documentId: 'doc',
 		files: Object.fromEntries(
 			paths.map((path) => [
 				path,
-				{
+				(() => {
+					const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1 @@\n+next\n`;
+					return {
 					path,
 					bodyFingerprint: fingerprintForPath(path),
 					bodyState: 'loaded' as const,
@@ -111,31 +115,11 @@ function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => 
 					isBinary: false,
 					isTooLarge: false,
 					renderedRowCount: 2,
-					patchBytes: 64,
-					rows: [
-						{
-							key: `hunk-0:${path}`,
-							kind: 'hunk' as const,
-							text: '@@ -1 +1 @@',
-							beforeLine: null,
-							afterLine: null,
-							hunkId: 'h0',
-							hunkIndex: 0,
-							diffLineIndex: -1,
-						},
-						{
-							key: `add-0:${path}`,
-							kind: 'add' as const,
-							text: 'next',
-							beforeLine: null,
-							afterLine: 1,
-							hunkId: 'h0',
-							hunkIndex: 0,
-							diffLineIndex: 0,
-						},
-					],
-					hunks: [],
-				},
+					patchBytes: patch.length,
+					patch,
+					patchIndex: createGitPatchIndex(patch),
+					};
+				})(),
 			]),
 		),
 		errors: {},
@@ -213,7 +197,31 @@ describe('GitHistoryController', () => {
 			expect.objectContaining({ parent: 'parent', context: 5 }),
 		);
 		expect(history.fileBodies['a.ts']?.bodyState).toBe('loaded');
-		expect(history.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
+		expect(
+			history.rowSource
+				.rowsInRange(0, history.rowSource.rowCount)
+				.some((row) => row.kind === 'unified-row'),
+		).toBe(true);
+	});
+
+	it('refreshes an expired commit document once without retrying indefinitely', async () => {
+		vi.mocked(getGitCommitSnapshot)
+			.mockResolvedValueOnce(snapshot('abcdef123', 'fp-a'))
+			.mockResolvedValueOnce(snapshot('abcdef123', 'fp-b'));
+		vi.mocked(getGitCommitFileBodies).mockResolvedValue({
+			status: 'document-expired',
+			documentId: 'expired-doc',
+			message: 'This review expired.',
+		});
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+
+		history.openCommit('/project', 'abcdef123');
+
+		await vi.waitFor(() => expect(getGitCommitSnapshot).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
+		expect(getGitCommitSnapshot).toHaveBeenCalledTimes(2);
+		expect(history.commitError).toBe('This review expired.');
 	});
 
 	it('keeps an open comment when a context change is requested', async () => {
@@ -241,21 +249,26 @@ describe('GitHistoryController', () => {
 		);
 	});
 
-	it('finishes the initial body batch when visible demand adds another file', async () => {
+	it('loads newly visible files after the active visible request without waiting for prefetch', async () => {
 		const files = Array.from({ length: 9 }, (_, index) => commitFile(`file-${index}.ts`));
 		const firstBodyCandidates = files.slice(0, 8).map((file) => file.path);
-		const firstBatch = deferred<ReturnType<typeof bodiesForPaths>>();
+		const firstVisible = deferred<ReturnType<typeof bodiesForPaths>>();
+		const prefetch = deferred<ReturnType<typeof bodiesForPaths>>();
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(
 			snapshot('abcdef123', 'fp-a', { files, firstBodyCandidates }),
 		);
 		vi.mocked(getGitCommitFileBodies)
-			.mockReturnValueOnce(firstBatch.promise)
+			.mockReturnValueOnce(firstVisible.promise)
+			.mockReturnValueOnce(prefetch.promise)
 			.mockResolvedValueOnce(bodiesForPaths(['file-8.ts']));
 		const history = new GitHistoryController();
 		history.resetForProject('/project');
 
 		history.openCommit('/project', 'abcdef123');
-		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[3]).toEqual([{ path: 'file-0.ts' }]);
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.purpose).toBe('visible');
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[4]?.purpose).toBe('prefetch');
 		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
 		const ninthFile = files[8];
 		history.setVisibleRows('/project', [
@@ -274,14 +287,14 @@ describe('GitHistoryController', () => {
 		]);
 
 		expect(firstSignal?.aborted).toBe(false);
-		expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1);
-
-		firstBatch.resolve(bodiesForPaths(firstBodyCandidates));
+		expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
+		firstVisible.resolve(bodiesForPaths(['file-0.ts']));
 		await vi.waitFor(() => {
-			expect(history.fileBodies['file-0.ts']?.bodyState).toBe('loaded');
-			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
+			expect(history.fileBodies['file-8.ts']?.bodyState).toBe('loaded');
+			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(3);
 		});
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[3]).toEqual([{ path: 'file-8.ts' }]);
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[2]?.[3]).toEqual([{ path: 'file-8.ts' }]);
+		prefetch.resolve(bodiesForPaths(firstBodyCandidates.slice(1)));
 	});
 
 	it('still aborts an active body batch when leaving commit details', async () => {

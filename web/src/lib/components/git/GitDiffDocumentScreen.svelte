@@ -13,6 +13,7 @@
 		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import {
 		clampGitFileTreeWidth,
 		DEFAULT_GIT_FILE_TREE_WIDTH,
@@ -38,8 +39,7 @@
 		isLoading: boolean;
 		error: string | null;
 		onDismissError?: () => void;
-		rows: GitVirtualReviewRow[];
-		fileRowIndex: Map<string, number>;
+		source: GitVirtualReviewRowSource;
 		scrollRequest: { filePath: string; token: number } | null;
 		fileFilter: string;
 		focusedFilePath: string | null;
@@ -80,8 +80,7 @@
 		isLoading,
 		error,
 		onDismissError,
-		rows,
-		fileRowIndex,
+		source,
 		scrollRequest,
 		fileFilter,
 		focusedFilePath,
@@ -244,8 +243,7 @@
 			>
 				<GitCommitVirtualDiffSurface
 					{documentId}
-					{rows}
-					{fileRowIndex}
+					{source}
 					{fontSize}
 					scrollToRequest={scrollRequest}
 					overscan={isSinglePane ? 3 : 18}

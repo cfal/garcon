@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 
 type GitVirtualDiffSurfaceProps = ComponentProps<typeof GitVirtualDiffSurface>;
@@ -42,8 +43,7 @@ function renderSurface(
 ) {
 	const props = {
 		documentId: 'doc',
-		rows,
-		fileRowIndex: new Map(rows.map((row, index) => [row.filePath, index])),
+		source: arrayGitVirtualReviewRowSource(rows),
 		activeTab: 'unstaged' as const,
 		fontSize: 12,
 		selectedLineKeys: new Set<string>(),
@@ -85,6 +85,31 @@ function renderSurface(
 }
 
 describe('GitVirtualDiffSurface', () => {
+	beforeEach(() => {
+		vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1024);
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(720);
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+			this: HTMLElement,
+		) {
+			const height = this.hasAttribute('data-git-virtual-diff-root') ? 720 : 42;
+			return {
+				width: 1024,
+				height,
+				top: 0,
+				right: 1024,
+				bottom: height,
+				left: 0,
+				x: 0,
+				y: 0,
+				toJSON: () => ({}),
+			};
+		});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	it('uses one virtual diff root and mounts a bounded row window for large documents', async () => {
 		const rows = Array.from({ length: 10_000 }, (_, index) => makeHeaderRow(index));
 		const { container } = renderSurface(rows);
@@ -110,8 +135,7 @@ describe('GitVirtualDiffSurface', () => {
 
 		await rerender({
 			...props,
-			rows: replacementRows,
-			fileRowIndex: new Map([['file-2.ts', 0]]),
+			source: arrayGitVirtualReviewRowSource(replacementRows),
 		});
 
 		await waitFor(() => {

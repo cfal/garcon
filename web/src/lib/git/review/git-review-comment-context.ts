@@ -1,4 +1,5 @@
-import type { GitRenderedDiffRow } from '$lib/api/git.js';
+import type { GitReviewFileBody } from '$lib/api/git.js';
+import type { GitRenderedDiffRow } from './git-rendered-diff-types.js';
 
 const NEARBY_ROW_COUNT = 2;
 
@@ -7,26 +8,60 @@ export function buildGitReviewCommentContext(
 	side: 'before' | 'after',
 	line: number,
 ): string[] {
-	const targetIndex = rows.findIndex((row) =>
-		side === 'before' ? row.beforeLine === line : row.afterLine === line,
+	return buildCommentContext(rows.length, (index) => rows[index], side, line);
+}
+
+export function buildGitReviewBodyCommentContext(
+	body: GitReviewFileBody | undefined,
+	side: 'before' | 'after',
+	line: number,
+): string[] {
+	if (!body?.patchIndex) return [];
+	const index = body.patchIndex;
+	return buildCommentContext(
+		index.rowCount,
+		(rowIndex) => index.rowAt(rowIndex),
+		side,
+		line,
 	);
+}
+
+function buildCommentContext(
+	rowCount: number,
+	rowAt: (index: number) => GitRenderedDiffRow | undefined,
+	side: 'before' | 'after',
+	line: number,
+): string[] {
+	let hunkHeaderIndex = -1;
+	let hunkHeaderText: string | null = null;
+	let targetIndex = -1;
+	for (let index = 0; index < rowCount; index += 1) {
+		const row = rowAt(index);
+		if (!row) continue;
+		if (row.kind === 'hunk') {
+			hunkHeaderIndex = index;
+			hunkHeaderText = row.text;
+			continue;
+		}
+		if (side === 'before' ? row.beforeLine === line : row.afterLine === line) {
+			targetIndex = index;
+			break;
+		}
+	}
 	if (targetIndex < 0) return [];
-	const target = rows[targetIndex];
+	const target = rowAt(targetIndex);
 	if (!target || target.kind === 'hunk') return [];
-	const hunkRows = rows
-		.map((row, index) => ({ row, index }))
-		.filter(({ row }) => row.kind !== 'hunk' && row.hunkId === target.hunkId);
-	const targetPosition = hunkRows.findIndex(({ index }) => index === targetIndex);
-	const nearby = hunkRows.slice(
-		Math.max(0, targetPosition - NEARBY_ROW_COUNT),
-		targetPosition + NEARBY_ROW_COUNT + 1,
-	);
-	const hunkHeader = rows.find(
-		(row) => row.kind === 'hunk' && row.hunkId === target.hunkId,
-	);
+	const nearby: GitRenderedDiffRow[] = [];
+	const start = Math.max(hunkHeaderIndex + 1, targetIndex - NEARBY_ROW_COUNT);
+	const end = Math.min(rowCount, targetIndex + NEARBY_ROW_COUNT + 1);
+	for (let index = start; index < end; index += 1) {
+		const row = rowAt(index);
+		if (!row || row.kind === 'hunk' || row.hunkId !== target.hunkId) continue;
+		nearby.push(row);
+	}
 	return [
-		...(hunkHeader ? [hunkHeader.text] : []),
-		...nearby.map(({ row }) => formatContextRow(row)),
+		...(hunkHeaderText ? [hunkHeaderText] : []),
+		...nearby.map(formatContextRow),
 	];
 }
 

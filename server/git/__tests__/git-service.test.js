@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
-import { createGitService } from "../git-service.js";
+import { createGitService as createProductionGitService } from "../git-service.js";
 import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
@@ -15,6 +15,7 @@ import {
   needsRevisionFailureDiagnostics,
 } from "../comparison-errors.js";
 import { GIT_REVIEW_DOCUMENT_LIMITS } from "../types.js";
+import { parseUnifiedPatchToRenderedRows } from "../rendered-diff.js";
 import { serializeWorktreeMtime } from "../worktrees.js";
 
 // Minimal classifier stub for toHttpError tests
@@ -38,6 +39,77 @@ function mockClassifyGitError(error) {
 const mockAgents = {
   runSingleQuery: () => Promise.resolve("chore: stub"),
 };
+
+function materializeReviewResponse(response) {
+  if (response.status !== "ready") return response;
+  return {
+    ...response,
+    files: Object.fromEntries(
+      Object.entries(response.files).map(([filePath, body]) => {
+        const rendered = body.patch
+          ? parseUnifiedPatchToRenderedRows(body.patch, { allowMultipleFileSections: true })
+          : { rows: [], hunks: [] };
+        return [filePath, { ...body, ...rendered }];
+      }),
+    ),
+  };
+}
+
+function createGitService(options) {
+  const service = createProductionGitService(options);
+  return {
+    ...service,
+    async getReviewFileBodies(request) {
+      let response = await service.getReviewDocumentFileBodies({
+        projectPath: request.projectPath,
+        documentId: request.documentId,
+        files: request.files,
+        purpose: "visible",
+        trace: request.trace,
+        signal: request.signal,
+      });
+      if (response.status === "document-expired") {
+        const snapshot = await service.getWorkbenchSnapshot({
+          projectPath: request.projectPath,
+          mode: request.mode,
+          context: request.context,
+          trace: request.trace,
+          signal: request.signal,
+        });
+        if (snapshot.status !== "ready") throw new Error(snapshot.message);
+        response = await service.getReviewDocumentFileBodies({
+          projectPath: request.projectPath,
+          documentId: snapshot.reviewSummary.documentId,
+          files: request.files,
+          purpose: "visible",
+          trace: request.trace,
+          signal: request.signal,
+        });
+      }
+      return materializeReviewResponse(response);
+    },
+    async getCommitFileBodies(request) {
+      return materializeReviewResponse(await service.getReviewDocumentFileBodies({
+        projectPath: request.projectPath,
+        documentId: request.documentId,
+        files: request.files.map((file) => file.path),
+        purpose: "visible",
+        trace: request.trace,
+        signal: request.signal,
+      }));
+    },
+    async getComparisonFileBodies(request) {
+      return materializeReviewResponse(await service.getReviewDocumentFileBodies({
+        projectPath: request.projectPath,
+        documentId: request.documentId,
+        files: request.files.map((file) => file.path),
+        purpose: "visible",
+        trace: request.trace,
+        signal: request.signal,
+      }));
+    },
+  };
+}
 
 async function runGitCommand(cwd, args) {
   return new Promise((resolve, reject) => {
@@ -65,20 +137,23 @@ async function runGitCommand(cwd, args) {
   });
 }
 
-function mutateAfterComparisonSummaries(filePath, contents) {
+function mutateDuringComparisonValidations(filePath, contents) {
   const trace = [];
-  let summaryCount = 0;
+  let statusCount = 0;
+  let validationCount = 0;
   trace.push = function (...entries) {
     const length = Array.prototype.push.apply(this, entries);
     for (const entry of entries) {
-      if (!entry.args.includes("--name-status")) continue;
-      const content = contents[summaryCount];
-      summaryCount += 1;
+      if (!entry.args.includes("--porcelain=v1")) continue;
+      statusCount += 1;
+      if (statusCount % 2 !== 0) continue;
+      const content = contents[validationCount];
+      validationCount += 1;
       if (content !== undefined) writeFileSync(filePath, content, "utf-8");
     }
     return length;
   };
-  return { trace, summaryCount: () => summaryCount };
+  return { trace, validationCount: () => validationCount };
 }
 
 async function initRepoWithCommit(projectPath) {
@@ -146,7 +221,7 @@ describe("GitDomainError", () => {
 });
 
 describe("createGitService", () => {
-  const git = createGitService({
+  const git = createProductionGitService({
     agents: mockAgents,
     classifyGitError: mockClassifyGitError,
   });
@@ -164,9 +239,7 @@ describe("createGitService", () => {
       "createBranch",
       "getHistoryCommits",
       "getCommitSnapshot",
-      "getCommitFileBodies",
       "getComparisonSnapshot",
-      "getComparisonFileBodies",
       "generateCommitMessageForFiles",
       "getRemoteStatus",
       "getRemotes",
@@ -178,7 +251,7 @@ describe("createGitService", () => {
       "getWorkbenchSnapshot",
       "getWorkingTreeFingerprint",
       "getQuickSummary",
-      "getReviewFileBodies",
+      "getReviewDocumentFileBodies",
       "stageSelection",
       "stageHunk",
       "getWorktrees",
@@ -1508,7 +1581,7 @@ describe("comparison operations", () => {
     }
   });
 
-  it("retries a Working Tree snapshot once when content changes during its summary", async () => {
+  it("retries a Working Tree snapshot once when content changes before validation", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-retry-"),
     );
@@ -1521,7 +1594,7 @@ describe("comparison operations", () => {
       await initRepoWithCommit(projectPath);
       const filePath = path.join(projectPath, "a.txt");
       await fs.writeFile(filePath, "first edit\n", "utf-8");
-      const mutation = mutateAfterComparisonSummaries(filePath, [
+      const mutation = mutateDuringComparisonValidations(filePath, [
         "second edit\n",
       ]);
 
@@ -1534,7 +1607,7 @@ describe("comparison operations", () => {
       });
 
       expect(snapshot.status).toBe("ready");
-      expect(mutation.summaryCount()).toBe(2);
+      expect(mutation.validationCount()).toBe(2);
       expect(snapshot.files).toContainEqual(
         expect.objectContaining({ path: "a.txt", additions: 1 }),
       );
@@ -1556,7 +1629,7 @@ describe("comparison operations", () => {
       await initRepoWithCommit(projectPath);
       const filePath = path.join(projectPath, "a.txt");
       await fs.writeFile(filePath, "first edit\n", "utf-8");
-      const mutation = mutateAfterComparisonSummaries(filePath, [
+      const mutation = mutateDuringComparisonValidations(filePath, [
         "second edit\n",
         "third edit\n",
       ]);
@@ -1573,7 +1646,7 @@ describe("comparison operations", () => {
         status: "working-tree-changing",
         project: projectPath,
       });
-      expect(mutation.summaryCount()).toBe(2);
+      expect(mutation.validationCount()).toBe(2);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -3928,6 +4001,17 @@ describe("toHttpError", () => {
     const err = new GitDomainError("AUTH_FAILED", "Auth failed");
     const response = git.toHttpError(err);
     expect(response.status).toBe(401);
+  });
+
+  it("maps SERVICE_BUSY GitDomainError to a retryable 503", async () => {
+    const err = new GitDomainError("SERVICE_BUSY", "Try again shortly");
+    const response = git.toHttpError(err);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Try again shortly",
+      errorCode: "SERVICE_BUSY",
+      retryable: true,
+    });
   });
 
   it("maps unknown GitDomainError codes to 500", async () => {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { GitCommitFileSummary, GitCommitSnapshotReady } from '$lib/api/git.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import type {
 		CommentComposerState,
 		GitDiffSeverity,
@@ -15,8 +16,7 @@
 		files: GitCommitFileSummary[];
 		isLoading: boolean;
 		error: string | null;
-		rows: GitVirtualReviewRow[];
-		fileRowIndex: Map<string, number>;
+		source: GitVirtualReviewRowSource;
 		scrollRequest: { filePath: string; token: number } | null;
 		fileFilter: string;
 		focusedFilePath: string | null;
@@ -90,8 +90,7 @@
 	files={props.files}
 	isLoading={props.isLoading}
 	error={props.error}
-	rows={props.rows}
-	fileRowIndex={props.fileRowIndex}
+	source={props.source}
 	scrollRequest={props.scrollRequest}
 	fileFilter={props.fileFilter}
 	focusedFilePath={props.focusedFilePath}

@@ -4,7 +4,15 @@ import type {
 	GitReviewFileBody,
 	GitReviewFileSummary,
 } from '$lib/api/git.js';
-import { buildVirtualRows } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
+import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+
+function buildVirtualRows(
+	options: Parameters<typeof buildGitVirtualReviewRowSource>[0],
+) {
+	const source = buildGitVirtualReviewRowSource(options);
+	return source.rowsInRange(0, source.rowCount);
+}
 
 function makeSummary(files: GitReviewFileSummary[], documentId = 'doc'): GitReviewDocumentSummary {
 	return {
@@ -46,6 +54,7 @@ function makeFile(path: string, patch: Partial<GitReviewFileSummary> = {}): GitR
 }
 
 function makeBody(path: string): GitReviewFileBody {
+	const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1 @@\n+new line\n`;
 	return {
 		path,
 		bodyFingerprint: `fingerprint:${path}`,
@@ -53,42 +62,10 @@ function makeBody(path: string): GitReviewFileBody {
 		category: 'normal',
 		isBinary: false,
 		isTooLarge: false,
-		renderedRowCount: 4,
-		patchBytes: 128,
-		rows: [
-			{
-				key: 'hunk:0',
-				kind: 'hunk',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: null,
-				afterLine: null,
-				text: '@@ -1 +1 @@',
-				diffLineIndex: -1,
-			},
-			{
-				key: 'line:0:add',
-				kind: 'add',
-				hunkIndex: 0,
-				hunkId: 'hunk-0',
-				beforeLine: null,
-				afterLine: 1,
-				text: 'new line',
-				diffLineIndex: 0,
-			},
-		],
-		hunks: [
-			{
-				id: 'hunk-0',
-				header: '@@ -1 +1 @@',
-				oldStart: 1,
-				oldLines: 0,
-				newStart: 1,
-				newLines: 1,
-				rowStartIndex: 0,
-				rowEndIndex: 1,
-			},
-		],
+		renderedRowCount: 2,
+		patchBytes: patch.length,
+		patch,
+		patchIndex: createGitPatchIndex(patch),
 	};
 }
 
@@ -141,7 +118,7 @@ describe('buildVirtualRows', () => {
 		expect(rows[2]).toMatchObject({ kind: 'unified-row', filePath: 'a.ts' });
 		if (rows[2].kind === 'unified-row') {
 			expect(rows[2].view.text).toBe('new line');
-			expect(rows[2].selectableLineKeys).toHaveLength(1);
+			expect(rows[2].selectableLineKeys()).toHaveLength(1);
 			expect(rows[2].actionTarget).toMatchObject({ tab: 'unstaged', mode: 'stage' });
 		}
 	});
@@ -160,7 +137,7 @@ describe('buildVirtualRows', () => {
 		const content = rows.filter((row) => row.kind === 'unified-row' || row.kind === 'split-row');
 
 		expect(content.every((row) => row.actionTarget === null)).toBe(true);
-		expect(content.every((row) => row.selectableLineKeys.length === 0)).toBe(true);
+		expect(content.every((row) => row.selectableLineKeys().length === 0)).toBe(true);
 	});
 
 	it('uses placeholders for unloaded files and limit rows for binary files', () => {

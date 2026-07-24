@@ -1,22 +1,13 @@
 import { createHash } from 'crypto';
 import { GitDomainError } from './git-types.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
-import { mapWithConcurrency } from '../lib/concurrency.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';
-import { exactGitPathspecs } from './pathspecs.js';
-import {
-  categoryForPath,
-  errorFileBody,
-  limitedRenderedPatch,
-  selectFilePatchFromRawDiff,
-} from './rendered-diff.js';
+import { categoryForPath } from './rendered-diff.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
   type GitCommitDetails,
-  type GitCommitFileBodiesOptions,
-  type GitCommitFileBodiesResponse,
   type GitCommitFileStatus,
   type GitCommitFileSummary,
   type GitCommitSnapshotOptions,
@@ -27,6 +18,11 @@ import {
   type GitHistoryCommitListOptions,
   type GitHistoryCommitListResponse,
 } from './types.js';
+import {
+  GitReviewDocumentRegistry,
+  registeredTreeDiffFile,
+} from './review-document-registry.js';
+import { measureGitReviewPhaseSync } from './review-performance.js';
 
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const DEFAULT_HISTORY_REF = 'HEAD';
@@ -321,8 +317,9 @@ async function getCommitSnapshot({
   context = 5,
   bodyCandidateCount = 8,
   trace,
+  metrics,
   signal,
-}: GitCommitSnapshotOptions): Promise<GitCommitSnapshotResponse> {
+}: GitCommitSnapshotOptions, registry: GitReviewDocumentRegistry): Promise<GitCommitSnapshotResponse> {
   await assertGitRepository(projectPath);
   const resolvedCommit = await resolveCommit(projectPath, commit, trace, signal);
   if (!resolvedCommit) {
@@ -354,12 +351,20 @@ async function getCommitSnapshot({
 
   const allFiles = summarizeCommitFiles(details.hash, selectedParent, context, nameStatus.stdout, numstat.stdout);
   const limitedFiles = allFiles.slice(0, GIT_REVIEW_DOCUMENT_LIMITS.maxSummaryFiles);
-  const documentId = commitDocumentId(projectPath, details.hash, selectedParent, context, limitedFiles);
+  const document = measureGitReviewPhaseSync(metrics, 'document-register', () =>
+    registry.register({
+      sourceCacheKey: `commit:${projectPath}:${details.hash}:${selectedParent ?? EMPTY_TREE}:${context}`,
+      projectPath,
+      repoRoot: projectPath,
+      context,
+      source: { kind: 'commit', baseHash: base, targetHash: details.hash },
+      files: limitedFiles.map(registeredTreeDiffFile),
+    }));
 
   return {
     status: 'ready',
     project: projectPath,
-    documentId,
+    documentId: document.id,
     commit: details,
     selectedParent,
     parentOptions: details.parents.map((hash, index) => ({
@@ -386,76 +391,10 @@ async function getCommitSnapshot({
   } satisfies GitCommitSnapshotReady;
 }
 
-async function getCommitFileBodies({
-  projectPath,
-  documentId,
-  commit,
-  parent,
-  context = 5,
-  files,
-  trace,
-  signal,
-}: GitCommitFileBodiesOptions): Promise<GitCommitFileBodiesResponse> {
-  await assertGitRepository(projectPath);
-  const resolvedCommit = await resolveCommit(projectPath, commit, trace, signal);
-  if (!resolvedCommit) {
-    throw new GitDomainError('INVALID_INPUT', 'Commit was not found in this repository.');
-  }
-
-  const details = await loadCommitDetails(projectPath, resolvedCommit, trace, signal);
-  const selectedParent = selectCommitParent(details.parents, parent);
-  const base = selectedParent ?? EMPTY_TREE;
-  const requestedFiles = files.slice(0, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles);
-  const parsedFiles: GitCommitFileBodiesResponse['files'] = {};
-  const errors: GitCommitFileBodiesResponse['errors'] = {};
-
-  await mapWithConcurrency(requestedFiles, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
-    const pathspecs = exactGitPathspecs(
-      file.originalPath ? [file.originalPath, file.path] : [file.path],
-    );
-    try {
-      const { stdout } = await runGitTraced(
-        projectPath,
-        [
-          'diff',
-          '--patch-with-raw',
-          '-z',
-          '--no-color',
-          '--no-ext-diff',
-          `-U${context}`,
-          '--find-renames',
-          '--submodule=short',
-          ...(file.originalPath ? ['--diff-filter=RC'] : []),
-          base,
-          details.hash,
-          '--',
-          ...pathspecs,
-        ],
-        trace,
-        readOnlyGitOptions({ signal }),
-      );
-      const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
-      parsedFiles[file.path] = limitedRenderedPatch(
-        file.path,
-        fingerprint,
-        selectFilePatchFromRawDiff(stdout, file.path),
-        { allowMultipleFileSections: true },
-      );
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
-      parsedFiles[file.path] = errorFileBody(file.path, fingerprint, error instanceof Error ? error.message : String(error));
-      errors[file.path] = error instanceof Error ? error.message : String(error);
-    }
-  });
-
-  return { documentId, files: parsedFiles, errors };
-}
-
-export function createCommitHistoryOperations() {
+export function createCommitHistoryOperations(registry: GitReviewDocumentRegistry) {
   return {
     getHistoryCommits,
-    getCommitSnapshot,
-    getCommitFileBodies,
+    getCommitSnapshot: (options: GitCommitSnapshotOptions) =>
+      getCommitSnapshot(options, registry),
   };
 }

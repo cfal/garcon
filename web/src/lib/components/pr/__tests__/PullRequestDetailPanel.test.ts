@@ -1,10 +1,33 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequestDetail } from '$lib/api/pull-requests';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import PullRequestDetailPanelTestHost from './PullRequestDetailPanelTestHost.svelte';
+
+beforeEach(() => {
+	vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1024);
+	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(720);
+	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		const height = this.hasAttribute('data-git-virtual-diff-root') ? 720 : 42;
+		return {
+			width: 1024,
+			height,
+			top: 0,
+			right: 1024,
+			bottom: height,
+			left: 0,
+			x: 0,
+			y: 0,
+			toJSON: () => ({}),
+		};
+	});
+});
 
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 });
 
 function makeDetail(withThread = false): PullRequestDetail {
@@ -57,8 +80,8 @@ function makeDetail(withThread = false): PullRequestDetail {
 						isTooLarge: false,
 						renderedRowCount: 0,
 						patchBytes: 0,
-						rows: [],
-						hunks: [],
+						patch: '',
+						patchIndex: createGitPatchIndex(''),
 					},
 				}
 			: {},

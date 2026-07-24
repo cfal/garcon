@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitCommitVirtualDiffSurface from '../GitCommitVirtualDiffSurface.svelte';
 
 const file = {
@@ -34,7 +35,7 @@ const rows: GitVirtualReviewRow[] = [
 		estimatedHeight: 22,
 		file,
 		actionTarget: null,
-		selectableLineKeys: [],
+		selectableLineKeys: () => [],
 		view: {
 			key: 'add',
 			row: {
@@ -77,13 +78,37 @@ const rows: GitVirtualReviewRow[] = [
 ];
 
 describe('GitCommitVirtualDiffSurface', () => {
+	beforeEach(() => {
+		vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1024);
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(720);
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+			this: HTMLElement,
+		) {
+			const height = this.hasAttribute('data-git-virtual-diff-root') ? 720 : 42;
+			return {
+				width: 1024,
+				height,
+				top: 0,
+				right: 1024,
+				bottom: height,
+				left: 0,
+				x: 0,
+				y: 0,
+				toJSON: () => ({}),
+			};
+		});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	it('renders commit diffs through one virtual root without worktree actions', async () => {
 		const onAddComment = vi.fn();
 		const { container } = render(GitCommitVirtualDiffSurface, {
 			props: {
 				documentId: 'doc',
-				rows,
-				fileRowIndex: new Map([['a.ts', 0]]),
+				source: arrayGitVirtualReviewRowSource(rows),
 				fontSize: 12,
 				scrollToRequest: null,
 				composerState: {

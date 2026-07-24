@@ -1,4 +1,5 @@
-import type { GitDiffTab, GitFileReviewData, GitRenderedDiffRow } from '$lib/api/git.js';
+import type { GitDiffTab } from '$lib/api/git.js';
+import type { GitRenderedDiffRow } from './git-rendered-diff-types.js';
 import type { GitDiffSeverity, GitDiffSide } from '$lib/git/review/git-inline-comment.svelte.js';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
 
@@ -112,47 +113,31 @@ interface BuildSplitRowViewsOptions {
 	composerTarget: GitDiffComposerTarget | null;
 }
 
-export function buildUnifiedDiffRows(reviewData: GitFileReviewData | null): RenderedDiffRow[] {
-	if (!reviewData || reviewData.isBinary) return [];
-
-	return buildUnifiedDiffRowsFromRenderedRows(reviewData.rows);
-}
-
-export function buildUnifiedDiffRowsFromRenderedRows(
-	rows: GitRenderedDiffRow[],
-): RenderedDiffRow[] {
-	return rows.map((row): RenderedDiffRow => {
-		if (row.kind === 'hunk') {
-			return {
-				key: row.key,
-				kind: 'hunk-header',
-				beforeLine: null,
-				afterLine: null,
-				beforeText: row.text,
-				afterText: '',
-				hunkId: row.hunkId,
-				hunkIndex: row.hunkIndex,
-				diffLineIndex: -1,
-			};
-		}
+export function renderUnifiedDiffRow(row: GitRenderedDiffRow): RenderedDiffRow {
+	if (row.kind === 'hunk') {
 		return {
 			key: row.key,
-			kind: row.kind === 'add' ? 'add' : row.kind === 'del' ? 'del' : 'context',
-			beforeLine: row.beforeLine,
-			afterLine: row.afterLine,
-			beforeText: row.kind === 'add' ? '' : row.text,
-			afterText: row.kind === 'del' ? '' : row.text,
+			kind: 'hunk-header',
+			beforeLine: null,
+			afterLine: null,
+			beforeText: row.text,
+			afterText: '',
 			hunkId: row.hunkId,
 			hunkIndex: row.hunkIndex,
-			diffLineIndex: row.diffLineIndex,
+			diffLineIndex: -1,
 		};
-	});
-}
-
-export function buildUnifiedDiffRowsFromRendered(
-	reviewData: GitFileReviewData | null,
-): RenderedDiffRow[] {
-	return buildUnifiedDiffRows(reviewData);
+	}
+	return {
+		key: row.key,
+		kind: row.kind === 'add' ? 'add' : row.kind === 'del' ? 'del' : 'context',
+		beforeLine: row.beforeLine,
+		afterLine: row.afterLine,
+		beforeText: row.kind === 'add' ? '' : row.text,
+		afterText: row.kind === 'del' ? '' : row.text,
+		hunkId: row.hunkId,
+		hunkIndex: row.hunkIndex,
+		diffLineIndex: row.diffLineIndex,
+	};
 }
 
 export function buildSplitDiffRows(rows: RenderedDiffRow[]): SplitDiffRow[] {
@@ -256,7 +241,13 @@ export function getSelectableLineKeys(
 export function buildUnifiedDiffRowViews(
 	options: BuildUnifiedRowViewsOptions,
 ): UnifiedDiffRowView[] {
-	return options.rows.map((row) => {
+	return options.rows.map((row) => buildUnifiedDiffRowView(options, row));
+}
+
+export function buildUnifiedDiffRowView(
+	options: Omit<BuildUnifiedRowViewsOptions, 'rows'>,
+	row: RenderedDiffRow,
+): UnifiedDiffRowView {
 		const selectionKey = getUnifiedSelectionKey(row, options.filePath, options.activeTab);
 		const isSelectable = !options.readOnly && selectionKey !== null;
 		const isSelected = isSelectable && options.selectedLineKeys.has(selectionKey);
@@ -278,25 +269,31 @@ export function buildUnifiedDiffRowViews(
 			afterContextTarget: getUnifiedContextTarget(row, 'after'),
 			rowContextTarget: getUnifiedContextTarget(row, row.kind === 'del' ? 'before' : 'after'),
 		};
-	});
 }
 
 export function buildSplitDiffRowViews(options: BuildSplitRowViewsOptions): SplitDiffRowView[] {
-	return options.rows.map((row) => ({
+	return options.rows.map((row) => buildSplitDiffRowView(options, row));
+}
+
+export function buildSplitDiffRowView(
+	options: Omit<BuildSplitRowViewsOptions, 'rows'>,
+	row: SplitDiffRow,
+): SplitDiffRowView {
+	return {
 		key: row.key,
 		row,
 		isHunkHeader: row.isHeader,
 		showComposer: isComposerForSplitRow(row, options.composerTarget),
 		left: row.left ? buildSplitCellView(row.left, 'before', row.hunkIndex ?? -1, options) : null,
 		right: row.right ? buildSplitCellView(row.right, 'after', row.hunkIndex ?? -1, options) : null,
-	}));
+	};
 }
 
 function buildSplitCellView(
 	cell: SplitDiffCell,
 	side: GitDiffSide,
 	hunkIndex: number,
-	options: BuildSplitRowViewsOptions,
+	options: Omit<BuildSplitRowViewsOptions, 'rows'>,
 ): SplitDiffCellView {
 	const selectionKey = getSplitCellSelectionKey(cell, side, options.filePath, options.activeTab);
 	const isSelectable = !options.readOnly && selectionKey !== null;
@@ -329,6 +326,14 @@ function getUnifiedSelectionKey(
 		row.kind === 'del' ? 'before' : 'after',
 		row.diffLineIndex,
 	);
+}
+
+export function getRenderedSelectionKey(
+	row: RenderedDiffRow,
+	filePath: string,
+	activeTab: GitDiffTab,
+): string | null {
+	return getUnifiedSelectionKey(row, filePath, activeTab);
 }
 
 function getSplitCellSelectionKey(

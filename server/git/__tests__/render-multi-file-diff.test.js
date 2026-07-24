@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { renderMultiFileDiff } from '../diff-engine.js';
+import { parseMultiFileDiffPatches } from '../diff-engine.js';
 
 const SAMPLE_DIFF = `diff --git a/src/added.ts b/src/added.ts
 new file mode 100644
@@ -28,9 +28,9 @@ index 3333333..0000000
 -gone two
 `;
 
-describe('renderMultiFileDiff', () => {
-  it('splits a multi-file diff into per-file rendered bodies', () => {
-    const files = renderMultiFileDiff(SAMPLE_DIFF);
+describe('parseMultiFileDiffPatches', () => {
+  it('splits a multi-file diff into compact per-file bodies', () => {
+    const files = parseMultiFileDiffPatches(SAMPLE_DIFF);
     expect(files.map((file) => file.path)).toEqual([
       'src/added.ts',
       'src/modified.ts',
@@ -39,7 +39,7 @@ describe('renderMultiFileDiff', () => {
   });
 
   it('derives add/modify/delete status and line counts', () => {
-    const [added, modified, removed] = renderMultiFileDiff(SAMPLE_DIFF);
+    const [added, modified, removed] = parseMultiFileDiffPatches(SAMPLE_DIFF);
 
     expect(added.status).toBe('A');
     expect(added.changeKind).toBe('added');
@@ -56,13 +56,12 @@ describe('renderMultiFileDiff', () => {
     expect(removed.deletions).toBe(2);
   });
 
-  it('produces rendered rows reusing the workbench diff parser', () => {
-    const [added] = renderMultiFileDiff(SAMPLE_DIFF);
+  it('keeps patch text without allocating rendered row objects', () => {
+    const [added] = parseMultiFileDiffPatches(SAMPLE_DIFF);
     expect(added.body.bodyState).toBe('loaded');
-    // one hunk row plus two added rows
-    expect(added.body.rows).toHaveLength(3);
-    expect(added.body.rows[0].kind).toBe('hunk');
-    expect(added.body.rows[1].kind).toBe('add');
+    expect(added.body.renderedRowCount).toBe(3);
+    expect(added.body.patch).toContain('+export const a = 1;');
+    expect(added.body).not.toHaveProperty('rows');
   });
 
   it('detects renames via rename headers', () => {
@@ -77,14 +76,14 @@ index 1111111..2222222 100644
 -const value = 1;
 +const value = 2;
 `;
-    const [file] = renderMultiFileDiff(renameDiff);
+    const [file] = parseMultiFileDiffPatches(renameDiff);
     expect(file.status).toBe('R');
     expect(file.path).toBe('new/name.ts');
     expect(file.originalPath).toBe('old/name.ts');
   });
 
   it('returns an empty list for empty input', () => {
-    expect(renderMultiFileDiff('')).toEqual([]);
-    expect(renderMultiFileDiff('   \n')).toEqual([]);
+    expect(parseMultiFileDiffPatches('')).toEqual([]);
+    expect(parseMultiFileDiffPatches('   \n')).toEqual([]);
   });
 });

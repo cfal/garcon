@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { runGit } from '../run.js';
+import { GitOutputLimitError, runGit } from '../run.js';
 
 function textStream(value) {
   return new ReadableStream({
@@ -43,5 +43,21 @@ describe('runGit', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(spawnMock.mock.calls[0][1].env).toBeUndefined();
+  });
+
+  it('stops oversized stdout without retrying the process', async () => {
+    const kill = mock(() => undefined);
+    spawnMock.mockImplementation(() => ({
+      stdout: textStream('output over limit'),
+      stderr: textStream('diagnostic'),
+      exited: Promise.resolve(1),
+      kill,
+    }));
+
+    await expect(
+      runGit('/repo', ['diff'], { maxStdoutBytes: 5 }),
+    ).rejects.toBeInstanceOf(GitOutputLimitError);
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 });

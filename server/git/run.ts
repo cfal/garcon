@@ -37,6 +37,37 @@ function streamText(stream: ReadableStream<Uint8Array> | null): Promise<string> 
   return stream ? new Response(stream).text() : Promise.resolve('');
 }
 
+export class GitOutputLimitError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`Git output exceeded the ${maxBytes} byte limit.`);
+    this.name = 'GitOutputLimitError';
+  }
+}
+
+async function streamTextWithLimit(
+  stream: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<string> {
+  if (!stream) return '';
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let byteCount = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      byteCount += next.value.byteLength;
+      if (byteCount > maxBytes) throw new GitOutputLimitError(maxBytes);
+      chunks.push(decoder.decode(next.value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join('');
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function createGitAbortState(options: GitCommandOptions): {
   signal?: AbortSignal;
   cleanup: () => void;
@@ -122,14 +153,25 @@ export async function runGit(
       proc.kill();
     };
     abortState.signal?.addEventListener('abort', abortListener, { once: true });
+    let outputLimitError: GitOutputLimitError | null = null;
     const [stdout, stderr, exitCode] = await Promise.all([
-      streamText(proc.stdout).catch(() => ''),
+      (options.maxStdoutBytes === undefined
+        ? streamText(proc.stdout)
+        : streamTextWithLimit(proc.stdout, options.maxStdoutBytes)
+      ).catch((error) => {
+        if (error instanceof GitOutputLimitError) {
+          outputLimitError = error;
+          proc.kill();
+        }
+        return '';
+      }),
       streamText(proc.stderr).catch(() => ''),
       proc.exited,
     ]).finally(() => {
       abortState.signal?.removeEventListener('abort', abortListener);
       abortState.cleanup();
     });
+    if (outputLimitError) throw outputLimitError;
     if (exitCode === 0) return { stdout, stderr };
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {

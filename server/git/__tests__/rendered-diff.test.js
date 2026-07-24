@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  limitedRenderedPatch,
+  compactRenderedPatch,
   parseUnifiedPatchToRenderedRows,
+  scanUnifiedPatch,
   selectFilePatchFromRawDiff,
+  splitPatchesFromRawDiff,
 } from '../rendered-diff.js';
 
 describe('parseUnifiedPatchToRenderedRows', () => {
@@ -64,7 +66,7 @@ describe('selectFilePatchFromRawDiff', () => {
     ].join('');
 
     const selected = selectFilePatchFromRawDiff(rawPatch, 'link');
-    const body = limitedRenderedPatch('link', 'fingerprint', selected, {
+    const body = parseUnifiedPatchToRenderedRows(selected, {
       allowMultipleFileSections: true,
     });
 
@@ -73,5 +75,55 @@ describe('selectFilePatchFromRawDiff', () => {
     expect(body.rows.map((row) => row.text)).not.toContain('-- /dev/null');
     expect(body.rows.map((row) => row.text)).not.toContain('++ b/link');
     expect(body.rows.every((row) => row.kind !== 'add' || row.afterLine > 0)).toBe(true);
+  });
+});
+
+describe('splitPatchesFromRawDiff', () => {
+  it('maps modified and renamed files in one raw diff', () => {
+    const rawPatch = [
+      ':100644 100644 1111111 2222222 M\0src/a.ts\0',
+      ':100644 100644 3333333 4444444 R095\0src/old.ts\0src/new.ts\0',
+      '\0',
+      'diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-old a\n+new a\n',
+      'diff --git a/src/old.ts b/src/new.ts\nsimilarity index 95%\nrename from src/old.ts\nrename to src/new.ts\n@@ -1 +1 @@\n-old\n+new\n',
+    ].join('');
+
+    const files = splitPatchesFromRawDiff(rawPatch);
+
+    expect(files.get('src/a.ts')).toMatchObject({
+      path: 'src/a.ts',
+      rawStatus: 'M',
+      patchSectionCount: 1,
+    });
+    expect(files.get('src/a.ts')?.patch).toContain('+new a');
+    expect(files.get('src/new.ts')).toMatchObject({
+      path: 'src/new.ts',
+      originalPath: 'src/old.ts',
+      rawStatus: 'R095',
+      patchSectionCount: 1,
+    });
+    expect(files.get('src/new.ts')?.patch).toContain('rename to src/new.ts');
+  });
+});
+
+describe('scanUnifiedPatch', () => {
+  it('matches the legacy parser and keeps the patch as the compact body', () => {
+    const patch = `diff --git a/src/file.ts b/src/file.ts
+--- a/src/file.ts
++++ b/src/file.ts
+@@ -1,2 +1,3 @@
+ context
+-old
++new
++added
+`;
+    const legacy = parseUnifiedPatchToRenderedRows(patch);
+    const scanned = scanUnifiedPatch(patch);
+    const compact = compactRenderedPatch('src/file.ts', 'fingerprint', patch);
+
+    expect(scanned.renderedRowCount).toBe(legacy.rows.length);
+    expect(scanned.hunkCount).toBe(legacy.hunks.length);
+    expect(compact.patch).toBe(patch);
+    expect(compact.renderedRowCount).toBe(legacy.rows.length);
   });
 });

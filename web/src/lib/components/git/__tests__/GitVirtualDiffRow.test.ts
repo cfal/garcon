@@ -1,12 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { GitRenderedDiffRow, GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git';
-import {
-	buildVirtualRows,
-	type GitVirtualReviewRow,
-} from '$lib/git/review/git-virtual-review-document.svelte.js';
+import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git';
+import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
+import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitVirtualDiffRow from '../GitVirtualDiffRow.svelte';
+
+function buildVirtualRows(
+	options: Parameters<typeof buildGitVirtualReviewRowSource>[0],
+) {
+	const source = buildGitVirtualReviewRowSource(options);
+	return source.rowsInRange(0, source.rowCount);
+}
 
 type DiffContentRow = Extract<GitVirtualReviewRow, { kind: 'unified-row' | 'split-row' }>;
 type UnifiedContentRow = Extract<GitVirtualReviewRow, { kind: 'unified-row' }>;
@@ -28,50 +34,9 @@ const file: GitReviewFileSummary = {
 	isTooLarge: false,
 };
 
-const renderedRows: GitRenderedDiffRow[] = [
-	{
-		key: 'hunk:0:hunk-0',
-		kind: 'hunk',
-		hunkIndex: 0,
-		hunkId: 'hunk-0',
-		beforeLine: null,
-		afterLine: null,
-		text: '@@ -1,2 +1,2 @@',
-		diffLineIndex: -1,
-	},
-	{
-		key: 'line:0:del:1',
-		kind: 'del',
-		hunkIndex: 0,
-		hunkId: 'hunk-0',
-		beforeLine: 1,
-		afterLine: null,
-		text: 'old line',
-		diffLineIndex: 0,
-	},
-	{
-		key: 'line:1:add:1',
-		kind: 'add',
-		hunkIndex: 0,
-		hunkId: 'hunk-0',
-		beforeLine: null,
-		afterLine: 1,
-		text: 'new line',
-		diffLineIndex: 1,
-	},
-	{
-		key: 'line:2:context:2',
-		kind: 'context',
-		hunkIndex: 0,
-		hunkId: 'hunk-0',
-		beforeLine: 2,
-		afterLine: 2,
-		text: 'shared line',
-		diffLineIndex: 2,
-	},
-];
-
 function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
+	const patch =
+		'diff --git a/src/example.ts b/src/example.ts\n@@ -1,2 +1,2 @@\n-old line\n+new line\n shared line\n';
 	const body: GitReviewFileBody = {
 		path: file.path,
 		bodyFingerprint: file.bodyFingerprint,
@@ -79,10 +44,10 @@ function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
 		category: 'normal',
 		isBinary: false,
 		isTooLarge: false,
-		renderedRowCount: renderedRows.length,
-		patchBytes: 128,
-		rows: renderedRows,
-		hunks: [],
+		renderedRowCount: 4,
+		patchBytes: patch.length,
+		patch,
+		patchIndex: createGitPatchIndex(patch),
 	};
 	return buildVirtualRows({
 		summary: {

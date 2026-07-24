@@ -18,6 +18,7 @@ import {
 	GIT_EMPTY_TREE_REVISION,
 	GitComparisonController,
 } from '$lib/git/review/git-comparison.svelte.js';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import GitHistoryView from '../GitHistoryView.svelte';
 
@@ -108,6 +109,8 @@ function fingerprintForPath(path: string): string {
 }
 
 function bodyForPath(path: string) {
+	const text = path === 'later.ts' ? 'later line' : 'added line';
+	const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1 @@\n+${text}\n`;
 	return {
 		path,
 		bodyFingerprint: fingerprintForPath(path),
@@ -116,35 +119,15 @@ function bodyForPath(path: string) {
 		isBinary: false,
 		isTooLarge: false,
 		renderedRowCount: 2,
-		patchBytes: 64,
-		rows: [
-			{
-				key: `hunk:${path}`,
-				kind: 'hunk' as const,
-				text: '@@ -1 +1 @@',
-				beforeLine: null,
-				afterLine: null,
-				hunkId: 'h0',
-				hunkIndex: 0,
-				diffLineIndex: -1,
-			},
-			{
-				key: `add:${path}`,
-				kind: 'add' as const,
-				text: path === 'later.ts' ? 'later line' : 'added line',
-				beforeLine: null,
-				afterLine: 1,
-				hunkId: 'h0',
-				hunkIndex: 0,
-				diffLineIndex: 0,
-			},
-		],
-		hunks: [],
+		patchBytes: patch.length,
+		patch,
+		patchIndex: createGitPatchIndex(patch),
 	};
 }
 
 function bodiesForPaths(paths: string[]) {
 	return {
+		status: 'ready' as const,
 		documentId: 'doc-abc',
 		files: Object.fromEntries(paths.map((path) => [path, bodyForPath(path)])),
 		errors: {},
@@ -361,6 +344,7 @@ describe('GitHistoryView', () => {
 		});
 		if (!filesPane) return;
 		await fireEvent.click(within(filesPane).getByRole('treeitem', { name: /a.ts/ }));
+		if (diffRoot) ResizeObserverHarness.emit(diffRoot, 480, 720);
 
 		await screen.findAllByText('+added line');
 		expect(filesPane.getAttribute('aria-hidden')).toBe('true');
@@ -435,14 +419,14 @@ describe('GitHistoryView', () => {
 			commitFile(`file-${index}.ts`, `fp-file-${index}.ts`),
 		);
 		const firstBodyCandidates = files.slice(0, 8).map((file) => file.path);
-		const firstBatch = deferred<ReturnType<typeof bodiesForPaths>>();
+		const firstVisible = deferred<ReturnType<typeof bodiesForPaths>>();
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue({
 			...snapshot(),
 			files,
 			firstBodyCandidates,
 		});
 		vi.mocked(getGitCommitFileBodies)
-			.mockReturnValueOnce(firstBatch.promise)
+			.mockReturnValueOnce(firstVisible.promise)
 			.mockImplementation(async (_project, _documentId, _commit, files) =>
 				bodiesForPaths(requestedPaths(files)),
 			);
@@ -465,7 +449,7 @@ describe('GitHistoryView', () => {
 		await screen.findByText('List commit');
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
 		await screen.findByText('Commit detail');
-		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
 		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
 		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		const diffRoot = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
@@ -485,7 +469,7 @@ describe('GitHistoryView', () => {
 			expect(firstSignal?.aborted).toBe(false);
 		});
 
-		firstBatch.resolve(bodiesForPaths(firstBodyCandidates));
+		firstVisible.resolve(bodiesForPaths([firstBodyCandidates[0]]));
 
 		expect(await screen.findAllByText('+added line')).not.toHaveLength(0);
 		await waitFor(() => {
@@ -557,9 +541,10 @@ describe('GitHistoryView', () => {
 				return bodiesForPaths(paths);
 			},
 		);
+		const history = new GitHistoryController();
 		const { container } = render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
+				history,
 				comparison,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
@@ -588,7 +573,8 @@ describe('GitHistoryView', () => {
 		if (!details || !filesPane || !diffPane || !diffRoot) return;
 		ResizeObserverHarness.emit(details, 480);
 		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
-		await waitFor(() => expect(screen.queryAllByText('+added line').length).toBeGreaterThan(0));
+		await waitFor(() => expect(history.document.fileBodies['a.ts']).toBeTruthy());
+		expect(diffPane.getAttribute('aria-hidden')).toBe('true');
 		vi.mocked(getGitCommitFileBodies).mockClear();
 
 		await fireEvent.click(within(filesPane).getByRole('treeitem', { name: /later\.ts/ }));

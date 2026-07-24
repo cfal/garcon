@@ -152,8 +152,7 @@
 		files={history.visibleFiles}
 		isLoading={history.commitLoading}
 		error={history.commitError}
-		rows={history.virtualRows}
-		fileRowIndex={history.fileRowIndex}
+		source={history.rowSource}
 		scrollRequest={history.scrollRequest}
 		fileFilter={history.fileFilter}
 		focusedFilePath={history.focusedFilePath}

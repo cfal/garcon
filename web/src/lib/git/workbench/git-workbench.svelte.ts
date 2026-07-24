@@ -68,6 +68,7 @@ export class GitWorkbenchStore {
 	private localGitMutationDepth = 0;
 	private localGitMutationProjectPath: string | null = null;
 	private localGitMutationSnapshotApplied = false;
+	private documentRecoveryAttempted = false;
 	private scrollPositions = new Map<string, number>();
 
 	private readonly treeState: GitTreeState;
@@ -100,7 +101,7 @@ export class GitWorkbenchStore {
 			selectedLineKeys: () => this.lineSelection.selectedLineKeys,
 			composerState: () => this.reviewDrafts.commentComposer,
 			surfaceError: (message) => this.surfaceError(message),
-			markExternallyStale: () => this.markExternallyStale(),
+			markExternallyStale: (reason) => this.markExternallyStale(reason),
 		});
 		this.lineSelection = new GitLineSelectionState();
 		this.stagingActions = new GitStagingActions({
@@ -332,10 +333,17 @@ export class GitWorkbenchStore {
 		}
 	}
 
-	markExternallyStale(): void {
+	markExternallyStale(reason: 'stale' | 'document-expired' = 'stale'): void {
 		if (!this.loadedWorkbenchFingerprint) return;
 		if (this.isReconcilingLocalGitMutation) return;
 		this.isExternallyStale = true;
+		if (reason !== 'document-expired' || this.documentRecoveryAttempted || !this.target) return;
+		this.documentRecoveryAttempted = true;
+		void this.refresh({
+			reason: 'document-expired',
+			preserveSelection: true,
+			preferSelectedFile: true,
+		});
 	}
 
 	ensureFreshForGitMutation(): boolean {
@@ -457,6 +465,7 @@ export class GitWorkbenchStore {
 			...DEFAULT_REFRESH_OPTIONS,
 			...options,
 		};
+		if (effective.reason !== 'document-expired') this.documentRecoveryAttempted = false;
 		const loadStartedAt = performance.now();
 		const trace: WorkbenchLoadTrace = {
 			targetKey: targetKey(target),
@@ -580,7 +589,7 @@ export class GitWorkbenchStore {
 			...snapshot.firstBodyCandidates,
 		]).filter((filePath) => visible.includes(filePath));
 		if (bodyCandidates.length > 0)
-			this.virtualReview.requestBodies(target.projectPath, bodyCandidates);
+			this.virtualReview.requestInitialBodies(target.projectPath, bodyCandidates);
 	}
 
 	private async refreshFileAfterStage(projectPath: string, filePath: string): Promise<void> {
@@ -679,6 +688,7 @@ export class GitWorkbenchStore {
 		this.lastError = null;
 		this.repositoryError = null;
 		this.hasCompletedInitialLoadValue = false;
+		this.documentRecoveryAttempted = false;
 		this.scrollPositions.clear();
 		this.snapshotLoadAbort?.abort();
 		this.snapshotLoadAbort = null;

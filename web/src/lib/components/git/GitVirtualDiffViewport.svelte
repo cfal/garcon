@@ -2,11 +2,15 @@
 	import { tick, untrack, type Snippet } from 'svelte';
 	import { createVirtualizer } from '@tanstack/svelte-virtual';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+	import {
+		markGitReviewFirstRow,
+		markGitReviewViewportReady,
+	} from '$lib/git/review/git-review-performance.js';
 
 	interface GitVirtualDiffViewportProps {
 		documentId?: string | null;
-		rows: GitVirtualReviewRow[];
-		fileRowIndex: Map<string, number>;
+		source: GitVirtualReviewRowSource;
 		fontSize: number;
 		scrollToRequest: { filePath: string; token: number } | null;
 		overscan?: number;
@@ -17,8 +21,7 @@
 
 	let {
 		documentId = null,
-		rows,
-		fileRowIndex,
+		source,
 		fontSize,
 		scrollToRequest,
 		overscan = 18,
@@ -34,57 +37,29 @@
 	let servicedScrollRequestState: 'pending' | 'resolved' | 'terminal' | null = null;
 	let completedScrollRequestId = '';
 	let measuredDocumentId: string | null = null;
+	let performanceFrame: number | null = null;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
-
-	interface VirtualRowItem {
-		index: number;
-		key: string | number | bigint;
-		start: number;
-		size: number;
-		end: number;
-	}
+	const scrollKeys = new Set(['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' ']);
 
 	function estimateRowHeight(index: number): number {
-		const row = rows[index];
-		if (!row) return rowLineHeight;
-		if (row.kind === 'unified-row' || row.kind === 'split-row') {
-			return Math.max(row.estimatedHeight, rowLineHeight);
-		}
-		return row.estimatedHeight;
+		return source.estimateRowHeight(index, rowLineHeight);
 	}
 
 	const virtualizer = createVirtualizer<HTMLElement, HTMLDivElement>({
-		count: 0,
+		count: untrack(() => source.rowCount),
 		getScrollElement: () => viewportRef,
 		estimateSize: estimateRowHeight,
 		measureElement: (element) => element.getBoundingClientRect().height,
 		initialRect: { width: 0, height: 720 },
 		overscan: 18,
-		getItemKey: (index) => rows[index]?.id ?? index,
+		getItemKey: (index) => source.rowKey(index),
 	});
 
 	let virtualItems = $derived($virtualizer.getVirtualItems());
-	let renderedVirtualItems = $derived.by<VirtualRowItem[]>(() => {
-		if (virtualItems.length > 0 || rows.length === 0) return virtualItems;
-		const itemCount = Math.min(rows.length, Math.max(1, overscan * 2));
-		let start = 0;
-		return Array.from({ length: itemCount }, (_, index) => {
-			const size = estimateRowHeight(index);
-			const item = {
-				index,
-				key: rows[index]?.id ?? index,
-				start,
-				size,
-				end: start + size,
-			};
-			start += size;
-			return item;
-		});
-	});
 	let totalHeight = $derived($virtualizer.getTotalSize());
 	let visibleRows = $derived.by(() =>
-		renderedVirtualItems
-			.map((virtualItem) => rows[virtualItem.index])
+		virtualItems
+			.map((virtualItem) => source.rowAt(virtualItem.index))
 			.filter((row): row is GitVirtualReviewRow => Boolean(row)),
 	);
 
@@ -105,7 +80,8 @@
 	});
 
 	$effect(() => {
-		const count = rows.length;
+		const activeSource = source;
+		const count = source.rowCount;
 		const scrollElement = viewportRef;
 		const rowOverscan = overscan;
 		const lineHeight = rowLineHeight;
@@ -114,19 +90,35 @@
 				count,
 				getScrollElement: () => scrollElement,
 				estimateSize: (index) => {
-					const row = rows[index];
-					if (!row) return lineHeight;
-					if (row.kind === 'unified-row' || row.kind === 'split-row') {
-						return Math.max(row.estimatedHeight, lineHeight);
-					}
-					return row.estimatedHeight;
+					return activeSource.estimateRowHeight(index, lineHeight);
 				},
 				measureElement: (element) => element.getBoundingClientRect().height,
 				initialRect: { width: 0, height: 720 },
 				overscan: rowOverscan,
-				getItemKey: (index) => rows[index]?.id ?? index,
+				getItemKey: (index) => activeSource.rowKey(index),
 			});
 		});
+	});
+
+	$effect(() => {
+		const scrollElement = viewportRef;
+		if (!scrollElement) return;
+		const completeScrollRequest = () => {
+			if (servicedScrollRequestId) completedScrollRequestId = servicedScrollRequestId;
+		};
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (scrollKeys.has(event.key)) completeScrollRequest();
+		};
+		scrollElement.addEventListener('wheel', completeScrollRequest, { passive: true });
+		scrollElement.addEventListener('touchstart', completeScrollRequest, { passive: true });
+		scrollElement.addEventListener('pointerdown', completeScrollRequest, { passive: true });
+		scrollElement.addEventListener('keydown', handleKeydown);
+		return () => {
+			scrollElement.removeEventListener('wheel', completeScrollRequest);
+			scrollElement.removeEventListener('touchstart', completeScrollRequest);
+			scrollElement.removeEventListener('pointerdown', completeScrollRequest);
+			scrollElement.removeEventListener('keydown', handleKeydown);
+		};
 	});
 
 	$effect(() => {
@@ -138,17 +130,40 @@
 	});
 
 	$effect(() => {
+		const activeDocumentId = documentId;
+		if (!activeDocumentId || visibleRows.length === 0) return;
+		const hasPendingFile = visibleRows.some(
+			(row) => row.filePath && source.fileState(row.filePath) === 'pending',
+		);
+		const hasRealDiffRow = visibleRows.some(
+			(row) => row.kind === 'unified-row' || row.kind === 'split-row',
+		);
+		if (hasPendingFile || (!hasRealDiffRow && source.rowCount === 0)) return;
+		const readyDocumentId = activeDocumentId;
+		untrack(() => {
+			if (performanceFrame !== null) cancelAnimationFrame(performanceFrame);
+			performanceFrame = requestAnimationFrame(() => {
+				performanceFrame = null;
+				if (documentId !== readyDocumentId) return;
+				if (hasRealDiffRow) markGitReviewFirstRow(readyDocumentId);
+				markGitReviewViewportReady(readyDocumentId);
+			});
+		});
+		return () => {
+			if (performanceFrame !== null) {
+				cancelAnimationFrame(performanceFrame);
+				performanceFrame = null;
+			}
+		};
+	});
+
+	$effect(() => {
 		if (!scrollToRequest) return;
 		const requestId = `${scrollToRequest.token}\0${scrollToRequest.filePath}`;
 		if (requestId === completedScrollRequestId) return;
-		const targetIndex = fileRowIndex.get(scrollToRequest.filePath);
+		const targetIndex = source.fileStart(scrollToRequest.filePath);
 		if (targetIndex === undefined) return;
-		let targetState: 'pending' | 'resolved' | 'terminal' = 'terminal';
-		for (const row of rows) {
-			if (row.filePath !== scrollToRequest.filePath) continue;
-			if (row.kind === 'file-placeholder') targetState = 'pending';
-			if (row.kind === 'unified-row' || row.kind === 'split-row') targetState = 'resolved';
-		}
+		const targetState = source.fileState(scrollToRequest.filePath);
 		if (
 			targetState === 'terminal' &&
 			servicedScrollRequestId === requestId &&
@@ -161,8 +176,8 @@
 		if (requestKey === lastScrollRequestKey) return;
 		lastScrollRequestKey = requestKey;
 		const start = Math.max(0, targetIndex - 6);
-		const end = Math.min(rows.length, targetIndex + 36);
-		const priorityRows = rows.slice(start, end);
+		const end = Math.min(source.rowCount, targetIndex + 36);
+		const priorityRows = source.rowsInRange(start, end);
 		untrack(() => {
 			onVisibleRowsChange(priorityRows);
 			void tick().then(() => {
@@ -170,17 +185,21 @@
 				const scrollElement = viewportRef;
 				if (!scrollElement) return;
 				$virtualizer.scrollToIndex(targetIndex, { align: 'start' });
-				scrollElement.dispatchEvent(new Event('scroll'));
 				servicedScrollRequestId = requestId;
 				servicedScrollRequestState = targetState;
-				if (targetState !== 'pending') completedScrollRequestId = requestId;
 			});
 		});
 	});
 
-	function measureRow(element: HTMLDivElement): { destroy: () => void } {
+	function measureRow(
+		element: HTMLDivElement,
+		_index: number,
+	): { update: (index: number) => void; destroy: () => void } {
 		$virtualizer.measureElement(element);
 		return {
+			update() {
+				$virtualizer.measureElement(element);
+			},
 			destroy() {
 				$virtualizer.measureElement(null);
 			},
@@ -193,19 +212,19 @@
 	class="min-h-0 flex-1 overflow-auto bg-muted/15"
 	data-git-virtual-diff-root
 >
-	{#if rows.length === 0}
+	{#if source.rowCount === 0}
 		<div class="flex h-full items-center justify-center px-4 text-sm text-muted-foreground">
 			{emptyMessage}
 		</div>
 	{:else}
 		<div class="relative w-full" style:height={`${totalHeight}px`}>
-			{#each renderedVirtualItems as virtualItem (virtualItem.key)}
-				{@const row = rows[virtualItem.index]}
+			{#each virtualItems as virtualItem (virtualItem.key)}
+				{@const row = source.rowAt(virtualItem.index)}
 				{#if row}
 					<div
 						data-index={virtualItem.index}
 						data-git-virtual-row
-						use:measureRow
+						use:measureRow={virtualItem.index}
 						class="absolute left-0 top-0 w-full"
 						style:transform={`translateY(${virtualItem.start}px)`}
 					>

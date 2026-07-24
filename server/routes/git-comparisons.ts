@@ -4,19 +4,18 @@ import {
   GIT_DIFF_LIMITS,
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
-  type GitComparisonBodyTarget,
   type GitComparisonFreshnessToExpectation,
   type GitComparisonFromEndpoint,
   type GitComparisonMode,
   type GitComparisonRevisionExpectation,
   type GitComparisonToEndpoint,
+  type GitReviewRouteMetrics,
 } from '../git/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { jsonError } from '../lib/http-error.js';
 import { withJsonBody } from '../lib/json-route.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
-import { traceGitJsonResponse } from './git-route-response.js';
-import { parseGitDiffFileRequests } from './git-diff-file-requests.js';
+import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -48,19 +47,6 @@ function validComparisonTo(value: unknown): GitComparisonToEndpoint | null {
   if (!isRecord(value)) return null;
   if (value.kind === 'working-tree') return { kind: 'working-tree' };
   return validComparisonFrom(value);
-}
-
-function validComparisonBodyTarget(value: unknown): GitComparisonBodyTarget | null {
-  if (!isRecord(value)) return null;
-  if (value.kind === 'revision') {
-    const hash = nonEmptyString(value.hash);
-    return hash ? { kind: 'revision', hash } : null;
-  }
-  if (value.kind === 'working-tree') {
-    const fingerprint = nonEmptyString(value.fingerprint);
-    return fingerprint ? { kind: 'working-tree', fingerprint } : null;
-  }
-  return null;
 }
 
 function validResolvedHash(value: unknown): string | null {
@@ -122,51 +108,25 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
       }
 
       const trace: GitCommandTrace[] = [];
+      const metrics: GitReviewRouteMetrics = { phases: [] };
       const startedAt = performance.now();
-      const result = await git.getComparisonSnapshot({
-        projectPath: project,
-        from,
-        to,
-        mode,
-        context,
-        bodyCandidateCount,
-        trace,
-        signal: request.signal,
-      });
-      return traceGitJsonResponse('comparison-snapshot', startedAt, trace, result);
-    });
-  }
-
-  async function postFiles(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const documentId = nonEmptyString(input.documentId);
-      const effectiveFromHash = nonEmptyString(input.effectiveFromHash);
-      const to = validComparisonBodyTarget(input.to);
-      const context = validContextLines(input.context ?? 5);
-      const files = parseGitDiffFileRequests(input.files);
-      if (!project || !documentId || !effectiveFromHash || !to || !files || files.length === 0) {
-        return routeError('Missing or invalid comparison body parameters.');
+      const result = await measureGitRoutePhase(metrics.phases, 'summary-git', () =>
+        git.getComparisonSnapshot({
+          projectPath: project,
+          from,
+          to,
+          mode,
+          context,
+          bodyCandidateCount,
+          trace,
+          metrics,
+          signal: request.signal,
+        }));
+      if (result.status === 'ready') {
+        metrics.fileCount = result.files.length;
+        metrics.rowCount = result.files.reduce((total, file) => total + file.estimatedRows, 0);
       }
-      if (context === null) return routeError('Invalid context line count.');
-      if (files.length > GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles) {
-        return routeError(`Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.`);
-      }
-
-      const trace: GitCommandTrace[] = [];
-      const startedAt = performance.now();
-      const result = await git.getComparisonFileBodies({
-        projectPath: project,
-        documentId,
-        effectiveFromHash,
-        to,
-        context,
-        files,
-        trace,
-        signal: request.signal,
-      });
-      return traceGitJsonResponse('comparison-files', startedAt, trace, result);
+      return traceGitJsonResponse('comparison-snapshot', startedAt, trace, result, metrics);
     });
   }
 
@@ -195,7 +155,6 @@ export function createGitComparisonRoutes(git: GitService): RouteMap {
 
   return {
     '/api/v1/git/comparisons/snapshot': { POST: withJsonBody(postSnapshot) },
-    '/api/v1/git/comparisons/files': { POST: withJsonBody(postFiles) },
     '/api/v1/git/comparisons/freshness': { POST: withJsonBody(postFreshness) },
   };
 }

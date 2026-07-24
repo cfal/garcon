@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { GitReviewFileBody } from '$lib/api/git.js';
 import { buildGitReviewCommentMessage } from '../git-review-comment-message.js';
-import { buildGitReviewCommentContext } from '../git-review-comment-context.js';
+import {
+	buildGitReviewBodyCommentContext,
+	buildGitReviewCommentContext,
+} from '../git-review-comment-context.js';
+import { createGitPatchIndex } from '../git-patch-index.js';
 
 describe('buildGitReviewCommentMessage', () => {
 	it('formats a Working Tree comparison comment with frozen line context', () => {
@@ -72,6 +77,32 @@ describe('buildGitReviewCommentMessage', () => {
 
 		expect(buildGitReviewCommentContext(rows, 'after', 4)).toEqual([
 			'@@ -1,5 +1,5 @@',
+			' line 2',
+			' line 3',
+			' line 4',
+			' line 5',
+			' line 6',
+		]);
+	});
+
+	it('reads comment context from the patch index without materializing legacy rows', () => {
+		const patch =
+			'diff --git a/a.ts b/a.ts\n@@ -1,6 +1,6 @@\n line 1\n line 2\n line 3\n line 4\n line 5\n line 6\n';
+		const body = {
+			path: 'a.ts',
+			bodyFingerprint: 'fp',
+			bodyState: 'loaded',
+			category: 'normal',
+			isBinary: false,
+			isTooLarge: false,
+			renderedRowCount: 7,
+			patchBytes: patch.length,
+			patch,
+			patchIndex: createGitPatchIndex(patch),
+		} satisfies GitReviewFileBody;
+
+		expect(buildGitReviewBodyCommentContext(body, 'after', 4)).toEqual([
+			'@@ -1,6 +1,6 @@',
 			' line 2',
 			' line 3',
 			' line 4',

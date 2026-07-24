@@ -53,17 +53,14 @@ export class GitHistoryController {
 	private commitGeneration = 0;
 	private loadedProjectPath: string | null = null;
 	private listInitialized = false;
+	private documentRecoveryAttempted = false;
 
 	get visibleFiles(): GitCommitFileSummary[] {
 		return this.document.visibleFiles;
 	}
 
-	get virtualRows(): GitVirtualReviewRow[] {
-		return this.document.virtualRows;
-	}
-
-	get fileRowIndex(): Map<string, number> {
-		return this.document.fileRowIndex;
+	get rowSource() {
+		return this.document.rowSource;
 	}
 
 	get scrollRequest(): { filePath: string; token: number } | null {
@@ -209,6 +206,7 @@ export class GitHistoryController {
 		this.commitAbort?.abort();
 		this.document.clear({ preserveCache: true });
 		this.commitLoading = false;
+		this.documentRecoveryAttempted = false;
 	}
 
 	selectParent(projectPath: string, parentHash: string | null): void {
@@ -258,6 +256,7 @@ export class GitHistoryController {
 		this.commitSnapshot = null;
 		this.commitLoading = false;
 		this.commitError = null;
+		this.documentRecoveryAttempted = false;
 		this.listScrollTop = 0;
 	}
 
@@ -265,7 +264,9 @@ export class GitHistoryController {
 		projectPath: string,
 		commitHash: string,
 		parentHash: string | null,
+		isDocumentRecovery = false,
 	): void {
+		if (!isDocumentRecovery) this.documentRecoveryAttempted = false;
 		this.commitAbort?.abort();
 		this.document.clear({ preserveCache: true });
 		this.commitSnapshot = null;
@@ -305,14 +306,28 @@ export class GitHistoryController {
 							? `parent ${result.selectedParent.slice(0, 10)}`
 							: 'the empty tree',
 					},
-					loadBodies: (_snapshot, files, signal) =>
+					loadBodies: (_snapshot, files, purpose, signal) =>
 						getGitCommitFileBodies(projectPath, result.documentId, result.commit.hash, files, {
 							parent: result.selectedParent,
 							context: this.contextLines,
+							purpose,
 							signal,
 						}),
 					onError: (detail) => {
 						this.commitError = m.git_history_load_diff_rows_failed({ detail });
+					},
+					onExpired: (message) => {
+						if (this.documentRecoveryAttempted) {
+							this.commitError = message;
+							return;
+						}
+						this.documentRecoveryAttempted = true;
+						this.loadCommitSnapshot(
+							projectPath,
+							result.commit.hash,
+							result.selectedParent,
+							true,
+						);
 					},
 				});
 			})

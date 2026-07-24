@@ -12,9 +12,9 @@ import type {
   ChangesTreeResult,
   CompatibleTreeFields,
   DiffStats,
+  GitCommandTrace,
   GitReviewDocumentSummary,
-  GitReviewFileBodiesResponse,
-  GitReviewFileBody,
+  GitReviewFilePatchBody,
   GitReviewFileSummary,
   GitWorkingTreeFingerprintOptions,
   GitWorkingTreeFingerprintResponse,
@@ -27,7 +27,6 @@ import type {
   ParsedPatch,
   PatchHunk,
   PorcelainStatusEntry,
-  ReviewFileBodiesOptions,
   StageHunkOptions,
   StageSelectionOptions,
   TransformedHunk,
@@ -46,12 +45,10 @@ import {
   runGitWithStdin,
   stripDiffHeaders,
 } from './run.js';
-import { parseNumstatZ } from './diff-file-list.js';
+import { parseNumstatZ, parseUnmergedPaths } from './diff-file-list.js';
 import {
   categoryForPath,
-  errorFileBody,
-  limitedFileBody,
-  limitedRenderedPatch,
+  compactRenderedPatch,
 } from './rendered-diff.js';
 import {
   changeKindForStatus,
@@ -60,8 +57,15 @@ import {
   parsePorcelainV1Z,
 } from './porcelain-status.js';
 import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
-import { buildFullFileAddedPatch } from './full-file-patch.js';
-import { mapWithConcurrency, mapWithConcurrencyResult } from '../lib/concurrency.js';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
+import {
+  GitReviewDocumentRegistry,
+  registeredWorkbenchFile,
+} from './review-document-registry.js';
+import { captureWorkingPathTokens } from './working-path-token.js';
+import { measureGitReviewPhaseSync } from './review-performance.js';
+
+const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 function buildFacet(
   status: string,
@@ -229,11 +233,6 @@ function buildTreeFromChangeEntries(
   }
 
   return { root: mapTreeToArray(rootMap), hasCommits, statsState };
-}
-
-function buildFullFileDeletedPatch(contentBefore: string | null): string {
-  const lines = (contentBefore || '').split('\n');
-  return `@@ -1,${lines.length} +0,0 @@\n${lines.map((line) => `-${line}`).join('\n')}`;
 }
 
 // Partial-staging implementation follows lazygit's patch-transform approach.
@@ -439,32 +438,6 @@ function tabDiffArgs(contextLines: number, file: string, isUnstage: boolean): st
 }
 
 
-async function readHeadBlob(projectPath: string, file: string, signal?: AbortSignal): Promise<string> {
-  try {
-    const { stdout } = await runGit(
-      projectPath,
-      ['show', `HEAD:${file}`],
-      readOnlyGitOptions({ signal }),
-    );
-    return stdout;
-  } catch {
-    return '';
-  }
-}
-
-async function readIndexBlob(projectPath: string, file: string, signal?: AbortSignal): Promise<string | null> {
-  try {
-    const { stdout } = await runGit(
-      projectPath,
-      ['show', `:${file}`],
-      readOnlyGitOptions({ signal }),
-    );
-    return stdout;
-  } catch {
-    return null;
-  }
-}
-
 function hashString(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
@@ -566,7 +539,16 @@ async function loadFingerprintIndexEntries(
   paths: string[],
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const entries: string[] = [];
+  const entriesByPath = await loadFingerprintIndexEntryMap(projectPath, paths, signal);
+  return Array.from(entriesByPath, ([filePath, entry]) => `${filePath}\x00${entry}`).sort();
+}
+
+async function loadFingerprintIndexEntryMap(
+  projectPath: string,
+  paths: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const entries = new Map<string, string>();
   for (const chunk of chunkGitPathspecs(paths)) {
     try {
       const { stdout } = await runGit(
@@ -575,13 +557,14 @@ async function loadFingerprintIndexEntries(
         readOnlyGitOptions({ signal }),
       );
       for (const [filePath, entry] of parseLsFilesStageZ(stdout)) {
-        entries.push(`${filePath}\x00${entry}`);
+        entries.set(filePath, entry);
       }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       // Status output still captures the changed path. Missing index metadata should not make freshness fail.
     }
   }
-  return entries.sort();
+  return entries;
 }
 
 async function worktreeStatFingerprint(projectPath: string, file: string): Promise<string> {
@@ -633,6 +616,8 @@ interface WorkbenchFingerprintInput {
   cachedStatsOutput: string;
   unmergedOutput: string;
   statusEntries: PorcelainStatusEntry[];
+  indexEntriesByPath?: Map<string, string>;
+  worktreeStatTokens?: string[];
   signal?: AbortSignal;
 }
 
@@ -646,12 +631,20 @@ async function buildWorkbenchFingerprintFromInputs({
   cachedStatsOutput,
   unmergedOutput,
   statusEntries,
+  indexEntriesByPath,
+  worktreeStatTokens: loadedWorktreeStatTokens,
   signal,
 }: WorkbenchFingerprintInput): Promise<{ fingerprint: string; changedPathCount: number }> {
   const changedPaths = uniqueGitPaths(statusEntries.map((entry) => entry.path));
   const [indexEntryTokens, worktreeStatTokens] = await Promise.all([
-    loadFingerprintIndexEntries(projectPath, changedPaths, signal),
-    loadFingerprintWorktreeStats(projectPath, statusEntries),
+    indexEntriesByPath
+      ? Promise.resolve(
+          Array.from(indexEntriesByPath, ([filePath, entry]) => `${filePath}\x00${entry}`).sort(),
+        )
+      : loadFingerprintIndexEntries(projectPath, changedPaths, signal),
+    loadedWorktreeStatTokens
+      ? Promise.resolve(loadedWorktreeStatTokens)
+      : loadFingerprintWorktreeStats(projectPath, statusEntries),
   ]);
 
   const fingerprint = `v${GIT_WORKING_TREE_FINGERPRINT_VERSION}:${hashString([
@@ -674,21 +667,24 @@ async function buildWorkbenchFingerprintFromInputs({
 async function loadBatchedFingerprintInputs(
   projectPath: string,
   files: TreeNode[],
+  existingIndexEntries: Map<string, string> | undefined,
   signal?: AbortSignal,
 ): Promise<BatchedFingerprintInputs> {
   const paths = files.map((file) => file.path);
-  const indexEntriesByPath = new Map<string, string>();
+  const indexEntriesByPath = new Map(existingIndexEntries);
   const headEntriesByPath = new Map<string, string>();
   for (const chunk of chunkGitPathspecs(paths)) {
     const [indexResult, headResult] = await Promise.allSettled([
-      runGit(
-        projectPath,
-        ['ls-files', '-s', '-z', '--', ...chunk],
-        readOnlyGitOptions({ signal }),
-      ),
+      existingIndexEntries
+        ? Promise.resolve({ stdout: '' })
+        : runGit(
+            projectPath,
+            ['ls-files', '-s', '-z', '--', ...chunk],
+            readOnlyGitOptions({ signal }),
+          ),
       runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...chunk], readOnlyGitOptions({ signal })),
     ]);
-    if (indexResult.status === 'fulfilled') {
+    if (!existingIndexEntries && indexResult.status === 'fulfilled') {
       for (const [filePath, entry] of parseLsFilesStageZ(indexResult.value.stdout)) {
         indexEntriesByPath.set(filePath, entry);
       }
@@ -825,117 +821,6 @@ async function isSummaryBinaryFile(
   return (isUntracked || isAmbiguousChange) && await isBinaryWorktreeFile(projectPath, file);
 }
 
-interface ReviewFileBodyLoadOptions {
-  projectPath: string;
-  file: string;
-  statusEntry: PorcelainStatusEntry;
-  mode: GitReviewMode;
-  context: number;
-  signal?: AbortSignal;
-}
-
-async function getReviewFileBody({
-  projectPath,
-  file,
-  statusEntry,
-  mode,
-  context = 5,
-  signal,
-}: ReviewFileBodyLoadOptions): Promise<GitReviewFileBody> {
-  const effectiveMode = mode === 'staged' ? 'staged' : 'working';
-  const bodyFingerprint = await buildBodyFingerprint(projectPath, file, statusEntry, effectiveMode, signal);
-  const isUntracked = effectiveMode === 'working' &&
-    (statusEntry.indexStatus === '?' || statusEntry.workTreeStatus === '?');
-  const isDeleted = effectiveMode === 'staged'
-    ? statusEntry.indexStatus === 'D'
-    : statusEntry.workTreeStatus === 'D';
-
-  let filePath: string | null = null;
-  if (!isDeleted && effectiveMode === 'working') {
-    try {
-      filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        return limitedFileBody(
-          file,
-          bodyFingerprint,
-          'unsupported-file-kind',
-          'Directory diff is not supported. Provide a file path.',
-        );
-      }
-      if (await isBinaryFile(filePath)) {
-        return limitedFileBody(
-          file,
-          bodyFingerprint,
-          'binary',
-          'Binary diff is not available.',
-        );
-      }
-    } catch {
-      filePath = null;
-    }
-  }
-
-  let diffText = '';
-  if (isUntracked) {
-    if (!filePath) filePath = resolvePathWithinProject(projectPath, file);
-    const stats = await fs.stat(filePath);
-    if (stats.size > GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes) {
-      return limitedFileBody(
-        file,
-        bodyFingerprint,
-        'file-too-many-bytes',
-        `File exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`,
-      );
-    }
-    const contentAfter = await fs.readFile(filePath, 'utf-8');
-    diffText = buildFullFileAddedPatch(contentAfter);
-  } else {
-    const pathspec = literalGitPathspec(file);
-    const args = effectiveMode === 'staged'
-      ? ['diff', '--cached', `-U${context}`, '--', pathspec]
-      : ['diff', `-U${context}`, '--', pathspec];
-    try {
-      const { stdout } = await runGit(projectPath, args, readOnlyGitOptions({ signal }));
-      diffText = stdout;
-    } catch {
-      if (isDeleted) {
-        const contentBefore = effectiveMode === 'staged'
-          ? await readHeadBlob(projectPath, file, signal)
-          : await readIndexBlob(projectPath, file, signal) ?? await readHeadBlob(projectPath, file, signal);
-        diffText = buildFullFileDeletedPatch(contentBefore);
-      } else {
-        diffText = '';
-      }
-    }
-  }
-
-  return limitedRenderedPatch(file, bodyFingerprint, diffText);
-}
-
-async function getStatusMapForFiles(
-  projectPath: string,
-  files: string[],
-  signal?: AbortSignal,
-): Promise<Map<string, PorcelainStatusEntry>> {
-  const result = new Map<string, PorcelainStatusEntry>();
-  if (files.length === 0) return result;
-  const { stdout } = await runGit(
-    projectPath,
-    ['status', '--porcelain=v1', '-z', '--', ...files],
-    readOnlyGitOptions({ signal }),
-  );
-  for (const entry of parsePorcelainV1Z(stdout)) {
-    result.set(entry.path, entry);
-  }
-  for (const file of files) {
-    if (!result.has(file)) {
-      result.set(file, { path: file, indexStatus: ' ', workTreeStatus: ' ' });
-    }
-  }
-  return result;
-}
-
 function flattenFileNodes(nodes: TreeNode[]): TreeNode[] {
   const files: TreeNode[] = [];
   for (const node of nodes) {
@@ -957,6 +842,7 @@ async function summarizeReviewFile(
   node: TreeNode,
   mode: GitReviewMode,
   fingerprintInputs?: BatchedFingerprintInputs,
+  unmergedPaths: ReadonlySet<string> = new Set(),
   signal?: AbortSignal,
 ): Promise<GitReviewFileSummary | null> {
   const facet = facetForReviewMode(node, mode);
@@ -972,7 +858,9 @@ async function summarizeReviewFile(
   const category = facet.category ?? node.category ?? categoryForPath(node.path);
   const isBinary = await isSummaryBinaryFile(projectPath, node.path, statusEntry, mode, stats, signal);
   const estimatedRows = Math.max(1, stats.additions + stats.deletions + 1);
-  const isTooLarge = !isBinary && estimatedRows > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows;
+  const isConflicted = unmergedPaths.has(node.path);
+  const exceedsRowLimit = !isBinary && estimatedRows > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows;
+  const isTooLarge = isConflicted || exceedsRowLimit;
   const bodyFingerprint = fingerprintInputs
     ? await buildSummaryBodyFingerprint(projectPath, node.path, statusEntry, mode, fingerprintInputs)
     : await buildBodyFingerprint(projectPath, node.path, statusEntry, mode, signal);
@@ -992,7 +880,12 @@ async function summarizeReviewFile(
     isBinary,
     isTooLarge,
     ...(isBinary ? { limitReason: 'binary' as const, limitMessage: 'Binary diff is not available.' } : {}),
-    ...(isTooLarge
+    ...(isConflicted
+      ? {
+          limitReason: 'unsupported-file-kind' as const,
+          limitMessage: 'Resolve this conflict before reviewing its diff.',
+        }
+      : isTooLarge
       ? {
           limitReason: 'file-too-many-rows' as const,
           limitMessage: `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows} estimated rows.`,
@@ -1020,23 +913,40 @@ async function buildReviewDocumentSummaryFromTree({
   mode,
   context,
   treeRoot,
+  indexEntriesByPath,
+  unmergedPaths,
   signal,
 }: {
   projectPath: string;
   mode: GitReviewMode;
   context: number;
   treeRoot: TreeNode[];
+  indexEntriesByPath?: Map<string, string>;
+  unmergedPaths?: ReadonlySet<string>;
   signal?: AbortSignal;
 }): Promise<GitReviewDocumentSummary> {
   const effectiveMode = mode === 'staged' ? 'staged' : 'working';
   const allFiles = flattenFileNodes(treeRoot);
   const relevantFiles = allFiles.filter((node) => Boolean(facetForReviewMode(node, effectiveMode)));
   const limitedFiles = relevantFiles.slice(0, GIT_REVIEW_DOCUMENT_LIMITS.maxSummaryFiles);
-  const fingerprintInputs = await loadBatchedFingerprintInputs(projectPath, limitedFiles, signal);
+  const fingerprintInputs = await loadBatchedFingerprintInputs(
+    projectPath,
+    limitedFiles,
+    indexEntriesByPath,
+    signal,
+  );
   const summaries = (await mapWithConcurrencyResult(
     limitedFiles,
     GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency,
-    (node) => summarizeReviewFile(projectPath, node, effectiveMode, fingerprintInputs, signal),
+    (node) =>
+      summarizeReviewFile(
+        projectPath,
+        node,
+        effectiveMode,
+        fingerprintInputs,
+        unmergedPaths,
+        signal,
+      ),
   )).filter((summary): summary is GitReviewFileSummary => Boolean(summary));
 
   const documentId = reviewDocumentId(projectPath, effectiveMode, context, summaries);
@@ -1107,6 +1017,186 @@ function notRepositoryFingerprint(projectPath: string): GitWorkingTreeFingerprin
   };
 }
 
+export interface GitWorkingTreeObservation {
+  projectPath: string;
+  repoRoot: string;
+  branch: string;
+  head: string;
+  statusOutput: string;
+  workingStatsOutput: string;
+  cachedStatsOutput: string;
+  unmergedOutput: string;
+  statusEntries: PorcelainStatusEntry[];
+  changedPaths: string[];
+  indexEntriesByPath: Map<string, string>;
+  worktreeStatTokens: string[];
+  fingerprint: string;
+  changedPathCount: number;
+}
+
+class GitWorkingTreeNotRepositoryError extends Error {
+  constructor(cause: unknown) {
+    super('Git working-tree observation requires a repository.', { cause });
+    this.name = 'GitWorkingTreeNotRepositoryError';
+  }
+}
+
+export async function captureWorkingTreeObservation({
+  projectPath,
+  repoRoot: knownRepoRoot,
+  trace,
+  signal,
+}: GitWorkingTreeFingerprintOptions & { repoRoot?: string }): Promise<GitWorkingTreeObservation> {
+  const [
+    repoRootResult,
+    branchResult,
+    headResult,
+    statusResult,
+    workingStatsResult,
+    cachedStatsResult,
+    unmergedResult,
+  ] = await Promise.allSettled([
+    knownRepoRoot
+      ? Promise.resolve({ stdout: knownRepoRoot, stderr: '' })
+      : runGitTraced(
+          projectPath,
+          ['rev-parse', '--show-toplevel'],
+          trace,
+          readOnlyGitOptions({ signal }),
+        ),
+    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['diff', '--cached', '--numstat', '-z'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
+  ]);
+
+  if (repoRootResult.status === 'rejected') {
+    if (signal?.aborted) throw repoRootResult.reason;
+    throw new GitWorkingTreeNotRepositoryError(repoRootResult.reason);
+  }
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
+  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
+  const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
+  const changedPaths = uniqueGitPaths(statusEntries.map((entry) => entry.path));
+  const [indexEntriesByPath, worktreeStatTokens] = await Promise.all([
+    loadFingerprintIndexEntryMap(projectPath, changedPaths, signal),
+    loadFingerprintWorktreeStats(projectPath, statusEntries),
+  ]);
+  const { fingerprint, changedPathCount } = await buildWorkbenchFingerprintFromInputs({
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput: statusResult.value.stdout,
+    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
+    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
+    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
+    statusEntries,
+    indexEntriesByPath,
+    worktreeStatTokens,
+    signal,
+  });
+
+  return {
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput: statusResult.value.stdout,
+    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
+    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
+    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
+    statusEntries,
+    changedPaths,
+    indexEntriesByPath,
+    worktreeStatTokens,
+    fingerprint,
+    changedPathCount,
+  };
+}
+
+export async function isWorkingTreeObservationCurrent(
+  observation: GitWorkingTreeObservation,
+  trace?: GitCommandTrace[],
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const [branchResult, headResult, statusResult, unmergedResult] = await Promise.allSettled([
+    runGitTraced(
+      observation.projectPath,
+      ['branch', '--show-current'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['rev-parse', 'HEAD'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['ls-files', '-u', '-z'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+  ]);
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
+  const unmerged = unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '';
+  if (
+    branch !== observation.branch ||
+    head !== observation.head ||
+    statusResult.value.stdout !== observation.statusOutput ||
+    unmerged !== observation.unmergedOutput
+  ) {
+    return false;
+  }
+
+  const currentEntries = await loadFingerprintIndexEntryMap(
+    observation.projectPath,
+    observation.changedPaths,
+    signal,
+  );
+  const currentEntryTokens = Array.from(
+    currentEntries,
+    ([filePath, entry]) => `${filePath}\x00${entry}`,
+  ).sort();
+  const expectedEntryTokens = Array.from(
+    observation.indexEntriesByPath,
+    ([filePath, entry]) => `${filePath}\x00${entry}`,
+  ).sort();
+  if (currentEntryTokens.join('\x1f') !== expectedEntryTokens.join('\x1f')) return false;
+
+  const currentWorktreeStats = await loadFingerprintWorktreeStats(
+    observation.projectPath,
+    observation.statusEntries,
+  );
+  return currentWorktreeStats.join('\x1f') === observation.worktreeStatTokens.join('\x1f');
+}
+
 export async function getWorkingTreeFingerprint({
   projectPath,
   trace,
@@ -1118,60 +1208,22 @@ export async function getWorkingTreeFingerprint({
     return notRepositoryFingerprint(projectPath);
   }
 
-  const [
-    repoRootResult,
-    branchResult,
-    headResult,
-    statusResult,
-    workingStatsResult,
-    cachedStatsResult,
-    unmergedResult,
-  ] = await Promise.allSettled([
-    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(
-      projectPath,
-      ['status', '--porcelain=v1', '-z', '-uall'],
-      trace,
-      readOnlyGitOptions({ signal }),
-    ),
-    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(
-      projectPath,
-      ['diff', '--cached', '--numstat', '-z'],
-      trace,
-      readOnlyGitOptions({ signal }),
-    ),
-    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
-  ]);
-
-  if (repoRootResult.status === 'rejected') return notRepositoryFingerprint(projectPath);
-  if (statusResult.status === 'rejected') throw statusResult.reason;
-
-  const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
-  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
-  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
-  const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
-  const { fingerprint, changedPathCount } = await buildWorkbenchFingerprintFromInputs({
-    projectPath,
-    repoRoot,
-    branch,
-    head,
-    statusOutput: statusResult.value.stdout,
-    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
-    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
-    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
-    statusEntries,
-    signal,
-  });
+  let observation: GitWorkingTreeObservation;
+  try {
+    observation = await captureWorkingTreeObservation({ projectPath, trace, signal });
+  } catch (error) {
+    if (error instanceof GitWorkingTreeNotRepositoryError) {
+      return notRepositoryFingerprint(projectPath);
+    }
+    throw error;
+  }
 
   return {
     status: 'ready',
     project: projectPath,
     fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
-    fingerprint,
-    changedPathCount,
+    fingerprint: observation.fingerprint,
+    changedPathCount: observation.changedPathCount,
   };
 }
 
@@ -1182,78 +1234,68 @@ async function getWorkbenchSnapshot({
   selectedFile,
   bodyCandidateCount = 8,
   trace,
+  metrics,
   signal,
-}: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse> {
+}: GitWorkbenchSnapshotOptions, registry: GitReviewDocumentRegistry): Promise<GitWorkbenchSnapshotResponse> {
   try {
     await fs.access(projectPath);
   } catch {
     return notRepositorySnapshot(projectPath);
   }
 
-  const [
-    repoRootResult,
-    branchResult,
-    headResult,
-    statusResult,
-    workingStatsResult,
-    cachedStatsResult,
-    unmergedResult,
-  ] = await Promise.allSettled([
-    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(
-      projectPath,
-      ['status', '--porcelain=v1', '-z', '-uall'],
-      trace,
-      readOnlyGitOptions({ signal }),
-    ),
-    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
-    runGitTraced(
-      projectPath,
-      ['diff', '--cached', '--numstat', '-z'],
-      trace,
-      readOnlyGitOptions({ signal }),
-    ),
-    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
-  ]);
-
-  if (repoRootResult.status === 'rejected') return notRepositorySnapshot(projectPath);
-  if (statusResult.status === 'rejected') throw statusResult.reason;
-
+  let observation: GitWorkingTreeObservation;
+  try {
+    observation = await captureWorkingTreeObservation({ projectPath, trace, signal });
+  } catch (error) {
+    if (error instanceof GitWorkingTreeNotRepositoryError) {
+      return notRepositorySnapshot(projectPath);
+    }
+    throw error;
+  }
   const effectiveMode = mode === 'staged' ? 'staged' : 'working';
-  const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
-  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
-  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
-  const hasCommits = headResult.status === 'fulfilled';
-  const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
-  const workingStats = workingStatsResult.status === 'fulfilled'
-    ? parseNumstatZ(workingStatsResult.value.stdout)
-    : {};
-  const cachedStats = cachedStatsResult.status === 'fulfilled'
-    ? parseNumstatZ(cachedStatsResult.value.stdout)
-    : {};
+  const { repoRoot, branch, head, statusEntries } = observation;
+  const hasCommits = Boolean(head);
+  const workingStats = parseNumstatZ(observation.workingStatsOutput);
+  const cachedStats = parseNumstatZ(observation.cachedStatsOutput);
   const tree = buildTreeFromStatusEntries(statusEntries, workingStats, cachedStats, hasCommits, 'loaded');
   const reviewSummary = await buildReviewDocumentSummaryFromTree({
     projectPath,
     mode: effectiveMode,
     context,
     treeRoot: tree.root,
+    indexEntriesByPath: observation.indexEntriesByPath,
+    unmergedPaths: parseUnmergedPaths(observation.unmergedOutput),
     signal,
   });
-  const { fingerprint } = await buildWorkbenchFingerprintFromInputs({
-    projectPath,
+  const workingPathTokens = await captureWorkingPathTokens(
     repoRoot,
-    branch,
-    head,
-    statusOutput: statusResult.value.stdout,
-    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
-    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
-    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
-    statusEntries,
+    reviewSummary.files.flatMap((file) =>
+      file.originalPath ? [file.path, file.originalPath] : [file.path],
+    ),
+    {
+      statusEntries: observation.statusEntries,
+      indexEntriesByPath: observation.indexEntriesByPath,
+      scope: effectiveMode === 'staged' ? 'index' : 'working-tree',
+    },
     signal,
-  });
-  const selected = chooseSelectedFile(reviewSummary.files, selectedFile);
+  );
+  const document = measureGitReviewPhaseSync(metrics, 'document-register', () =>
+    registry.register({
+      sourceCacheKey: `workbench:${repoRoot}:${effectiveMode}:${context}`,
+      projectPath,
+      repoRoot,
+      context,
+      source: {
+        kind: 'workbench',
+        mode: effectiveMode,
+        stagedBaseHash: head || GIT_EMPTY_TREE,
+        fingerprint: observation.fingerprint,
+      },
+      files: reviewSummary.files.map(registeredWorkbenchFile),
+      workingPathTokens,
+    }));
+  const registeredSummary = { ...reviewSummary, documentId: document.id };
+  const selected = chooseSelectedFile(registeredSummary.files, selectedFile);
 
   return {
     status: 'ready',
@@ -1271,56 +1313,15 @@ async function getWorkbenchSnapshot({
       hasCommits,
       statsState: 'loaded',
     },
-    reviewSummary,
+    reviewSummary: registeredSummary,
     selectedFile: selected,
     firstBodyCandidates: chooseFirstBodyCandidates(
-      reviewSummary.files,
+      registeredSummary.files,
       selected,
       Math.max(0, Math.min(bodyCandidateCount, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles)),
     ),
-    snapshotId: reviewSummary.documentId,
-    workbenchFingerprint: fingerprint,
-  };
-}
-
-async function getReviewFileBodies({
-  projectPath,
-  documentId,
-  files,
-  mode = 'working',
-  context = 5,
-  signal,
-}: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse> {
-  await assertGitRepository(projectPath);
-
-  const effectiveMode = mode === 'staged' ? 'staged' : 'working';
-  const statusByPath = await getStatusMapForFiles(projectPath, files, signal);
-  const parsedFiles: Record<string, GitReviewFileBody> = {};
-  const errors: Record<string, string> = {};
-
-  await mapWithConcurrency(files, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (file) => {
-    try {
-      const statusEntry = statusByPath.get(file) ??
-        { path: file, indexStatus: ' ', workTreeStatus: ' ' };
-      parsedFiles[file] = await getReviewFileBody({
-        projectPath,
-        file,
-        statusEntry,
-        mode: effectiveMode,
-        context,
-        signal,
-      });
-    } catch (error) {
-      const fingerprint = hashString(`${effectiveMode}:${file}:error`);
-      parsedFiles[file] = errorFileBody(file, fingerprint, error instanceof Error ? error.message : String(error));
-      errors[file] = error instanceof Error ? error.message : String(error);
-    }
-  });
-
-  return {
-    documentId,
-    files: Object.fromEntries(files.filter((file) => parsedFiles[file]).map((file) => [file, parsedFiles[file]])),
-    errors,
+    snapshotId: document.id,
+    workbenchFingerprint: observation.fingerprint,
   };
 }
 
@@ -1463,17 +1464,17 @@ async function stageHunk({
 }
 
 
-export function createDiffEngine() {
+export function createDiffEngine(registry: GitReviewDocumentRegistry) {
   return {
-    getWorkbenchSnapshot,
+    getWorkbenchSnapshot: (options: GitWorkbenchSnapshotOptions) =>
+      getWorkbenchSnapshot(options, registry),
     getWorkingTreeFingerprint,
-    getReviewFileBodies,
     stageSelection,
     stageHunk,
   };
 }
 
-export interface RenderedDiffFile {
+export interface GitDiffPatchFile {
   path: string;
   originalPath?: string;
   status: string;
@@ -1481,10 +1482,10 @@ export interface RenderedDiffFile {
   additions: number;
   deletions: number;
   isBinary: boolean;
-  body: GitReviewFileBody;
+  body: GitReviewFilePatchBody;
 }
 
-const RENDERED_CHANGE_KIND: Record<string, string> = {
+const PATCH_CHANGE_KIND: Record<string, string> = {
   A: 'added',
   D: 'deleted',
   R: 'renamed',
@@ -1496,9 +1497,8 @@ function stripAbPrefix(candidate: string): string {
   return candidate.startsWith('a/') || candidate.startsWith('b/') ? candidate.slice(2) : candidate;
 }
 
-// Renders a single `diff --git` segment into a review file body, deriving the
-// change status from the segment headers.
-function renderDiffFileSegment(segment: string): RenderedDiffFile | null {
+// Parses a single `diff --git` segment into a compact review body.
+function parseDiffFilePatch(segment: string): GitDiffPatchFile | null {
   const lines = segment.split('\n');
   const headerMatch = lines[0].match(/^diff --git a\/(.*) b\/(.*)$/);
   let oldPath = headerMatch?.[1];
@@ -1531,20 +1531,26 @@ function renderDiffFileSegment(segment: string): RenderedDiffFile | null {
 
   const patchBody = stripDiffHeaders(segment);
   const fingerprint = createHash('sha1').update(segment).digest('hex').slice(0, 16);
-  const body = limitedRenderedPatch(path, fingerprint, patchBody);
+  const body = compactRenderedPatch(path, fingerprint, patchBody);
 
   let additions = 0;
   let deletions = 0;
-  for (const row of body.rows) {
-    if (row.kind === 'add') additions += 1;
-    else if (row.kind === 'del') deletions += 1;
+  let insideHunk = false;
+  for (const line of patchBody.split('\n')) {
+    if (line.startsWith('@@')) {
+      insideHunk = true;
+      continue;
+    }
+    if (!insideHunk || line.startsWith('\\')) continue;
+    if (line.startsWith('+')) additions += 1;
+    else if (line.startsWith('-')) deletions += 1;
   }
 
   return {
     path,
     originalPath: status === 'R' ? renameFrom ?? oldPath : undefined,
     status,
-    changeKind: RENDERED_CHANGE_KIND[status] ?? 'modified',
+    changeKind: PATCH_CHANGE_KIND[status] ?? 'modified',
     additions,
     deletions,
     isBinary: body.isBinary,
@@ -1552,15 +1558,14 @@ function renderDiffFileSegment(segment: string): RenderedDiffFile | null {
   };
 }
 
-// Splits a multi-file unified diff (for example `gh pr diff` output) into
-// per-file rendered bodies, reusing the same row parsing as the local workbench.
-export function renderMultiFileDiff(diffText: string): RenderedDiffFile[] {
+// Splits a multi-file unified diff into compact per-file patch bodies.
+export function parseMultiFileDiffPatches(diffText: string): GitDiffPatchFile[] {
   if (!diffText.trim()) return [];
   const segments = diffText.split(/\n(?=diff --git )/);
-  const files: RenderedDiffFile[] = [];
+  const files: GitDiffPatchFile[] = [];
   for (const segment of segments) {
     if (!segment.startsWith('diff --git ')) continue;
-    const parsed = renderDiffFileSegment(segment);
+    const parsed = parseDiffFilePatch(segment);
     if (parsed) files.push(parsed);
   }
   return files;

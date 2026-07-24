@@ -545,20 +545,21 @@ describe('git API contract', () => {
 		});
 
 	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),
+		);
 
 		await getGitReviewFileBodies('/project', 'doc', ['a.ts', 'b.ts'], 'staged', 3);
 
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/review-document/files');
+		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(opts.method).toBe('POST');
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
 			project: '/project',
 			documentId: 'doc',
 			files: ['a.ts', 'b.ts'],
-			mode: 'staged',
-			context: 3,
+			purpose: 'prefetch',
 		});
 	});
 
@@ -622,7 +623,9 @@ describe('git API contract', () => {
 	});
 
 	it('getGitCommitFileBodies posts commit file body requests', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({ status: 'ready', documentId: 'doc', files: {}, errors: {} }),
+		);
 		const controller = new AbortController();
 
 		await getGitCommitFileBodies('/project', 'doc', 'abc', [{ path: 'renamed.ts', originalPath: 'a.ts' }], {
@@ -632,16 +635,14 @@ describe('git API contract', () => {
 		});
 
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/history/commit/files');
+		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
 			project: '/project',
 			documentId: 'doc',
-			commit: 'abc',
-			parent: null,
-			context: 4,
-			files: [{ path: 'renamed.ts', originalPath: 'a.ts' }],
+			files: ['renamed.ts'],
+			purpose: 'prefetch',
 		});
 	});
 
@@ -678,8 +679,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({
 			status: 'stale',
 			documentId: 'comparison-doc',
-			expectedFingerprint: 'v1:old',
-			actualFingerprint: 'v1:new',
+			changedPaths: ['new.ts'],
 			message: 'The Working Tree changed.',
 		}));
 
@@ -694,14 +694,12 @@ describe('git API contract', () => {
 
 		expect(result.status).toBe('stale');
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/comparisons/files');
+		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(JSON.parse(opts.body)).toEqual({
 			project: '/project',
 			documentId: 'comparison-doc',
-			effectiveFromHash: 'from-hash',
-			to: { kind: 'working-tree', fingerprint: 'v1:old' },
-			files: [{ path: 'new.ts', originalPath: 'old.ts' }],
-			context: 3,
+			files: ['new.ts'],
+			purpose: 'prefetch',
 		});
 	});
 

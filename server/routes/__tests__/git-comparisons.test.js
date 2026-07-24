@@ -11,7 +11,6 @@ mock.module('../../lib/http-request.js', () => ({
 const { createGitComparisonRoutes } = await import('../git-comparisons.js');
 
 const snapshotCalls = [];
-const bodyCalls = [];
 const freshnessCalls = [];
 const git = {
   getComparisonSnapshot: mock(async (options) => {
@@ -22,16 +21,6 @@ const git = {
       endpoint: 'from',
       revision: options.from.revision,
       message: 'Missing revision.',
-    };
-  }),
-  getComparisonFileBodies: mock(async (options) => {
-    bodyCalls.push(options);
-    return {
-      status: 'stale',
-      documentId: options.documentId,
-      expectedFingerprint: options.to.fingerprint,
-      actualFingerprint: 'changed',
-      message: 'Working Tree changed.',
     };
   }),
   getComparisonFreshness: mock(async (options) => {
@@ -50,7 +39,6 @@ const git = {
 };
 const routes = createGitComparisonRoutes(git);
 const snapshotHandler = routes['/api/v1/git/comparisons/snapshot'].POST;
-const filesHandler = routes['/api/v1/git/comparisons/files'].POST;
 const freshnessHandler = routes['/api/v1/git/comparisons/freshness'].POST;
 
 function request(path, body, signal) {
@@ -65,10 +53,8 @@ function request(path, body, signal) {
 describe('Git comparison route contracts', () => {
   beforeEach(() => {
     snapshotCalls.length = 0;
-    bodyCalls.length = 0;
     freshnessCalls.length = 0;
     git.getComparisonSnapshot.mockClear();
-    git.getComparisonFileBodies.mockClear();
     git.getComparisonFreshness.mockClear();
   });
 
@@ -147,41 +133,6 @@ describe('Git comparison route contracts', () => {
     expect(git.getComparisonSnapshot).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [[], 'empty batch'],
-    [[{ path: 'bad\0path' }], 'NUL path'],
-    [Array.from({ length: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 }, (_, index) => ({ path: `file-${index}` })), 'oversized batch'],
-  ])('rejects an invalid body request: %s', async (files) => {
-    const response = await filesHandler(request('/api/v1/git/comparisons/files', {
-      project: '/project',
-      documentId: 'document',
-      effectiveFromHash: 'a'.repeat(40),
-      to: { kind: 'working-tree', fingerprint: 'fingerprint' },
-      context: 5,
-      files,
-    }));
-
-    expect(response.status).toBe(400);
-    expect(git.getComparisonFileBodies).not.toHaveBeenCalled();
-  });
-
-  it.each([-1, GIT_REVIEW_DOCUMENT_LIMITS.maxContextLines + 1])(
-    'rejects an invalid body context: %s',
-    async (context) => {
-      const response = await filesHandler(request('/api/v1/git/comparisons/files', {
-        project: '/project',
-        documentId: 'document',
-        effectiveFromHash: 'a'.repeat(40),
-        to: { kind: 'working-tree', fingerprint: 'fingerprint' },
-        context,
-        files: [{ path: 'a.ts' }],
-      }));
-
-      expect(response.status).toBe(400);
-      expect(git.getComparisonFileBodies).not.toHaveBeenCalled();
-    },
-  );
-
   it('forwards frozen revision identities to the freshness operation', async () => {
     const controller = new AbortController();
     const inputRequest = request('/api/v1/git/comparisons/freshness', {
@@ -232,24 +183,4 @@ describe('Git comparison route contracts', () => {
     expect(git.getComparisonFreshness).not.toHaveBeenCalled();
   });
 
-	it('serializes typed body statuses and forwards the abort signal', async () => {
-		const controller = new AbortController();
-		const inputRequest = request('/api/v1/git/comparisons/files', {
-      project: '/project',
-      documentId: 'document',
-      effectiveFromHash: 'a'.repeat(40),
-      to: { kind: 'working-tree', fingerprint: 'fingerprint' },
-      context: 5,
-      files: [{ path: 'a.ts', originalPath: 'old-a.ts' }],
-		}, controller.signal);
-		const response = await filesHandler(inputRequest);
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ status: 'stale', actualFingerprint: 'changed' });
-    expect(bodyCalls[0]).toMatchObject({
-      documentId: 'document',
-      files: [{ path: 'a.ts', originalPath: 'old-a.ts' }],
-    });
-		expect(bodyCalls[0].signal).toBe(inputRequest.signal);
-  });
 });
