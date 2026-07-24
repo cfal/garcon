@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequestDetail } from '$lib/api/pull-requests';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import PullRequestDetailPanelTestHost from './PullRequestDetailPanelTestHost.svelte';
 
 afterEach(() => {
@@ -57,8 +58,8 @@ function makeDetail(withThread = false): PullRequestDetail {
 						isTooLarge: false,
 						renderedRowCount: 0,
 						patchBytes: 0,
-						rows: [],
-						hunks: [],
+						patch: '',
+						patchIndex: createGitPatchIndex(''),
 					},
 				}
 			: {},

@@ -1,8 +1,8 @@
 // Pure transforms from raw `gh` JSON output into the typed PR contract. Kept
 // free of subprocess IO so they can be unit-tested directly.
 
-import type { RenderedDiffFile } from '../git/diff-engine.js';
-import type { GitReviewFileBody, GitReviewFileSummary } from '../git/types.js';
+import type { GitDiffPatchFile } from '../git/diff-engine.js';
+import type { GitReviewFilePatchBody, GitReviewFileSummary } from '../git/types.js';
 import type {
   PullRequestCheck,
   PullRequestCheckState,
@@ -191,19 +191,19 @@ export function buildThreads(comments: GhRawReviewComment[]): PullRequestThread[
   );
 }
 
-export interface RenderedFileSet {
+export interface PullRequestPatchFileSet {
   files: GitReviewFileSummary[];
-  fileBodies: Record<string, GitReviewFileBody>;
+  fileBodies: Record<string, GitReviewFilePatchBody>;
 }
 
-// Builds review file summaries + bodies from a rendered PR diff, preferring
+// Builds review file summaries and bodies from compact PR patches, preferring
 // GitHub's per-file line counts (authoritative, includes binary files).
-export function buildRenderedFileSet(
-  rendered: RenderedDiffFile[],
+export function buildPatchFileSet(
+  patches: GitDiffPatchFile[],
   ghFiles: GhRawFile[] | undefined,
-): RenderedFileSet {
+): PullRequestPatchFileSet {
   const ghFileMap = new Map((ghFiles ?? []).map((file) => [file.path, file]));
-  const files = rendered.map((file): GitReviewFileSummary => {
+  const files = patches.map((file): GitReviewFileSummary => {
     const gh = ghFileMap.get(file.path);
     return {
       path: file.path,
@@ -213,7 +213,7 @@ export function buildRenderedFileSet(
       category: file.body.category,
       additions: gh?.additions ?? file.additions,
       deletions: gh?.deletions ?? file.deletions,
-      estimatedRows: file.body.rows.length,
+      estimatedRows: file.body.renderedRowCount,
       bodyState: file.body.bodyState,
       bodyFingerprint: file.body.bodyFingerprint,
       isGenerated: file.body.category === 'generated',
@@ -223,17 +223,17 @@ export function buildRenderedFileSet(
       ...(file.body.limitMessage ? { limitMessage: file.body.limitMessage } : {}),
     };
   });
-  const fileBodies: Record<string, GitReviewFileBody> = {};
-  for (const file of rendered) fileBodies[file.path] = file.body;
+  const fileBodies: Record<string, GitReviewFilePatchBody> = {};
+  for (const file of patches) fileBodies[file.path] = file.body;
   return { files, fileBodies };
 }
 
 export function buildDetail(
   raw: GhRawPullRequest,
-  rendered: RenderedDiffFile[],
+  patches: GitDiffPatchFile[],
   threads: PullRequestThread[],
 ): PullRequestDetail {
-  const { files, fileBodies } = buildRenderedFileSet(rendered, raw.files);
+  const { files, fileBodies } = buildPatchFileSet(patches, raw.files);
   return {
     number: raw.number,
     title: raw.title ?? '',

@@ -3,11 +3,13 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
+	import { DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS } from '$lib/api/git.js';
 	import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
-	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import type { PullRequestThread } from '$lib/api/pull-requests';
+	import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+	import { buildPullRequestVirtualRowSource } from '$lib/git/pull-requests/pull-request-virtual-row-source.js';
 	import PullRequestHeader from './PullRequestHeader.svelte';
-	import PullRequestFileDiff from './PullRequestFileDiff.svelte';
+	import PullRequestVirtualDiffSurface from './PullRequestVirtualDiffSurface.svelte';
 	import { buildAddressThreadPrompt, buildReviewPrompt } from './pr-agent-prompts';
 
 	interface PullRequestDetailPanelProps {
@@ -42,22 +44,49 @@
 		}
 	});
 
-	const threadsByFile = $derived.by(() => {
-		const map = new Map<string, PullRequestThread[]>();
-		for (const thread of detail?.threads ?? []) {
-			const list = map.get(thread.path) ?? [];
-			list.push(thread);
-			map.set(thread.path, list);
-		}
-		return map;
-	});
-
 	const filePaths = $derived(detail?.files.map((file) => file.path) ?? []);
 	const allCollapsed = $derived(filePaths.length > 0 && collapsedFiles.size >= filePaths.length);
 	const viewedCount = $derived(viewedFiles.size);
 	const viewedPercent = $derived(
 		filePaths.length ? Math.round((viewedCount / filePaths.length) * 100) : 0,
 	);
+	const threadsById = $derived(
+		new Map((detail?.threads ?? []).map((thread) => [thread.id, thread])),
+	);
+	const threadCountByFile = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const thread of detail?.threads ?? []) {
+			counts.set(thread.path, (counts.get(thread.path) ?? 0) + 1);
+		}
+		return counts;
+	});
+	const diffSource = $derived.by(() => {
+		if (!detail) return null;
+		const baseSource = buildGitVirtualReviewRowSource({
+			summary: {
+				documentId: `pr:${detail.number}:${detail.updatedAt}`,
+				project: '',
+				context: 3,
+				files: detail.files,
+				limits: DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS,
+			},
+			visibleFilePaths: detail.files.map((file) => file.path),
+			fileBodies: detail.fileBodies,
+			loadingBodies: new Set<string>(),
+			focusedFilePath: null,
+			diffMode: 'unified',
+			contextLines: 3,
+			interaction: { kind: 'read-only' },
+			collapsedFilePaths: collapsedFiles,
+		});
+		return buildPullRequestVirtualRowSource({
+			baseSource,
+			files: detail.files,
+			fileBodies: detail.fileBodies,
+			threads: detail.threads,
+			collapsedFilePaths: collapsedFiles,
+		});
+	});
 
 	async function handleReview(): Promise<void> {
 		if (!detail) return;
@@ -146,37 +175,23 @@
 				></div>
 			</div>
 		</div>
-		<ScrollArea class="min-h-0 flex-1">
-			<div class="space-y-2 p-3">
-				{#if detail.files.length === 0}
-					<div class="py-8 text-center text-sm text-muted-foreground">
-						This pull request has no file changes.
-					</div>
-				{:else}
-					{#each detail.files as file (file.path)}
-						<svelte:boundary>
-							<PullRequestFileDiff
-								{file}
-								body={detail.fileBodies[file.path]}
-								threads={threadsByFile.get(file.path) ?? []}
-								viewed={viewedFiles.has(file.path)}
-								collapsed={collapsedFiles.has(file.path)}
-								onToggleViewed={() => toggleViewed(file.path)}
-								onToggleCollapsed={() => toggleCollapsed(file.path)}
-								onAddressThread={handleAddressThread}
-							/>
-							{#snippet failed(err)}
-								<div class="rounded-md border border-border px-3 py-2 text-xs text-git-deleted">
-									Failed to render {file.path}: {err instanceof Error
-										? err.message
-										: 'unknown error'}
-								</div>
-							{/snippet}
-						</svelte:boundary>
-					{/each}
-				{/if}
+		{#if detail.files.length === 0}
+			<div class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+				This pull request has no file changes.
 			</div>
-		</ScrollArea>
+		{:else if diffSource}
+			<PullRequestVirtualDiffSurface
+				documentId={`pr:${detail.number}:${detail.updatedAt}`}
+				source={diffSource}
+				{viewedFiles}
+				{collapsedFiles}
+				{threadsById}
+				{threadCountByFile}
+				onToggleViewed={toggleViewed}
+				onToggleCollapsed={toggleCollapsed}
+				onAddressThread={handleAddressThread}
+			/>
+		{/if}
 	{:else if isLoading}
 		<div class="flex h-full items-center justify-center text-muted-foreground">
 			<LoaderCircle class="h-5 w-5 animate-spin" />

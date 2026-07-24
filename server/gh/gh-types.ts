@@ -2,7 +2,7 @@
 // request detail reuses the git review file shapes so the frontend can render
 // PR diffs with the exact same components as the local workbench.
 
-import type { GitReviewFileBody, GitReviewFileSummary } from '../git/types.js';
+import type { GitReviewFilePatchBody, GitReviewFileSummary } from '../git/types.js';
 
 // Domain error type for gh operations. Carries a machine-readable code for
 // HTTP status mapping at the route boundary.
@@ -96,7 +96,7 @@ export interface PullRequestDetail {
   reviewDecision: PullRequestReviewDecision;
   checks: PullRequestCheck[];
   files: GitReviewFileSummary[];
-  fileBodies: Record<string, GitReviewFileBody>;
+  fileBodies: Record<string, GitReviewFilePatchBody>;
   threads: PullRequestThread[];
 }
 
