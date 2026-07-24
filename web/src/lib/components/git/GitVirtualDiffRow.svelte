@@ -188,7 +188,7 @@
 			{@const defaultTarget = row.view.rowContextTarget}
 			<div
 				data-git-diff-review-row
-				class="diff-row-paint group/diff-cell relative grid select-none {workbenchControls
+				class="group/diff-cell relative grid select-none {workbenchControls
 					? 'grid-cols-[2rem_3rem_3rem_minmax(0,1fr)]'
 					: 'grid-cols-[3rem_3rem_minmax(0,1fr)]'} {row.view.bgClass}"
 			>
@@ -364,7 +364,7 @@
 			>
 				{#each splitCellViews(row.view) as cellView, index}
 					<div
-						class="diff-row-paint group/diff-cell relative grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ??
+						class="group/diff-cell grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ??
 							''}"
 					>
 						{#if cellView?.contextTarget && commentControls}
@@ -451,7 +451,7 @@
 						</div>
 					</div>
 					{#if index === 0}
-						<div class="diff-row-paint relative bg-border/40 p-0"></div>
+						<div class="bg-border/40 p-0"></div>
 					{/if}
 				{/each}
 			</div>
@@ -485,16 +485,3 @@
 			</div>{/if}
 	</div>
 {/if}
-
-<style>
-	.diff-row-paint::after {
-		position: absolute;
-		right: 0;
-		bottom: -1px;
-		left: 0;
-		height: 1px;
-		background: inherit;
-		content: '';
-		pointer-events: none;
-	}
-</style>
