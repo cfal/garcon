@@ -146,6 +146,8 @@ interface GitReviewDocumentRegistryOptions {
 
 function contentKey(input: RegisterGitReviewDocumentInput): string {
   return [
+    input.projectPath,
+    input.repoRoot,
     input.sourceCacheKey,
     input.context,
     JSON.stringify(input.source),
@@ -153,9 +155,15 @@ function contentKey(input: RegisterGitReviewDocumentInput): string {
   ].join('\x1f');
 }
 
+function sourceRegistrationKey(
+  input: Pick<RegisterGitReviewDocumentInput, 'projectPath' | 'sourceCacheKey'>,
+): string {
+  return `${input.projectPath}\x1f${input.sourceCacheKey}`;
+}
+
 export class GitReviewDocumentRegistry {
   private readonly documents = new Map<string, MutableRegisteredGitReviewDocument>();
-  private readonly latestBySource = new Map<string, string>();
+  private readonly latestByRegistration = new Map<string, string>();
   private readonly now: () => number;
   private readonly idleTtlMs: number;
   private readonly maxIdleDocuments: number;
@@ -173,7 +181,8 @@ export class GitReviewDocumentRegistry {
 
   register(input: RegisterGitReviewDocumentInput): RegisteredGitReviewDocument {
     this.prune();
-    const previousId = this.latestBySource.get(input.sourceCacheKey);
+    const registrationKey = sourceRegistrationKey(input);
+    const previousId = this.latestByRegistration.get(registrationKey);
     const previous = previousId ? this.documents.get(previousId) : undefined;
     const nextContentKey = contentKey(input);
     if (previous && !previous.superseded && contentKey({
@@ -219,7 +228,7 @@ export class GitReviewDocumentRegistry {
       bodyBytes: 0,
     };
     this.documents.set(document.id, document);
-    this.latestBySource.set(document.sourceCacheKey, document.id);
+    this.latestByRegistration.set(registrationKey, document.id);
     this.prune();
     return document;
   }
@@ -306,8 +315,9 @@ export class GitReviewDocumentRegistry {
 
   private deleteDocument(document: MutableRegisteredGitReviewDocument): void {
     this.documents.delete(document.id);
-    if (this.latestBySource.get(document.sourceCacheKey) === document.id) {
-      this.latestBySource.delete(document.sourceCacheKey);
+    const registrationKey = sourceRegistrationKey(document);
+    if (this.latestByRegistration.get(registrationKey) === document.id) {
+      this.latestByRegistration.delete(registrationKey);
     }
     this.totalBodyBytes -= document.bodyBytes;
   }

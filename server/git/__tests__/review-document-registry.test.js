@@ -101,6 +101,23 @@ describe('GitReviewDocumentRegistry', () => {
     lease?.release();
   });
 
+  it('keeps identical documents independently acquirable across project paths', () => {
+    const registry = new GitReviewDocumentRegistry();
+    const first = registry.register(registration());
+    const second = registry.register({
+      ...registration(),
+      projectPath: '/repo/subdirectory',
+    });
+
+    expect(second.id).not.toBe(first.id);
+    const firstLease = registry.acquire('/repo', first.id);
+    const secondLease = registry.acquire('/repo/subdirectory', second.id);
+    expect(firstLease).not.toBeNull();
+    expect(secondLease).not.toBeNull();
+    firstLease?.release();
+    secondLease?.release();
+  });
+
   it('rejects bodies that do not belong to the leased document', () => {
     const registry = new GitReviewDocumentRegistry();
     const document = registry.register(registration());
