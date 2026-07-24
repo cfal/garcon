@@ -6,6 +6,7 @@
 	import type { GitComparisonSnapshotReady } from '$lib/api/git-comparison.js';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
+	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitComparisonHeaderProps {
@@ -20,6 +21,9 @@
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
+		showFileTreeToggle: boolean;
+		fileTreeVisible: boolean;
+		onToggleFileTree: () => void;
 	}
 
 	let {
@@ -34,6 +38,9 @@
 		onSetDiffMode,
 		onSetContextLines,
 		onSetDiffFontSize,
+		showFileTreeToggle,
+		fileTreeVisible,
+		onToggleFileTree,
 	}: GitComparisonHeaderProps = $props();
 	let additions = $derived(snapshot.files.reduce((sum, file) => sum + file.additions, 0));
 	let additionsKnown = $derived(snapshot.files.every((file) => file.statsKnown !== false));
@@ -67,6 +74,9 @@
 				<span class="shrink-0 font-mono text-[10px]">{toIdentity}</span>
 			</div>
 		</div>
+		{#if showFileTreeToggle}
+			<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
+		{/if}
 		<button
 			type="button"
 			class="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"

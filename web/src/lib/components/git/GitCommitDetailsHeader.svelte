@@ -7,6 +7,7 @@
 	import type { GitCommitSnapshotReady } from '$lib/api/git.js';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
+	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitCommitDetailsHeaderProps {
@@ -21,6 +22,9 @@
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
+		showFileTreeToggle: boolean;
+		fileTreeVisible: boolean;
+		onToggleFileTree: () => void;
 	}
 
 	let {
@@ -35,6 +39,9 @@
 		onSetDiffMode,
 		onSetContextLines,
 		onSetDiffFontSize,
+		showFileTreeToggle,
+		fileTreeVisible,
+		onToggleFileTree,
 	}: GitCommitDetailsHeaderProps = $props();
 
 	let copied = $state(false);
@@ -145,6 +152,9 @@
 			{/if}
 		</div>
 		<div class="flex items-center gap-2">
+			{#if showFileTreeToggle}
+				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
+			{/if}
 			<GitDiffSettingsMenu
 				{diffMode}
 				{contextLines}

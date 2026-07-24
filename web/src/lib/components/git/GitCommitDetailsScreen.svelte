@@ -58,7 +58,11 @@
 	let props: GitCommitDetailsScreenProps = $props();
 </script>
 
-{#snippet header()}
+{#snippet header(
+	showFileTreeToggle: boolean,
+	fileTreeVisible: boolean,
+	onToggleFileTree: () => void,
+)}
 	{#if props.snapshot}
 		<GitCommitDetailsHeader
 			snapshot={props.snapshot}
@@ -72,6 +76,9 @@
 			onSetDiffMode={props.onSetDiffMode}
 			onSetContextLines={props.onSetContextLines}
 			onSetDiffFontSize={props.onSetDiffFontSize}
+			{showFileTreeToggle}
+			{fileTreeVisible}
+			{onToggleFileTree}
 		/>
 	{/if}
 {/snippet}
