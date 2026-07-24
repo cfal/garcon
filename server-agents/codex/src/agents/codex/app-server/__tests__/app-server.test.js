@@ -4948,6 +4948,32 @@ describe('CodexAppServerRuntime', () => {
     expect(resolvedPath).toBe(nativePath);
   });
 
+  it('refreshes a cached discovery miss on a later native path resolution', async () => {
+    const nativePath = path.join(tmpDir, 'later-resolved-thread.jsonl');
+    await fs.writeFile(nativePath, '{}\n');
+    let discoverable = false;
+    const fake = new FakeClient({
+      listThreads: async () => ({
+        data: discoverable ? [makeThread({ id: 'thread-1', path: nativePath })] : [],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const session = {
+      provider: 'codex',
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      projectPath: '/repo',
+    };
+
+    await expect(provider.resolveNativePath(session)).resolves.toBeNull();
+    discoverable = true;
+    await expect(provider.resolveNativePath(session)).resolves.toBe(nativePath);
+
+    expect(fake.listThreads).toHaveBeenCalledTimes(2);
+  });
+
   it('surfaces thread/list failures during native path reconciliation', async () => {
     const fake = new FakeClient({
       listThreads: async () => {

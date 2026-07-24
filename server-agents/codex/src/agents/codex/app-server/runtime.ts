@@ -802,16 +802,18 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async resolveNativePath(session: CodexChatEntry): Promise<string | null> {
     if (!session.agentSessionId) return null;
 
-    const threads = await this.#getThreadListCache(false);
-    const nativePath = threads?.get(session.agentSessionId)?.path ?? null;
-    if (!nativePath) return null;
+    const hadCachedThreadList = this.#threadListCaches.has(false);
+    const cachedPath = await this.#accessibleNativePath(
+      await this.#getThreadListCache(false),
+      session.agentSessionId,
+    );
+    if (cachedPath || !hadCachedThreadList) return cachedPath;
 
-    try {
-      await fs.access(nativePath);
-      return nativePath;
-    } catch {
-      return null;
-    }
+    this.#threadListCaches.delete(false);
+    return this.#accessibleNativePath(
+      await this.#getThreadListCache(false),
+      session.agentSessionId,
+    );
   }
 
   async resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> {
@@ -902,6 +904,20 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     });
     this.#threadListCaches.set(useStateDbOnly, pending);
     return pending;
+  }
+
+  async #accessibleNativePath(
+    threads: ReadonlyMap<string, CodexThread>,
+    agentSessionId: string,
+  ): Promise<string | null> {
+    const nativePath = threads.get(agentSessionId)?.path ?? null;
+    if (!nativePath) return null;
+    try {
+      await fs.access(nativePath);
+      return nativePath;
+    } catch {
+      return null;
+    }
   }
 
   async #loadThreadListCache(useStateDbOnly: boolean): Promise<Map<string, CodexThread>> {
