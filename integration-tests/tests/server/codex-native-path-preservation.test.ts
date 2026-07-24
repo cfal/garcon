@@ -200,6 +200,60 @@ describe('Codex native transcript path preservation', () => {
     );
   }, 15_000);
 
+  test('starts with one discovery snapshot for many preserved pathless chats', async () => {
+    const chatIds = Array.from(
+      { length: 100 },
+      (_, index) => String(Date.now() * 1_000 + 10_000 + index),
+    );
+    const serverEnvironment = codexServerEnvironment();
+    let callLogPath = '';
+
+    await withIntegrationFixture(
+      'codex-native-path-startup-snapshot',
+      async (fixture) => {
+        expect(
+          fixture.garcon.logs.filter((line) =>
+            line.includes('preserving chat') && line.includes('unresolved native session')
+          ),
+        ).toEqual([]);
+        expect(await readFile(callLogPath, 'utf8')).toBe('thread/list\n');
+
+        const firstFailure = await captureApiError(fixture.client.getMessages(chatIds[0]!));
+        expect(firstFailure).toMatchObject({
+          status: 503,
+          body: {
+            errorCode: 'TRANSCRIPT_UNAVAILABLE',
+            retryable: true,
+          },
+        });
+        expect(await readFile(callLogPath, 'utf8')).toBe('thread/list\n');
+
+        const retryFailure = await captureApiError(fixture.client.getMessages(chatIds[0]!));
+        expect(retryFailure).toMatchObject({
+          status: 503,
+          body: {
+            errorCode: 'TRANSCRIPT_UNAVAILABLE',
+            retryable: true,
+          },
+        });
+        expect(await readFile(callLogPath, 'utf8')).toBe('thread/list\nthread/list\n');
+      },
+      {
+        serverEnvironment,
+        async prepareWorkspace(directories) {
+          callLogPath = join(directories.root, 'codex-calls.log');
+          serverEnvironment.INTEGRATION_CODEX_CALL_LOG = callLogPath;
+          await writeFile(callLogPath, '');
+          await seedPathlessWorkspace({
+            workspace: directories.workspace,
+            chatIds,
+            projectPath: directories.project,
+          });
+        },
+      },
+    );
+  }, 15_000);
+
   test('distinguishes discovery errors and retries a later discovery miss', async () => {
     const chatId = String(Date.now() * 1_000 + 3);
     const threadId = randomUUID();
@@ -421,6 +475,70 @@ async function seedWorkspace(input: {
           ],
         },
       },
+    }),
+  );
+}
+
+async function seedPathlessWorkspace(input: {
+  workspace: string;
+  chatIds: readonly string[];
+  projectPath: string;
+}): Promise<void> {
+  const firstChatId = input.chatIds[0];
+  if (!firstChatId) throw new Error('Pathless startup fixture requires at least one chat');
+  await seedWorkspace({
+    workspace: input.workspace,
+    chatId: firstChatId,
+    threadId: randomUUID(),
+    nativePath: null,
+    projectPath: input.projectPath,
+    carryUser: 'startup-carry',
+    carryAssistant: 'startup-carry-answer',
+  });
+
+  const registryPath = join(input.workspace, 'chats.json');
+  const registry = JSON.parse(await readFile(registryPath, 'utf8')) as {
+    sessions: Record<string, {
+      agentOwnershipEpoch: string;
+      agentSessionId: string;
+      nativeSession: {
+        ownerId: string;
+        schemaVersion: number;
+        value: { agentSessionId: string };
+      };
+    }>;
+  };
+  const template = registry.sessions[firstChatId];
+  if (!template) throw new Error('Pathless startup fixture template is missing');
+
+  for (const chatId of input.chatIds.slice(1)) {
+    const agentSessionId = randomUUID();
+    registry.sessions[chatId] = {
+      ...template,
+      agentOwnershipEpoch: randomUUID(),
+      agentSessionId,
+      nativeSession: {
+        ...template.nativeSession,
+        value: { agentSessionId },
+      },
+    };
+  }
+  await writeFile(registryPath, JSON.stringify(registry));
+  await writeFile(
+    join(input.workspace, 'chat-metadata.json'),
+    JSON.stringify({
+      version: 1,
+      chats: Object.fromEntries(input.chatIds.map((chatId) => [
+        chatId,
+        {
+          chatId,
+          createdAt: timestamp,
+          lastActivity: timestamp,
+          lastMessage: 'startup-carry-answer',
+          firstMessage: 'startup-carry',
+          source: 'startup',
+        },
+      ])),
     }),
   );
 }

@@ -54,6 +54,8 @@ function respond(line: string): void {
     return;
   }
   if (request.method === 'thread/list') {
+    const callLog = process.env.INTEGRATION_CODEX_CALL_LOG;
+    if (callLog) appendFileSync(callLog, 'thread/list\n');
     const discoveryMode = codexDiscoveryMode();
     if (discoveryMode === 'error') {
       writeError(
