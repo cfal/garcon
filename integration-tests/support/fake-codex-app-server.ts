@@ -1,13 +1,20 @@
 #!/usr/bin/env bun
 
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createCodexRolloutFileName, parseCodexRolloutFileName } from './codex-rollout-filename.js';
 
 export {};
 
 const decoder = new TextDecoder();
+const startedThreads = new Map<string, string>();
 let buffered = '';
 
 for await (const chunk of Bun.stdin.stream()) {
@@ -38,7 +45,28 @@ function respond(line: string): void {
     });
     return;
   }
+  if (request.method === 'thread/start') {
+    startThread(request.id, request.params);
+    return;
+  }
+  if (request.method === 'turn/start') {
+    startTurn(request.id, request.params);
+    return;
+  }
   if (request.method === 'thread/list') {
+    const discoveryMode = codexDiscoveryMode();
+    if (discoveryMode === 'error') {
+      writeError(
+        request.id,
+        -32001,
+        'Codex discovery failed at /home/private/.codex/sessions/rollout-secret.jsonl',
+      );
+      return;
+    }
+    if (discoveryMode === 'miss') {
+      write(request.id, { data: [], nextCursor: null, backwardsCursor: null });
+      return;
+    }
     const threadId = process.env.INTEGRATION_CODEX_THREAD_ID;
     const nativePath = process.env.INTEGRATION_CODEX_NATIVE_PATH;
     const discovered = discoverCodexThreads();
@@ -104,6 +132,122 @@ function respond(line: string): void {
   })}\n`);
 }
 
+function startThread(id: number, params: Record<string, unknown> | undefined): void {
+  const codexHome = process.env.CODEX_HOME;
+  if (!codexHome) {
+    writeError(id, -32602, 'CODEX_HOME is required');
+    return;
+  }
+
+  const now = new Date();
+  const threadId = randomUUID();
+  const nativeDirectory = join(
+    codexHome,
+    'sessions',
+    String(now.getUTCFullYear()),
+    String(now.getUTCMonth() + 1).padStart(2, '0'),
+    String(now.getUTCDate()).padStart(2, '0'),
+  );
+  const nativePath = join(nativeDirectory, createCodexRolloutFileName(threadId, now));
+  const timestamp = now.toISOString();
+  const cwd = typeof params?.cwd === 'string' ? params.cwd : '/';
+  mkdirSync(nativeDirectory, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    nativePath,
+    `${JSON.stringify({
+      timestamp,
+      type: 'session_meta',
+      payload: {
+        id: threadId,
+        timestamp,
+        cwd,
+        originator: 'garcon-integration',
+        cli_version: '0.144.6',
+        source: 'vscode',
+        model_provider: 'openai',
+        history_mode: 'legacy',
+      },
+    })}\n`,
+    { mode: 0o600 },
+  );
+  startedThreads.set(threadId, nativePath);
+  write(id, {
+    thread: { id: threadId, path: nativePath },
+    model: typeof params?.model === 'string' ? params.model : 'gpt',
+    modelProvider: 'openai',
+    serviceTier: null,
+    cwd,
+  });
+}
+
+function startTurn(id: number, params: Record<string, unknown> | undefined): void {
+  const threadId = typeof params?.threadId === 'string' ? params.threadId : null;
+  const nativePath = threadId ? startedThreads.get(threadId) : null;
+  if (!threadId || !nativePath) {
+    writeError(id, -32602, 'thread not found');
+    return;
+  }
+
+  const input = Array.isArray(params?.input) ? params.input : [];
+  const providerInput = input
+    .filter((item): item is { type: string; text: string } => (
+      Boolean(item)
+      && typeof item === 'object'
+      && (item as { type?: unknown }).type === 'text'
+      && typeof (item as { text?: unknown }).text === 'string'
+    ))
+    .map((item) => item.text)
+    .join('\n');
+  const carriedContextEnd = providerInput.lastIndexOf('</carried-context>');
+  const userContent = carriedContextEnd >= 0
+    ? providerInput.slice(carriedContextEnd + '</carried-context>'.length).trim()
+    : providerInput;
+  const assistantContent = `codex-answer-${userContent}`;
+  const timestamp = new Date().toISOString();
+  appendFileSync(
+    nativePath,
+    [
+      JSON.stringify({
+        timestamp,
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: userContent }],
+        },
+      }),
+      JSON.stringify({
+        timestamp,
+        type: 'event_msg',
+        payload: { type: 'user_message', message: userContent },
+      }),
+      JSON.stringify({
+        timestamp,
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: assistantContent }],
+        },
+      }),
+      '',
+    ].join('\n'),
+  );
+
+  const turnId = randomUUID();
+  write(id, {
+    turn: codexTurn(turnId, 'inProgress', timestamp),
+  });
+  notify('turn/started', {
+    threadId,
+    turn: codexTurn(turnId, 'inProgress', timestamp),
+  });
+  notify('turn/completed', {
+    threadId,
+    turn: codexTurn(turnId, 'completed', timestamp),
+  });
+}
+
 function forkJsonlThread(id: number, params: Record<string, unknown> | undefined): void {
   const sourcePath = typeof params?.path === 'string' ? params.path : null;
   if (!sourcePath) {
@@ -154,6 +298,44 @@ function forkJsonlThread(id: number, params: Record<string, unknown> | undefined
 
 function write(id: number, result: unknown): void {
   process.stdout.write(`${JSON.stringify({ id, result })}\n`);
+}
+
+function writeError(id: number, code: number, message: string): void {
+  process.stdout.write(`${JSON.stringify({ id, error: { code, message } })}\n`);
+}
+
+function notify(method: string, params: unknown): void {
+  process.stdout.write(`${JSON.stringify({ method, params })}\n`);
+}
+
+function codexTurn(
+  id: string,
+  status: 'inProgress' | 'completed',
+  timestamp: string,
+): Record<string, unknown> {
+  const startedAt = Date.parse(timestamp);
+  return {
+    id,
+    items: [],
+    itemsView: 'full',
+    status,
+    error: null,
+    startedAt,
+    completedAt: status === 'completed' ? startedAt : null,
+    durationMs: status === 'completed' ? 0 : null,
+  };
+}
+
+function codexDiscoveryMode(): 'normal' | 'miss' | 'error' {
+  if (process.env.INTEGRATION_CODEX_DISCOVERY_CONTROL !== '1') return 'normal';
+  const codexHome = process.env.CODEX_HOME;
+  if (!codexHome) return 'normal';
+  try {
+    const mode = readFileSync(join(codexHome, 'integration-discovery-mode'), 'utf8').trim();
+    return mode === 'miss' || mode === 'error' ? mode : 'normal';
+  } catch {
+    return 'normal';
+  }
 }
 
 function discoverCodexThreads(): Array<{ id: string; path: string }> {

@@ -14,18 +14,53 @@ const timestamp = '2026-07-24T00:00:00.000Z';
 describe('Codex native transcript path preservation', () => {
   test('keeps a new cross-agent fork attached to the same transcript across restarts', async () => {
     const sourceChatId = String(Date.now() * 1_000 + 1);
-    const sourceAgentSessionId = randomUUID();
     const cursorMarker = `cursorcarry${randomUUID().replaceAll('-', '')}`;
     const codexMarker = `codexnative${randomUUID().replaceAll('-', '')}`;
-    let sourceNativePath = '';
 
     await withIntegrationFixture(
       'codex-native-path-preservation',
       async (fixture) => {
-        const source = await fixture.client.getMessages(sourceChatId);
+        const first = await fixture.client.startDirectChat({
+          chatId: sourceChatId,
+          content: cursorMarker,
+          projectPath: fixture.dirs.project,
+          agent: fixture.directAgents.openAi,
+        });
+        await fixture.client.waitForTurnTerminal(sourceChatId, first.turnId);
+
+        const catalog = await fixture.client.listAgentCatalog();
+        const codex = catalog.agents.find((agent) => agent.id === 'codex');
+        if (!codex) throw new Error('Codex integration is missing from the agent catalog');
+        await fixture.client.switchAgentModel({
+          chatId: sourceChatId,
+          agentId: codex.id,
+          model: codex.defaultModel,
+        });
+
+        const codexTurn = await fixture.client.runChat({
+          clientRequestId: randomUUID(),
+          clientMessageId: randomUUID(),
+          chatId: sourceChatId,
+          command: codexMarker,
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          agentSettings: codex.defaultSettings,
+          model: codex.defaultModel,
+        });
+        const codexTerminal = await fixture.client.waitForTurnTerminal(
+          sourceChatId,
+          codexTurn.turnId,
+        );
+        expect(codexTerminal.type).toBe('agent-run-finished');
+
+        const sourceNativeSession = await waitForNativeSessionPath(
+          fixture.dirs.workspace,
+          sourceChatId,
+        );
+        const source = await fixture.client.reloadChat(sourceChatId);
         expect(messageLabels(source.messages.map((entry) => entry.message))).toEqual([
           cursorMarker,
-          `cursor-answer-${cursorMarker}`,
+          `echo:${cursorMarker}`,
           'agent-switch',
           codexMarker,
           `codex-answer-${codexMarker}`,
@@ -44,7 +79,7 @@ describe('Codex native transcript path preservation', () => {
         if (!beforeRestartPath) {
           throw new Error('Forked Codex chat did not persist a native path');
         }
-        expect(beforeRestartPath).not.toBe(sourceNativePath);
+        expect(beforeRestartPath).not.toBe(sourceNativeSession.path);
         expect(basename(beforeRestartPath)).toMatch(
           /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[0-9a-f-]{36}\.jsonl$/,
         );
@@ -83,27 +118,9 @@ describe('Codex native transcript path preservation', () => {
       },
       {
         serverEnvironment: codexServerEnvironment(),
-        async prepareWorkspace(directories) {
-          sourceNativePath = await writeCodexTranscript({
-            home: directories.home,
-            projectPath: directories.project,
-            threadId: sourceAgentSessionId,
-            userContent: codexMarker,
-            assistantContent: `codex-answer-${codexMarker}`,
-          });
-          await seedWorkspace({
-            workspace: directories.workspace,
-            chatId: sourceChatId,
-            threadId: sourceAgentSessionId,
-            nativePath: sourceNativePath,
-            projectPath: directories.project,
-            carryUser: cursorMarker,
-            carryAssistant: `cursor-answer-${cursorMarker}`,
-          });
-        },
       },
     );
-  }, 20_000);
+  }, 30_000);
 
   test('does not recover a legacy UUID-only file or render carry-over as complete', async () => {
     const chatId = String(Date.now() * 1_000 + 2);
@@ -126,6 +143,26 @@ describe('Codex native transcript path preservation', () => {
           status: 503,
           body: {
             success: false,
+            error: 'Chat transcript is temporarily unavailable. Retry the request.',
+            errorCode: 'TRANSCRIPT_UNAVAILABLE',
+            retryable: true,
+          },
+        });
+
+        const target = fixture.directAgents.openAi;
+        const switchFailure = await captureApiError(fixture.client.switchAgentModel({
+          chatId,
+          agentId: target.agentId,
+          model: target.provider.model,
+          apiProviderId: target.provider.providerId,
+          modelEndpointId: target.provider.endpointId,
+          modelProtocol: target.provider.protocol,
+        }));
+        expect(switchFailure).toMatchObject({
+          status: 503,
+          body: {
+            success: false,
+            error: 'Chat transcript is temporarily unavailable. Retry the request.',
             errorCode: 'TRANSCRIPT_UNAVAILABLE',
             retryable: true,
           },
@@ -162,14 +199,95 @@ describe('Codex native transcript path preservation', () => {
       },
     );
   }, 15_000);
+
+  test('distinguishes discovery errors and retries a later discovery miss', async () => {
+    const chatId = String(Date.now() * 1_000 + 3);
+    const threadId = randomUUID();
+    const carryMarker = `retrycarry${randomUUID().replaceAll('-', '')}`;
+
+    await withIntegrationFixture(
+      'codex-native-path-discovery-retry',
+      async (fixture) => {
+        const discoveryModePath = join(
+          fixture.dirs.home,
+          '.codex',
+          'integration-discovery-mode',
+        );
+        const providerFailure = await captureApiError(fixture.client.getMessages(chatId));
+        expect(providerFailure).toMatchObject({
+          status: 500,
+          body: {
+            success: false,
+            error: 'Internal server error',
+            errorCode: 'INTERNAL_ERROR',
+            retryable: true,
+          },
+        });
+        expect(JSON.stringify(providerFailure.body)).not.toContain('/home/private');
+
+        await writeFile(discoveryModePath, 'miss');
+        const cleanMiss = await captureApiError(fixture.client.getMessages(chatId));
+        expect(cleanMiss).toMatchObject({
+          status: 503,
+          body: {
+            success: false,
+            error: 'Chat transcript is temporarily unavailable. Retry the request.',
+            errorCode: 'TRANSCRIPT_UNAVAILABLE',
+            retryable: true,
+          },
+        });
+
+        const nativeMarker = carryMarker.replace('carry', 'native');
+        await writeCodexTranscript({
+          home: fixture.dirs.home,
+          projectPath: fixture.dirs.project,
+          threadId,
+          userContent: nativeMarker,
+          assistantContent: `retry-answer-${nativeMarker}`,
+        });
+        await writeFile(discoveryModePath, 'normal');
+
+        const recovered = await fixture.client.getMessages(chatId);
+        expect(messageLabels(recovered.messages.map((entry) => entry.message))).toEqual([
+          carryMarker,
+          `retry-answer-${carryMarker}`,
+          'agent-switch',
+          nativeMarker,
+          `retry-answer-${nativeMarker}`,
+        ]);
+      },
+      {
+        serverEnvironment: codexServerEnvironment({ discoveryControl: true }),
+        async prepareWorkspace(directories) {
+          await mkdir(join(directories.home, '.codex'), { recursive: true });
+          await writeFile(
+            join(directories.home, '.codex', 'integration-discovery-mode'),
+            'error',
+          );
+          await seedWorkspace({
+            workspace: directories.workspace,
+            chatId,
+            threadId,
+            nativePath: null,
+            projectPath: directories.project,
+            carryUser: carryMarker,
+            carryAssistant: `retry-answer-${carryMarker}`,
+          });
+        },
+      },
+    );
+  }, 20_000);
 });
 
-function codexServerEnvironment(): Record<string, string> {
+function codexServerEnvironment(
+  options: { discoveryControl?: boolean } = {},
+): Record<string, string> {
   return {
     GARCON_CODEX_CLI: fileURLToPath(
       new URL('../../support/fake-codex-app-server.ts', import.meta.url),
     ),
     PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+    ...(options.discoveryControl ? { INTEGRATION_CODEX_DISCOVERY_CONTROL: '1' } : {}),
   };
 }
 
@@ -320,6 +438,36 @@ async function readNativeSession(
     >;
   };
   return registry.sessions[chatId]!.nativeSession.value;
+}
+
+async function waitForNativeSessionPath(
+  workspace: string,
+  chatId: string,
+  timeoutMs = 5_000,
+): Promise<{ path: string; agentSessionId: string }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const nativeSession = await readNativeSession(workspace, chatId);
+      if (nativeSession.path) {
+        return { ...nativeSession, path: nativeSession.path };
+      }
+    } catch {
+      // Session creation persists asynchronously after the terminal provider event.
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for chat ${chatId} to persist its native path`);
+}
+
+async function captureApiError(request: Promise<unknown>): Promise<GarconApiError> {
+  try {
+    await request;
+  } catch (error) {
+    if (error instanceof GarconApiError) return error;
+    throw error;
+  }
+  throw new Error('Expected the request to fail');
 }
 
 function messageLabels(messages: ChatMessage[]): string[] {
