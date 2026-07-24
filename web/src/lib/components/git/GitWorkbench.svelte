@@ -28,7 +28,7 @@
 	import type { ConfirmAction } from '$lib/api/git.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { buildGitWorkbenchCommentMessage } from '$lib/git/workbench/git-workbench-comment-message.js';
-	import { buildGitReviewCommentContext } from '$lib/git/review/git-review-comment-context.js';
+	import { buildGitReviewBodyCommentContext } from '$lib/git/review/git-review-comment-context.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers, getWorkspaceShortcuts } from '$lib/context';
@@ -154,8 +154,8 @@
 				tab: files.activeTab,
 				side: composer.side,
 				line: composer.line,
-				contextLines: buildGitReviewCommentContext(
-					loadedBody?.rows ?? [],
+				contextLines: buildGitReviewBodyCommentContext(
+					loadedBody,
 					composer.side,
 					composer.line,
 				),
@@ -410,8 +410,7 @@
 	/>
 	<GitVirtualDiffSurface
 		documentId={viewportDocumentId}
-		rows={review.virtualRows}
-		fileRowIndex={review.fileRowIndex}
+		source={review.rowSource}
 		activeTab={files.activeTab}
 		fontSize={diffFontSize}
 		selectedLineKeys={selection.selectedLineKeys}

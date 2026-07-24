@@ -132,22 +132,16 @@ describe('Git comparison HTTP API', () => {
 
       const bodies = await postJson<{
         status: string;
-        files: Record<string, { rows: Array<{ kind: string; text: string }> }>;
-      }>(fixture.garcon.baseUrl, '/api/v1/git/comparisons/files', {
+        files: Record<string, { patch: string }>;
+      }>(fixture.garcon.baseUrl, '/api/v1/git/review-documents/files', {
         project: nestedProject,
         documentId: workingTree.documentId,
-        effectiveFromHash: workingTree.effectiveFromHash,
-        to: { kind: 'working-tree', fingerprint: workingTree.to.fingerprint },
-        context: 5,
-        files: [{ path: 'untracked.txt' }],
+        files: ['untracked.txt'],
+        purpose: 'visible',
       });
       expect(bodies.status).toBe('ready');
-      expect(bodies.files['untracked.txt']?.rows).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ kind: 'add', text: 'first' }),
-          expect.objectContaining({ kind: 'add', text: 'second' }),
-        ]),
-      );
+      expect(bodies.files['untracked.txt']?.patch).toContain('+first');
+      expect(bodies.files['untracked.txt']?.patch).toContain('+second');
 
       const fingerprint = await postJson<{
         status: string;

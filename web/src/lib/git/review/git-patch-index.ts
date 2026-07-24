@@ -2,9 +2,10 @@ import type {
 	GitRenderedDiffRow,
 	GitRenderedDiffRowKind,
 	GitRenderedHunk,
-} from '$lib/api/git.js';
+} from './git-rendered-diff-types.js';
 
 const NULL_NUMBER = 0xffffffff;
+const splitIndexCache = new WeakMap<GitPatchIndex, GitSplitPatchIndex>();
 
 const ROW_KIND = Object.freeze({
 	hunk: 0,
@@ -112,6 +113,11 @@ export class GitPatchIndex {
 		};
 	}
 
+	rowKindAt(index: number): GitRenderedDiffRowKind {
+		if (index < 0 || index >= this.rowCount) throw new RangeError(`Invalid diff row ${index}.`);
+		return decodeRowKind(this.rowKinds[index]);
+	}
+
 	hunkAt(index: number): GitRenderedHunk {
 		if (index < 0 || index >= this.hunkCount) throw new RangeError(`Invalid diff hunk ${index}.`);
 		const rowStartIndex = this.hunkHeaders[index];
@@ -128,11 +134,35 @@ export class GitPatchIndex {
 	}
 }
 
+export interface GitSplitPatchEntry {
+	leftRowIndex: number | null;
+	rightRowIndex: number | null;
+}
+
+export class GitSplitPatchIndex {
+	readonly rowCount: number;
+
+	constructor(
+		private readonly leftRowIndices: Uint32Array,
+		private readonly rightRowIndices: Uint32Array,
+	) {
+		this.rowCount = leftRowIndices.length;
+	}
+
+	entryAt(index: number): GitSplitPatchEntry {
+		if (index < 0 || index >= this.rowCount) throw new RangeError(`Invalid split row ${index}.`);
+		return {
+			leftRowIndex: decodeNullable(this.leftRowIndices[index]),
+			rightRowIndex: decodeNullable(this.rightRowIndices[index]),
+		};
+	}
+}
+
 export function createGitPatchIndex(
 	patch: string,
-	expectedRenderedRowCount = 0,
+	expectedRenderedRowCount?: number,
 ): GitPatchIndex {
-	const initialRows = Math.max(16, expectedRenderedRowCount);
+	const initialRows = Math.max(16, expectedRenderedRowCount ?? 0);
 	const rowKinds = new GrowingUint8(initialRows);
 	const textStarts = new GrowingUint32(initialRows);
 	const textEnds = new GrowingUint32(initialRows);
@@ -234,12 +264,44 @@ export function createGitPatchIndex(
 		hunkNewLines.finish(),
 		hunkRowEnds.finish(),
 	);
-	if (expectedRenderedRowCount > 0 && index.rowCount !== expectedRenderedRowCount) {
+	if (expectedRenderedRowCount !== undefined && index.rowCount !== expectedRenderedRowCount) {
 		throw new Error(
 			`Diff row count mismatch: server reported ${expectedRenderedRowCount}, client indexed ${index.rowCount}.`,
 		);
 	}
 	return index;
+}
+
+export function getGitSplitPatchIndex(index: GitPatchIndex): GitSplitPatchIndex {
+	const cached = splitIndexCache.get(index);
+	if (cached) return cached;
+	const left = new GrowingUint32(index.rowCount);
+	const right = new GrowingUint32(index.rowCount);
+	let rowIndex = 0;
+	while (rowIndex < index.rowCount) {
+		const kind = index.rowKindAt(rowIndex);
+		if (kind === 'hunk' || kind === 'context') {
+			left.push(rowIndex);
+			right.push(rowIndex);
+			rowIndex += 1;
+			continue;
+		}
+
+		const deletionStart = rowIndex;
+		while (rowIndex < index.rowCount && index.rowKindAt(rowIndex) === 'del') rowIndex += 1;
+		const deletionCount = rowIndex - deletionStart;
+		const additionStart = rowIndex;
+		while (rowIndex < index.rowCount && index.rowKindAt(rowIndex) === 'add') rowIndex += 1;
+		const additionCount = rowIndex - additionStart;
+		const pairCount = Math.max(deletionCount, additionCount);
+		for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+			left.push(pairIndex < deletionCount ? deletionStart + pairIndex : NULL_NUMBER);
+			right.push(pairIndex < additionCount ? additionStart + pairIndex : NULL_NUMBER);
+		}
+	}
+	const splitIndex = new GitSplitPatchIndex(left.finish(), right.finish());
+	splitIndexCache.set(index, splitIndex);
+	return splitIndex;
 }
 
 interface PushRowOptions {

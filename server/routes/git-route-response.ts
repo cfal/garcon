@@ -1,45 +1,24 @@
-import type { GitCommandTrace } from '../git/types.js';
+import type {
+  GitCommandTrace,
+  GitReviewRouteMetrics,
+  GitReviewRoutePhase,
+  GitReviewRoutePhaseName,
+} from '../git/types.js';
+import { measureGitReviewPhase } from '../git/review-performance.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('routes:git');
 
-export type GitRoutePhaseName =
-  | 'resolve'
-  | 'summary-git'
-  | 'document-register'
-  | 'freshness-before'
-  | 'body-cache'
-  | 'body-git'
-  | 'body-split'
-  | 'patch-scan'
-  | 'freshness-after'
-  | 'serialize';
-
-export interface GitRoutePhase {
-  name: GitRoutePhaseName;
-  durationMs: number;
-}
-
-export interface GitRouteResponseMetrics {
-  phases?: GitRoutePhase[];
-  fileCount?: number;
-  rowCount?: number;
-  cacheHits?: number;
-  batchCount?: number;
-  bisectionCount?: number;
-}
+export type GitRoutePhaseName = GitReviewRoutePhaseName;
+export type GitRoutePhase = GitReviewRoutePhase;
+export type GitRouteResponseMetrics = GitReviewRouteMetrics;
 
 export async function measureGitRoutePhase<T>(
   phases: GitRoutePhase[],
   name: GitRoutePhaseName,
   operation: () => Promise<T> | T,
 ): Promise<T> {
-  const startedAt = performance.now();
-  try {
-    return await operation();
-  } finally {
-    phases.push({ name, durationMs: performance.now() - startedAt });
-  }
+  return measureGitReviewPhase({ phases }, name, operation);
 }
 
 function serverTimingHeader(
@@ -60,24 +39,31 @@ export function traceGitJsonResponse(
   startedAt: number,
   trace: GitCommandTrace[],
   body: unknown,
-  metrics: GitRouteResponseMetrics = {},
+  metrics: GitRouteResponseMetrics = { phases: [] },
 ): Response {
   const serializeStartedAt = performance.now();
   const json = JSON.stringify(body) ?? 'null';
   const phases = [
-    ...(metrics.phases ?? []),
+    ...metrics.phases,
     { name: 'serialize' as const, durationMs: performance.now() - serializeStartedAt },
   ];
   const durationMs = performance.now() - startedAt;
+  const gitDurationMs = trace.reduce((total, command) => total + command.durationMs, 0);
   const slowestCommand = trace.reduce<GitCommandTrace | undefined>(
     (slowest, command) => (!slowest || command.durationMs > slowest.durationMs ? command : slowest),
     undefined,
   );
   logger.debug('git workbench route', {
     route,
+    status:
+      typeof body === 'object' && body !== null && 'status' in body
+        ? String(body.status)
+        : 'ready',
     durationMs: Math.round(durationMs),
     commandCount: trace.length,
-    slowestCommand,
+    gitDurationMs: Math.round(gitDurationMs),
+    maxGitDurationMs: Math.round(slowestCommand?.durationMs ?? 0),
+    slowestGitCommand: slowestCommand?.args[0] ?? null,
     responseBytes: Buffer.byteLength(json),
     phases: phases.map((phase) => ({
       name: phase.name,

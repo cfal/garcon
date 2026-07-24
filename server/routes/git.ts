@@ -1,6 +1,13 @@
 import { createGitService } from '../git/git-service.js';
 import type { GitService } from '../git/git-service.js';
-import { GIT_DIFF_LIMITS, GIT_REF_RESULT_LIMITS, GIT_REVIEW_DOCUMENT_LIMITS, type GitCommandTrace, type GitRefKind } from '../git/types.js';
+import {
+  GIT_DIFF_LIMITS,
+  GIT_REF_RESULT_LIMITS,
+  GIT_REVIEW_DOCUMENT_LIMITS,
+  type GitCommandTrace,
+  type GitRefKind,
+  type GitReviewRouteMetrics,
+} from '../git/types.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { resolveGenerationContextForSelection } from '../settings/generation-config-source.ts';
@@ -17,8 +24,7 @@ import { assertRealWithinProjectBase, isProjectBoundaryError, projectBoundaryErr
 import { jsonError } from '../lib/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { createGitComparisonRoutes } from './git-comparisons.js';
-import { traceGitJsonResponse } from './git-route-response.js';
-import { parseGitDiffFileRequests } from './git-diff-file-requests.js';
+import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
 
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
@@ -40,6 +46,10 @@ function optionalId(value: unknown): string | null {
 
 function optionalProtocol(value: unknown): ApiProtocol | null {
   return value === 'openai-compatible' || value === 'anthropic-messages' ? value : null;
+}
+
+function validReviewBodyPurpose(value: unknown): 'visible' | 'prefetch' | null {
+  return value === 'visible' || value === 'prefetch' ? value : null;
 }
 
 function hasGenerationRoutingOverride(input: Record<string, unknown>): boolean {
@@ -324,53 +334,24 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       }
 
       const trace: GitCommandTrace[] = [];
+      const metrics: GitReviewRouteMetrics = { phases: [] };
       const startedAt = performance.now();
-      const result = await git.getCommitSnapshot({
-        projectPath: project,
-        commit,
-        parent,
-        context,
-        bodyCandidateCount,
-        trace,
-        signal: request.signal,
-      });
-      return traceGitJsonResponse('history-commit-snapshot', startedAt, trace, result);
-    });
-  }
-
-  async function postCommitFiles(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const documentId = nonEmptyString(input.documentId);
-      const commit = nonEmptyString(input.commit);
-      const parent = nonEmptyString(input.parent);
-      const context = validContextLines(input.context ?? 5);
-      const files = parseGitDiffFileRequests(input.files);
-
-      if (!project || !documentId || !commit || !files || files.length === 0) {
-        return gitRouteError('Missing required parameters: project, documentId, commit, and files.', 400);
+      const result = await measureGitRoutePhase(metrics.phases, 'summary-git', () =>
+        git.getCommitSnapshot({
+          projectPath: project,
+          commit,
+          parent,
+          context,
+          bodyCandidateCount,
+          trace,
+          metrics,
+          signal: request.signal,
+        }));
+      if (result.status === 'ready') {
+        metrics.fileCount = result.files.length;
+        metrics.rowCount = result.files.reduce((total, file) => total + file.estimatedRows, 0);
       }
-      if (context === null) {
-        return gitRouteError('Invalid context line count.', 400);
-      }
-      if (files.length > GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles) {
-        return gitRouteError(`Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.`, 400);
-      }
-
-      const trace: GitCommandTrace[] = [];
-      const startedAt = performance.now();
-      const result = await git.getCommitFileBodies({
-        projectPath: project,
-        documentId,
-        commit,
-        parent,
-        context,
-        files,
-        trace,
-        signal: request.signal,
-      });
-      return traceGitJsonResponse('history-commit-files', startedAt, trace, result);
+      return traceGitJsonResponse('history-commit-snapshot', startedAt, trace, result, metrics);
     });
   }
 
@@ -510,17 +491,27 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       }
 
       const trace: GitCommandTrace[] = [];
+      const metrics: GitReviewRouteMetrics = { phases: [] };
       const startedAt = performance.now();
-      const result = await git.getWorkbenchSnapshot({
-        projectPath: project,
-        mode,
-        context,
-        selectedFile,
-        bodyCandidateCount,
-        trace,
-        signal: request.signal,
-      });
-      return traceGitJsonResponse('workbench-snapshot', startedAt, trace, result);
+      const result = await measureGitRoutePhase(metrics.phases, 'summary-git', () =>
+        git.getWorkbenchSnapshot({
+          projectPath: project,
+          mode,
+          context,
+          selectedFile,
+          bodyCandidateCount,
+          trace,
+          metrics,
+          signal: request.signal,
+        }));
+      if (result.status === 'ready') {
+        metrics.fileCount = result.reviewSummary.files.length;
+        metrics.rowCount = result.reviewSummary.files.reduce(
+          (total, file) => total + file.estimatedRows,
+          0,
+        );
+      }
+      return traceGitJsonResponse('workbench-snapshot', startedAt, trace, result, metrics);
     });
   }
 
@@ -562,31 +553,31 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       const project = nonEmptyString(input.project);
       const documentId = nonEmptyString(input.documentId);
       const files = stringArray(input.files);
-      const mode = validMode(input.mode);
-      const context = validContextLines(input.context ?? 5);
+      const purpose = validReviewBodyPurpose(input.purpose);
 
-      if (!project || !documentId || !files || files.length === 0) {
-        return gitRouteError('Missing required parameters: project, documentId, and files.', 400);
-      }
-      if (!mode) {
-        return gitRouteError('Invalid mode. Expected one of: working, staged.', 400);
-      }
-      if (context === null) {
-        return gitRouteError(`Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.`, 400);
+      if (!project || !documentId || !files || files.length === 0 || !purpose) {
+        return gitRouteError(
+          'Missing or invalid parameters: project, documentId, files, and purpose.',
+          400,
+        );
       }
       if (files.length > GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles) {
         return gitRouteError(`Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.`, 400);
       }
 
-      const result = await git.getReviewFileBodies({
+      const trace: GitCommandTrace[] = [];
+      const metrics: GitReviewRouteMetrics = { phases: [] };
+      const startedAt = performance.now();
+      const result = await git.getReviewDocumentFileBodies({
         projectPath: project,
         documentId,
         files,
-        mode,
-        context,
+        purpose,
+        trace,
+        metrics,
         signal: request.signal,
       });
-      return result;
+      return traceGitJsonResponse('review-document-files', startedAt, trace, result, metrics);
     });
   }
 
@@ -926,7 +917,6 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     '/api/v1/git/history/commit/snapshot': {
       POST: withJsonBody(postCommitSnapshot),
     },
-    '/api/v1/git/history/commit/files': { POST: withJsonBody(postCommitFiles) },
     ...createGitComparisonRoutes(git),
     '/api/v1/git/generate-commit-message': {
       POST: withJsonBody(postGenerateCommitMessage),
@@ -945,7 +935,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       POST: withJsonBody(postWorkingTreeFingerprint),
     },
     '/api/v1/git/quick-summary': { POST: withJsonBody(postQuickSummary) },
-    '/api/v1/git/review-document/files': {
+    '/api/v1/git/review-documents/files': {
       POST: withJsonBody(postReviewDocumentFiles),
     },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },

@@ -7,6 +7,7 @@ import type {
 	GitVirtualReviewRow,
 	GitVirtualUnifiedRow,
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 
 let measureCalls: number;
 let scrollToIndexCalls: number[];
@@ -106,7 +107,7 @@ function makeUnifiedRow(index: number, documentId = 'doc-a'): GitVirtualUnifiedR
 			rowContextTarget: null,
 		},
 		actionTarget: null,
-		selectableLineKeys: [],
+		selectableLineKeys: () => [],
 	};
 }
 
@@ -145,8 +146,7 @@ describe('Git virtual diff refresh', () => {
 		const replacementRows = [makeHeaderRow(2)];
 		const props = {
 			documentId: 'doc-a',
-			rows: initialRows,
-			fileRowIndex: new Map(initialRows.map((row, index) => [row.filePath, index])),
+			source: arrayGitVirtualReviewRowSource(initialRows),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
 			selectedLineKeys: new Set<string>(),
@@ -184,8 +184,7 @@ describe('Git virtual diff refresh', () => {
 
 		await rerender({
 			...props,
-			rows: replacementRows,
-			fileRowIndex: new Map([['file-2.ts', 0]]),
+			source: arrayGitVirtualReviewRowSource(replacementRows),
 		});
 
 		expect(screen.getByText('file-2.ts')).toBeTruthy();
@@ -196,8 +195,7 @@ describe('Git virtual diff refresh', () => {
 		const initialRows = makeUnloadedRows();
 		const props = {
 			documentId: 'doc-a',
-			rows: initialRows,
-			fileRowIndex: fileIndexes(initialRows),
+			source: arrayGitVirtualReviewRowSource(initialRows, fileIndexes(initialRows)),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
 			selectedLineKeys: new Set<string>(),
@@ -244,8 +242,7 @@ describe('Git virtual diff refresh', () => {
 		];
 		await rerender({
 			...props,
-			rows: movedRows,
-			fileRowIndex: fileIndexes(movedRows),
+			source: arrayGitVirtualReviewRowSource(movedRows, fileIndexes(movedRows)),
 		});
 
 		await waitFor(() => expect(scrollToIndexCalls).toEqual([4, 5]));
@@ -255,8 +252,7 @@ describe('Git virtual diff refresh', () => {
 		const initialRows = makeUnloadedRows();
 		const props = {
 			documentId: 'doc-a',
-			rows: initialRows,
-			fileRowIndex: fileIndexes(initialRows),
+			source: arrayGitVirtualReviewRowSource(initialRows, fileIndexes(initialRows)),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
 			selectedLineKeys: new Set<string>(),
@@ -295,7 +291,7 @@ describe('Git virtual diff refresh', () => {
 		const expandedRows = [...initialRows.slice(0, -1), makeUnifiedRow(2)];
 		await rerender({
 			...props,
-			rows: expandedRows,
+			source: arrayGitVirtualReviewRowSource(expandedRows, fileIndexes(expandedRows)),
 		});
 
 		await waitFor(() => expect(scrollToIndexCalls).toEqual([4, 4]));
@@ -305,8 +301,7 @@ describe('Git virtual diff refresh', () => {
 		const initialRows = makeUnloadedRows();
 		const props = {
 			documentId: 'doc-a',
-			rows: initialRows,
-			fileRowIndex: fileIndexes(initialRows),
+			source: arrayGitVirtualReviewRowSource(initialRows, fileIndexes(initialRows)),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
 			selectedLineKeys: new Set<string>(),
@@ -343,7 +338,10 @@ describe('Git virtual diff refresh', () => {
 		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
 		await rerender({
 			...props,
-			rows: [...initialRows.slice(0, -1), makeLimitRow(2)],
+			source: arrayGitVirtualReviewRowSource([
+				...initialRows.slice(0, -1),
+				makeLimitRow(2),
+			]),
 		});
 
 		expect(scrollToIndexCalls).toEqual([4]);
@@ -354,8 +352,7 @@ describe('Git virtual diff refresh', () => {
 		const onVisibleRowsChange = vi.fn();
 		const props = {
 			documentId: 'doc-a',
-			rows: initialRows,
-			fileRowIndex: new Map(initialRows.map((row, index) => [row.filePath, index])),
+			source: arrayGitVirtualReviewRowSource(initialRows),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
 			selectedLineKeys: new Set<string>(),
@@ -401,7 +398,7 @@ describe('Git virtual diff refresh', () => {
 		await rerender({
 			...props,
 			documentId: 'doc-b',
-			rows: replacementRows,
+			source: arrayGitVirtualReviewRowSource(replacementRows),
 		});
 
 		expect(viewport.scrollTop).toBe(0);

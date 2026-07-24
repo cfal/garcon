@@ -16,9 +16,12 @@ function reviewFile(path, bodyFingerprint = `fingerprint:${path}`) {
   };
 }
 
-function registration(files = [reviewFile('src/file.ts')]) {
+function registration(
+  files = [reviewFile('src/file.ts')],
+  sourceCacheKey = 'comparison:/repo:base:target:3',
+) {
   return {
-    sourceCacheKey: 'comparison:/repo:base:target:3',
+    sourceCacheKey,
     projectPath: '/repo',
     repoRoot: '/repo',
     context: 3,
@@ -95,5 +98,79 @@ describe('GitReviewDocumentRegistry', () => {
     lease?.setBodies([patchBody()]);
     expect(lease?.getBody('src/file.ts')).toEqual(patchBody());
     lease?.release();
+  });
+
+  it('rejects bodies that do not belong to the leased document', () => {
+    const registry = new GitReviewDocumentRegistry();
+    const document = registry.register(registration());
+    const lease = registry.acquire('/repo', document.id);
+
+    expect(() => lease?.setBodies([patchBody('other.ts')])).toThrow(
+      'Refusing to cache an invalid review body',
+    );
+    expect(() =>
+      lease?.setBodies([{ ...patchBody(), bodyFingerprint: 'wrong' }]),
+    ).toThrow('Refusing to cache an invalid review body');
+    expect(() =>
+      lease?.setBodies([patchBody(), patchBody('other.ts')]),
+    ).toThrow('Refusing to cache an invalid review body');
+    expect(lease?.getBody('src/file.ts')).toBeNull();
+    lease?.release();
+  });
+
+  it('evicts the least recently used idle document', () => {
+    let now = 0;
+    const registry = new GitReviewDocumentRegistry({
+      maxIdleDocuments: 2,
+      now: () => now,
+    });
+    const first = registry.register(registration(undefined, 'source:first'));
+    now += 1;
+    const second = registry.register(registration(undefined, 'source:second'));
+    now += 1;
+    const secondLease = registry.acquire('/repo', second.id);
+    secondLease?.release();
+    now += 1;
+    const third = registry.register(registration(undefined, 'source:third'));
+
+    expect(registry.acquire('/repo', first.id)).toBeNull();
+    const retainedSecond = registry.acquire('/repo', second.id);
+    const retainedThird = registry.acquire('/repo', third.id);
+    expect(retainedSecond).not.toBeNull();
+    expect(retainedThird).not.toBeNull();
+    retainedSecond?.release();
+    retainedThird?.release();
+  });
+
+  it('does not evict a leased document to admit beyond the hard limit', () => {
+    const registry = new GitReviewDocumentRegistry({
+      maxIdleDocuments: 1,
+      maxTotalDocuments: 1,
+    });
+    const first = registry.register(registration(undefined, 'source:first'));
+    const lease = registry.acquire('/repo', first.id);
+
+    expect(() => registry.register(registration(undefined, 'source:second'))).toThrow(
+      'Too many active Git review documents',
+    );
+    lease?.release();
+  });
+
+  it('drops older idle bodies when the cache byte budget is exceeded', () => {
+    const registry = new GitReviewDocumentRegistry({ maxBodyBytes: 20 });
+    const first = registry.register(registration(undefined, 'source:first'));
+    const firstLease = registry.acquire('/repo', first.id);
+    firstLease?.setBodies([patchBody()]);
+    firstLease?.release();
+
+    const second = registry.register(registration(undefined, 'source:second'));
+    const secondLease = registry.acquire('/repo', second.id);
+    secondLease?.setBodies([patchBody()]);
+
+    const reloadedFirst = registry.acquire('/repo', first.id);
+    expect(reloadedFirst?.getBody('src/file.ts')).toBeNull();
+    expect(secondLease?.getBody('src/file.ts')).toEqual(patchBody());
+    reloadedFirst?.release();
+    secondLease?.release();
   });
 });

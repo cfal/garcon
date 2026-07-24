@@ -36,7 +36,8 @@ export interface GitWorkbenchRefreshOptions {
 		| 'branch-change'
 		| 'worktree-change'
 		| 'tab-change'
-		| 'context-change';
+		| 'context-change'
+		| 'document-expired';
 	preserveSelection?: boolean;
 	preferSelectedFile?: boolean;
 }

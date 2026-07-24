@@ -65,3 +65,12 @@ export function parseNameStatusZ(output: string, stats: NumstatMap): ParsedDiffF
   }
 	return files;
 }
+
+export function parseUnmergedPaths(output: string): Set<string> {
+  const paths = new Set<string>();
+  for (const token of output.split('\0')) {
+    const tab = token.indexOf('\t');
+    if (tab >= 0 && token.slice(tab + 1)) paths.add(token.slice(tab + 1));
+  }
+  return paths;
+}

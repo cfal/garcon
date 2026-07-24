@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   compactRenderedPatch,
-  limitedRenderedPatch,
   parseUnifiedPatchToRenderedRows,
   scanUnifiedPatch,
   selectFilePatchFromRawDiff,
@@ -67,7 +66,7 @@ describe('selectFilePatchFromRawDiff', () => {
     ].join('');
 
     const selected = selectFilePatchFromRawDiff(rawPatch, 'link');
-    const body = limitedRenderedPatch('link', 'fingerprint', selected, {
+    const body = parseUnifiedPatchToRenderedRows(selected, {
       allowMultipleFileSections: true,
     });
 

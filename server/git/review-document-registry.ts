@@ -1,9 +1,11 @@
 import { randomUUID } from 'crypto';
 import type {
   GitCommitFileStatus,
+  GitCommitFileSummary,
   GitFileReviewCategory,
   GitReviewBodyState,
   GitReviewFilePatchBody,
+  GitReviewFileSummary,
   GitReviewLimitReason,
   GitReviewMode,
 } from './types.js';
@@ -19,6 +21,7 @@ export type GitReviewDocumentSource =
       kind: 'workbench';
       mode: GitReviewMode;
       stagedBaseHash: string;
+      fingerprint: string;
     }
   | {
       kind: 'commit';
@@ -52,6 +55,46 @@ export interface RegisteredGitReviewFile {
   isTooLarge: boolean;
   limitReason?: GitReviewLimitReason;
   limitMessage?: string;
+}
+
+export function registeredWorkbenchFile(file: GitReviewFileSummary): RegisteredGitReviewFile {
+  return {
+    path: file.path,
+    ...(file.originalPath ? { originalPath: file.originalPath } : {}),
+    change: {
+      kind: 'workbench',
+      indexStatus: file.indexStatus,
+      workTreeStatus: file.workTreeStatus,
+    },
+    category: file.category,
+    additions: file.additions,
+    deletions: file.deletions,
+    estimatedRows: file.estimatedRows,
+    bodyState: file.bodyState,
+    bodyFingerprint: file.bodyFingerprint,
+    isBinary: file.isBinary,
+    isTooLarge: file.isTooLarge,
+    ...(file.limitReason ? { limitReason: file.limitReason } : {}),
+    ...(file.limitMessage ? { limitMessage: file.limitMessage } : {}),
+  };
+}
+
+export function registeredTreeDiffFile(file: GitCommitFileSummary): RegisteredGitReviewFile {
+  return {
+    path: file.path,
+    ...(file.originalPath ? { originalPath: file.originalPath } : {}),
+    change: { kind: 'tree-diff', status: file.status, rawStatus: file.rawStatus },
+    category: file.category,
+    additions: file.additions,
+    deletions: file.deletions,
+    estimatedRows: file.estimatedRows,
+    bodyState: file.bodyState,
+    bodyFingerprint: file.bodyFingerprint,
+    isBinary: file.isBinary,
+    isTooLarge: file.isTooLarge,
+    ...(file.limitReason ? { limitReason: file.limitReason } : {}),
+    ...(file.limitMessage ? { limitMessage: file.limitMessage } : {}),
+  };
 }
 
 export interface RegisteredGitReviewDocument {
@@ -104,6 +147,7 @@ function contentKey(input: RegisterGitReviewDocumentInput): string {
   return [
     input.sourceCacheKey,
     input.context,
+    JSON.stringify(input.source),
     ...input.files.map((file) => `${file.path}\0${file.bodyFingerprint}`),
   ].join('\x1f');
 }
@@ -188,7 +232,14 @@ export class GitReviewDocumentRegistry {
       getBody: (path) => document.bodies.get(path) ?? null,
       setBodies: (bodies) => {
         if (!this.documents.has(document.id) || document.superseded) return;
-        for (const body of bodies) {
+        const validatedBodies = Array.from(bodies);
+        for (const body of validatedBodies) {
+          const file = document.filesByPath.get(body.path);
+          if (!file || file.bodyFingerprint !== body.bodyFingerprint) {
+            throw new Error(`Refusing to cache an invalid review body for ${body.path}.`);
+          }
+        }
+        for (const body of validatedBodies) {
           const previous = document.bodies.get(body.path);
           if (previous) {
             document.bodyBytes -= previous.patchBytes;

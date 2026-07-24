@@ -25,6 +25,32 @@ export interface GitCommandTrace {
   aborted?: boolean;
 }
 
+export type GitReviewRoutePhaseName =
+  | 'resolve'
+  | 'summary-git'
+  | 'document-register'
+  | 'freshness-before'
+  | 'body-cache'
+  | 'body-git'
+  | 'body-split'
+  | 'patch-scan'
+  | 'freshness-after'
+  | 'serialize';
+
+export interface GitReviewRoutePhase {
+  name: GitReviewRoutePhaseName;
+  durationMs: number;
+}
+
+export interface GitReviewRouteMetrics {
+  phases: GitReviewRoutePhase[];
+  fileCount?: number;
+  rowCount?: number;
+  cacheHits?: number;
+  batchCount?: number;
+  bisectionCount?: number;
+}
+
 export interface GitProcessError extends Error {
   code?: number;
   stdout?: string;
@@ -188,6 +214,7 @@ export interface CreateGitServiceOptions {
 export interface ProjectOptions {
   projectPath: string;
   trace?: GitCommandTrace[];
+  metrics?: GitReviewRouteMetrics;
   signal?: AbortSignal;
 }
 
@@ -257,19 +284,6 @@ export interface PushOptions extends ProjectOptions {
   remoteBranch?: string;
 }
 
-export interface FileReviewOptions extends FileOptions {
-  mode?: GitReviewMode;
-  context?: number;
-  signal?: AbortSignal;
-}
-
-export interface ReviewFileBodiesOptions extends ProjectOptions {
-  documentId: string;
-  files: string[];
-  mode?: GitReviewMode;
-  context?: number;
-}
-
 export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
 
 export interface GitRenderedDiffRow {
@@ -292,21 +306,6 @@ export interface GitRenderedHunk {
   newLines: number;
   rowStartIndex: number;
   rowEndIndex: number;
-}
-
-export interface GitFileReviewData {
-  path: string;
-  mode: GitReviewMode;
-  indexStatus?: string;
-  workTreeStatus?: string;
-  isBinary: boolean;
-  truncated: boolean;
-  truncatedReason?: string;
-  limitReason?: GitDiffLimitReason;
-  category?: GitFileReviewCategory;
-  rows: GitRenderedDiffRow[];
-  hunks: GitRenderedHunk[];
-  error?: string;
 }
 
 export interface GitReviewDocumentLimits {
@@ -357,22 +356,6 @@ export interface GitReviewDocumentSummary {
   collectionLimit?: GitReviewCollectionLimit;
 }
 
-export interface GitReviewFileBody {
-  path: string;
-  bodyFingerprint: string;
-  bodyState: GitReviewBodyState;
-  category: GitFileReviewCategory;
-  isBinary: boolean;
-  isTooLarge: boolean;
-  renderedRowCount: number;
-  patchBytes: number;
-  rows: GitRenderedDiffRow[];
-  hunks: GitRenderedHunk[];
-  limitReason?: GitReviewLimitReason;
-  limitMessage?: string;
-  error?: string;
-}
-
 export interface GitReviewFilePatchBody {
   path: string;
   bodyFingerprint: string;
@@ -420,12 +403,6 @@ export type GitReviewDocumentFileBodiesResponse =
   | GitReviewDocumentFileBodiesReady
   | GitReviewDocumentFileBodiesStale
   | GitReviewDocumentFileBodiesExpired;
-
-export interface GitReviewFileBodiesResponse {
-  documentId: string;
-  files: Record<string, GitReviewFileBody>;
-  errors: Record<string, string>;
-}
 
 export interface GitHistoryCommitListOptions extends ProjectOptions {
   ref?: string;
@@ -497,8 +474,6 @@ export interface GitCommitFileSummary {
   limitMessage?: string;
 }
 
-export type GitCommitFileBody = GitReviewFileBody;
-
 export interface GitCommitSnapshotReady {
   status: 'ready';
   project: string;
@@ -531,20 +506,6 @@ export interface GitCommitSnapshotOptions extends ProjectOptions {
 export interface GitDiffFileRequest {
   path: string;
   originalPath?: string;
-}
-
-export interface GitCommitFileBodiesOptions extends ProjectOptions {
-  documentId: string;
-  commit: string;
-  parent?: string | null;
-  context?: number;
-  files: GitDiffFileRequest[];
-}
-
-export interface GitCommitFileBodiesResponse {
-  documentId: string;
-  files: Record<string, GitCommitFileBody>;
-  errors: Record<string, string>;
 }
 
 export type GitComparisonMode = 'direct' | 'merge-base';
@@ -634,21 +595,6 @@ export interface GitComparisonSnapshotOptions extends ProjectOptions {
   bodyCandidateCount?: number;
 }
 
-export type GitComparisonFileRequest = GitDiffFileRequest;
-
-export interface GitComparisonRevisionBodyTarget {
-  kind: 'revision';
-  hash: string;
-}
-
-export interface GitComparisonWorkingTreeBodyTarget {
-  kind: 'working-tree';
-  fingerprint: string;
-}
-
-export type GitComparisonBodyTarget =
-  GitComparisonRevisionBodyTarget | GitComparisonWorkingTreeBodyTarget;
-
 export interface GitComparisonRevisionExpectation {
   kind: 'revision';
   revision: string;
@@ -661,7 +607,8 @@ export interface GitComparisonWorkingTreeExpectation {
 }
 
 export type GitComparisonFreshnessToExpectation =
-  GitComparisonRevisionExpectation | GitComparisonWorkingTreeExpectation;
+  | GitComparisonRevisionExpectation
+  | GitComparisonWorkingTreeExpectation;
 
 export interface GitComparisonFreshnessOptions extends ProjectOptions {
   from: GitComparisonRevisionExpectation;
@@ -685,30 +632,10 @@ export interface GitComparisonFreshnessNotFound {
 }
 
 export type GitComparisonFreshnessResponse =
-  GitComparisonFreshnessReady | GitComparisonFreshnessNotFound;
+  | GitComparisonFreshnessReady
+  | GitComparisonFreshnessNotFound;
 
-export interface GitComparisonFileBodiesOptions extends ProjectOptions {
-  documentId: string;
-  effectiveFromHash: string;
-  to: GitComparisonBodyTarget;
-  context?: number;
-  files: GitComparisonFileRequest[];
-}
-
-export interface GitComparisonFileBodiesReady extends GitReviewFileBodiesResponse {
-  status: 'ready';
-}
-
-export interface GitComparisonFileBodiesStale {
-  status: 'stale';
-  documentId: string;
-  expectedFingerprint: string;
-  actualFingerprint: string | null;
-  message: string;
-}
-
-export type GitComparisonFileBodiesResponse =
-  GitComparisonFileBodiesReady | GitComparisonFileBodiesStale;
+export type GitComparisonFileRequest = GitDiffFileRequest;
 
 export interface GitWorkbenchSnapshotTarget {
   projectPath: string;
@@ -1010,19 +937,17 @@ export interface GitService {
     options: GitWorkingTreeFingerprintOptions,
   ): Promise<GitWorkingTreeFingerprintResponse>;
   getQuickSummary(options: GitQuickSummaryOptions): Promise<GitQuickSummaryResponse>;
-  getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
+  getReviewDocumentFileBodies(
+    options: GitReviewDocumentFileBodiesOptions,
+  ): Promise<GitReviewDocumentFileBodiesResponse>;
   getHistoryCommits(options: GitHistoryCommitListOptions): Promise<GitHistoryCommitListResponse>;
   getCommitSnapshot(options: GitCommitSnapshotOptions): Promise<GitCommitSnapshotResponse>;
-  getCommitFileBodies(options: GitCommitFileBodiesOptions): Promise<GitCommitFileBodiesResponse>;
   getComparisonSnapshot(
     options: GitComparisonSnapshotOptions,
   ): Promise<GitComparisonSnapshotResponse>;
   getComparisonFreshness(
     options: GitComparisonFreshnessOptions,
   ): Promise<GitComparisonFreshnessResponse>;
-  getComparisonFileBodies(
-    options: GitComparisonFileBodiesOptions,
-  ): Promise<GitComparisonFileBodiesResponse>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;
   stageHunk(options: StageHunkOptions): Promise<unknown>;
   getConflicts(options: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }>;

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFilePatchBody } from '$lib/api/git.js';
-import { materializeLegacyReviewBody } from '$lib/git/review/git-review-body-bridge.js';
+import { createIndexedGitReviewFileBody } from '$lib/git/review/git-review-body-index.js';
 
-describe('materializeLegacyReviewBody', () => {
-	it('reproduces rendered rows and hunks from a compact patch body', () => {
+describe('createIndexedGitReviewFileBody', () => {
+	it('indexes a compact patch body without materializing row arrays', () => {
+		performance.clearMeasures();
 		const patch = `diff --git a/file.txt b/file.txt
 --- a/file.txt
 +++ b/file.txt
@@ -24,26 +25,26 @@ describe('materializeLegacyReviewBody', () => {
 			patch,
 		};
 
-		const materialized = materializeLegacyReviewBody(body);
+		const indexed = createIndexedGitReviewFileBody(body);
 
-		expect(materialized.rows.map((row) => row.kind)).toEqual(['hunk', 'context', 'del', 'add']);
-		expect(materialized.rows[2]).toMatchObject({
+		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(0);
+		expect(indexed.patchIndex?.rowCount).toBe(4);
+		expect(performance.getEntriesByName('garcon.git-review.patch-index', 'measure')).toHaveLength(1);
+		expect(indexed.patchIndex?.rowAt(2)).toMatchObject({
 			key: 'line:1:del:2',
 			beforeLine: 2,
 			text: 'old',
 		});
-		expect(materialized.hunks).toEqual([
-			{
-				id: 'hunk-0',
-				header: '@@ -1,2 +1,2 @@',
-				oldStart: 1,
-				oldLines: 2,
-				newStart: 1,
-				newLines: 2,
-				rowStartIndex: 0,
-				rowEndIndex: 3,
-			},
-		]);
+		expect(indexed.patchIndex?.hunkAt(0)).toEqual({
+			id: 'hunk-0',
+			header: '@@ -1,2 +1,2 @@',
+			oldStart: 1,
+			oldLines: 2,
+			newStart: 1,
+			newLines: 2,
+			rowStartIndex: 0,
+			rowEndIndex: 3,
+		});
 	});
 
 	it('preserves terminal body metadata without indexing', () => {
@@ -61,10 +62,9 @@ describe('materializeLegacyReviewBody', () => {
 			limitMessage: 'Binary diff is not available.',
 		};
 
-		expect(materializeLegacyReviewBody(body)).toEqual({
+		expect(createIndexedGitReviewFileBody(body)).toEqual({
 			...body,
-			rows: [],
-			hunks: [],
+			patchIndex: null,
 		});
 	});
 });

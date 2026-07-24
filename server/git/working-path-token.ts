@@ -17,6 +17,7 @@ export interface GitWorkingPathToken {
 interface WorkingPathTokenInputs {
   statusEntries?: PorcelainStatusEntry[];
   indexEntriesByPath?: Map<string, string>;
+  scope?: 'working-tree' | 'index';
 }
 
 function parseIndexEntries(output: string): Map<string, string> {
@@ -71,6 +72,7 @@ export async function captureWorkingPathTokens(
   signal?: AbortSignal,
 ): Promise<Map<string, GitWorkingPathToken>> {
   const uniquePaths = Array.from(new Set(paths.filter(Boolean))).sort();
+  const scope = inputs.scope ?? 'working-tree';
   let indexEntriesByPath = inputs.indexEntriesByPath;
   let statusEntries = inputs.statusEntries;
 
@@ -110,8 +112,18 @@ export async function captureWorkingPathTokens(
     uniquePaths.map(async (path) => ({
       path,
       indexEntry: indexEntriesByPath?.get(path) ?? null,
-      status: statusToken(statusByPath.get(path)),
-      ...(await worktreeToken(projectPath, path)),
+      status:
+        scope === 'index'
+          ? `${statusToken(statusByPath.get(path)).slice(0, 1)} \0`
+          : statusToken(statusByPath.get(path)),
+      ...(scope === 'index'
+        ? {
+            worktreeKind: 'missing' as const,
+            worktreeSize: null,
+            worktreeMtimeNs: null,
+            worktreeCtimeNs: null,
+          }
+        : await worktreeToken(projectPath, path)),
     })),
   );
   return new Map(tokens.map((token) => [token.path, token]));

@@ -3,21 +3,18 @@ import type {
 	GitDiffFileRequest,
 	GitReviewCollectionLimit,
 	GitReviewDocumentLimits,
-	GitReviewFileBodiesResponse,
+	GitReviewDocumentIndexedFileBodiesResponse,
+	GitReviewBodyPurpose,
 	GitReviewFileBody,
 	GitReviewFileSummary,
 	GitStatusCode,
 } from '$lib/api/git.js';
-import type { GitComparisonFileBodiesResponse } from '$lib/api/git-comparison.js';
 import {
 	GitInlineCommentState,
 	type CommentComposerState,
 	type GitDiffSeverity,
 } from '$lib/git/review/git-inline-comment.svelte.js';
-import {
-	buildVirtualRows,
-	type GitVirtualReviewRow,
-} from '$lib/git/review/git-virtual-review-document.svelte.js';
+import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 import type {
 	ChatDraftAppend,
@@ -27,8 +24,18 @@ import {
 	buildGitReviewCommentMessage,
 	type GitReviewCommentSource,
 } from '$lib/git/review/git-review-comment-message.js';
-import { buildGitReviewCommentContext } from '$lib/git/review/git-review-comment-context.js';
-import { isAbortError } from '$lib/utils/is-abort-error.js';
+import { buildGitReviewBodyCommentContext } from '$lib/git/review/git-review-comment-context.js';
+import { GitReviewBodyScheduler } from './git-review-body-scheduler.js';
+import {
+	collectionLimitDecisionFromGitReviewBody,
+	decideGitReviewBodyBudget,
+	type GitReviewBodyBudgetDecision,
+} from './git-review-body-budget.js';
+import {
+	buildGitVirtualReviewRowSource,
+	emptyGitVirtualReviewRowSource,
+	type GitVirtualReviewRowSource,
+} from './git-virtual-review-row-source.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const MAX_CACHED_FILE_BODIES = 128;
@@ -42,12 +49,12 @@ export interface GitDiffDocumentSnapshot {
 	firstBodyCandidates: string[];
 }
 
-export type GitDiffDocumentBodyResponse =
-	GitReviewFileBodiesResponse | GitComparisonFileBodiesResponse;
+export type GitDiffDocumentBodyResponse = GitReviewDocumentIndexedFileBodiesResponse;
 
 export type GitDiffDocumentBodyLoader = (
 	snapshot: GitDiffDocumentSnapshot,
 	files: GitDiffFileRequest[],
+	purpose: GitReviewBodyPurpose,
 	signal: AbortSignal,
 ) => Promise<GitDiffDocumentBodyResponse>;
 
@@ -58,13 +65,14 @@ export interface GitDiffDocumentOpenOptions {
 	onError: (message: string) => void;
 	onBodyLoadSuccess?: () => void;
 	onStale?: (message: string) => void;
+	onExpired?: (message: string) => void;
 	commentSource?: GitReviewCommentSource;
 }
 
 export class GitDiffDocumentController {
 	readonly inlineComment = new GitInlineCommentState();
 	snapshot = $state<GitDiffDocumentSnapshot | null>(null);
-	fileBodies = $state<Record<string, GitReviewFileBody>>({});
+	fileBodies = $state.raw<Record<string, GitReviewFileBody>>({});
 	loadingBodies = $state(new Set<string>());
 	scrollRequest = $state<{ filePath: string; token: number } | null>(null);
 	fileFilter = $state('');
@@ -75,18 +83,18 @@ export class GitDiffDocumentController {
 	isStale = $state(false);
 	staleMessage = $state<string | null>(null);
 
-	private bodyAbort: AbortController | null = null;
-	private bodyBatchFiles = new Set<string>();
-	private pendingBodyQueue: string[] = [];
+	private bodyScheduler: GitReviewBodyScheduler<GitDiffDocumentBodyResponse> | null = null;
 	private summariesByPath = new Map<string, GitCommitFileSummary>();
 	private bodyCache = new Map<string, GitReviewFileBody>();
+	private bodyPurposes = new Map<string, GitReviewBodyPurpose>();
 	private bodyCacheBytes = 0;
+	private prefetchStopped = false;
 	private generation = 0;
 	private scrollToken = 0;
-	private loadBodies: GitDiffDocumentBodyLoader | null = null;
 	private onError: ((message: string) => void) | null = null;
 	private onBodyLoadSuccess: (() => void) | null = null;
 	private onStale: ((message: string) => void) | null = null;
+	private onExpired: ((message: string) => void) | null = null;
 	private commentSource: GitReviewCommentSource | null = null;
 
 	get commentComposer(): CommentComposerState {
@@ -131,10 +139,23 @@ export class GitDiffDocumentController {
 		};
 	});
 
-	virtualRows = $derived.by<GitVirtualReviewRow[]>(() => {
+	rowSource = $derived.by<GitVirtualReviewRowSource>(() => {
 		const summary = this.virtualSummary;
-		if (!summary) return [];
-		let rows = buildVirtualRows({
+		if (!summary) return emptyGitVirtualReviewRowSource();
+		const placeholderLimit = this.aggregateLimit
+			? {
+					title: m.git_virtual_diff_limit_reached(),
+					message: this.aggregateLimit.message,
+					reason: this.aggregateLimit.reason,
+				}
+			: this.isStale
+				? {
+						title: m.git_virtual_stale_diff(),
+						message: this.staleMessage ?? m.git_virtual_stale_diff_message(),
+						reason: 'stale-document' as const,
+					}
+				: undefined;
+		return buildGitVirtualReviewRowSource({
 			summary,
 			visibleFilePaths: summary.files.map((file) => file.path),
 			fileBodies: this.fileBodies,
@@ -145,67 +166,26 @@ export class GitDiffDocumentController {
 			interaction: this.commentSource
 				? { kind: 'commentable', composerState: this.commentComposer }
 				: { kind: 'read-only' },
+			...(placeholderLimit ? { placeholderLimit } : {}),
 		});
-		const aggregateLimit = this.aggregateLimit;
-		if (aggregateLimit) {
-			rows = rows.map((row) =>
-				row.kind === 'file-placeholder'
-					? {
-							kind: 'file-limit' as const,
-							id: `${summary.documentId}:file:${encodeURIComponent(row.filePath)}:limit:${aggregateLimit.reason}`,
-							filePath: row.filePath,
-							estimatedHeight: 112,
-							file: row.file,
-							title: m.git_virtual_diff_limit_reached(),
-							message: aggregateLimit.message,
-							reason: aggregateLimit.reason,
-						}
-					: row,
-			);
-		}
-		if (!this.isStale) return rows;
-		return rows.map((row) =>
-			row.kind === 'file-placeholder'
-				? {
-						kind: 'file-limit' as const,
-						id: `${summary.documentId}:file:${encodeURIComponent(row.filePath)}:limit:stale-document`,
-						filePath: row.filePath,
-						estimatedHeight: 112,
-						file: row.file,
-						title: m.git_virtual_stale_diff(),
-						message: this.staleMessage ?? m.git_virtual_stale_diff_message(),
-						reason: 'stale-document' as const,
-					}
-				: row,
-		);
-	});
-
-	fileRowIndex = $derived.by(() => {
-		const index = new Map<string, number>();
-		this.virtualRows.forEach((row, rowIndex) => {
-			if (row.kind === 'file-header') index.set(row.filePath, rowIndex);
-		});
-		return index;
 	});
 
 	open(snapshot: GitDiffDocumentSnapshot, options: GitDiffDocumentOpenOptions): void {
-		this.bodyAbort?.abort();
-		this.bodyAbort = null;
+		this.bodyScheduler?.cancel();
 		this.generation += 1;
 		this.snapshot = snapshot;
 		this.summariesByPath = new Map(snapshot.files.map((file) => [file.path, file]));
-		this.loadBodies = options.loadBodies;
 		this.onError = options.onError;
 		this.onBodyLoadSuccess = options.onBodyLoadSuccess ?? null;
 		this.onStale = options.onStale ?? null;
+		this.onExpired = options.onExpired ?? null;
 		this.commentSource = options.commentSource ?? null;
 		this.diffMode = options.diffMode;
 		this.contextLines = options.contextLines;
 		this.fileBodies = {};
-		this.seedCachedBodies(snapshot.files.map((file) => file.path));
+		this.bodyPurposes.clear();
+		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
-		this.bodyBatchFiles = new Set();
-		this.pendingBodyQueue = [];
 		this.scrollRequest = null;
 		this.fileFilter = '';
 		this.focusedFilePath = null;
@@ -214,7 +194,25 @@ export class GitDiffDocumentController {
 		this.staleMessage = null;
 		this.closeCommentComposer();
 		this.clearCommentFeedback();
-		this.requestBodies(snapshot.firstBodyCandidates);
+		const generation = this.generation;
+		this.bodyScheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: snapshot.limits.maxBodyBatchFiles || 24,
+			load: (paths, purpose, signal) => {
+				const requests = paths.map((path) => {
+					const summary = this.summaryForFile(path);
+					return { path, ...(summary?.originalPath ? { originalPath: summary.originalPath } : {}) };
+				});
+				return options.loadBodies(snapshot, requests, purpose, signal);
+			},
+			onResult: (result, paths, purpose) =>
+				this.applyBodyResult(result, paths, purpose, generation, snapshot),
+			onError: (error) =>
+				this.onError?.(error instanceof Error ? error.message : String(error)),
+			onLoadingChange: (paths, loading) => this.markLoading(paths, loading),
+		});
+		const [priority, ...prefetch] = snapshot.firstBodyCandidates;
+		if (priority) this.requestBodies([priority], 'visible');
+		this.requestBodies(prefetch, 'prefetch');
 	}
 
 	setDisplayOptions(diffMode: DiffMode, contextLines: number): void {
@@ -224,13 +222,16 @@ export class GitDiffDocumentController {
 
 	focusFile(filePath: string): void {
 		this.focusedFilePath = filePath;
-		this.requestBodies([filePath]);
+		this.requestBodies([filePath], 'visible');
 		this.scrollToken += 1;
 		this.scrollRequest = { filePath, token: this.scrollToken };
 	}
 
 	setVisibleRows(rows: GitVirtualReviewRow[]): void {
-		this.requestBodies(Array.from(new Set(rows.map((row) => row.filePath).filter(Boolean))));
+		this.requestBodies(
+			Array.from(new Set(rows.map((row) => row.filePath).filter(Boolean))),
+			'visible',
+		);
 	}
 
 	setFileFilter(value: string): void {
@@ -272,7 +273,7 @@ export class GitDiffDocumentController {
 			...(file?.originalPath ? { originalPath: file.originalPath } : {}),
 			side: composer.side,
 			line: composer.line,
-			contextLines: buildGitReviewCommentContext(body?.rows ?? [], composer.side, composer.line),
+			contextLines: buildGitReviewBodyCommentContext(body, composer.side, composer.line),
 			body: composer.body,
 			severity: composer.severity,
 		});
@@ -288,26 +289,23 @@ export class GitDiffDocumentController {
 	}
 
 	markStale(message?: string): void {
-		this.bodyAbort?.abort();
-		this.bodyAbort = null;
+		this.bodyScheduler?.cancel();
 		this.isStale = true;
 		this.staleMessage = message ?? m.git_virtual_stale_diff_message();
-		this.pendingBodyQueue = [];
-		this.bodyBatchFiles = new Set();
 		this.loadingBodies = new Set();
 		if (message) this.onStale?.(message);
 	}
 
 	clear(options: { preserveCache?: boolean } = {}): void {
-		this.bodyAbort?.abort();
-		this.bodyAbort = null;
+		this.bodyScheduler?.cancel();
+		this.bodyScheduler = null;
 		this.generation += 1;
 		this.snapshot = null;
 		this.summariesByPath.clear();
 		this.fileBodies = {};
+		this.bodyPurposes.clear();
+		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
-		this.bodyBatchFiles = new Set();
-		this.pendingBodyQueue = [];
 		this.scrollRequest = null;
 		this.fileFilter = '';
 		this.focusedFilePath = null;
@@ -316,146 +314,164 @@ export class GitDiffDocumentController {
 		this.staleMessage = null;
 		this.closeCommentComposer();
 		this.clearCommentFeedback();
-		this.loadBodies = null;
 		this.onError = null;
 		this.onBodyLoadSuccess = null;
 		this.onStale = null;
+		this.onExpired = null;
 		this.commentSource = null;
 		if (!options.preserveCache) this.clearBodyCache();
 	}
 
-	private requestBodies(filePaths: string[]): void {
+	private requestBodies(filePaths: string[], purpose: GitReviewBodyPurpose): void {
 		const snapshot = this.snapshot;
-		if (!snapshot || !this.loadBodies || this.aggregateLimit || this.isStale) return;
+		if (!snapshot || !this.bodyScheduler || this.aggregateLimit || this.isStale) return;
+		if (purpose === 'prefetch' && this.prefetchStopped) return;
 		const uniquePaths = Array.from(new Set(filePaths)).filter(Boolean);
-		this.seedCachedBodies(uniquePaths);
+		this.seedCachedBodies(uniquePaths, purpose);
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));
 		if (toFetch.length === 0) return;
-		this.markLoading(toFetch, true);
-		const requested = new Set(toFetch);
-		this.pendingBodyQueue = [
-			...toFetch,
-			...this.pendingBodyQueue.filter((filePath) => !requested.has(filePath)),
-		];
-		this.pumpBodyQueue(this.generation);
+		if (purpose === 'visible') this.bodyScheduler.requestVisible(toFetch);
+		else this.bodyScheduler.requestPrefetch(toFetch);
 	}
 
-	private pumpBodyQueue(generation: number): void {
-		const snapshot = this.snapshot;
-		const loadBodies = this.loadBodies;
-		if (!snapshot || !loadBodies || this.bodyAbort || this.pendingBodyQueue.length === 0) return;
-		if (generation !== this.generation || this.aggregateLimit) return;
-		const batch = this.pendingBodyQueue
-			.splice(0, snapshot.limits.maxBodyBatchFiles || 24)
-			.filter((filePath) => this.shouldStartBodyLoad(filePath));
-		if (batch.length === 0) {
-			this.pumpBodyQueue(generation);
+	private applyBodyResult(
+		result: GitDiffDocumentBodyResponse,
+		paths: string[],
+		purpose: GitReviewBodyPurpose,
+		generation: number,
+		snapshot: GitDiffDocumentSnapshot,
+	): void {
+		if (!this.isCurrent(generation, snapshot.documentId)) return;
+		if (
+			'status' in result &&
+			(result.status === 'stale' || result.status === 'document-expired')
+		) {
+			this.markStale(result.message);
+			if (result.status === 'document-expired') this.onExpired?.(result.message);
 			return;
 		}
-
-		const controller = new AbortController();
-		this.bodyAbort = controller;
-		this.bodyBatchFiles = new Set(batch);
-		const requests = batch.map((path) => {
-			const summary = this.summaryForFile(path);
-			return { path, ...(summary?.originalPath ? { originalPath: summary.originalPath } : {}) };
-		});
-
-		void loadBodies(snapshot, requests, controller.signal)
-			.then((result) => {
-				if (!this.isCurrent(generation, snapshot.documentId, controller.signal)) return;
-				if ('status' in result && result.status === 'stale') {
-					this.markStale(result.message);
-					return;
+		this.onBodyLoadSuccess?.();
+		const next = { ...this.fileBodies };
+		for (const filePath of paths) {
+			const file = this.summaryForFile(filePath);
+			const body = result.files[filePath];
+			if (!file || !body) continue;
+			if (body.bodyState === 'error') {
+				next[filePath] = body;
+				continue;
+			}
+			if (body.bodyFingerprint !== file.bodyFingerprint) {
+				next[filePath] = {
+					path: body.path,
+					bodyFingerprint: body.bodyFingerprint,
+					bodyState: 'error',
+					category: body.category,
+					isBinary: false,
+					isTooLarge: false,
+					renderedRowCount: 0,
+					patchBytes: 0,
+					patch: null,
+					patchIndex: null,
+					error: m.git_diff_document_changed(),
+				};
+				continue;
+			}
+			const serverLimit = collectionLimitDecisionFromGitReviewBody(body, next);
+			if (serverLimit) {
+				next[filePath] = body;
+				this.setAggregateLimit(
+					serverLimit,
+					Object.keys(next).length,
+					body.limitMessage,
+				);
+				break;
+			}
+			const decision = decideGitReviewBodyBudget(
+				body,
+				purpose,
+				next,
+				this.bodyPurposes,
+				snapshot.limits,
+			);
+			this.evictActiveBodies(next, decision);
+			if (!decision.accept) {
+				if (purpose === 'prefetch') {
+					this.stopPrefetch();
+					break;
 				}
-				this.onBodyLoadSuccess?.();
-				const next = { ...this.fileBodies };
-				for (const filePath of batch) {
-					const file = this.summaryForFile(filePath);
-					const body = result.files[filePath];
-					if (!file || !body) continue;
-					if (body.bodyState === 'error') {
-						next[filePath] = body;
-						continue;
-					}
-					if (body.bodyFingerprint !== file.bodyFingerprint) {
-						next[filePath] = {
-							...body,
-							bodyState: 'error',
-							error: m.git_diff_document_changed(),
-						};
-						continue;
-					}
-					const limited = this.acceptWithinBudget(body, snapshot.limits, next);
-					next[filePath] = limited;
-					if (limited === body) this.cacheBody(file, body, snapshot.limits.maxLoadedPatchBytes);
-					if (this.aggregateLimit) break;
-				}
-				this.fileBodies = next;
-			})
-			.catch((error) => {
-				if (
-					isAbortError(error) ||
-					!this.isCurrent(generation, snapshot.documentId, controller.signal)
-				) {
-					return;
-				}
-				this.onError?.(error instanceof Error ? error.message : String(error));
-			})
-			.finally(() => {
-				if (this.bodyAbort !== controller) return;
-				this.bodyAbort = null;
-				this.bodyBatchFiles = new Set();
-				this.markLoading(batch, false);
-				if (generation === this.generation) this.pumpBodyQueue(generation);
-			});
+				next[filePath] = this.collectionLimitBody(body, decision);
+				this.setAggregateLimit(decision, Object.keys(next).length);
+				break;
+			}
+			next[filePath] = body;
+			this.bodyPurposes.set(filePath, purpose);
+			if (body.bodyState === 'loaded') {
+				this.cacheBody(file, body, snapshot.limits.maxLoadedPatchBytes);
+			}
+		}
+		this.fileBodies = next;
 	}
 
-	private acceptWithinBudget(
+	private collectionLimitBody(
 		body: GitReviewFileBody,
-		limits: GitReviewDocumentLimits,
-		acceptedBodies: Record<string, GitReviewFileBody>,
+		decision: GitReviewBodyBudgetDecision,
 	): GitReviewFileBody {
-		if (body.bodyState !== 'loaded') return body;
-		const loaded = Object.values(acceptedBodies).filter(
-			(candidate) => candidate.bodyState === 'loaded',
-		);
-		const loadedRows = loaded.reduce((total, candidate) => total + candidate.renderedRowCount, 0);
-		const loadedBytes = loaded.reduce((total, candidate) => total + candidate.patchBytes, 0);
-		const rowsExceeded = loadedRows + body.renderedRowCount > limits.maxLoadedRows;
-		const bytesExceeded = loadedBytes + body.patchBytes > limits.maxLoadedPatchBytes;
-		if (!rowsExceeded && !bytesExceeded) return body;
-
-		this.pendingBodyQueue = [];
-		this.loadingBodies = new Set();
-		const reason = rowsExceeded ? 'collection-too-many-rows' : 'collection-too-many-bytes';
-		const message = rowsExceeded
-			? `Stopped loading after ${loadedRows.toLocaleString()} rendered rows.`
-			: `Stopped loading after ${loadedBytes.toLocaleString()} patch bytes.`;
-		this.aggregateLimit = {
-			reason,
-			message,
-			visibleFiles: Object.keys(acceptedBodies).length,
-			totalFilesKnown: this.snapshot?.files.length ?? 0,
-		};
+		const reason = decision.reason ?? 'collection-too-many-rows';
+		const message = this.aggregateLimitMessage(decision);
 		return {
-			...body,
+			path: body.path,
+			bodyFingerprint: body.bodyFingerprint,
 			bodyState: 'too-large',
 			category: 'large',
+			isBinary: false,
 			isTooLarge: true,
 			renderedRowCount: 0,
 			patchBytes: 0,
-			rows: [],
-			hunks: [],
+			patch: null,
+			patchIndex: null,
 			limitReason: reason,
 			limitMessage: message,
 		};
 	}
 
-	private isCurrent(generation: number, documentId: string, signal: AbortSignal): boolean {
-		return (
-			!signal.aborted && generation === this.generation && this.snapshot?.documentId === documentId
-		);
+	private setAggregateLimit(
+		decision: GitReviewBodyBudgetDecision,
+		visibleFiles: number,
+		message = this.aggregateLimitMessage(decision),
+	): void {
+		this.bodyScheduler?.cancel();
+		this.loadingBodies = new Set();
+		this.aggregateLimit = {
+			reason: decision.reason ?? 'collection-too-many-rows',
+			message,
+			visibleFiles,
+			totalFilesKnown: this.snapshot?.files.length ?? 0,
+		};
+	}
+
+	private aggregateLimitMessage(decision: GitReviewBodyBudgetDecision): string {
+		return decision.reason === 'collection-too-many-bytes'
+			? `Stopped loading after ${decision.loadedBytes.toLocaleString()} patch bytes.`
+			: `Stopped loading after ${decision.loadedRows.toLocaleString()} rendered rows.`;
+	}
+
+	private evictActiveBodies(
+		bodies: Record<string, GitReviewFileBody>,
+		decision: GitReviewBodyBudgetDecision,
+	): void {
+		for (const path of decision.evictedPaths) {
+			delete bodies[path];
+			this.bodyPurposes.delete(path);
+		}
+	}
+
+	private stopPrefetch(): void {
+		this.prefetchStopped = true;
+		this.bodyScheduler?.cancelPrefetch();
+	}
+
+	private isCurrent(generation: number, documentId: string): boolean {
+		return generation === this.generation && this.snapshot?.documentId === documentId;
 	}
 
 	private summaryForFile(filePath: string): GitCommitFileSummary | null {
@@ -466,20 +482,12 @@ export class GitDiffDocumentController {
 		const file = this.summaryForFile(filePath);
 		if (!file || file.bodyState !== 'unloaded') return false;
 		if (this.fileBodies[filePath] || this.bodyCache.has(this.cacheKey(file))) return false;
-		if (this.loadingBodies.has(filePath) || this.pendingBodyQueue.includes(filePath)) return false;
-		return !this.bodyBatchFiles.has(filePath);
+		return !this.loadingBodies.has(filePath);
 	}
 
-	private shouldStartBodyLoad(filePath: string): boolean {
-		const file = this.summaryForFile(filePath);
-		if (!file || file.bodyState !== 'unloaded') return false;
-		if (this.fileBodies[filePath] || this.bodyCache.has(this.cacheKey(file))) return false;
-		return !this.bodyBatchFiles.has(filePath);
-	}
-
-	private seedCachedBodies(filePaths: string[]): void {
+	private seedCachedBodies(filePaths: string[], purpose: GitReviewBodyPurpose): void {
 		if (this.bodyCache.size === 0) return;
-		const seeded: Record<string, GitReviewFileBody> = {};
+		const next = { ...this.fileBodies };
 		for (const filePath of filePaths) {
 			const file = this.summaryForFile(filePath);
 			if (!file || this.fileBodies[filePath]) continue;
@@ -488,10 +496,28 @@ export class GitDiffDocumentController {
 			if (cached) {
 				this.bodyCache.delete(key);
 				this.bodyCache.set(key, cached);
-				seeded[filePath] = cached;
+				const decision = decideGitReviewBodyBudget(
+					cached,
+					purpose,
+					next,
+					this.bodyPurposes,
+					this.snapshot!.limits,
+				);
+				this.evictActiveBodies(next, decision);
+				if (!decision.accept) {
+					if (purpose === 'prefetch') {
+						this.stopPrefetch();
+					} else {
+						next[filePath] = this.collectionLimitBody(cached, decision);
+						this.setAggregateLimit(decision, Object.keys(next).length);
+					}
+					continue;
+				}
+				next[filePath] = cached;
+				this.bodyPurposes.set(filePath, purpose);
 			}
 		}
-		if (Object.keys(seeded).length > 0) this.fileBodies = { ...this.fileBodies, ...seeded };
+		this.fileBodies = next;
 	}
 
 	private markLoading(filePaths: string[], isLoading: boolean): void {
@@ -504,7 +530,7 @@ export class GitDiffDocumentController {
 	}
 
 	private cacheKey(file: GitCommitFileSummary): string {
-		return `${this.snapshot?.documentId ?? ''}|${file.bodyFingerprint}|${file.path}`;
+		return `${this.contextLines}|${file.bodyFingerprint}|${file.path}`;
 	}
 
 	private cacheBody(file: GitCommitFileSummary, body: GitReviewFileBody, byteLimit: number): void {

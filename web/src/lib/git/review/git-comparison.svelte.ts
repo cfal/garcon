@@ -72,6 +72,7 @@ export class GitComparisonController {
 	private contextLines = 5;
 	private loadedContextLines = 5;
 	private activeProjectPath: string | null = null;
+	private documentRecoveryAttempted = false;
 
 	openDialog(
 		defaults: GitComparisonDialogDefaults,
@@ -190,7 +191,8 @@ export class GitComparisonController {
 		void this.refresh(projectPath);
 	}
 
-	async compare(projectPath: string): Promise<boolean> {
+	async compare(projectPath: string, isDocumentRecovery = false): Promise<boolean> {
+		if (!isDocumentRecovery) this.documentRecoveryAttempted = false;
 		this.clearError();
 		const fromRevision = this.fromRevision.trim();
 		const toRevision = this.toRevision.trim();
@@ -246,7 +248,7 @@ export class GitComparisonController {
 					mode: result.mode,
 					...(result.mergeBaseHash ? { mergeBaseHash: result.mergeBaseHash } : {}),
 				},
-				loadBodies: (_snapshot, files, signal) =>
+				loadBodies: (_snapshot, files, purpose, signal) =>
 					getGitComparisonFileBodies(
 						projectPath,
 						result.documentId,
@@ -255,7 +257,7 @@ export class GitComparisonController {
 							? { kind: 'revision', hash: result.to.hash }
 							: { kind: 'working-tree', fingerprint: result.to.fingerprint },
 						files,
-						{ context: requestContextLines, signal },
+						{ context: requestContextLines, purpose, signal },
 					),
 				onError: (detail) => {
 					this.bodyError = m.git_compare_load_rows_failed({ detail });
@@ -265,6 +267,14 @@ export class GitComparisonController {
 				},
 				onStale: (message) => {
 					this.staleMessage = message;
+				},
+				onExpired: (message) => {
+					if (this.documentRecoveryAttempted) {
+						this.staleMessage = message;
+						return;
+					}
+					this.documentRecoveryAttempted = true;
+					void this.refresh(projectPath, true);
 				},
 			});
 			return true;
@@ -284,9 +294,9 @@ export class GitComparisonController {
 		}
 	}
 
-	async refresh(projectPath: string): Promise<void> {
+	async refresh(projectPath: string, isDocumentRecovery = false): Promise<void> {
 		this.restoreInputsFromSnapshot();
-		await this.compare(projectPath);
+		await this.compare(projectPath, isDocumentRecovery);
 	}
 
 	async checkFreshness(projectPath: string): Promise<void> {
@@ -359,6 +369,7 @@ export class GitComparisonController {
 		this.errorStatus = null;
 		this.errorEndpoint = null;
 		this.staleMessage = null;
+		this.documentRecoveryAttempted = false;
 		this.loadedContextLines = this.contextLines;
 		this.cancelHistorySelection();
 		this.document.clear();

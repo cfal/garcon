@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
+import {
+	createGitPatchIndex,
+	getGitSplitPatchIndex,
+} from '$lib/git/review/git-patch-index.js';
 
 const PATCH = `diff --git a/src/file.ts b/src/file.ts
 --- a/src/file.ts
@@ -62,6 +65,7 @@ describe('createGitPatchIndex', () => {
 
 	it('rejects a server row count mismatch', () => {
 		expect(() => createGitPatchIndex(PATCH, 10)).toThrow('Diff row count mismatch');
+		expect(() => createGitPatchIndex(PATCH, 0)).toThrow('Diff row count mismatch');
 	});
 
 	it('indexes both sections of a file type change', () => {
@@ -89,5 +93,11 @@ new file mode 120000
 		expect(index.rowCount).toBe(50_001);
 		expect(index.rowAt(50_000).text).toBe('line 49999');
 		expect(Object.values(index).some((value) => Array.isArray(value))).toBe(false);
+	});
+
+	it('reuses split alignment for the lifetime of a patch index', () => {
+		const index = createGitPatchIndex(PATCH, 9);
+
+		expect(getGitSplitPatchIndex(index)).toBe(getGitSplitPatchIndex(index));
 	});
 });

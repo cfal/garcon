@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
-import { createGitService } from "../git-service.js";
+import { createGitService as createProductionGitService } from "../git-service.js";
 import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
@@ -15,6 +15,7 @@ import {
   needsRevisionFailureDiagnostics,
 } from "../comparison-errors.js";
 import { GIT_REVIEW_DOCUMENT_LIMITS } from "../types.js";
+import { parseUnifiedPatchToRenderedRows } from "../rendered-diff.js";
 import { serializeWorktreeMtime } from "../worktrees.js";
 
 // Minimal classifier stub for toHttpError tests
@@ -38,6 +39,77 @@ function mockClassifyGitError(error) {
 const mockAgents = {
   runSingleQuery: () => Promise.resolve("chore: stub"),
 };
+
+function materializeReviewResponse(response) {
+  if (response.status !== "ready") return response;
+  return {
+    ...response,
+    files: Object.fromEntries(
+      Object.entries(response.files).map(([filePath, body]) => {
+        const rendered = body.patch
+          ? parseUnifiedPatchToRenderedRows(body.patch, { allowMultipleFileSections: true })
+          : { rows: [], hunks: [] };
+        return [filePath, { ...body, ...rendered }];
+      }),
+    ),
+  };
+}
+
+function createGitService(options) {
+  const service = createProductionGitService(options);
+  return {
+    ...service,
+    async getReviewFileBodies(request) {
+      let response = await service.getReviewDocumentFileBodies({
+        projectPath: request.projectPath,
+        documentId: request.documentId,
+        files: request.files,
+        purpose: "visible",
+        trace: request.trace,
+        signal: request.signal,
+      });
+      if (response.status === "document-expired") {
+        const snapshot = await service.getWorkbenchSnapshot({
+          projectPath: request.projectPath,
+          mode: request.mode,
+          context: request.context,
+          trace: request.trace,
+          signal: request.signal,
+        });
+        if (snapshot.status !== "ready") throw new Error(snapshot.message);
+        response = await service.getReviewDocumentFileBodies({
+          projectPath: request.projectPath,
+          documentId: snapshot.reviewSummary.documentId,
+          files: request.files,
+          purpose: "visible",
+          trace: request.trace,
+          signal: request.signal,
+        });
+      }
+      return materializeReviewResponse(response);
+    },
+    async getCommitFileBodies(request) {
+      return materializeReviewResponse(await service.getReviewDocumentFileBodies({
+        projectPath: request.projectPath,
+        documentId: request.documentId,
+        files: request.files.map((file) => file.path),
+        purpose: "visible",
+        trace: request.trace,
+        signal: request.signal,
+      }));
+    },
+    async getComparisonFileBodies(request) {
+      return materializeReviewResponse(await service.getReviewDocumentFileBodies({
+        projectPath: request.projectPath,
+        documentId: request.documentId,
+        files: request.files.map((file) => file.path),
+        purpose: "visible",
+        trace: request.trace,
+        signal: request.signal,
+      }));
+    },
+  };
+}
 
 async function runGitCommand(cwd, args) {
   return new Promise((resolve, reject) => {
@@ -146,7 +218,7 @@ describe("GitDomainError", () => {
 });
 
 describe("createGitService", () => {
-  const git = createGitService({
+  const git = createProductionGitService({
     agents: mockAgents,
     classifyGitError: mockClassifyGitError,
   });
@@ -164,9 +236,7 @@ describe("createGitService", () => {
       "createBranch",
       "getHistoryCommits",
       "getCommitSnapshot",
-      "getCommitFileBodies",
       "getComparisonSnapshot",
-      "getComparisonFileBodies",
       "generateCommitMessageForFiles",
       "getRemoteStatus",
       "getRemotes",
@@ -178,7 +248,7 @@ describe("createGitService", () => {
       "getWorkbenchSnapshot",
       "getWorkingTreeFingerprint",
       "getQuickSummary",
-      "getReviewFileBodies",
+      "getReviewDocumentFileBodies",
       "stageSelection",
       "stageHunk",
       "getWorktrees",

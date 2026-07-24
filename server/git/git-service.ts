@@ -7,6 +7,8 @@ import { createPorcelainOperations } from './porcelain.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
 import { createQuickSummaryOperations } from './quick-summary.js';
+import { GitReviewDocumentRegistry } from './review-document-registry.js';
+import { createReviewDocumentOperations } from './review-document-service.js';
 import type { ClassifiedGitError, CreateGitServiceOptions, GitService } from './types.js';
 import { createLogger } from '../lib/log.js';
 
@@ -43,9 +45,11 @@ export function createGitService({
   assertProjectPathAllowed,
 }: CreateGitServiceOptions): GitService {
   const status = createStatusOperations(agents);
-  const diff = createDiffEngine();
-  const commitHistory = createCommitHistoryOperations();
-  const comparison = createComparisonOperations(assertProjectPathAllowed);
+  const reviewRegistry = new GitReviewDocumentRegistry();
+  const diff = createDiffEngine(reviewRegistry);
+  const commitHistory = createCommitHistoryOperations(reviewRegistry);
+  const comparison = createComparisonOperations(reviewRegistry, assertProjectPathAllowed);
+  const reviewDocuments = createReviewDocumentOperations(reviewRegistry);
   const porcelain = createPorcelainOperations();
   const worktrees = createWorktreeOperations();
   const quickSummary = createQuickSummaryOperations();
@@ -55,6 +59,7 @@ export function createGitService({
     ...diff,
     ...commitHistory,
     ...comparison,
+    ...reviewDocuments,
     ...porcelain,
     ...worktrees,
     ...quickSummary,

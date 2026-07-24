@@ -423,6 +423,34 @@ describe('GitComparisonController', () => {
 		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]).toMatchObject({ context: 12 });
 	});
 
+	it('refreshes an expired comparison document once without retrying indefinitely', async () => {
+		const first = {
+			...workingTreeSnapshotWithFile(),
+			firstBodyCandidates: ['src/a.ts'],
+		};
+		const second = {
+			...first,
+			documentId: 'comparison-doc-recovered',
+		};
+		vi.mocked(getGitComparisonSnapshot)
+			.mockResolvedValueOnce(first)
+			.mockResolvedValueOnce(second);
+		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
+			status: 'document-expired',
+			documentId: 'expired-doc',
+			message: 'This comparison expired.',
+		});
+		const comparison = new GitComparisonController();
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
+
+		await comparison.compare('/project');
+
+		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledTimes(2));
+		expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2);
+		expect(comparison.staleMessage).toBe('This comparison expired.');
+	});
+
 	it('requires explicit refresh before applying context changes to a Working Tree snapshot', async () => {
 		const snapshot = workingTreeSnapshotWithFile();
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);

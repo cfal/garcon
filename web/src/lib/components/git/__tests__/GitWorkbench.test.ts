@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
 import type { GitWorkbenchTarget } from '$lib/git/workbench/git-workbench-types.js';
+import { emptyGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitWorkbenchTestHost from './GitWorkbenchTestHost.svelte';
 import {
 	installResizeObserverHarness,
@@ -45,8 +46,7 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		stagedFileCount: () => 0,
 	};
 	const review = {
-		virtualRows: [],
-		fileRowIndex: new Map<string, number>(),
+		rowSource: emptyGitVirtualReviewRowSource(),
 		scrollRequest: null,
 		summary: null,
 		fileBodies: {},

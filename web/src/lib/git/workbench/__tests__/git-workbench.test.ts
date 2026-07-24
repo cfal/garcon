@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
+import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type {
 	GitDiffActionTarget,
@@ -114,6 +115,9 @@ function makeReviewBody(
 	text = '',
 	fingerprint = `fingerprint:${path}`,
 ): GitReviewFileBody {
+	const patch = text
+		? `diff --git a/${path} b/${path}\n@@ -1 +1 @@\n ${text}\n`
+		: '';
 	return {
 		path,
 		bodyFingerprint: fingerprint,
@@ -122,50 +126,15 @@ function makeReviewBody(
 		isBinary: false,
 		isTooLarge: false,
 		renderedRowCount: text ? 2 : 0,
-		patchBytes: text.length,
-		rows: text
-			? [
-					{
-						key: 'hunk:0:hunk-0',
-						kind: 'hunk',
-						hunkIndex: 0,
-						hunkId: 'hunk-0',
-						beforeLine: null,
-						afterLine: null,
-						text: '@@ -1 +1 @@',
-						diffLineIndex: -1,
-					},
-					{
-						key: `line:0:context:1:1:${text}`,
-						kind: 'context',
-						hunkIndex: 0,
-						hunkId: 'hunk-0',
-						beforeLine: 1,
-						afterLine: 1,
-						text,
-						diffLineIndex: 0,
-					},
-				]
-			: [],
-		hunks: text
-			? [
-					{
-						id: 'hunk-0',
-						header: '@@ -1 +1 @@',
-						oldStart: 1,
-						oldLines: 1,
-						newStart: 1,
-						newLines: 1,
-						rowStartIndex: 0,
-						rowEndIndex: 1,
-					},
-				]
-			: [],
+		patchBytes: patch.length,
+		patch,
+		patchIndex: createGitPatchIndex(patch),
 	};
 }
 
 function makeReviewBodies(paths: string[]) {
 	return {
+		status: 'ready' as const,
 		documentId: 'doc',
 		files: Object.fromEntries(paths.map((path) => [path, makeReviewBody(path, `body:${path}`)])),
 		errors: {},
@@ -288,6 +257,7 @@ describe('GitWorkbenchStore', () => {
 		mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
 		mockedApi.getGitWorkingTreeFingerprint.mockResolvedValue(makeFingerprint('v1:baseline'));
 		mockedApi.getGitReviewFileBodies.mockResolvedValue({
+			status: 'ready',
 			documentId: 'doc',
 			files: { 'a.ts': makeReviewBody('a.ts') },
 			errors: {},
@@ -402,7 +372,7 @@ describe('GitWorkbenchStore', () => {
 
 			expect(wb.repositoryError).toBe('Git is not initialized in this directory.');
 			expect(wb.files.tree).toEqual([]);
-			expect(wb.review.virtualRows).toEqual([]);
+			expect(wb.review.rowSource.rowsInRange(0, wb.review.rowSource.rowCount)).toEqual([]);
 			expect(wb.loadedWorkbenchFingerprint).toBeNull();
 			expect(wb.isExternallyStale).toBe(false);
 			expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
@@ -618,6 +588,7 @@ describe('GitWorkbenchStore', () => {
 			const stage = wb.staging.stageHunk('/project', makeActionTarget(), 0);
 
 			bodyLoad.resolve({
+				status: 'ready',
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
 				errors: {},
@@ -644,6 +615,7 @@ describe('GitWorkbenchStore', () => {
 
 			await wb.setTarget(makeTarget());
 			bodyLoad.resolve({
+				status: 'ready',
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
 				errors: {},
@@ -756,6 +728,7 @@ describe('GitWorkbenchStore', () => {
 	describe('virtual review document', () => {
 		it('loads visible file bodies with the active tab and document id', async () => {
 			mockedApi.getGitReviewFileBodies.mockResolvedValue({
+				status: 'ready',
 				documentId: 'doc',
 				files: { 'a.ts': makeReviewBody('a.ts', 'loaded') },
 				errors: {},
@@ -790,14 +763,19 @@ describe('GitWorkbenchStore', () => {
 				);
 			});
 			await vi.waitFor(() => {
-				expect(wb.review.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
+				expect(
+					wb.review.rowSource
+						.rowsInRange(0, wb.review.rowSource.rowCount)
+						.some((row) => row.kind === 'unified-row'),
+				).toBe(true);
 			});
 		});
 
-		it('finishes the active body batch before loading newly visible files', async () => {
+		it('loads newly visible files after the active visible request without waiting for prefetch', async () => {
 			const paths = Array.from({ length: 9 }, (_, index) => `file-${index}.ts`);
 			const firstBodyCandidates = paths.slice(0, 8);
-			const firstBatch = deferred<ReturnType<typeof makeReviewBodies>>();
+			const firstVisible = deferred<ReturnType<typeof makeReviewBodies>>();
+			const prefetch = deferred<ReturnType<typeof makeReviewBodies>>();
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
 				makeWorkbenchSnapshot({
 					root: paths.map((path) => makeTreeFile(path)),
@@ -807,11 +785,15 @@ describe('GitWorkbenchStore', () => {
 				}),
 			);
 			mockedApi.getGitReviewFileBodies
-				.mockReturnValueOnce(firstBatch.promise)
+				.mockReturnValueOnce(firstVisible.promise)
+				.mockReturnValueOnce(prefetch.promise)
 				.mockResolvedValueOnce(makeReviewBodies([paths[8]]));
 
 			await wb.setTarget(makeTarget());
-			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(1));
+			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2));
+			expect(mockedApi.getGitReviewFileBodies.mock.calls[0]?.[2]).toEqual([paths[0]]);
+			expect(mockedApi.getGitReviewFileBodies.mock.calls[0]?.[5]?.purpose).toBe('visible');
+			expect(mockedApi.getGitReviewFileBodies.mock.calls[1]?.[5]?.purpose).toBe('prefetch');
 			const firstSignal = mockedApi.getGitReviewFileBodies.mock.calls[0]?.[5]?.signal;
 			const ninthFile = makeReviewFileSummary(paths[8]);
 			wb.handleVisibleReviewRows('/project', [
@@ -826,14 +808,126 @@ describe('GitWorkbenchStore', () => {
 			]);
 
 			expect(firstSignal?.aborted).toBe(false);
-			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(1);
-
-			firstBatch.resolve(makeReviewBodies(firstBodyCandidates));
+			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2);
+			firstVisible.resolve(makeReviewBodies([paths[0]]));
 			await vi.waitFor(() => {
-				expect(wb.review.fileBodies[paths[0]]?.bodyState).toBe('loaded');
-				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2);
+				expect(wb.review.fileBodies[paths[8]]?.bodyState).toBe('loaded');
+				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(3);
 			});
-			expect(mockedApi.getGitReviewFileBodies.mock.calls[1]?.[2]).toEqual([paths[8]]);
+			expect(mockedApi.getGitReviewFileBodies.mock.calls[2]?.[2]).toEqual([paths[8]]);
+			prefetch.resolve(makeReviewBodies(firstBodyCandidates.slice(1)));
+		});
+
+		it('keeps the selected body when a speculative body consumes the aggregate budget first', async () => {
+			const paths = ['selected.ts', 'prefetch.ts'];
+			const visible = deferred<ReturnType<typeof makeReviewBodies>>();
+			const prefetch = deferred<ReturnType<typeof makeReviewBodies>>();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: paths.map((path) => makeTreeFile(path)),
+					summary: makeReviewSummary(paths, {
+						limits: {
+							...makeReviewSummary(paths).limits,
+							maxLoadedRows: 2,
+						},
+					}),
+					selectedFile: paths[0],
+					firstBodyCandidates: paths,
+				}),
+			);
+			mockedApi.getGitReviewFileBodies
+				.mockReturnValueOnce(visible.promise)
+				.mockReturnValueOnce(prefetch.promise);
+
+			await wb.setTarget(makeTarget());
+			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2));
+			prefetch.resolve(makeReviewBodies([paths[1]]));
+			await vi.waitFor(() =>
+				expect(wb.review.fileBodies[paths[1]]?.bodyState).toBe('loaded'),
+			);
+
+			visible.resolve(makeReviewBodies([paths[0]]));
+
+			await vi.waitFor(() =>
+				expect(wb.review.fileBodies[paths[0]]?.bodyState).toBe('loaded'),
+			);
+			expect(wb.review.fileBodies[paths[1]]).toBeUndefined();
+			expect(wb.review.aggregateLimit).toBeNull();
+		});
+
+		it('honors a collection budget limit emitted by the server', async () => {
+			const paths = ['a.ts', 'b.ts', 'c.ts'];
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: paths.map((path) => makeTreeFile(path)),
+					summary: makeReviewSummary(paths),
+					selectedFile: paths[0],
+					firstBodyCandidates: [paths[0]],
+				}),
+			);
+			mockedApi.getGitReviewFileBodies.mockImplementation(
+				async (_project, _documentId, requestedPaths) => {
+					if (requestedPaths[0] !== 'b.ts') return makeReviewBodies(requestedPaths);
+					return {
+						status: 'ready' as const,
+						documentId: 'doc',
+						files: {
+							'b.ts': {
+								...makeReviewBody('b.ts'),
+								bodyState: 'too-large' as const,
+								category: 'large' as const,
+								isTooLarge: true,
+								renderedRowCount: 0,
+								patchBytes: 0,
+								patch: null,
+								patchIndex: null,
+								limitReason: 'collection-too-many-bytes' as const,
+								limitMessage: 'Server stopped after 42 patch bytes.',
+							},
+						},
+						errors: {},
+					};
+				},
+			);
+
+			await wb.setTarget(makeTarget());
+			await vi.waitFor(() => expect(wb.review.fileBodies['a.ts']).toBeTruthy());
+			wb.review.focusFile('/project', 'b.ts');
+
+			await vi.waitFor(() =>
+				expect(wb.review.aggregateLimit?.reason).toBe('collection-too-many-bytes'),
+			);
+			expect(wb.review.aggregateLimit?.message).toBe('Server stopped after 42 patch bytes.');
+			expect(wb.review.fileBodies['b.ts']?.bodyState).toBe('too-large');
+			expect(wb.review.fileBodies['c.ts']).toBeUndefined();
+		});
+
+		it('refreshes an expired workbench document once without retrying indefinitely', async () => {
+			const first = makeWorkbenchSnapshot({
+				root: [makeTreeFile('a.ts')],
+				summary: makeReviewSummary(['a.ts'], { documentId: 'expired-workbench-doc' }),
+				firstBodyCandidates: ['a.ts'],
+			});
+			const recovered = makeWorkbenchSnapshot({
+				root: [makeTreeFile('a.ts')],
+				summary: makeReviewSummary(['a.ts'], { documentId: 'recovered-workbench-doc' }),
+				firstBodyCandidates: ['a.ts'],
+			});
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(first)
+				.mockResolvedValueOnce(recovered);
+			mockedApi.getGitReviewFileBodies.mockResolvedValue({
+				status: 'document-expired',
+				documentId: 'expired-doc',
+				message: 'This workbench review expired.',
+			});
+
+			await wb.setTarget(makeTarget());
+
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
+			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2));
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2);
+			expect(wb.isExternallyStale).toBe(true);
 		});
 
 		it('ignores aborted body loads after tab changes', async () => {
@@ -865,6 +959,7 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.getGitReviewFileBodies
 				.mockReturnValueOnce(staleBodyLoad.promise)
 				.mockResolvedValueOnce({
+					status: 'ready',
 					documentId: 'staged-doc',
 					files: { 'a.ts': makeReviewBody('a.ts', 'new') },
 					errors: {},
@@ -888,13 +983,15 @@ describe('GitWorkbenchStore', () => {
 
 			await vi.waitFor(() => {
 				expect(
-					wb.review.virtualRows.some(
+					wb.review.rowSource.rowsInRange(0, wb.review.rowSource.rowCount).some(
 						(row) => row.kind === 'unified-row' && row.view.text === 'new',
 					),
 				).toBe(true);
 			});
 			expect(
-				wb.review.virtualRows.some((row) => row.kind === 'unified-row' && row.view.text === 'old'),
+				wb.review.rowSource
+					.rowsInRange(0, wb.review.rowSource.rowCount)
+					.some((row) => row.kind === 'unified-row' && row.view.text === 'old'),
 			).toBe(false);
 		});
 
@@ -928,7 +1025,11 @@ describe('GitWorkbenchStore', () => {
 			wb.setContextLines(10);
 
 			expect(wb.review.contextLines).toBe(10);
-			expect(wb.review.virtualRows.some((row) => row.kind === 'unified-row')).toBe(false);
+			expect(
+				wb.review.rowSource
+					.rowsInRange(0, wb.review.rowSource.rowCount)
+					.some((row) => row.kind === 'unified-row'),
+			).toBe(false);
 			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
 		});
 	});

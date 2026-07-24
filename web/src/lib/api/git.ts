@@ -1,7 +1,47 @@
 // Typed API client for git operations. All functions require the `project`
 // parameter (the project path on disk) to scope operations.
 
-import { apiGet, apiPost, type ApiFetchOptions } from './client.js';
+import {
+	apiGet,
+	apiPost,
+	type ApiFetchOptions,
+} from './client.js';
+import {
+	getGitReviewDocumentFileBodies,
+	type GitReviewBodyPurpose,
+	type GitReviewBodyState,
+	type GitReviewCollectionLimit,
+	type GitReviewDocumentIndexedFileBodiesResponse,
+	type GitReviewDocumentLimits,
+	type GitReviewFileBody,
+	type GitReviewLimitReason,
+	type GitReviewDocumentSummary,
+} from './git-review-documents.js';
+export {
+	getGitReviewDocumentFileBodies,
+	type GitFileReviewMode,
+	type GitReviewBodyPurpose,
+	type GitReviewBodyState,
+	type GitReviewCollectionLimit,
+	type GitReviewDocumentFileBodiesExpired,
+	type GitReviewDocumentFileBodiesReady,
+	type GitReviewDocumentFileBodiesResponse,
+	type GitReviewDocumentFileBodiesStale,
+	type GitReviewDocumentIndexedFileBodiesReady,
+	type GitReviewDocumentIndexedFileBodiesResponse,
+	type GitReviewDocumentLimits,
+	type GitReviewFileBody,
+	type GitReviewFilePatchBody,
+	type GitReviewFileSummary,
+	type GitReviewLimitReason,
+	type GitReviewDocumentSummary,
+	DEFAULT_GIT_REVIEW_DOCUMENT_LIMITS,
+} from './git-review-documents.js';
+import {
+	finishGitReviewPerformanceSpan,
+	registerGitReviewDocument,
+	startGitReviewPerformanceSpan,
+} from '$lib/git/review/git-review-performance.js';
 
 // Workbench contract types
 
@@ -12,9 +52,6 @@ export type GitStageMode = 'stage' | 'unstage';
 export const GIT_FRESHNESS_POLL_MS = 15_000;
 export const GIT_WORKING_TREE_FINGERPRINT_VERSION = 1;
 export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
-export type GitDiffLimitReason =
-	'patch-too-large' | 'too-many-rows' | 'line-too-long' | 'binary' | 'unsupported-file-kind';
-
 export interface GitChangeStats {
 	additions: number;
 	deletions: number;
@@ -55,170 +92,6 @@ export interface GitChangesTreeResult {
 }
 
 export type GitDiffTab = 'unstaged' | 'staged';
-export type GitFileReviewMode = 'working' | 'staged';
-export type GitReviewBodyState =
-	'unloaded' | 'loading' | 'loaded' | 'binary' | 'too-large' | 'error';
-export type GitReviewLimitReason =
-	| 'collection-too-many-files'
-	| 'collection-too-many-rows'
-	| 'collection-too-many-bytes'
-	| 'file-too-many-rows'
-	| 'file-too-many-bytes'
-	| 'line-too-long'
-	| 'binary'
-	| 'unsupported-file-kind'
-	| 'git-timeout';
-
-export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
-
-export interface GitRenderedDiffRow {
-	key: string;
-	kind: GitRenderedDiffRowKind;
-	hunkIndex: number;
-	hunkId: string;
-	beforeLine: number | null;
-	afterLine: number | null;
-	text: string;
-	diffLineIndex: number;
-}
-
-export interface GitRenderedHunk {
-	id: string;
-	header: string;
-	oldStart: number;
-	oldLines: number;
-	newStart: number;
-	newLines: number;
-	rowStartIndex: number;
-	rowEndIndex: number;
-}
-
-export interface GitFileReviewData {
-	path: string;
-	mode: GitFileReviewMode;
-	indexStatus?: GitStatusCode;
-	workTreeStatus?: GitStatusCode;
-	isBinary: boolean;
-	truncated: boolean;
-	truncatedReason?: string;
-	limitReason?: GitDiffLimitReason;
-	category?: GitFileReviewCategory;
-	rows: GitRenderedDiffRow[];
-	hunks: GitRenderedHunk[];
-	error?: string;
-}
-
-export interface GitReviewDocumentLimits {
-	maxSummaryFiles: number;
-	maxBodyBatchFiles: number;
-	maxLoadedRows: number;
-	maxLoadedPatchBytes: number;
-	maxFileRows: number;
-	maxFilePatchBytes: number;
-	maxLineBytes: number;
-	maxContextLines: number;
-	bodyConcurrency: number;
-}
-
-export interface GitReviewCollectionLimit {
-	reason: GitReviewLimitReason;
-	message: string;
-	visibleFiles: number;
-	totalFilesKnown: number;
-}
-
-export interface GitReviewFileSummary {
-	path: string;
-	originalPath?: string;
-	indexStatus: GitStatusCode;
-	workTreeStatus: GitStatusCode;
-	category: GitFileReviewCategory;
-	additions: number;
-	deletions: number;
-	statsKnown?: boolean;
-	estimatedRows: number;
-	bodyState: GitReviewBodyState;
-	bodyFingerprint: string;
-	isGenerated: boolean;
-	isBinary: boolean;
-	isTooLarge: boolean;
-	limitReason?: GitReviewLimitReason;
-	limitMessage?: string;
-}
-
-export interface GitReviewDocumentSummary {
-	documentId: string;
-	project: string;
-	mode: GitFileReviewMode;
-	context: number;
-	files: GitReviewFileSummary[];
-	limits: GitReviewDocumentLimits;
-	collectionLimit?: GitReviewCollectionLimit;
-}
-
-export interface GitReviewFileBody {
-	path: string;
-	bodyFingerprint: string;
-	bodyState: GitReviewBodyState;
-	category: GitFileReviewCategory;
-	isBinary: boolean;
-	isTooLarge: boolean;
-	renderedRowCount: number;
-	patchBytes: number;
-	rows: GitRenderedDiffRow[];
-	hunks: GitRenderedHunk[];
-	limitReason?: GitReviewLimitReason;
-	limitMessage?: string;
-	error?: string;
-}
-
-export interface GitReviewFilePatchBody {
-	path: string;
-	bodyFingerprint: string;
-	bodyState: GitReviewBodyState;
-	category: GitFileReviewCategory;
-	isBinary: boolean;
-	isTooLarge: boolean;
-	renderedRowCount: number;
-	patchBytes: number;
-	patch: string | null;
-	limitReason?: GitReviewLimitReason;
-	limitMessage?: string;
-	error?: string;
-}
-
-export type GitReviewBodyPurpose = 'visible' | 'prefetch';
-
-export interface GitReviewDocumentFileBodiesReady {
-	status: 'ready';
-	documentId: string;
-	files: Record<string, GitReviewFilePatchBody>;
-	errors: Record<string, string>;
-}
-
-export interface GitReviewDocumentFileBodiesStale {
-	status: 'stale';
-	documentId: string;
-	changedPaths: string[];
-	message: string;
-}
-
-export interface GitReviewDocumentFileBodiesExpired {
-	status: 'document-expired';
-	documentId: string;
-	message: string;
-}
-
-export type GitReviewDocumentFileBodiesResponse =
-	| GitReviewDocumentFileBodiesReady
-	| GitReviewDocumentFileBodiesStale
-	| GitReviewDocumentFileBodiesExpired;
-
-export interface GitReviewFileBodiesResponse {
-	documentId: string;
-	files: Record<string, GitReviewFileBody>;
-	errors: Record<string, string>;
-}
 
 export interface GitWorkbenchSnapshotTarget {
 	projectPath: string;
@@ -467,12 +340,6 @@ export interface GitDiffFileRequest {
 	originalPath?: string;
 }
 
-export interface GitCommitFileBodiesResponse {
-	documentId: string;
-	files: Record<string, GitCommitFileBody>;
-	errors: Record<string, string>;
-}
-
 export interface ConfirmAction {
 	type: 'discard' | 'delete' | 'commit' | 'pull' | 'push';
 	file?: string;
@@ -669,11 +536,18 @@ export async function getGitCommitSnapshot(
 	},
 ): Promise<GitCommitSnapshotResponse> {
 	const { parent = null, context = 5, bodyCandidateCount = 8, ...fetchOptions } = options ?? {};
-	return apiPost<GitCommitSnapshotResponse>(
-		'/api/v1/git/history/commit/snapshot',
-		{ project, commit, parent, context, bodyCandidateCount },
-		fetchOptions,
-	);
+	const span = startGitReviewPerformanceSpan('snapshot');
+	try {
+		const response = await apiPost<GitCommitSnapshotResponse>(
+			'/api/v1/git/history/commit/snapshot',
+			{ project, commit, parent, context, bodyCandidateCount },
+			fetchOptions,
+		);
+		if (response.status === 'ready') registerGitReviewDocument(response.documentId, span);
+		return response;
+	} finally {
+		finishGitReviewPerformanceSpan(span);
+	}
 }
 
 export async function getGitCommitFileBodies(
@@ -684,12 +558,20 @@ export async function getGitCommitFileBodies(
 	options?: ApiFetchOptions & {
 		parent?: string | null;
 		context?: number;
+		purpose?: GitReviewBodyPurpose;
 	},
-): Promise<GitCommitFileBodiesResponse> {
-	const { parent = null, context = 5, ...fetchOptions } = options ?? {};
-	return apiPost<GitCommitFileBodiesResponse>(
-		'/api/v1/git/history/commit/files',
-		{ project, documentId, commit, parent, context, files },
+): Promise<GitReviewDocumentIndexedFileBodiesResponse> {
+	const {
+		parent: _parent = null,
+		context: _context = 5,
+		purpose = 'prefetch',
+		...fetchOptions
+	} = options ?? {};
+	return getGitReviewDocumentFileBodies(
+		project,
+		documentId,
+		files.map((file) => file.path),
+		purpose,
 		fetchOptions,
 	);
 }
@@ -755,17 +637,26 @@ export async function getGitWorkbenchSnapshot(
 ): Promise<GitWorkbenchSnapshotResponse> {
 	const mode = tab === 'staged' ? 'staged' : 'working';
 	const { selectedFile = null, bodyCandidateCount = 8, ...fetchOptions } = options ?? {};
-	return apiPost<GitWorkbenchSnapshotResponse>(
-		'/api/v1/git/workbench/snapshot',
-		{
-			project,
-			mode,
-			context,
-			selectedFile,
-			bodyCandidateCount,
-		},
-		fetchOptions,
-	);
+	const span = startGitReviewPerformanceSpan('snapshot');
+	try {
+		const response = await apiPost<GitWorkbenchSnapshotResponse>(
+			'/api/v1/git/workbench/snapshot',
+			{
+				project,
+				mode,
+				context,
+				selectedFile,
+				bodyCandidateCount,
+			},
+			fetchOptions,
+		);
+		if (response.status === 'ready') {
+			registerGitReviewDocument(response.reviewSummary.documentId, span);
+		}
+		return response;
+	} finally {
+		finishGitReviewPerformanceSpan(span);
+	}
 }
 
 export async function getGitWorkingTreeFingerprint(
@@ -792,14 +683,12 @@ export async function getGitReviewFileBodies(
 	files: string[],
 	tab: GitDiffTab,
 	context = 5,
-	options?: ApiFetchOptions,
-): Promise<GitReviewFileBodiesResponse> {
-	const mode = tab === 'staged' ? 'staged' : 'working';
-	return apiPost<GitReviewFileBodiesResponse>(
-		'/api/v1/git/review-document/files',
-		{ project, documentId, files, mode, context },
-		options,
-	);
+	options?: ApiFetchOptions & { purpose?: GitReviewBodyPurpose },
+): Promise<GitReviewDocumentIndexedFileBodiesResponse> {
+	void tab;
+	void context;
+	const { purpose = 'prefetch', ...fetchOptions } = options ?? {};
+	return getGitReviewDocumentFileBodies(project, documentId, files, purpose, fetchOptions);
 }
 
 export async function getGitConflicts(

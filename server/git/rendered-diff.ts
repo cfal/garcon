@@ -3,7 +3,6 @@ import type {
   GitFileReviewCategory,
   GitRenderedDiffRow,
   GitRenderedHunk,
-  GitReviewFileBody,
   GitReviewFilePatchBody,
   GitReviewLimitReason,
 } from './types.js';
@@ -226,24 +225,54 @@ export interface ScannedUnifiedPatch {
   hunkCount: number;
 }
 
+interface InspectedUnifiedPatch extends ScannedUnifiedPatch {
+  hasBinaryMarker: boolean;
+  maxLineBytes: number;
+}
+
 export function scanUnifiedPatch(
   patchText: string,
   options: { allowMultipleFileSections?: boolean } = {},
 ): ScannedUnifiedPatch {
+  const { renderedRowCount, hunkCount } = inspectUnifiedPatch(patchText, options);
+  return { renderedRowCount, hunkCount };
+}
+
+function inspectUnifiedPatch(
+  patchText: string,
+  options: { allowMultipleFileSections?: boolean } = {},
+): InspectedUnifiedPatch {
   let renderedRowCount = 0;
   let hunkCount = 0;
   let currentHunkIndex = -1;
   let sawFileHeader = false;
-  const lines = patchText.split('\n');
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex];
-    if (line === '' && lineIndex === lines.length - 1) continue;
+  let countRows = true;
+  let hasBinaryMarker = false;
+  let maxLineBytes = 0;
+  let start = 0;
+  while (start < patchText.length) {
+    const newline = patchText.indexOf('\n', start);
+    const end = newline === -1 ? patchText.length : newline;
+    const line = patchText.slice(start, end);
+    start = newline === -1 ? patchText.length : newline + 1;
+    maxLineBytes = Math.max(maxLineBytes, Buffer.byteLength(line));
+    if (
+      line === 'GIT binary patch' ||
+      (line.startsWith('Binary files ') && line.endsWith(' differ'))
+    ) {
+      hasBinaryMarker = true;
+    }
     if (line.startsWith('diff --git ')) {
-      if (sawFileHeader && !options.allowMultipleFileSections) break;
+      if (sawFileHeader && !options.allowMultipleFileSections) {
+        countRows = false;
+        currentHunkIndex = -1;
+        continue;
+      }
       sawFileHeader = true;
       currentHunkIndex = -1;
       continue;
     }
+    if (!countRows) continue;
     if (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.test(line)) {
       currentHunkIndex = hunkCount;
       hunkCount += 1;
@@ -258,7 +287,7 @@ export function scanUnifiedPatch(
       renderedRowCount += 1;
     }
   }
-  return { renderedRowCount, hunkCount };
+  return { renderedRowCount, hunkCount, hasBinaryMarker, maxLineBytes };
 }
 
 export function limitedPatchFileBody(
@@ -308,7 +337,8 @@ export function compactRenderedPatch(
   patchText: string,
   options: { allowMultipleFileSections?: boolean } = {},
 ): GitReviewFilePatchBody {
-  if (hasBinaryPatchMarker(patchText)) {
+  const inspected = inspectUnifiedPatch(patchText, options);
+  if (inspected.hasBinaryMarker) {
     return limitedPatchFileBody(
       path,
       bodyFingerprint,
@@ -325,18 +355,15 @@ export function compactRenderedPatch(
       `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`,
     );
   }
-  for (const line of patchText.split('\n')) {
-    if (Buffer.byteLength(line) > GIT_REVIEW_DOCUMENT_LIMITS.maxLineBytes) {
-      return limitedPatchFileBody(
-        path,
-        bodyFingerprint,
-        'line-too-long',
-        `Diff contains a line over ${GIT_REVIEW_DOCUMENT_LIMITS.maxLineBytes} bytes.`,
-      );
-    }
+  if (inspected.maxLineBytes > GIT_REVIEW_DOCUMENT_LIMITS.maxLineBytes) {
+    return limitedPatchFileBody(
+      path,
+      bodyFingerprint,
+      'line-too-long',
+      `Diff contains a line over ${GIT_REVIEW_DOCUMENT_LIMITS.maxLineBytes} bytes.`,
+    );
   }
-  const scanned = scanUnifiedPatch(patchText, options);
-  if (scanned.renderedRowCount > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows) {
+  if (inspected.renderedRowCount > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows) {
     return limitedPatchFileBody(
       path,
       bodyFingerprint,
@@ -351,113 +378,8 @@ export function compactRenderedPatch(
     category: categoryForPath(path),
     isBinary: false,
     isTooLarge: false,
-    renderedRowCount: scanned.renderedRowCount,
+    renderedRowCount: inspected.renderedRowCount,
     patchBytes,
     patch: patchText,
   };
-}
-
-export function limitedFileBody(
-  path: string,
-  bodyFingerprint: string,
-  limitReason: GitReviewLimitReason,
-  limitMessage: string,
-): GitReviewFileBody {
-  const isBinary = limitReason === 'binary';
-  return {
-    path,
-    bodyFingerprint,
-    bodyState: isBinary ? 'binary' : 'too-large',
-    category: isBinary ? 'binary' : 'large',
-    isBinary,
-    isTooLarge: !isBinary,
-    renderedRowCount: 0,
-    patchBytes: 0,
-    limitReason,
-    limitMessage,
-    rows: [],
-    hunks: [],
-  };
-}
-
-export function errorFileBody(path: string, bodyFingerprint: string, message: string): GitReviewFileBody {
-  return {
-    path,
-    bodyFingerprint,
-    bodyState: 'error',
-    category: categoryForPath(path),
-    isBinary: false,
-    isTooLarge: false,
-    renderedRowCount: 0,
-    patchBytes: 0,
-    rows: [],
-    hunks: [],
-    error: message,
-  };
-}
-
-export function limitedRenderedPatch(
-  path: string,
-  bodyFingerprint: string,
-  patchText: string,
-  options: { allowMultipleFileSections?: boolean } = {},
-): GitReviewFileBody {
-  if (hasBinaryPatchMarker(patchText)) {
-    return limitedFileBody(
-      path,
-      bodyFingerprint,
-      'binary',
-      'Binary diff is not available.',
-    );
-  }
-
-  const patchBytes = Buffer.byteLength(patchText);
-  if (patchBytes > GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes) {
-    return limitedFileBody(
-      path,
-      bodyFingerprint,
-      'file-too-many-bytes',
-      `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`,
-    );
-  }
-
-  for (const line of patchText.split('\n')) {
-    if (Buffer.byteLength(line) > GIT_REVIEW_DOCUMENT_LIMITS.maxLineBytes) {
-      return limitedFileBody(
-        path,
-        bodyFingerprint,
-        'line-too-long',
-        `Diff contains a line over ${GIT_REVIEW_DOCUMENT_LIMITS.maxLineBytes} bytes.`,
-      );
-    }
-  }
-
-  const { rows, hunks } = parseUnifiedPatchToRenderedRows(patchText, options);
-  if (rows.length > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows) {
-    return limitedFileBody(
-      path,
-      bodyFingerprint,
-      'file-too-many-rows',
-      `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows} rendered rows.`,
-    );
-  }
-
-  return {
-    path,
-    bodyFingerprint,
-    bodyState: 'loaded',
-    category: categoryForPath(path),
-    isBinary: false,
-    isTooLarge: false,
-    renderedRowCount: rows.length,
-    patchBytes,
-    rows,
-    hunks,
-  };
-}
-
-function hasBinaryPatchMarker(patchText: string): boolean {
-  return patchText
-    .split('\n')
-    .some((line) => line === 'GIT binary patch' || /^Binary files .+ differ$/.test(line));
 }

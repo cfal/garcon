@@ -1,12 +1,6 @@
 import { promises as fs } from 'fs';
-import { buildFullFileAddedPatch } from './full-file-patch.js';
-import { limitedFileBody, limitedRenderedPatch } from './rendered-diff.js';
 import { resolvePathWithinProject } from './run.js';
-import {
-  GIT_REVIEW_DOCUMENT_LIMITS,
-  type GitComparisonFileRequest,
-  type GitReviewFileBody,
-} from './types.js';
+import { GIT_REVIEW_DOCUMENT_LIMITS } from './types.js';
 
 export interface UntrackedSummaryBudget {
   remainingBytes: number;
@@ -131,78 +125,4 @@ async function inspectUntrackedFile(
   } finally {
     await handle.close();
   }
-}
-
-type UntrackedFileRead =
-  | { status: 'text'; content: string }
-  | { status: 'binary' }
-  | { status: 'too-large' }
-  | { status: 'unsupported' };
-
-async function readUntrackedFile(
-  projectPath: string,
-  filePath: string,
-  signal?: AbortSignal,
-): Promise<UntrackedFileRead> {
-  signal?.throwIfAborted();
-  const resolvedPath = resolvePathWithinProject(projectPath, filePath);
-  const pathStats = await fs.lstat(resolvedPath);
-  signal?.throwIfAborted();
-  if (!pathStats.isFile()) return { status: 'unsupported' };
-
-  const handle = await fs.open(resolvedPath, 'r');
-  try {
-    signal?.throwIfAborted();
-    const stats = await handle.stat();
-    if (!stats.isFile()) return { status: 'unsupported' };
-    const byteLimit = GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes;
-    if (stats.size > byteLimit) return { status: 'too-large' };
-
-    const chunks: Buffer[] = [];
-    const readBuffer = Buffer.allocUnsafe(Math.min(64 * 1024, byteLimit + 1));
-    let bytesRead = 0;
-    while (bytesRead <= byteLimit) {
-      signal?.throwIfAborted();
-      const result = await handle.read(readBuffer, 0, readBuffer.length, bytesRead);
-      if (result.bytesRead === 0) break;
-      const chunk = Buffer.from(readBuffer.subarray(0, result.bytesRead));
-      if (chunk.includes(0x00)) return { status: 'binary' };
-      chunks.push(chunk);
-      bytesRead += result.bytesRead;
-      if (bytesRead > byteLimit) return { status: 'too-large' };
-    }
-    signal?.throwIfAborted();
-    return { status: 'text', content: Buffer.concat(chunks, bytesRead).toString('utf8') };
-  } finally {
-    await handle.close();
-  }
-}
-
-export async function loadUntrackedComparisonBody(
-  projectPath: string,
-  file: GitComparisonFileRequest,
-  fingerprint: string,
-  signal?: AbortSignal,
-): Promise<GitReviewFileBody> {
-  const result = await readUntrackedFile(projectPath, file.path, signal);
-  if (result.status === 'unsupported') {
-    return limitedFileBody(
-      file.path,
-      fingerprint,
-      'unsupported-file-kind',
-      'Only regular untracked files can be displayed.',
-    );
-  }
-  if (result.status === 'binary') {
-    return limitedFileBody(file.path, fingerprint, 'binary', 'Binary diff is not available.');
-  }
-  if (result.status === 'too-large') {
-    return limitedFileBody(
-      file.path,
-      fingerprint,
-      'file-too-many-bytes',
-      `File exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes} byte display limit.`,
-    );
-  }
-  return limitedRenderedPatch(file.path, fingerprint, buildFullFileAddedPatch(result.content));
 }

@@ -224,7 +224,7 @@
 								row.file.path,
 								row.view.beforeContextTarget,
 								row.view.selectionKey,
-								row.selectableLineKeys,
+								row.selectableLineKeys(),
 							)}
 						ondblclick={() => openEditor(row.file.path, row.view.row.beforeLine)}
 						title={m.git_comment_add_old_line_to_chat({
@@ -254,7 +254,7 @@
 								row.file.path,
 								row.view.afterContextTarget,
 								row.view.selectionKey,
-								row.selectableLineKeys,
+								row.selectableLineKeys(),
 							)}
 						ondblclick={() => openEditor(row.file.path, row.view.row.afterLine)}
 						title={m.git_comment_add_new_line_to_chat({ line: row.view.afterContextTarget.line })}
@@ -283,7 +283,7 @@
 								row.file.path,
 								defaultTarget,
 								row.view.selectionKey,
-								row.selectableLineKeys,
+								row.selectableLineKeys(),
 							)}
 					>
 						<span class="{row.view.textClass} select-text"
@@ -377,7 +377,7 @@
 										row.file.path,
 										cellView.contextTarget,
 										cellView.selectionKey,
-										row.selectableLineKeys,
+										row.selectableLineKeys(),
 									)}
 								ondblclick={() =>
 									openEditor(row.file.path, cellView.side === 'after' ? cellView.cell.line : null)}
@@ -413,7 +413,7 @@
 												row.file.path,
 												cellView.contextTarget,
 												cellView.selectionKey,
-												row.selectableLineKeys,
+												row.selectableLineKeys(),
 											)}
 									>
 										<span class="{cellView.textClass} select-text"

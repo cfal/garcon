@@ -3,6 +3,7 @@ import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 
 type GitVirtualDiffSurfaceProps = ComponentProps<typeof GitVirtualDiffSurface>;
@@ -42,8 +43,7 @@ function renderSurface(
 ) {
 	const props = {
 		documentId: 'doc',
-		rows,
-		fileRowIndex: new Map(rows.map((row, index) => [row.filePath, index])),
+		source: arrayGitVirtualReviewRowSource(rows),
 		activeTab: 'unstaged' as const,
 		fontSize: 12,
 		selectedLineKeys: new Set<string>(),
@@ -110,8 +110,7 @@ describe('GitVirtualDiffSurface', () => {
 
 		await rerender({
 			...props,
-			rows: replacementRows,
-			fileRowIndex: new Map([['file-2.ts', 0]]),
+			source: arrayGitVirtualReviewRowSource(replacementRows),
 		});
 
 		await waitFor(() => {

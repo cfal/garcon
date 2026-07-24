@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { GitDiffTab } from '$lib/api/git.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
 	import type {
 		CommentComposerState,
@@ -14,8 +15,7 @@
 
 	interface GitVirtualDiffSurfaceProps {
 		documentId: string | null;
-		rows: GitVirtualReviewRow[];
-		fileRowIndex: Map<string, number>;
+		source: GitVirtualReviewRowSource;
 		activeTab: GitDiffTab;
 		fontSize: number;
 		selectedLineKeys: Set<string>;
@@ -54,8 +54,7 @@
 
 	let {
 		documentId,
-		rows,
-		fileRowIndex,
+		source,
 		activeTab,
 		fontSize,
 		selectedLineKeys,
@@ -125,15 +124,14 @@
 		/>
 	{:else if row.kind === 'file-placeholder' || row.kind === 'file-limit' || row.kind === 'collection-limit'}
 		<GitVirtualPlaceholderRow {row} />
-	{:else}
+	{:else if row.kind === 'unified-row' || row.kind === 'split-row'}
 		<GitVirtualDiffRow {row} {fontSize} interaction={rowInteraction} {onOpenInEditor} />
 	{/if}
 {/snippet}
 
 <GitVirtualDiffViewport
 	{documentId}
-	{rows}
-	{fileRowIndex}
+	{source}
 	{fontSize}
 	{scrollToRequest}
 	{overscan}

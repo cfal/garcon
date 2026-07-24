@@ -4,8 +4,14 @@ import type {
 	GitDiffFileRequest,
 	GitReviewCollectionLimit,
 	GitReviewDocumentLimits,
-	GitReviewFileBodiesResponse,
+	GitReviewDocumentIndexedFileBodiesResponse,
 } from './git.js';
+import { getGitReviewDocumentFileBodies } from './git.js';
+import {
+	finishGitReviewPerformanceSpan,
+	registerGitReviewDocument,
+	startGitReviewPerformanceSpan,
+} from '$lib/git/review/git-review-performance.js';
 
 export type GitComparisonMode = 'direct' | 'merge-base';
 
@@ -124,20 +130,7 @@ export type GitComparisonFileRequest = GitDiffFileRequest;
 export type GitComparisonBodyTarget =
 	{ kind: 'revision'; hash: string } | { kind: 'working-tree'; fingerprint: string };
 
-export interface GitComparisonFileBodiesReady extends GitReviewFileBodiesResponse {
-	status: 'ready';
-}
-
-export interface GitComparisonFileBodiesStale {
-	status: 'stale';
-	documentId: string;
-	expectedFingerprint: string;
-	actualFingerprint: string | null;
-	message: string;
-}
-
-export type GitComparisonFileBodiesResponse =
-	GitComparisonFileBodiesReady | GitComparisonFileBodiesStale;
+export type GitComparisonFileBodiesResponse = GitReviewDocumentIndexedFileBodiesResponse;
 
 export async function getGitComparisonSnapshot(
 	project: string,
@@ -147,11 +140,18 @@ export async function getGitComparisonSnapshot(
 	options?: ApiFetchOptions & { context?: number; bodyCandidateCount?: number },
 ): Promise<GitComparisonSnapshotResponse> {
 	const { context = 5, bodyCandidateCount = 8, ...fetchOptions } = options ?? {};
-	return apiPost<GitComparisonSnapshotResponse>(
-		'/api/v1/git/comparisons/snapshot',
-		{ project, from, to, mode, context, bodyCandidateCount },
-		fetchOptions,
-	);
+	const span = startGitReviewPerformanceSpan('snapshot');
+	try {
+		const response = await apiPost<GitComparisonSnapshotResponse>(
+			'/api/v1/git/comparisons/snapshot',
+			{ project, from, to, mode, context, bodyCandidateCount },
+			fetchOptions,
+		);
+		if (response.status === 'ready') registerGitReviewDocument(response.documentId, span);
+		return response;
+	} finally {
+		finishGitReviewPerformanceSpan(span);
+	}
 }
 
 export async function getGitComparisonFreshness(
@@ -173,12 +173,19 @@ export async function getGitComparisonFileBodies(
 	effectiveFromHash: string,
 	to: GitComparisonBodyTarget,
 	files: GitComparisonFileRequest[],
-	options?: ApiFetchOptions & { context?: number },
+	options?: ApiFetchOptions & {
+		context?: number;
+		purpose?: import('./git.js').GitReviewBodyPurpose;
+	},
 ): Promise<GitComparisonFileBodiesResponse> {
-	const { context = 5, ...fetchOptions } = options ?? {};
-	return apiPost<GitComparisonFileBodiesResponse>(
-		'/api/v1/git/comparisons/files',
-		{ project, documentId, effectiveFromHash, to, files, context },
+	const { context: _context = 5, purpose = 'prefetch', ...fetchOptions } = options ?? {};
+	void effectiveFromHash;
+	void to;
+	return getGitReviewDocumentFileBodies(
+		project,
+		documentId,
+		files.map((file) => file.path),
+		purpose,
 		fetchOptions,
 	);
 }

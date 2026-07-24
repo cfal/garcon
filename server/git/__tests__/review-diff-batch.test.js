@@ -71,6 +71,47 @@ async function createRevisionDocument() {
   };
 }
 
+async function createLargeRevisionDocument() {
+  const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-review-budget-'));
+  temporaryDirectories.push(projectPath);
+  await git(projectPath, ['init']);
+  await git(projectPath, ['config', 'user.email', 'test@example.com']);
+  await git(projectPath, ['config', 'user.name', 'Test User']);
+  const paths = ['a.txt', 'b.txt', 'c.txt', 'd.txt'];
+  await Promise.all(paths.map((pathname) => fs.writeFile(path.join(projectPath, pathname), 'old\n')));
+  await git(projectPath, ['add', '.']);
+  await git(projectPath, ['commit', '-m', 'initial']);
+  const baseHash = await git(projectPath, ['rev-parse', 'HEAD']);
+  await Promise.all(
+    paths.map((pathname) =>
+      fs.writeFile(
+        path.join(projectPath, pathname),
+        Array.from({ length: 34_000 }, (_, index) => `${pathname}:${index}\n`).join(''),
+      ),
+    ),
+  );
+  await git(projectPath, ['add', '.']);
+  await git(projectPath, ['commit', '-m', 'large change']);
+  const targetHash = await git(projectPath, ['rev-parse', 'HEAD']);
+  const files = paths.map((pathname) => reviewFile(pathname, 34_000));
+  return {
+    document: {
+      id: 'large-document',
+      generation: 1,
+      sourceCacheKey: 'large-source',
+      projectPath,
+      repoRoot: projectPath,
+      context: 3,
+      source: { kind: 'comparison-revisions', effectiveFromHash: baseHash, toHash: targetHash },
+      filesByPath: new Map(files.map((file) => [file.path, file])),
+      workingPathTokens: new Map(),
+      createdAt: 0,
+      lastAccessedAt: 0,
+    },
+    files,
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) =>
@@ -103,5 +144,22 @@ describe('loadReviewDiffBatches', () => {
     expect(result.bodies).toHaveLength(2);
     expect(result.bodies.find((body) => body.path === 'a.txt')?.patch).toContain('+new a');
     expect(result.bodies.find((body) => body.path === 'b.txt')?.patch).toContain('+new b');
+  });
+
+  it('stops later Git batches after the response reaches the aggregate row budget', async () => {
+    const { document, files } = await createLargeRevisionDocument();
+    const trace = [];
+
+    const result = await loadReviewDiffBatches(document, files, trace);
+
+    expect(trace.filter((entry) => entry.args[0] === 'diff')).toHaveLength(3);
+    expect(result.bodies.map((body) => body.path)).toEqual(['a.txt', 'b.txt', 'c.txt']);
+    expect(result.bodies[0]?.bodyState).toBe('loaded');
+    expect(result.bodies[1]?.bodyState).toBe('loaded');
+    expect(result.bodies[2]).toMatchObject({
+      bodyState: 'too-large',
+      limitReason: 'collection-too-many-rows',
+    });
+    expect(result.bodies.some((body) => body.path === 'd.txt')).toBe(false);
   });
 });

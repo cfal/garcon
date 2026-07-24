@@ -23,7 +23,13 @@ import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
   type GitReviewFilePatchBody,
+  type GitReviewRouteMetrics,
 } from './types.js';
+import {
+  measureGitReviewPhase,
+  measureGitReviewPhaseSync,
+} from './review-performance.js';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 const TARGET_BATCH_ESTIMATED_ROWS = 20_000;
 const MAX_BATCH_STDOUT_BYTES = GIT_REVIEW_DOCUMENT_LIMITS.maxLoadedPatchBytes + 2_000_000;
@@ -37,6 +43,15 @@ export interface GitReviewDiffBatchResult {
   bodies: GitReviewFilePatchBody[];
   errors: Record<string, string>;
   metrics: GitReviewDiffBatchMetrics;
+}
+
+export interface GitReviewLoadedBodyTotals {
+  loadedRows: number;
+  loadedBytes: number;
+}
+
+interface ResponseBudget extends GitReviewLoadedBodyTotals {
+  exhausted: boolean;
 }
 
 export function planReviewDiffBatches(
@@ -135,10 +150,14 @@ function diffArgs(
 async function loadUntrackedBody(
   document: RegisteredGitReviewDocument,
   file: RegisteredGitReviewFile,
+  routeMetrics?: GitReviewRouteMetrics,
+  signal?: AbortSignal,
 ): Promise<GitReviewFilePatchBody> {
   try {
+    signal?.throwIfAborted();
     const filePath = resolvePathWithinProject(document.repoRoot, file.path);
-    const stats = await fs.stat(filePath);
+    const stats = await fs.lstat(filePath);
+    signal?.throwIfAborted();
     if (!stats.isFile()) {
       return limitedPatchFileBody(
         file.path,
@@ -163,12 +182,19 @@ async function loadUntrackedBody(
         'Binary diff is not available.',
       );
     }
-    return compactRenderedPatch(
-      file.path,
-      file.bodyFingerprint,
-      buildFullFileAddedPatch(await fs.readFile(filePath, 'utf8')),
+    const content = await fs.readFile(filePath, 'utf8');
+    signal?.throwIfAborted();
+    return measureGitReviewPhaseSync(
+      routeMetrics,
+      'patch-scan',
+      () => compactRenderedPatch(
+        file.path,
+        file.bodyFingerprint,
+        buildFullFileAddedPatch(content),
+      ),
     );
   } catch (error) {
+    if (signal?.aborted) throw error;
     return errorPatchFileBody(
       file.path,
       file.bodyFingerprint,
@@ -183,30 +209,47 @@ async function runTrackedBatch(
   trace: GitCommandTrace[] | undefined,
   signal: AbortSignal | undefined,
   metrics: GitReviewDiffBatchMetrics,
+  routeMetrics?: GitReviewRouteMetrics,
 ): Promise<GitReviewFilePatchBody[]> {
   metrics.batchCount += 1;
   try {
-    const { stdout } = await runGitTraced(
-      document.repoRoot,
-      diffArgs(document, files, false),
-      trace,
-      readOnlyGitOptions({ signal, maxStdoutBytes: MAX_BATCH_STDOUT_BYTES }),
+    const { stdout } = await measureGitReviewPhase(
+      routeMetrics,
+      'body-git',
+      () => runGitTraced(
+        document.repoRoot,
+        diffArgs(document, files, false),
+        trace,
+        readOnlyGitOptions({ signal, maxStdoutBytes: MAX_BATCH_STDOUT_BYTES }),
+      ),
     );
-    const split = splitPatchesFromRawDiff(stdout);
+    const split = measureGitReviewPhaseSync(
+      routeMetrics,
+      'body-split',
+      () => splitPatchesFromRawDiff(stdout),
+    );
     const bodies: GitReviewFilePatchBody[] = [];
     for (const file of files) {
       let entry = split.get(file.path);
       if (!entry || !splitMatches(document, file, entry)) {
-        const fallback = await runGitTraced(
-          document.repoRoot,
-          diffArgs(document, [file], true),
-          trace,
-          readOnlyGitOptions({
-            signal,
-            maxStdoutBytes: GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes + 1_000_000,
-          }),
+        const fallback = await measureGitReviewPhase(
+          routeMetrics,
+          'body-git',
+          () => runGitTraced(
+            document.repoRoot,
+            diffArgs(document, [file], true),
+            trace,
+            readOnlyGitOptions({
+              signal,
+              maxStdoutBytes: GIT_REVIEW_DOCUMENT_LIMITS.maxFilePatchBytes + 1_000_000,
+            }),
+          ),
         );
-        entry = splitPatchesFromRawDiff(fallback.stdout).get(file.path);
+        entry = measureGitReviewPhaseSync(
+          routeMetrics,
+          'body-split',
+          () => splitPatchesFromRawDiff(fallback.stdout).get(file.path),
+        );
       }
       if (!entry || !splitMatches(document, file, entry)) {
         bodies.push(errorPatchFileBody(
@@ -216,11 +259,15 @@ async function runTrackedBatch(
         ));
         continue;
       }
-      bodies.push(compactRenderedPatch(
-        file.path,
-        file.bodyFingerprint,
-        entry.patch,
-        { allowMultipleFileSections: entry.patchSectionCount > 1 },
+      bodies.push(measureGitReviewPhaseSync(
+        routeMetrics,
+        'patch-scan',
+        () => compactRenderedPatch(
+          file.path,
+          file.bodyFingerprint,
+          entry.patch,
+          { allowMultipleFileSections: entry.patchSectionCount > 1 },
+        ),
       ));
     }
     return bodies;
@@ -230,8 +277,22 @@ async function runTrackedBatch(
       metrics.bisectionCount += 1;
       const midpoint = Math.ceil(files.length / 2);
       return [
-        ...await runTrackedBatch(document, files.slice(0, midpoint), trace, signal, metrics),
-        ...await runTrackedBatch(document, files.slice(midpoint), trace, signal, metrics),
+        ...await runTrackedBatch(
+          document,
+          files.slice(0, midpoint),
+          trace,
+          signal,
+          metrics,
+          routeMetrics,
+        ),
+        ...await runTrackedBatch(
+          document,
+          files.slice(midpoint),
+          trace,
+          signal,
+          metrics,
+          routeMetrics,
+        ),
       ];
     }
     const file = files[0];
@@ -256,32 +317,161 @@ export async function loadReviewDiffBatches(
   requestedFiles: readonly RegisteredGitReviewFile[],
   trace?: GitCommandTrace[],
   signal?: AbortSignal,
+  routeMetrics?: GitReviewRouteMetrics,
+  initialTotals: GitReviewLoadedBodyTotals = { loadedRows: 0, loadedBytes: 0 },
 ): Promise<GitReviewDiffBatchResult> {
   const metrics = { batchCount: 0, bisectionCount: 0 };
   const bodies: GitReviewFilePatchBody[] = [];
   const errors: Record<string, string> = {};
   const tracked: RegisteredGitReviewFile[] = [];
+  const untracked: RegisteredGitReviewFile[] = [];
+  const budget = createResponseBudget(initialTotals);
 
   for (const file of requestedFiles) {
     if (file.bodyState !== 'unloaded') {
-      bodies.push(limitedPatchFileBody(
+      appendWithinResponseBudget(bodies, budget, limitedPatchFileBody(
         file.path,
         file.bodyFingerprint,
         file.limitReason ?? 'unsupported-file-kind',
         file.limitMessage ?? 'This file cannot be rendered.',
       ));
     } else if (isUntracked(document, file)) {
-      bodies.push(await loadUntrackedBody(document, file));
+      untracked.push(file);
     } else {
       tracked.push(file);
     }
   }
 
+  if (budget.exhausted) {
+    const firstUnloaded = untracked[0] ?? tracked[0];
+    if (firstUnloaded) bodies.push(responseLimitBody(firstUnloaded, budget));
+  }
+  for (
+    let offset = 0;
+    offset < untracked.length && !budget.exhausted;
+    offset += GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency
+  ) {
+    const group = untracked.slice(offset, offset + GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency);
+    const loaded = await mapWithConcurrencyResult(
+      group,
+      GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency,
+      (file) => loadUntrackedBody(document, file, routeMetrics, signal),
+    );
+    for (const body of loaded) {
+      appendWithinResponseBudget(bodies, budget, body);
+      if (budget.exhausted) break;
+    }
+  }
   for (const batch of planReviewDiffBatches(tracked)) {
-    bodies.push(...await runTrackedBatch(document, batch, trace, signal, metrics));
+    if (budget.exhausted) break;
+    const loaded = await runTrackedBatch(
+      document,
+      batch,
+      trace,
+      signal,
+      metrics,
+      routeMetrics,
+    );
+    for (const body of loaded) {
+      appendWithinResponseBudget(bodies, budget, body);
+      if (budget.exhausted) break;
+    }
   }
   for (const body of bodies) {
     if (body.error) errors[body.path] = body.error;
   }
+  if (routeMetrics) {
+    routeMetrics.batchCount = (routeMetrics.batchCount ?? 0) + metrics.batchCount;
+    routeMetrics.bisectionCount =
+      (routeMetrics.bisectionCount ?? 0) + metrics.bisectionCount;
+  }
   return { bodies, errors, metrics };
+}
+
+export function loadedGitReviewBodyTotals(
+  bodies: Iterable<GitReviewFilePatchBody>,
+): GitReviewLoadedBodyTotals {
+  let loadedRows = 0;
+  let loadedBytes = 0;
+  for (const body of bodies) {
+    if (body.bodyState !== 'loaded') continue;
+    loadedRows += body.renderedRowCount;
+    loadedBytes += body.patchBytes;
+  }
+  return { loadedRows, loadedBytes };
+}
+
+export function isGitReviewCollectionLimitBody(body: GitReviewFilePatchBody): boolean {
+  return body.limitReason === 'collection-too-many-rows'
+    || body.limitReason === 'collection-too-many-bytes';
+}
+
+export function limitGitReviewResponseBodies(
+  candidates: Iterable<GitReviewFilePatchBody>,
+): GitReviewFilePatchBody[] {
+  const bodies: GitReviewFilePatchBody[] = [];
+  const budget = createResponseBudget({ loadedRows: 0, loadedBytes: 0 });
+  for (const body of candidates) {
+    appendWithinResponseBudget(bodies, budget, body);
+    if (budget.exhausted) break;
+  }
+  return bodies;
+}
+
+function createResponseBudget(initialTotals: GitReviewLoadedBodyTotals): ResponseBudget {
+  return {
+    ...initialTotals,
+    exhausted:
+      initialTotals.loadedRows >= GIT_REVIEW_DOCUMENT_LIMITS.maxLoadedRows
+      || initialTotals.loadedBytes >= GIT_REVIEW_DOCUMENT_LIMITS.maxLoadedPatchBytes,
+  };
+}
+
+function appendWithinResponseBudget(
+  bodies: GitReviewFilePatchBody[],
+  budget: ResponseBudget,
+  body: GitReviewFilePatchBody,
+): void {
+  if (budget.exhausted) return;
+  if (isGitReviewCollectionLimitBody(body)) {
+    bodies.push(body);
+    budget.exhausted = true;
+    return;
+  }
+  if (body.bodyState !== 'loaded') {
+    bodies.push(body);
+    return;
+  }
+  const rowsExceeded =
+    budget.loadedRows + body.renderedRowCount > GIT_REVIEW_DOCUMENT_LIMITS.maxLoadedRows;
+  const bytesExceeded =
+    budget.loadedBytes + body.patchBytes > GIT_REVIEW_DOCUMENT_LIMITS.maxLoadedPatchBytes;
+  if (!rowsExceeded && !bytesExceeded) {
+    bodies.push(body);
+    budget.loadedRows += body.renderedRowCount;
+    budget.loadedBytes += body.patchBytes;
+    return;
+  }
+  const reason = rowsExceeded ? 'collection-too-many-rows' : 'collection-too-many-bytes';
+  bodies.push(responseLimitBody(body, budget, reason));
+  budget.exhausted = true;
+}
+
+function responseLimitBody(
+  file: Pick<RegisteredGitReviewFile, 'path' | 'bodyFingerprint'>,
+  budget: GitReviewLoadedBodyTotals,
+  reason: 'collection-too-many-rows' | 'collection-too-many-bytes' =
+    budget.loadedRows >= GIT_REVIEW_DOCUMENT_LIMITS.maxLoadedRows
+      ? 'collection-too-many-rows'
+      : 'collection-too-many-bytes',
+): GitReviewFilePatchBody {
+  const amount = reason === 'collection-too-many-rows'
+    ? `${budget.loadedRows.toLocaleString()} rendered rows`
+    : `${budget.loadedBytes.toLocaleString()} patch bytes`;
+  return limitedPatchFileBody(
+    file.path,
+    file.bodyFingerprint,
+    reason,
+    `Stopped loading after ${amount}.`,
+  );
 }

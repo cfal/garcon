@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitCommitVirtualDiffSurface from '../GitCommitVirtualDiffSurface.svelte';
 
 const file = {
@@ -34,7 +35,7 @@ const rows: GitVirtualReviewRow[] = [
 		estimatedHeight: 22,
 		file,
 		actionTarget: null,
-		selectableLineKeys: [],
+		selectableLineKeys: () => [],
 		view: {
 			key: 'add',
 			row: {
@@ -82,8 +83,7 @@ describe('GitCommitVirtualDiffSurface', () => {
 		const { container } = render(GitCommitVirtualDiffSurface, {
 			props: {
 				documentId: 'doc',
-				rows,
-				fileRowIndex: new Map([['a.ts', 0]]),
+				source: arrayGitVirtualReviewRowSource(rows),
 				fontSize: 12,
 				scrollToRequest: null,
 				composerState: {
