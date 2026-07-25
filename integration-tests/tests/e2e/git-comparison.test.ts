@@ -179,7 +179,7 @@ describe('Lightpanda Git comparison', () => {
       }
       expect(await fixture.page.$('[data-git-virtual-diff-root]')).not.toBeNull();
 
-      await app.clickButton('Chat');
+      await app.selectMainWorkspaceSurface('Chat');
       await fixture.page.waitForSelector('textarea[placeholder="Reply..."]');
       const draft = await fixture.page.$eval(
         'textarea[placeholder="Reply..."]',

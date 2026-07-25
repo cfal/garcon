@@ -70,7 +70,7 @@ describe('Lightpanda Git Changes comments', () => {
         button.click();
       });
       await app.waitForText('Added to the Chat composer.');
-      await app.clickButton('Chat');
+      await app.selectMainWorkspaceSurface('Chat');
       const draft = await fixture.page.$eval(
         'textarea[placeholder="Reply..."]',
         (element) => (element as HTMLTextAreaElement).value,

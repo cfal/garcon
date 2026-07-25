@@ -234,6 +234,56 @@ export class SpaDriver {
     }
   }
 
+  async selectMainWorkspaceSurface(name: string): Promise<void> {
+    const result = await this.#page.evaluate((expected) => {
+      const taskbar = document.querySelector<HTMLElement>(
+        '[data-floating-workspace-toolbar] [data-workspace-taskbar]',
+      );
+      if (!taskbar) return 'missing-taskbar';
+
+      const tab = [...taskbar.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+        (element) =>
+          (element.getAttribute('aria-label') || element.textContent?.trim() || '') === expected,
+      );
+      if (tab) {
+        if (tab.disabled || tab.getAttribute('aria-disabled') === 'true') return 'disabled';
+        return 'tab';
+      }
+
+      const menuTrigger = taskbar.querySelector<HTMLButtonElement>(
+        '[data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
+      );
+      if (!menuTrigger) return 'missing-menu';
+      return 'menu';
+    }, name);
+
+    if (result === 'tab') {
+      await this.clickButton(name);
+      return;
+    }
+    if (result === 'disabled') throw new Error(`Workspace surface is disabled: ${name}`);
+    if (result === 'missing-taskbar') throw new Error('Missing main workspace taskbar.');
+    if (result === 'missing-menu') throw new Error('Missing main workspace menu.');
+    try {
+      await this.#page.evaluate(() => {
+        const menuTrigger = document.querySelector<HTMLButtonElement>(
+          '[data-floating-workspace-toolbar] [data-workspace-taskbar-end] '
+            + '[data-slot="dropdown-menu-trigger"]',
+        );
+        if (!menuTrigger) throw new Error('Missing main workspace menu.');
+        menuTrigger.click();
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
+    }
+    await this.waitForMenuItemEnabled(name);
+    try {
+      await this.clickMenuItem(name);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
+    }
+  }
+
   async clickResponsiveAction(name: string): Promise<void> {
     const result = await this.#page.evaluate((expected) => {
       const roots = [...document.querySelectorAll<HTMLElement>('[data-responsive-surface-actions]')];
