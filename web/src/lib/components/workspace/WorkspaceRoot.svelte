@@ -7,6 +7,10 @@
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
+	import {
+		FLOATING_ICON_TRIGGER_CLASS,
+		FLOATING_TOOLBAR_RAIL_CLASS,
+	} from '$lib/components/shared/floating-toolbar-styles.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceSidebarHost from './WorkspaceSidebarHost.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
@@ -31,7 +35,10 @@
 	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
 	import { CHAT_SURFACE_ID, type HostId } from '$lib/workspace/surface-types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatDraftAppend, ChatDraftAppendResult } from '$lib/chat/composer/chat-draft-append.js';
+	import type {
+		ChatDraftAppend,
+		ChatDraftAppendResult,
+	} from '$lib/chat/composer/chat-draft-append.js';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action';
 	import {
 		renderedPortablePresentations,
@@ -335,7 +342,7 @@
 				{#if !isMobile}
 					<div
 						data-floating-workspace-toolbar
-						class={`pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 ${snapshot.main.order.length === 1 ? 'justify-end' : 'justify-center'}`}
+						class="pointer-events-none absolute inset-x-2 top-2 z-40 min-w-0"
 					>
 						<WorkspaceTaskBar
 							host="main"
@@ -348,13 +355,11 @@
 							{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
 							{#snippet endActions()}
 								{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
-									<div
-										class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-									>
+									<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
 										<button
 											bind:this={openSidebarButton}
 											type="button"
-											class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+											class={FLOATING_ICON_TRIGGER_CLASS}
 											onclick={() => void workspace.openSidebar()}
 											aria-label={m.workspace_open_sidebar()}
 											title={m.workspace_open_sidebar()}

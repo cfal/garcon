@@ -1,6 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceTaskBar from '../WorkspaceTaskBar.svelte';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '../../shared/__tests__/resize-observer-harness.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const {
@@ -248,5 +252,81 @@ describe('WorkspaceTaskBar', () => {
 		});
 
 		expect(screen.getByRole('tab', { name: 'Files' })).toBeTruthy();
+	});
+
+	it('keeps tab and menu controls in independent toolbar regions', () => {
+		const { container } = render(WorkspaceTaskBar, {
+			host: 'main',
+			hostState: {
+				order: ['singleton:chat', 'singleton:git'],
+				activeId: 'singleton:git',
+				mru: ['singleton:git', 'singleton:chat'],
+			},
+			labelFor: (surfaceId: string) => (surfaceId === 'singleton:chat' ? 'Chat' : 'Git'),
+			onSelect: vi.fn(),
+		});
+
+		const start = container.querySelector('[data-workspace-taskbar-start]');
+		const center = container.querySelector('[data-workspace-taskbar-center]');
+		const end = container.querySelector('[data-workspace-taskbar-end]');
+		const tablist = screen.getByRole('tablist', { name: m.workspace_main_views() });
+		const menu = screen.getByRole('button', { name: m.workspace_taskbar_actions() });
+
+		expect(start).toBeTruthy();
+		expect(center?.contains(tablist)).toBe(true);
+		expect(end?.contains(menu)).toBe(true);
+		expect(end?.contains(tablist)).toBe(false);
+	});
+
+	it('reserves equal side capacity for a geometrically centered tab rail', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		try {
+			const { container } = render(WorkspaceTaskBar, {
+				host: 'main',
+				hostState: {
+					order: ['singleton:chat', 'singleton:git', 'singleton:files', 'file:one'],
+					activeId: 'file:one',
+					mru: ['file:one', 'singleton:git', 'singleton:chat'],
+				},
+				labelFor: (surfaceId: string) =>
+					surfaceId === 'singleton:chat'
+						? 'Chat'
+						: surfaceId === 'singleton:git'
+							? 'Git'
+							: surfaceId === 'singleton:files'
+								? 'Files'
+								: 'one.ts',
+				onSelect: vi.fn(),
+			});
+			const root = container.querySelector<HTMLElement>('[data-workspace-taskbar]');
+			const start = container.querySelector<HTMLElement>('[data-workspace-taskbar-start]');
+			const center = container.querySelector<HTMLElement>('[data-workspace-taskbar-center]');
+			const end = container.querySelector<HTMLElement>('[data-workspace-taskbar-end]');
+			expect(root && start && center && end).toBeTruthy();
+			if (!root || !start || !center || !end) return;
+
+			Object.defineProperty(root, 'clientWidth', { configurable: true, value: 500 });
+			Object.defineProperty(start, 'offsetWidth', { configurable: true, value: 110 });
+			Object.defineProperty(end, 'offsetWidth', { configurable: true, value: 82 });
+			for (const item of container.querySelectorAll<HTMLElement>('[data-taskbar-measure-id]')) {
+				vi.spyOn(item, 'getBoundingClientRect').mockReturnValue({
+					width: 80,
+				} as DOMRect);
+			}
+
+			await waitFor(() =>
+				expect(
+					ResizeObserverHarness.instances.some((observer) => observer.observed.has(root)),
+				).toBe(true),
+			);
+			ResizeObserverHarness.emit(root, 500);
+
+			await waitFor(() => expect(center.style.maxWidth).toBe('268px'));
+			expect(screen.getAllByRole('tab')).toHaveLength(3);
+			expect(screen.getByRole('tab', { name: 'one.ts' })).toBeTruthy();
+			expect(screen.queryByRole('tab', { name: 'Files' })).toBeNull();
+		} finally {
+			restoreResizeObserver();
+		}
 	});
 });

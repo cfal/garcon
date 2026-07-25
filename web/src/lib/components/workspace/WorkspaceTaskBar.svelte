@@ -44,7 +44,18 @@
 		type PortableSingletonKind,
 	} from '$lib/workspace/surface-types.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-	import { selectVisibleTaskbarSurfaceIds } from './workspace-taskbar-layout';
+	import {
+		FLOATING_ICON_TRIGGER_CLASS,
+		FLOATING_TAB_ACTIVE_CLASS,
+		FLOATING_TAB_IDLE_CLASS,
+		FLOATING_TAB_TRIGGER_CLASS,
+		FLOATING_TOOLBAR_RAIL_CLASS,
+	} from '$lib/components/shared/floating-toolbar-styles.js';
+	import { cn } from '$lib/utils/cn';
+	import {
+		resolveCenteredTaskbarCapacity,
+		selectVisibleTaskbarSurfaceIds,
+	} from './workspace-taskbar-layout';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -54,6 +65,7 @@
 		labelFor,
 		onSelect,
 		onFocus,
+		startActions,
 		menuItems,
 		endActions,
 	}: {
@@ -63,6 +75,7 @@
 		labelFor: (surfaceId: string) => string;
 		onSelect: (surfaceId: string) => void;
 		onFocus?: (surfaceId: string) => void;
+		startActions?: Snippet;
 		menuItems?: Snippet;
 		endActions?: Snippet;
 	} = $props();
@@ -82,8 +95,10 @@
 	let tabViewport: HTMLDivElement | null = $state(null);
 	let measurementRail: HTMLDivElement | null = $state(null);
 	let taskbarRoot: HTMLDivElement | null = $state(null);
-	let menuControl: HTMLDivElement | null = $state(null);
-	let endControl: HTMLDivElement | null = $state(null);
+	let startControls: HTMLDivElement | null = $state(null);
+	let endControls: HTMLDivElement | null = $state(null);
+	let centeredRailMaxWidth: number | null = $state(null);
+	let centeredContentWidth: number | null = $state(null);
 	let visibleSurfaceIds = $state.raw<readonly string[] | null>(null);
 	let creatingTerminal = $state(false);
 	const hideSingleMainTab = $derived(host === 'main' && hostState.order.length === 1);
@@ -105,14 +120,16 @@
 	);
 
 	$effect(() => {
+		hostState.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
 		const root = taskbarRoot;
 		const rail = measurementRail;
-		const menu = menuControl;
-		if (!root || !rail || !menu || typeof ResizeObserver === 'undefined') return;
+		const start = startControls;
+		const end = endControls;
+		if (!root || !rail || !start || !end || typeof ResizeObserver === 'undefined') return;
 		const observer = new ResizeObserver(() => recomputeVisibleTabs());
-		observer.observe(root.parentElement ?? root);
-		observer.observe(menu);
-		if (endControl) observer.observe(endControl);
+		observer.observe(root);
+		observer.observe(start);
+		observer.observe(end);
 		observer.observe(rail);
 		for (const item of rail.querySelectorAll<HTMLElement>('[data-taskbar-measure-id]')) {
 			observer.observe(item);
@@ -122,7 +139,6 @@
 	});
 
 	$effect(() => {
-		hostState.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
 		hostState.activeId;
 		untrack(() => queueMicrotask(recomputeVisibleTabs));
 	});
@@ -169,28 +185,26 @@
 	}
 
 	function recomputeVisibleTabs(): void {
-		if (!taskbarRoot || !tabViewport || !measurementRail || !menuControl) return;
+		if (!taskbarRoot || !measurementRail || !startControls || !endControls) return;
 		const widths = new Map<string, number>();
 		for (const item of measurementRail.querySelectorAll<HTMLElement>('[data-taskbar-measure-id]')) {
 			const surfaceId = item.dataset.taskbarMeasureId;
 			if (surfaceId) widths.set(surfaceId, item.getBoundingClientRect().width);
 		}
-		const fixedWidth = menuControl.offsetWidth + (endControl?.offsetWidth ?? 0);
-		const controlCount = 1 + ((endControl?.offsetWidth ?? 0) > 0 ? 1 : 0);
-		const clusterGaps = controlCount * 6;
-		const railChrome = 6;
-		const availableWidth = Math.max(
-			0,
-			(taskbarRoot.parentElement?.clientWidth ?? taskbarRoot.clientWidth) -
-				fixedWidth -
-				clusterGaps -
-				railChrome,
-		);
+		const capacity = resolveCenteredTaskbarCapacity({
+			containerWidth: taskbarRoot.clientWidth,
+			startWidth: startControls.offsetWidth,
+			endWidth: endControls.offsetWidth,
+			regionGap: 6,
+			railChromeWidth: 6,
+		});
+		centeredRailMaxWidth = capacity.railWidth;
+		centeredContentWidth = capacity.contentWidth;
 		visibleSurfaceIds = selectVisibleTaskbarSurfaceIds({
 			order: hostState.order,
 			activeId: hostState.activeId,
 			pinnedIds: host === 'main' ? [CHAT_SURFACE_ID] : [],
-			availableWidth,
+			availableWidth: capacity.contentWidth,
 			widths,
 			gap: 2,
 		});
@@ -248,11 +262,15 @@
 		aria-selected={measurement ? undefined : hostState.activeId === surfaceId}
 		tabindex={measurement ? -1 : hostState.activeId === surfaceId ? 0 : -1}
 		data-taskbar-measure-id={measurement ? surfaceId : undefined}
-		class={`relative inline-flex h-8 max-w-40 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium transition-colors duration-150 sm:gap-1.5 sm:px-3 sm:text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
+		class={cn(
+			FLOATING_TAB_TRIGGER_CLASS,
 			!measurement && hostState.activeId === surfaceId
-				? 'bg-chat-tabs-active text-chat-tabs-active-foreground shadow-sm border border-chat-tabs-active-border'
-				: 'border border-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
-		}`}
+				? FLOATING_TAB_ACTIVE_CLASS
+				: FLOATING_TAB_IDLE_CLASS,
+		)}
+		style:max-width={measurement || centeredContentWidth == null
+			? undefined
+			: `${Math.min(160, centeredContentWidth)}px`}
 		title={labelFor(surfaceId)}
 		onclick={measurement ? undefined : () => onSelect(surfaceId)}
 		onfocus={measurement ? undefined : () => onFocus?.(surfaceId)}
@@ -312,97 +330,113 @@
 
 <div
 	bind:this={taskbarRoot}
-	class="pointer-events-auto relative flex w-max min-w-0 max-w-full items-center gap-1.5"
+	data-workspace-taskbar
+	class="pointer-events-none relative grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-x-1.5"
 >
-	{#if !hideSingleMainTab}
-		<div
-			class="relative flex min-w-0 items-center rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-		>
-			<div
-				bind:this={tabViewport}
-				class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
-				role="tablist"
-				aria-label={host === 'main' ? m.workspace_main_views() : m.workspace_sidebar_views()}
-			>
-				{#each displayedSurfaceIds as surfaceId (surfaceId)}
-					{@render tab(surfaceId)}
-				{/each}
+	<div
+		bind:this={startControls}
+		data-workspace-taskbar-start
+		class="pointer-events-auto min-w-0 justify-self-start"
+	>
+		{@render startActions?.()}
+	</div>
+
+	<div
+		data-workspace-taskbar-center
+		class="pointer-events-auto min-w-0 max-w-full justify-self-center overflow-hidden"
+		style:max-width={centeredRailMaxWidth == null ? undefined : `${centeredRailMaxWidth}px`}
+	>
+		{#if !hideSingleMainTab && displayedSurfaceIds.length > 0}
+			<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
+				<div
+					bind:this={tabViewport}
+					class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+					role="tablist"
+					aria-label={host === 'main' ? m.workspace_main_views() : m.workspace_sidebar_views()}
+				>
+					{#each displayedSurfaceIds as surfaceId (surfaceId)}
+						{@render tab(surfaceId)}
+					{/each}
+				</div>
 			</div>
-		</div>
-	{/if}
+		{/if}
+	</div>
 
-	<DropdownMenu>
-		<div
-			bind:this={menuControl}
-			class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-		>
-			<DropdownMenuTrigger
-				class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-				aria-label={m.workspace_taskbar_actions()}
-				title={m.workspace_taskbar_actions()}
-			>
-				<EllipsisVertical class="h-3.5 w-3.5" />
-			</DropdownMenuTrigger>
-		</div>
-		<DropdownMenuContent align="end" class="w-64">
-			{#if hasTabActions(activeSurfaceId)}
-				{@render tabActions(activeSurfaceId, DropdownMenuItem)}
-				<DropdownMenuSeparator />
-			{/if}
-			{#if hiddenSurfaceIds.length > 0}
-				<DropdownMenuLabel>{m.workspace_open_tabs()}</DropdownMenuLabel>
-				{#each hiddenSurfaceIds as surfaceId (surfaceId)}
-					<DropdownMenuItem onclick={() => onSelect(surfaceId)}>
-						{@render icon(surfaceId)}
-						<span class="min-w-0 truncate">{labelFor(surfaceId)}</span>
+	<div
+		bind:this={endControls}
+		data-workspace-taskbar-end
+		class="pointer-events-auto flex min-w-0 shrink-0 justify-self-end gap-1.5"
+	>
+		<DropdownMenu>
+			<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
+				<DropdownMenuTrigger
+					class={FLOATING_ICON_TRIGGER_CLASS}
+					aria-label={m.workspace_taskbar_actions()}
+					title={m.workspace_taskbar_actions()}
+				>
+					<EllipsisVertical class="h-3.5 w-3.5" />
+				</DropdownMenuTrigger>
+			</div>
+			<DropdownMenuContent align="end" class="w-64">
+				{#if hasTabActions(activeSurfaceId)}
+					{@render tabActions(activeSurfaceId, DropdownMenuItem)}
+					<DropdownMenuSeparator />
+				{/if}
+				{#if hiddenSurfaceIds.length > 0}
+					<DropdownMenuLabel>{m.workspace_open_tabs()}</DropdownMenuLabel>
+					{#each hiddenSurfaceIds as surfaceId (surfaceId)}
+						<DropdownMenuItem onclick={() => onSelect(surfaceId)}>
+							{@render icon(surfaceId)}
+							<span class="min-w-0 truncate">{labelFor(surfaceId)}</span>
+						</DropdownMenuItem>
+					{/each}
+					<DropdownMenuSeparator />
+				{/if}
+
+				<DropdownMenuItem
+					disabled={creatingTerminal || terminalLimitReached}
+					title={terminalLimitReached ? m.terminal_limit_reached() : undefined}
+					onclick={() => void createTerminal()}
+				>
+					<SquareTerminal />
+					{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
+				</DropdownMenuItem>
+				{#if unplacedTerminalSessions.length > 0}
+					<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
+					{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
+						<DropdownMenuItem
+							onclick={() => void workspace.openTerminalSession(session.metadata.terminalId, host)}
+						>
+							<SquareTerminal />
+							{m.workspace_surface_terminal_number({
+								number: session.metadata.displaySequence,
+							})}
+						</DropdownMenuItem>
+					{/each}
+				{/if}
+				{#each closedSingletonKinds as kind (kind)}
+					<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
+						{@render icon(singletonSurfaceId(kind))}
+						{m.workspace_open_surface({ surface: singletonLabels[kind]() })}
 					</DropdownMenuItem>
 				{/each}
-				<DropdownMenuSeparator />
-			{/if}
-
-			<DropdownMenuItem
-				disabled={creatingTerminal || terminalLimitReached}
-				title={terminalLimitReached ? m.terminal_limit_reached() : undefined}
-				onclick={() => void createTerminal()}
-			>
-				<SquareTerminal />
-				{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
-			</DropdownMenuItem>
-			{#if unplacedTerminalSessions.length > 0}
-				<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
-				{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
-					<DropdownMenuItem
-						onclick={() => void workspace.openTerminalSession(session.metadata.terminalId, host)}
-					>
-						<SquareTerminal />
-						{m.workspace_surface_terminal_number({
-							number: session.metadata.displaySequence,
-						})}
+				{#if menuItems}
+					<DropdownMenuSeparator />
+					{@render menuItems()}
+				{/if}
+				{#if activeSurfaceId === singletonSurfaceId('files')}
+					<DropdownMenuSeparator />
+					<DropdownMenuItem onclick={() => fileSessions.showOpenFiles()}>
+						<FolderOpen />
+						{m.file_session_file_sessions()}
 					</DropdownMenuItem>
-				{/each}
-			{/if}
-			{#each closedSingletonKinds as kind (kind)}
-				<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
-					{@render icon(singletonSurfaceId(kind))}
-					{m.workspace_open_surface({ surface: singletonLabels[kind]() })}
-				</DropdownMenuItem>
-			{/each}
-			{#if menuItems}
-				<DropdownMenuSeparator />
-				{@render menuItems()}
-			{/if}
-			{#if activeSurfaceId === singletonSurfaceId('files')}
-				<DropdownMenuSeparator />
-				<DropdownMenuItem onclick={() => fileSessions.showOpenFiles()}>
-					<FolderOpen />
-					{m.file_session_file_sessions()}
-				</DropdownMenuItem>
-			{/if}
-		</DropdownMenuContent>
-	</DropdownMenu>
+				{/if}
+			</DropdownMenuContent>
+		</DropdownMenu>
 
-	<div bind:this={endControl} class="flex shrink-0 empty:hidden">
-		{@render endActions?.()}
+		<div class="flex shrink-0 empty:hidden">
+			{@render endActions?.()}
+		</div>
 	</div>
 
 	<div

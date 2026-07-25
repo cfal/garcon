@@ -678,7 +678,7 @@ describe('WorkspaceRoot', () => {
 		).toBe('false');
 	});
 
-	it('centers desktop taskbars when they contain multiple tabs', () => {
+	it('centers tabs independently from end-aligned desktop toolbar controls', () => {
 		installContext(withAdditionalSurfaces());
 		const { container } = render(WorkspaceRoot, {
 			isMobile: false,
@@ -686,11 +686,19 @@ describe('WorkspaceRoot', () => {
 		});
 		const mainToolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
 		const sidebarToolbar = container.querySelector<HTMLElement>('[data-floating-sidebar-toolbar]');
+		const mainCenter = mainToolbar?.querySelector('[data-workspace-taskbar-center]');
+		const mainEnd = mainToolbar?.querySelector('[data-workspace-taskbar-end]');
+		const sidebarCenter = sidebarToolbar?.querySelector('[data-workspace-taskbar-center]');
+		const sidebarEnd = sidebarToolbar?.querySelector('[data-workspace-taskbar-end]');
 
-		expect(mainToolbar?.classList.contains('justify-center')).toBe(true);
+		expect(mainToolbar?.classList.contains('justify-center')).toBe(false);
 		expect(mainToolbar?.classList.contains('justify-end')).toBe(false);
-		expect(sidebarToolbar?.classList.contains('justify-center')).toBe(true);
+		expect(sidebarToolbar?.classList.contains('justify-center')).toBe(false);
 		expect(sidebarToolbar?.classList.contains('justify-start')).toBe(false);
+		expect(mainCenter?.querySelector('[role="tablist"]')).toBeTruthy();
+		expect(mainEnd?.querySelector(`[aria-label="${m.workspace_taskbar_actions()}"]`)).toBeTruthy();
+		expect(sidebarCenter?.querySelector('[role="tablist"]')).toBeTruthy();
+		expect(sidebarEnd?.querySelector(`[aria-label="${m.workspace_close_sidebar()}"]`)).toBeTruthy();
 	});
 
 	it('binds focus, move, and close for every portable kind without replacing Chat', async () => {

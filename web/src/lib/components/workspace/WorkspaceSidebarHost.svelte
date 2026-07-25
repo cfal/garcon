@@ -16,6 +16,10 @@
 	} from '$lib/workspace/surface-types.js';
 	import type { RenderedPortablePresentation } from '$lib/workspace/visible-presentations.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
+	import {
+		FLOATING_ICON_TRIGGER_CLASS,
+		FLOATING_TOOLBAR_RAIL_CLASS,
+	} from '$lib/components/shared/floating-toolbar-styles.js';
 	import WorkspaceSidebarResizeHandle from './WorkspaceSidebarResizeHandle.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
 	import type { DesktopLayoutEdge, MainInlineInsets } from '$lib/layout/desktop-layout.js';
@@ -221,7 +225,7 @@
 		{/if}
 		<div
 			data-floating-sidebar-toolbar
-			class="pointer-events-none absolute inset-x-2 top-2 z-40 flex min-w-0 justify-center"
+			class="pointer-events-none absolute inset-x-2 top-2 z-40 min-w-0"
 		>
 			<WorkspaceTaskBar
 				host="sidebar"
@@ -232,12 +236,10 @@
 				onFocus={(surfaceId) => workspace.noteHostChromeFocus('sidebar', surfaceId)}
 			>
 				{#snippet endActions()}
-					<div
-						class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-					>
+					<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
 						<button
 							type="button"
-							class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+							class={FLOATING_ICON_TRIGGER_CLASS}
 							onclick={() => void workspace.closeSidebar()}
 							aria-label={m.workspace_close_sidebar()}
 							title={m.workspace_close_sidebar()}
