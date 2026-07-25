@@ -56,7 +56,9 @@
 				{chatName}
 			</span>
 			{#if isUnread}
-				<span class="sr-only">{m.sidebar_chat_unread()}</span>
+				<span class="sr-only" data-slot="sidebar-chat-unread-status">
+					{m.sidebar_chat_unread()}
+				</span>
 			{/if}
 			{#if isProcessing}
 				<span class="sr-only">{m.chat_pane_processing()}</span>

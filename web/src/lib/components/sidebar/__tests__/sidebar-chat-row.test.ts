@@ -75,7 +75,9 @@ describe('shared sidebar chat row', () => {
 		expect(pinnedBadges).toHaveLength(1);
 		const title = screen.getByText('Shared row chat');
 		expect(title.className).toContain('font-semibold');
-		expect(screen.getByText('Unread').className).toContain('sr-only');
+		const unreadStatus = screen.getByText('Unread');
+		expect(unreadStatus.className).toContain('sr-only');
+		expect(unreadStatus.getAttribute('data-slot')).toBe('sidebar-chat-unread-status');
 		expect(document.querySelector('.bg-indicator-unread')).toBeNull();
 		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeNull();
 		expect(screen.getByText('3h ago')).toBeTruthy();

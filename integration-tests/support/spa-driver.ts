@@ -504,7 +504,7 @@ export class SpaDriver {
         const summary = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]')]
           .find((element) => element.innerText.includes(chatMarker));
         if (!summary) return false;
-        return Boolean(summary.querySelector('[aria-label="Unread"]')) === shouldBeUnread;
+        return Boolean(summary.querySelector('[data-slot="sidebar-chat-unread-status"]')) === shouldBeUnread;
       },
       { timeout: 20_000 },
       chatText,
