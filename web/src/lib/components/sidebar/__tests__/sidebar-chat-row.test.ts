@@ -305,6 +305,7 @@ describe('shared sidebar chat row', () => {
 	it('renders the same chat summary content inside the search dialog rows', async () => {
 		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat({ isPinned: true, isProcessing: true })],
+			reduceMotion: true,
 		});
 
 		const option = await screen.findByRole('option');
@@ -316,9 +317,14 @@ describe('shared sidebar chat row', () => {
 		expect(option.querySelector('[data-slot="sidebar-chat-summary"]')).toBeTruthy();
 		expect(option.querySelector('.border-sidebar-badge-pinned-border')).toBeNull();
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
-		expect(screen.queryByLabelText('Unread')).toBeNull();
+		expect(screen.getByText('Unread').className).toContain('sr-only');
 		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
-		expect(option.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+		const processingIndicator = option.querySelector(
+			'[data-slot="sidebar-chat-processing-indicator"]',
+		);
+		expect(processingIndicator).toBeTruthy();
+		expect(processingIndicator?.closest('.sidebar-reduce-motion')).toBeTruthy();
+		expect(screen.getByText('Shared row chat').className).toContain('font-semibold');
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByText('3h ago')).toBeTruthy();

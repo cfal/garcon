@@ -255,8 +255,6 @@
 		<SidebarChatSummary
 			{session}
 			{isSelected}
-			{isPinned}
-			{isArchived}
 			{currentTime}
 			showTimestamp={true}
 			showProjectPath={!displayOptions.groupByProject || showProjectPathInGroup}

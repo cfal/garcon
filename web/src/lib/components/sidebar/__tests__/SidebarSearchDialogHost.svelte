@@ -12,6 +12,7 @@
 		onCreateSavedSearch?: () => void;
 		onOpenManager?: () => void;
 		onClose?: () => void;
+		reduceMotion?: boolean;
 	}
 
 	let {
@@ -23,6 +24,7 @@
 		onCreateSavedSearch,
 		onOpenManager,
 		onClose,
+		reduceMotion = false,
 	}: SidebarSearchDialogHostProps = $props();
 
 	let query = $state('');
@@ -52,6 +54,7 @@
 	{savedSearches}
 	{currentTime}
 	{highlightedIndex}
+	{reduceMotion}
 	onQueryChange={handleQueryChange}
 	onSelectChat={(chatId) => onSelectChat?.(chatId)}
 	onApplySavedSearch={handleApplySavedSearch}

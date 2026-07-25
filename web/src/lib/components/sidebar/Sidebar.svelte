@@ -604,6 +604,7 @@
 	onRetryTranscriptSearch={() => {
 		transcriptSearchRetryVersion += 1;
 	}}
+	reduceMotion={localSettings.reduceMotion}
 	onClose={() => sidebarSearch.closeSearchDialog()}
 />
 

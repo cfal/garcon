@@ -37,6 +37,7 @@
 		onRetryTranscriptSearch?: () => void;
 		onClose: () => void;
 		showSavedSearchActions?: boolean;
+		reduceMotion?: boolean;
 		overlayClass?: string;
 		backdropTreatment?: 'standard' | 'interaction-only';
 		contentRole?: 'dialog' | 'presentation';
@@ -64,6 +65,7 @@
 		onRetryTranscriptSearch = () => {},
 		onClose,
 		showSavedSearchActions = true,
+		reduceMotion = false,
 		overlayClass,
 		backdropTreatment = 'standard',
 		contentRole = 'dialog',
@@ -148,6 +150,7 @@
 		class={cn(
 			'fixed inset-0 z-50',
 			backdropTreatment === 'standard' && 'transient-backdrop',
+			reduceMotion && 'sidebar-reduce-motion',
 			overlayClass,
 		)}
 		role="presentation"

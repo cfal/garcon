@@ -9,8 +9,7 @@
 	interface SidebarChatSummaryProps {
 		session: ChatSessionRecord;
 		isSelected: boolean;
-		isPinned: boolean;
-		isArchived: boolean;
+		suppressUnread?: boolean;
 		currentTime?: Date;
 		showTimestamp?: boolean;
 		showProjectPath?: boolean;
@@ -22,6 +21,7 @@
 	let {
 		session,
 		isSelected,
+		suppressUnread,
 		currentTime = new Date(),
 		showTimestamp = false,
 		showProjectPath = true,
@@ -30,7 +30,7 @@
 		onManageTags,
 	}: SidebarChatSummaryProps = $props();
 
-	let isUnread = $derived(session.isUnread && !isSelected);
+	let isUnread = $derived(session.isUnread && !(suppressUnread ?? isSelected));
 	let isProcessing = $derived(session.isProcessing);
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let lastMessage = $derived(session.lastMessage || '');

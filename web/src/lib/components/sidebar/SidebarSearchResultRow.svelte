@@ -51,8 +51,7 @@
 	<SidebarChatSummary
 		session={chat}
 		isSelected={isHighlighted}
-		isPinned={chat.isPinned}
-		isArchived={chat.isArchived}
+		suppressUnread={false}
 		{currentTime}
 		showTimestamp={true}
 	/>
