@@ -20,19 +20,23 @@ export type PinnedInsertPosition = 'top' | 'bottom';
 export const DEFAULT_APP_TITLE = 'Garcon';
 export const APP_TITLE_MAX_LENGTH = 120;
 
-export interface GenerationUiSettings {
-  enabled?: boolean;
+export interface GenerationSelectionUiSettings {
   agentId?: AgentId;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
   thinkingMode?: ThinkingMode;
+}
+
+export interface ChatTitleUiSettings extends GenerationSelectionUiSettings {
+  enabled?: boolean;
+}
+
+export interface CommitMessageUiSettings extends GenerationSelectionUiSettings {
   customPrompt?: string;
   useCommonDirPrefix?: boolean;
 }
-
-export type CommitMessageUiSettings = Omit<GenerationUiSettings, 'enabled'>;
 
 export interface TelegramNotificationSettings {
   enabled?: boolean;
@@ -55,7 +59,7 @@ export interface RemoteTelegramStatus {
 
 export interface RemoteUiSettings {
   pinnedInsertPosition?: PinnedInsertPosition;
-  chatTitle?: GenerationUiSettings;
+  chatTitle?: ChatTitleUiSettings;
   commitMessage?: CommitMessageUiSettings;
   appIdentity?: AppIdentityUiSettings;
   notifications?: {
@@ -63,19 +67,22 @@ export interface RemoteUiSettings {
   };
 }
 
-type EffectiveGenerationExtras = {
+type EffectiveGenerationSelection = {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+};
+
+type EffectiveCommitMessageExtras = EffectiveGenerationSelection & {
   customPrompt?: string;
   useCommonDirPrefix?: boolean;
 };
 
 export interface RemoteUiEffectiveSettings {
-  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
-    EffectiveGenerationExtras;
+  chatTitle?: Required<Pick<ChatTitleUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
+    EffectiveGenerationSelection;
   commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model' | 'thinkingMode'>> &
-    EffectiveGenerationExtras;
+    EffectiveCommitMessageExtras;
 }
 
 export interface RemotePathSettings {
@@ -163,16 +170,13 @@ function safeOptionalProtocol(value: unknown): ApiProtocol | null {
   return null;
 }
 
-function normalizeGenerationUiSettings(
+function normalizeGenerationSelection(
   value: unknown,
-  options: { includeEnabled?: boolean } = {},
-): GenerationUiSettings | undefined {
+): GenerationSelectionUiSettings | undefined {
   const raw = asRecord(value);
   if (!raw) return undefined;
 
-  const includeEnabled = options.includeEnabled ?? true;
-  const normalized: GenerationUiSettings = {};
-  if (includeEnabled && typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  const normalized: GenerationSelectionUiSettings = {};
   if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
@@ -180,6 +184,29 @@ function normalizeGenerationUiSettings(
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
   const thinkingMode = coerceThinkingMode(raw.thinkingMode);
   if (thinkingMode) normalized.thinkingMode = thinkingMode;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizeChatTitleUiSettings(value: unknown): ChatTitleUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: ChatTitleUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
+  if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizeCommitMessageUiSettings(
+  value: unknown,
+): CommitMessageUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+
+  const normalized: CommitMessageUiSettings = {
+    ...normalizeGenerationSelection(raw),
+  };
   if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
@@ -196,13 +223,20 @@ function normalizeAppIdentityUiSettings(value: unknown): AppIdentityUiSettings |
   return { title };
 }
 
-function normalizeEffectiveGenerationExtras(
+function normalizeEffectiveGenerationSelection(
   raw: Record<string, unknown>,
-  normalized: EffectiveGenerationExtras,
+  normalized: EffectiveGenerationSelection,
 ): void {
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
+}
+
+function normalizeEffectiveCommitMessageExtras(
+  raw: Record<string, unknown>,
+  normalized: EffectiveCommitMessageExtras,
+): void {
+  normalizeEffectiveGenerationSelection(raw, normalized);
   if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
@@ -224,7 +258,7 @@ function normalizeChatTitleUiEffectiveSettings(
     model: raw.model,
     thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
-  normalizeEffectiveGenerationExtras(raw, normalized);
+  normalizeEffectiveGenerationSelection(raw, normalized);
   return normalized;
 }
 
@@ -241,7 +275,7 @@ function normalizeCommitMessageUiEffectiveSettings(
     model: raw.model,
     thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
-  normalizeEffectiveGenerationExtras(raw, normalized);
+  normalizeEffectiveCommitMessageExtras(raw, normalized);
   return normalized;
 }
 
@@ -254,10 +288,10 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
     normalized.pinnedInsertPosition = raw.pinnedInsertPosition;
   }
 
-  const chatTitle = normalizeGenerationUiSettings(raw.chatTitle);
+  const chatTitle = normalizeChatTitleUiSettings(raw.chatTitle);
   if (chatTitle) normalized.chatTitle = chatTitle;
 
-  const commitMessage = normalizeGenerationUiSettings(raw.commitMessage, { includeEnabled: false });
+  const commitMessage = normalizeCommitMessageUiSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;
 
   const appIdentity = normalizeAppIdentityUiSettings(raw.appIdentity);

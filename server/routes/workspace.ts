@@ -15,6 +15,8 @@ import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   DEFAULT_REMOTE_FEATURE_SETTINGS,
+  normalizeChatTitleUiSettings,
+  normalizeCommitMessageUiSettings,
   type RemoteSettingsSnapshot,
   type RemoteUiEffectiveSettings,
 } from '../../common/settings.js';
@@ -151,6 +153,16 @@ export default function createWorkspaceRoutes(
     const patch = { ...asPlainObject(raw) };
     if ('appIdentity' in patch) {
       patch.appIdentity = sanitizeAppIdentityPatch(patch.appIdentity);
+    }
+    if ('chatTitle' in patch) {
+      const chatTitle = normalizeChatTitleUiSettings(patch.chatTitle);
+      if (chatTitle) patch.chatTitle = chatTitle;
+      else delete patch.chatTitle;
+    }
+    if ('commitMessage' in patch) {
+      const commitMessage = normalizeCommitMessageUiSettings(patch.commitMessage);
+      if (commitMessage) patch.commitMessage = commitMessage;
+      else delete patch.commitMessage;
     }
     const notifications = asPlainObject(patch.notifications);
     const rawTelegram = notifications.telegram;

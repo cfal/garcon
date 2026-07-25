@@ -70,7 +70,7 @@
 			<Switch
 				checked={cardState.enabled}
 				onCheckedChange={async (next) => {
-					await cardState.persistSettings({ enabled: Boolean(next) });
+					await cardState.persistEnabled(Boolean(next));
 				}}
 				aria-label={enabledLabel}
 			/>
@@ -179,7 +179,7 @@
 				<Switch
 					checked={cardState.directoryPrefixEnabled}
 					onCheckedChange={async (next) => {
-						await cardState.persistSettings({ useCommonDirPrefix: Boolean(next) });
+						await cardState.persistDirectoryPrefixEnabled(Boolean(next));
 					}}
 					aria-label={m.settings_commit_add_common_directory_prefix_aria()}
 				/>

@@ -12,7 +12,12 @@ import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import { normalizeThinkingMode } from '$shared/chat-modes';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
-import type { GenerationUiSettings, RemoteUiSettings } from '$shared/settings';
+import type {
+	ChatTitleUiSettings,
+	CommitMessageUiSettings,
+	GenerationSelectionUiSettings,
+	RemoteUiSettings,
+} from '$shared/settings';
 
 export type GenerationSettingsKey = 'chatTitle' | 'commitMessage';
 
@@ -52,46 +57,54 @@ export class RemoteGenerationSettingsCardState {
 		return this.options.settingsKey === 'chatTitle' && Boolean(this.options.enabledLabel);
 	}
 
-	get persistedSettings(): GenerationUiSettings {
-		return this.options.remoteSettings.snapshot?.ui?.[this.options.settingsKey] ?? {};
+	get persistedChatTitleSettings(): ChatTitleUiSettings {
+		return this.options.remoteSettings.snapshot?.ui?.chatTitle ?? {};
 	}
 
-	get effectiveSettings(): GenerationUiSettings {
-		return this.options.remoteSettings.snapshot?.uiEffective?.[this.options.settingsKey] ?? {};
+	get persistedCommitMessageSettings(): CommitMessageUiSettings {
+		return this.options.remoteSettings.snapshot?.ui?.commitMessage ?? {};
+	}
+
+	get effectiveSelection(): GenerationSelectionUiSettings {
+		return this.options.settingsKey === 'chatTitle'
+			? (this.options.remoteSettings.snapshot?.uiEffective?.chatTitle ?? {})
+			: (this.options.remoteSettings.snapshot?.uiEffective?.commitMessage ?? {});
 	}
 
 	get enabled(): boolean {
-		return this.hasEnabledSwitch ? this.effectiveSettings.enabled !== false : true;
+		return this.hasEnabledSwitch
+			? this.options.remoteSettings.snapshot?.uiEffective?.chatTitle?.enabled !== false
+			: true;
 	}
 
 	get provider(): SessionAgentId {
 		return (
 			this.selectionOverride?.agentId ??
-			(this.effectiveSettings.agentId as SessionAgentId) ??
+			(this.effectiveSelection.agentId as SessionAgentId) ??
 			'claude'
 		);
 	}
 
 	get rawModel(): string {
-		return this.effectiveSettings.model ?? '';
+		return this.effectiveSelection.model ?? '';
 	}
 
 	get modelEndpointId(): string | null {
-		return this.selectionOverride?.modelEndpointId ?? this.effectiveSettings.modelEndpointId ?? null;
+		return this.selectionOverride?.modelEndpointId ?? this.effectiveSelection.modelEndpointId ?? null;
 	}
 
 	get modelProtocol(): ApiProtocol | null {
-		return this.selectionOverride?.modelProtocol ?? this.effectiveSettings.modelProtocol ?? null;
+		return this.selectionOverride?.modelProtocol ?? this.effectiveSelection.modelProtocol ?? null;
 	}
 
 	get apiProviderId(): string | null {
-		return this.selectionOverride?.apiProviderId ?? this.effectiveSettings.apiProviderId ?? null;
+		return this.selectionOverride?.apiProviderId ?? this.effectiveSelection.apiProviderId ?? null;
 	}
 
 	get thinkingMode() {
 		return (
 			this.selectionOverride?.thinkingMode ??
-			normalizeThinkingMode(this.effectiveSettings.thinkingMode)
+			normalizeThinkingMode(this.effectiveSelection.thinkingMode)
 		);
 	}
 
@@ -152,7 +165,8 @@ export class RemoteGenerationSettingsCardState {
 	}
 
 	get directoryPrefixEnabled(): boolean {
-		return this.effectiveSettings.useCommonDirPrefix === true;
+		return this.options.settingsKey === 'commitMessage'
+			&& this.options.remoteSettings.snapshot?.uiEffective?.commitMessage?.useCommonDirPrefix === true;
 	}
 
 	get isDefaultPrompt(): boolean {
@@ -163,11 +177,11 @@ export class RemoteGenerationSettingsCardState {
 	}
 
 	syncPromptDraft(): void {
-		if (!this.options.showPrompt) return;
+		if (this.options.settingsKey !== 'commitMessage' || !this.options.showPrompt) return;
 		const snapshotVersion = this.options.remoteSettings.snapshot?.version ?? 0;
 		const persistedPrompt =
-			typeof this.persistedSettings.customPrompt === 'string'
-				? this.persistedSettings.customPrompt
+			typeof this.persistedCommitMessageSettings.customPrompt === 'string'
+				? this.persistedCommitMessageSettings.customPrompt
 				: '';
 		const nextHydrationKey = `${this.options.settingsKey}:${snapshotVersion}:${persistedPrompt}`;
 		if (this.#promptHydrationKey === nextHydrationKey) return;
@@ -177,7 +191,9 @@ export class RemoteGenerationSettingsCardState {
 		this.#promptHydrationKey = nextHydrationKey;
 	}
 
-	async persistSettings(overrides: GenerationUiSettings = {}): Promise<boolean> {
+	#selectionSettings(
+		overrides: GenerationSelectionUiSettings = {},
+	): GenerationSelectionUiSettings {
 		const nextProvider =
 			typeof overrides.agentId === 'string'
 				? (overrides.agentId as SessionAgentId)
@@ -192,9 +208,7 @@ export class RemoteGenerationSettingsCardState {
 			nextModelValue,
 			nextEndpointId,
 		);
-		const nextSettings: GenerationUiSettings = {
-			...this.persistedSettings,
-			...overrides,
+		return {
 			agentId: nextProvider,
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
@@ -205,11 +219,28 @@ export class RemoteGenerationSettingsCardState {
 					? normalizeThinkingMode(overrides.thinkingMode)
 					: this.thinkingMode,
 		};
-		if (this.hasEnabledSwitch) {
-			nextSettings.enabled =
-				typeof overrides.enabled === 'boolean' ? overrides.enabled : this.enabled;
-		}
-		return this.#saveGenerationSettings(nextSettings);
+	}
+
+	async persistEnabled(enabled: boolean): Promise<boolean> {
+		if (this.options.settingsKey !== 'chatTitle') return false;
+		return this.#saveUiSettings({
+			chatTitle: {
+				...this.persistedChatTitleSettings,
+				...this.#selectionSettings(),
+				enabled,
+			},
+		});
+	}
+
+	async persistDirectoryPrefixEnabled(useCommonDirPrefix: boolean): Promise<boolean> {
+		if (this.options.settingsKey !== 'commitMessage') return false;
+		return this.#saveUiSettings({
+			commitMessage: {
+				...this.persistedCommitMessageSettings,
+				...this.#selectionSettings(),
+				useCommonDirPrefix,
+			},
+		});
 	}
 
 	async persistSelection(next: ModelSelectorChange): Promise<void> {
@@ -224,8 +255,7 @@ export class RemoteGenerationSettingsCardState {
 			thinkingMode: normalizeThinkingMode(next.thinkingMode),
 		};
 
-		const nextSettings: GenerationUiSettings = {
-			...this.persistedSettings,
+		const selection: GenerationSelectionUiSettings = {
 			agentId: next.agentId,
 			model: next.model,
 			apiProviderId: next.apiProviderId,
@@ -233,21 +263,45 @@ export class RemoteGenerationSettingsCardState {
 			modelProtocol: next.modelProtocol,
 			thinkingMode: normalizeThinkingMode(next.thinkingMode),
 		};
-		if (this.hasEnabledSwitch) nextSettings.enabled = this.enabled;
-		const saved = await this.#saveGenerationSettings(nextSettings);
+		const saved = this.options.settingsKey === 'chatTitle'
+			? await this.#saveUiSettings({
+					chatTitle: {
+						...this.persistedChatTitleSettings,
+						...selection,
+						enabled: this.enabled,
+					},
+				})
+			: await this.#saveUiSettings({
+					commitMessage: {
+						...this.persistedCommitMessageSettings,
+						...selection,
+					},
+				});
 		if (token !== this.#selectionSaveToken) return;
 		this.selectionOverride = saved ? null : previousOverride;
 	}
 
 	async persistPromptDraft(): Promise<void> {
-		await this.persistSettings({
-			customPrompt: this.isDefaultPrompt ? '' : this.promptDraft,
+		if (this.options.settingsKey !== 'commitMessage') return;
+		await this.#saveUiSettings({
+			commitMessage: {
+				...this.persistedCommitMessageSettings,
+				...this.#selectionSettings(),
+				customPrompt: this.isDefaultPrompt ? '' : this.promptDraft,
+			},
 		});
 	}
 
 	async restoreDefaultPrompt(): Promise<void> {
+		if (this.options.settingsKey !== 'commitMessage') return;
 		this.promptDraft = DEFAULT_COMMIT_MESSAGE_PROMPT;
-		await this.persistSettings({ customPrompt: '' });
+		await this.#saveUiSettings({
+			commitMessage: {
+				...this.persistedCommitMessageSettings,
+				...this.#selectionSettings(),
+				customPrompt: '',
+			},
+		});
 	}
 
 	formatDuration(durationMs: number): string {
@@ -283,19 +337,10 @@ export class RemoteGenerationSettingsCardState {
 		}
 	}
 
-	#settingsForSave(settings: GenerationUiSettings): GenerationUiSettings {
-		const nextSettings = { ...settings };
-		if (!this.hasEnabledSwitch) delete nextSettings.enabled;
-		return nextSettings;
-	}
-
-	async #saveGenerationSettings(nextSettings: GenerationUiSettings): Promise<boolean> {
+	async #saveUiSettings(ui: Partial<RemoteUiSettings>): Promise<boolean> {
 		this.saveError = null;
 		this.pendingSaveCount += 1;
 		try {
-			const ui = {
-				[this.options.settingsKey]: this.#settingsForSave(nextSettings),
-			} as Partial<RemoteUiSettings>;
 			await this.options.remoteSettings.update({ ui });
 			return true;
 		} catch (error) {

@@ -4,13 +4,18 @@ import type {
   ThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
-import type { TranscriptSearchFeatureSettings } from '../../common/settings.js';
+import type {
+  AppIdentityUiSettings,
+  ChatTitleUiSettings,
+  CommitMessageUiSettings,
+  TranscriptSearchFeatureSettings,
+} from '../../common/settings.js';
 
 export interface UiSettings {
   pinnedInsertPosition?: 'top' | 'bottom';
-  chatTitle?: unknown;
-  commitMessage?: unknown;
-  appIdentity?: unknown;
+  chatTitle?: ChatTitleUiSettings;
+  commitMessage?: CommitMessageUiSettings;
+  appIdentity?: AppIdentityUiSettings;
   [key: string]: unknown;
 }
 

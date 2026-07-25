@@ -158,6 +158,45 @@ describe('settings store', () => {
       expect(ui.fontSize).toBe(14);
     });
 
+    it('strips commit-only fields from title settings while preserving commit settings', async () => {
+      await store.setUiSettings({
+        chatTitle: {
+          enabled: true,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          customPrompt: 'Unsupported title prompt',
+          useCommonDirPrefix: true,
+        },
+        commitMessage: {
+          enabled: false,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          customPrompt: 'Summarize the diff',
+          useCommonDirPrefix: true,
+        },
+      });
+
+      expect(store.getUiSettings()).toMatchObject({
+        chatTitle: {
+          enabled: true,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+        },
+        commitMessage: {
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          customPrompt: 'Summarize the diff',
+          useCommonDirPrefix: true,
+        },
+      });
+      expect(store.getUiSettings().chatTitle).not.toHaveProperty('customPrompt');
+      expect(store.getUiSettings().chatTitle).not.toHaveProperty('useCommonDirPrefix');
+      expect(store.getUiSettings().commitMessage).not.toHaveProperty('enabled');
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.ui).toEqual(store.getUiSettings());
+    });
+
     it('trims and persists app identity title settings', async () => {
       await store.setUiSettings({
         appIdentity: {

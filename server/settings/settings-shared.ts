@@ -1,5 +1,9 @@
 import type { FolderFilter, UiSettings } from './types.js';
-import { APP_TITLE_MAX_LENGTH } from '../../common/settings.js';
+import {
+  APP_TITLE_MAX_LENGTH,
+  normalizeChatTitleUiSettings,
+  normalizeCommitMessageUiSettings,
+} from '../../common/settings.js';
 
 function normalizeAppIdentitySettings(value: unknown): { title: string } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -22,15 +26,15 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
   if ('pinnedInsertPosition' in normalized) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
   }
-  const commitMessage = normalized.commitMessage;
-  if (commitMessage && typeof commitMessage === 'object' && !Array.isArray(commitMessage)) {
-    const nextCommitMessage = { ...(commitMessage as Record<string, unknown>) };
-    delete nextCommitMessage.enabled;
-    if (Object.keys(nextCommitMessage).length > 0) {
-      normalized.commitMessage = nextCommitMessage;
-    } else {
-      delete normalized.commitMessage;
-    }
+  if ('chatTitle' in normalized) {
+    const chatTitle = normalizeChatTitleUiSettings(normalized.chatTitle);
+    if (chatTitle) normalized.chatTitle = chatTitle;
+    else delete normalized.chatTitle;
+  }
+  if ('commitMessage' in normalized) {
+    const commitMessage = normalizeCommitMessageUiSettings(normalized.commitMessage);
+    if (commitMessage) normalized.commitMessage = commitMessage;
+    else delete normalized.commitMessage;
   }
   return normalized;
 }

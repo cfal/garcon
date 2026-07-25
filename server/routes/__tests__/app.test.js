@@ -342,6 +342,30 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
   });
 
+  it('removes commit-only fields from persisted and effective title settings', async () => {
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      version: 4,
+      ui: {
+        chatTitle: {
+          enabled: true,
+          agentId: 'codex',
+          model: 'gpt-5.5',
+          thinkingMode: 'medium',
+          customPrompt: 'Unsupported title prompt',
+          useCommonDirPrefix: true,
+        },
+      },
+    }));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.ui.chatTitle).not.toHaveProperty('customPrompt');
+    expect(body.ui.chatTitle).not.toHaveProperty('useCommonDirPrefix');
+    expect(body.uiEffective.chatTitle).not.toHaveProperty('customPrompt');
+    expect(body.uiEffective.chatTitle).not.toHaveProperty('useCommonDirPrefix');
+  });
+
   it('preserves complete saved generation selections without catalog reconciliation', async () => {
     const chatTitle = {
       enabled: true,
@@ -580,16 +604,72 @@ describe('PUT /api/app/settings', () => {
   });
 
   it('patches ui.chatTitle settings', async () => {
-    const chatTitleConfig = { enabled: true, agentId: 'opencode', model: 'anthropic/claude-sonnet-4-5' };
-    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { chatTitle: chatTitleConfig } }));
+    const chatTitleInput = {
+      enabled: true,
+      agentId: 'opencode',
+      model: 'anthropic/claude-sonnet-4-5',
+      customPrompt: 'Unsupported title prompt',
+      useCommonDirPrefix: true,
+    };
+    const chatTitleConfig = {
+      enabled: true,
+      agentId: 'opencode',
+      model: 'anthropic/claude-sonnet-4-5',
+    };
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { chatTitle: chatTitleInput } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ chatTitle: chatTitleConfig }));
     ctx.settings.getPathSettings.mockImplementation(() => ({}));
 
-    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', { ui: { chatTitle: chatTitleConfig } }));
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {
+      ui: { chatTitle: chatTitleInput },
+    }));
     const body = await response.json();
 
     expect(body.success).toBe(true);
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ chatTitle: chatTitleConfig });
+  });
+
+  it('ignores a title settings patch containing only unsupported fields', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: {
+        chatTitle: {
+          customPrompt: 'Unsupported title prompt',
+          useCommonDirPrefix: true,
+        },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+  });
+
+  it('preserves commit prompt settings while stripping title-only enabled state', async () => {
+    const commitMessageInput = {
+      enabled: false,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      customPrompt: 'Summarize the diff',
+      useCommonDirPrefix: true,
+    };
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { commitMessage: commitMessageInput },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      commitMessage: {
+        agentId: 'codex',
+        model: 'gpt-5.5',
+        customPrompt: 'Summarize the diff',
+        useCommonDirPrefix: true,
+      },
+    });
   });
 
   it('patches and trims ui.appIdentity title settings', async () => {
