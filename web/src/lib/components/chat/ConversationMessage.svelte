@@ -198,7 +198,7 @@
 	const messageMenuText = $derived(getMessageMenuText());
 	const canGenerateTitleFromMessage = $derived(
 		Boolean(
-			asUser &&
+			(asUser || asAssistant) &&
 			messageMenuText.trim() &&
 			activeChatContext?.chatId &&
 			forkUpToSeq !== undefined &&
@@ -614,6 +614,9 @@
 									onCopy={copyText}
 									onSendToNewSession={sendToNewSession}
 									onSelectText={openSelectTextDialog}
+									onGenerateTitleFromMessage={canGenerateTitleFromMessage
+										? generateTitleFromCurrentMessage
+										: undefined}
 								/>
 							</ContextMenuContent>
 						</ContextMenu>

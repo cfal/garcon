@@ -169,10 +169,37 @@ describe('ConversationMessage actions', () => {
 		expect(onGenerateTitleFromMessage).toHaveBeenCalledWith('user text', 9);
 	});
 
-	it('does not show generate title from message for assistant messages', async () => {
+	it('shows generate title from message at the bottom for durable assistant messages', async () => {
+		const onGenerateTitleFromMessage = vi.fn();
 		render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
 			forkUpToSeq: 9,
+			onGenerateTitleFromMessage,
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+
+		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
+		expect(labels.at(-1)).toBe('Generate title from message');
+		const menuParts = Array.from(
+			document.querySelector<HTMLElement>('[data-slot="context-menu-content"]')?.children ?? [],
+		).map((item) =>
+			item.getAttribute('data-slot') === 'context-menu-separator'
+				? 'separator'
+				: item.textContent?.trim(),
+		);
+		expect(menuParts.at(-2)).toBe('separator');
+		expect(menuParts.at(-1)).toBe('Generate title from message');
+
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Generate title from message' }));
+
+		expect(onGenerateTitleFromMessage).toHaveBeenCalledWith('assistant text', 9);
+	});
+
+	it('does not show generate title from message for user rows without a sequence', async () => {
+		render(ConversationMessageHost, {
+			message: new UserMessage('2026-06-27T00:00:00.000Z', 'user text'),
 			onGenerateTitleFromMessage: vi.fn(),
 		});
 
@@ -182,9 +209,9 @@ describe('ConversationMessage actions', () => {
 		expect(screen.queryByRole('menuitem', { name: 'Generate title from message' })).toBeNull();
 	});
 
-	it('does not show generate title from message for user rows without a sequence', async () => {
+	it('does not show generate title from message for assistant rows without a sequence', async () => {
 		render(ConversationMessageHost, {
-			message: new UserMessage('2026-06-27T00:00:00.000Z', 'user text'),
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
 			onGenerateTitleFromMessage: vi.fn(),
 		});
 
