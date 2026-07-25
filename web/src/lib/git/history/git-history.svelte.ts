@@ -8,7 +8,7 @@ import {
 	type GitHistoryCommitListItem,
 } from '$lib/api/git.js';
 import { GitDiffDocumentController } from '$lib/git/review/git-diff-document.svelte.js';
-import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
@@ -219,8 +219,8 @@ export class GitHistoryController {
 		this.document.focusFile(filePath);
 	}
 
-	setVisibleRows(_projectPath: string, rows: GitVirtualReviewRow[]): void {
-		this.document.setVisibleRows(rows);
+	handleBodyDemand(demand: GitReviewBodyDemand): void {
+		this.document.handleBodyDemand(demand);
 	}
 
 	setFileFilter(value: string): void {
@@ -322,12 +322,7 @@ export class GitHistoryController {
 							return;
 						}
 						this.documentRecoveryAttempted = true;
-						this.loadCommitSnapshot(
-							projectPath,
-							result.commit.hash,
-							result.selectedParent,
-							true,
-						);
+						this.loadCommitSnapshot(projectPath, result.commit.hash, result.selectedParent, true);
 					},
 				});
 			})

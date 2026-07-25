@@ -165,9 +165,7 @@ describe('Git virtual review row source', () => {
 		};
 
 		const source = buildGitVirtualReviewRowSource(splitOptions);
-		const unifiedSource = buildGitVirtualReviewRowSource(
-			options([file], { 'file.txt': body }),
-		);
+		const unifiedSource = buildGitVirtualReviewRowSource(options([file], { 'file.txt': body }));
 
 		expect(source.rowCount).toBe(5);
 		expect(source.rowKey(1)).not.toBe(unifiedSource.rowKey(1));
@@ -196,5 +194,93 @@ describe('Git virtual review row source', () => {
 		expect(source.estimateRowHeight(1, 18)).toBe(28);
 		expect(source.estimateRowHeight(2, 18)).toBe(18);
 		expect(source.estimateRowHeight(2, 24)).toBe(24);
+	});
+
+	it('reads ordered file paths from clamped row ranges without materializing rows', () => {
+		const pending = summary('pending.txt', 4);
+		const loaded = summary('loaded.txt', 2);
+		const source = buildGitVirtualReviewRowSource(
+			options([pending, loaded], { 'loaded.txt': indexedBody('loaded.txt', 2) }),
+		);
+
+		expect(source.filePathAt(-1)).toBeNull();
+		expect(source.filePathAt(0)).toBe('pending.txt');
+		expect(source.filePathAt(1)).toBe('pending.txt');
+		expect(source.filePathAt(2)).toBe('loaded.txt');
+		expect(source.filePathAt(source.rowCount)).toBeNull();
+		expect(source.filePathsInRange(-100, 3)).toEqual(['pending.txt', 'loaded.txt']);
+		expect(source.filePathsInRange(1, 2)).toEqual(['pending.txt']);
+		expect(source.filePathsInRange(2, 10_000)).toEqual(['loaded.txt']);
+		expect(source.filePathsInRange(4, 4)).toEqual([]);
+	});
+
+	it('changes measurement revision only for structural or height-affecting inputs', () => {
+		const file = summary('file.txt', 2);
+		const baseOptions = options([file], {});
+		const baseRevision = buildGitVirtualReviewRowSource(baseOptions).measurementRevision;
+		const withLoading = {
+			...baseOptions,
+			loadingBodies: new Set(['file.txt']),
+		};
+		const withFocus = {
+			...baseOptions,
+			focusedFilePath: 'file.txt',
+		};
+
+		expect(buildGitVirtualReviewRowSource(withLoading).measurementRevision).toBe(baseRevision);
+		expect(buildGitVirtualReviewRowSource(withFocus).measurementRevision).toBe(baseRevision);
+
+		const changedDocument = options([file], {});
+		changedDocument.summary.documentId = 'document-b';
+		expect(buildGitVirtualReviewRowSource(changedDocument).measurementRevision).not.toBe(
+			baseRevision,
+		);
+
+		const changedMode = { ...baseOptions, diffMode: 'split' as const };
+		expect(buildGitVirtualReviewRowSource(changedMode).measurementRevision).not.toBe(baseRevision);
+
+		const changedContext = { ...baseOptions, contextLines: 12 };
+		expect(buildGitVirtualReviewRowSource(changedContext).measurementRevision).not.toBe(
+			baseRevision,
+		);
+
+		const changedEstimate = options([{ ...file, estimatedRows: 20 }], {});
+		expect(buildGitVirtualReviewRowSource(changedEstimate).measurementRevision).not.toBe(
+			baseRevision,
+		);
+
+		const loaded = options([file], { 'file.txt': indexedBody('file.txt', 2) });
+		expect(buildGitVirtualReviewRowSource(loaded).measurementRevision).not.toBe(baseRevision);
+
+		const composerClosed = {
+			...loaded,
+			interaction: {
+				kind: 'commentable' as const,
+				composerState: {
+					open: false,
+					focusPending: false,
+					filePath: '',
+					side: 'after' as const,
+					line: 0,
+					body: '',
+					severity: 'note' as const,
+				},
+			},
+		};
+		const composerOpen = {
+			...composerClosed,
+			interaction: {
+				...composerClosed.interaction,
+				composerState: {
+					...composerClosed.interaction.composerState,
+					open: true,
+					filePath: 'file.txt',
+					line: 1,
+				},
+			},
+		};
+		expect(buildGitVirtualReviewRowSource(composerOpen).measurementRevision).not.toBe(
+			buildGitVirtualReviewRowSource(composerClosed).measurementRevision,
+		);
 	});
 });

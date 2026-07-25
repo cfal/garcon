@@ -123,7 +123,7 @@ describe('GitCommitVirtualDiffSurface', () => {
 				commentFeedback: null,
 				commentError: null,
 				commentCopyText: null,
-				onVisibleRowsChange: vi.fn(),
+				onBodyDemand: vi.fn(),
 				onSelectFile: vi.fn(),
 				onAddComment,
 				onComposerBodyChange: vi.fn(),

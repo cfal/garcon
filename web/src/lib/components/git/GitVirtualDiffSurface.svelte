@@ -2,6 +2,7 @@
 	import type { GitDiffTab } from '$lib/api/git.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
 	import type {
 		CommentComposerState,
@@ -14,7 +15,9 @@
 	import type { GitDiffRowInteraction } from './git-diff-row-interaction.js';
 
 	interface GitVirtualDiffSurfaceProps {
-		documentId: string | null;
+		layoutIdentity: string | null;
+		reviewDocumentId: string | null;
+		active?: boolean;
 		source: GitVirtualReviewRowSource;
 		activeTab: GitDiffTab;
 		fontSize: number;
@@ -24,7 +27,7 @@
 		composerState: CommentComposerState;
 		showInlineCommentComposer: boolean;
 		overscan?: number;
-		onVisibleRowsChange: (rows: GitVirtualReviewRow[]) => void;
+		onBodyDemand: (demand: GitReviewBodyDemand) => void;
 		onSelectFile: (filePath: string) => void;
 		onToggleLineSelection: (key: string) => void;
 		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
@@ -53,7 +56,9 @@
 	}
 
 	let {
-		documentId,
+		layoutIdentity,
+		reviewDocumentId,
+		active = true,
 		source,
 		activeTab,
 		fontSize,
@@ -63,7 +68,7 @@
 		composerState,
 		showInlineCommentComposer,
 		overscan = 18,
-		onVisibleRowsChange,
+		onBodyDemand,
 		onSelectFile,
 		onToggleLineSelection,
 		onSelectLineRange,
@@ -130,11 +135,13 @@
 {/snippet}
 
 <GitVirtualDiffViewport
-	{documentId}
+	{layoutIdentity}
+	{reviewDocumentId}
+	{active}
 	{source}
 	{fontSize}
 	{scrollToRequest}
 	{overscan}
-	{onVisibleRowsChange}
+	{onBodyDemand}
 	rowSnippet={renderWorkbenchRow}
 />

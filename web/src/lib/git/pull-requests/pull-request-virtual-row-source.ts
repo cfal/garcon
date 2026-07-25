@@ -50,6 +50,7 @@ export function buildPullRequestVirtualRowSource(
 
 class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 	readonly rowCount: number;
+	readonly measurementRevision: string;
 	private readonly runs: DecoratedRun[];
 	private readonly baseRuns: BaseRun[];
 	private readonly fileStarts = new Map<string, number>();
@@ -62,6 +63,13 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 		this.runs = buildRuns(baseSource.rowCount, insertions);
 		this.baseRuns = this.runs.filter((run): run is BaseRun => run.kind === 'base');
 		this.rowCount = this.runs.reduce((total, run) => total + run.count, 0);
+		this.measurementRevision = JSON.stringify([
+			baseSource.measurementRevision,
+			insertions.map((insertion) => [
+				insertion.afterBaseIndex,
+				insertion.rows.map((row) => [row.id, row.estimatedHeight]),
+			]),
+		]);
 		for (const file of files) {
 			const baseStart = baseSource.fileStart(file.path);
 			if (baseStart === undefined) continue;
@@ -76,7 +84,7 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 		const localIndex = index - run.start;
 		return run.kind === 'base'
 			? this.baseSource.rowAt(run.baseStart + localIndex)
-			: run.rows[localIndex] ?? null;
+			: (run.rows[localIndex] ?? null);
 	}
 
 	rowKey(index: number): string | number {
@@ -85,7 +93,7 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 		const localIndex = index - run.start;
 		return run.kind === 'base'
 			? this.baseSource.rowKey(run.baseStart + localIndex)
-			: run.rows[localIndex]?.id ?? index;
+			: (run.rows[localIndex]?.id ?? index);
 	}
 
 	estimateRowHeight(index: number, lineHeight: number): number {
@@ -94,7 +102,7 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 		const localIndex = index - run.start;
 		return run.kind === 'base'
 			? this.baseSource.estimateRowHeight(run.baseStart + localIndex, lineHeight)
-			: run.rows[localIndex]?.estimatedHeight ?? lineHeight;
+			: (run.rows[localIndex]?.estimatedHeight ?? lineHeight);
 	}
 
 	fileStart(filePath: string): number | undefined {
@@ -103,6 +111,21 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 
 	fileState(filePath: string): 'pending' | 'resolved' | 'terminal' {
 		return this.baseSource.fileState(filePath);
+	}
+
+	filePathAt(index: number): string | null {
+		return this.rowAt(index)?.filePath || null;
+	}
+
+	filePathsInRange(start: number, end: number): string[] {
+		const paths = new Set<string>();
+		const safeStart = Math.min(this.rowCount, Math.max(0, Math.trunc(start)));
+		const safeEnd = Math.min(this.rowCount, Math.max(0, Math.trunc(end)));
+		for (let index = safeStart; index < safeEnd; index += 1) {
+			const filePath = this.filePathAt(index);
+			if (filePath) paths.add(filePath);
+		}
+		return Array.from(paths);
 	}
 
 	rowsInRange(start: number, end: number): GitVirtualReviewRow[] {
@@ -143,9 +166,7 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 	}
 }
 
-function buildThreadInsertions(
-	options: PullRequestVirtualRowSourceOptions,
-): ThreadInsertion[] {
+function buildThreadInsertions(options: PullRequestVirtualRowSourceOptions): ThreadInsertion[] {
 	const fileOrder = new Map(options.files.map((file, index) => [file.path, index]));
 	const threadsByFile = new Map<string, PullRequestThread[]>();
 	for (const thread of options.threads) {
@@ -234,10 +255,7 @@ function threadRow(
 	};
 }
 
-function buildRuns(
-	baseRowCount: number,
-	insertions: readonly ThreadInsertion[],
-): DecoratedRun[] {
+function buildRuns(baseRowCount: number, insertions: readonly ThreadInsertion[]): DecoratedRun[] {
 	const runs: DecoratedRun[] = [];
 	let baseStart = 0;
 	let start = 0;

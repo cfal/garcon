@@ -14,7 +14,6 @@ import {
 	type CommentComposerState,
 	type GitDiffSeverity,
 } from '$lib/git/review/git-inline-comment.svelte.js';
-import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 import type {
 	ChatDraftAppend,
@@ -36,6 +35,17 @@ import {
 	emptyGitVirtualReviewRowSource,
 	type GitVirtualReviewRowSource,
 } from './git-virtual-review-row-source.js';
+import {
+	normalizeGitReviewDemandFilePaths,
+	type GitReviewBodyDemand,
+	type GitReviewDemandOutcome,
+} from './git-review-body-demand.js';
+import { GitReviewDemandReconciler } from './git-review-demand-reconciler.js';
+import {
+	assertGitReviewLoadingOwnership,
+	traceGitReviewDemand,
+	type GitReviewDemandDebugSnapshot,
+} from './git-review-demand-trace.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const MAX_CACHED_FILE_BODIES = 128;
@@ -84,6 +94,7 @@ export class GitDiffDocumentController {
 	staleMessage = $state<string | null>(null);
 
 	private bodyScheduler: GitReviewBodyScheduler<GitDiffDocumentBodyResponse> | null = null;
+	private readonly demandReconciler: GitReviewDemandReconciler;
 	private summariesByPath = new Map<string, GitCommitFileSummary>();
 	private bodyCache = new Map<string, GitReviewFileBody>();
 	private bodyPurposes = new Map<string, GitReviewBodyPurpose>();
@@ -96,6 +107,23 @@ export class GitDiffDocumentController {
 	private onStale: ((message: string) => void) | null = null;
 	private onExpired: ((message: string) => void) | null = null;
 	private commentSource: GitReviewCommentSource | null = null;
+
+	constructor() {
+		this.demandReconciler = new GitReviewDemandReconciler({
+			currentDocumentId: () => this.snapshot?.documentId ?? null,
+			requestViewportPaths: (filePaths) => this.requestBodies(filePaths, 'visible'),
+			requestNavigationPaths: (filePaths) => this.requestBodies(filePaths, 'visible'),
+			reportOutcome: (demand, outcome) => {
+				traceGitReviewDemand({
+					stage: 'controller',
+					owner: 'document',
+					documentId: demand.documentId,
+					fileCount: demand.filePaths.length,
+					outcome,
+				});
+			},
+		});
+	}
 
 	get commentComposer(): CommentComposerState {
 		return this.inlineComment.composer;
@@ -128,7 +156,7 @@ export class GitDiffDocumentController {
 	private virtualSummary = $derived.by(() => {
 		const snapshot = this.snapshot;
 		if (!snapshot) return null;
-			const collectionLimit = snapshot.collectionLimit ?? this.aggregateLimit;
+		const collectionLimit = snapshot.collectionLimit ?? this.aggregateLimit;
 		return {
 			documentId: snapshot.documentId,
 			project: snapshot.project,
@@ -206,10 +234,19 @@ export class GitDiffDocumentController {
 			},
 			onResult: (result, paths, purpose) =>
 				this.applyBodyResult(result, paths, purpose, generation, snapshot),
-			onError: (error) =>
-				this.onError?.(error instanceof Error ? error.message : String(error)),
+			onError: (error) => this.onError?.(error instanceof Error ? error.message : String(error)),
 			onLoadingChange: (paths, loading) => this.markLoading(paths, loading),
+			onDispatch: (paths, purpose) => {
+				traceGitReviewDemand({
+					stage: 'scheduler',
+					owner: 'document',
+					documentId: snapshot.documentId,
+					fileCount: paths.length,
+					purpose,
+				});
+			},
 		});
+		this.demandReconciler.markReadinessChanged();
 		const [priority, ...prefetch] = snapshot.firstBodyCandidates;
 		if (priority) this.requestBodies([priority], 'visible');
 		this.requestBodies(prefetch, 'prefetch');
@@ -228,11 +265,24 @@ export class GitDiffDocumentController {
 		this.scrollRequest = { filePath, token: this.scrollToken };
 	}
 
-	setVisibleRows(rows: GitVirtualReviewRow[]): void {
-		this.requestBodies(
-			Array.from(new Set(rows.map((row) => row.filePath).filter(Boolean))),
-			'visible',
-		);
+	handleBodyDemand(demand: GitReviewBodyDemand): void {
+		this.demandReconciler.handle(demand);
+	}
+
+	getDemandDebugSnapshot(): GitReviewDemandDebugSnapshot {
+		const demand = this.demandReconciler.snapshot();
+		return {
+			documentId: this.snapshot?.documentId ?? null,
+			demandedPaths: demand.filePaths,
+			loadingPaths: Array.from(this.loadingBodies),
+			schedulerPendingByPath: Object.fromEntries(
+				Array.from(this.loadingBodies, (filePath) => [
+					filePath,
+					this.bodyScheduler?.hasPending(filePath) === true,
+				]),
+			),
+			readinessGeneration: demand.readinessGeneration,
+		};
 	}
 
 	setFileFilter(value: string): void {
@@ -321,18 +371,33 @@ export class GitDiffDocumentController {
 		this.onExpired = null;
 		this.commentSource = null;
 		if (!options.preserveCache) this.clearBodyCache();
+		this.demandReconciler.clear();
 	}
 
-	private requestBodies(filePaths: string[], purpose: GitReviewBodyPurpose): void {
+	private requestBodies(
+		filePaths: readonly string[],
+		purpose: GitReviewBodyPurpose,
+	): GitReviewDemandOutcome {
 		const snapshot = this.snapshot;
-		if (!snapshot || !this.bodyScheduler || this.aggregateLimit || this.isStale) return;
-		if (purpose === 'prefetch' && this.prefetchStopped) return;
-		const uniquePaths = Array.from(new Set(filePaths)).filter(Boolean);
+		if (!snapshot || !this.bodyScheduler || this.isStale) return 'not-ready';
+		if (this.aggregateLimit) return 'limited';
+		if (purpose === 'prefetch' && this.prefetchStopped) return 'already-satisfied';
+		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
 		this.seedCachedBodies(uniquePaths, purpose);
+		if (purpose === 'visible') this.promoteLoadedBodiesToVisible(uniquePaths);
+		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));
-		if (toFetch.length === 0) return;
-		if (purpose === 'visible') this.bodyScheduler.requestVisible(toFetch);
-		else this.bodyScheduler.requestPrefetch(toFetch);
+		const pending = uniquePaths.filter(
+			(filePath) =>
+				this.loadingBodies.has(filePath) &&
+				this.summaryForFile(filePath)?.bodyState === 'unloaded' &&
+				!this.fileBodies[filePath],
+		);
+		const scheduled =
+			purpose === 'visible'
+				? this.bodyScheduler.requestVisible([...toFetch, ...pending])
+				: this.bodyScheduler.requestPrefetch(toFetch);
+		return scheduled ? 'scheduled' : 'already-satisfied';
 	}
 
 	private applyBodyResult(
@@ -343,10 +408,7 @@ export class GitDiffDocumentController {
 		snapshot: GitDiffDocumentSnapshot,
 	): void {
 		if (!this.isCurrent(generation, snapshot.documentId)) return;
-		if (
-			'status' in result &&
-			(result.status === 'stale' || result.status === 'document-expired')
-		) {
+		if ('status' in result && (result.status === 'stale' || result.status === 'document-expired')) {
 			this.markStale(result.message);
 			if (result.status === 'document-expired') this.onExpired?.(result.message);
 			return;
@@ -380,23 +442,23 @@ export class GitDiffDocumentController {
 			const serverLimit = collectionLimitDecisionFromGitReviewBody(body, next);
 			if (serverLimit) {
 				next[filePath] = body;
-				this.setAggregateLimit(
-					serverLimit,
-					Object.keys(next).length,
-					body.limitMessage,
-				);
+				this.setAggregateLimit(serverLimit, Object.keys(next).length, body.limitMessage);
 				break;
 			}
+			const effectivePurpose =
+				purpose === 'prefetch' && this.demandReconciler.demandsPath(snapshot.documentId, filePath)
+					? 'visible'
+					: purpose;
 			const decision = decideGitReviewBodyBudget(
 				body,
-				purpose,
+				effectivePurpose,
 				next,
 				this.bodyPurposes,
 				snapshot.limits,
 			);
 			this.evictActiveBodies(next, decision);
 			if (!decision.accept) {
-				if (purpose === 'prefetch') {
+				if (effectivePurpose === 'prefetch') {
 					this.stopPrefetch();
 					break;
 				}
@@ -405,7 +467,7 @@ export class GitDiffDocumentController {
 				break;
 			}
 			next[filePath] = body;
-			this.bodyPurposes.set(filePath, purpose);
+			this.bodyPurposes.set(filePath, effectivePurpose);
 			if (body.bodyState === 'loaded') {
 				this.cacheBody(file, body, snapshot.limits.maxLoadedPatchBytes);
 			}
@@ -533,6 +595,17 @@ export class GitDiffDocumentController {
 		if (changed) this.fileBodies = next;
 	}
 
+	private promoteLoadedBodiesToVisible(filePaths: readonly string[]): void {
+		for (const filePath of filePaths) {
+			if (
+				this.fileBodies[filePath]?.bodyState === 'loaded' &&
+				this.bodyPurposes.get(filePath) === 'prefetch'
+			) {
+				this.bodyPurposes.set(filePath, 'visible');
+			}
+		}
+	}
+
 	private markLoading(filePaths: string[], isLoading: boolean): void {
 		const next = new Set(this.loadingBodies);
 		for (const filePath of filePaths) {
@@ -540,6 +613,11 @@ export class GitDiffDocumentController {
 			else next.delete(filePath);
 		}
 		this.loadingBodies = next;
+		assertGitReviewLoadingOwnership(
+			next,
+			(filePath) => this.bodyScheduler?.hasPending(filePath) === true,
+			'document',
+		);
 	}
 
 	private cacheKey(file: GitCommitFileSummary): string {

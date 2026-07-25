@@ -6,7 +6,7 @@ import {
 	type GitComparisonSnapshotReady,
 } from '$lib/api/git-comparison.js';
 import { GitDiffDocumentController } from '$lib/git/review/git-diff-document.svelte.js';
-import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
@@ -348,8 +348,8 @@ export class GitComparisonController {
 		this.document.focusFile(filePath);
 	}
 
-	setVisibleRows(rows: GitVirtualReviewRow[]): void {
-		this.document.setVisibleRows(rows);
+	handleBodyDemand(demand: GitReviewBodyDemand): void {
+		this.document.handleBodyDemand(demand);
 	}
 
 	setFileFilter(value: string): void {

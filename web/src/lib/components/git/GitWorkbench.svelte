@@ -23,7 +23,7 @@
 		GitDiffActionTarget,
 		GitWorkbenchTarget,
 	} from '$lib/git/workbench/git-workbench-types.js';
-	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import type { GitInspectorView } from '$lib/git/workbench/git-porcelain.svelte.js';
 	import type { ConfirmAction } from '$lib/api/git.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -43,6 +43,7 @@
 		projectPath?: string | null;
 		target?: GitWorkbenchTarget | null;
 		isMobile: boolean;
+		active?: boolean;
 		wb: GitWorkbenchStore;
 		diffFontSize: number;
 		onAppendToChatDraft?: ChatDraftAppend;
@@ -55,6 +56,7 @@
 		projectPath = null,
 		target = null,
 		isMobile,
+		active = true,
 		wb,
 		diffFontSize,
 		onAppendToChatDraft,
@@ -75,7 +77,7 @@
 	);
 	let activeTarget = $derived(target ?? fallbackTarget);
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? null);
-	let viewportDocumentId = $derived(
+	let viewportLayoutIdentity = $derived(
 		activeTarget
 			? `workbench:${JSON.stringify([activeTarget.repoRoot, activeTarget.worktreePath])}`
 			: null,
@@ -111,10 +113,12 @@
 			? 'narrow'
 			: 'wide',
 	);
+	let diffViewportActive = $derived(
+		active && (containerPresentation === 'wide' || singlePane === 'diff'),
+	);
 
-	function handleVisibleRowsChange(rows: GitVirtualReviewRow[]): void {
-		if (!activeProjectPath) return;
-		wb.handleVisibleReviewRows(activeProjectPath, rows);
+	function handleBodyDemand(demand: GitReviewBodyDemand): void {
+		wb.handleReviewBodyDemand(demand);
 	}
 
 	function handleSelectFile(path: string): void {
@@ -154,11 +158,7 @@
 				tab: files.activeTab,
 				side: composer.side,
 				line: composer.line,
-				contextLines: buildGitReviewBodyCommentContext(
-					loadedBody,
-					composer.side,
-					composer.line,
-				),
+				contextLines: buildGitReviewBodyCommentContext(loadedBody, composer.side, composer.line),
 				body: composer.body,
 				severity: composer.severity,
 			}),
@@ -409,7 +409,9 @@
 		{onCompareRevisions}
 	/>
 	<GitVirtualDiffSurface
-		documentId={viewportDocumentId}
+		layoutIdentity={viewportLayoutIdentity}
+		reviewDocumentId={review.summary?.documentId ?? null}
+		active={diffViewportActive}
 		source={review.rowSource}
 		activeTab={files.activeTab}
 		fontSize={diffFontSize}
@@ -419,7 +421,7 @@
 		composerState={drafts.commentComposer}
 		showInlineCommentComposer={!isMobile}
 		{overscan}
-		onVisibleRowsChange={handleVisibleRowsChange}
+		onBodyDemand={handleBodyDemand}
 		onSelectFile={handleSelectFile}
 		onToggleLineSelection={(key) => selection.toggleLineSelection(key)}
 		onSelectLineRange={(start, end, selectAll) => selection.selectLineRange(start, end, selectAll)}

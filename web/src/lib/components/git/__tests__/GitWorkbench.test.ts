@@ -126,7 +126,7 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		setActiveTab: vi.fn(),
 		setHideGenerated: vi.fn(),
 		setHideOtherTabFiles: vi.fn(),
-		handleVisibleReviewRows: vi.fn(),
+		handleReviewBodyDemand: vi.fn(),
 		dismissError: vi.fn(),
 	} as unknown as GitWorkbenchStore;
 }

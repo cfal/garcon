@@ -65,10 +65,11 @@
 {/snippet}
 
 <GitVirtualDiffViewport
-	{documentId}
+	layoutIdentity={documentId}
+	reviewDocumentId={documentId}
 	{source}
 	fontSize={12}
 	scrollToRequest={null}
-	onVisibleRowsChange={() => undefined}
+	onBodyDemand={() => undefined}
 	rowSnippet={renderRow}
 />

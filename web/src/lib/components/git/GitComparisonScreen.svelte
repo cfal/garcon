@@ -10,6 +10,7 @@
 	interface GitComparisonScreenProps {
 		comparison: GitComparisonController;
 		isMobile: boolean;
+		active?: boolean;
 		fontSize: number;
 		diffMode: DiffMode;
 		contextLines: number;
@@ -27,6 +28,7 @@
 	let {
 		comparison,
 		isMobile,
+		active = true,
 		fontSize,
 		diffMode,
 		contextLines,
@@ -95,6 +97,7 @@
 	fileFilter={comparison.document.fileFilter}
 	focusedFilePath={comparison.document.focusedFilePath}
 	{isMobile}
+	{active}
 	{fontSize}
 	loadingLabel={m.git_compare_loading()}
 	emptyErrorLabel={m.git_compare_load_failed()}
@@ -102,7 +105,7 @@
 	{onBack}
 	onSelectFile={(filePath) => comparison.focusFile(filePath)}
 	onFileFilterChange={(value) => comparison.setFileFilter(value)}
-	onVisibleRowsChange={(rows) => comparison.setVisibleRows(rows)}
+	onBodyDemand={(demand) => comparison.handleBodyDemand(demand)}
 	{onOpenInEditor}
 	composerState={comparison.document.commentComposer}
 	commentFeedback={comparison.document.commentFeedback}

@@ -20,10 +20,9 @@ import {
 	type GitWorkbenchTarget,
 } from '$lib/git/workbench/git-workbench-types.js';
 import { GitWorktrees } from '$lib/git/targets/git-worktrees.svelte.js';
-import {
-	GitVirtualReviewDocumentController,
-	type GitVirtualReviewRow,
-} from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { GitVirtualReviewDocumentController } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
+import { readGarconDebugFlag } from '$lib/utils/debug-flags.js';
 
 export interface GitWorkbenchStoreOptions {
 	runMutation?: GitWorkbenchMutationRunner;
@@ -43,11 +42,7 @@ function elapsedMs(startedAt: number): number {
 }
 
 function shouldLogWorkbenchTrace(): boolean {
-	try {
-		return globalThis.localStorage?.getItem(WORKBENCH_TRACE_STORAGE_KEY) === '1';
-	} catch {
-		return false;
-	}
+	return readGarconDebugFlag(WORKBENCH_TRACE_STORAGE_KEY);
 }
 
 function logWorkbenchTrace(trace: WorkbenchLoadTrace): void {
@@ -228,6 +223,7 @@ export class GitWorkbenchStore {
 		const nextKey = targetKey(nextTarget);
 		if (nextKey === this.lastTargetKey) {
 			this.target = nextTarget;
+			this.virtualReview.markDemandReadinessChanged();
 			if (
 				nextTarget &&
 				this.treeState.tree.length === 0 &&
@@ -379,8 +375,8 @@ export class GitWorkbenchStore {
 		await this.openFile(projectPath, filePath);
 	}
 
-	handleVisibleReviewRows(projectPath: string, rows: GitVirtualReviewRow[]): void {
-		this.virtualReview.setVisibleRows(projectPath, rows);
+	handleReviewBodyDemand(demand: GitReviewBodyDemand): void {
+		this.virtualReview.handleBodyDemand(demand);
 	}
 
 	private refreshAllData(projectPath: string): void {

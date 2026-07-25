@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { GitCommitFileSummary, GitCommitSnapshotReady } from '$lib/api/git.js';
-	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import type {
 		CommentComposerState,
@@ -21,6 +21,7 @@
 		fileFilter: string;
 		focusedFilePath: string | null;
 		isMobile: boolean;
+		active?: boolean;
 		fontSize: number;
 		diffMode: DiffMode;
 		contextLines: number;
@@ -35,7 +36,7 @@
 		onSetDiffFontSize: (size: string) => void;
 		onSelectFile: (file: string) => void;
 		onFileFilterChange: (value: string) => void;
-		onVisibleRowsChange: (rows: GitVirtualReviewRow[]) => void;
+		onBodyDemand: (demand: GitReviewBodyDemand) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 		composerState: CommentComposerState;
 		commentFeedback: {
@@ -95,6 +96,7 @@
 	fileFilter={props.fileFilter}
 	focusedFilePath={props.focusedFilePath}
 	isMobile={props.isMobile}
+	active={props.active ?? true}
 	fontSize={props.fontSize}
 	loadingLabel={m.git_commit_details_loading()}
 	emptyErrorLabel={m.git_commit_not_found()}
@@ -103,7 +105,7 @@
 	onRetry={props.onRetry}
 	onSelectFile={props.onSelectFile}
 	onFileFilterChange={props.onFileFilterChange}
-	onVisibleRowsChange={props.onVisibleRowsChange}
+	onBodyDemand={props.onBodyDemand}
 	onOpenInEditor={props.onOpenInEditor}
 	composerState={props.composerState}
 	commentFeedback={props.commentFeedback}

@@ -242,10 +242,10 @@
 			activeView === 'changes'
 				? wb.drafts
 				: activeView === 'comparison'
-				? comparison.document
-				: activeView === 'history' && history.screen === 'commit'
-					? history.document
-					: null;
+					? comparison.document
+					: activeView === 'history' && history.screen === 'commit'
+						? history.document
+						: null;
 		if (lines !== review.contextLines && activeDocument?.commentComposer.open) {
 			activeDocument.markContextChangeBlocked();
 			return;
@@ -421,6 +421,7 @@
 			<GitWorkbench
 				target={activeTarget ?? fallbackTarget}
 				{isMobile}
+				active={presentationVisible}
 				{wb}
 				{onAppendToChatDraft}
 				onOpenChat={() => void workspace.focusChat()}
@@ -437,6 +438,7 @@
 				projectPath={activeProjectPath}
 				{effectiveProjectKey}
 				{isMobile}
+				active={presentationVisible}
 				diffMode={review.diffMode}
 				contextLines={review.contextLines}
 				diffFontSize={gitDiffFontSize}
@@ -456,6 +458,7 @@
 			<GitComparisonScreen
 				{comparison}
 				{isMobile}
+				active={presentationVisible}
 				fontSize={gitDiffFontSize}
 				diffMode={review.diffMode}
 				contextLines={review.contextLines}

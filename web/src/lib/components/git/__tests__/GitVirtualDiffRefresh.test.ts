@@ -164,7 +164,8 @@ describe('Git virtual diff refresh', () => {
 		const initialRows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
 		const replacementRows = [makeHeaderRow(2)];
 		const props = {
-			documentId: 'doc-a',
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
 			source: arrayGitVirtualReviewRowSource(initialRows),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
@@ -181,7 +182,7 @@ describe('Git virtual diff refresh', () => {
 				severity: 'note' as const,
 			},
 			showInlineCommentComposer: true,
-			onVisibleRowsChange: vi.fn(),
+			onBodyDemand: vi.fn(),
 			onSelectFile: vi.fn(),
 			onToggleLineSelection: vi.fn(),
 			onSelectLineRange: vi.fn(),
@@ -225,7 +226,8 @@ describe('Git virtual diff refresh', () => {
 	it('repositions a requested file when preceding rows move its index', async () => {
 		const initialRows = makeUnloadedRows();
 		const props = {
-			documentId: 'doc-a',
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
 			source: arrayGitVirtualReviewRowSource(initialRows, fileIndexes(initialRows)),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
@@ -242,7 +244,7 @@ describe('Git virtual diff refresh', () => {
 				severity: 'note' as const,
 			},
 			showInlineCommentComposer: true,
-			onVisibleRowsChange: vi.fn(),
+			onBodyDemand: vi.fn(),
 			onSelectFile: vi.fn(),
 			onToggleLineSelection: vi.fn(),
 			onSelectLineRange: vi.fn(),
@@ -282,7 +284,8 @@ describe('Git virtual diff refresh', () => {
 	it('repositions a requested file after its lazy body expands in place', async () => {
 		const initialRows = makeUnloadedRows();
 		const props = {
-			documentId: 'doc-a',
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
 			source: arrayGitVirtualReviewRowSource(initialRows, fileIndexes(initialRows)),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
@@ -299,7 +302,7 @@ describe('Git virtual diff refresh', () => {
 				severity: 'note' as const,
 			},
 			showInlineCommentComposer: true,
-			onVisibleRowsChange: vi.fn(),
+			onBodyDemand: vi.fn(),
 			onSelectFile: vi.fn(),
 			onToggleLineSelection: vi.fn(),
 			onSelectLineRange: vi.fn(),
@@ -360,7 +363,8 @@ describe('Git virtual diff refresh', () => {
 	it('does not replay a serviced scroll when a pending file becomes stale', async () => {
 		const initialRows = makeUnloadedRows();
 		const props = {
-			documentId: 'doc-a',
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
 			source: arrayGitVirtualReviewRowSource(initialRows, fileIndexes(initialRows)),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
@@ -377,7 +381,7 @@ describe('Git virtual diff refresh', () => {
 				severity: 'note' as const,
 			},
 			showInlineCommentComposer: true,
-			onVisibleRowsChange: vi.fn(),
+			onBodyDemand: vi.fn(),
 			onSelectFile: vi.fn(),
 			onToggleLineSelection: vi.fn(),
 			onSelectLineRange: vi.fn(),
@@ -404,12 +408,64 @@ describe('Git virtual diff refresh', () => {
 		expect(scrollToIndexCalls).toEqual([4]);
 	});
 
-	it('resets scroll and measurements when the document identity changes', async () => {
-		const initialRows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
-		const onVisibleRowsChange = vi.fn();
+	it('defers an inactive navigation request until the viewport becomes active', async () => {
+		const rows = makeUnloadedRows();
 		const props = {
-			documentId: 'doc-a',
-			source: arrayGitVirtualReviewRowSource(initialRows),
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
+			active: false,
+			source: arrayGitVirtualReviewRowSource(rows, fileIndexes(rows)),
+			activeTab: 'unstaged' as const,
+			fontSize: 12,
+			selectedLineKeys: new Set<string>(),
+			operationPending: false,
+			scrollToRequest: { filePath: 'file-2.ts', token: 1 },
+			composerState: {
+				open: false,
+				focusPending: false,
+				filePath: '',
+				side: 'after' as const,
+				line: 0,
+				body: '',
+				severity: 'note' as const,
+			},
+			showInlineCommentComposer: true,
+			onBodyDemand: vi.fn(),
+			onSelectFile: vi.fn(),
+			onToggleLineSelection: vi.fn(),
+			onSelectLineRange: vi.fn(),
+			onStageHunk: vi.fn(),
+			onUnstageHunk: vi.fn(),
+			onStageLine: vi.fn(),
+			onUnstageLine: vi.fn(),
+			onStageFile: vi.fn(),
+			onUnstageFile: vi.fn(),
+			onAddCommentForFile: vi.fn(),
+			commentFeedback: null,
+			commentError: null,
+			commentCopyText: null,
+			onOpenChat: vi.fn(),
+		};
+		const { rerender } = render(GitVirtualDiffSurface, { props });
+
+		await waitFor(() => expect(measureCalls).toBe(1));
+		expect(scrollToIndexCalls).toEqual([]);
+		expect(props.onBodyDemand).not.toHaveBeenCalled();
+
+		await rerender({ ...props, active: true });
+
+		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
+		expect(props.onBodyDemand).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: 'navigation', documentId: 'doc-a' }),
+		);
+	});
+
+	it('keeps measurement callbacks stable for presentation-only source rebuilds', async () => {
+		const rows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
+		const props = {
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
+			source: arrayGitVirtualReviewRowSource(rows),
 			activeTab: 'unstaged' as const,
 			fontSize: 12,
 			selectedLineKeys: new Set<string>(),
@@ -425,7 +481,62 @@ describe('Git virtual diff refresh', () => {
 				severity: 'note' as const,
 			},
 			showInlineCommentComposer: true,
-			onVisibleRowsChange,
+			onBodyDemand: vi.fn(),
+			onSelectFile: vi.fn(),
+			onToggleLineSelection: vi.fn(),
+			onSelectLineRange: vi.fn(),
+			onStageHunk: vi.fn(),
+			onUnstageHunk: vi.fn(),
+			onStageLine: vi.fn(),
+			onUnstageLine: vi.fn(),
+			onStageFile: vi.fn(),
+			onUnstageFile: vi.fn(),
+			onAddCommentForFile: vi.fn(),
+			commentFeedback: null,
+			commentError: null,
+			commentCopyText: null,
+			onOpenChat: vi.fn(),
+		};
+		const { rerender } = render(GitVirtualDiffSurface, { props });
+		await waitFor(() => expect(refreshedVirtualizerOptions?.estimateSize).toBeTruthy());
+		const estimateSize = refreshedVirtualizerOptions?.estimateSize;
+		const getItemKey = refreshedVirtualizerOptions?.getItemKey;
+
+		await rerender({
+			...props,
+			source: arrayGitVirtualReviewRowSource(
+				rows.map((row, index) => ({ ...row, isFocused: index === 0 })),
+			),
+		});
+
+		expect(refreshedVirtualizerOptions?.estimateSize).toBe(estimateSize);
+		expect(refreshedVirtualizerOptions?.getItemKey).toBe(getItemKey);
+		expect(measureCalls).toBe(1);
+	});
+
+	it('republishes a new review document without resetting the layout scroll', async () => {
+		const rows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
+		const onBodyDemand = vi.fn();
+		const props = {
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
+			source: arrayGitVirtualReviewRowSource(rows),
+			activeTab: 'unstaged' as const,
+			fontSize: 12,
+			selectedLineKeys: new Set<string>(),
+			operationPending: false,
+			scrollToRequest: null,
+			composerState: {
+				open: false,
+				focusPending: false,
+				filePath: '',
+				side: 'after' as const,
+				line: 0,
+				body: '',
+				severity: 'note' as const,
+			},
+			showInlineCommentComposer: true,
+			onBodyDemand,
 			onSelectFile: vi.fn(),
 			onToggleLineSelection: vi.fn(),
 			onSelectLineRange: vi.fn(),
@@ -444,8 +555,63 @@ describe('Git virtual diff refresh', () => {
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 300;
-		await waitFor(() => expect(onVisibleRowsChange).toHaveBeenCalled());
-		onVisibleRowsChange.mockClear();
+		await waitFor(() => expect(onBodyDemand).toHaveBeenCalled());
+		onBodyDemand.mockClear();
+
+		await rerender({ ...props, reviewDocumentId: 'doc-b' });
+
+		await waitFor(() =>
+			expect(onBodyDemand).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: 'viewport', documentId: 'doc-b' }),
+			),
+		);
+		expect(viewport.scrollTop).toBe(300);
+		expect(measureCalls).toBe(1);
+	});
+
+	it('resets scroll and measurements when the layout identity changes', async () => {
+		const initialRows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
+		const onBodyDemand = vi.fn();
+		const props = {
+			layoutIdentity: 'layout-a',
+			reviewDocumentId: 'doc-a',
+			source: arrayGitVirtualReviewRowSource(initialRows),
+			activeTab: 'unstaged' as const,
+			fontSize: 12,
+			selectedLineKeys: new Set<string>(),
+			operationPending: false,
+			scrollToRequest: null,
+			composerState: {
+				open: false,
+				focusPending: false,
+				filePath: '',
+				side: 'after' as const,
+				line: 0,
+				body: '',
+				severity: 'note' as const,
+			},
+			showInlineCommentComposer: true,
+			onBodyDemand,
+			onSelectFile: vi.fn(),
+			onToggleLineSelection: vi.fn(),
+			onSelectLineRange: vi.fn(),
+			onStageHunk: vi.fn(),
+			onUnstageHunk: vi.fn(),
+			onStageLine: vi.fn(),
+			onUnstageLine: vi.fn(),
+			onStageFile: vi.fn(),
+			onUnstageFile: vi.fn(),
+			onAddCommentForFile: vi.fn(),
+			commentFeedback: null,
+			commentError: null,
+			commentCopyText: null,
+			onOpenChat: vi.fn(),
+		};
+		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		viewport.scrollTop = 300;
+		await waitFor(() => expect(onBodyDemand).toHaveBeenCalled());
+		onBodyDemand.mockClear();
 
 		const replacementRows = [
 			makeHeaderRow(0, 'doc-b'),
@@ -454,12 +620,13 @@ describe('Git virtual diff refresh', () => {
 		];
 		await rerender({
 			...props,
-			documentId: 'doc-b',
+			layoutIdentity: 'layout-b',
+			reviewDocumentId: 'doc-b',
 			source: arrayGitVirtualReviewRowSource(replacementRows),
 		});
 
 		expect(viewport.scrollTop).toBe(0);
 		expect(measureCalls).toBeGreaterThanOrEqual(2);
-		await waitFor(() => expect(onVisibleRowsChange).toHaveBeenCalled());
+		await waitFor(() => expect(onBodyDemand).toHaveBeenCalled());
 	});
 });

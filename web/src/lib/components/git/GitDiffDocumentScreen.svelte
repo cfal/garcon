@@ -12,7 +12,7 @@
 		observeContainerWidth,
 		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
-	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import {
 		clampGitFileTreeWidth,
@@ -44,6 +44,7 @@
 		fileFilter: string;
 		focusedFilePath: string | null;
 		isMobile: boolean;
+		active?: boolean;
 		fontSize: number;
 		loadingLabel: string;
 		emptyErrorLabel: string;
@@ -52,7 +53,7 @@
 		onRetry?: () => void;
 		onSelectFile: (file: string) => void;
 		onFileFilterChange: (value: string) => void;
-		onVisibleRowsChange: (rows: GitVirtualReviewRow[]) => void;
+		onBodyDemand: (demand: GitReviewBodyDemand) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 		composerState: CommentComposerState;
 		commentFeedback: {
@@ -85,6 +86,7 @@
 		fileFilter,
 		focusedFilePath,
 		isMobile,
+		active = true,
 		fontSize,
 		loadingLabel,
 		emptyErrorLabel,
@@ -93,7 +95,7 @@
 		onRetry,
 		onSelectFile,
 		onFileFilterChange,
-		onVisibleRowsChange,
+		onBodyDemand,
 		onOpenInEditor,
 		composerState,
 		commentFeedback,
@@ -124,6 +126,7 @@
 	let filePaneHidden = $derived(
 		(isSinglePane && singlePane !== 'files') || (isWide && !fileTreeVisible),
 	);
+	let diffViewportActive = $derived(active && (!isSinglePane || singlePane === 'diff'));
 	let virtualEmptyMessage = $derived(
 		fileFilter.trim() ? m.git_diff_document_no_filter_matches() : emptyDocumentLabel,
 	);
@@ -243,11 +246,12 @@
 			>
 				<GitCommitVirtualDiffSurface
 					{documentId}
+					active={diffViewportActive}
 					{source}
 					{fontSize}
 					scrollToRequest={scrollRequest}
 					overscan={isSinglePane ? 3 : 18}
-					{onVisibleRowsChange}
+					{onBodyDemand}
 					onSelectFile={handleSelectFile}
 					{onOpenInEditor}
 					{composerState}

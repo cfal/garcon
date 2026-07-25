@@ -42,7 +42,8 @@ function renderSurface(
 	overrides: Partial<GitVirtualDiffSurfaceProps> = {},
 ) {
 	const props = {
-		documentId: 'doc',
+		layoutIdentity: 'layout',
+		reviewDocumentId: 'doc',
 		source: arrayGitVirtualReviewRowSource(rows),
 		activeTab: 'unstaged' as const,
 		fontSize: 12,
@@ -59,7 +60,7 @@ function renderSurface(
 			severity: 'note' as const,
 		},
 		showInlineCommentComposer: true,
-		onVisibleRowsChange: vi.fn(),
+		onBodyDemand: vi.fn(),
 		onSelectFile: vi.fn(),
 		onToggleLineSelection: vi.fn(),
 		onSelectLineRange: vi.fn(),
@@ -84,6 +85,18 @@ function renderSurface(
 	};
 }
 
+function firstMountedIndex(container: HTMLElement): number {
+	const first = container.querySelector<HTMLElement>('[data-git-virtual-row]');
+	return first ? Number(first.dataset.index) : -1;
+}
+
+function lastViewportDemand(callback: ReturnType<typeof vi.fn>) {
+	return callback.mock.calls
+		.map(([demand]) => demand)
+		.filter((demand) => demand.kind === 'viewport')
+		.at(-1);
+}
+
 describe('GitVirtualDiffSurface', () => {
 	beforeEach(() => {
 		vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1024);
@@ -91,7 +104,11 @@ describe('GitVirtualDiffSurface', () => {
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
 			this: HTMLElement,
 		) {
-			const height = this.hasAttribute('data-git-virtual-diff-root') ? 720 : 42;
+			const height = this.hasAttribute('data-git-virtual-diff-root')
+				? 720
+				: this.dataset.index === '0' || this.dataset.index === '101'
+					? 64
+					: 42;
 			return {
 				width: 1024,
 				height,
@@ -171,6 +188,92 @@ describe('GitVirtualDiffSurface', () => {
 			expect(container.querySelectorAll('[data-git-virtual-row]')).toHaveLength(1);
 		});
 		expect(screen.getByText('file-2.ts')).toBeTruthy();
+	});
+
+	it('advances the real virtual range and body demand when the browser scrolls', async () => {
+		const rows = Array.from({ length: 1_000 }, (_, index) => makeHeaderRow(index));
+		const onBodyDemand = vi.fn();
+		const { container } = renderSurface(rows, { onBodyDemand });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+
+		await waitFor(() => expect(lastViewportDemand(onBodyDemand)).toBeTruthy());
+		const initialDemand = lastViewportDemand(onBodyDemand);
+		onBodyDemand.mockClear();
+		viewport.scrollTop = 8_400;
+		await fireEvent.scroll(viewport);
+
+		await waitFor(() => expect(firstMountedIndex(container)).toBeGreaterThan(100));
+		await waitFor(() => expect(lastViewportDemand(onBodyDemand)).toBeTruthy());
+		const scrolledDemand = lastViewportDemand(onBodyDemand);
+		expect(scrolledDemand.filePaths).not.toEqual(initialDemand.filePaths);
+		expect(scrolledDemand.filePaths.some((path: string) => path === 'file-200.ts')).toBe(true);
+	});
+
+	it('republishes retained demand without losing virtualizer geometry on activation', async () => {
+		const rows = Array.from({ length: 1_000 }, (_, index) => makeHeaderRow(index));
+		const onBodyDemand = vi.fn();
+		const { container, props, rerender } = renderSurface(rows, { onBodyDemand, active: true });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		viewport.scrollTop = 4_200;
+		await fireEvent.scroll(viewport);
+		await waitFor(() => expect(firstMountedIndex(container)).toBeGreaterThan(40));
+		const measuredRow = container.querySelector<HTMLElement>('[data-index="101"]');
+		expect(measuredRow).toBeTruthy();
+		expect(measuredRow?.getBoundingClientRect().height).toBe(64);
+		const firstIndex = firstMountedIndex(container);
+		const spacer = container.querySelector<HTMLElement>(
+			'[data-git-virtual-row-window]',
+		)?.parentElement;
+		const spacerHeight = spacer?.style.height;
+		expect(Number.parseFloat(spacerHeight ?? '')).toBeGreaterThan(rows.length * 42);
+		const demand = lastViewportDemand(onBodyDemand);
+
+		await rerender({ ...props, active: false });
+		onBodyDemand.mockClear();
+		await rerender({ ...props, active: true });
+
+		await waitFor(() => expect(lastViewportDemand(onBodyDemand)).toEqual(demand));
+		expect(viewport.scrollTop).toBe(4_200);
+		expect(firstMountedIndex(container)).toBe(firstIndex);
+		expect(spacer?.style.height).toBe(spacerHeight);
+	});
+
+	it('republishes for a new server document without resetting the stable layout', async () => {
+		const rows = Array.from({ length: 1_000 }, (_, index) => makeHeaderRow(index));
+		const onBodyDemand = vi.fn();
+		const { container, props, rerender } = renderSurface(rows, { onBodyDemand });
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		viewport.scrollTop = 4_200;
+		await fireEvent.scroll(viewport);
+		await waitFor(() => expect(firstMountedIndex(container)).toBeGreaterThan(40));
+		const firstIndex = firstMountedIndex(container);
+		onBodyDemand.mockClear();
+
+		await rerender({ ...props, reviewDocumentId: 'doc-b' });
+
+		await waitFor(() =>
+			expect(lastViewportDemand(onBodyDemand)).toMatchObject({ documentId: 'doc-b' }),
+		);
+		expect(viewport.scrollTop).toBe(4_200);
+		expect(firstMountedIndex(container)).toBe(firstIndex);
+	});
+
+	it('republishes when presentation-only source state rebuilds the same visible paths', async () => {
+		const rows = Array.from({ length: 20 }, (_, index) => makeHeaderRow(index));
+		const onBodyDemand = vi.fn();
+		const { props, rerender } = renderSurface(rows, { onBodyDemand });
+		await waitFor(() => expect(lastViewportDemand(onBodyDemand)).toBeTruthy());
+		const initialDemand = lastViewportDemand(onBodyDemand);
+		onBodyDemand.mockClear();
+
+		await rerender({
+			...props,
+			source: arrayGitVirtualReviewRowSource(
+				rows.map((row, index) => ({ ...row, isFocused: index === 0 })),
+			),
+		});
+
+		await waitFor(() => expect(lastViewportDemand(onBodyDemand)).toEqual(initialDemand));
 	});
 
 	it('stages the current file from the virtual file header in the unstaged tab', async () => {

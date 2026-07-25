@@ -7,6 +7,7 @@ interface GitReviewBodySchedulerOptions<T> {
 	onResult: (result: T, paths: string[], purpose: GitReviewBodyPurpose) => void;
 	onError: (error: unknown) => void;
 	onLoadingChange: (paths: string[], loading: boolean) => void;
+	onDispatch?: (paths: string[], purpose: GitReviewBodyPurpose) => void;
 }
 
 interface ActiveLane {
@@ -23,19 +24,22 @@ export class GitReviewBodyScheduler<T> {
 
 	constructor(private readonly options: GitReviewBodySchedulerOptions<T>) {}
 
-	requestVisible(paths: readonly string[]): void {
-		const requested = this.unique(paths).filter((path) => !this.isVisiblePending(path));
-		if (requested.length === 0) return;
-		this.removeQueued(this.prefetchQueue, requested);
+	requestVisible(paths: readonly string[]): boolean {
+		const uniquePaths = this.unique(paths);
+		this.removeQueued(this.prefetchQueue, uniquePaths);
+		const requested = uniquePaths.filter((path) => !this.hasPending(path));
+		if (requested.length === 0) return false;
 		this.enqueue(this.visibleQueue, requested, true);
 		this.pump('visible');
+		return true;
 	}
 
-	requestPrefetch(paths: readonly string[]): void {
+	requestPrefetch(paths: readonly string[]): boolean {
 		const requested = this.unique(paths).filter((path) => !this.hasPending(path));
-		if (requested.length === 0) return;
+		if (requested.length === 0) return false;
 		this.enqueue(this.prefetchQueue, requested, false);
 		this.pump('prefetch');
+		return true;
 	}
 
 	cancel(): void {
@@ -72,10 +76,6 @@ export class GitReviewBodyScheduler<T> {
 		return Array.from(new Set(paths.filter(Boolean)));
 	}
 
-	private isVisiblePending(path: string): boolean {
-		return this.visibleQueue.includes(path) || this.visibleActive?.paths.includes(path) === true;
-	}
-
 	private enqueue(queue: string[], paths: string[], prepend: boolean): void {
 		if (prepend) queue.unshift(...paths);
 		else queue.push(...paths);
@@ -99,6 +99,7 @@ export class GitReviewBodyScheduler<T> {
 		if (purpose === 'visible') this.visibleActive = lane;
 		else this.prefetchActive = lane;
 		const generation = this.generation;
+		this.options.onDispatch?.(paths, purpose);
 
 		void this.options
 			.load(paths, purpose, controller.signal)
@@ -107,7 +108,8 @@ export class GitReviewBodyScheduler<T> {
 				this.options.onResult(result, paths, purpose);
 			})
 			.catch((error) => {
-				if (generation !== this.generation || controller.signal.aborted || isAbortError(error)) return;
+				if (generation !== this.generation || controller.signal.aborted || isAbortError(error))
+					return;
 				this.options.onError(error);
 			})
 			.finally(() => {

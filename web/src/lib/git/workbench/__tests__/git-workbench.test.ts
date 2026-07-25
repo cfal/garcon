@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
-import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type {
 	GitDiffActionTarget,
 	GitWorkbenchTarget,
@@ -115,9 +114,7 @@ function makeReviewBody(
 	text = '',
 	fingerprint = `fingerprint:${path}`,
 ): GitReviewFileBody {
-	const patch = text
-		? `diff --git a/${path} b/${path}\n@@ -1 +1 @@\n ${text}\n`
-		: '';
+	const patch = text ? `diff --git a/${path} b/${path}\n@@ -1 +1 @@\n ${text}\n` : '';
 	return {
 		path,
 		bodyFingerprint: fingerprint,
@@ -811,17 +808,11 @@ describe('GitWorkbenchStore', () => {
 			expect(mockedApi.getGitReviewFileBodies.mock.calls[0]?.[5]?.purpose).toBe('visible');
 			expect(mockedApi.getGitReviewFileBodies.mock.calls[1]?.[5]?.purpose).toBe('prefetch');
 			const firstSignal = mockedApi.getGitReviewFileBodies.mock.calls[0]?.[5]?.signal;
-			const ninthFile = makeReviewFileSummary(paths[8]);
-			wb.handleVisibleReviewRows('/project', [
-				{
-					kind: 'file-header',
-					id: `header:${ninthFile.path}`,
-					filePath: ninthFile.path,
-					estimatedHeight: 42,
-					file: ninthFile,
-					isFocused: false,
-				} satisfies GitVirtualFileHeaderRow,
-			]);
+			wb.handleReviewBodyDemand({
+				kind: 'viewport',
+				documentId: 'doc',
+				filePaths: [paths[8]],
+			});
 
 			expect(firstSignal?.aborted).toBe(false);
 			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2);
@@ -832,6 +823,59 @@ describe('GitWorkbenchStore', () => {
 			});
 			expect(mockedApi.getGitReviewFileBodies.mock.calls[2]?.[2]).toEqual([paths[8]]);
 			prefetch.resolve(makeReviewBodies(firstBodyCandidates.slice(1)));
+		});
+
+		it('rejects stale viewport demand and deduplicates the current visible range', async () => {
+			const pending = deferred<ReturnType<typeof makeReviewBodies>>();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: [makeTreeFile('initial.ts'), makeTreeFile('visible.ts')],
+					summary: makeReviewSummary(['initial.ts', 'visible.ts'], {
+						documentId: 'current-doc',
+					}),
+					firstBodyCandidates: [],
+				}),
+			);
+			mockedApi.getGitReviewFileBodies.mockResolvedValueOnce({
+				...makeReviewBodies(['initial.ts']),
+				documentId: 'current-doc',
+			});
+			await wb.setTarget(makeTarget());
+			await vi.waitFor(() => expect(wb.review.fileBodies['initial.ts']).toBeTruthy());
+			mockedApi.getGitReviewFileBodies.mockClear();
+			mockedApi.getGitReviewFileBodies.mockReturnValue(pending.promise);
+
+			wb.handleReviewBodyDemand({
+				kind: 'viewport',
+				documentId: 'old-doc',
+				filePaths: ['visible.ts'],
+			});
+			expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
+
+			const demand = {
+				kind: 'viewport',
+				documentId: 'current-doc',
+				filePaths: ['visible.ts'],
+			} as const;
+			wb.handleReviewBodyDemand(demand);
+			wb.handleReviewBodyDemand({ ...demand, filePaths: [...demand.filePaths] });
+
+			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledOnce();
+			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
+				'/project',
+				'current-doc',
+				['visible.ts'],
+				'unstaged',
+				5,
+				expect.objectContaining({ purpose: 'visible' }),
+			);
+			expect(wb.review.getDemandDebugSnapshot().schedulerPendingByPath).toEqual({
+				'visible.ts': true,
+			});
+			pending.resolve({
+				...makeReviewBodies(['visible.ts']),
+				documentId: 'current-doc',
+			});
 		});
 
 		it('retries a transient body error after a same-fingerprint summary refresh', async () => {
@@ -911,15 +955,11 @@ describe('GitWorkbenchStore', () => {
 			await wb.setTarget(makeTarget());
 			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2));
 			prefetch.resolve(makeReviewBodies([paths[1]]));
-			await vi.waitFor(() =>
-				expect(wb.review.fileBodies[paths[1]]?.bodyState).toBe('loaded'),
-			);
+			await vi.waitFor(() => expect(wb.review.fileBodies[paths[1]]?.bodyState).toBe('loaded'));
 
 			visible.resolve(makeReviewBodies([paths[0]]));
 
-			await vi.waitFor(() =>
-				expect(wb.review.fileBodies[paths[0]]?.bodyState).toBe('loaded'),
-			);
+			await vi.waitFor(() => expect(wb.review.fileBodies[paths[0]]?.bodyState).toBe('loaded'));
 			expect(wb.review.fileBodies[paths[1]]).toBeUndefined();
 			expect(wb.review.aggregateLimit).toBeNull();
 		});
@@ -1052,9 +1092,9 @@ describe('GitWorkbenchStore', () => {
 
 			await vi.waitFor(() => {
 				expect(
-					wb.review.rowSource.rowsInRange(0, wb.review.rowSource.rowCount).some(
-						(row) => row.kind === 'unified-row' && row.view.text === 'new',
-					),
+					wb.review.rowSource
+						.rowsInRange(0, wb.review.rowSource.rowCount)
+						.some((row) => row.kind === 'unified-row' && row.view.text === 'new'),
 				).toBe(true);
 			});
 			expect(
@@ -2052,6 +2092,12 @@ describe('GitWorkbenchStore', () => {
 			const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
 			vi.spyOn(localStorage, 'getItem').mockImplementation((key) =>
 				key === 'garcon.gitWorkbenchTrace' ? '1' : 'claude',
+			);
+			globalThis.dispatchEvent(
+				new StorageEvent('storage', {
+					key: 'garcon.gitWorkbenchTrace',
+					storageArea: localStorage,
+				}),
 			);
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
 				makeWorkbenchSnapshot({

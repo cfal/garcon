@@ -7,7 +7,6 @@ import {
 } from '$lib/api/git.js';
 import { GitHistoryController } from '$lib/git/history/git-history.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
-import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitHistoryCommits: vi.fn(),
@@ -108,16 +107,16 @@ function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => 
 				(() => {
 					const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1 @@\n+next\n`;
 					return {
-					path,
-					bodyFingerprint: fingerprintForPath(path),
-					bodyState: 'loaded' as const,
-					category: 'normal' as const,
-					isBinary: false,
-					isTooLarge: false,
-					renderedRowCount: 2,
-					patchBytes: patch.length,
-					patch,
-					patchIndex: createGitPatchIndex(patch),
+						path,
+						bodyFingerprint: fingerprintForPath(path),
+						bodyState: 'loaded' as const,
+						category: 'normal' as const,
+						isBinary: false,
+						isTooLarge: false,
+						renderedRowCount: 2,
+						patchBytes: patch.length,
+						patch,
+						patchIndex: createGitPatchIndex(patch),
 					};
 				})(),
 			]),
@@ -270,21 +269,11 @@ describe('GitHistoryController', () => {
 		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.purpose).toBe('visible');
 		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[4]?.purpose).toBe('prefetch');
 		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
-		const ninthFile = files[8];
-		history.setVisibleRows('/project', [
-			{
-				kind: 'file-header',
-				filePath: ninthFile.path,
-				id: `header:${ninthFile.path}`,
-				estimatedHeight: 42,
-				file: {
-					...ninthFile,
-					indexStatus: 'M',
-					workTreeStatus: ' ',
-				},
-				isFocused: false,
-			} satisfies GitVirtualFileHeaderRow,
-		]);
+		history.handleBodyDemand({
+			kind: 'viewport',
+			documentId: history.commitSnapshot!.documentId,
+			filePaths: [files[8].path],
+		});
 
 		expect(firstSignal?.aborted).toBe(false);
 		expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
@@ -348,20 +337,11 @@ describe('GitHistoryController', () => {
 
 		history.openCommit('/project', 'abcdef123');
 		await flushPromises();
-		history.setVisibleRows('/project', [
-			{
-				kind: 'file-header',
-				filePath: 'a.ts',
-				id: 'row',
-				estimatedHeight: 42,
-				file: {
-					...commitSnapshot.files[0],
-					indexStatus: 'M',
-					workTreeStatus: ' ',
-				},
-				isFocused: true,
-			} satisfies GitVirtualFileHeaderRow,
-		]);
+		history.handleBodyDemand({
+			kind: 'viewport',
+			documentId: commitSnapshot.documentId,
+			filePaths: ['a.ts'],
+		});
 		await flushPromises();
 		history.backToList();
 

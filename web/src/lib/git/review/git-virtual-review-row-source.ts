@@ -34,11 +34,14 @@ interface RowSegment {
 
 export interface GitVirtualReviewRowSource {
 	readonly rowCount: number;
+	readonly measurementRevision: string;
 	rowAt(index: number): GitVirtualReviewRow | null;
 	rowKey(index: number): string | number;
 	estimateRowHeight(index: number, lineHeight: number): number;
 	fileStart(filePath: string): number | undefined;
 	fileState(filePath: string): 'pending' | 'resolved' | 'terminal';
+	filePathAt(index: number): string | null;
+	filePathsInRange(start: number, end: number): string[];
 	rowsInRange(start: number, end: number): GitVirtualReviewRow[];
 }
 
@@ -51,11 +54,14 @@ export function buildGitVirtualReviewRowSource(
 export function emptyGitVirtualReviewRowSource(): GitVirtualReviewRowSource {
 	return {
 		rowCount: 0,
+		measurementRevision: 'empty',
 		rowAt: () => null,
 		rowKey: (index) => index,
 		estimateRowHeight: (_index, lineHeight) => lineHeight,
 		fileStart: () => undefined,
 		fileState: () => 'terminal',
+		filePathAt: () => null,
+		filePathsInRange: () => [],
 		rowsInRange: () => [],
 	};
 }
@@ -73,6 +79,7 @@ export function arrayGitVirtualReviewRowSource(
 		);
 	return {
 		rowCount: rows.length,
+		measurementRevision: JSON.stringify(rows.map((row) => [row.id, row.kind, row.estimatedHeight])),
 		rowAt: (index) => rows[index] ?? null,
 		rowKey: (index) => rows[index]?.id ?? index,
 		estimateRowHeight: (index, lineHeight) => {
@@ -91,12 +98,16 @@ export function arrayGitVirtualReviewRowSource(
 			}
 			return 'terminal';
 		},
+		filePathAt: (index) => rows[index]?.filePath || null,
+		filePathsInRange: (start, end) =>
+			uniqueFilePaths(rows.slice(clampIndex(start, rows.length), clampIndex(end, rows.length))),
 		rowsInRange: (start, end) => rows.slice(start, end),
 	};
 }
 
 class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 	readonly rowCount: number;
+	readonly measurementRevision: string;
 	private readonly segments: RowSegment[] = [];
 	private readonly fileStarts = new Map<string, number>();
 	private readonly fileKeyBases = new Map<string, number>();
@@ -185,6 +196,7 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 			start += 1;
 		}
 		this.rowCount = start;
+		this.measurementRevision = buildMeasurementRevision(options, this.segments);
 	}
 
 	rowAt(index: number): GitVirtualReviewRow | null {
@@ -226,10 +238,7 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		if (!segment) return lineHeight;
 		if (segment.kind === 'header') return 42;
 		if (segment.kind === 'placeholder') {
-			return Math.max(
-				96,
-				Math.min(720, (segment.file?.estimatedRows ?? 1) * DEFAULT_ROW_HEIGHT),
-			);
+			return Math.max(96, Math.min(720, (segment.file?.estimatedRows ?? 1) * DEFAULT_ROW_HEIGHT));
 		}
 		if (segment.kind === 'limit' || segment.kind === 'collection') return 112;
 		const localIndex = index - segment.start;
@@ -248,10 +257,33 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		return this.fileStates.get(filePath) ?? 'terminal';
 	}
 
+	filePathAt(index: number): string | null {
+		if (index < 0 || index >= this.rowCount) return null;
+		return this.segmentAt(index)?.file?.path ?? null;
+	}
+
+	filePathsInRange(start: number, end: number): string[] {
+		const safeStart = clampIndex(start, this.rowCount);
+		const safeEnd = clampIndex(end, this.rowCount);
+		if (safeEnd <= safeStart) return [];
+		const paths: string[] = [];
+		const seen = new Set<string>();
+		const firstSegmentIndex = this.segmentIndexAt(safeStart);
+		for (let index = firstSegmentIndex; index < this.segments.length; index += 1) {
+			const segment = this.segments[index];
+			if (segment.start >= safeEnd) break;
+			const filePath = segment.file?.path;
+			if (!filePath || seen.has(filePath)) continue;
+			seen.add(filePath);
+			paths.push(filePath);
+		}
+		return paths;
+	}
+
 	rowsInRange(start: number, end: number): GitVirtualReviewRow[] {
 		const rows: GitVirtualReviewRow[] = [];
-		const safeStart = Math.max(0, start);
-		const safeEnd = Math.min(this.rowCount, end);
+		const safeStart = clampIndex(start, this.rowCount);
+		const safeEnd = clampIndex(end, this.rowCount);
 		for (let index = safeStart; index < safeEnd; index += 1) {
 			const row = this.rowAt(index);
 			if (row) rows.push(row);
@@ -260,6 +292,12 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 	}
 
 	private segmentAt(index: number): RowSegment | null {
+		const segmentIndex = this.segmentIndexAt(index);
+		return segmentIndex < 0 ? null : this.segments[segmentIndex];
+	}
+
+	private segmentIndexAt(index: number): number {
+		if (index < 0 || index >= this.rowCount) return -1;
 		let low = 0;
 		let high = this.segments.length - 1;
 		while (low <= high) {
@@ -267,9 +305,9 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 			const segment = this.segments[middle];
 			if (index < segment.start) high = middle - 1;
 			else if (index >= segment.start + segment.count) low = middle + 1;
-			else return segment;
+			else return middle;
 		}
-		return null;
+		return -1;
 	}
 
 	private headerRow(file: GitReviewFileSummary): GitVirtualReviewRow {
@@ -363,6 +401,35 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 	}
 }
 
+function buildMeasurementRevision(
+	options: BuildVirtualRowsOptions,
+	segments: readonly RowSegment[],
+): string {
+	const composer =
+		options.interaction.kind === 'read-only' ? null : options.interaction.composerState;
+	return JSON.stringify([
+		options.summary.documentId,
+		options.diffMode,
+		options.contextLines,
+		segments.map((segment) => [
+			segment.file?.path ?? '',
+			segment.kind,
+			segment.count,
+			segment.file?.estimatedRows ?? 0,
+			segment.body?.bodyFingerprint ?? '',
+		]),
+		composer?.open ? [composer.filePath, composer.side, composer.line] : null,
+	]);
+}
+
+function clampIndex(index: number, rowCount: number): number {
+	return Math.min(rowCount, Math.max(0, Math.trunc(index)));
+}
+
+function uniqueFilePaths(rows: readonly GitVirtualReviewRow[]): string[] {
+	return Array.from(new Set(rows.map((row) => row.filePath).filter(Boolean)));
+}
+
 function terminalRow(
 	options: BuildVirtualRowsOptions,
 	file: GitReviewFileSummary,
@@ -447,9 +514,14 @@ function indexedSplitRow(
 	index: number,
 ): SplitDiffRow {
 	const entry = splitIndex.entryAt(index);
-	const left = entry.leftRowIndex === null ? null : renderUnifiedDiffRow(renderedRowAt(body, entry.leftRowIndex));
+	const left =
+		entry.leftRowIndex === null
+			? null
+			: renderUnifiedDiffRow(renderedRowAt(body, entry.leftRowIndex));
 	const right =
-		entry.rightRowIndex === null ? null : renderUnifiedDiffRow(renderedRowAt(body, entry.rightRowIndex));
+		entry.rightRowIndex === null
+			? null
+			: renderUnifiedDiffRow(renderedRowAt(body, entry.rightRowIndex));
 	if (left?.kind === 'hunk-header') return splitHeader(left);
 	if (left?.kind === 'context') return splitContext(left);
 	return splitPair(left, right, index);

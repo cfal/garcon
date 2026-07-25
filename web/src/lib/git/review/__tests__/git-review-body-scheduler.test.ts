@@ -43,6 +43,7 @@ describe('GitReviewBodyScheduler', () => {
 	it('promotes queued prefetch paths into the visible lane', async () => {
 		const firstPrefetch = deferred<string>();
 		const calls: Array<{ paths: string[]; purpose: string }> = [];
+		const onDispatch = vi.fn();
 		const scheduler = new GitReviewBodyScheduler({
 			maxBatchFiles: 1,
 			load: (paths, purpose) => {
@@ -52,16 +53,36 @@ describe('GitReviewBodyScheduler', () => {
 			onResult: vi.fn(),
 			onError: vi.fn(),
 			onLoadingChange: vi.fn(),
+			onDispatch,
 		});
 
-		scheduler.requestPrefetch(['a.ts', 'b.ts']);
-		scheduler.requestVisible(['b.ts']);
+		expect(scheduler.requestPrefetch(['a.ts', 'b.ts'])).toBe(true);
+		expect(scheduler.requestVisible(['b.ts'])).toBe(true);
 
-		await vi.waitFor(() =>
-			expect(calls).toContainEqual({ paths: ['b.ts'], purpose: 'visible' }),
-		);
+		await vi.waitFor(() => expect(calls).toContainEqual({ paths: ['b.ts'], purpose: 'visible' }));
 		expect(calls[0]).toEqual({ paths: ['a.ts'], purpose: 'prefetch' });
+		expect(onDispatch).toHaveBeenCalledWith(['a.ts'], 'prefetch');
+		expect(onDispatch).toHaveBeenCalledWith(['b.ts'], 'visible');
 		firstPrefetch.resolve('prefetched');
+	});
+
+	it('does not duplicate an active prefetch when it becomes visible', () => {
+		const prefetch = deferred<string>();
+		const load = vi.fn(() => prefetch.promise);
+		const scheduler = new GitReviewBodyScheduler({
+			maxBatchFiles: 1,
+			load,
+			onResult: vi.fn(),
+			onError: vi.fn(),
+			onLoadingChange: vi.fn(),
+		});
+
+		expect(scheduler.requestPrefetch(['a.ts'])).toBe(true);
+		expect(scheduler.requestVisible(['a.ts'])).toBe(false);
+
+		expect(load).toHaveBeenCalledOnce();
+		expect(load).toHaveBeenCalledWith(['a.ts'], 'prefetch', expect.any(AbortSignal));
+		prefetch.resolve('prefetched');
 	});
 
 	it('cancels speculative work without interrupting the visible lane', async () => {

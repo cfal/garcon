@@ -22,6 +22,7 @@
 		projectPath: string | null;
 		effectiveProjectKey: string | null;
 		isMobile: boolean;
+		active?: boolean;
 		diffMode: DiffMode;
 		contextLines: number;
 		diffFontSize: number;
@@ -42,6 +43,7 @@
 		projectPath,
 		effectiveProjectKey,
 		isMobile,
+		active = true,
 		diffMode,
 		contextLines,
 		diffFontSize,
@@ -157,6 +159,7 @@
 		fileFilter={history.fileFilter}
 		focusedFilePath={history.focusedFilePath}
 		{isMobile}
+		{active}
 		fontSize={Number(diffFontSize) || 12}
 		{diffMode}
 		{contextLines}
@@ -181,7 +184,7 @@
 		{onSetDiffFontSize}
 		onSelectFile={(file) => history.focusFile(projectPath, file)}
 		onFileFilterChange={(value) => history.setFileFilter(value)}
-		onVisibleRowsChange={(rows) => history.setVisibleRows(projectPath, rows)}
+		onBodyDemand={(demand) => history.handleBodyDemand(demand)}
 		{onOpenInEditor}
 		composerState={history.document.commentComposer}
 		commentFeedback={history.document.commentFeedback}
