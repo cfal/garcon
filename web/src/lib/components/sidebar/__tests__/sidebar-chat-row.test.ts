@@ -111,7 +111,7 @@ describe('shared sidebar chat row', () => {
 			expect(badge.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
 			expect(badge.closest('button')).not.toBe(desktopMenuTrigger);
 			expect(badge.parentElement?.className).toContain('relative flex-1 min-w-0');
-			expect(badge.parentElement?.className).toContain('pr-8');
+			expect(badge.parentElement?.className).not.toContain('pr-8');
 		}
 
 		await fireEvent.click(screen.getByRole('button', { name: 'ops' }));
@@ -127,14 +127,17 @@ describe('shared sidebar chat row', () => {
 		});
 
 		const title = screen.getByText('Shared row chat');
-		const processingSlot = document.querySelector('[data-slot="sidebar-chat-processing-slot"]');
+		const processingIndicator = document.querySelector(
+			'[data-slot="sidebar-chat-processing-indicator"]',
+		);
 		expect(title.className).toContain('font-semibold');
+		expect(title.className).not.toContain('flex-1');
+		expect(title.parentElement?.className).toContain('gap-1.5');
 		expect(screen.getByText('Unread').className).toContain('sr-only');
 		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
-		expect(processingSlot?.className).toContain('size-3');
-		expect(
-			processingSlot?.querySelector('[data-slot="sidebar-chat-processing-indicator"]'),
-		).toBeTruthy();
+		expect(processingIndicator?.className).toContain('shrink-0');
+		expect(processingIndicator?.parentElement).toBe(title.parentElement);
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-slot"]')).toBeNull();
 		expect(title.closest('button')?.className).not.toContain('border-l-status-processing');
 
 		await rerender({
@@ -163,7 +166,7 @@ describe('shared sidebar chat row', () => {
 
 		expect(screen.queryByText('Chat is processing')).toBeNull();
 		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeNull();
-		expect(document.querySelector('[data-slot="sidebar-chat-processing-slot"]')).toBeTruthy();
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-slot"]')).toBeNull();
 	});
 
 	it('sizes archived badges to the same metadata pill height', () => {
@@ -326,7 +329,9 @@ describe('shared sidebar chat row', () => {
 		);
 		expect(processingIndicator).toBeTruthy();
 		expect(processingIndicator?.closest('.sidebar-reduce-motion')).toBeTruthy();
-		expect(screen.getByText('Shared row chat').className).toContain('font-semibold');
+		const searchTitle = screen.getByText('Shared row chat');
+		expect(searchTitle.className).toContain('font-semibold');
+		expect(processingIndicator?.parentElement).toBe(searchTitle.parentElement);
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByText('3h ago')).toBeTruthy();

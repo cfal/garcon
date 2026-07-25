@@ -251,7 +251,7 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div class={cn('relative flex-1 min-w-0', !isMobile && 'pr-8')}>
+	<div class="relative flex-1 min-w-0">
 		<SidebarChatSummary
 			{session}
 			{isSelected}

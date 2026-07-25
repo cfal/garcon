@@ -48,11 +48,11 @@
 	<div class="min-w-0 flex-1">
 		<div
 			class={cn(
-				'flex min-w-0 items-center gap-1 text-[14px] leading-[1.3]',
+				'flex min-w-0 items-center gap-1.5 text-[14px] leading-[1.3]',
 				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>
-			<span class={cn('min-w-0 flex-1 truncate', isUnread ? 'font-semibold' : 'font-medium')}>
+			<span class={cn('min-w-0 truncate', isUnread ? 'font-semibold' : 'font-medium')}>
 				{chatName}
 			</span>
 			{#if isUnread}
@@ -63,18 +63,13 @@
 			{#if isProcessing}
 				<span class="sr-only">{m.chat_pane_processing()}</span>
 			{/if}
-			<span
-				class="flex size-3 shrink-0 items-center justify-center"
-				aria-hidden="true"
-				data-slot="sidebar-chat-processing-slot"
-			>
-				{#if isProcessing}
-					<span
-						class="sidebar-processing-indicator size-2 rounded-full bg-status-processing"
-						data-slot="sidebar-chat-processing-indicator"
-					></span>
-				{/if}
-			</span>
+			{#if isProcessing}
+				<span
+					class="sidebar-processing-indicator size-2 shrink-0 rounded-full bg-status-processing"
+					aria-hidden="true"
+					data-slot="sidebar-chat-processing-indicator"
+				></span>
+			{/if}
 		</div>
 
 		{#if projectPath || formattedTimestamp}
