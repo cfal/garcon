@@ -701,6 +701,35 @@ describe('WorkspaceRoot', () => {
 		expect(sidebarEnd?.querySelector(`[aria-label="${m.workspace_close_sidebar()}"]`)).toBeTruthy();
 	});
 
+	it('shows Agents only while the Chat feed is the active main tab', async () => {
+		const snapshot = minimalGitSnapshot();
+		installContext({
+			...snapshot,
+			main: {
+				...snapshot.main,
+				activeId: CHAT_SURFACE_ID,
+				mru: [CHAT_SURFACE_ID, 'singleton:git'],
+			},
+			mobileActiveSurfaceId: CHAT_SURFACE_ID,
+		});
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const start = container.querySelector('[data-workspace-taskbar-start]');
+		const end = container.querySelector('[data-workspace-taskbar-end]');
+		const agents = await screen.findByRole('button', { name: /Agents/ });
+
+		expect(start?.contains(agents)).toBe(true);
+		expect(end?.contains(agents)).toBe(false);
+
+		await fireEvent.click(screen.getByRole('tab', { name: m.workspace_surface_git() }));
+		await waitFor(() => expect(screen.queryByRole('button', { name: /Agents/ })).toBeNull());
+
+		await fireEvent.click(screen.getByRole('tab', { name: m.workspace_surface_chat() }));
+		expect(await screen.findByRole('button', { name: /Agents/ })).toBeTruthy();
+	});
+
 	it('binds focus, move, and close for every portable kind without replacing Chat', async () => {
 		const { workspace } = installContext();
 		const { container } = render(WorkspaceRoot, {

@@ -11,7 +11,6 @@
 	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import QueueControls from './QueueControls.svelte';
-	import SubagentManagementBar from './SubagentManagementBar.svelte';
 	import {
 		ActiveTranscriptState,
 		INITIAL_VISIBLE_MESSAGES,
@@ -22,6 +21,7 @@
 	import type { SplitPanePreviewCursor } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
@@ -83,6 +83,7 @@
 		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
+		subagentToolbar: SubagentToolbarState;
 		transcriptCache?: ChatTranscriptCache;
 		reserveTopFloatingToolbar?: boolean;
 		reserveFeedTopFloatingToolbar?: boolean;
@@ -108,6 +109,7 @@
 		onRegisterAppendToDraft,
 		onRegisterReload,
 		onRegisterUserMessageNavigator,
+		subagentToolbar,
 		transcriptCache: providedTranscriptCache,
 		reserveTopFloatingToolbar = false,
 		reserveFeedTopFloatingToolbar = false,
@@ -358,8 +360,17 @@
 		onRegisterAppendToDraft?.(appendToActiveDraft);
 		onRegisterReload?.(reloadSelectedChat);
 		onRegisterUserMessageNavigator?.(() => userMessageNavigator.openForActiveChat());
+		const unregisterSubagentToolbar = subagentToolbar.register({
+			get model() {
+				return subagentModel;
+			},
+			jumpToTool: jumpToToolInput,
+		});
 
-		return () => onRegisterUserMessageNavigator?.(null);
+		return () => {
+			unregisterSubagentToolbar();
+			onRegisterUserMessageNavigator?.(null);
+		};
 	});
 
 	// Chat switch effect (dedup handled inside the controller).
@@ -601,8 +612,6 @@
 </script>
 
 <div class="h-full flex flex-col">
-	<SubagentManagementBar model={subagentModel} onJumpToTool={jumpToToolInput} />
-
 	<div class="relative flex-1 min-h-0">
 		<ConversationFeed
 			bind:scrollContainer

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import ConversationWorkspace from '../ConversationWorkspace.svelte';
 	import {
 		setAppShell,
@@ -150,6 +151,7 @@
 	setGitQuickSummary(new GitQuickSummaryStore());
 	setGitBranchActions(new GitBranchSelectorState());
 
+	const subagentToolbar = new SubagentToolbarState();
 	let showTestLayer = $state(false);
 	let testLayerElement = $state<HTMLElement | null>(null);
 	$effect(() => {
@@ -173,4 +175,4 @@
 {#if showTestLayer}
 	<div bind:this={testLayerElement} role="dialog" tabindex="-1" aria-label="Test dialog"></div>
 {/if}
-<ConversationWorkspace isVisible={true} />
+<ConversationWorkspace isVisible={true} {subagentToolbar} />

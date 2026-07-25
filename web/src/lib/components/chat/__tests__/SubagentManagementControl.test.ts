@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import SubagentManagementBar from '../SubagentManagementBar.svelte';
+import SubagentManagementControl from '../SubagentManagementControl.svelte';
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 
 function makeModel(): SubagentManagementModel {
@@ -40,32 +40,47 @@ function makeModel(): SubagentManagementModel {
 	};
 }
 
-describe('SubagentManagementBar', () => {
+describe('SubagentManagementControl', () => {
 	it('collapses to an Agents trigger showing the subagent count', () => {
-		render(SubagentManagementBar, { model: makeModel() });
+		const { container } = render(SubagentManagementControl, { model: makeModel() });
 
 		const trigger = screen.getByRole('button', { name: /Agents/ });
 		expect(within(trigger).getByText('1')).toBeTruthy();
+		expect(trigger.classList).toContain('border-transparent');
+		expect(container.querySelector('.border-b')).toBeNull();
 		// Entries stay hidden until the popover is opened.
 		expect(screen.queryByText('Main chat')).toBeNull();
 	});
 
 	it('reveals root and subagent entries when opened', async () => {
-		render(SubagentManagementBar, { model: makeModel() });
+		render(SubagentManagementControl, { model: makeModel() });
 
-		await fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
+		const trigger = screen.getByRole('button', { name: /Agents/ });
+		await fireEvent.click(trigger);
 
 		expect(await screen.findByText('Main chat')).toBeTruthy();
 		expect(screen.getByRole('button', { name: /review-auth/ })).toBeTruthy();
+		expect(trigger.classList).toContain('bg-chat-tabs-active');
 	});
 
 	it('jumps to the originating tool event when a subagent is selected', async () => {
 		const onJumpToTool = vi.fn();
-		render(SubagentManagementBar, { model: makeModel(), onJumpToTool });
+		render(SubagentManagementControl, { model: makeModel(), onJumpToTool });
 
 		await fireEvent.click(screen.getByRole('button', { name: /Agents/ }));
 		await fireEvent.click(await screen.findByRole('button', { name: /review-auth/ }));
 
 		expect(onJumpToTool).toHaveBeenCalledWith('tool-input-tool-subagent-1');
+		expect(screen.queryByText('Main chat')).toBeNull();
+	});
+
+	it('renders nothing without subagents', () => {
+		const model = makeModel();
+		model.entries = model.entries.filter((entry) => entry.kind === 'root');
+		model.subagents = [];
+
+		const { container } = render(SubagentManagementControl, { model });
+
+		expect(container.firstElementChild).toBeNull();
 	});
 });

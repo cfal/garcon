@@ -5,6 +5,7 @@
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
+	import SubagentManagementControl from '$lib/components/chat/SubagentManagementControl.svelte';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
 	import {
@@ -32,6 +33,7 @@
 		UserMessageNavigatorCommand,
 		UserMessageNavigatorRegistration,
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
+	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
 	import { CHAT_SURFACE_ID, type HostId } from '$lib/workspace/surface-types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -105,6 +107,7 @@
 	const gitBranchActions = getGitBranchActions();
 	const fileSessions = getFileSessions();
 	const surfaceFrames = getSurfaceFrames();
+	const subagentToolbar = new SubagentToolbarState();
 	let openSidebarButton: HTMLButtonElement | null = $state(null);
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
@@ -352,6 +355,17 @@
 							onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
 							onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
 						>
+							{#snippet startActions()}
+								{#if activeMain === CHAT_SURFACE_ID}
+									{@const toolbarModel = subagentToolbar.model}
+									{#if toolbarModel}
+										<SubagentManagementControl
+											model={toolbarModel}
+											onJumpToTool={(anchorId) => subagentToolbar.jumpToTool(anchorId)}
+										/>
+									{/if}
+								{/if}
+							{/snippet}
 							{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
 							{#snippet endActions()}
 								{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
@@ -406,6 +420,7 @@
 					>
 						<ChatSurface
 							{isMobile}
+							{subagentToolbar}
 							reserveTopFloatingToolbar={!isMobile}
 							isVisible={workspace.isChatPresented}
 							isInteractive={workspace.isChatInteractive}

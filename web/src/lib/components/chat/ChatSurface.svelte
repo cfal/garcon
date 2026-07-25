@@ -11,10 +11,12 @@
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
+	import SubagentManagementControl from '$lib/components/chat/SubagentManagementControl.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
 	import { SplitPanePreviewStore } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import type {
 		UserMessageNavigatorCommand,
 		UserMessageNavigatorRegistration,
@@ -65,6 +67,7 @@
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
+		subagentToolbar: SubagentToolbarState;
 		chatActions?: WorkspaceChatActions;
 	}
 
@@ -80,6 +83,7 @@
 		onRegisterSubmit,
 		onRegisterUserMessageNavigator,
 		onRegisterAppendToDraft,
+		subagentToolbar,
 		chatActions = noopChatActions,
 	}: ChatSurfaceProps = $props();
 
@@ -348,8 +352,22 @@
 
 <div class="h-full flex flex-col relative" inert={!isInteractive}>
 	{#if isMobileLayout && hasUsableChatContext}
-		<div data-mobile-current-chat-menu class="absolute right-3 top-3 z-20 sm:hidden">
-			{@render currentChatMenu(true)}
+		{@const toolbarModel = subagentToolbar.model}
+		<div
+			data-mobile-chat-toolbar
+			class="pointer-events-none absolute inset-x-3 top-3 z-20 flex min-w-0 items-start justify-between gap-2 sm:hidden"
+		>
+			<div class="pointer-events-auto min-w-0">
+				{#if toolbarModel}
+					<SubagentManagementControl
+						model={toolbarModel}
+						onJumpToTool={(anchorId) => subagentToolbar.jumpToTool(anchorId)}
+					/>
+				{/if}
+			</div>
+			<div data-mobile-current-chat-menu class="pointer-events-auto shrink-0">
+				{@render currentChatMenu(true)}
+			</div>
 		</div>
 	{/if}
 
@@ -401,6 +419,7 @@
 				style:height={conversationWorkspaceHeight}
 			>
 				<ConversationWorkspace
+					{subagentToolbar}
 					onRegisterSubmit={handleRegisterSubmit}
 					onRegisterUserMessageNavigator={handleRegisterUserMessageNavigator}
 					onRegisterAppendToDraft={handleRegisterAppendToDraft}

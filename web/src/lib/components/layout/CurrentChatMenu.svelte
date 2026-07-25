@@ -1,11 +1,14 @@
 <script lang="ts">
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
+	import {
+		FLOATING_ICON_TRIGGER_CLASS,
+		FLOATING_TOOLBAR_RAIL_CLASS,
+	} from '$lib/components/shared/floating-toolbar-styles.js';
 	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import CurrentChatMenuItems from './CurrentChatMenuItems.svelte';
@@ -62,26 +65,13 @@
 	const triggerLabel = $derived(
 		isMobileLayout ? m.sidebar_actions_settings() : m.sidebar_chat_more_actions(),
 	);
-	const railClass = $derived(
-		cn(
-			'relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground',
-			shadow ? 'shadow-sm' : '',
-		),
-	);
-	const triggerClass = $derived(
-		cn(
-			'relative inline-flex h-8 shrink-0 items-center justify-center rounded-md font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground',
-			isMobileLayout ? 'w-8 px-0 text-sm' : 'w-8 px-0 text-xs sm:text-sm',
-		),
-	);
+	const railClass = $derived(cn(FLOATING_TOOLBAR_RAIL_CLASS, !shadow && 'shadow-none'));
 </script>
 
 <DropdownMenu>
 	<div class={railClass}>
-		<DropdownMenuTrigger class={triggerClass} aria-label={triggerLabel}>
-			{#if isMobileLayout}<SettingsIcon class="h-3.5 w-3.5" />{:else}<EllipsisVertical
-					class="h-3.5 w-3.5"
-				/>{/if}
+		<DropdownMenuTrigger class={FLOATING_ICON_TRIGGER_CLASS} aria-label={triggerLabel}>
+			<EllipsisVertical class="h-3.5 w-3.5" />
 		</DropdownMenuTrigger>
 	</div>
 	<DropdownMenuContent align="end">

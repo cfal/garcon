@@ -55,10 +55,6 @@ vi.mock('$lib/components/chat/QueuedInputsDialog.svelte', async () => ({
 	default: (await import('./GenericStub.svelte')).default,
 }));
 
-vi.mock('$lib/components/chat/SubagentManagementBar.svelte', async () => ({
-	default: (await import('./GenericStub.svelte')).default,
-}));
-
 const mockGetChatMessages = vi.mocked(getChatMessages);
 const mockGetChatExecutionControl = vi.mocked(getChatExecutionControl);
 const mockStopChat = vi.mocked(stopChat);

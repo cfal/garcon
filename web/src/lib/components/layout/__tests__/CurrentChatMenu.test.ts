@@ -59,6 +59,20 @@ describe('CurrentChatMenu', () => {
 		document.body.innerHTML = '';
 	});
 
+	it('uses the vertical actions icon on mobile and desktop', async () => {
+		const rendered = render(CurrentChatMenu, props());
+		const mobileTrigger = screen.getByRole('button', { name: m.sidebar_actions_settings() });
+
+		expect(mobileTrigger.querySelector('.lucide-ellipsis-vertical')).toBeTruthy();
+		expect(mobileTrigger.querySelector('.lucide-settings')).toBeNull();
+
+		await rendered.rerender({ ...props(), isMobileLayout: false });
+		const desktopTrigger = screen.getByRole('button', {
+			name: m.sidebar_chat_more_actions(),
+		});
+		expect(desktopTrigger.querySelector('.lucide-ellipsis-vertical')).toBeTruthy();
+	});
+
 	it('omits the navigator action until its command is registered', async () => {
 		render(CurrentChatMenu, props());
 
