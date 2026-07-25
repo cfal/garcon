@@ -9,12 +9,13 @@ export interface SharedModelOption {
 
 export const CLAUDE_MODELS = {
   OPTIONS: [
+    { value: 'claude-opus-5', label: 'Opus 5', supportsImages: true },
     { value: 'opus', label: 'Opus', supportsImages: true },
     { value: 'sonnet', label: 'Sonnet', supportsImages: true },
     { value: 'haiku', label: 'Haiku', supportsImages: true },
     { value: 'fable', label: 'Fable 5', supportsImages: true },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'opus',
+  DEFAULT: 'claude-opus-5',
 };
 
 export const CODEX_MODELS = {
