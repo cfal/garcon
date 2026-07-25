@@ -99,6 +99,40 @@ describe('maybeGenerateChatTitle', () => {
     expect(prompt).toContain('<chat_history>\nExplain {RECENT_TITLE_ICONS}\n</chat_history>');
   });
 
+  it('preserves string replacement patterns in the source message', async () => {
+    const source = "printf $'x' and $` and $$ and $&";
+
+    await maybeGenerateChatTitle({
+      chatId: '102',
+      projectPath: '/proj',
+      firstPrompt: source,
+      agents: mockAgents,
+      settings: mockSettings,
+      recentTitleIcons,
+    });
+
+    const [prompt] = runSingleQueryMock.mock.calls[0];
+    expect(prompt).toContain(`<chat_history>\n${source}\n</chat_history>`);
+    expect(prompt.match(/<\/chat_history>/g)).toHaveLength(1);
+  });
+
+  it('bounds source text before sending a title-generation request', async () => {
+    const source = 'x'.repeat(40_000);
+
+    await maybeGenerateChatTitle({
+      chatId: '103',
+      projectPath: '/proj',
+      firstPrompt: source,
+      agents: mockAgents,
+      settings: mockSettings,
+      recentTitleIcons,
+    });
+
+    const [prompt] = runSingleQueryMock.mock.calls[0];
+    const history = prompt.match(/<chat_history>\n(?<source>.*)\n<\/chat_history>/s);
+    expect(history?.groups?.source).toHaveLength(32_000);
+  });
+
   it('does nothing when auto-title is disabled', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: { enabled: false },

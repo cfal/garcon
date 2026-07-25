@@ -17,6 +17,7 @@ import {
 import type { RecentTitleIconSource } from './recent-title-icons.js';
 
 const logger = createLogger('chats:title-generator');
+const TITLE_GENERATION_SOURCE_MAX_CHARS = 32_000;
 
 interface TitleGenerationAgents {
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
@@ -130,8 +131,11 @@ function buildTitleGenerationPrompt(
 ): string {
   const recentIcons = recentTitleIcons.getRecentIcons();
   return TITLE_GENERATION_PROMPT
-    .replace('{RECENT_TITLE_ICONS}', recentIcons.length > 0 ? recentIcons.join(' ') : 'None')
-    .replace('{USER_PROMPT}', sourceText);
+    .replace(
+      '{RECENT_TITLE_ICONS}',
+      () => recentIcons.length > 0 ? recentIcons.join(' ') : 'None',
+    )
+    .replace('{USER_PROMPT}', () => sourceText);
 }
 
 function normalizeTitle(text: unknown): string {
@@ -174,7 +178,7 @@ async function runTitleGeneration({
   swallowErrors,
   signal,
 }: RunTitleGenerationInput): Promise<GenerateChatTitleResult | null> {
-  const normalizedSource = sourceText?.trim() ?? '';
+  const normalizedSource = (sourceText?.trim() ?? '').slice(0, TITLE_GENERATION_SOURCE_MAX_CHARS);
   if (!normalizedSource) return null;
   const generationSignal = createGenerationRequestSignal(signal);
 
