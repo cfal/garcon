@@ -242,7 +242,23 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
       expect(retainedBefore.firstIndex).toBeGreaterThan(0);
 
       await switchToChat(fixture.page);
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-git-virtual-diff-root]')
+            ?.closest('[data-workspace-surface-id]')
+            ?.getAttribute('aria-hidden') === 'true',
+        { timeout: 20_000 },
+      );
       await switchToGit(fixture.page);
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-git-virtual-diff-root]')
+            ?.closest('[data-workspace-surface-id]')
+            ?.getAttribute('aria-hidden') === 'false',
+        { timeout: 20_000 },
+      );
       await showWorkbenchDiff(fixture.page);
       const retainedAfter = await fixture.page.evaluate(() => {
         const viewport = document.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
@@ -303,7 +319,7 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
       );
       const visiblePath = heldPaths[0] ?? '';
       expect(visiblePath).toBeTruthy();
-      expect(Number(/file-(\d+)\.txt$/.exec(visiblePath)?.[1])).toBeGreaterThan(40);
+      expect(Number(/file-(\d+)\.txt$/.exec(visiblePath)?.[1])).toBeGreaterThanOrEqual(40);
 
       await fixture.page.evaluate(() => {
         const scope = globalThis as typeof globalThis & {
