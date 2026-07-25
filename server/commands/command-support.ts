@@ -32,6 +32,7 @@ import type { PathCache } from '../chats/path-cache.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import { DomainError } from '../lib/domain-error.js';
+import { CommandValidationError } from '../lib/command-validation-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
 import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
@@ -219,17 +220,7 @@ export interface AcceptedRunPreparation {
   compensate(): Promise<void>;
 }
 
-export class CommandValidationError extends Error {
-  constructor(
-    readonly code: CommandErrorCode,
-    message: string,
-    readonly status = 400,
-    readonly retryable = false,
-  ) {
-    super(message);
-    this.name = 'CommandValidationError';
-  }
-}
+export { CommandValidationError };
 
 export class CommandExecutionControlError extends CommandValidationError {
   constructor(

@@ -34,6 +34,7 @@ import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-sessi
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { runClaudeSingleQueryProcess } from './single-query-process.js';
 import { pipeClaudeProcessOutput } from './cli-stdio.js';
+import { ClaudeProjectPathProcessTracker } from './project-path-processes.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -41,9 +42,6 @@ const NOOP_LOGGER: AgentLogger = {
   warn() {},
   error() {},
 };
-
-const CLAUDE_PROCESS_EXIT_GRACE_MS = 5_000;
-const CLAUDE_PROCESS_EXIT_FORCE_MS = 5_000;
 
 interface CompactMetadata {
   trigger?: string;
@@ -151,26 +149,6 @@ interface ClaudeRunningSession {
   // that follows it so both can be emitted as a single CompactionMessage.
   pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
   eventMetadata: ReturnType<typeof claudeEventMetadata>;
-}
-
-async function waitForClaudeProcessExit(
-  subprocess: ReturnType<typeof Bun.spawn>,
-  timeoutMs: number,
-): Promise<boolean> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      subprocess.exited.then(
-        () => true,
-        () => false,
-      ),
-      new Promise<boolean>((resolve) => {
-        timeout = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
 }
 
 function mergeClaudeSessionOptions(
@@ -480,10 +458,7 @@ function buildClaudeCLIArgs({
 
 class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
-  #exitingProcesses = new Map<string, {
-    chatId: string;
-    processes: Set<ReturnType<typeof Bun.spawn>>;
-  }>();
+  #projectPathProcesses = new ClaudeProjectPathProcessTracker();
   #pendingPermissions = new Map<string, PendingPermission>();
   #pendingControlRequests = new Map<string, PendingControlRequest>();
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
@@ -774,30 +749,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const proc = session.process;
     if (!proc) return;
     session.process = null;
-    let exiting = this.#exitingProcesses.get(session.id);
-    if (!exiting) {
-      exiting = { chatId: session.chatId, processes: new Set() };
-      this.#exitingProcesses.set(session.id, exiting);
-    }
-    exiting.processes.add(proc);
-    void proc.exited.then(
-      () => this.#forgetExitingProcess(session.id, proc),
-      () => this.#forgetExitingProcess(session.id, proc),
-    );
+    this.#projectPathProcesses.trackDetached(session.id, session.chatId, proc);
     if (!proc.killed) {
       proc.kill();
-    }
-  }
-
-  #forgetExitingProcess(
-    agentSessionId: string,
-    proc: ReturnType<typeof Bun.spawn>,
-  ): void {
-    const exiting = this.#exitingProcesses.get(agentSessionId);
-    if (!exiting) return;
-    exiting.processes.delete(proc);
-    if (exiting.processes.size === 0) {
-      this.#exitingProcesses.delete(agentSessionId);
     }
   }
 
@@ -864,12 +818,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!agentSessionId) return;
 
     const session = this.#runningSessions.get(agentSessionId);
-    const exiting = this.#exitingProcesses.get(agentSessionId);
-    if (!session && !exiting) return;
     if (session && session.chatId !== request.chatId) {
-      throw new Error('Chat ID mismatch');
-    }
-    if (exiting && exiting.chatId !== request.chatId) {
       throw new Error('Chat ID mismatch');
     }
     if (session?.isRunning) {
@@ -881,25 +830,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }
     }
 
-    const subprocesses = [...(exiting?.processes ?? [])];
-    if (session?.process) subprocesses.push(session.process);
-    if (subprocesses.length === 0) return;
-
     if (session) this.#clearAbortTimer(session);
-    for (const subprocess of subprocesses) {
-      if (!subprocess.killed) subprocess.kill();
-    }
-    const gracefulExits = await Promise.all(subprocesses.map((subprocess) =>
-      waitForClaudeProcessExit(subprocess, CLAUDE_PROCESS_EXIT_GRACE_MS)
-    ));
-    const remaining = subprocesses.filter((_, index) => !gracefulExits[index]);
-    for (const subprocess of remaining) subprocess.kill('SIGKILL');
-    const forcedExits = await Promise.all(remaining.map((subprocess) =>
-      waitForClaudeProcessExit(subprocess, CLAUDE_PROCESS_EXIT_FORCE_MS)
-    ));
-    if (forcedExits.some((exited) => !exited)) {
-      throw new Error('Claude process did not exit for project-path update');
-    }
+    await this.#projectPathProcesses.stopForUpdate({
+      agentSessionId,
+      chatId: request.chatId,
+      activeProcess: session?.process ?? null,
+    });
   }
 
   setInternalPermissionMode(agentSessionId: string, mode: PermissionMode): void {
