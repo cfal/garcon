@@ -41,9 +41,8 @@
 	role="option"
 	aria-selected={isHighlighted}
 	class={cn(
-		'h-full min-w-0 w-full border-l-2 border-l-transparent bg-transparent px-3 py-1.5 text-left font-normal transition-colors duration-150',
+		'h-full min-w-0 w-full bg-transparent px-3 py-1.5 text-left font-normal transition-colors duration-150',
 		isHighlighted ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/40',
-		chat.isProcessing && 'border-l-[3px] border-l-status-processing',
 	)}
 	style={`min-height:${SEARCH_RESULT_ROW_HEIGHT}px;`}
 	onclick={() => onSelectChat(chat.id)}

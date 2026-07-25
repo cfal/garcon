@@ -251,7 +251,7 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div class="relative flex-1 min-w-0">
+	<div class={cn('relative flex-1 min-w-0', !isMobile && 'pr-8')}>
 		<SidebarChatSummary
 			{session}
 			{isSelected}
@@ -277,7 +277,6 @@
 					isSelected &&
 					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 				isMultiSelectMode && isMultiSelected && 'bg-primary/8',
-				!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 			)}
 		>
 			<button
@@ -312,13 +311,10 @@
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
-					isMultiSelectMode
-						? 'py-[5px] pl-1 border-l-0'
-						: 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
+					isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[9px]',
 					!isMultiSelectMode &&
 						isSelected &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
-					!isMultiSelectMode && isProcessing && 'border-l-[3px] border-l-status-processing',
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
 				onclick={handleItemClick}

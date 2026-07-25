@@ -103,7 +103,6 @@
 	--color-tag-orange: hsl(var(--tag-orange-bg));
 	--color-tag-orange-foreground: hsl(var(--tag-orange-foreground));
 	--color-tag-orange-border: hsl(var(--tag-orange-border));
-	--color-indicator-unread: hsl(var(--indicator-unread));
 	--color-indicator-attention: hsl(var(--indicator-attention));
 	--color-status-processing: hsl(var(--status-processing));
 	--color-status-processing-foreground: hsl(var(--status-processing-foreground));
@@ -296,7 +295,6 @@
 	--tag-orange-bg: 28 92% 92% / 0.5;
 	--tag-orange-foreground: 24 82% 30%;
 	--tag-orange-border: 24 52% 74% / 0.5;
-	--indicator-unread: 214 90% 48%;
 	--indicator-attention: 0 78% 54%;
 	--status-processing: 214 90% 48%;
 	--status-processing-foreground: 214 85% 32%;
@@ -513,7 +511,6 @@
 	--tag-orange-bg: 24 42% 22% / 0.3;
 	--tag-orange-foreground: 24 88% 86%;
 	--tag-orange-border: 24 34% 40% / 0.4;
-	--indicator-unread: 214 95% 68%;
 	--indicator-attention: 0 82% 66%;
 	--status-processing: 214 95% 68%;
 	--status-processing-foreground: 214 95% 86%;
@@ -975,6 +972,27 @@
 		--composer-thinking-composer-background: hsl(var(--card));
 		--composer-thinking-composer-border: hsl(var(--border));
 		--composer-thinking-status-border: hsl(var(--border));
+	}
+}
+
+@keyframes sidebar-processing-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.4;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.sidebar-processing-indicator {
+		animation: sidebar-processing-pulse 1.6s ease-in-out infinite;
+	}
+
+	.sidebar-reduce-motion .sidebar-processing-indicator {
+		animation: none;
 	}
 }
 

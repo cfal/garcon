@@ -31,6 +31,7 @@
 	}: SidebarChatSummaryProps = $props();
 
 	let isUnread = $derived(session.isUnread && !isSelected);
+	let isProcessing = $derived(session.isProcessing);
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let lastMessage = $derived(session.lastMessage || '');
 	let projectPath = $derived(showProjectPath ? session.projectPath || '' : '');
@@ -47,17 +48,31 @@
 	<div class="min-w-0 flex-1">
 		<div
 			class={cn(
-				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium leading-[1.3]',
+				'flex min-w-0 items-center gap-1 text-[14px] leading-[1.3]',
 				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>
+			<span class={cn('min-w-0 flex-1 truncate', isUnread ? 'font-semibold' : 'font-medium')}>
+				{chatName}
+			</span>
 			{#if isUnread}
-				<span
-					class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator-unread"
-					aria-label={m.sidebar_chat_unread()}
-				></span>
+				<span class="sr-only">{m.sidebar_chat_unread()}</span>
 			{/if}
-			<span class="truncate">{chatName}</span>
+			{#if isProcessing}
+				<span class="sr-only">{m.chat_pane_processing()}</span>
+			{/if}
+			<span
+				class="flex size-3 shrink-0 items-center justify-center"
+				aria-hidden="true"
+				data-slot="sidebar-chat-processing-slot"
+			>
+				{#if isProcessing}
+					<span
+						class="sidebar-processing-indicator size-2 rounded-full bg-status-processing"
+						data-slot="sidebar-chat-processing-indicator"
+					></span>
+				{/if}
+			</span>
 		</div>
 
 		{#if projectPath || formattedTimestamp}
