@@ -414,4 +414,31 @@ describe('prepareClaudeNativeSessionRelocation', () => {
       configHomeDir: path.join(rootDirectory, 'config'),
     })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
   });
+
+  it('rejects session IDs that could escape recursive artifact cleanup', async () => {
+    const rootDirectory = await temporaryDirectory();
+    const configHomeDir = path.join(rootDirectory, 'config');
+    const projectPath = path.join(rootDirectory, 'project');
+    const projectDirectory = path.join(configHomeDir, 'projects', 'source');
+    const siblingDirectory = path.join(configHomeDir, 'projects', 'sibling');
+    const unsafePath = path.join(projectDirectory, '...jsonl');
+    await fs.mkdir(projectPath, { recursive: true });
+    await fs.mkdir(projectDirectory, { recursive: true });
+    await fs.mkdir(siblingDirectory, { recursive: true });
+    await fs.writeFile(unsafePath, 'unsafe\n');
+    await fs.writeFile(path.join(siblingDirectory, 'retained.txt'), 'retained\n');
+
+    await expect(prepareClaudeNativeSessionRelocation({
+      previousProjectPath: projectPath,
+      nextProjectPath: projectPath,
+      agentSessionId: '..',
+      nativePath: unsafePath,
+      configHomeDir,
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+
+    expect(await pathExists(unsafePath)).toBe(true);
+    expect(await pathExists(path.join(siblingDirectory, 'retained.txt'))).toBe(
+      true,
+    );
+  });
 });

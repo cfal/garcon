@@ -480,6 +480,10 @@ function buildClaudeCLIArgs({
 
 class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
+  #exitingProcesses = new Map<string, {
+    chatId: string;
+    processes: Set<ReturnType<typeof Bun.spawn>>;
+  }>();
   #pendingPermissions = new Map<string, PendingPermission>();
   #pendingControlRequests = new Map<string, PendingControlRequest>();
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
@@ -770,8 +774,30 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const proc = session.process;
     if (!proc) return;
     session.process = null;
+    let exiting = this.#exitingProcesses.get(session.id);
+    if (!exiting) {
+      exiting = { chatId: session.chatId, processes: new Set() };
+      this.#exitingProcesses.set(session.id, exiting);
+    }
+    exiting.processes.add(proc);
+    void proc.exited.then(
+      () => this.#forgetExitingProcess(session.id, proc),
+      () => this.#forgetExitingProcess(session.id, proc),
+    );
     if (!proc.killed) {
       proc.kill();
+    }
+  }
+
+  #forgetExitingProcess(
+    agentSessionId: string,
+    proc: ReturnType<typeof Bun.spawn>,
+  ): void {
+    const exiting = this.#exitingProcesses.get(agentSessionId);
+    if (!exiting) return;
+    exiting.processes.delete(proc);
+    if (exiting.processes.size === 0) {
+      this.#exitingProcesses.delete(agentSessionId);
     }
   }
 
@@ -838,11 +864,15 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!agentSessionId) return;
 
     const session = this.#runningSessions.get(agentSessionId);
-    if (!session) return;
-    if (session.chatId !== request.chatId) {
+    const exiting = this.#exitingProcesses.get(agentSessionId);
+    if (!session && !exiting) return;
+    if (session && session.chatId !== request.chatId) {
       throw new Error('Chat ID mismatch');
     }
-    if (session.isRunning) {
+    if (exiting && exiting.chatId !== request.chatId) {
+      throw new Error('Chat ID mismatch');
+    }
+    if (session?.isRunning) {
       throw new Error('Cannot update project path while Claude is running');
     }
     for (const pending of this.#pendingPermissions.values()) {
@@ -851,23 +881,23 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }
     }
 
-    const subprocess = session.process;
-    if (!subprocess) return;
+    const subprocesses = [...(exiting?.processes ?? [])];
+    if (session?.process) subprocesses.push(session.process);
+    if (subprocesses.length === 0) return;
 
-    this.#clearAbortTimer(session);
-    if (!subprocess.killed) subprocess.kill();
-    if (await waitForClaudeProcessExit(
-      subprocess,
-      CLAUDE_PROCESS_EXIT_GRACE_MS,
-    )) {
-      return;
+    if (session) this.#clearAbortTimer(session);
+    for (const subprocess of subprocesses) {
+      if (!subprocess.killed) subprocess.kill();
     }
-
-    subprocess.kill('SIGKILL');
-    if (!await waitForClaudeProcessExit(
-      subprocess,
-      CLAUDE_PROCESS_EXIT_FORCE_MS,
-    )) {
+    const gracefulExits = await Promise.all(subprocesses.map((subprocess) =>
+      waitForClaudeProcessExit(subprocess, CLAUDE_PROCESS_EXIT_GRACE_MS)
+    ));
+    const remaining = subprocesses.filter((_, index) => !gracefulExits[index]);
+    for (const subprocess of remaining) subprocess.kill('SIGKILL');
+    const forcedExits = await Promise.all(remaining.map((subprocess) =>
+      waitForClaudeProcessExit(subprocess, CLAUDE_PROCESS_EXIT_FORCE_MS)
+    ));
+    if (forcedExits.some((exited) => !exited)) {
       throw new Error('Claude process did not exit for project-path update');
     }
   }

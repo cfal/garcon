@@ -382,6 +382,96 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('waits for a process detached by a thinking-mode change', async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSetTimeout = globalThis.setTimeout;
+    const fake = createFakeClaudeProcess({
+      onKill: (signal) => signal === 'SIGKILL' ? 137 : null,
+    });
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions());
+      enqueueResult(fake);
+      await start;
+      runtime.setInternalThinkingMode('expected-session', 'high');
+      globalThis.setTimeout = mock((callback) => {
+        queueMicrotask(callback);
+        return 1;
+      });
+
+      await expect(runtime.prepareClaudeProjectPathUpdate({
+        chatId: 'chat-1',
+        agentSessionId: 'expected-session',
+        previousProjectPath: '/tmp',
+        nextProjectPath: '/next',
+        nativePath: '/config/projects/tmp/expected-session.jsonl',
+      })).resolves.toBeUndefined();
+
+      expect(fake.proc.kill.mock.calls).toEqual([
+        [],
+        ['SIGKILL'],
+      ]);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('waits for a process detached by idle-session eviction', async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSetInterval = globalThis.setInterval;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalDateNow = Date.now;
+    const fake = createFakeClaudeProcess({
+      onKill: (signal) => signal === 'SIGKILL' ? 137 : null,
+    });
+    let purgeIdleSessions;
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      globalThis.setInterval = mock((callback) => {
+        purgeIdleSessions = callback;
+        return 1;
+      });
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions());
+      enqueueResult(fake);
+      await start;
+      const idleSince = Date.now();
+      Date.now = mock(() => idleSince + 31 * 60 * 1000);
+      runtime.startPurgeTimer();
+      purgeIdleSessions();
+      globalThis.setTimeout = mock((callback) => {
+        queueMicrotask(callback);
+        return 1;
+      });
+
+      await expect(runtime.prepareClaudeProjectPathUpdate({
+        chatId: 'chat-1',
+        agentSessionId: 'expected-session',
+        previousProjectPath: '/tmp',
+        nextProjectPath: '/next',
+        nativePath: '/config/projects/tmp/expected-session.jsonl',
+      })).resolves.toBeUndefined();
+
+      expect(fake.proc.kill.mock.calls).toEqual([
+        [],
+        ['SIGKILL'],
+      ]);
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.setInterval = originalSetInterval;
+      globalThis.setTimeout = originalSetTimeout;
+      runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('retains a stuck process so retries cannot bypass the exit guard', async () => {
     const originalSpawn = Bun.spawn;
     const originalSetTimeout = globalThis.setTimeout;

@@ -63,6 +63,15 @@ function transcriptFileName(agentSessionId: string): string {
   return `${agentSessionId}.jsonl`;
 }
 
+function isSafeSessionPathSegment(agentSessionId: string): boolean {
+  return (
+    agentSessionId.length > 0
+    && agentSessionId !== '.'
+    && agentSessionId !== '..'
+    && path.basename(agentSessionId) === agentSessionId
+  );
+}
+
 function configHomeDirFromNativePath(
   nativePath: string,
   agentSessionId: string,
@@ -254,6 +263,13 @@ export async function prepareClaudeNativeSessionRelocation(input: {
   readonly logger?: AgentLogger;
 }): Promise<ClaudeNativeSessionRelocation> {
   const logger = input.logger ?? NOOP_LOGGER;
+  if (!isSafeSessionPathSegment(input.agentSessionId)) {
+    throw new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Claude session transcript is outside the expected project-state directory',
+      false,
+    );
+  }
   const sourcePath = await resolveClaudeNativePath({
     projectPath: input.previousProjectPath,
     agentSessionId: input.agentSessionId,
