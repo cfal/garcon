@@ -140,6 +140,7 @@ describe('ChatSurface mobile toolbar', () => {
 		const menuRegion = rendered.container.querySelector('[data-mobile-current-chat-menu]');
 
 		expect(toolbar).toBeTruthy();
+		expect(toolbar?.classList.contains('sm:hidden')).toBe(false);
 		expect(toolbar?.firstElementChild?.contains(agents)).toBe(true);
 		expect(menuRegion?.contains(menu)).toBe(true);
 		expect(

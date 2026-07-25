@@ -355,7 +355,7 @@
 		{@const toolbarModel = subagentToolbar.model}
 		<div
 			data-mobile-chat-toolbar
-			class="pointer-events-none absolute inset-x-3 top-3 z-20 flex min-w-0 items-start justify-between gap-2 sm:hidden"
+			class="pointer-events-none absolute inset-x-3 top-3 z-20 flex min-w-0 items-start justify-between gap-2"
 		>
 			<div class="pointer-events-auto min-w-0">
 				{#if toolbarModel}
