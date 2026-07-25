@@ -106,10 +106,14 @@ const agents = {
 const commandLedger = createRouteCommandLedger('chats-title');
 const pendingInputs = createRoutePendingInputs();
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
+const recentTitleIcons = {
+  getRecentIcons: () => [],
+};
 
 const chatsRoutes = createChatRoutes({
   registry,
   settings,
+  recentTitleIcons,
   queue,
   pathCache,
   metadata,
@@ -392,6 +396,7 @@ describe('POST /api/v1/chats/title/generate', () => {
       messageSeq: 9,
       agents,
       settings,
+      recentTitleIcons,
       signal: expect.any(AbortSignal),
     });
   });

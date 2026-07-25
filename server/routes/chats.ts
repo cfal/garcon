@@ -17,6 +17,7 @@ import {
   CommandValidationError,
 } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
+import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import {
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
@@ -352,6 +353,7 @@ async function searchableChatIds(
 interface ChatRouteDeps {
   registry: IChatRegistry;
   settings: SettingsDep;
+  recentTitleIcons: RecentTitleIconSource;
   queue: QueueDep;
   pathCache: PathCacheDep;
   metadata: MetadataDep;
@@ -368,6 +370,7 @@ interface ChatRouteDeps {
 export default function createChatRoutes({
   registry,
   settings,
+  recentTitleIcons,
   queue,
   pathCache,
   metadata,
@@ -825,6 +828,7 @@ export default function createChatRoutes({
         ...(messageSeq === undefined ? {} : { messageSeq }),
         agents,
         settings,
+        recentTitleIcons,
         signal: request.signal,
       });
 

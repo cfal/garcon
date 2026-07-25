@@ -23,6 +23,7 @@ import { ChatRegistry } from './chats/store.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
 import { migrateWorkspaceChatIds } from './chats/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
+import { RecentTitleIconStore } from './chats/recent-title-icons.js';
 import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
 import {
@@ -147,6 +148,14 @@ export async function startServer(): Promise<void> {
     // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
     const settings = new SettingsStore(workspaceDir);
+    const recentTitleIcons = new RecentTitleIconStore();
+    settings.onSessionNameChanged((_chatId, title) => {
+      try {
+        recentTitleIcons.recordTitle(title);
+      } catch (error) {
+        logger.warn('chat-title: failed to record recent icons:', errorMessage(error));
+      }
+    });
     const pathCache = new PathCache();
     const terminalManager = new TerminalManager();
     const terminalStream = new TerminalStreamHandler(terminalManager);
@@ -425,6 +434,7 @@ export async function startServer(): Promise<void> {
       queue,
       ledger: commandLedger,
       settings,
+      recentTitleIcons,
       metadata,
       agents: agentRegistry,
       pendingInputs,
@@ -507,6 +517,7 @@ export async function startServer(): Promise<void> {
     const routes = createAllRoutes({
       registry: chatRegistry,
       settings,
+      recentTitleIcons,
       queue,
       pathCache,
       metadata,

@@ -224,6 +224,7 @@ export class StartCommands {
       firstPrompt: input.command,
       agents: this.deps.agents,
       settings: this.deps.settings,
+      recentTitleIcons: this.deps.recentTitleIcons,
     });
     const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed', 'finished'], {
       status: 'running',

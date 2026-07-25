@@ -72,6 +72,9 @@ export function createRouteCommandService({
     chats: registry,
     queue,
     settings,
+    recentTitleIcons: {
+      getRecentIcons: () => [],
+    },
     metadata,
     agents,
     ledger: commandLedger,

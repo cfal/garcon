@@ -29,6 +29,9 @@ const mockSettings = {
   getChatName: getChatNameMock,
   setSessionName: setSessionNameMock,
 };
+const recentTitleIcons = {
+  getRecentIcons: () => [],
+};
 
 const allMocks = [
   runSingleQueryMock, setSessionNameMock,
@@ -61,6 +64,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Help me fix a bug',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
@@ -74,6 +78,27 @@ describe('maybeGenerateChatTitle', () => {
     expect(setSessionNameMock).toHaveBeenCalledWith('100', 'Test Chat Title');
   });
 
+  it('asks automatic generation to avoid recent icons and keep the icon first', async () => {
+    await maybeGenerateChatTitle({
+      chatId: '101',
+      projectPath: '/proj',
+      firstPrompt: 'Explain {RECENT_TITLE_ICONS}',
+      agents: mockAgents,
+      settings: mockSettings,
+      recentTitleIcons: {
+        getRecentIcons: () => ['🧪', '📦'],
+      },
+    });
+
+    const [prompt] = runSingleQueryMock.mock.calls[0];
+    expect(prompt).toContain(
+      'Generate a concise, 2-5 word title with a leading emoji icon summarizing the chat history.',
+    );
+    expect(prompt).toContain('Use emojis that enhance understanding of the topic');
+    expect(prompt).toContain('<recent_title_icons>\n🧪 📦\n</recent_title_icons>');
+    expect(prompt).toContain('<chat_history>\nExplain {RECENT_TITLE_ICONS}\n</chat_history>');
+  });
+
   it('does nothing when auto-title is disabled', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: { enabled: false },
@@ -85,6 +110,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).not.toHaveBeenCalled();
@@ -100,6 +126,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).not.toHaveBeenCalled();
@@ -123,6 +150,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
@@ -157,6 +185,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
@@ -182,6 +211,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).not.toHaveBeenCalled();
@@ -194,6 +224,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: '',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).not.toHaveBeenCalled();
@@ -208,6 +239,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Some prompt',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).not.toHaveBeenCalled();
@@ -222,6 +254,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'A prompt',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(setSessionNameMock).toHaveBeenCalledWith('600', 'Quoted Title');
@@ -236,6 +269,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'A prompt',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(setSessionNameMock).not.toHaveBeenCalled();
@@ -251,6 +285,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'A prompt',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(setSessionNameMock).not.toHaveBeenCalled();
@@ -267,6 +302,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Do something',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     const [, opts] = runSingleQueryMock.mock.calls[0];
@@ -290,6 +326,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Explain this change',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock.mock.calls[0][1]).toMatchObject({
@@ -318,6 +355,7 @@ describe('maybeGenerateChatTitle', () => {
       firstPrompt: 'Do something',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     const [, opts] = runSingleQueryMock.mock.calls[0];
@@ -339,11 +377,32 @@ describe('maybeGenerateChatTitle', () => {
       message: 'Debug composer layout jumps',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(result).toEqual({ chatId: '1000', title: 'Test Chat Title' });
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
     expect(setSessionNameMock).toHaveBeenCalledWith('1000', 'Test Chat Title');
+  });
+
+  it('includes recent icons in generation from a message', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: { enabled: false, agentId: 'claude', model: 'opus' },
+    }));
+
+    await generateChatTitleFromMessage({
+      chatId: '1000',
+      projectPath: '/proj',
+      message: 'Debug composer layout jumps',
+      agents: mockAgents,
+      settings: mockSettings,
+      recentTitleIcons: {
+        getRecentIcons: () => ['🧭', '🪟'],
+      },
+    });
+
+    const [prompt] = runSingleQueryMock.mock.calls[0];
+    expect(prompt).toContain('<recent_title_icons>\n🧭 🪟\n</recent_title_icons>');
   });
 
   it('manual title generation overwrites an existing title', async () => {
@@ -355,6 +414,7 @@ describe('maybeGenerateChatTitle', () => {
       message: 'New source message',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
@@ -380,6 +440,7 @@ describe('maybeGenerateChatTitle', () => {
       message: 'Generate this one-off title',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     });
 
     const [, opts] = runSingleQueryMock.mock.calls[0];
@@ -398,6 +459,7 @@ describe('maybeGenerateChatTitle', () => {
       message: 'Hello',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
     })).rejects.toMatchObject({
       code: 'TITLE_GENERATION_UNAVAILABLE',
       status: 409,
@@ -426,6 +488,7 @@ describe('maybeGenerateChatTitle', () => {
       message: 'Generate a title',
       agents: mockAgents,
       settings: mockSettings,
+      recentTitleIcons,
       signal: controller.signal,
     });
     await discoveryStarted;

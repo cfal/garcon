@@ -410,6 +410,10 @@ export class GarconTestClient {
     return this.post<GenerateChatTitleResponse>('/api/v1/chats/title/generate', request);
   }
 
+  updateSessionName(chatId: string, title: string): Promise<{ success: boolean }> {
+    return this.put('/api/v1/app/session-name', { chatId, title });
+  }
+
   async getScheduledPrompts(): Promise<ScheduledPromptsSnapshot> {
     const response = await this.get<unknown>('/api/v1/scheduled-prompts');
     const snapshot = normalizeScheduledPromptsSnapshot(response);

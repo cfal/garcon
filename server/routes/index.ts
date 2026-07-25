@@ -36,10 +36,12 @@ import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { TerminalManager } from '../terminals/terminal-manager.js';
 import type { TranscriptSearchController } from '../chats/search/controller.js';
 import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
+import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 
 export default function createAllRoutes({
   registry,
   settings,
+  recentTitleIcons,
   queue,
   pathCache,
   metadata,
@@ -63,6 +65,7 @@ export default function createAllRoutes({
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
+  recentTitleIcons: RecentTitleIconSource;
   queue: ChatExecutionService;
   pathCache: PathCache;
   metadata: MetadataIndex;
@@ -92,6 +95,7 @@ export default function createAllRoutes({
     ...createChatRoutes({
       registry,
       settings,
+      recentTitleIcons,
       queue,
       pathCache,
       metadata,

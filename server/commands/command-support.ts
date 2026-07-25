@@ -30,6 +30,7 @@ import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import type { CarryOverForkStage } from '../chats/chat-carryover-store.js';
 import type { PathCache } from '../chats/path-cache.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
+import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import { DomainError } from '../lib/domain-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -121,6 +122,7 @@ export interface ChatCommandServiceDeps {
   queue: ChatExecutionCommands;
   ledger: CommandLedger;
   settings: SettingsDep;
+  recentTitleIcons: RecentTitleIconSource;
   metadata: MetadataDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
