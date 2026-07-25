@@ -1,5 +1,4 @@
 import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage, type CompactionTrigger } from '@garcon/common/chat-types';
-import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentActiveInputHandoff, AgentLogger } from '@garcon/server-agent-interface';
@@ -19,7 +18,7 @@ import type { PermissionMode } from '@garcon/common/chat-modes';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import { convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from './converter.js';
-import { waitForMaterializedThread } from './durability.js';
+import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
 import { NativePathDiscoveryRefreshLimiter, type NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type {
@@ -158,8 +157,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#capacityRetryDelaysMs = (options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS)
       .slice(0, MAX_CAPACITY_RETRIES);
     this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
-    this.#nativePathDiscoveryRefresh =
-      new NativePathDiscoveryRefreshLimiter(options.nativePathDiscoveryRefresh);
+    this.#nativePathDiscoveryRefresh = new NativePathDiscoveryRefreshLimiter(options.nativePathDiscoveryRefresh);
     this.#logger = options.logger ?? NOOP_LOGGER;
     this.#history = new CodexHistoryService({
       createClient: this.#createClient,
@@ -831,10 +829,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async resolveNativePath(session: CodexChatEntry): Promise<string | null> {
     if (!session.agentSessionId) return null;
 
-    return this.#accessibleNativePath(
-      await this.#getThreadListCache(false),
-      session.agentSessionId,
-    );
+    return accessibleThreadPath(await this.#getThreadListCache(false), session.agentSessionId);
   }
 
   requestNativePathDiscoveryRefresh(agentSessionId: string): void {
@@ -931,20 +926,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     });
     this.#threadListCaches.set(useStateDbOnly, pending);
     return pending;
-  }
-
-  async #accessibleNativePath(
-    threads: ReadonlyMap<string, CodexThread>,
-    agentSessionId: string,
-  ): Promise<string | null> {
-    const nativePath = threads.get(agentSessionId)?.path ?? null;
-    if (!nativePath) return null;
-    try {
-      await fs.access(nativePath);
-      return nativePath;
-    } catch {
-      return null;
-    }
   }
 
   async #loadThreadListCache(useStateDbOnly: boolean): Promise<Map<string, CodexThread>> {
