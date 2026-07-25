@@ -34,7 +34,7 @@ export function decideGitReviewBodyBudget(
 	body: GitReviewFileBody,
 	purpose: GitReviewBodyPurpose,
 	currentBodies: Readonly<Record<string, GitReviewFileBody>>,
-	bodyPurposes: ReadonlyMap<string, GitReviewBodyPurpose>,
+	pinnedPaths: ReadonlySet<string>,
 	limits: GitReviewDocumentLimits,
 ): GitReviewBodyBudgetDecision {
 	if (body.bodyState !== 'loaded') {
@@ -52,7 +52,7 @@ export function decideGitReviewBodyBudget(
 			loadedBytes + body.patchBytes > limits.maxLoadedPatchBytes)
 	) {
 		for (const [path, candidate] of loaded) {
-			if (bodyPurposes.get(path) !== 'prefetch') continue;
+			if (pinnedPaths.has(path)) continue;
 			evictedPaths.push(path);
 			loadedRows -= candidate.renderedRowCount;
 			loadedBytes -= candidate.patchBytes;

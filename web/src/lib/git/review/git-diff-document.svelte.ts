@@ -97,7 +97,6 @@ export class GitDiffDocumentController {
 	private readonly demandReconciler: GitReviewDemandReconciler;
 	private summariesByPath = new Map<string, GitCommitFileSummary>();
 	private bodyCache = new Map<string, GitReviewFileBody>();
-	private bodyPurposes = new Map<string, GitReviewBodyPurpose>();
 	private bodyCacheBytes = 0;
 	private prefetchStopped = false;
 	private generation = 0;
@@ -211,7 +210,6 @@ export class GitDiffDocumentController {
 		this.diffMode = options.diffMode;
 		this.contextLines = options.contextLines;
 		this.fileBodies = {};
-		this.bodyPurposes.clear();
 		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
@@ -354,7 +352,6 @@ export class GitDiffDocumentController {
 		this.snapshot = null;
 		this.summariesByPath.clear();
 		this.fileBodies = {};
-		this.bodyPurposes.clear();
 		this.prefetchStopped = false;
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
@@ -384,7 +381,6 @@ export class GitDiffDocumentController {
 		if (purpose === 'prefetch' && this.prefetchStopped) return 'already-satisfied';
 		const uniquePaths = normalizeGitReviewDemandFilePaths(filePaths);
 		this.seedCachedBodies(uniquePaths, purpose);
-		if (purpose === 'visible') this.promoteLoadedBodiesToVisible(uniquePaths);
 		if (this.aggregateLimit) return 'limited';
 		const toFetch = uniquePaths.filter((filePath) => this.shouldLoadBody(filePath));
 		const pending = uniquePaths.filter(
@@ -415,6 +411,7 @@ export class GitDiffDocumentController {
 		}
 		this.onBodyLoadSuccess?.();
 		const next = { ...this.fileBodies };
+		const pinnedPaths = this.pinnedBodyPaths(snapshot.documentId);
 		for (const filePath of paths) {
 			const file = this.summaryForFile(filePath);
 			const body = result.files[filePath];
@@ -453,21 +450,20 @@ export class GitDiffDocumentController {
 				body,
 				effectivePurpose,
 				next,
-				this.bodyPurposes,
+				pinnedPaths,
 				snapshot.limits,
 			);
 			this.evictActiveBodies(next, decision);
 			if (!decision.accept) {
 				if (effectivePurpose === 'prefetch') {
 					this.stopPrefetch();
-					break;
+					continue;
 				}
 				next[filePath] = this.collectionLimitBody(body, decision);
 				this.setAggregateLimit(decision, Object.keys(next).length);
 				break;
 			}
 			next[filePath] = body;
-			this.bodyPurposes.set(filePath, effectivePurpose);
 			if (body.bodyState === 'loaded') {
 				this.cacheBody(file, body, snapshot.limits.maxLoadedPatchBytes);
 			}
@@ -524,7 +520,6 @@ export class GitDiffDocumentController {
 	): void {
 		for (const path of decision.evictedPaths) {
 			delete bodies[path];
-			this.bodyPurposes.delete(path);
 		}
 	}
 
@@ -546,7 +541,6 @@ export class GitDiffDocumentController {
 		this.fileBodies = Object.fromEntries(
 			Object.entries(this.fileBodies).filter(([candidate]) => candidate !== filePath),
 		);
-		this.bodyPurposes.delete(filePath);
 	}
 
 	private shouldLoadBody(filePath: string): boolean {
@@ -559,6 +553,7 @@ export class GitDiffDocumentController {
 	private seedCachedBodies(filePaths: string[], purpose: GitReviewBodyPurpose): void {
 		if (this.bodyCache.size === 0) return;
 		const next = { ...this.fileBodies };
+		const pinnedPaths = this.pinnedBodyPaths(this.snapshot?.documentId ?? null);
 		let changed = false;
 		for (const filePath of filePaths) {
 			const file = this.summaryForFile(filePath);
@@ -572,7 +567,7 @@ export class GitDiffDocumentController {
 					cached,
 					purpose,
 					next,
-					this.bodyPurposes,
+					pinnedPaths,
 					this.snapshot!.limits,
 				);
 				this.evictActiveBodies(next, decision);
@@ -589,21 +584,18 @@ export class GitDiffDocumentController {
 				}
 				next[filePath] = cached;
 				changed = true;
-				this.bodyPurposes.set(filePath, purpose);
 			}
 		}
 		if (changed) this.fileBodies = next;
 	}
 
-	private promoteLoadedBodiesToVisible(filePaths: readonly string[]): void {
-		for (const filePath of filePaths) {
-			if (
-				this.fileBodies[filePath]?.bodyState === 'loaded' &&
-				this.bodyPurposes.get(filePath) === 'prefetch'
-			) {
-				this.bodyPurposes.set(filePath, 'visible');
-			}
+	private pinnedBodyPaths(documentId: string | null): Set<string> {
+		const pinned = new Set<string>();
+		const demand = this.demandReconciler.snapshot();
+		if (documentId && demand.documentId === documentId) {
+			for (const filePath of demand.filePaths) pinned.add(filePath);
 		}
+		return pinned;
 	}
 
 	private markLoading(filePaths: string[], isLoading: boolean): void {

@@ -964,6 +964,41 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.review.aggregateLimit).toBeNull();
 		});
 
+		it('applies a demanded body after stopping an over-budget prefetch response', async () => {
+			const paths = ['initial.ts', 'blocked.ts', 'visible.ts'];
+			const prefetch = deferred<ReturnType<typeof makeReviewBodies>>();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: paths.map((path) => makeTreeFile(path)),
+					summary: makeReviewSummary(paths, {
+						limits: {
+							...makeReviewSummary(paths).limits,
+							maxLoadedRows: 2,
+						},
+					}),
+					selectedFile: paths[0],
+					firstBodyCandidates: paths,
+				}),
+			);
+			mockedApi.getGitReviewFileBodies
+				.mockResolvedValueOnce(makeReviewBodies([paths[0]]))
+				.mockReturnValueOnce(prefetch.promise);
+
+			await wb.setTarget(makeTarget());
+			await vi.waitFor(() => expect(wb.review.fileBodies[paths[0]]?.bodyState).toBe('loaded'));
+			wb.handleReviewBodyDemand({
+				kind: 'viewport',
+				documentId: 'doc',
+				filePaths: [paths[2]],
+			});
+			prefetch.resolve(makeReviewBodies(paths.slice(1)));
+
+			await vi.waitFor(() => expect(wb.review.fileBodies[paths[2]]?.bodyState).toBe('loaded'));
+			expect(wb.review.fileBodies[paths[0]]).toBeUndefined();
+			expect(wb.review.fileBodies[paths[1]]).toBeUndefined();
+			expect(wb.review.aggregateLimit).toBeNull();
+		});
+
 		it('honors a collection budget limit emitted by the server', async () => {
 			const paths = ['a.ts', 'b.ts', 'c.ts'];
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(

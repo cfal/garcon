@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { GitReviewBodyPurpose, GitReviewFileBody } from '$lib/api/git.js';
+import type { GitReviewFileBody } from '$lib/api/git.js';
 import {
 	collectionLimitDecisionFromGitReviewBody,
 	decideGitReviewBodyBudget,
@@ -42,10 +42,7 @@ describe('Git review body budget', () => {
 			body('selected.ts', 6, 60),
 			'visible',
 			current,
-			new Map<string, GitReviewBodyPurpose>([
-				['a.ts', 'prefetch'],
-				['b.ts', 'visible'],
-			]),
+			new Set(['b.ts']),
 			limits,
 		);
 
@@ -63,7 +60,7 @@ describe('Git review body budget', () => {
 			body('b.ts', 4, 40),
 			'prefetch',
 			current,
-			new Map<string, GitReviewBodyPurpose>([['a.ts', 'visible']]),
+			new Set(),
 			limits,
 		);
 
@@ -71,6 +68,21 @@ describe('Git review body budget', () => {
 			accept: false,
 			evictedPaths: [],
 			reason: 'collection-too-many-rows',
+		});
+	});
+
+	it('lets visible loading recycle any body that is no longer pinned', () => {
+		const decision = decideGitReviewBodyBudget(
+			body('new-visible.ts', 6, 60),
+			'visible',
+			{ 'old-visible.ts': body('old-visible.ts', 6, 60) },
+			new Set(),
+			limits,
+		);
+
+		expect(decision).toMatchObject({
+			accept: true,
+			evictedPaths: ['old-visible.ts'],
 		});
 	});
 
