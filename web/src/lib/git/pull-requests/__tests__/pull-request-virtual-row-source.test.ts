@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PullRequestThread } from '$lib/api/pull-requests.js';
 import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git.js';
 import { buildPullRequestVirtualRowSource } from '../pull-request-virtual-row-source.js';
@@ -119,6 +119,50 @@ function expectEveryRowPresent(rowSource: GitVirtualReviewRowSource): void {
 }
 
 describe('pull request virtual row source', () => {
+	it('resolves demanded file paths without materializing base rows', () => {
+		const reviewFile = file('src/app.ts');
+		const reviewBody = body(reviewFile.path);
+		const base = buildGitVirtualReviewRowSource({
+			summary: {
+				documentId: 'pull-request:1',
+				project: '',
+				context: 3,
+				files: [reviewFile],
+				limits,
+			},
+			visibleFilePaths: [reviewFile.path],
+			fileBodies: { [reviewFile.path]: reviewBody },
+			loadingBodies: new Set(),
+			focusedFilePath: null,
+			diffMode: 'unified',
+			contextLines: 3,
+			interaction: { kind: 'read-only' },
+		});
+		const rowAt = vi.fn((index: number) => base.rowAt(index));
+		const observedBase: GitVirtualReviewRowSource = {
+			rowCount: base.rowCount,
+			measurementRevision: base.measurementRevision,
+			rowAt,
+			rowKey: (index) => base.rowKey(index),
+			estimateRowHeight: (index, lineHeight) => base.estimateRowHeight(index, lineHeight),
+			fileStart: (filePath) => base.fileStart(filePath),
+			fileState: (filePath) => base.fileState(filePath),
+			filePathAt: (index) => base.filePathAt(index),
+			filePathsInRange: (start, end) => base.filePathsInRange(start, end),
+			rowsInRange: (start, end) => base.rowsInRange(start, end),
+		};
+		const decorated = buildPullRequestVirtualRowSource({
+			baseSource: observedBase,
+			files: [reviewFile],
+			fileBodies: { [reviewFile.path]: reviewBody },
+			threads: [thread(reviewFile.path, 2)],
+			collapsedFilePaths: new Set(),
+		});
+
+		expect(decorated.filePathsInRange(0, decorated.rowCount)).toEqual([reviewFile.path]);
+		expect(rowAt).not.toHaveBeenCalled();
+	});
+
 	it('inserts a thread after its matching diff line', () => {
 		const reviewFile = file('src/app.ts');
 		const reviewBody = body(reviewFile.path);

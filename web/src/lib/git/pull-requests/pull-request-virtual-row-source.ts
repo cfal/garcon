@@ -114,7 +114,12 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 	}
 
 	filePathAt(index: number): string | null {
-		return this.rowAt(index)?.filePath || null;
+		const run = this.runAt(index);
+		if (!run) return null;
+		const localIndex = index - run.start;
+		return run.kind === 'base'
+			? this.baseSource.filePathAt(run.baseStart + localIndex)
+			: (run.rows[localIndex]?.filePath ?? null);
 	}
 
 	filePathsInRange(start: number, end: number): string[] {
