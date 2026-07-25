@@ -179,4 +179,16 @@ describe('sidebar search dialog flow', () => {
 			expect(screen.queryByText('First chat preview')).toBeNull();
 		});
 	});
+
+	it('marks the sidebar to suppress activity animation when motion is reduced', () => {
+		render(SidebarHost, {
+			chats: [createChat('chat-a', 'Chat A', { isProcessing: true })],
+			reduceMotion: true,
+		});
+
+		expect(document.querySelector('[data-slot="sidebar"]')?.className).toContain(
+			'sidebar-reduce-motion',
+		);
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+	});
 });

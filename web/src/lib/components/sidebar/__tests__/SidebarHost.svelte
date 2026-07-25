@@ -28,6 +28,7 @@
 		sidebarGroupByProject?: boolean;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarCompactChatItems?: boolean;
+		reduceMotion?: boolean;
 		collapsedProjectKeys?: Set<string>;
 	}
 
@@ -41,6 +42,7 @@
 		sidebarGroupByProject = true,
 		sidebarGroupNestedProjectPaths = false,
 		sidebarCompactChatItems = false,
+		reduceMotion = false,
 		collapsedProjectKeys = new Set<string>(),
 	}: SidebarHostProps = $props();
 
@@ -90,6 +92,9 @@
 		},
 		get sidebarCompactChatItems() {
 			return sidebarCompactChatItems;
+		},
+		get reduceMotion() {
+			return reduceMotion;
 		},
 		toggle(
 			key: 'sidebarGroupByProject' | 'sidebarGroupNestedProjectPaths' | 'sidebarCompactChatItems',

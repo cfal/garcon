@@ -1,10 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import SidebarChatItemHost from './SidebarChatItemHost.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+
+const appCss = readFileSync('src/app.css', 'utf8');
 
 function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
@@ -70,10 +73,13 @@ describe('shared sidebar chat row', () => {
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
 		const pinnedBadges = document.querySelectorAll('.border-sidebar-badge-pinned-border');
 		expect(pinnedBadges).toHaveLength(1);
-		expect(screen.getByText('Shared row chat')).toBeTruthy();
-		expect(screen.getByLabelText('Unread')).toBeTruthy();
+		const title = screen.getByText('Shared row chat');
+		expect(title.className).toContain('font-semibold');
+		expect(screen.getByText('Unread').className).toContain('sr-only');
+		expect(document.querySelector('.bg-indicator-unread')).toBeNull();
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeNull();
 		expect(screen.getByText('3h ago')).toBeTruthy();
-		expect(screen.getByText('Shared row chat').parentElement?.className).toContain('leading-[1.3]');
+		expect(title.parentElement?.className).toContain('leading-[1.3]');
 		expect(screen.getByText('3h ago').className).toContain('font-normal');
 		expect(screen.getByText('3h ago').className).not.toContain('md:group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
@@ -103,7 +109,7 @@ describe('shared sidebar chat row', () => {
 			expect(badge.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
 			expect(badge.closest('button')).not.toBe(desktopMenuTrigger);
 			expect(badge.parentElement?.className).toContain('relative flex-1 min-w-0');
-			expect(badge.parentElement?.className).not.toContain('pr-');
+			expect(badge.parentElement?.className).toContain('pr-8');
 		}
 
 		await fireEvent.click(screen.getByRole('button', { name: 'ops' }));
@@ -111,6 +117,51 @@ describe('shared sidebar chat row', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: '+1' }));
 		expect(onManageTags).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-1' }));
+	});
+
+	it('uses independent title weight and activity treatments for unread and processing states', async () => {
+		const { rerender } = render(SidebarChatItemHost, {
+			session: createChat({ isUnread: true, isProcessing: true }),
+		});
+
+		const title = screen.getByText('Shared row chat');
+		const processingSlot = document.querySelector('[data-slot="sidebar-chat-processing-slot"]');
+		expect(title.className).toContain('font-semibold');
+		expect(screen.getByText('Unread').className).toContain('sr-only');
+		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
+		expect(processingSlot?.className).toContain('size-3');
+		expect(
+			processingSlot?.querySelector('[data-slot="sidebar-chat-processing-indicator"]'),
+		).toBeTruthy();
+		expect(title.closest('button')?.className).not.toContain('border-l-status-processing');
+
+		await rerender({
+			session: createChat({ isUnread: false, isProcessing: true }),
+		});
+
+		expect(title.className).toContain('font-medium');
+		expect(title.className).not.toContain('font-semibold');
+		expect(screen.queryByText('Unread')).toBeNull();
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+
+		await rerender({
+			session: createChat({ isUnread: true, isProcessing: true }),
+			selectedChatId: 'chat-1',
+		});
+
+		expect(title.className).toContain('font-medium');
+		expect(title.className).not.toContain('font-semibold');
+		expect(screen.queryByText('Unread')).toBeNull();
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+
+		await rerender({
+			session: createChat({ isUnread: false, isProcessing: false }),
+			selectedChatId: null,
+		});
+
+		expect(screen.queryByText('Chat is processing')).toBeNull();
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeNull();
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-slot"]')).toBeTruthy();
 	});
 
 	it('sizes archived badges to the same metadata pill height', () => {
@@ -171,6 +222,9 @@ describe('shared sidebar chat row', () => {
 
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
 		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+		expect(
+			document.querySelector('[data-slot="sidebar-chat-summary"]')?.parentElement?.className,
+		).not.toContain('pr-8');
 		expect(
 			document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'),
 		).toBeNull();
@@ -250,18 +304,21 @@ describe('shared sidebar chat row', () => {
 
 	it('renders the same chat summary content inside the search dialog rows', async () => {
 		render(SidebarSearchDialogHost, {
-			filteredChats: [createChat({ isPinned: true })],
+			filteredChats: [createChat({ isPinned: true, isProcessing: true })],
 		});
 
 		const option = await screen.findByRole('option');
 		expect(option.className).toContain('bg-accent');
 		expect(option.className).toContain('px-3');
+		expect(option.className).not.toContain('border-l-status-processing');
 		expect(option.parentElement?.className).toContain('divide-y');
 
 		expect(option.querySelector('[data-slot="sidebar-chat-summary"]')).toBeTruthy();
 		expect(option.querySelector('.border-sidebar-badge-pinned-border')).toBeNull();
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
 		expect(screen.queryByLabelText('Unread')).toBeNull();
+		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
+		expect(option.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByText('3h ago')).toBeTruthy();
@@ -273,6 +330,16 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('prod')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: '+1' })).toBeNull();
 		expect(screen.getByText('+1')).toBeTruthy();
+	});
+
+	it('pulses processing only when system and local motion preferences allow it', () => {
+		expect(appCss).toContain('@keyframes sidebar-processing-pulse');
+		expect(appCss).toMatch(
+			/@media \(prefers-reduced-motion: no-preference\)\s*\{[\s\S]*?\.sidebar-processing-indicator\s*\{[\s\S]*?animation: sidebar-processing-pulse 1\.6s ease-in-out infinite;[\s\S]*?\}/,
+		);
+		expect(appCss).toMatch(
+			/\.sidebar-reduce-motion \.sidebar-processing-indicator\s*\{\s*animation: none;\s*\}/,
+		);
 	});
 
 	it('updates relative timestamps when currentTime changes', async () => {
