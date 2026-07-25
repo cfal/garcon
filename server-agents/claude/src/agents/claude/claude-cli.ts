@@ -42,6 +42,9 @@ const NOOP_LOGGER: AgentLogger = {
   error() {},
 };
 
+const CLAUDE_PROCESS_EXIT_GRACE_MS = 5_000;
+const CLAUDE_PROCESS_EXIT_FORCE_MS = 5_000;
+
 interface CompactMetadata {
   trigger?: string;
   pre_tokens?: number;
@@ -148,6 +151,26 @@ interface ClaudeRunningSession {
   // that follows it so both can be emitted as a single CompactionMessage.
   pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
   eventMetadata: ReturnType<typeof claudeEventMetadata>;
+}
+
+async function waitForClaudeProcessExit(
+  subprocess: ReturnType<typeof Bun.spawn>,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      subprocess.exited.then(
+        () => true,
+        () => false,
+      ),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function mergeClaudeSessionOptions(
@@ -828,9 +851,24 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }
     }
 
-    session.options = { ...session.options, projectPath: request.nextProjectPath };
-    if (session.process) {
-      this.#killSessionProcess(session);
+    const subprocess = session.process;
+    if (!subprocess) return;
+
+    this.#clearAbortTimer(session);
+    if (!subprocess.killed) subprocess.kill();
+    if (await waitForClaudeProcessExit(
+      subprocess,
+      CLAUDE_PROCESS_EXIT_GRACE_MS,
+    )) {
+      return;
+    }
+
+    subprocess.kill('SIGKILL');
+    if (!await waitForClaudeProcessExit(
+      subprocess,
+      CLAUDE_PROCESS_EXIT_FORCE_MS,
+    )) {
+      throw new Error('Claude process did not exit for project-path update');
     }
   }
 

@@ -29,9 +29,17 @@ function deferred() {
   return { promise, resolve };
 }
 
-function createFakeClaudeProcess() {
+function createFakeClaudeProcess(options = {}) {
   let stdoutController;
+  let stdoutClosed = false;
   const exited = deferred();
+  const finish = (exitCode) => {
+    if (!stdoutClosed) {
+      stdoutClosed = true;
+      stdoutController.close();
+    }
+    exited.resolve(exitCode);
+  };
   const proc = {
     killed: false,
     stdin: {
@@ -49,10 +57,15 @@ function createFakeClaudeProcess() {
       },
     }),
     exited: exited.promise,
-    kill: mock(() => {
+    kill: mock((signal) => {
       proc.killed = true;
-      stdoutController.close();
-      exited.resolve(143);
+      if (options.onKill) {
+        const exitCode = options.onKill(signal);
+        if (exitCode === null) return;
+        finish(exitCode);
+        return;
+      }
+      finish(143);
     }),
   };
 
@@ -60,8 +73,7 @@ function createFakeClaudeProcess() {
     proc,
     stdout: stdoutController,
     exit(exitCode) {
-      stdoutController.close();
-      exited.resolve(exitCode);
+      finish(exitCode);
     },
   };
 }
@@ -300,6 +312,117 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueResult(fake);
       await expect(resumed).resolves.toBeUndefined();
     } finally {
+      runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('waits for the idle Claude process to exit before preparing a path update', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions());
+      enqueueResult(fake);
+      await start;
+
+      await expect(runtime.prepareClaudeProjectPathUpdate({
+        chatId: 'chat-1',
+        agentSessionId: 'expected-session',
+        previousProjectPath: '/tmp',
+        nextProjectPath: '/next',
+        nativePath: '/config/projects/tmp/expected-session.jsonl',
+      })).resolves.toBeUndefined();
+
+      expect(fake.proc.kill).toHaveBeenCalledTimes(1);
+    } finally {
+      runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('force-kills an idle process that ignores graceful termination', async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSetTimeout = globalThis.setTimeout;
+    const fake = createFakeClaudeProcess({
+      onKill: (signal) => signal === 'SIGKILL' ? 137 : null,
+    });
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions());
+      enqueueResult(fake);
+      await start;
+      globalThis.setTimeout = mock((callback) => {
+        queueMicrotask(callback);
+        return 1;
+      });
+
+      await expect(runtime.prepareClaudeProjectPathUpdate({
+        chatId: 'chat-1',
+        agentSessionId: 'expected-session',
+        previousProjectPath: '/tmp',
+        nextProjectPath: '/next',
+        nativePath: '/config/projects/tmp/expected-session.jsonl',
+      })).resolves.toBeUndefined();
+
+      expect(fake.proc.kill.mock.calls).toEqual([
+        [],
+        ['SIGKILL'],
+      ]);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('retains a stuck process so retries cannot bypass the exit guard', async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSetTimeout = globalThis.setTimeout;
+    const fake = createFakeClaudeProcess({
+      onKill: () => null,
+    });
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+    const request = {
+      chatId: 'chat-1',
+      agentSessionId: 'expected-session',
+      previousProjectPath: '/tmp',
+      nextProjectPath: '/next',
+      nativePath: '/config/projects/tmp/expected-session.jsonl',
+    };
+
+    try {
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions());
+      enqueueResult(fake);
+      await start;
+      globalThis.setTimeout = mock((callback) => {
+        queueMicrotask(callback);
+        return 1;
+      });
+
+      await expect(
+        runtime.prepareClaudeProjectPathUpdate(request),
+      ).rejects.toThrow('Claude process did not exit');
+      await expect(
+        runtime.prepareClaudeProjectPathUpdate(request),
+      ).rejects.toThrow('Claude process did not exit');
+
+      expect(fake.proc.kill.mock.calls).toEqual([
+        [],
+        ['SIGKILL'],
+        ['SIGKILL'],
+      ]);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      fake.exit(137);
       runtime?.shutdown();
       Bun.spawn = originalSpawn;
     }

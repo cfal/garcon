@@ -7,6 +7,7 @@ import {
   type AgentExecutionContext,
   type AgentHost,
   type AgentLogger,
+  type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
 import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
 import { AgentOperationTracker } from '@garcon/server-agent-common/execution/operation-tracker';
@@ -16,7 +17,10 @@ import {
   buildClaudeEndpointRuntime,
   buildClaudeHostEnvironment,
 } from './endpoint-runtime.js';
-import { createClaudeNativePath } from './native-path.js';
+import {
+  createClaudeNativePath,
+  prepareClaudeNativeSessionRelocation,
+} from './native-path.js';
 import { claudeEventMetadata } from './runtime-types.js';
 import type { ClaudeCliRuntime } from './claude-cli.js';
 import type { ClaudeConfig } from '../../config.js';
@@ -167,16 +171,39 @@ export class ClaudeExecution implements AgentExecution {
 
   async prepareProjectPathUpdate(
     request: Parameters<NonNullable<AgentExecution['prepareProjectPathUpdate']>>[0],
-  ): Promise<void> {
+  ): Promise<AgentProjectPathUpdatePreparation | void> {
     request.signal.throwIfAborted();
+    const agentSessionId = request.chat.agentSessionId;
+    if (!agentSessionId) return;
+
     const native = this.nativeSessions.decode(request.chat.nativeSession);
     await this.runtime.prepareClaudeProjectPathUpdate({
       chatId: request.chat.chatId,
-      agentSessionId: request.chat.agentSessionId,
+      agentSessionId,
       previousProjectPath: request.chat.projectPath,
       nextProjectPath: request.nextProjectPath,
       nativePath: native.path,
     });
+    request.signal.throwIfAborted();
+
+    const relocation = await prepareClaudeNativeSessionRelocation({
+      previousProjectPath: request.chat.projectPath,
+      nextProjectPath: request.nextProjectPath,
+      agentSessionId,
+      nativePath: native.path,
+      configHomeDir: this.config.configHomeDir() ?? undefined,
+      logger: this.logger,
+    });
+
+    return {
+      nativeSession: this.nativeSessions.encode({
+        path: relocation.nativePath,
+        agentSessionId,
+        modelEndpointId: native.modelEndpointId,
+      }),
+      commit: relocation.commit,
+      rollback: relocation.rollback,
+    };
   }
 
   subscribe(listener: Parameters<AgentExecution['subscribe']>[0]): () => void {
