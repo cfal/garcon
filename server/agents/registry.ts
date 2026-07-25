@@ -1,5 +1,9 @@
-import type { AgentTranscriptPage, AgentTranscriptSourceLocation } from '@garcon/server-agent-interface';
-import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import type {
+  AgentNativeSessionRef,
+  AgentProjectPathUpdatePreparation,
+  AgentTranscriptPage,
+  AgentTranscriptSourceLocation,
+} from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
@@ -75,7 +79,10 @@ export interface AgentRegistryServiceContract {
   runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
-  prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
+  prepareProjectPathUpdate(
+    agentId: string,
+    request: PrepareProjectPathUpdateRequest,
+  ): Promise<AgentProjectPathUpdatePreparation | void>;
   resolveNativeSession(session: AgentChatEntry, chatId?: string): Promise<AgentNativeSessionRef | null>;
   describeTranscriptSource(
     session: AgentChatEntry,
@@ -188,7 +195,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
     this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
   }
-  prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void> {
+  prepareProjectPathUpdate(
+    agentId: string,
+    request: PrepareProjectPathUpdateRequest,
+  ): Promise<AgentProjectPathUpdatePreparation | void> {
     return this.#runtime.prepareProjectPathUpdate(agentId, request);
   }
   forkAgentSession(args: {

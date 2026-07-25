@@ -1,16 +1,24 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
+import {
+  AgentIntegrationError,
+  type AgentProjectPathUpdatePreparation,
+} from '@garcon/server-agent-interface';
 import type {
   AgentInterruptAndSendResponse,
   AgentStopResponse,
   CommandAcceptedResponse,
   ProjectPathPatchResponse,
 } from '../../common/chat-command-contracts.js';
-import type { ChatRegistryEntry } from '../chats/store.js';
+import type {
+  ChatRegistryEntry,
+  ChatRegistryResolvedEntry,
+} from '../chats/store.js';
 import {
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
 import { createLogger } from '../lib/log.js';
+import { errorMessage } from '../lib/errors.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import {
   CommandSupport,
@@ -308,8 +316,9 @@ export class SessionCommands {
     await this.assertChatIdleForProjectPathUpdate(input.chatId, chat);
     const nativeSession = await this.nativeSessionForProjectPathUpdate(input.chatId, chat);
 
+    let preparation: AgentProjectPathUpdatePreparation | void;
     try {
-      await this.deps.agents.prepareProjectPathUpdate(chat.agentId, {
+      preparation = await this.deps.agents.prepareProjectPathUpdate(chat.agentId, {
         chatId: input.chatId,
         agentSessionId: chat.agentSessionId,
         previousProjectPath: chat.projectPath,
@@ -317,9 +326,20 @@ export class SessionCommands {
         nativeSession,
       });
     } catch (error) {
+      if (
+        error instanceof AgentIntegrationError
+        && error.code === 'TRANSCRIPT_UNAVAILABLE'
+      ) {
+        throw new CommandValidationError(
+          'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
+          error.message,
+          409,
+          error.retryable,
+        );
+      }
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
-        error instanceof Error ? error.message : String(error),
+        errorMessage(error),
         409,
         true,
       );
@@ -331,11 +351,47 @@ export class SessionCommands {
       effectiveProjectKey,
       previousProjectPath: chat.projectPath,
       previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
-      ...(nativeSession !== chat.nativeSession ? { nativeSession } : {}),
+      ...(preparation
+        ? { nativeSession: preparation.nativeSession }
+        : nativeSession !== chat.nativeSession
+          ? { nativeSession }
+          : {}),
     };
-    const updated = await this.deps.chats.updateProjectPath(input.chatId, event, { flush: true });
-    if (!updated) {
-      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    let updated: ChatRegistryResolvedEntry | null;
+    try {
+      updated = await this.deps.chats.updateProjectPath(
+        input.chatId,
+        event,
+        { flush: true },
+      );
+      if (!updated) {
+        throw new CommandValidationError(
+          'SESSION_NOT_FOUND',
+          'Session not found',
+          404,
+        );
+      }
+    } catch (error) {
+      if (preparation) {
+        await preparation.rollback().catch((rollbackError) => {
+          logger.warn('Project-path preparation rollback failed', {
+            chatId: input.chatId,
+            agentId: chat.agentId,
+            error: errorMessage(rollbackError),
+          });
+        });
+      }
+      throw error;
+    }
+
+    if (preparation) {
+      await preparation.commit().catch((error) => {
+        logger.warn('Project-path preparation cleanup failed', {
+          chatId: input.chatId,
+          agentId: chat.agentId,
+          error: errorMessage(error),
+        });
+      });
     }
 
     return {

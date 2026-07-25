@@ -479,6 +479,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     if (update.chatId !== id) {
       throw new Error(`Project path update identity mismatch: ${id}`);
     }
+    const previousProjectPath = existing.projectPath;
+    const previousNativeSession = existing.nativeSession;
     existing.projectPath = update.projectPath;
     if ('nativeSession' in update) {
       if (update.nativeSession?.ownerId !== existing.agentId && update.nativeSession !== null) {
@@ -486,7 +488,13 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       }
       existing.nativeSession = update.nativeSession ?? null;
     }
-    await this.#flushRegistrySave();
+    try {
+      await this.#flushRegistrySave();
+    } catch (error) {
+      existing.projectPath = previousProjectPath;
+      existing.nativeSession = previousNativeSession;
+      throw error;
+    }
     this.#emitChatProjectPathUpdated({
       chatId: update.chatId,
       projectPath: update.projectPath,

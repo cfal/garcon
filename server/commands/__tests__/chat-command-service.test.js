@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
 import { CommandLedger, commandLedgerKey } from '../command-ledger.ts';
@@ -165,6 +166,7 @@ function makeService(overrides = {}) {
       return Promise.resolve(next);
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
+    ...overrides.chats,
   };
   const executionTasks = new Set();
   const queue = overrides.queueService ?? {
@@ -2354,6 +2356,175 @@ describe('ChatCommandService', () => {
       { flush: true },
     );
     expect(sessions.get(SOURCE_CHAT_ID).projectPath).toBe(realNextPath);
+  });
+
+  it('persists a prepared native session before provider cleanup', async () => {
+    const relocated = {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      value: {
+        path: '/tmp/relocated.jsonl',
+        agentSessionId: 'agent-1',
+      },
+    };
+    let sessions;
+    const commit = mock(async () => {
+      expect(sessions.get(SOURCE_CHAT_ID).nativeSession).toEqual(relocated);
+    });
+    const rollback = mock(() => Promise.resolve());
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.resolve({
+          nativeSession: relocated,
+          commit,
+          rollback,
+        })),
+      },
+    });
+    sessions = fixture.sessions;
+    const nextPath = path.join(projectBaseDir, 'prepared-native');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
+
+    expect(fixture.chats.updateProjectPath).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      expect.objectContaining({ nativeSession: relocated }),
+      { flush: true },
+    );
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(rollback).not.toHaveBeenCalled();
+  });
+
+  it('rolls back provider preparation when registry persistence fails', async () => {
+    const commit = mock(() => Promise.resolve());
+    const rollback = mock(() => Promise.resolve());
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.resolve({
+          nativeSession: {
+            ownerId: 'claude',
+            schemaVersion: 1,
+            value: { path: '/tmp/relocated.jsonl' },
+          },
+          commit,
+          rollback,
+        })),
+      },
+      chats: {
+        updateProjectPath: mock(() => Promise.reject(new Error('disk full'))),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'failed-persistence');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toThrow('disk full');
+
+    expect(rollback).toHaveBeenCalledTimes(1);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('rolls back preparation and preserves the typed error when the chat disappears', async () => {
+    const commit = mock(() => Promise.resolve());
+    const rollback = mock(() => Promise.resolve());
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.resolve({
+          nativeSession: null,
+          commit,
+          rollback,
+        })),
+      },
+      chats: {
+        updateProjectPath: mock(() => Promise.resolve(null)),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'removed-chat');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+      status: 404,
+    });
+
+    expect(rollback).toHaveBeenCalledTimes(1);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('does not report durable project-path updates as failed when cleanup fails', async () => {
+    const commit = mock(() => Promise.reject(new Error('cleanup failed')));
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.resolve({
+          nativeSession: null,
+          commit,
+          rollback: mock(() => Promise.resolve()),
+        })),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'cleanup-warning');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps unavailable provider transcripts to the project-path error contract', async () => {
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.reject(
+          new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            'Claude session transcript could not be resolved for project-path update',
+            false,
+          ),
+        )),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'missing-transcript');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toMatchObject({
+      code: 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
+      status: 409,
+      retryable: false,
+    });
+
+    expect(fixture.chats.updateProjectPath).not.toHaveBeenCalled();
+  });
+
+  it('allows an unstarted Claude chat to change project path', async () => {
+    const fixture = makeService({
+      session: {
+        agentSessionId: null,
+        nativeSession: null,
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'unstarted-chat');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
+
+    expect(fixture.agents.resolveNativeSession).toHaveBeenCalledTimes(1);
+    expect(fixture.agents.prepareProjectPathUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('rejects project path updates while a turn is running', async () => {
