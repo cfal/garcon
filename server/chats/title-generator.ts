@@ -93,7 +93,7 @@ export class TitleGenerationError extends DomainError {
 
 // Modified from Open WebUI
 const TITLE_GENERATION_PROMPT = `### Task:
-Generate a concise, 2-5 word title with an emoji summarizing the chat history.
+Generate a concise, 2-5 word title with a leading emoji icon summarizing the chat history.
 ### Guidelines:
 - The title should clearly represent the main theme or subject of the conversation.
 - Use emojis that enhance understanding of the topic, but avoid quotation marks or special formatting.
@@ -103,14 +103,14 @@ Generate a concise, 2-5 word title with an emoji summarizing the chat history.
 - The output must be a single line without any markdown code fences or other encapsulating text.
 - Ensure no conversational text, affirmations, or explanations precede or follow the title, as this will cause direct parsing failure.
 ### Output:
-your concise title here
+💡 Your Concise Title
 ### Examples:
-Stock Market Trends
-Perfect Chocolate Chip Recipe
-Evolution of Music Streaming
-Remote Work Productivity Tips
-Artificial Intelligence in Healthcare
-Video Game Development Insights
+📈 Stock Market Trends
+🍪 Perfect Chocolate Chip Recipe
+🎵 Evolution of Music Streaming
+🏠 Remote Work Productivity Tips
+🩺 Artificial Intelligence in Healthcare
+🎮 Video Game Development Insights
 ### Chat History:
 <chat_history>
 {USER_PROMPT}
