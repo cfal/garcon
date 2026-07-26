@@ -2,7 +2,13 @@ import { describe, it, expect, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { ClaudeCliVersionProbe, isVersionBefore, parseClaudeCliVersion, THINKING_FLAG_REMOVED_VERSION } from '../cli-version.js';
+import {
+  ClaudeCliVersionProbe,
+  isVersionBefore,
+  MINIMUM_CLAUDE_CLI_VERSION,
+  parseClaudeCliVersion,
+  THINKING_FLAG_REMOVED_VERSION,
+} from '../cli-version.js';
 
 // Writes an executable fake `claude` binary that logs each invocation and
 // prints the given --version output.
@@ -46,6 +52,16 @@ function createProbe() {
 }
 
 describe('ClaudeCliVersionProbe', () => {
+  it('requires the tested persistent protocol version', async () => {
+    const supported = await createFakeClaudeBinary('2.1.220 (Claude Code)');
+    const unsupported = await createFakeClaudeBinary('2.1.219 (Claude Code)');
+
+    await expect(createProbe().assertCompatible(supported.binaryPath))
+      .resolves.toEqual(MINIMUM_CLAUDE_CLI_VERSION);
+    await expect(createProbe().assertCompatible(unsupported.binaryPath))
+      .rejects.toThrow('Upgrade to 2.1.220 or newer');
+  });
+
   it('reports support for CLIs older than the flag removal', async () => {
     const { binaryPath } = await createFakeClaudeBinary('2.1.150 (Claude Code)');
     expect(await createProbe().supportsLegacyThinkingFlag(binaryPath)).toBe(true);

@@ -1,13 +1,11 @@
-// Probes the installed Claude CLI version to decide whether the legacy
-// `--thinking` flag (removed in Claude Code 2.1.198) can still be forwarded.
-
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 
-// First Claude Code version without the legacy `--thinking` flag.
 const THINKING_FLAG_REMOVED_VERSION: readonly [number, number, number] = [2, 1, 198];
-
-const VERSION_PROBE_TIMEOUT_MS = 5000;
+const MINIMUM_CLAUDE_CLI_VERSION: readonly [number, number, number] = [2, 1, 220];
+const VERSION_PROBE_TIMEOUT_MS = 5_000;
+const VERSION_PROBE_EXIT_GRACE_MS = 1_000;
+const MAX_VERSION_OUTPUT_BYTES = 16 * 1024;
 
 type CliVersion = readonly [number, number, number];
 
@@ -24,58 +22,123 @@ function isVersionBefore(version: CliVersion, threshold: CliVersion): boolean {
   return false;
 }
 
-async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion | null> {
-  const proc = Bun.spawn([claudeBinary, '--version'], {
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'ignore',
-  });
+function versionText(version: CliVersion): string {
+  return version.join('.');
+}
 
-  const killTimer = setTimeout(() => {
-    if (!proc.killed) proc.kill();
-  }, VERSION_PROBE_TIMEOUT_MS);
-
+async function waitForExit(
+  process: ReturnType<typeof Bun.spawn>,
+  timeoutMs: number,
+): Promise<number | null> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
-    const output = await new Response(proc.stdout).text();
-    await proc.exited;
-    return parseClaudeCliVersion(output);
+    return await Promise.race([
+      process.exited,
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
   } finally {
-    clearTimeout(killTimer);
+    if (timeout) clearTimeout(timeout);
   }
 }
 
-// Resolves true only when the CLI predates the `--thinking` removal.
-// Defaults to false on probe failure: omitting the flag is harmless on old
-// CLIs, while passing it makes newer CLIs reject the session.
+async function readProbeOutput(
+  stream: ReadableStream<Uint8Array>,
+): Promise<string> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_VERSION_OUTPUT_BYTES) {
+      throw new Error('Claude CLI version output exceeded its size limit');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
+}
+
+async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion> {
+  const process = Bun.spawn([claudeBinary, '--version'], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const stdout = readProbeOutput(process.stdout);
+  const stderr = readProbeOutput(process.stderr);
+
+  let exitCode = await waitForExit(process, VERSION_PROBE_TIMEOUT_MS);
+  if (exitCode === null) {
+    if (!process.killed) process.kill();
+    exitCode = await waitForExit(process, VERSION_PROBE_EXIT_GRACE_MS);
+  }
+  if (exitCode === null) {
+    process.kill('SIGKILL');
+    exitCode = await waitForExit(process, VERSION_PROBE_EXIT_GRACE_MS);
+  }
+  if (exitCode === null) {
+    throw new Error('Claude CLI version probe did not exit after SIGKILL');
+  }
+
+  const [output, errorOutput] = await Promise.all([stdout, stderr]);
+  if (exitCode !== 0) {
+    const detail = errorOutput.trim();
+    throw new Error(
+      detail
+        ? `Claude CLI version probe exited with code ${exitCode}: ${detail}`
+        : `Claude CLI version probe exited with code ${exitCode}`,
+    );
+  }
+  const version = parseClaudeCliVersion(output);
+  if (!version) throw new Error('Could not parse the installed Claude CLI version');
+  return version;
+}
+
 export class ClaudeCliVersionProbe {
-  readonly #legacyThinkingFlagSupport = new Map<string, Promise<boolean>>();
+  readonly #versions = new Map<string, Promise<CliVersion>>();
 
   constructor(private readonly logger: AgentLogger) {}
 
-  supportsLegacyThinkingFlag(claudeBinary: string): Promise<boolean> {
-    let cached = this.#legacyThinkingFlagSupport.get(claudeBinary);
+  async assertCompatible(claudeBinary: string): Promise<CliVersion> {
+    const version = await this.#version(claudeBinary);
+    if (isVersionBefore(version, MINIMUM_CLAUDE_CLI_VERSION)) {
+      throw new Error(
+        `Claude Code ${versionText(version)} is unsupported.`
+          + ` Upgrade to ${versionText(MINIMUM_CLAUDE_CLI_VERSION)} or newer.`,
+      );
+    }
+    return version;
+  }
+
+  async supportsLegacyThinkingFlag(claudeBinary: string): Promise<boolean> {
+    try {
+      const version = await this.#version(claudeBinary);
+      return isVersionBefore(version, THINKING_FLAG_REMOVED_VERSION);
+    } catch (error: unknown) {
+      this.logger.warn('Claude CLI version probe failed; legacy thinking disabled', {
+        binary: claudeBinary,
+        error: errorMessage(error),
+      });
+      return false;
+    }
+  }
+
+  #version(claudeBinary: string): Promise<CliVersion> {
+    let cached = this.#versions.get(claudeBinary);
     if (!cached) {
-      cached = probeClaudeCliVersion(claudeBinary)
-        .then((version) => {
-          if (!version) {
-            this.logger.warn('Could not parse Claude CLI version; legacy thinking disabled', {
-              binary: claudeBinary,
-            });
-            return false;
-          }
-          return isVersionBefore(version, THINKING_FLAG_REMOVED_VERSION);
-        })
-        .catch((error: unknown) => {
-          this.logger.warn('Claude CLI version probe failed; legacy thinking disabled', {
-            binary: claudeBinary,
-            error: errorMessage(error),
-          });
-          return false;
-        });
-      this.#legacyThinkingFlagSupport.set(claudeBinary, cached);
+      cached = probeClaudeCliVersion(claudeBinary);
+      this.#versions.set(claudeBinary, cached);
     }
     return cached;
   }
 }
 
-export { isVersionBefore, parseClaudeCliVersion, THINKING_FLAG_REMOVED_VERSION };
+export {
+  isVersionBefore,
+  MINIMUM_CLAUDE_CLI_VERSION,
+  parseClaudeCliVersion,
+  THINKING_FLAG_REMOVED_VERSION,
+};

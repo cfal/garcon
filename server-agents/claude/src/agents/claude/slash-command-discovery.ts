@@ -1,18 +1,12 @@
-// Discovers the slash commands available to the Claude CLI for a project.
-// The CLI emits the available command names in its stream-json `system/init`
-// message. A short-lived probe spawns the binary, sends a trivial message to
-// trigger init, reads the command list, then kills the process before the
-// model turn does meaningful work. Results are cached per project.
-
+import crypto from 'node:crypto';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { SlashCommand } from '@garcon/common/slash-commands';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { isRecord } from '@garcon/common/json';
+import { ClaudeProcessTransport } from './cli-process-transport.js';
 
 const PROBE_TIMEOUT_MS = 12_000;
 const CACHE_TTL_MS = 5 * 60_000;
-// Empty results are cached briefly so rapid menu reopens do not re-spawn the
-// probe on every keystroke, while still recovering quickly once the probe
-// starts succeeding.
 const EMPTY_CACHE_TTL_MS = 5_000;
 
 interface CacheEntry {
@@ -20,19 +14,44 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-// Maps the init message's `slash_commands`/`skills` arrays to typed commands.
-// Names present in `skills` are tagged as skills; everything else (built-ins
-// and project prompt commands) is tagged as a generic command.
+interface InitializeMessage {
+  type?: string;
+  response?: {
+    subtype?: string;
+    request_id?: string;
+    error?: string;
+    response?: unknown;
+  };
+}
+
 export function parseInitSlashCommands(slashCommands: unknown, skills: unknown): SlashCommand[] {
-  const names = Array.isArray(slashCommands)
-    ? slashCommands.filter((value): value is string => typeof value === 'string')
-    : [];
   const skillNames = new Set(
     Array.isArray(skills) ? skills.filter((value): value is string => typeof value === 'string') : [],
   );
-  return names
-    .map((name) => ({ name, source: skillNames.has(name) ? 'skill' : 'command' }) as SlashCommand)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!Array.isArray(slashCommands)) return [];
+
+  return slashCommands
+    .flatMap((value): SlashCommand[] => {
+      if (typeof value === 'string') {
+        return [{
+          name: value,
+          source: skillNames.has(value) ? 'skill' : 'command',
+        }];
+      }
+      if (!isRecord(value) || typeof value.name !== 'string') return [];
+      const description = typeof value.description === 'string'
+        ? value.description
+        : undefined;
+      const source = value.type === 'skill' || skillNames.has(value.name)
+        ? 'skill'
+        : 'command';
+      return [{
+        name: value.name,
+        source,
+        ...(description ? { description } : {}),
+      }];
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function probeClaudeSlashCommands(
@@ -48,93 +67,78 @@ function probeClaudeSlashCommands(
     '--no-session-persistence',
   ];
 
-  let proc: ReturnType<typeof Bun.spawn>;
+  let process: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn([claudeBinary, ...args], {
+    process = Bun.spawn([claudeBinary, ...args], {
       cwd: projectPath,
       stdin: 'pipe',
       stdout: 'pipe',
-      stderr: 'ignore',
-      env: (() => { const { CLAUDECODE, ...env } = process.env; return env; })(),
+      stderr: 'pipe',
+      env: (() => { const { CLAUDECODE, ...env } = globalThis.process.env; return env; })(),
     });
-  } catch (err: unknown) {
-    // Spawn can fail under transient resource pressure (e.g. process/fd limits)
-    // or a missing binary. Degrade to an empty list rather than a 500 so the
-    // composer shows "no matching commands" instead of a hard error.
-    logger.warn(`probe spawn failed for ${projectPath}: ${errorMessage(err)}`);
+  } catch (error: unknown) {
+    logger.warn('Claude slash-command probe spawn failed', {
+      projectPath,
+      error: errorMessage(error),
+    });
     return Promise.resolve([]);
   }
 
   return new Promise<SlashCommand[]>((resolve) => {
+    const requestId = crypto.randomUUID();
     let settled = false;
-    const finish = (commands: SlashCommand[]) => {
+    let transport: ClaudeProcessTransport<InitializeMessage>;
+    const finish = (commands: SlashCommand[], failure?: string) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (!proc.killed) proc.kill();
-      resolve(commands);
+      if (failure) {
+        logger.warn('Claude slash-command probe failed', {
+          projectPath,
+          error: failure,
+        });
+      }
+      void transport.retire().catch((error: unknown) => {
+        logger.warn('Claude slash-command probe teardown failed', {
+          projectPath,
+          error: errorMessage(error),
+        });
+      }).finally(() => resolve(commands));
     };
-
     const timer = setTimeout(() => {
-      logger.warn(`probe timed out for ${projectPath}`);
-      finish([]);
+      finish([], 'initialize request timed out');
     }, PROBE_TIMEOUT_MS);
 
-    // A user message is required to trigger the init message; the process is
-    // killed as soon as init arrives, before the turn meaningfully runs.
-    const stdin = proc.stdin as import('bun').FileSink;
-    try {
-      stdin.write(
-        JSON.stringify({
-          type: 'user',
-          message: { role: 'user', content: '.' },
-          parent_tool_use_id: null,
-          session_id: '',
-        }) + '\n',
-      );
-      stdin.flush();
-    } catch (err: unknown) {
-      logger.warn(`probe stdin write failed for ${projectPath}: ${errorMessage(err)}`);
-      finish([]);
-      return;
-    }
-
-    void (async () => {
-      try {
-        const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (!settled) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop()!;
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            let msg: { type?: string; subtype?: string; slash_commands?: unknown; skills?: unknown };
-            try {
-              msg = JSON.parse(line);
-            } catch {
-              continue;
-            }
-            if (msg.type === 'system' && msg.subtype === 'init') {
-              finish(parseInitSlashCommands(msg.slash_commands, msg.skills));
-              return;
-            }
-          }
+    transport = new ClaudeProcessTransport({
+      process,
+      logger,
+      sessionId: 'command-probe',
+      onMessage: (message) => {
+        const response = message.response;
+        if (message.type !== 'control_response' || response?.request_id !== requestId) return;
+        if (response.subtype === 'error') {
+          finish([], response.error || 'initialize request failed');
+          return;
         }
-        finish([]);
-      } catch (err: unknown) {
-        if (!proc.killed) logger.warn(`probe read failed for ${projectPath}: ${errorMessage(err)}`);
-        finish([]);
-      }
-    })();
+        const info = isRecord(response.response) ? response.response : {};
+        finish(parseInitSlashCommands(info.commands, info.skills));
+      },
+      onFailure: (failure) => finish([], `${failure.kind}: ${failure.message}`),
+      onEof: () => finish([], 'stdout ended before initialize completed'),
+      onExit: (exit) => {
+        if (settled) return;
+        finish([], `process exited with code ${exit.exitCode}`);
+      },
+    });
+
+    void transport.writeLine(JSON.stringify({
+      type: 'control_request',
+      request_id: requestId,
+      request: { subtype: 'initialize' },
+    })).catch((error: unknown) => finish([], errorMessage(error)));
   });
 }
 
-// Returns the Claude slash commands for a project, served from cache when
-// fresh. Concurrent callers for the same project share a single probe.
 export class ClaudeSlashCommandDiscovery {
   readonly #cache = new Map<string, CacheEntry>();
   readonly #inFlight = new Map<string, Promise<SlashCommand[]>>();
