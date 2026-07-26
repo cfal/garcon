@@ -162,10 +162,24 @@ interface GarconWebSocket {
 
 export interface GarconTestClientOptions {
   createWebSocket?: (url: string) => GarconWebSocket;
+  redactSensitiveDiagnostics?: boolean;
 }
 
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSED = 3;
+const SAFE_DIAGNOSTIC_STRING_KEYS = new Set([
+  'agentid',
+  'code',
+  'method',
+  'model',
+  'permissionmode',
+  'requesttype',
+  'status',
+  'stopintent',
+  'thinkingmode',
+  'timestamp',
+  'type',
+]);
 
 export class GarconApiError extends Error {
   constructor(
@@ -186,8 +200,20 @@ export class GarconWsRequestError extends Error {
   }
 }
 
-function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
+function redact(
+  value: unknown,
+  redactSensitiveDiagnostics = false,
+  parentKey?: string,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redact(item, redactSensitiveDiagnostics, parentKey));
+  }
+  if (redactSensitiveDiagnostics && typeof value === 'string') {
+    const normalized = parentKey?.toLowerCase() ?? '';
+    return SAFE_DIAGNOSTIC_STRING_KEYS.has(normalized) || normalized.endsWith('id')
+      ? value
+      : '[REDACTED]';
+  }
   if (!isRecord(value)) return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) => {
     const normalized = key.toLowerCase();
@@ -199,7 +225,7 @@ function redact(value: unknown): unknown {
     ) {
       return [key, '[REDACTED]'];
     }
-    return [key, redact(item)];
+    return [key, redact(item, redactSensitiveDiagnostics, key)];
   }));
 }
 
@@ -234,6 +260,7 @@ async function responseBody(response: Response): Promise<unknown> {
 export class GarconTestClient {
   readonly #baseUrl: string;
   readonly #createWebSocket: (url: string) => GarconWebSocket;
+  readonly #redactSensitiveDiagnostics: boolean;
   readonly #exchanges: HttpExchange[] = [];
   readonly #eventRecords: EventRecord[] = [];
   readonly #waiters = new Set<EventWaiter>();
@@ -244,6 +271,7 @@ export class GarconTestClient {
   private constructor(baseUrl: string, options: GarconTestClientOptions) {
     this.#baseUrl = baseUrl.replace(/\/$/, '');
     this.#createWebSocket = options.createWebSocket ?? ((url) => new WebSocket(url));
+    this.#redactSensitiveDiagnostics = options.redactSensitiveDiagnostics === true;
   }
 
   static async connect(baseUrl: string, options: GarconTestClientOptions = {}): Promise<GarconTestClient> {
@@ -273,7 +301,12 @@ export class GarconTestClient {
   }
 
   eventRecords(): readonly EventRecord[] {
-    return this.#eventRecords.slice();
+    if (!this.#redactSensitiveDiagnostics) return this.#eventRecords.slice();
+    return this.#eventRecords.map((record) => ({
+      raw: redact(record.raw, true),
+      parsed: redact(record.parsed, true) as ServerWsMessage,
+      receivedAt: record.receivedAt,
+    }));
   }
 
   exchanges(): readonly HttpExchange[] {
@@ -798,11 +831,11 @@ export class GarconTestClient {
   }
 
   describeEvents(): string {
-    return JSON.stringify(this.#eventRecords.map((record, index) => ({
+    return JSON.stringify(redact(this.#eventRecords.map((record, index) => ({
       index,
       receivedAt: record.receivedAt,
       event: record.parsed,
-    })), null, 2);
+    })), this.#redactSensitiveDiagnostics), null, 2);
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -816,8 +849,10 @@ export class GarconTestClient {
       method,
       path,
       status: response.status,
-      ...(body === undefined ? {} : { requestBody: redact(body) }),
-      responseBody: redact(parsed),
+      ...(body === undefined
+        ? {}
+        : { requestBody: redact(body, this.#redactSensitiveDiagnostics) }),
+      responseBody: redact(parsed, this.#redactSensitiveDiagnostics),
     });
     if (!response.ok) throw new GarconApiError(response.status, parsed, method, path);
     return parsed as T;

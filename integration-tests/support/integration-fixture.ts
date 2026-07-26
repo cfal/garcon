@@ -46,6 +46,7 @@ export interface IntegrationFixtureOptions {
   chatTitleEnabled?: boolean;
   chatTitleAgent?: keyof DirectTestAgents;
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
+  redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
 }
 
@@ -77,6 +78,37 @@ export interface IntegrationDiagnostics {
   };
 }
 
+function redactedErrorDetails(error: unknown): unknown {
+  if (!(error instanceof Error)) return error === undefined ? null : '[REDACTED]';
+  const stackFrames = error.stack
+    ?.split('\n')
+    .slice(1)
+    .filter((line) => line.trimStart().startsWith('at '))
+    .join('\n');
+  return {
+    name: error.name,
+    message: '[REDACTED]',
+    ...(stackFrames ? { stack: `[REDACTED]\n${stackFrames}` } : {}),
+  };
+}
+
+function redactedFailure(error: unknown, artifact: string | null, diagnostics: string): Error {
+  const original = error instanceof Error ? error : new Error(String(error));
+  const stackFrames = original.stack
+    ?.split('\n')
+    .slice(1)
+    .filter((line) => line.trimStart().startsWith('at '))
+    .join('\n');
+  const result = new Error([
+    'Credential-backed integration test failed; sensitive failure content was redacted.',
+    ...(artifact ? [`Integration diagnostics: ${artifact}`] : []),
+    diagnostics,
+  ].join('\n'));
+  result.name = original.name;
+  if (stackFrames) result.stack = `${result.name}: ${result.message}\n${stackFrames}`;
+  return result;
+}
+
 export class IntegrationFixture {
   readonly dirs: IntegrationDirectories;
   readonly fakeProviders: {
@@ -85,6 +117,7 @@ export class IntegrationFixture {
     anthropic: FakeAnthropicServer;
   };
   readonly directAgents: DirectTestAgents;
+  readonly #redactSensitiveDiagnostics: boolean;
   readonly #serverEnvironment: Record<string, string>;
   garcon: GarconProcess;
   client: GarconTestClient;
@@ -98,6 +131,7 @@ export class IntegrationFixture {
     garcon: GarconProcess;
     client: GarconTestClient;
     directAgents: DirectTestAgents;
+    redactSensitiveDiagnostics?: boolean;
     serverEnvironment?: Record<string, string>;
   }) {
     this.dirs = input.dirs;
@@ -106,6 +140,7 @@ export class IntegrationFixture {
     this.client = input.client;
     this.#clients.set('primary', input.client);
     this.directAgents = input.directAgents;
+    this.#redactSensitiveDiagnostics = input.redactSensitiveDiagnostics === true;
     this.#serverEnvironment = { ...(input.serverEnvironment ?? {}) };
   }
 
@@ -137,7 +172,9 @@ export class IntegrationFixture {
         homeDir: dirs.home,
         environment: options.serverEnvironment,
       });
-      client = await GarconTestClient.connect(garcon.baseUrl);
+      client = await GarconTestClient.connect(garcon.baseUrl, {
+        redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
+      });
       await client.ping();
       const openAiProvider = await client.createOpenAiProvider(fakeProviders.openAi.baseUrl);
       const openAiResponsesProvider = await client.createOpenAiResponsesProvider(
@@ -179,6 +216,7 @@ export class IntegrationFixture {
         garcon,
         client,
         directAgents,
+        redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
         serverEnvironment: options.serverEnvironment,
       });
     } catch (error) {
@@ -205,7 +243,9 @@ export class IntegrationFixture {
     if (this.#clients.has(normalizedName)) {
       throw new Error(`Integration client already exists: ${normalizedName}`);
     }
-    const observer = await GarconTestClient.connect(this.garcon.baseUrl);
+    const observer = await GarconTestClient.connect(this.garcon.baseUrl, {
+      redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
+    });
     try {
       await observer.ping();
       this.#clients.set(normalizedName, observer);
@@ -342,15 +382,20 @@ export class IntegrationFixture {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({
       testName,
-      error: error instanceof Error
-        ? { name: error.name, message: error.message, stack: error.stack }
-        : error === undefined ? null : String(error),
-      ...this.diagnostics(),
+      error: this.#redactSensitiveDiagnostics
+        ? redactedErrorDetails(error)
+        : error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack }
+          : error === undefined ? null : String(error),
+      ...this.#diagnosticsForOutput(),
     }, null, 2));
     return path;
   }
 
   describe(): string {
+    if (this.#redactSensitiveDiagnostics) {
+      return JSON.stringify(this.#diagnosticsForOutput(), null, 2);
+    }
     return [
       `Directories: ${JSON.stringify(this.dirs, null, 2)}`,
       `Process runs:\n${JSON.stringify(this.diagnostics().processRuns, null, 2)}`,
@@ -390,6 +435,9 @@ export class IntegrationFixture {
       await rm(this.dirs.root, { recursive: true, force: true });
     }
     if (errors.length > 0) {
+      if (this.#redactSensitiveDiagnostics) {
+        throw new Error(`Integration fixture cleanup failed.\n${this.describe()}`);
+      }
       throw new AggregateError(errors, `Integration fixture cleanup failed.\n${this.describe()}`);
     }
   }
@@ -403,7 +451,9 @@ export class IntegrationFixture {
       homeDir: this.dirs.home,
       environment: this.#serverEnvironment,
     });
-    this.client = await GarconTestClient.connect(this.garcon.baseUrl);
+    this.client = await GarconTestClient.connect(this.garcon.baseUrl, {
+      redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
+    });
     this.#clients.set('primary', this.client);
     try {
       await this.client.ping();
@@ -425,6 +475,29 @@ export class IntegrationFixture {
         httpExchanges: client.exchanges(),
         websocketEvents: client.eventRecords(),
       })),
+    };
+  }
+
+  #diagnosticsForOutput(): Record<string, unknown> {
+    const diagnostics = this.diagnostics();
+    if (!this.#redactSensitiveDiagnostics) {
+      return diagnostics as unknown as Record<string, unknown>;
+    }
+    return {
+      directories: '[REDACTED]',
+      processRuns: diagnostics.processRuns.map((run) => ({
+        serverLogLineCount: run.serverLogs.length,
+        clients: run.clients,
+      })),
+      providers: Object.fromEntries(
+        Object.entries(diagnostics.providers).map(([name, provider]) => [
+          name,
+          {
+            requestCount: provider.requests.length,
+            protocolViolationCount: provider.protocolViolations.length,
+          },
+        ]),
+      ),
     };
   }
 
@@ -457,6 +530,9 @@ export async function withIntegrationFixture<T>(
   } catch (error) {
     failure = error;
     const artifact = await fixture.writeDiagnostics(testName, error).catch(() => null);
+    if (options.redactSensitiveDiagnostics) {
+      throw redactedFailure(error, artifact, fixture.describe());
+    }
     if (artifact && error instanceof Error) {
       error.message = `${error.message}\nIntegration diagnostics: ${artifact}\n${fixture.describe()}`;
     }

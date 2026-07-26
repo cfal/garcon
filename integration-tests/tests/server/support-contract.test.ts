@@ -346,6 +346,51 @@ describe('integration support contracts', () => {
     await expect(close).rejects.toThrow('Unknown or malformed WebSocket payload');
   });
 
+  test('redacts credential-backed event diagnostics without changing live events', async () => {
+    const privateContent = 'private provider prompt and response';
+    let socket: ControlledWebSocket | null = null;
+    const client = await GarconTestClient.connect('http://garcon.test', {
+      createWebSocket: () => {
+        socket = new ControlledWebSocket();
+        return socket;
+      },
+      redactSensitiveDiagnostics: true,
+    });
+    const received = client.waitForEvent(
+      (event) => event.type === 'chat-messages',
+      'redacted credential-backed event',
+    );
+
+    socket!.receive(JSON.stringify({
+      type: 'chat-messages',
+      chatId: 'private-chat',
+      generationId: 'private-generation',
+      messages: [{
+        seq: 1,
+        message: {
+          type: 'assistant-message',
+          timestamp: '2026-07-26T00:00:00.000Z',
+          content: privateContent,
+        },
+      }],
+    }));
+
+    const event = await received;
+    expect(event.type).toBe('chat-messages');
+    if (event.type !== 'chat-messages') throw new Error('Expected a chat messages event.');
+    const message = event.messages[0]?.message;
+    expect(message?.type).toBe('assistant-message');
+    if (message?.type !== 'assistant-message') throw new Error('Expected an assistant message.');
+    expect(message.content).toBe(privateContent);
+    expect(client.describeEvents()).not.toContain(privateContent);
+    expect(JSON.stringify(client.eventRecords())).not.toContain(privateContent);
+    expect(client.describeEvents()).toContain('[REDACTED]');
+
+    const close = client.close();
+    socket!.finishClose();
+    await close;
+  });
+
   test('waits for a matching request strictly after the supplied cursor', async () => {
     const fake = FakeOpenAiServer.start({ defaultDelayMs: 0 });
     const request = () => fetch(`${fake.baseUrl}/v1/chat/completions`, {
