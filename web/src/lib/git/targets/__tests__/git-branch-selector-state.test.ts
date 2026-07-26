@@ -49,6 +49,16 @@ describe('GitBranchSelectorState', () => {
 		branchSelector.showBranchDropdown = true;
 		branchSelector.refs = [{ name: 'feature', ref: 'refs/heads/feature', kind: 'local-branch' }];
 		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
+		vi.mocked(getGitRefs).mockResolvedValueOnce({
+			refs: [
+				{
+					name: 'feature',
+					ref: 'refs/heads/feature',
+					kind: 'local-branch',
+					isCurrent: true,
+				},
+			],
+		});
 
 		const ok = await branchSelector.switchBranch(
 			'/project',
@@ -91,6 +101,15 @@ describe('GitBranchSelectorState', () => {
 			{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
 		];
 		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
+		vi.mocked(getGitRefs).mockResolvedValueOnce({
+			refs: [
+				{
+					name: 'origin/main',
+					ref: 'refs/remotes/origin/main',
+					kind: 'remote-branch',
+				},
+			],
+		});
 
 		const ok = await branchSelector.switchBranch(
 			'/project',
@@ -117,6 +136,16 @@ describe('GitBranchSelectorState', () => {
 		branchSelector.newBranchName = '  feature/new-ui  ';
 		branchSelector.newBranchBaseRef = 'refs/remotes/origin/main';
 		vi.mocked(gitCreateBranch).mockResolvedValue({ success: true });
+		vi.mocked(getGitRefs).mockResolvedValueOnce({
+			refs: [
+				{
+					name: 'feature/new-ui',
+					ref: 'refs/heads/feature/new-ui',
+					kind: 'local-branch',
+					isCurrent: true,
+				},
+			],
+		});
 
 		const ok = await branchSelector.createBranch();
 
