@@ -1,11 +1,7 @@
-// Claude CLI transport. Spawns the `claude` binary with stdin/stdout
-// pipes, exchanging JSONL messages. Extends AgentEventEmitterRuntime so all output
-// flows through typed events wired in the composition root.
-
 import crypto from 'crypto';
 import { AssistantMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
 import type { ChatMessage, CompactionTrigger } from '@garcon/common/chat-types';
-import type { AskUserQuestionDecisionResponse, PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
@@ -14,7 +10,6 @@ import {
   type RuntimeEventMetadata,
 } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import { normalizeThinkingMode } from '@garcon/common/chat-modes';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import {
   assertClaudeExecutionOpen,
@@ -29,10 +24,19 @@ import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { isRecord } from '@garcon/common/json';
 import { isManualBypassMode, providerStartupPermissionMode } from '@garcon/server-agent-common/execution/permission-modes';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
-import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
-import { runClaudeSingleQueryProcess } from './single-query-process.js';
 import { ClaudeProcessRetirementTracker } from './process-retirements.js';
 import { ClaudeControlBroker } from './cli-control.js';
+import {
+  buildClaudeCLIArgs,
+  runSingleQuery,
+  type ClaudeCliDependencies,
+} from './cli-invocation.js';
+import { buildClaudePermissionApprovalResponse, isClaudeAskUserQuestionTool } from './permission-response.js';
+import {
+  mergeClaudeSessionOptions,
+  normalizeClaudeThinkingModeForState,
+  type ClaudeSessionOptions,
+} from './session-options.js';
 import {
   ClaudeProcessTransport,
   type ClaudeProcessExit,
@@ -52,19 +56,6 @@ const NOOP_LOGGER: AgentLogger = {
   warn() {},
   error() {},
 };
-
-interface ClaudeSessionOptions {
-  agentSessionId: string;
-  sessionId: string;
-  chatId: string;
-  projectPath: string;
-  model: string;
-  permissionMode: PermissionMode;
-  thinkingMode: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  images?: readonly AgentAttachment[];
-  envOverrides?: Record<string, string>;
-}
 
 interface ClaudeRunningSession {
   id: string;
@@ -96,24 +87,6 @@ interface ClaudeActiveTurn {
   pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
 }
 
-function mergeClaudeSessionOptions(
-  current: ClaudeSessionOptions,
-  next: ClaudeSessionOptions,
-): ClaudeSessionOptions {
-  return {
-    agentSessionId: next.agentSessionId ?? current.agentSessionId,
-    sessionId: next.sessionId ?? current.sessionId,
-    chatId: next.chatId ?? current.chatId,
-    projectPath: next.projectPath ?? current.projectPath,
-    model: next.model ?? current.model,
-    permissionMode: next.permissionMode ?? current.permissionMode,
-    thinkingMode: next.thinkingMode ?? current.thinkingMode,
-    claudeThinkingMode: next.claudeThinkingMode ?? current.claudeThinkingMode,
-    envOverrides: next.envOverrides ?? current.envOverrides,
-    images: next.images,
-  };
-}
-
 interface PendingPermission {
   cliRequestId: string;
   agentSessionId: string;
@@ -122,236 +95,6 @@ interface PendingPermission {
   toolInput: Record<string, unknown>;
   toolUseId?: string;
   eventMetadata: RuntimeEventMetadata;
-}
-
-interface ClaudeCLIArgOptions {
-  model?: string;
-  permissionMode?: PermissionMode;
-  thinkingMode?: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  prompt?: string;
-  sessionId?: string;
-  resumeSessionId?: string;
-  streamJson?: boolean;
-}
-
-interface ClaudeSingleQueryOptions {
-  model?: string;
-  cwd?: string;
-  permissionMode?: PermissionMode;
-  thinkingMode?: ThinkingMode;
-  claudeThinkingMode?: ClaudeThinkingMode;
-  envOverrides?: Record<string, string>;
-  timeoutMs?: number;
-  signal?: AbortSignal;
-}
-
-export interface ClaudeCliDependencies {
-  readonly binary: () => string;
-  readonly logger: AgentLogger;
-  readonly versionProbe: ClaudeCliVersionProbe;
-}
-
-function canonicalClaudeToolName(raw: string | undefined): string {
-  return (raw ?? '').trim().toLowerCase().replace(/[\s_\-]+/g, '');
-}
-
-function isClaudeAskUserQuestionTool(raw: string | undefined): boolean {
-  return canonicalClaudeToolName(raw) === 'askuserquestion';
-}
-
-function isAskUserQuestionDecisionResponse(
-  response: Record<string, unknown> | undefined,
-): response is AskUserQuestionDecisionResponse {
-  if (!response || response.type !== 'ask-user-question-response') return false;
-  return response.outcome === 'answered' || response.outcome === 'skipped';
-}
-
-function claudeAskUserQuestionControlResponse(
-  pending: Pick<PendingPermission, 'toolInput' | 'toolUseId'>,
-  decision: Pick<PermissionDecisionPayload, 'allow' | 'response'>,
-): Record<string, unknown> | null {
-  if (!isAskUserQuestionDecisionResponse(decision.response)) return null;
-  if (!decision.allow || decision.response.outcome === 'skipped') {
-    return {
-      behavior: 'deny',
-      message: decision.response.reason ?? 'User declined to answer questions',
-      ...(pending.toolUseId ? { toolUseID: pending.toolUseId } : {}),
-    };
-  }
-
-  const rawQuestions = Array.isArray(pending.toolInput.questions) ? pending.toolInput.questions : [];
-  const questions = rawQuestions.map((entry) => isRecord(entry) ? entry : {});
-  const answers: Record<string, string> = {};
-  const annotations: Record<string, { preview?: string }> = {};
-
-  for (const answer of decision.response.answers) {
-    const question = questions.find((candidate) => candidate.question === answer.questionId);
-    const questionText = typeof question?.question === 'string' ? question.question : answer.questionId;
-    const options = Array.isArray(question?.options)
-      ? question.options.map((entry) => isRecord(entry) ? entry : {})
-      : [];
-    const selectedLabels = answer.selectedOptionIds.map((optionId) => {
-      const option = options.find((candidate) => candidate.label === optionId || candidate.id === optionId);
-      return typeof option?.label === 'string' ? option.label : optionId;
-    });
-    answers[questionText] = selectedLabels.join(', ');
-
-    const firstSelectedOption = options.find(
-      (option) => option.label === answer.selectedOptionIds[0] || option.id === answer.selectedOptionIds[0],
-    );
-    if (typeof firstSelectedOption?.preview === 'string') {
-      annotations[questionText] = { preview: firstSelectedOption.preview };
-    }
-  }
-
-  const updatedInput: Record<string, unknown> = {
-    ...pending.toolInput,
-    answers,
-  };
-  if (Object.keys(annotations).length > 0) {
-    updatedInput.annotations = annotations;
-  }
-
-  return {
-    behavior: 'allow',
-    updatedInput,
-    ...(pending.toolUseId ? { toolUseID: pending.toolUseId } : {}),
-  };
-}
-
-// Builds the permission approval/deny response sent back to the CLI.
-function buildClaudePermissionApprovalResponse(
-  pending: Partial<Pick<PendingPermission, 'toolName' | 'toolInput' | 'toolUseId'>> & { providerToolName?: string; providerToolInput?: Record<string, unknown> },
-  decision: Pick<PermissionDecisionPayload, 'allow' | 'alwaysAllow' | 'response'>,
-): Record<string, unknown> {
-  const toolInput = pending.providerToolInput ?? pending.toolInput ?? {};
-  const toolName = pending.providerToolName ?? pending.toolName ?? 'Unknown';
-  if (isClaudeAskUserQuestionTool(toolName)) {
-    const questionResponse = claudeAskUserQuestionControlResponse(
-      { toolInput, toolUseId: pending.toolUseId },
-      decision,
-    );
-    if (questionResponse) return questionResponse;
-  }
-  if (decision.response) return decision.response;
-  if (!decision.allow) {
-    return { behavior: 'deny', message: 'Denied by user' };
-  }
-  const response: Record<string, unknown> = {
-    behavior: 'allow',
-    updatedInput: toolInput,
-  };
-  if (decision.alwaysAllow) {
-    response.updatedPermissions = [{
-      type: 'addRules',
-      rules: [{ toolName }],
-      behavior: 'allow',
-      destination: 'session',
-    }];
-  }
-  return response;
-}
-
-// Runs a one-shot CLI query and returns the plain text output.
-async function runSingleQuery(
-  prompt: string,
-  {
-    model,
-    cwd,
-    permissionMode,
-    thinkingMode,
-    claudeThinkingMode,
-    envOverrides,
-    timeoutMs,
-    signal,
-  }: ClaudeSingleQueryOptions = {},
-  dependencies: ClaudeCliDependencies = defaultClaudeCliDependencies(),
-): Promise<string> {
-  return withSingleQueryControl({ signal, timeoutMs }, async (querySignal) => {
-    const claudeBinary = dependencies.binary();
-    await dependencies.versionProbe.assertCompatible(claudeBinary);
-    const args = buildClaudeCLIArgs({
-      model,
-      permissionMode,
-      thinkingMode,
-      claudeThinkingMode,
-      prompt,
-    });
-
-    return runClaudeSingleQueryProcess({
-      binary: claudeBinary,
-      args,
-      cwd: cwd || process.cwd(),
-      signal: querySignal,
-      envOverrides,
-      logger: dependencies.logger,
-    });
-  });
-}
-
-// Forwards non-default effort exactly and leaves unsupported values to the CLI.
-function mapThinkingModeToClaudeEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
-  const normalizedMode = normalizeThinkingMode(thinkingMode);
-  if (normalizedMode === 'none') return undefined;
-  return normalizedMode;
-}
-
-function normalizeClaudeThinkingModeForState(claudeThinkingMode: ClaudeThinkingMode | undefined): ClaudeThinkingMode {
-  return claudeThinkingMode ?? 'auto';
-}
-
-function buildClaudeCLIArgs({
-  model,
-  permissionMode,
-  thinkingMode,
-  claudeThinkingMode,
-  prompt = '',
-  sessionId,
-  resumeSessionId,
-  streamJson = false,
-}: ClaudeCLIArgOptions): string[] {
-  const args = streamJson
-    ? [
-        '--print',
-        '--output-format', 'stream-json',
-        '--input-format', 'stream-json',
-        '--replay-user-messages',
-        '--verbose',
-      ]
-    : ['--print', '--no-session-persistence'];
-
-  if (model) args.push('--model', model);
-
-  const effectiveMode = permissionMode || 'default';
-  const providerMode = providerStartupPermissionMode(effectiveMode);
-  if (providerMode !== 'default') {
-    if (providerMode === 'bypassPermissions') {
-      args.push('--dangerously-skip-permissions');
-    } else {
-      args.push('--permission-mode', providerMode);
-    }
-  }
-
-  if (streamJson) {
-    args.push('--permission-prompt-tool', 'stdio');
-  }
-
-  const effort = mapThinkingModeToClaudeEffort(thinkingMode);
-  if (effort) {
-    args.push('--effort', effort);
-  }
-
-  if (streamJson) {
-    if (resumeSessionId) {
-      args.push(`--resume=${resumeSessionId}`);
-    } else if (sessionId) {
-      args.push(`--session-id=${sessionId}`);
-    }
-  }
-
-  args.push('-p', prompt);
-  return args;
 }
 
 class ClaudeCliRuntime extends AgentEventEmitterRuntime {
@@ -1674,3 +1417,4 @@ function defaultClaudeCliDependencies(): ClaudeCliDependencies {
 }
 
 export { ClaudeCliRuntime, buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, runSingleQuery };
+export type { ClaudeCliDependencies };
