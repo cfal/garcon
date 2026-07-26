@@ -378,6 +378,54 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('emits tool results carried by live user frames', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const messages = [];
+      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
+      fake.stdout.enqueue(new TextEncoder().encode([
+        JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [{
+              type: 'tool_result',
+              tool_use_id: 'tool-1',
+              content: [{ type: 'text', text: 'command output' }],
+              is_error: false,
+            }],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'done',
+        }),
+      ].join('\n') + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(messages).toMatchObject([
+        { type: 'tool-result', toolId: 'tool-1', isError: false },
+        { type: 'assistant-message', content: 'done' },
+      ]);
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('ignores a result correlated to another user input', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();

@@ -41,6 +41,109 @@ describe('Claude pending-input evidence', () => {
     await service.reconcileNativeHistory('chat-1');
     expect(service.listForChat('chat-1')).toEqual([]);
   });
+
+  it('reconciles a user input persisted only as a queued command attachment', async () => {
+    const content = 'it finished now';
+    const queuedCommand = {
+      sessionId: 'session-1',
+      type: 'attachment',
+      uuid: 'queued-1',
+      timestamp: '2026-07-21T14:00:00.000Z',
+      attachment: {
+        type: 'queued_command',
+        prompt: content,
+        commandMode: 'prompt',
+        timestamp: '2026-07-21T14:00:01.000Z',
+      },
+    };
+
+    await withTempJsonl([JSON.stringify(queuedCommand)], async (filePath) => {
+      const service = new PendingUserInputService({
+        loadNativeMessages: () => loadClaudeChatMessages(filePath),
+        getRetainedHistoryMessages: () => [],
+      });
+      await service.register('chat-1', content, {
+        clientRequestId: 'request-1',
+        createdAt: '2026-07-21T14:00:00.500Z',
+      });
+
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages).toMatchObject([{
+        type: 'user-message',
+        content,
+        timestamp: '2026-07-21T14:00:01.000Z',
+      }]);
+      expect(getNativeMessageSource(messages[0])).toEqual({
+        entryId: 'queued-1',
+        lineNumber: 1,
+      });
+
+      await service.reconcileNativeHistory('chat-1');
+      expect(service.listForChat('chat-1')).toEqual([]);
+    });
+  });
+
+  it('filters provider task notifications while preserving normal user messages', async () => {
+    const entries = [
+      {
+        sessionId: 'session-1',
+        type: 'queue-operation',
+        uuid: 'queue-1',
+        timestamp: '2026-07-21T14:00:00.000Z',
+        operation: 'enqueue',
+        content: 'do not duplicate this',
+      },
+      {
+        sessionId: 'session-1',
+        type: 'attachment',
+        uuid: 'task-attachment',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'task-notification',
+          prompt: '<task-notification>background task finished</task-notification>',
+        },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'task-user',
+        timestamp: '2026-07-21T14:00:02.000Z',
+        origin: { kind: 'task-notification' },
+        message: { role: 'user', content: 'A task completed with ordinary-looking prose.' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'fallback-task-user',
+        timestamp: '2026-07-21T14:00:03.000Z',
+        message: {
+          role: 'user',
+          content: '<task-notification>fallback notification</task-notification>',
+        },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'normal-user',
+        timestamp: '2026-07-21T14:00:04.000Z',
+        message: { role: 'user', content: 'A task completed with ordinary-looking prose.' },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+
+      expect(messages).toMatchObject([{
+        type: 'user-message',
+        content: 'A task completed with ordinary-looking prose.',
+      }]);
+      expect(getNativeMessageSource(messages[0])).toEqual({
+        entryId: 'normal-user',
+        lineNumber: 5,
+      });
+    });
+  });
 });
 
 describe('loadClaudeChatMessagePage', () => {

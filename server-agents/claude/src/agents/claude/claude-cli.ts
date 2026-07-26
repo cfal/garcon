@@ -593,10 +593,19 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
   // Folds the post-compaction summary (delivered as a synthetic user message)
   // into a CompactionMessage, pairing it with the metadata from the preceding
-  // compact_boundary. Ordinary user echoes carry no rendered output.
+  // compact_boundary. Replayed user prompts carry no rendered output, while
+  // provider tool results are canonical live output.
   #handleUserMessage(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     const activeTurn = session.activeTurn;
-    if (!activeTurn?.pendingCompaction) return;
+    if (!activeTurn?.protocol.inputStarted) return;
+
+    const chatMessages = convertCLIMessageToChatMessages(msg);
+    if (chatMessages.length > 0) {
+      activeTurn.protocol.addOutputMessages(chatMessages.length);
+      this.emitMessages(session.chatId, chatMessages, activeTurn.eventMetadata);
+    }
+
+    if (!activeTurn.pendingCompaction) return;
 
     const content = msg.message?.content;
     const text = typeof content === 'string' ? content : '';

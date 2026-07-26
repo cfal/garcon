@@ -180,6 +180,7 @@ function isSystemUserMessage(text: string): boolean {
     text.startsWith('<command-args>') ||
     text.startsWith('<local-command-stdout>') ||
     text.startsWith('<system-reminder>') ||
+    text.startsWith('<task-notification>') ||
     text.startsWith('Caveat:') ||
     text.startsWith('This session is being continued from a previous') ||
     text.startsWith('Invalid API key') ||
@@ -187,6 +188,23 @@ function isSystemUserMessage(text: string): boolean {
     text.includes('CRITICAL: You MUST respond with ONLY a JSON') ||
     text === 'Warmup'
   );
+}
+
+function isProviderOwnedUserMessage(
+  entry: Record<string, unknown>,
+  text: string,
+): boolean {
+  return asRecord(entry.origin).kind === 'task-notification' || isSystemUserMessage(text);
+}
+
+function queuedCommandPrompt(entry: Record<string, unknown>): string | null {
+  if (entry.type !== 'attachment') return null;
+  const attachment = asRecord(entry.attachment);
+  if (attachment.type !== 'queued_command' || attachment.commandMode !== 'prompt') return null;
+  const prompt = asString(attachment.prompt)?.trim();
+  return prompt && !isProviderOwnedUserMessage(entry, prompt)
+    ? stripResolvedFileMentionContext(prompt)
+    : null;
 }
 
 function isSystemAssistantMessage(text: string): boolean {
@@ -266,6 +284,15 @@ export function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMe
       continue;
     }
 
+    const queuedPrompt = queuedCommandPrompt(entry);
+    if (queuedPrompt) {
+      const attachmentTimestamp = asString(asRecord(entry.attachment).timestamp);
+      pushMessage(entry, new UserMessage(attachmentTimestamp || ts, queuedPrompt));
+      continue;
+    }
+
+    if (entry.type === 'attachment') continue;
+
     if (entry.type === 'system') continue;
 
     if (entry.isCompactSummary) {
@@ -311,7 +338,7 @@ export function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMe
       }
 
       const text = getMessageText(content);
-      if (text && !isSystemUserMessage(text)) {
+      if (text && !isProviderOwnedUserMessage(entry, text)) {
         pushMessage(entry, new UserMessage(ts, stripResolvedFileMentionContext(text)));
       }
       continue;
@@ -631,12 +658,13 @@ async function readFirstUserMessage(filePath: string, logger: AgentLogger): Prom
         firstTimestamp = entry.timestamp;
       }
       const message = asRecord(entry.message);
-      if (message.role !== 'user') {
-        continue;
-      }
-      const text = getMessageText(message.content);
-      if (text && !isSystemUserMessage(text)) {
-        firstMessage = text;
+      if (message.role === 'user') {
+        const text = getMessageText(message.content);
+        if (text && !isProviderOwnedUserMessage(entry, text)) {
+          firstMessage = text;
+        }
+      } else {
+        firstMessage = queuedCommandPrompt(entry);
       }
       if (firstMessage) {
         if (firstTimestamp) {
@@ -701,7 +729,7 @@ export async function getClaudePreviewFromNativePath(
       const role = message.role;
       if (role === 'user') {
         const text = getMessageText(message.content);
-        if (!text || isSystemUserMessage(text)) {
+        if (!text || isProviderOwnedUserMessage(entry, text)) {
           continue;
         }
         lastMessage = '> ' + text;
@@ -711,6 +739,9 @@ export async function getClaudePreviewFromNativePath(
           continue;
         }
         lastMessage = text;
+      } else {
+        const prompt = queuedCommandPrompt(entry);
+        if (prompt) lastMessage = '> ' + prompt;
       }
     }
     if (lastActivity && lastMessage) {

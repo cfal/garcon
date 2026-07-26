@@ -234,9 +234,11 @@ export class ClaudeTurnState {
   }
 }
 
-// Converts a finalized CLI assistant message to ChatMessage objects.
+// Converts user-visible CLI content to canonical messages.
 export function convertCLIMessageToChatMessages(message: ClaudeCLIMessage): ChatMessage[] {
-  if (message.type !== 'assistant') return [];
+  const isAssistant = message.type === 'assistant';
+  const isUser = message.type === 'user';
+  if (!isAssistant && !isUser) return [];
 
   const chatMessages: ChatMessage[] = [];
   const now = new Date().toISOString();
@@ -247,13 +249,13 @@ export function convertCLIMessageToChatMessages(message: ClaudeCLIMessage): Chat
   const content = rawContent.filter(isClaudeContentPart);
 
   for (const part of content) {
-    if (part.type === 'text' && part.text?.trim()) {
+    if (isAssistant && part.type === 'text' && part.text?.trim()) {
       chatMessages.push(new AssistantMessage(now, part.text));
     }
-    if (part.type === 'thinking' && part.thinking) {
+    if (isAssistant && part.type === 'thinking' && part.thinking) {
       chatMessages.push(new ThinkingMessage(now, part.thinking));
     }
-    if (part.type === 'tool_use') {
+    if (isAssistant && part.type === 'tool_use') {
       chatMessages.push(convertClaudeToolUse(now, part));
     }
     if (part.type === 'tool_result') {

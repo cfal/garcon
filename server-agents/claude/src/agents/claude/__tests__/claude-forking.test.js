@@ -43,6 +43,20 @@ describe('Claude JSONL forking', () => {
         uuid: '42b019b0-3f2d-4dc4-a72f-6a428bb67a16',
         timestamp: '2026-07-17T15:20:03.808Z',
       },
+      {
+        parentUuid: '42b019b0-3f2d-4dc4-a72f-6a428bb67a16',
+        isSidechain: false,
+        sessionId: sourceAgentSessionId,
+        type: 'attachment',
+        attachment: {
+          type: 'queued_command',
+          prompt: 'persisted queued prompt',
+          commandMode: 'prompt',
+          timestamp: '2026-07-17T15:20:04.808Z',
+        },
+        uuid: 'b2823712-55bb-479e-c11f-7bb789cc138f',
+        timestamp: '2026-07-17T15:20:04.808Z',
+      },
     ];
     const sourceContent = `${sourceEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`;
     await writeFile(sourcePath, sourceContent);
@@ -119,13 +133,20 @@ describe('Claude JSONL forking', () => {
     expect(forkedEntries.map((entry) => entry.sessionId)).toEqual([
       forked.agentSessionId,
       forked.agentSessionId,
+      forked.agentSessionId,
     ]);
     expect(forkedEntries[0].uuid).not.toBe(sourceEntries[0].uuid);
     expect(forkedEntries[1].uuid).not.toBe(sourceEntries[1].uuid);
+    expect(forkedEntries[2].uuid).not.toBe(sourceEntries[2].uuid);
     expect(forkedEntries[1].parentUuid).toBe(forkedEntries[0].uuid);
+    expect(forkedEntries[2].parentUuid).toBe(forkedEntries[1].uuid);
     expect((await stat(forkedPath)).mode & 0o777).toBe(0o600);
     expect(await readFile(sourcePath, 'utf8')).toBe(sourceContent);
-    await expect(loadClaudeChatMessages(forkedPath)).resolves.toHaveLength(2);
+    await expect(loadClaudeChatMessages(forkedPath)).resolves.toMatchObject([
+      { type: 'user-message', content: 'source prompt' },
+      { type: 'assistant-message', content: 'source reply' },
+      { type: 'user-message', content: 'persisted queued prompt' },
+    ]);
 
     await forking.discard(forked, new AbortController().signal);
     await expect(access(forkedPath)).rejects.toMatchObject({ code: 'ENOENT' });

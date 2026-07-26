@@ -163,6 +163,36 @@ describe('convertCLIMessageToChatMessages', () => {
     expect(result[0].isError).toBe(false);
   });
 
+  it('converts real CLI user-frame tool results without replaying user text', () => {
+    const msg = {
+      type: 'user',
+      uuid: 'user-1',
+      isReplay: true,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'do not render this prompt again' },
+          {
+            type: 'tool_result',
+            tool_use_id: 'tool-1',
+            content: [{ type: 'text', text: 'command output' }],
+            is_error: false,
+          },
+        ],
+      },
+    };
+
+    const result = convertCLIMessageToChatMessages(msg);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: 'tool-result',
+      toolId: 'tool-1',
+      isError: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('do not render this prompt again');
+  });
+
   it('converts all content types from a single assistant message', () => {
     const msg = {
       type: 'assistant',
