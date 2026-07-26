@@ -43,6 +43,7 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 		this.target = new GitTargetSessionController({
 			kind: 'git',
 			createBranchSelector: deps.createGitBranchSelector,
+			invalidationVersion: deps.invalidationVersion,
 			canChangeTarget: () =>
 				deps.gitMutations.pendingCount(singletonSurfaceId('git')) === 0,
 			beforeCheckout: () => this.workbench.ensureFreshForGitMutation(),

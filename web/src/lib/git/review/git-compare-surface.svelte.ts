@@ -38,6 +38,7 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 		this.target = new GitTargetSessionController({
 			kind: 'git-compare',
 			createBranchSelector: deps.createGitBranchSelector,
+			invalidationVersion: deps.invalidationVersion,
 			canChangeTarget: () =>
 				deps.gitMutations.pendingCount(singletonSurfaceId('git-compare')) === 0,
 			onTargetChanged: (_target, _identity, reason, identityChanged) => {

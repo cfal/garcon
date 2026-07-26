@@ -46,6 +46,7 @@ function deferred<T>() {
 function createSession(options: {
 	kind?: 'git' | 'git-history' | 'git-compare' | 'commit';
 	canChangeTarget?: () => boolean;
+	invalidationVersion?: (effectiveProjectKey: string) => number;
 	runMutation?: GitBranchSelectorStateOptions['runMutation'];
 }) {
 	const changes: Array<{
@@ -64,6 +65,7 @@ function createSession(options: {
 			selectors.push(selector);
 			return selector;
 		},
+		invalidationVersion: options.invalidationVersion ?? (() => 0),
 		canChangeTarget: options.canChangeTarget ?? (() => true),
 		onTargetChanged: (target, identity, reason, identityChanged) => {
 			changes.push({
@@ -236,6 +238,53 @@ describe('GitTargetSessionController', () => {
 		);
 		expect(changes.filter((change) => change.reason === 'checkout')).toHaveLength(1);
 		expect(session.branches.currentBranch).toBe('feature');
+	});
+
+	it('coalesces its branch invalidation into the direct checkout reconciliation', async () => {
+		let invalidationVersion = 0;
+		const context: { session?: GitTargetSessionController } = {};
+		const runMutation = vi.fn(
+			async (
+				_surfaceId: string,
+				_projectPath: string,
+				effectiveProjectKey: string,
+				execute: () => Promise<{ success: boolean }>,
+			) => {
+				const result = await execute();
+				if (result.success) {
+					invalidationVersion += 1;
+					await context.session?.refreshForInvalidation(
+						effectiveProjectKey,
+						invalidationVersion,
+					);
+				}
+				return result;
+			},
+		);
+		api.getGitTargetCandidates.mockResolvedValue({
+			targets: [candidate('/chat', { branch: 'feature' })],
+		});
+		const created = createSession({
+			runMutation,
+			invalidationVersion: () => invalidationVersion,
+		});
+		context.session = created.session;
+		setProject(created.session, '/chat', 'chat');
+		created.session.setPresentationVisible(true);
+		await created.session.activate();
+
+		await expect(
+			created.session.switchBranch('feature', 'local-branch'),
+		).resolves.toBe(true);
+		await expect(
+			created.session.refreshForInvalidation('chat', invalidationVersion),
+		).resolves.toBe(false);
+
+		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2);
+		expect(created.changes.filter((change) => change.reason === 'checkout')).toHaveLength(1);
+		expect(created.changes.filter((change) => change.reason === 'invalidation')).toHaveLength(
+			0,
+		);
 	});
 
 	it('rejects target and branch changes while the owner is busy', async () => {

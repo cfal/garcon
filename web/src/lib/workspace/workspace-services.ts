@@ -173,6 +173,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			new CommitController({
 				createGitBranchSelector,
 				gitMutations,
+				invalidationVersion: (effectiveProjectKey) =>
+					gitProjectInvalidations.version(effectiveProjectKey),
 				reviewDisplay: gitReviewDisplay,
 				runMutation: (request) =>
 					gitMutations.run({
@@ -186,6 +188,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		createGitBranchSelector,
 		gitMutations,
+		invalidationVersion: (effectiveProjectKey) =>
+			gitProjectInvalidations.version(effectiveProjectKey),
 		reviewDisplay: gitReviewDisplay,
 	});
 	const domainBindings = new WorkspaceDomainBindings({

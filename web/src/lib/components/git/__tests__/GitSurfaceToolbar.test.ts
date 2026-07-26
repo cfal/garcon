@@ -15,6 +15,7 @@ function target(): GitTargetSessionController {
 	const controller = new GitTargetSessionController({
 		kind: 'git-history',
 		createBranchSelector: () => new GitBranchSelectorState(),
+		invalidationVersion: () => 0,
 		canChangeTarget: () => true,
 		onTargetChanged: () => undefined,
 	});

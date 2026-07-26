@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import type { GitTargetCandidate } from '$lib/api/git.js';
+import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
+import { GitProjectInvalidationStore } from '$lib/git/surface/git-project-invalidation.svelte.js';
+import { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
+import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitTargetCandidates: vi.fn(),
@@ -78,6 +83,50 @@ describe('GitHistorySurfaceController', () => {
 		await controller.refreshForInvalidation('chat', 1);
 		await vi.waitFor(() => expect(api.getGitHistoryCommits).toHaveBeenCalledTimes(2));
 		await controller.refreshForInvalidation('chat', 1);
+
+		expect(api.getGitHistoryCommits).toHaveBeenCalledTimes(2);
+	});
+
+	it('reloads once when its own branch checkout also publishes invalidation', async () => {
+		const invalidations = new GitProjectInvalidationStore();
+		const context: { controller?: GitHistorySurfaceController } = {};
+		const gitMutations = new GitMutationCoordinator({
+			onChanged: async (effectiveProjectKey) => {
+				invalidations.markChanged(effectiveProjectKey);
+				await context.controller?.refreshForInvalidation(
+					effectiveProjectKey,
+					invalidations.version(effectiveProjectKey),
+				);
+			},
+		});
+		const deps = {
+			createGitBranchSelector: () =>
+				new GitBranchSelectorState({
+					runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
+						gitMutations.run({
+							surfaceId,
+							projectPath,
+							effectiveProjectKey,
+							execute,
+							didMutate: (result) => result.success,
+						}),
+				}),
+			gitMutations,
+			invalidationVersion: (effectiveProjectKey: string) =>
+				invalidations.version(effectiveProjectKey),
+			reviewDisplay: new GitReviewDisplaySettingsStore(),
+		} satisfies GitSurfaceControllerDeps;
+		const controller = new GitHistorySurfaceController(deps);
+		context.controller = controller;
+		setProject(controller);
+		controller.setPresentationVisible(true);
+		await controller.target.activate();
+		await vi.waitFor(() => expect(api.getGitHistoryCommits).toHaveBeenCalledOnce());
+
+		await expect(
+			controller.target.switchBranch('feature', 'local-branch'),
+		).resolves.toBe(true);
+		await vi.waitFor(() => expect(api.getGitHistoryCommits).toHaveBeenCalledTimes(2));
 
 		expect(api.getGitHistoryCommits).toHaveBeenCalledTimes(2);
 	});

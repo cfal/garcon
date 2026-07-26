@@ -253,6 +253,7 @@ export class CommitController implements PortableSingletonController {
 		this.target = new GitTargetSessionController({
 			kind: 'commit',
 			createBranchSelector: deps.createGitBranchSelector,
+			invalidationVersion: deps.invalidationVersion,
 			canChangeTarget: () =>
 				this.canClose &&
 				deps.gitMutations.pendingCount(singletonSurfaceId('commit')) === 0,

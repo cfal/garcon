@@ -29,6 +29,7 @@ export type GitTargetChangeReason = 'project' | 'selection' | 'checkout' | 'inva
 export interface GitTargetSessionDeps {
 	kind: GitTargetSurfaceKind;
 	createBranchSelector(): GitBranchSelectorState;
+	invalidationVersion(effectiveProjectKey: string): number;
 	canChangeTarget(): boolean;
 	beforeCheckout?(): boolean | Promise<boolean>;
 	runCheckoutReconciliation?<T>(
@@ -49,6 +50,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	readonly branches: GitBranchSelectorState;
 	presentationVisible = $state(false);
 	projectIdentityPending = $state(false);
+	branchChangePending = $state(false);
 	targets = $state<GitTargetCandidate[]>([]);
 	activeTarget = $state<GitTarget | null>(null);
 	isLoadingTargets = $state(false);
@@ -71,6 +73,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	#appliedIdentity: string | null = null;
 	#handledInvalidationVersions = new Map<string, number>();
 	#pendingInvalidationVersions = new Map<string, number>();
+	#deferredBranchInvalidationVersions = new Map<string, number>();
 
 	constructor(private readonly deps: GitTargetSessionDeps) {
 		this.surfaceId = singletonSurfaceId(deps.kind);
@@ -110,7 +113,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	get canChangeTarget(): boolean {
-		return !this.projectIdentityPending && this.deps.canChangeTarget();
+		return !this.branchChangePending && this.#targetChangeAllowed();
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
@@ -323,12 +326,22 @@ export class GitTargetSessionController implements PortableSingletonController {
 	): Promise<boolean> {
 		const handled = this.#handledInvalidationVersions.get(effectiveProjectKey) ?? 0;
 		const pending = this.#pendingInvalidationVersions.get(effectiveProjectKey) ?? 0;
+		const deferred =
+			this.#deferredBranchInvalidationVersions.get(effectiveProjectKey) ?? 0;
 		if (
 			!this.presentationVisible ||
 			effectiveProjectKey !== this.effectiveProjectKey ||
 			version <= 0 ||
-			version <= Math.max(handled, pending)
+			version <= Math.max(handled, pending, deferred)
 		) {
+			return false;
+		}
+		if (this.branchChangePending) {
+			storeMostRecent(
+				this.#deferredBranchInvalidationVersions,
+				effectiveProjectKey,
+				version,
+			);
 			return false;
 		}
 		storeMostRecent(this.#pendingInvalidationVersions, effectiveProjectKey, version);
@@ -378,6 +391,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.#targetByProject.clear();
 		this.#handledInvalidationVersions.clear();
 		this.#pendingInvalidationVersions.clear();
+		this.#deferredBranchInvalidationVersions.clear();
 		this.#appliedIdentity = null;
 		this.#activation = null;
 	}
@@ -397,6 +411,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 		) {
 			return false;
 		}
+		const invalidationVersionBefore =
+			this.deps.invalidationVersion(effectiveProjectKey);
+		let changed = false;
+		let reconciled = false;
+		this.branchChangePending = true;
 		const execute = async (): Promise<boolean> => {
 			if (this.deps.beforeCheckout && !(await this.deps.beforeCheckout())) {
 				return false;
@@ -405,11 +424,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 				identity !== this.identity ||
 				projectPath !== this.activeProjectPath ||
 				effectiveProjectKey !== this.effectiveProjectKey ||
-				!this.canChangeTarget
+				!this.#targetChangeAllowed()
 			) {
 				return false;
 			}
-			const changed = await mutate();
+			changed = await mutate();
 			if (!changed) return false;
 			if (identity !== this.identity) return true;
 			const nextBranch = typeof branch === 'string' ? branch : branch();
@@ -418,11 +437,57 @@ export class GitTargetSessionController implements PortableSingletonController {
 			if (identity !== this.identity) return true;
 			await this.#applyTarget('checkout', true, nextBranch);
 			await this.deps.afterCheckout?.(projectPath);
+			reconciled = true;
 			return true;
 		};
-		return this.deps.runCheckoutReconciliation
-			? this.deps.runCheckoutReconciliation(projectPath, execute)
-			: execute();
+		try {
+			return await (this.deps.runCheckoutReconciliation
+				? this.deps.runCheckoutReconciliation(projectPath, execute)
+				: execute());
+		} finally {
+			this.branchChangePending = false;
+			await this.#settleBranchInvalidation(
+				effectiveProjectKey,
+				invalidationVersionBefore,
+				changed,
+				reconciled,
+			);
+		}
+	}
+
+	async #settleBranchInvalidation(
+		effectiveProjectKey: string,
+		versionBefore: number,
+		changed: boolean,
+		reconciled: boolean,
+	): Promise<void> {
+		const deferred =
+			this.#deferredBranchInvalidationVersions.get(effectiveProjectKey) ?? 0;
+		this.#deferredBranchInvalidationVersions.delete(effectiveProjectKey);
+		if (effectiveProjectKey !== this.effectiveProjectKey) return;
+		const currentVersion = this.deps.invalidationVersion(effectiveProjectKey);
+		if (reconciled && currentVersion === versionBefore + 1) {
+			storeMostRecent(
+				this.#handledInvalidationVersions,
+				effectiveProjectKey,
+				currentVersion,
+			);
+			return;
+		}
+		if (!changed && deferred <= 0) return;
+		const recoveryVersion = Math.max(deferred, currentVersion);
+		if (recoveryVersion <= 0) return;
+		try {
+			await this.refreshForInvalidation(effectiveProjectKey, recoveryVersion);
+		} catch (error) {
+			this.lastError = `Failed to refresh Git target after branch change: ${
+				error instanceof Error ? error.message : String(error)
+			}`;
+		}
+	}
+
+	#targetChangeAllowed(): boolean {
+		return !this.projectIdentityPending && this.deps.canChangeTarget();
 	}
 
 	#setContext(projectPath: string | null, effectiveProjectKey: string | null): void {

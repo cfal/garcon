@@ -5,5 +5,6 @@ import type { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-d
 export interface GitSurfaceControllerDeps {
 	createGitBranchSelector(): GitBranchSelectorState;
 	gitMutations: GitMutationCoordinator;
+	invalidationVersion(effectiveProjectKey: string): number;
 	reviewDisplay: GitReviewDisplaySettingsStore;
 }

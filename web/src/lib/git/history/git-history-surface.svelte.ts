@@ -26,6 +26,7 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 		this.target = new GitTargetSessionController({
 			kind: 'git-history',
 			createBranchSelector: deps.createGitBranchSelector,
+			invalidationVersion: deps.invalidationVersion,
 			canChangeTarget: () =>
 				!this.isRevertingCommit &&
 				deps.gitMutations.pendingCount(singletonSurfaceId('git-history')) === 0,
