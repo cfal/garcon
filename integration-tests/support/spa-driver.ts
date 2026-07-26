@@ -268,7 +268,7 @@ export class SpaDriver {
         `${selector} [data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]`,
       );
       if (!trigger) throw new Error(`Missing ${selector} workspace menu.`);
-      trigger.click();
+      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
     }, toolbarSelector);
   }
 
