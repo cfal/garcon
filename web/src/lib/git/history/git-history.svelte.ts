@@ -152,6 +152,14 @@ export class GitHistoryController {
 		this.loadInitial(projectPath);
 	}
 
+	pauseListLoading(): void {
+		if (!this.listAbort) return;
+		this.listAbort.abort();
+		this.listAbort = null;
+		this.listGeneration += 1;
+		this.listLoading = false;
+	}
+
 	loadMore(projectPath: string): void {
 		if (this.listLoading || this.nextOffset === null) return;
 		this.listAbort?.abort();

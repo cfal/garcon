@@ -15,6 +15,7 @@ import { GitTreeState } from '$lib/git/workbench/git-tree-state.svelte.js';
 import {
 	DEFAULT_REFRESH_OPTIONS,
 	targetKey,
+	type DiffMode,
 	type GitWorkbenchMutationRunner,
 	type GitWorkbenchRefreshOptions,
 	type GitWorkbenchTarget,
@@ -349,13 +350,22 @@ export class GitWorkbenchStore {
 	}
 
 	runLocalGitMutation: GitWorkbenchMutationRunner = async (projectPath, action) => {
+		return this.runLocalGitReconciliation(projectPath, () =>
+			this.options.runMutation?.(projectPath, action) ?? action(),
+		);
+	};
+
+	async runLocalGitReconciliation<T>(
+		projectPath: string,
+		action: () => Promise<T>,
+	): Promise<T> {
 		this.beginLocalGitMutation(projectPath);
 		try {
-			return await (this.options.runMutation?.(projectPath, action) ?? action());
+			return await action();
 		} finally {
 			this.endLocalGitMutation(projectPath);
 		}
-	};
+	}
 
 	async openFile(projectPath: string, filePath: string): Promise<void> {
 		if (!this.isCurrentTarget(projectPath)) return;
@@ -430,14 +440,27 @@ export class GitWorkbenchStore {
 	}
 
 	setContextLines(lines: number): void {
-		this.virtualReview.contextLines = lines;
+		this.setDisplayOptions(this.virtualReview.diffMode, lines, { refresh: true });
+	}
+
+	setDisplayOptions(
+		diffMode: DiffMode,
+		contextLines: number,
+		options: { refresh: boolean },
+	): void {
+		const normalizedContext = Math.max(0, Math.round(contextLines));
+		const contextChanged = normalizedContext !== this.virtualReview.contextLines;
+		this.virtualReview.diffMode = diffMode;
+		if (!contextChanged) return;
+		this.virtualReview.contextLines = normalizedContext;
 		this.virtualReview.clearForDisplayChange();
-		if (this.target)
+		if (options.refresh && this.target) {
 			void this.refresh({
 				reason: 'context-change',
 				preserveSelection: true,
 				preferSelectedFile: true,
 			});
+		}
 	}
 
 	saveScrollPosition(filePath: string, position: number): void {

@@ -12,12 +12,14 @@ import { selectMobileEntrySurface } from './responsive-handoff.js';
 import {
 	CHAT_SURFACE_ID,
 	PORTABLE_SINGLETON_KINDS,
+	isTransientMobileSingletonKind,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
 	type FocusOwner,
 	type HostId,
 	type PortableSingletonKind,
 	type PresentationHostId,
+	type TransientMobileSingletonKind,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
@@ -62,6 +64,28 @@ function revealSidebarMutations(snapshot: WorkspaceLayoutSnapshot): WorkspaceLay
 	}
 	if (!snapshot.sidebarOpen) mutations.push({ type: 'set-sidebar-open', open: true });
 	return mutations;
+}
+
+function transientMobileGitViewKinds(
+	snapshot: WorkspaceLayoutSnapshot,
+): TransientMobileSingletonKind[] {
+	return snapshot.mobileOnlySurfaceIds.flatMap((surfaceId) => {
+		const surface = snapshot.surfaces[surfaceId];
+		return surface?.type === 'singleton' &&
+			surface.kind !== 'chat' &&
+			isTransientMobileSingletonKind(surface.kind)
+			? [surface.kind]
+			: [];
+	});
+}
+
+function removeTransientMobileGitViews(
+	snapshot: WorkspaceLayoutSnapshot,
+): WorkspaceLayoutMutation[] {
+	return transientMobileGitViewKinds(snapshot).map((kind) => ({
+		type: 'remove-surface',
+		surfaceId: singletonSurfaceId(kind),
+	}));
 }
 
 export class WorkspacePresentationController {
@@ -303,11 +327,16 @@ export class WorkspacePresentationController {
 		this.#requestedPresentationMode = 'desktop';
 		this.deps.chatInteractionGate.cancelBeforeInertTransition();
 		const responsiveGeneration = ++this.#responsiveGeneration;
+		let plannedTransientKinds: TransientMobileSingletonKind[] = [];
 		let current: boolean;
 		try {
-			current = await this.commit((latest) => this.#mobilePresentation.planDesktopReturn(latest), {
-				presentationMode: 'desktop',
-			});
+			current = await this.commit(
+				(latest) => {
+					plannedTransientKinds = transientMobileGitViewKinds(latest);
+					return this.#mobilePresentation.planDesktopReturn(latest);
+				},
+				{ presentationMode: 'desktop' },
+			);
 		} catch (error) {
 			if (
 				responsiveGeneration === this.#responsiveGeneration &&
@@ -315,9 +344,21 @@ export class WorkspacePresentationController {
 			) {
 				this.#requestedPresentationMode = 'mobile';
 				this.#setPresentationMode('mobile');
+			} else if (
+				responsiveGeneration === this.#responsiveGeneration &&
+				this.#presentationMode === 'desktop'
+			) {
+				await this.#reconcileTransientMobileGitViews(
+					plannedTransientKinds,
+					responsiveGeneration,
+				);
 			}
 			throw error;
 		}
+		await this.#reconcileTransientMobileGitViews(
+			plannedTransientKinds,
+			responsiveGeneration,
+		);
 		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
 		this.focusPresentedSurface(this.lastFocusedSurfaceId);
 	}
@@ -333,7 +374,7 @@ export class WorkspacePresentationController {
 				type: 'set-mobile-presentation',
 				activeId: surfaceId,
 				returnStack:
-					kind === 'commit'
+					kind === 'commit' || isTransientMobileSingletonKind(kind)
 						? this.#mobilePresentation.returnStackForTransient(
 								surfaceId,
 								this.layout.snapshot,
@@ -403,27 +444,64 @@ export class WorkspacePresentationController {
 			: commit();
 	}
 
-	async commitDestroyedRemoval(
-		surfaceId: string,
+	async commitDestroyedRemovals(
+		surfaceIds: readonly string[],
 		mutations: WorkspaceMutationPlan,
 	): Promise<boolean> {
 		try {
 			return await this.commit(mutations, { requiredPublication: true });
 		} catch (error) {
-			if (!this.layout.surface(surfaceId)) {
+			const remaining = surfaceIds.filter((surfaceId) => this.layout.surface(surfaceId));
+			if (remaining.length === 0) {
 				console.error('Required workspace removal completed with degraded follow-up work', error);
 				return true;
 			}
 			console.error('Retrying required workspace removal after a publication failure', error);
 			const removed = await this.deps.arbiter.commit(
-				(latest) => (latest.surfaces[surfaceId] ? [{ type: 'remove-surface', surfaceId }] : []),
+				(latest) =>
+					remaining.flatMap((surfaceId) =>
+						latest.surfaces[surfaceId]
+							? [{ type: 'remove-surface' as const, surfaceId }]
+							: [],
+					),
 				{},
 				{ retryPublishFailure: true },
 			);
-			if (!removed || this.layout.surface(surfaceId)) {
-				throw new Error(`Required workspace removal failed for ${surfaceId}`, { cause: error });
+			const survivors = remaining.filter((surfaceId) => this.layout.surface(surfaceId));
+			if (!removed || survivors.length > 0) {
+				throw new Error(
+					`Required workspace removal failed for ${survivors.join(', ')}`,
+					{ cause: error },
+				);
 			}
 			return true;
+		}
+	}
+
+	async #reconcileTransientMobileGitViews(
+		plannedKinds: readonly TransientMobileSingletonKind[],
+		responsiveGeneration: number,
+	): Promise<void> {
+		if (
+			responsiveGeneration !== this.#responsiveGeneration ||
+			this.#presentationMode !== 'desktop'
+		) {
+			return;
+		}
+		let reconciledKinds: TransientMobileSingletonKind[] = [];
+		await this.commitDestroyedRemovals(
+			(['git-history', 'git-compare'] as const).map((kind) =>
+				singletonSurfaceId(kind),
+			),
+			(latest) => {
+				reconciledKinds = transientMobileGitViewKinds(latest);
+				return removeTransientMobileGitViews(latest);
+			},
+		);
+		for (const kind of new Set([...plannedKinds, ...reconciledKinds])) {
+			if (!this.layout.surface(singletonSurfaceId(kind))) {
+				this.deps.singletons.disposeSurface(kind);
+			}
 		}
 	}
 

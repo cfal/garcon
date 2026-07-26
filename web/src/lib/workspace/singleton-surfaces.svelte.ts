@@ -2,10 +2,10 @@ import { untrack } from 'svelte';
 import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
-import {
-	GitSurfaceController,
-	type GitSurfaceControllerDeps,
-} from '$lib/git/surface/git-surface.svelte.js';
+import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
+import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
+import { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
+import { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
 import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
@@ -36,8 +36,10 @@ export class FilesSurfaceController implements PortableSingletonController {
 	}
 }
 
-interface SingletonControllerByKind {
-	git: GitSurfaceController;
+export interface SingletonControllerByKind {
+	git: GitWorkbenchSurfaceController;
+	'git-history': GitHistorySurfaceController;
+	'git-compare': GitCompareSurfaceController;
 	'pull-requests': PullRequestsStore;
 	files: FilesSurfaceController;
 	commit: CommitController;
@@ -57,6 +59,8 @@ export class SingletonSurfaceRegistry {
 	} = { hasChecked: false, available: false };
 	#visible: Record<PortableSingletonKind, boolean> = {
 		git: false,
+		'git-history': false,
+		'git-compare': false,
 		'pull-requests': false,
 		files: false,
 		commit: false,
@@ -64,7 +68,9 @@ export class SingletonSurfaceRegistry {
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
 		this.#factories = {
-			git: () => new GitSurfaceController(this.deps),
+			git: () => new GitWorkbenchSurfaceController(this.deps),
+			'git-history': () => new GitHistorySurfaceController(this.deps),
+			'git-compare': () => new GitCompareSurfaceController(this.deps),
 			files: () => new FilesSurfaceController(),
 			commit: () => this.deps.createCommit(),
 			'pull-requests': () => {
@@ -78,8 +84,16 @@ export class SingletonSurfaceRegistry {
 		};
 	}
 
-	git(): GitSurfaceController {
+	gitWorkbench(): GitWorkbenchSurfaceController {
 		return this.#controller('git');
+	}
+
+	gitHistory(): GitHistorySurfaceController {
+		return this.#controller('git-history');
+	}
+
+	gitCompare(): GitCompareSurfaceController {
+		return this.#controller('git-compare');
 	}
 
 	files(): FilesSurfaceController {

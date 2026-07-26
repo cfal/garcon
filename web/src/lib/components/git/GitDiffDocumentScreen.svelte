@@ -49,8 +49,9 @@
 		loadingLabel: string;
 		emptyErrorLabel: string;
 		emptyDocumentLabel: string;
-		onBack: () => void;
+		onBack?: () => void;
 		onRetry?: () => void;
+		fallbackActions?: Snippet;
 		onSelectFile: (file: string) => void;
 		onFileFilterChange: (value: string) => void;
 		onBodyDemand: (demand: GitReviewBodyDemand) => void;
@@ -93,6 +94,7 @@
 		emptyDocumentLabel,
 		onBack,
 		onRetry,
+		fallbackActions,
 		onSelectFile,
 		onFileFilterChange,
 		onBodyDemand,
@@ -278,11 +280,14 @@
 		<div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
 			<div class="max-w-md text-sm text-status-error-foreground">{error ?? emptyErrorLabel}</div>
 			<div class="flex items-center gap-2">
-				<button
-					type="button"
-					class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					onclick={onBack}>{m.git_diff_document_back()}</button
-				>
+				{#if onBack}
+					<button
+						type="button"
+						class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						onclick={onBack}>{m.git_diff_document_back()}</button
+					>
+				{/if}
+				{@render fallbackActions?.()}
 				{#if onRetry}<button
 						type="button"
 						class="rounded bg-interactive-accent px-3 py-1.5 text-sm text-interactive-accent-foreground hover:bg-interactive-accent/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"

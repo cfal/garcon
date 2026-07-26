@@ -8,6 +8,8 @@ import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+import { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
+import { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
 import type {
 	FileOpenPlacementPreference,
 	LocalSettingsStore,
@@ -87,6 +89,8 @@ export interface WorkspaceServices {
 	gitQuickSummary: GitQuickSummaryStore;
 	gitMutations: GitMutationCoordinator;
 	gitBranchActions: GitBranchSelectorState;
+	gitReviewDisplay: GitReviewDisplaySettingsStore;
+	gitViews: GitViewLauncher;
 	singletonSurfaces: SingletonSurfaceRegistry;
 	files: FileSessionRegistry;
 	coordinator: WorkspaceCoordinator;
@@ -150,7 +154,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			);
 		},
 	});
-	const gitBranchActions = new GitBranchSelectorState({
+	const createGitBranchSelector = () =>
+		new GitBranchSelectorState({
 		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
 		runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
 			gitMutations.run({
@@ -160,10 +165,15 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				execute,
 				didMutate: (result) => result.success,
 			}),
-	});
+		});
+	const gitBranchActions = createGitBranchSelector();
+	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
 		createCommit: () =>
 			new CommitController({
+				createGitBranchSelector,
+				gitMutations,
+				reviewDisplay: gitReviewDisplay,
 				runMutation: (request) =>
 					gitMutations.run({
 						surfaceId: singletonSurfaceId('commit'),
@@ -174,9 +184,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			createPullRequestsStore({
 				notifyError: (message) => deps.notifications.error(message),
 			}),
-		gitBranchActions,
+		createGitBranchSelector,
 		gitMutations,
-		getCurrentEffectiveProjectKey: () => context.currentProject?.effectiveProjectKey ?? null,
+		reviewDisplay: gitReviewDisplay,
 	});
 	const domainBindings = new WorkspaceDomainBindings({
 		workspaceContext: context,
@@ -233,6 +243,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
 		getRouteIdentity: deps.getRouteIdentity,
 	});
+	const gitViews = new GitViewLauncher(coordinator, singletonSurfaces);
 	placement = coordinator;
 	terminalLayoutBinding = new TerminalLayoutBinding({
 		restoreSource: restore.source,
@@ -264,6 +275,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		gitQuickSummary,
 		gitMutations,
 		gitBranchActions,
+		gitReviewDisplay,
+		gitViews,
 		singletonSurfaces,
 		files,
 		coordinator,

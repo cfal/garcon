@@ -41,6 +41,7 @@ export class GitBranchSelectorState {
 	private branchLoadGeneration = 0;
 	private newBranchLoadGeneration = 0;
 	private newBranchInvocationGeneration = 0;
+	private projectContextGeneration = 0;
 	private errorClearTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly options: GitBranchSelectorStateOptions = {}) {}
@@ -78,7 +79,9 @@ export class GitBranchSelectorState {
 		currentBranch = '',
 		effectiveProjectKey: string | null = projectPath,
 	): void {
+		this.projectContextGeneration += 1;
 		this.branchLoadGeneration += 1;
+		this.closeNewBranchDialog();
 		this.currentProjectPath = projectPath;
 		this.currentEffectiveProjectKey = effectiveProjectKey;
 		this.currentBranch = currentBranch;
@@ -142,6 +145,10 @@ export class GitBranchSelectorState {
 				return;
 			}
 			this.refs = data.refs ?? [];
+			if (!query) {
+				const current = this.refs.find((ref) => ref.isCurrent);
+				if (current) this.currentBranch = current.name;
+			}
 		} catch (err) {
 			if (generation !== this.branchLoadGeneration) return;
 			this.refs = [];
@@ -200,13 +207,18 @@ export class GitBranchSelectorState {
 		surfaceId: string,
 		effectiveProjectKey: string,
 	): Promise<boolean> {
+		const projectContextGeneration = this.projectContextGeneration;
 		try {
 			const execute = () => gitCheckoutRef(projectPath, refOption.ref, refOption.kind);
 			const data = this.options.runMutation
 				? await this.options.runMutation(surfaceId, projectPath, effectiveProjectKey, execute)
 				: await execute();
 			if (data.success) {
-				if (this.currentEffectiveProjectKey === effectiveProjectKey) {
+				if (
+					projectContextGeneration === this.projectContextGeneration &&
+					this.currentProjectPath === projectPath &&
+					this.currentEffectiveProjectKey === effectiveProjectKey
+				) {
 					this.currentBranch = refOption.name;
 					this.showBranchDropdown = false;
 					await this.fetchRefs(projectPath);
@@ -242,6 +254,7 @@ export class GitBranchSelectorState {
 		const effectiveProjectKey = this.newBranchEffectiveProjectKey;
 		const surfaceId = this.newBranchSurfaceId;
 		const invocationGeneration = this.newBranchInvocationGeneration;
+		const projectContextGeneration = this.projectContextGeneration;
 		if (!projectPath || !effectiveProjectKey || !surfaceId) return false;
 		const branch = this.newBranchName.trim();
 		if (!branch) return false;
@@ -254,11 +267,18 @@ export class GitBranchSelectorState {
 				? await this.options.runMutation(surfaceId, projectPath, effectiveProjectKey, execute)
 				: await execute();
 			if (data.success) {
-				if (this.currentEffectiveProjectKey === effectiveProjectKey) {
+				if (
+					projectContextGeneration === this.projectContextGeneration &&
+					this.currentProjectPath === projectPath &&
+					this.currentEffectiveProjectKey === effectiveProjectKey
+				) {
 					this.currentBranch = branch;
 					await this.fetchRefs(projectPath);
 				}
-				if (invocationGeneration === this.newBranchInvocationGeneration) {
+				if (
+					projectContextGeneration === this.projectContextGeneration &&
+					invocationGeneration === this.newBranchInvocationGeneration
+				) {
 					this.showBranchDropdown = false;
 					this.closeNewBranchDialog();
 				}

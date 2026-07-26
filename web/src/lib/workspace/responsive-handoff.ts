@@ -1,5 +1,6 @@
 import {
 	CHAT_SURFACE_ID,
+	isTransientMobileSingletonKind,
 	type HostId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
@@ -46,7 +47,11 @@ export function planDesktopReturnMutations(
 			}
 			continue;
 		}
-		if (surface.type === 'singleton') {
+		if (surface.type === 'singleton' && surface.kind !== 'chat') {
+			if (isTransientMobileSingletonKind(surface.kind)) {
+				mutations.push({ type: 'remove-surface', surfaceId });
+				continue;
+			}
 			const destination: HostId =
 				surface.kind === 'files' || surface.kind === 'commit' ? 'sidebar' : 'main';
 			mutations.push({ type: 'assign-to-host', surfaceId, destination });

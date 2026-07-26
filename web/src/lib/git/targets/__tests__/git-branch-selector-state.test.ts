@@ -66,6 +66,25 @@ describe('GitBranchSelectorState', () => {
 		expect(branchSelector.showBranchDropdown).toBe(false);
 	});
 
+	it('updates the current branch only from an unfiltered ref response', async () => {
+		branchSelector.setProject('/project', 'old', '/project');
+		await branchSelector.fetchRefs('/project');
+		expect(branchSelector.currentBranch).toBe('main');
+
+		vi.mocked(getGitRefs).mockResolvedValueOnce({
+			refs: [
+				{
+					name: 'feature',
+					ref: 'refs/heads/feature',
+					kind: 'local-branch',
+					isCurrent: true,
+				},
+			],
+		});
+		await branchSelector.fetchRefs('/project', 'feat');
+		expect(branchSelector.currentBranch).toBe('main');
+	});
+
 	it('checks out remote refs using their full ref value', async () => {
 		branchSelector.setProject('/project', 'main', '/project');
 		branchSelector.refs = [
@@ -113,7 +132,11 @@ describe('GitBranchSelectorState', () => {
 		expect(branchSelector.newBranchBaseRef).toBe('');
 	});
 
-	it('captures the invoking worktree and surface while the selected project changes', async () => {
+	it('lets an in-flight create finish without publishing into a newly selected target', async () => {
+		let resolveCreate!: (value: { success: boolean }) => void;
+		const create = new Promise<{ success: boolean }>((resolve) => {
+			resolveCreate = resolve;
+		});
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
@@ -129,12 +152,13 @@ describe('GitBranchSelectorState', () => {
 			'singleton:git',
 			'/canonical/project',
 		);
-		branchSelector.setProject('/other', 'develop', '/canonical/other');
-
 		await branchSelector.searchNewBranchRefs('origin');
 		branchSelector.newBranchName = 'captured-target';
-		vi.mocked(gitCreateBranch).mockResolvedValue({ success: true });
-		await expect(branchSelector.createBranch()).resolves.toBe(true);
+		vi.mocked(gitCreateBranch).mockReturnValueOnce(create);
+		const pendingCreate = branchSelector.createBranch();
+		branchSelector.resetForProject('/other', 'develop', '/canonical/other');
+		resolveCreate({ success: true });
+		await expect(pendingCreate).resolves.toBe(true);
 
 		expect(getGitRefs).toHaveBeenCalledWith('/project/worktrees/feature', {
 			query: 'origin',
@@ -152,6 +176,33 @@ describe('GitBranchSelectorState', () => {
 		expect(branchSelector.currentProjectPath).toBe('/other');
 		expect(branchSelector.currentBranch).toBe('develop');
 		expect(branchSelector.showNewBranchModal).toBe(false);
+	});
+
+	it('does not publish a deferred checkout into another worktree in the same chat', async () => {
+		let resolveCheckout!: (value: { success: boolean }) => void;
+		const checkout = new Promise<{ success: boolean }>((resolve) => {
+			resolveCheckout = resolve;
+		});
+		branchSelector.setProject('/worktree-a', 'main', '/chat');
+		vi.mocked(gitCheckoutRef).mockReturnValueOnce(checkout);
+
+		const pending = branchSelector.switchBranch(
+			'/worktree-a',
+			'feature',
+			'local-branch',
+			'singleton:git-history',
+			'/chat',
+		);
+		branchSelector.resetForProject('/worktree-b', 'develop', '/chat');
+		resolveCheckout({ success: true });
+
+		await expect(pending).resolves.toBe(true);
+		expect(branchSelector.currentProjectPath).toBe('/worktree-b');
+		expect(branchSelector.currentBranch).toBe('develop');
+		expect(getGitRefs).not.toHaveBeenCalledWith('/worktree-a', {
+			query: '',
+			limit: 200,
+		});
 	});
 
 	it('uses the invoking effective key after another surface retargets shared branch state', async () => {

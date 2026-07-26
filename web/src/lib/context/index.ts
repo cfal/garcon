@@ -36,6 +36,8 @@ import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.sv
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
+import type { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
+import type { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -79,6 +81,9 @@ export const [getWorkspaceShortcuts, setWorkspaceShortcuts] =
 export const [getGitQuickSummary, setGitQuickSummary] = createContext<GitQuickSummaryStore>();
 export const [getGitBranchActions, setGitBranchActions] = createContext<GitBranchSelectorState>();
 export const [getGitMutations, setGitMutations] = createContext<GitMutationCoordinator>();
+export const [getGitReviewDisplay, setGitReviewDisplay] =
+	createContext<GitReviewDisplaySettingsStore>();
+export const [getGitViewLauncher, setGitViewLauncher] = createContext<GitViewLauncher>();
 export const [getSingletonSurfaces, setSingletonSurfaces] =
 	createContext<SingletonSurfaceRegistry>();
 

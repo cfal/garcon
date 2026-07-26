@@ -6,7 +6,9 @@
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+	import History from '@lucide/svelte/icons/history';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import PanelLeft from '@lucide/svelte/icons/panel-left';
@@ -87,6 +89,8 @@
 	const notifications = getNotifications();
 	const singletonLabels: Record<PortableSingletonKind, () => string> = {
 		git: m.workspace_surface_git_workbench,
+		'git-history': m.workspace_surface_git_history,
+		'git-compare': m.workspace_surface_git_compare,
 		'pull-requests': m.workspace_surface_pull_requests,
 		files: m.workspace_surface_files,
 		commit: m.workspace_surface_commit,
@@ -106,9 +110,18 @@
 	const hiddenSurfaceIds = $derived(
 		hostState.order.filter((surfaceId) => !displayedSurfaceIds.includes(surfaceId)),
 	);
-	const closedSingletonKinds = $derived(
+	const gitViewKinds = ['git-history', 'git-compare'] as const;
+	const closedGitViewKinds = $derived(
+		gitViewKinds.filter(
+			(kind) => !workspace.layout.surface(singletonSurfaceId(kind)),
+		),
+	);
+	const otherClosedSingletonKinds = $derived(
 		PORTABLE_SINGLETON_KINDS.filter(
-			(kind) => canOffer(kind) && !workspace.layout.surface(singletonSurfaceId(kind)),
+			(kind) =>
+				!gitViewKinds.includes(kind as (typeof gitViewKinds)[number]) &&
+				canOffer(kind) &&
+				!workspace.layout.surface(singletonSurfaceId(kind)),
 		),
 	);
 	const activeSurfaceId = $derived(hostState.activeId);
@@ -245,6 +258,8 @@
 	{@const kind = iconKind(surfaceId)}
 	{#if kind === 'chat'}<MessageSquare class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'git'}<GitBranch class="h-3.5 w-3.5 shrink-0" />
+	{:else if kind === 'git-history'}<History class="h-3.5 w-3.5 shrink-0" />
+	{:else if kind === 'git-compare'}<GitCompareArrows class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'pull-requests'}<GitPullRequest class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'files'}<Files class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'commit'}<GitCommitHorizontal class="h-3.5 w-3.5 shrink-0" />
@@ -401,6 +416,14 @@
 					<SquareTerminal />
 					{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
 				</DropdownMenuItem>
+				{#each closedGitViewKinds as kind (kind)}
+					<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
+						{@render icon(singletonSurfaceId(kind))}
+						{kind === 'git-history'
+							? m.workspace_open_git_history()
+							: m.workspace_open_git_compare()}
+					</DropdownMenuItem>
+				{/each}
 				{#if unplacedTerminalSessions.length > 0}
 					<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
 					{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
@@ -414,7 +437,7 @@
 						</DropdownMenuItem>
 					{/each}
 				{/if}
-				{#each closedSingletonKinds as kind (kind)}
+				{#each otherClosedSingletonKinds as kind (kind)}
 					<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
 						{@render icon(singletonSurfaceId(kind))}
 						{m.workspace_open_surface({ surface: singletonLabels[kind]() })}

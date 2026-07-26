@@ -75,7 +75,10 @@ describe('GitRepositoryController', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		controller = new GitRepositoryController(new GitBranchSelectorState());
+		controller = new GitRepositoryController({
+			branches: new GitBranchSelectorState(),
+			surfaceId: 'singleton:git',
+		});
 		controller.resetForProject('/project', { deferMetadata: true });
 	});
 
@@ -115,7 +118,8 @@ describe('GitRepositoryController', () => {
 
 	describe('deferred metadata', () => {
 		it('does not fetch branch list or remote status during deferred project reset', () => {
-			controller.resetForProject('/project', { deferMetadata: true, currentBranch: 'main' });
+			controller.currentBranch = 'main';
+			controller.resetForProject('/project', { deferMetadata: true });
 
 			expect(controller.currentBranch).toBe('main');
 			expect(getGitStatus).not.toHaveBeenCalled();
@@ -177,7 +181,8 @@ describe('GitRepositoryController', () => {
 		});
 
 		it('does not overwrite an explicit current branch from remote status', async () => {
-			controller.resetForProject('/project', { deferMetadata: true, currentBranch: 'feature' });
+			controller.currentBranch = 'feature';
+			controller.resetForProject('/project', { deferMetadata: true });
 			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
 
 			await controller.fetchRemoteStatus('/project');

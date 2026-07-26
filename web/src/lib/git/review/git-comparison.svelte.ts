@@ -12,7 +12,6 @@ import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 
 export type GitComparisonToKind = 'revision' | 'working-tree';
-export type GitComparisonSelectionSlot = 'from' | 'to';
 export const GIT_EMPTY_TREE_REVISION = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 export interface GitComparisonDialogDefaults {
@@ -57,10 +56,6 @@ export class GitComparisonController {
 	errorStatus = $state<'not-found' | 'no-merge-base' | 'working-tree-changing' | null>(null);
 	errorEndpoint = $state<'from' | 'to' | null>(null);
 	staleMessage = $state<string | null>(null);
-	historySelectionActive = $state(false);
-	historySelectionSlot = $state<GitComparisonSelectionSlot>('from');
-	historySelectionFrom = $state<string | null>(null);
-	historySelectionTo = $state<string | null>(null);
 
 	get documentError(): string | null {
 		return this.bodyError ?? (this.dialogOpen ? null : this.error);
@@ -78,6 +73,22 @@ export class GitComparisonController {
 		defaults: GitComparisonDialogDefaults,
 		displayOptions?: GitComparisonDisplayOptions,
 	): void {
+		this.applySpecification(defaults, displayOptions);
+		this.dialogOpen = true;
+	}
+
+	setSpecification(
+		defaults: GitComparisonDialogDefaults,
+		displayOptions?: GitComparisonDisplayOptions,
+	): void {
+		this.applySpecification(defaults, displayOptions);
+		this.dialogOpen = false;
+	}
+
+	private applySpecification(
+		defaults: GitComparisonDialogDefaults,
+		displayOptions?: GitComparisonDisplayOptions,
+	): void {
 		if (displayOptions) {
 			this.diffMode = displayOptions.diffMode;
 			this.contextLines = displayOptions.contextLines;
@@ -92,7 +103,6 @@ export class GitComparisonController {
 		this.toRevision = defaults.toRevision ?? 'HEAD';
 		this.mode = defaults.toKind === 'working-tree' ? 'direct' : (defaults.mode ?? 'direct');
 		this.clearError();
-		this.dialogOpen = true;
 	}
 
 	editComparison(): void {
@@ -123,46 +133,6 @@ export class GitComparisonController {
 		const from = this.fromRevision;
 		this.fromRevision = this.toRevision;
 		this.toRevision = from;
-	}
-
-	beginHistorySelection(): void {
-		this.historySelectionActive = true;
-		this.historySelectionSlot = 'from';
-		this.historySelectionFrom = null;
-		this.historySelectionTo = null;
-	}
-
-	cancelHistorySelection(): void {
-		this.historySelectionActive = false;
-		this.historySelectionSlot = 'from';
-		this.historySelectionFrom = null;
-		this.historySelectionTo = null;
-	}
-
-	setHistorySelectionSlot(slot: GitComparisonSelectionSlot): void {
-		if (!this.historySelectionActive) return;
-		this.historySelectionSlot = slot;
-	}
-
-	selectHistoryCommit(hash: string): void {
-		if (!this.historySelectionActive) return;
-		if (this.historySelectionSlot === 'from') {
-			this.historySelectionFrom = hash;
-			this.historySelectionSlot = 'to';
-			return;
-		}
-		this.historySelectionTo = hash;
-	}
-
-	takeSelectedHistoryRange(): GitComparisonDialogDefaults | null {
-		if (!this.historySelectionFrom || !this.historySelectionTo) return null;
-		const defaults: GitComparisonDialogDefaults = {
-			fromRevision: this.historySelectionFrom,
-			toKind: 'revision',
-			toRevision: this.historySelectionTo,
-		};
-		this.cancelHistorySelection();
-		return defaults;
 	}
 
 	setDisplayOptions(projectPath: string, diffMode: DiffMode, contextLines: number): void {
@@ -371,7 +341,6 @@ export class GitComparisonController {
 		this.staleMessage = null;
 		this.documentRecoveryAttempted = false;
 		this.loadedContextLines = this.contextLines;
-		this.cancelHistorySelection();
 		this.document.clear();
 	}
 

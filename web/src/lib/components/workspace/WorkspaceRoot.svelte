@@ -252,6 +252,8 @@
 		const labels = {
 			chat: m.workspace_surface_chat(),
 			git: m.workspace_surface_git(),
+			'git-history': m.workspace_surface_git_history(),
+			'git-compare': m.workspace_surface_git_compare(),
 			'pull-requests': m.workspace_surface_pull_requests_short(),
 			files: m.workspace_surface_files(),
 			commit: m.workspace_surface_commit(),

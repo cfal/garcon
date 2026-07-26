@@ -1,15 +1,9 @@
 import type { GitDiffTab } from '$lib/api/git.js';
+import type { GitTarget } from '$lib/git/targets/git-target.js';
 
 export type DiffMode = 'unified' | 'split';
 
-export interface GitWorkbenchTarget {
-	projectPath: string;
-	repoRoot: string;
-	worktreePath: string;
-	label: string;
-	branch?: string;
-	source: 'chat-project' | 'repo-root' | 'worktree';
-}
+export type GitWorkbenchTarget = GitTarget;
 
 export type GitDiffActionMode = 'stage' | 'unstage';
 
@@ -61,5 +55,5 @@ export const DEFAULT_REFRESH_OPTIONS = {
 };
 
 export function targetKey(target: GitWorkbenchTarget | null): string {
-	return target ? target.projectPath : '';
+	return target ? JSON.stringify([target.repoRoot, target.worktreePath]) : '';
 }

@@ -29,6 +29,8 @@ function parseRef(value: unknown): PersistedWorkspaceSurfaceRef | null {
 	if (
 		value.type === 'singleton' &&
 		(value.kind === 'git' ||
+			value.kind === 'git-history' ||
+			value.kind === 'git-compare' ||
 			value.kind === 'pull-requests' ||
 			value.kind === 'files' ||
 			value.kind === 'commit')

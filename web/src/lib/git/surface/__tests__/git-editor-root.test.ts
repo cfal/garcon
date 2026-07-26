@@ -7,17 +7,15 @@ describe('resolveGitEditorRoot', () => {
 			resolveGitEditorRoot({
 				activeProjectPath: '/repo/nested',
 				targetRepoRoot: '/repo',
-				activeView: 'comparison',
-				comparisonRepoRoot: '/repo',
+				reviewRepoRoot: '/comparison-root',
 			}),
-		).toBe('/repo');
+		).toBe('/comparison-root');
 	});
 
 	it('falls back to the selected project when target metadata is unavailable', () => {
 		expect(
 			resolveGitEditorRoot({
 				activeProjectPath: '/repo/nested',
-				activeView: 'changes',
 			}),
 		).toBe('/repo/nested');
 	});

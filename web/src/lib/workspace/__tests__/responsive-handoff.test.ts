@@ -86,4 +86,65 @@ describe('planDesktopReturnMutations', () => {
 			{ type: 'assign-to-host', surfaceId: 'file:mobile', destination: 'main' },
 		]);
 	});
+
+	it('removes mobile-only History and Compare instead of assigning them to desktop', () => {
+		const mobile = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-history',
+					type: 'singleton',
+					kind: 'git-history',
+				},
+			},
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-compare',
+					type: 'singleton',
+					kind: 'git-compare',
+				},
+			},
+		]);
+
+		expect(
+			planDesktopReturnMutations(mobile, [
+				'singleton:git-compare',
+				'singleton:git-history',
+			]),
+		).toEqual([
+			{ type: 'remove-surface', surfaceId: 'singleton:git-compare' },
+			{ type: 'remove-surface', surfaceId: 'singleton:git-history' },
+		]);
+	});
+
+	it('does not remove a History or Compare surface with desktop ownership', () => {
+		const desktop = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-history',
+					type: 'singleton',
+					kind: 'git-history',
+				},
+				host: 'main',
+			},
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-compare',
+					type: 'singleton',
+					kind: 'git-compare',
+				},
+				host: 'sidebar',
+			},
+		]);
+
+		expect(
+			planDesktopReturnMutations(desktop, [
+				'singleton:git-history',
+				'singleton:git-compare',
+			]),
+		).toEqual([]);
+	});
 });
