@@ -628,7 +628,7 @@ export async function getClaudeSessionMessagesFromNativePath(
 }
 
 // Reads the head of a JSONL file to find the first user message.
-async function readFirstUserMessage(filePath: string, logger: AgentLogger): Promise<{
+async function readFirstUserMessage(filePath: string): Promise<{
   firstMessage: string | null;
   firstTimestamp: string | number | null;
 }> {
@@ -653,18 +653,13 @@ async function readFirstUserMessage(filePath: string, logger: AgentLogger): Prom
       const message = asRecord(entry.message);
       if (message.role === 'user') {
         const text = getMessageText(message.content);
-        if (text && !isProviderOwnedUserMessage(entry, text)) {
+        if (!firstMessage && text && !isProviderOwnedUserMessage(entry, text)) {
           firstMessage = text;
         }
       } else if (!firstMessage) {
         firstMessage = queuedCommandPrompt(entry);
       }
-      if (firstMessage) {
-        if (firstTimestamp) {
-          break;
-        }
-        logger.error('Claude first user message has no timestamp', { filePath });
-      }
+      if (firstMessage && firstTimestamp) break;
     }
   } catch { } finally {
     await fh?.close();
@@ -744,7 +739,7 @@ export async function getClaudePreviewFromNativePath(
 
   // TODO: It's possible that the full file was already read if it's small enough (see `fullyRead`),
   // in which case we could have handled it in the loop above.
-  const { firstMessage, firstTimestamp } = await readFirstUserMessage(nativePath, logger);
+  const { firstMessage, firstTimestamp } = await readFirstUserMessage(nativePath);
   if (!firstMessage || !firstTimestamp) {
     logger.warn('Claude preview has no first user message', { nativePath });
   }

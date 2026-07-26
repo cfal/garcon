@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -158,19 +158,26 @@ describe('getClaudePreviewFromNativePath', () => {
       },
       {
         sessionId: 'session-1',
-        type: 'assistant',
-        uuid: 'assistant-1',
+        type: 'user',
+        uuid: 'user-2',
         timestamp: '2026-07-21T14:00:01.000Z',
-        message: { role: 'assistant', content: [{ type: 'text', text: 'reply' }] },
+        message: { role: 'user', content: 'later prompt' },
       },
     ];
+    const logger = {
+      debug: mock(() => undefined),
+      info: mock(() => undefined),
+      warn: mock(() => undefined),
+      error: mock(() => undefined),
+    };
 
     await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
-      const preview = await getClaudePreviewFromNativePath(filePath);
+      const preview = await getClaudePreviewFromNativePath(filePath, logger);
       expect(preview).toMatchObject({
         firstMessage: 'first prompt',
         createdAt: '2026-07-21T14:00:01.000Z',
       });
+      expect(logger.error).not.toHaveBeenCalled();
     });
   });
 });
