@@ -21,7 +21,8 @@ This is the operating model for how engineers design, implement, review, and evo
 - DO NOT use emojis
 - Keep Garcon core lean and agent agnostic. All agent-specific runtime, dependencies, storage, index-source parsing, and translation code must stay behind `@garcon/server-agent-interface` in `server-agents/<id>/`; `server/agents/default-agent-integrations.ts` is the only core provider import point. Provider-neutral transcript search, its shared database, and its fixed Worker pair live in `server-agents/common`.
 - Keep execution state ephemeral. Queue entries, pending user inputs, and the command ledger live only for the server process lifetime; restart intentionally starts them empty and must not replay or recover them from disk. `server/chats/agent-ownership-journal.ts` is the durable exception for cross-provider ownership transfers/deletions, not queue recovery. Provider-neutral transcript search in `server-agents/common` owns the only SQLite store.
-- If interacting with the Claude, Codex, or Opencode SDK, clone it and look through if as needed:
+- Use the official Claude Agent SDK as the primary reference when changing the Claude integration. It is not a complete source of truth because Garcon adds lifecycle requirements such as provider-neutral queue ownership, but its protocol, process, control, and cleanup behavior should guide the implementation.
+- If interacting with the Claude, Codex, or Opencode SDK, clone it and look through it as needed:
   - https://github.com/anthropics/claude-agent-sdk-python
     - this is the Python SDK - the Typescript one is closed source, but you can find references in our node_modules
   - [https://github.com/openai](https://github.com/openai) - SDK contained inside
