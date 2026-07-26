@@ -523,6 +523,10 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
+    const failures = [];
+    const finishes = [];
+    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
 
     const turn = runtime.startClaudeCliSession(startOptions());
     ctrl.push(INIT);
@@ -537,6 +541,11 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     expect(ctrl.proc.killed).toBe(true);
     await turn;
+    expect(failures).toEqual([{
+      chatId: 'chat-1',
+      message: 'Claude CLI exited before confirming cancellation of the queued message.',
+    }]);
+    expect(finishes).toEqual([]);
   });
 
   it('surfaces the abort force-kill as a clean finish, not a 143 failure', async () => {

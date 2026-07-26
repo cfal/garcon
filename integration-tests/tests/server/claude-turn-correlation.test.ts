@@ -30,9 +30,13 @@ let firstUserMessage = true;
 let processing = false;
 let drainPromise = Promise.resolve();
 const pendingInputs = [];
+const interruptedInputs = new Set();
+const startedInputs = new Set();
+let currentInput = null;
 const receivedPath = process.env.CLAUDE_TEST_RECEIVED_PATH;
 const releasePath = process.env.CLAUDE_TEST_RELEASE_PATH;
 const internalResultPath = process.env.CLAUDE_TEST_INTERNAL_RESULT_PATH;
+const startedPath = process.env.CLAUDE_TEST_STARTED_PATH;
 
 const recordInput = (input) => {
   if (!receivedPath) return;
@@ -42,13 +46,14 @@ const recordInput = (input) => {
   }) + '\\n');
 };
 
-const waitForRelease = async () => {
+const waitForRelease = async (inputUuid) => {
   if (!releasePath) return;
   if (internalResultPath) appendFileSync(internalResultPath, 'emitted\\n');
-  while (!existsSync(releasePath)) await Bun.sleep(5);
+  while (!existsSync(releasePath) && !interruptedInputs.has(inputUuid)) await Bun.sleep(5);
 };
 
 const processInput = async (input) => {
+  currentInput = input;
   emit({
     type: 'command_lifecycle',
     command_uuid: input.uuid,
@@ -112,7 +117,8 @@ const processInput = async (input) => {
       stop_reason: null,
       session_id: input.session_id,
     });
-    await waitForRelease();
+    await waitForRelease(input.uuid);
+    if (interruptedInputs.has(input.uuid)) return;
   }
 
   const content = input.message?.content;
@@ -125,6 +131,8 @@ const processInput = async (input) => {
     state: 'started',
     session_id: input.session_id,
   });
+  startedInputs.add(input.uuid);
+  if (startedPath) appendFileSync(startedPath, input.uuid + '\\n');
   emit({
     type: 'system',
     subtype: 'init',
@@ -138,6 +146,10 @@ const processInput = async (input) => {
     message: input.message,
     session_id: input.session_id,
   });
+  if (content === 'trigger active abort') {
+    while (!interruptedInputs.has(input.uuid)) await Bun.sleep(5);
+    return;
+  }
   emit({
     type: 'assistant',
     content: [{ type: 'text', text: response }],
@@ -181,6 +193,67 @@ for await (const chunk of Bun.stdin.stream()) {
   for (const line of lines) {
     if (!line.trim()) continue;
     const input = JSON.parse(line);
+    if (input.type === 'control_request' && input.request?.subtype === 'interrupt') {
+      const activeInput = currentInput;
+      const inputUuid = activeInput?.uuid;
+      if (!inputUuid) {
+        emit({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: input.request_id,
+            response: { cancelled: [], still_queued: [] },
+          },
+        });
+        continue;
+      }
+
+      interruptedInputs.add(inputUuid);
+      if (!startedInputs.has(inputUuid)) {
+        emit({
+          type: 'command_lifecycle',
+          command_uuid: inputUuid,
+          state: 'cancelled',
+          session_id: activeInput.session_id,
+        });
+        emit({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: input.request_id,
+            response: { cancelled: [inputUuid], still_queued: [] },
+          },
+        });
+        continue;
+      }
+
+      emit({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: input.request_id,
+          response: { cancelled: [], still_queued: [] },
+        },
+      });
+      emit({
+        type: 'result',
+        subtype: 'error_during_execution',
+        terminal_reason: 'aborted_streaming',
+        is_error: true,
+        duration_ms: 1,
+        num_turns: 1,
+        result: '',
+        user_message_uuid: inputUuid,
+        session_id: activeInput.session_id,
+      });
+      emit({
+        type: 'command_lifecycle',
+        command_uuid: inputUuid,
+        state: 'cancelled',
+        session_id: activeInput.session_id,
+      });
+      continue;
+    }
     if (
       input.type === 'control_request'
       && (input.request?.subtype === 'initialize' || input.request?.subtype === 'set_model')
@@ -359,6 +432,111 @@ describe('Claude turn correlation', () => {
         serverEnvironment.CLAUDE_TEST_RECEIVED_PATH = receivedPath;
         serverEnvironment.CLAUDE_TEST_RELEASE_PATH = releasePath;
         serverEnvironment.CLAUDE_TEST_INTERNAL_RESULT_PATH = internalResultPath;
+      },
+    });
+  });
+
+  test('confirms cancellation of a queued input before it starts', async () => {
+    const serverEnvironment: Record<string, string> = {};
+    let releasePath = '';
+    let internalResultPath = '';
+
+    await withIntegrationFixture('claude-pre-start-cancellation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const accepted = await fixture.client.startChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        agentId: 'claude',
+        projectPath: fixture.dirs.project,
+        model: 'haiku',
+        permissionMode: 'default',
+        thinkingMode: 'low',
+        agentSettings: {
+          ownerId: 'claude',
+          schemaVersion: 1,
+          values: {},
+        },
+        command: 'trigger pre-start abort',
+      });
+      await waitForFile(internalResultPath);
+      const cursor = fixture.client.markEvents();
+
+      const stopped = await fixture.client.stopChat({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+      });
+      expect(stopped.stopped).toBe(true);
+      expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
+        afterIndex: cursor,
+      })).type).toBe('agent-run-finished');
+      expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-failed',
+        chatId,
+        turnId: accepted.turnId,
+      }));
+    }, {
+      serverEnvironment,
+      prepareWorkspace: async (directories) => {
+        const fakeClaude = join(directories.root, 'fake-claude');
+        releasePath = join(directories.root, 'hold-pre-start-turn');
+        internalResultPath = join(directories.root, 'pre-start-internal-result');
+        await writeFile(fakeClaude, fakeClaudeSource());
+        await chmod(fakeClaude, 0o755);
+        serverEnvironment.CLAUDE_BINARY = fakeClaude;
+        serverEnvironment.CLAUDE_TEST_RELEASE_PATH = releasePath;
+        serverEnvironment.CLAUDE_TEST_INTERNAL_RESULT_PATH = internalResultPath;
+      },
+    });
+  });
+
+  test('stops an active correlated input without reporting provider failure', async () => {
+    const serverEnvironment: Record<string, string> = {};
+    let startedPath = '';
+
+    await withIntegrationFixture('claude-active-cancellation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const accepted = await fixture.client.startChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        agentId: 'claude',
+        projectPath: fixture.dirs.project,
+        model: 'haiku',
+        permissionMode: 'default',
+        thinkingMode: 'low',
+        agentSettings: {
+          ownerId: 'claude',
+          schemaVersion: 1,
+          values: {},
+        },
+        command: 'trigger active abort',
+      });
+      await waitForFile(startedPath);
+      const cursor = fixture.client.markEvents();
+
+      const stopped = await fixture.client.stopChat({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+      });
+      expect(stopped.stopped).toBe(true);
+      expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
+        afterIndex: cursor,
+      })).type).toBe('agent-run-finished');
+      expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-failed',
+        chatId,
+        turnId: accepted.turnId,
+      }));
+    }, {
+      serverEnvironment,
+      prepareWorkspace: async (directories) => {
+        const fakeClaude = join(directories.root, 'fake-claude');
+        startedPath = join(directories.root, 'active-input-started');
+        await writeFile(fakeClaude, fakeClaudeSource());
+        await chmod(fakeClaude, 0o755);
+        serverEnvironment.CLAUDE_BINARY = fakeClaude;
+        serverEnvironment.CLAUDE_TEST_STARTED_PATH = startedPath;
       },
     });
   });
