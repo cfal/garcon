@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
+  getClaudePreviewFromNativePath,
   getClaudeSessionMessagesFromNativePath,
   loadClaudeChatMessages,
   loadClaudeChatMessagePage,
@@ -141,6 +142,34 @@ describe('Claude pending-input evidence', () => {
       expect(getNativeMessageSource(messages[0])).toEqual({
         entryId: 'normal-user',
         lineNumber: 5,
+      });
+    });
+  });
+});
+
+describe('getClaudePreviewFromNativePath', () => {
+  it('preserves an untimestamped first user message while finding session time', async () => {
+    const entries = [
+      {
+        sessionId: 'session-1',
+        type: 'user',
+        uuid: 'user-1',
+        message: { role: 'user', content: 'first prompt' },
+      },
+      {
+        sessionId: 'session-1',
+        type: 'assistant',
+        uuid: 'assistant-1',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'reply' }] },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const preview = await getClaudePreviewFromNativePath(filePath);
+      expect(preview).toMatchObject({
+        firstMessage: 'first prompt',
+        createdAt: '2026-07-21T14:00:01.000Z',
       });
     });
   });

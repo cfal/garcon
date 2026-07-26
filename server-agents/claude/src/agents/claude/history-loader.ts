@@ -656,7 +656,7 @@ async function readFirstUserMessage(filePath: string, logger: AgentLogger): Prom
         if (text && !isProviderOwnedUserMessage(entry, text)) {
           firstMessage = text;
         }
-      } else {
+      } else if (!firstMessage) {
         firstMessage = queuedCommandPrompt(entry);
       }
       if (firstMessage) {
