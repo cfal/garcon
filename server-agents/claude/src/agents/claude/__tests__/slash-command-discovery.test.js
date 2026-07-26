@@ -105,6 +105,7 @@ describe('ClaudeSlashCommandDiscovery', () => {
     try {
       const discovery = new ClaudeSlashCommandDiscovery(
         () => 'claude',
+        () => ({ CLAUDE_CONFIG_DIR: '/tmp/claude-config' }),
         {
           debug: mock(() => undefined),
           info: mock(() => undefined),
@@ -123,6 +124,10 @@ describe('ClaudeSlashCommandDiscovery', () => {
         request: { subtype: 'initialize' },
       });
       expect(writes.some((message) => message.type === 'user')).toBe(false);
+      expect(Bun.spawn.mock.calls[0][1].env).toMatchObject({
+        CLAUDE_CONFIG_DIR: '/tmp/claude-config',
+      });
+      expect(Bun.spawn.mock.calls[0][1].env.CLAUDECODE).toBeUndefined();
     } finally {
       Bun.spawn = originalSpawn;
     }

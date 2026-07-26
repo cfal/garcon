@@ -105,7 +105,11 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       logger,
       environment: () => claudeLoginEnvironment(config),
     });
-    const commandDiscovery = new ClaudeSlashCommandDiscovery(config.binary, logger);
+    const commandDiscovery = new ClaudeSlashCommandDiscovery(
+      config.binary,
+      () => buildClaudeHostEnvironment(config),
+      logger,
+    );
 
     this.settings = createVersionedSettings({
       ownerId: 'claude',

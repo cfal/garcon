@@ -57,6 +57,7 @@ export function parseInitSlashCommands(slashCommands: unknown, skills: unknown):
 function probeClaudeSlashCommands(
   projectPath: string,
   claudeBinary: string,
+  envOverrides: Record<string, string> | undefined,
   logger: AgentLogger,
 ): Promise<SlashCommand[]> {
   const args = [
@@ -74,7 +75,10 @@ function probeClaudeSlashCommands(
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: (() => { const { CLAUDECODE, ...env } = globalThis.process.env; return env; })(),
+      env: (() => {
+        const { CLAUDECODE, ...env } = globalThis.process.env;
+        return { ...env, ...envOverrides };
+      })(),
     });
   } catch (error: unknown) {
     logger.warn('Claude slash-command probe spawn failed', {
@@ -145,6 +149,7 @@ export class ClaudeSlashCommandDiscovery {
 
   constructor(
     private readonly binary: () => string,
+    private readonly environment: () => Record<string, string> | undefined,
     private readonly logger: AgentLogger,
   ) {}
 
@@ -154,7 +159,12 @@ export class ClaudeSlashCommandDiscovery {
     const existing = this.#inFlight.get(projectPath);
     if (existing) return existing;
 
-    const probe = probeClaudeSlashCommands(projectPath, this.binary(), this.logger)
+    const probe = probeClaudeSlashCommands(
+      projectPath,
+      this.binary(),
+      this.environment(),
+      this.logger,
+    )
       .catch((error: unknown) => {
         this.logger.warn('Claude slash-command probe rejected', {
           projectPath,
