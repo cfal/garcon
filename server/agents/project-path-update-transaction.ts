@@ -4,7 +4,7 @@ import {
   type AgentNativeSessionRef,
   type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
-import { CommandValidationError } from '../lib/command-validation-error.js';
+import { DomainError } from '../lib/domain-error.js';
 import { errorMessage } from '../lib/errors.js';
 
 async function rollbackPreparation(
@@ -43,14 +43,14 @@ export async function runProjectPathUpdateTransaction<T>(input: {
       error instanceof AgentIntegrationError
       && error.code === 'TRANSCRIPT_UNAVAILABLE'
     ) {
-      throw new CommandValidationError(
+      throw new DomainError(
         'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
         error.message,
         409,
         error.retryable,
       );
     }
-    throw new CommandValidationError(
+    throw new DomainError(
       'CHAT_NOT_IDLE',
       errorMessage(error),
       409,
