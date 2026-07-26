@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages } from '../claude-cli.js';
+import { claudeResultFailureMessage } from '../cli-protocol.js';
 import { convertClaudePermissionTool } from '../permission-tool-converter.js';
 import { AskUserQuestionToolUseMessage, BashToolUseMessage, ExitPlanModeToolUseMessage } from '@garcon/common/chat-types';
 
@@ -49,6 +50,7 @@ describe('buildClaudeCLIArgs', () => {
       '--print',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
+      '--replay-user-messages',
       '--verbose',
       '--model', 'sonnet',
       '--permission-mode', 'acceptEdits',
@@ -73,6 +75,7 @@ describe('buildClaudeCLIArgs', () => {
       '--print',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
+      '--replay-user-messages',
       '--verbose',
       '--model', 'sonnet',
       '--permission-mode', 'acceptEdits',
@@ -303,6 +306,20 @@ describe('convertCLIMessageToChatMessages', () => {
     const msg = { type: 'assistant', content: [] };
     const result = convertCLIMessageToChatMessages(msg);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('claudeResultFailureMessage', () => {
+  it('does not expose Claude internal execution diagnostics', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'error_during_execution',
+      terminal_reason: 'aborted_streaming',
+      is_error: true,
+      errors: [
+        '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null',
+      ],
+    })).toBe('Claude CLI turn failed: error_during_execution');
   });
 });
 

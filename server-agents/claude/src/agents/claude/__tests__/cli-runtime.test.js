@@ -78,11 +78,42 @@ function createFakeClaudeProcess(options = {}) {
   };
 }
 
-function enqueueResult(fake) {
+async function enqueueResult(fake) {
+  await enqueueInputStarted(fake);
   fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
     type: 'result',
     is_error: false,
   }) + '\n'));
+}
+
+function writtenUserMessage(fake) {
+  const writes = fake.proc.stdin.write.mock.calls
+    .map(([line]) => JSON.parse(line))
+    .filter((message) => message.type === 'user');
+  return writes.at(-1);
+}
+
+const startedInputByFake = new WeakMap();
+
+async function waitForWrittenUserMessage(fake, excludeUuid) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const input = writtenUserMessage(fake);
+    if (input && input.uuid !== excludeUuid) return input;
+    await Promise.resolve();
+  }
+  throw new Error('Claude user input was not written');
+}
+
+async function enqueueInputStarted(fake) {
+  const input = await waitForWrittenUserMessage(fake, startedInputByFake.get(fake));
+  if (!input?.uuid) throw new Error('Claude input UUID was not written');
+  startedInputByFake.set(fake, input.uuid);
+  fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+    type: 'command_lifecycle',
+    command_uuid: input.uuid,
+    state: 'started',
+  }) + '\n'));
+  return input;
 }
 
 function startOptions(overrides = {}) {
@@ -108,6 +139,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     try {
       const runtime = createRuntime(logger);
       const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'result',
         subtype: 'success',
@@ -194,6 +226,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
       runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
       const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'result',
         subtype: 'error_during_execution',
@@ -232,6 +265,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     try {
       const runtime = createRuntime();
       const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
       fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
         type: 'result',
         subtype: 'success',
@@ -240,6 +274,316 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       fake.exit(0);
 
       await expect(start).resolves.toBe('expected-session');
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('waits for the submitted input when an internal turn completes first', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const logger = createLogger();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime(logger);
+      const messages = [];
+      const finishes = [];
+      const processing = [];
+      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+      runtime.onProcessing((chatId, isProcessing) => processing.push({ chatId, isProcessing }));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      const input = await waitForWrittenUserMessage(fake);
+      expect(input.uuid).toBeString();
+
+      fake.stdout.enqueue(new TextEncoder().encode([
+        JSON.stringify({
+          type: 'system',
+          subtype: 'init',
+          session_id: 'expected-session',
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          duration_ms: 108,
+          num_turns: 0,
+          result: '',
+          stop_reason: null,
+        }),
+      ].join('\n') + '\n'));
+      await Promise.resolve();
+
+      expect(finishes).toEqual([]);
+      expect(messages).toEqual([]);
+      expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
+      expect(processing).not.toContainEqual({ chatId: 'chat-1', isProcessing: false });
+
+      fake.stdout.enqueue(new TextEncoder().encode([
+        JSON.stringify({
+          type: 'command_lifecycle',
+          command_uuid: input.uuid,
+          state: 'started',
+        }),
+        JSON.stringify({
+          type: 'system',
+          subtype: 'init',
+          session_id: 'expected-session',
+        }),
+        JSON.stringify({
+          type: 'user',
+          uuid: input.uuid,
+          isReplay: true,
+          message: { role: 'user', content: 'hello' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'actual user response' }],
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          duration_ms: 12,
+          num_turns: 1,
+          result: 'actual user response',
+          stop_reason: 'end_turn',
+        }),
+      ].join('\n') + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(messages).toEqual([
+        expect.objectContaining({
+          type: 'assistant-message',
+          content: 'actual user response',
+        }),
+      ]);
+      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      expect(logger.info).toHaveBeenCalledWith(
+        'Claude CLI emitted an uncorrelated result while user input was pending',
+        expect.objectContaining({
+          durationMs: 108,
+          numTurns: 0,
+          outputMessages: 0,
+        }),
+      );
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('surfaces a setup failure that cancels the submitted input before it starts', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const failures = [];
+      runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      const input = await waitForWrittenUserMessage(fake);
+      fake.stdout.enqueue(new TextEncoder().encode([
+        JSON.stringify({
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          terminal_reason: 'turn_setup_failed',
+          errors: ['queryParams builder failed: invalid runtime configuration'],
+          num_turns: 0,
+        }),
+        JSON.stringify({
+          type: 'command_lifecycle',
+          command_uuid: input.uuid,
+          state: 'cancelled',
+        }),
+      ].join('\n') + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(failures).toEqual([{
+        chatId: 'chat-1',
+        errorMessage: 'queryParams builder failed: invalid runtime configuration',
+      }]);
+      expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(false);
+
+      startedInputByFake.set(fake, input.uuid);
+      const retry = runtime.runClaudeTurn(startOptions({ command: 'retry after setup failure' }));
+      await enqueueInputStarted(fake);
+      fake.stdout.enqueue(new TextEncoder().encode([
+        JSON.stringify({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'retry succeeded' }],
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'retry succeeded',
+        }),
+      ].join('\n') + '\n'));
+      await retry;
+      expect(failures).toHaveLength(1);
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  for (const state of ['completed', 'discarded']) {
+    it(`fails when the submitted input is ${state} without starting`, async () => {
+      const originalSpawn = Bun.spawn;
+      const fake = createFakeClaudeProcess();
+      Bun.spawn = mock(() => fake.proc);
+
+      try {
+        const runtime = createRuntime();
+        const failures = [];
+        runtime.onFailed((_chatId, errorMessage) => failures.push(errorMessage));
+
+        const start = runtime.startClaudeCliSession(startOptions());
+        const input = await waitForWrittenUserMessage(fake);
+        fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+          type: 'command_lifecycle',
+          command_uuid: input.uuid,
+          state,
+        }) + '\n'));
+
+        await expect(start).resolves.toBe('expected-session');
+        expect(failures).toEqual([
+          state === 'completed'
+            ? 'Claude CLI marked the submitted message complete without starting it or producing a response.'
+            : 'Claude CLI discarded the submitted message before it started.',
+        ]);
+        runtime.shutdown();
+      } finally {
+        Bun.spawn = originalSpawn;
+      }
+    });
+  }
+
+  it('fails a matched user turn that completes without a response', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const failures = [];
+      runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
+      fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        duration_ms: 108,
+        num_turns: 0,
+        result: '',
+        stop_reason: null,
+      }) + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(failures).toEqual([{
+        chatId: 'chat-1',
+        errorMessage: 'Claude CLI completed the submitted message without producing a response.',
+      }]);
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('surfaces structured Claude result errors', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const failures = [];
+      runtime.onFailed((chatId, errorMessage) => failures.push({ chatId, errorMessage }));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
+      fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        terminal_reason: 'api_error',
+        api_error_status: 529,
+        errors: [
+          '[ede_diagnostic] result_type=assistant last_content_type=text stop_reason=null',
+          'API Error: 529 overloaded',
+        ],
+        num_turns: 0,
+      }) + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(failures).toEqual([{
+        chatId: 'chat-1',
+        errorMessage: 'API Error: 529 overloaded',
+      }]);
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('logs API retry diagnostics and includes the last retry in an empty failure', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const logger = createLogger();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime(logger);
+      const failures = [];
+      runtime.onFailed((_chatId, errorMessage) => failures.push(errorMessage));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
+      fake.stdout.enqueue(new TextEncoder().encode([
+        JSON.stringify({
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 10,
+          max_retries: 10,
+          retry_delay_ms: 38_102,
+          error_status: 529,
+          error: 'overloaded',
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          num_turns: 0,
+          result: '',
+        }),
+      ].join('\n') + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(logger.warn).toHaveBeenCalledWith('Claude API request is retrying', {
+        chatId: 'chat-1',
+        turnId: null,
+        sessionId: 'expected',
+        processId: null,
+        matchedUserInput: true,
+        attempt: 10,
+        maxRetries: 10,
+        delayMs: 38_102,
+        errorStatus: 529,
+        error: 'overloaded',
+      });
+      expect(failures).toEqual([
+        'Claude CLI completed the submitted message without producing a response.'
+          + ' Last API retry: 529 overloaded (attempt 10/10).',
+      ]);
       runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
@@ -294,7 +638,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         permissionMode: 'acceptEdits',
         thinkingMode: 'medium',
       }));
-      enqueueResult(fake);
+      await enqueueResult(fake);
       await expect(start).resolves.toBe('expected-session');
       expect(Bun.spawn).toHaveBeenCalledTimes(1);
 
@@ -309,7 +653,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       expect(fake.proc.kill).not.toHaveBeenCalled();
       expect(Bun.spawn).toHaveBeenCalledTimes(1);
 
-      enqueueResult(fake);
+      await enqueueResult(fake);
       await expect(resumed).resolves.toBeUndefined();
     } finally {
       runtime?.shutdown();
@@ -326,7 +670,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     try {
       runtime = createRuntime();
       const start = runtime.startClaudeCliSession(startOptions());
-      enqueueResult(fake);
+      await enqueueResult(fake);
       await start;
 
       await expect(runtime.prepareClaudeProjectPathUpdate({
@@ -356,7 +700,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     try {
       runtime = createRuntime();
       const start = runtime.startClaudeCliSession(startOptions());
-      enqueueResult(fake);
+      await enqueueResult(fake);
       await start;
       globalThis.setTimeout = mock((callback) => {
         queueMicrotask(callback);
@@ -394,7 +738,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     try {
       runtime = createRuntime();
       const start = runtime.startClaudeCliSession(startOptions());
-      enqueueResult(fake);
+      await enqueueResult(fake);
       await start;
       runtime.setInternalThinkingMode('expected-session', 'high');
       globalThis.setTimeout = mock((callback) => {
@@ -440,7 +784,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       });
       runtime = createRuntime();
       const start = runtime.startClaudeCliSession(startOptions());
-      enqueueResult(fake);
+      await enqueueResult(fake);
       await start;
       const idleSince = Date.now();
       Date.now = mock(() => idleSince + 31 * 60 * 1000);
@@ -491,7 +835,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     try {
       runtime = createRuntime();
       const start = runtime.startClaudeCliSession(startOptions());
-      enqueueResult(fake);
+      await enqueueResult(fake);
       await start;
       globalThis.setTimeout = mock((callback) => {
         queueMicrotask(callback);

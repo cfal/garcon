@@ -3,13 +3,11 @@
 // flows through typed events wired in the composition root.
 
 import crypto from 'crypto';
-import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
-import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
+import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
 import type { ChatMessage, CompactionTrigger } from '@garcon/common/chat-types';
 import type { AskUserQuestionDecisionResponse, PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
-import { convertClaudeToolUse } from "./tool-use-converter.js";
 import { ClaudeCliVersionProbe } from "./cli-version.js";
 import {
   AgentEventEmitterRuntime,
@@ -35,6 +33,13 @@ import { withSingleQueryControl } from '@garcon/server-agent-common/shared/singl
 import { runClaudeSingleQueryProcess } from './single-query-process.js';
 import { pipeClaudeProcessOutput } from './cli-stdio.js';
 import { ClaudeProjectPathProcessTracker } from './project-path-processes.js';
+import {
+  ClaudeTurnTracker,
+  claudeResultFailureMessage,
+  convertCLIMessageToChatMessages,
+  type ClaudeCLIMessage,
+  type ClaudeTurnTerminalState,
+} from './cli-protocol.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -42,67 +47,6 @@ const NOOP_LOGGER: AgentLogger = {
   warn() {},
   error() {},
 };
-
-interface CompactMetadata {
-  trigger?: string;
-  pre_tokens?: number;
-  post_tokens?: number;
-}
-
-interface CLIMessage {
-  type: string;
-  subtype?: string;
-  session_id?: string;
-  model?: string;
-  is_error?: boolean;
-  api_error_status?: number | string | null;
-  duration_ms?: number;
-  num_turns?: number;
-  stop_reason?: string | null;
-  terminal_reason?: string;
-  result?: unknown;
-  permission_denials?: unknown[];
-  content?: unknown[];
-  message?: { role?: string; content?: unknown };
-  request_id?: string;
-  status?: string | null;
-  compact_result?: string;
-  compact_error?: string;
-  compact_metadata?: CompactMetadata;
-  request?: {
-    subtype?: string;
-    tool_name?: string;
-    input?: Record<string, unknown>;
-    tool_use_id?: string;
-  };
-  response?: {
-    subtype?: string;
-    request_id?: string;
-    error?: string;
-    response?: unknown;
-  };
-}
-
-function claudeResultFailureMessage(msg: CLIMessage): string {
-  const result = typeof msg.result === 'string' ? msg.result.trim() : '';
-  if (result) return result.slice(0, 4_000);
-  const outcome = msg.subtype || msg.terminal_reason || 'unknown error';
-  return `Claude CLI turn failed: ${outcome}`;
-}
-
-interface ClaudeContentPart {
-  type?: string;
-  text?: string;
-  thinking?: string;
-  tool_use_id?: string;
-  content?: unknown;
-  is_error?: boolean;
-  [key: string]: unknown;
-}
-
-function isClaudeContentPart(value: unknown): value is ClaudeContentPart {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 interface ClaudeSessionOptions {
   agentSessionId: string;
@@ -128,7 +72,7 @@ interface ClaudeRunningSession {
   turnWaiters: Array<() => void>;
   startTime: number;
   lastActivityAt: number;
-  turnOutputMessageCount: number;
+  turnTracker: ClaudeTurnTracker;
   process: ReturnType<typeof Bun.spawn> | null;
   // Fallback timer that force-kills the process if an interrupt is never
   // acknowledged. Cleared once the turn resolves, the process exits, or a new
@@ -313,36 +257,6 @@ function buildClaudePermissionApprovalResponse(
   return response;
 }
 
-// Converts a finalized CLI assistant message to ChatMessage objects.
-function convertCLIMessageToChatMessages(msg: CLIMessage): ChatMessage[] {
-  if (msg.type !== 'assistant') return [];
-
-  const chatMessages: ChatMessage[] = [];
-  const now = new Date().toISOString();
-  const rawContent =
-    Array.isArray(msg.content) ? msg.content
-      : Array.isArray(msg.message?.content) ? msg.message!.content!
-        : [];
-  const content = rawContent.filter(isClaudeContentPart);
-
-  for (const part of content) {
-    if (part.type === 'text' && part.text?.trim()) {
-      chatMessages.push(new AssistantMessage(now, part.text));
-    }
-    if (part.type === 'thinking' && part.thinking) {
-      chatMessages.push(new ThinkingMessage(now, part.thinking));
-    }
-    if (part.type === 'tool_use') {
-      chatMessages.push(convertClaudeToolUse(now, part));
-    }
-    if (part.type === 'tool_result') {
-      chatMessages.push(new ToolResultMessage(now, part.tool_use_id || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
-    }
-  }
-
-  return chatMessages;
-}
-
 // Runs a one-shot CLI query and returns the plain text output.
 async function runSingleQuery(
   prompt: string,
@@ -410,7 +324,13 @@ function buildClaudeCLIArgs({
   supportsLegacyThinkingFlag = false,
 }: ClaudeCLIArgOptions): string[] {
   const args = streamJson
-    ? ['--print', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose']
+    ? [
+        '--print',
+        '--output-format', 'stream-json',
+        '--input-format', 'stream-json',
+        '--replay-user-messages',
+        '--verbose',
+      ]
     : ['--print', '--no-session-persistence'];
 
   if (model) args.push('--model', model);
@@ -512,9 +432,25 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #routeCLIMessage(
     session: ClaudeRunningSession,
     proc: ReturnType<typeof Bun.spawn>,
-    msg: CLIMessage,
+    msg: ClaudeCLIMessage,
   ): void {
     if (this.#runningSessions.get(session.id) !== session || session.process !== proc) return;
+    const inputEvent = session.isRunning
+      ? session.turnTracker.observeInput(msg)
+      : null;
+    if (inputEvent?.type === 'started') {
+      this.#dependencies.logger.debug('Claude CLI user input started', {
+        chatId: session.chatId,
+        turnId: session.eventMetadata.turnId ?? null,
+        sessionId: session.id.slice(0, 8),
+        processId: session.process?.pid ?? null,
+        inputId: session.turnTracker.inputUuid?.slice(0, 8) ?? null,
+        source: inputEvent.source,
+      });
+    } else if (inputEvent?.type === 'terminal-before-start') {
+      this.#handleInputTerminalBeforeStart(session, inputEvent.state);
+      return;
+    }
 
     switch (msg.type) {
       case 'system':
@@ -523,8 +459,17 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
       case 'assistant': {
         if (!session.isRunning) return;
+        if (!session.turnTracker.inputStarted) {
+          this.#dependencies.logger.info('Claude CLI emitted assistant output for an internal turn', {
+            chatId: session.chatId,
+            turnId: session.eventMetadata.turnId ?? null,
+            sessionId: session.id.slice(0, 8),
+            processId: session.process?.pid ?? null,
+          });
+          return;
+        }
         const chatMessages = convertCLIMessageToChatMessages(msg);
-        session.turnOutputMessageCount += chatMessages.length;
+        session.turnTracker.addOutputMessages(chatMessages.length);
         if (chatMessages.length > 0) {
           this.emitMessages(session.chatId, chatMessages, session.eventMetadata);
         }
@@ -548,6 +493,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         this.#handleControlResponse(session, msg);
         break;
 
+      case 'command_lifecycle':
+        break;
+
       case 'user':
         if (!session.isRunning) return;
         this.#handleUserMessage(session, msg);
@@ -567,7 +515,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  #handleSystemMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
+  #handleSystemMessage(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     if (msg.subtype === 'init') {
       this.#dependencies.logger.info('Claude CLI session initialized', {
         chatId: session.chatId,
@@ -584,10 +532,25 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       return;
     }
 
-    if (msg.subtype === 'status' && msg.compact_result === 'failed') {
+    if (msg.subtype === 'api_retry') {
       if (!session.isRunning) return;
+      const retry = session.turnTracker.recordApiRetry(msg);
+      this.#dependencies.logger.warn('Claude API request is retrying', {
+        chatId: session.chatId,
+        turnId: session.eventMetadata.turnId ?? null,
+        sessionId: session.id.slice(0, 8),
+        processId: session.process?.pid ?? null,
+        matchedUserInput: session.turnTracker.inputStarted,
+        ...retry,
+      });
+      return;
+    }
+
+    if (msg.subtype === 'status' && msg.compact_result === 'failed') {
+      if (!session.isRunning || !session.turnTracker.inputStarted) return;
       session.pendingCompaction = undefined;
       const reason = msg.compact_error || 'Compaction failed';
+      session.turnTracker.addOutputMessages(1);
       this.emitMessages(
         session.chatId,
         [new ErrorMessage(new Date().toISOString(), reason)],
@@ -597,7 +560,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
 
     if (msg.subtype === 'compact_boundary') {
-      if (!session.isRunning) return;
+      if (!session.isRunning || !session.turnTracker.inputStarted) return;
       session.pendingCompaction = parseCompactMetadata(msg.compact_metadata);
     }
   }
@@ -605,7 +568,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   // Folds the post-compaction summary (delivered as a synthetic user message)
   // into a CompactionMessage, pairing it with the metadata from the preceding
   // compact_boundary. Ordinary user echoes carry no rendered output.
-  #handleUserMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
+  #handleUserMessage(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     if (!session.pendingCompaction) return;
 
     const content = msg.message?.content;
@@ -615,6 +578,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const pending = session.pendingCompaction;
     session.pendingCompaction = undefined;
 
+    session.turnTracker.addOutputMessages(1);
     this.emitMessages(session.chatId, [
       new CompactionMessage(
         new Date().toISOString(),
@@ -635,10 +599,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  #handleResultMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
-    // The turn has ended (including an acknowledged interrupt), so the abort
-    // fallback must not fire against the still-alive persistent process.
-    this.#clearAbortTimer(session);
+  #handleResultMessage(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     const resultDetails = {
       chatId: session.chatId,
       turnId: session.eventMetadata.turnId ?? null,
@@ -651,28 +612,77 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       stopReason: msg.stop_reason ?? null,
       durationMs: msg.duration_ms ?? null,
       numTurns: msg.num_turns ?? null,
-      outputMessages: session.turnOutputMessageCount,
-      hasResult: typeof msg.result === 'string' && msg.result.length > 0,
+      outputMessages: session.turnTracker.outputMessageCount,
+      hasResult: typeof msg.result === 'string' && msg.result.trim().length > 0,
       permissionDenials: msg.permission_denials?.length ?? 0,
     };
-    if (msg.is_error) {
+
+    if (!session.turnTracker.inputStarted) {
+      session.turnTracker.recordResultBeforeStart(msg);
+      if (msg.is_error) {
+        this.#dependencies.logger.warn(
+          'Claude CLI emitted an uncorrelated result while user input was pending',
+          resultDetails,
+        );
+      } else {
+        this.#dependencies.logger.info(
+          'Claude CLI emitted an uncorrelated result while user input was pending',
+          resultDetails,
+        );
+      }
+      return;
+    }
+
+    const completedWithoutResponse = session.turnTracker.completedWithoutResponse(msg);
+    if (msg.is_error || completedWithoutResponse) {
       this.#dependencies.logger.warn('Claude CLI turn completed with an error', resultDetails);
     } else {
       this.#dependencies.logger.info('Claude CLI turn completed', resultDetails);
     }
-    session.isRunning = false;
-    session.lastActivityAt = Date.now();
-    this.emitProcessing(session.chatId, false);
     if (msg.is_error) {
-      this.emitFailed(session.chatId, claudeResultFailureMessage(msg), session.eventMetadata);
-    } else {
-      this.emitFinished(session.chatId, 0, session.eventMetadata);
+      this.#failSession(session, claudeResultFailureMessage(msg));
+      return;
     }
-    if (session.turnResolve) {
-      const resolve = session.turnResolve;
-      session.turnResolve = null;
-      resolve();
+    if (completedWithoutResponse) {
+      this.#failSession(session, session.turnTracker.emptyCompletionFailureMessage());
+      return;
     }
+    this.#finishTurn(session);
+  }
+
+  #handleInputTerminalBeforeStart(
+    session: ClaudeRunningSession,
+    state: ClaudeTurnTerminalState,
+  ): void {
+    const result = session.turnTracker.takeResultBeforeStart();
+    const abortRequested = session.turnTracker.abortRequested;
+    const details = {
+      chatId: session.chatId,
+      turnId: session.eventMetadata.turnId ?? null,
+      sessionId: session.id.slice(0, 8),
+      processId: session.process?.pid ?? null,
+      inputId: session.turnTracker.inputUuid?.slice(0, 8) ?? null,
+      state,
+      abortRequested,
+      precedingResultOutcome: result?.subtype ?? null,
+      precedingResultWasError: Boolean(result?.is_error),
+    };
+
+    if (state === 'cancelled' && abortRequested) {
+      this.#dependencies.logger.info('Claude CLI cancelled queued user input after an interrupt', details);
+      this.#finishTurn(session);
+      return;
+    }
+    this.#dependencies.logger.warn('Claude CLI submitted input ended before starting', details);
+    if (result?.is_error) {
+      this.#failSession(session, claudeResultFailureMessage(result));
+      return;
+    }
+
+    const failure = state === 'completed'
+      ? 'Claude CLI marked the submitted message complete without starting it or producing a response.'
+      : `Claude CLI ${state} the submitted message before it started.`;
+    this.#failSession(session, failure);
   }
 
   #emitPermissionMessages(
@@ -684,7 +694,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.emitMessages(chatId, messages, eventMetadata);
   }
 
-  #handleControlRequest(session: ClaudeRunningSession, msg: CLIMessage): void {
+  #handleControlRequest(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     if (msg.request?.subtype !== 'can_use_tool') return;
 
     const permissionRequestId = `claude-${crypto.randomBytes(8).toString('hex')}`;
@@ -728,7 +738,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     ], session.eventMetadata);
   }
 
-  #handleControlResponse(session: ClaudeRunningSession, msg: CLIMessage): void {
+  #handleControlResponse(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     const reqId = msg.response?.request_id;
     if (!reqId) return;
     const pending = this.#pendingControlRequests.get(reqId);
@@ -799,12 +809,24 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #failSession(session: ClaudeRunningSession, message: string): void {
+    this.#clearAbortTimer(session);
     session.isRunning = false;
     session.lastActivityAt = Date.now();
     const resolve = session.turnResolve;
     session.turnResolve = null;
     this.emitProcessing(session.chatId, false);
     this.emitFailed(session.chatId, message, session.eventMetadata);
+    resolve?.();
+  }
+
+  #finishTurn(session: ClaudeRunningSession): void {
+    this.#clearAbortTimer(session);
+    session.isRunning = false;
+    session.lastActivityAt = Date.now();
+    const resolve = session.turnResolve;
+    session.turnResolve = null;
+    this.emitProcessing(session.chatId, false);
+    this.emitFinished(session.chatId, 0, session.eventMetadata);
     resolve?.();
   }
 
@@ -907,6 +929,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #sendUserMessage(session: ClaudeRunningSession, command: string, images?: readonly AgentAttachment[]): void {
+    const inputUuid = crypto.randomUUID();
+    session.turnTracker.beginInput(inputUuid);
     const prompt = appendTextAttachmentContext(command, images);
     const imageParts = imageAttachments(images);
     const documentParts = documentAttachments(images);
@@ -937,6 +961,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: session.id || '',
+      uuid: inputUuid,
     });
 
     this.#writeToCLI(session.id, jsonl);
@@ -1036,7 +1061,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.currentClaudeThinkingMode = normalizeClaudeThinkingModeForState(options.claudeThinkingMode);
     session.currentModel = options.model || '';
     session.currentEnvOverrides = options.envOverrides;
-    pipeClaudeProcessOutput<CLIMessage>({
+    pipeClaudeProcessOutput<ClaudeCLIMessage>({
       process: proc,
       logger: this.#dependencies.logger,
       sessionId: session.id,
@@ -1116,7 +1141,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       turnWaiters: [],
       startTime: Date.now(),
       lastActivityAt: Date.now(),
-      turnOutputMessageCount: 0,
+      turnTracker: new ClaudeTurnTracker(),
       process: null,
       abortTimer: null,
       abortKilledProc: null,
@@ -1238,7 +1263,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         turnWaiters: [],
         startTime: Date.now(),
         lastActivityAt: Date.now(),
-        turnOutputMessageCount: 0,
+        turnTracker: new ClaudeTurnTracker(),
         process: null,
         abortTimer: null,
         abortKilledProc: null,
@@ -1277,7 +1302,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.chatId = effectiveChatId;
     session.isRunning = true;
     session.lastActivityAt = Date.now();
-    session.turnOutputMessageCount = 0;
     session.eventMetadata = claudeEventMetadata({ clientRequestId, turnId });
     const desiredThinkingMode = session.options.thinkingMode || 'none';
     const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(session.options.claudeThinkingMode);
@@ -1352,12 +1376,16 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const session = this.#runningSessions.get(agentSessionId);
     if (!session?.process) return false;
 
+    session.turnTracker.markAbortRequested();
     const sent = this.#trySendToCLI(agentSessionId, JSON.stringify({
       type: 'control_request',
       request_id: crypto.randomUUID(),
-      request: { subtype: 'interrupt' },
+      request: { subtype: 'interrupt', cancel_queued: true },
     }));
-    if (!sent) return false;
+    if (!sent) {
+      session.turnTracker.clearAbortRequested();
+      return false;
+    }
 
     const proc = session.process;
     this.#clearAbortTimer(session);
