@@ -106,28 +106,20 @@ describe('Lightpanda Git comparison', () => {
         '[data-git-virtual-row]',
 				(rows) => rows.length,
 			);
-				expect(mountedRows).toBeLessThan(30);
+			expect(mountedRows).toBeLessThan(30);
 
-				await app.selectMainWorkspaceSurface('Chat');
-				await fixture.page.waitForFunction(() =>
-					[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].some(
-						(tab) =>
-							(tab.getAttribute('aria-label') || tab.textContent?.trim()) === 'Chat'
-							&& tab.getAttribute('aria-selected') === 'true',
-					),
-				);
-				await writeFile(join(project, 'large.txt'), `${refreshed}\n`, 'utf8');
-				await app.selectMainWorkspaceSurface('Git');
-				await fixture.page.waitForFunction(() =>
-					[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].some(
-						(tab) =>
-							(tab.getAttribute('aria-label') || tab.textContent?.trim()) === 'Git'
-							&& tab.getAttribute('aria-selected') === 'true',
-					),
-				);
-				await fixture.page.waitForFunction(
-					() => document.body.textContent?.includes('The Working Tree changed.'),
-					{ timeout: 5_000 },
+			await app.selectMainWorkspaceSurface('Chat');
+			await fixture.page.waitForSelector(
+				'[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
+			);
+			await writeFile(join(project, 'large.txt'), `${refreshed}\n`, 'utf8');
+			await app.selectMainWorkspaceSurface('Git');
+			await fixture.page.waitForSelector(
+				'[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]',
+			);
+			await fixture.page.waitForFunction(
+				() => document.body.textContent?.includes('The Working Tree changed.'),
+				{ timeout: 5_000 },
 			);
 			expect(await fixture.page.$eval('body', (element) => element.textContent)).toContain(
 				'large after marker',
