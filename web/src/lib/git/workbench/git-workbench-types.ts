@@ -55,5 +55,5 @@ export const DEFAULT_REFRESH_OPTIONS = {
 };
 
 export function targetKey(target: GitWorkbenchTarget | null): string {
-	return target ? JSON.stringify([target.repoRoot, target.worktreePath]) : '';
+	return target?.projectPath ?? '';
 }
