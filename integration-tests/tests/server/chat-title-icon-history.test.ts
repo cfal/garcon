@@ -34,7 +34,7 @@ describe('chat title icon history', () => {
         (request) => request.lastUserText.includes('first-history-generation'),
       );
       expect(firstGenerationRequest?.lastUserText).toContain(
-        '<recent_title_icons>\n🔐 🧿\n</recent_title_icons>',
+        '### Recently Used Emojis to Avoid When Another Accurate Emoji Is Available:\n🔐 🧿',
       );
 
       fixture.fakeProviders.openAiResponses.respondThinkingThenTextNext(
@@ -50,7 +50,7 @@ describe('chat title icon history', () => {
         (request) => request.lastUserText.includes('second-history-generation'),
       );
       expect(secondGenerationRequest?.lastUserText).toContain(
-        '<recent_title_icons>\n📦 🧪 🔐 🧿\n</recent_title_icons>',
+        '### Recently Used Emojis to Avoid When Another Accurate Emoji Is Available:\n📦 🧪 🔐 🧿',
       );
 
       await fixture.restartGarcon();
@@ -67,7 +67,7 @@ describe('chat title icon history', () => {
         (request) => request.lastUserText.includes('post-restart-generation'),
       );
       expect(postRestartRequest?.lastUserText).toContain(
-        '<recent_title_icons>\nNone\n</recent_title_icons>',
+        '### Recently Used Emojis to Avoid When Another Accurate Emoji Is Available:\nNone',
       );
       expect(postRestartRequest?.lastUserText).not.toContain('🧿');
       expect(postRestartRequest?.lastUserText).not.toContain('🔐');

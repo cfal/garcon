@@ -103,7 +103,6 @@ Generate a concise, 2-5 word title with a leading emoji icon summarizing the cha
 - The title should clearly represent the main theme or subject of the conversation.
 - Use emojis that enhance understanding of the topic, but avoid quotation marks or special formatting.
 - Prefer a specific subject-related emoji over a generic emoji.
-- Avoid recently used emojis when another accurate emoji is available.
 - Write the title in the chat's primary language; default to English if multilingual.
 - Prioritize accuracy over excessive creativity; keep it clear and simple.
 - Your entire response must consist solely of the title, without any introductory or concluding text.
@@ -116,10 +115,8 @@ Generate a concise, 2-5 word title with a leading emoji icon summarizing the cha
 🏠 Remote Work Productivity Tips
 🩺 Artificial Intelligence in Healthcare
 🎮 Video Game Development Insights
-### Recently Used Emojis:
-<recent_title_icons>
+### Recently Used Emojis to Avoid When Another Accurate Emoji Is Available:
 {RECENT_TITLE_ICONS}
-</recent_title_icons>
 ### Chat History:
 <chat_history>
 {USER_PROMPT}

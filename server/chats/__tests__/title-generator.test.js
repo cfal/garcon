@@ -95,7 +95,9 @@ describe('maybeGenerateChatTitle', () => {
       'Generate a concise, 2-5 word title with a leading emoji icon summarizing the chat history.',
     );
     expect(prompt).toContain('Use emojis that enhance understanding of the topic');
-    expect(prompt).toContain('<recent_title_icons>\n🧪 📦\n</recent_title_icons>');
+    expect(prompt).toContain(
+      '### Recently Used Emojis to Avoid When Another Accurate Emoji Is Available:\n🧪 📦',
+    );
     expect(prompt).toContain('<chat_history>\nExplain {RECENT_TITLE_ICONS}\n</chat_history>');
   });
 
@@ -436,7 +438,9 @@ describe('maybeGenerateChatTitle', () => {
     });
 
     const [prompt] = runSingleQueryMock.mock.calls[0];
-    expect(prompt).toContain('<recent_title_icons>\n🧭 🪟\n</recent_title_icons>');
+    expect(prompt).toContain(
+      '### Recently Used Emojis to Avoid When Another Accurate Emoji Is Available:\n🧭 🪟',
+    );
   });
 
   it('manual title generation overwrites an existing title', async () => {
