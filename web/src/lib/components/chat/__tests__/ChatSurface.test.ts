@@ -45,6 +45,10 @@ vi.mock('$lib/context', () => ({
 		register: () => () => {},
 	}),
 	getOptionalTransientLayers: () => null,
+	getGitViewLauncher: () => ({
+		openHistory: vi.fn(),
+		openCompare: vi.fn(),
+	}),
 }));
 
 vi.mock('$lib/components/chat/ConversationWorkspace.svelte', async () => ({

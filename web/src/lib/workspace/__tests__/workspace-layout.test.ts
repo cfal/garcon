@@ -147,6 +147,49 @@ describe('workspace layout reducers', () => {
 		expect(() => assertWorkspaceLayoutInvariants(next)).not.toThrow();
 	});
 
+	it('keeps standalone History and Compare singleton ownership exclusive', () => {
+		const opened = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-history',
+					type: 'singleton',
+					kind: 'git-history',
+				},
+				host: 'main',
+			},
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-compare',
+					type: 'singleton',
+					kind: 'git-compare',
+				},
+				host: 'sidebar',
+			},
+		]);
+
+		expect(opened.main.order).toContain('singleton:git-history');
+		expect(opened.sidebar.order).toContain('singleton:git-compare');
+
+		const moved = reduceWorkspaceLayout(opened, [
+			{
+				type: 'move-to-host',
+				surfaceId: 'singleton:git-history',
+				destination: 'sidebar',
+			},
+			{
+				type: 'move-to-host',
+				surfaceId: 'singleton:git-compare',
+				destination: 'main',
+			},
+		]);
+		expect(moved.main.order).toContain('singleton:git-compare');
+		expect(moved.main.order).not.toContain('singleton:git-history');
+		expect(moved.sidebar.order).toContain('singleton:git-history');
+		expect(moved.sidebar.order).not.toContain('singleton:git-compare');
+	});
+
 	it('rejects terminal and launcher registrations without a host', () => {
 		expect(() =>
 			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [

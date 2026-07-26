@@ -2,7 +2,6 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import type { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
-	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import GitComparisonHeader from './GitComparisonHeader.svelte';
 	import GitDiffDocumentScreen from './GitDiffDocumentScreen.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -12,14 +11,8 @@
 		isMobile: boolean;
 		active?: boolean;
 		fontSize: number;
-		diffMode: DiffMode;
-		contextLines: number;
-		diffFontSize: string;
-		onBack: () => void;
+		onEdit: () => void;
 		onRefresh: () => void;
-		onSetDiffMode: (mode: DiffMode) => void;
-		onSetContextLines: (lines: number) => void;
-		onSetDiffFontSize: (size: string) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 		onAppendToChatDraft?: ChatDraftAppend;
 		onOpenChat: () => void;
@@ -30,14 +23,8 @@
 		isMobile,
 		active = true,
 		fontSize,
-		diffMode,
-		contextLines,
-		diffFontSize,
-		onBack,
+		onEdit,
 		onRefresh,
-		onSetDiffMode,
-		onSetContextLines,
-		onSetDiffFontSize,
 		onOpenInEditor,
 		onAppendToChatDraft,
 		onOpenChat,
@@ -52,16 +39,6 @@
 	{#if comparison.snapshot}
 		<GitComparisonHeader
 			snapshot={comparison.snapshot}
-			isRefreshing={comparison.isLoading}
-			{diffMode}
-			{contextLines}
-			{diffFontSize}
-			{onBack}
-			onEdit={() => comparison.editComparison()}
-			{onRefresh}
-			{onSetDiffMode}
-			{onSetContextLines}
-			{onSetDiffFontSize}
 			{showFileTreeToggle}
 			{fileTreeVisible}
 			{onToggleFileTree}
@@ -84,8 +61,19 @@
 	{/if}
 {/snippet}
 
+{#snippet fallbackActions()}
+	<button
+		type="button"
+		class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+		onclick={onEdit}
+	>
+		{m.git_compare_edit()}
+	</button>
+{/snippet}
+
 <GitDiffDocumentScreen
 	{header}
+	{fallbackActions}
 	documentId={comparison.snapshot?.documentId ?? null}
 	documentAvailable={Boolean(comparison.snapshot)}
 	files={comparison.document.visibleFiles}
@@ -102,7 +90,7 @@
 	loadingLabel={m.git_compare_loading()}
 	emptyErrorLabel={m.git_compare_load_failed()}
 	emptyDocumentLabel={m.git_compare_no_changes()}
-	{onBack}
+	onRetry={onRefresh}
 	onSelectFile={(filePath) => comparison.focusFile(filePath)}
 	onFileFilterChange={(value) => comparison.setFileFilter(value)}
 	onBodyDemand={(demand) => comparison.handleBodyDemand(demand)}

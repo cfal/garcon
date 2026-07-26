@@ -119,7 +119,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			reservations: this.#reservedSurfaceIds,
 			commit,
 			commitDestroyedRemoval: (surfaceId, mutations) =>
-				this.#presentation.commitDestroyedRemoval(surfaceId, mutations),
+				this.#presentation.commitDestroyedRemovals([surfaceId], mutations),
 			currentProjectPath: () => deps.workspaceContext.current?.projectPath ?? null,
 			isMobile: () => this.isMobile,
 			isChatPresented: () => this.isChatPresented,
@@ -369,7 +369,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const current =
 				surface.type === 'terminal'
 					? await this.#presentation.commit(removalPlan)
-					: await this.#presentation.commitDestroyedRemoval(surfaceId, removalPlan);
+					: await this.#presentation.commitDestroyedRemovals([surfaceId], removalPlan);
 			this.#presentation.clearAttachmentError(surfaceId);
 			if (wasDialog) this.#fileDialog.clearReturnSurface();
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);

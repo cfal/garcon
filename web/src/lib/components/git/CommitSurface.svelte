@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import FileIcon from '@lucide/svelte/icons/file';
@@ -13,12 +13,9 @@
 	import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
-	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
-	import GitBranchSelector from './GitBranchSelector.svelte';
-	import { getGitBranchActions } from '$lib/context';
-	import ResponsiveSurfaceActions, {
-		type ResponsiveSurfaceAction,
-	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
+	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
+	import GitSurfaceToolbar from './GitSurfaceToolbar.svelte';
+	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 
 	interface Props {
 		controller: CommitController;
@@ -26,7 +23,6 @@
 	}
 
 	let { controller, presentation }: Props = $props();
-	const gitBranchActions = getGitBranchActions();
 	const isMobile = $derived(presentation === 'mobile');
 	let dialogBodyEl = $state<HTMLDivElement | null>(null);
 	let messagePanePercent = $state(28);
@@ -72,6 +68,14 @@
 			priority: 0,
 		},
 	]);
+
+	$effect(() => {
+		if (!controller.isPresentationVisible) return;
+		const key = controller.target.effectiveProjectKey;
+		if (!key) return;
+		const version = gitProjectInvalidations.version(key);
+		untrack(() => void controller.target.refreshForInvalidation(key, version));
+	});
 
 	function fileBadge(node: GitTreeNode): string {
 		if (node.staged && node.hasUnstaged) return 'mixed';
@@ -119,16 +123,6 @@
 		resizeCleanup = null;
 	}
 
-	function toggleBranchSelector(): void {
-		const projectPath = controller.projectPath;
-		if (!projectPath) return;
-		if (gitBranchActions.showBranchDropdown) {
-			gitBranchActions.closeBranchDropdown();
-			return;
-		}
-		void gitBranchActions.openBranchDropdown(projectPath);
-	}
-
 	function indeterminate(
 		node: HTMLInputElement,
 		value: boolean,
@@ -148,11 +142,9 @@
 
 <div class="flex h-full min-h-0 min-w-0 overflow-hidden bg-background">
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
-		<div
-			class="surface-toolbar flex min-w-0 items-center justify-between gap-2 border-b border-border px-4 py-2"
-			style="container-name: surface-toolbar; container-type: inline-size;"
-		>
-			<div class="flex min-w-0 items-center gap-2">
+		<GitSurfaceToolbar target={controller.target} {presentation} actions={toolbarActions}>
+			{#snippet leading()}
+			<div class="flex min-w-0 max-w-64 shrink items-center gap-2">
 				<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
 				<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
 					{controller.selectedFileCount === 0
@@ -168,49 +160,8 @@
 					{/if}
 				</div>
 			</div>
-			<ResponsiveSurfaceActions
-				actions={toolbarActions}
-				menuLabel={m.workspace_surface_actions()}
-				class="max-w-64"
-			>
-				{#snippet fixed()}
-					<GitBranchSelector
-						currentBranch={gitBranchActions.currentBranch || 'HEAD'}
-						refs={gitBranchActions.refs}
-						isOpen={gitBranchActions.showBranchDropdown}
-						isLoading={gitBranchActions.isLoadingBranches}
-						isMobile={presentation === 'mobile'}
-						triggerClass="h-8 max-w-40 px-2 text-xs"
-						labelClass="max-w-24 text-xs"
-						onToggle={toggleBranchSelector}
-						onClose={() => gitBranchActions.closeBranchDropdown()}
-						onCreateBranch={() => {
-							if (controller.projectPath && controller.effectiveProjectKey)
-								gitBranchActions.openNewBranchDialog(
-									controller.projectPath,
-									singletonSurfaceId('commit'),
-									controller.effectiveProjectKey,
-								);
-						}}
-						onSwitchBranch={(branch, refKind) => {
-							if (controller.projectPath && controller.effectiveProjectKey) {
-								void gitBranchActions.switchBranch(
-									controller.projectPath,
-									branch,
-									refKind,
-									singletonSurfaceId('commit'),
-									controller.effectiveProjectKey,
-								);
-							}
-						}}
-						onSearchRefs={(query) => {
-							if (controller.projectPath)
-								return gitBranchActions.fetchRefs(controller.projectPath, query);
-						}}
-					/>
-				{/snippet}
-			</ResponsiveSurfaceActions>
-		</div>
+			{/snippet}
+		</GitSurfaceToolbar>
 
 		<div bind:this={dialogBodyEl} class="grid min-h-0 min-w-0 flex-1" style={dialogBodyGridStyle}>
 			<section class="min-h-0 min-w-0 overflow-hidden">

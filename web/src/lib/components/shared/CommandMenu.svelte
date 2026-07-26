@@ -143,6 +143,26 @@
 						? workspace.focusMobileSingleton('git')
 						: workspace.openSingleton('git', 'main')),
 			},
+			{
+				id: 'workspace-git-history',
+				label: m.workspace_surface_git_history(),
+				description: m.command_open_panel({ panel: m.workspace_surface_git_history() }),
+				category: categories.workspace,
+				action: () =>
+					void (workspace.isMobile
+						? workspace.focusMobileSingleton('git-history')
+						: workspace.openSingleton('git-history', 'main')),
+			},
+			{
+				id: 'workspace-git-compare',
+				label: m.workspace_surface_git_compare(),
+				description: m.command_open_panel({ panel: m.workspace_surface_git_compare() }),
+				category: categories.workspace,
+				action: () =>
+					void (workspace.isMobile
+						? workspace.focusMobileSingleton('git-compare')
+						: workspace.openSingleton('git-compare', 'main')),
+			},
 			...(ghCapability.available || !ghCapability.hasChecked
 				? [
 						{

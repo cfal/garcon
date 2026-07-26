@@ -1,26 +1,11 @@
 <script lang="ts">
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
-	import Pencil from '@lucide/svelte/icons/pencil';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitComparisonSnapshotReady } from '$lib/api/git-comparison.js';
-	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
-	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
 	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitComparisonHeaderProps {
 		snapshot: GitComparisonSnapshotReady;
-		isRefreshing: boolean;
-		diffMode: DiffMode;
-		contextLines: number;
-		diffFontSize: string;
-		onBack: () => void;
-		onEdit: () => void;
-		onRefresh: () => void;
-		onSetDiffMode: (mode: DiffMode) => void;
-		onSetContextLines: (lines: number) => void;
-		onSetDiffFontSize: (size: string) => void;
 		showFileTreeToggle: boolean;
 		fileTreeVisible: boolean;
 		onToggleFileTree: () => void;
@@ -28,16 +13,6 @@
 
 	let {
 		snapshot,
-		isRefreshing,
-		diffMode,
-		contextLines,
-		diffFontSize,
-		onBack,
-		onEdit,
-		onRefresh,
-		onSetDiffMode,
-		onSetContextLines,
-		onSetDiffFontSize,
 		showFileTreeToggle,
 		fileTreeVisible,
 		onToggleFileTree,
@@ -55,15 +30,6 @@
 
 <header class="border-b border-border bg-background px-3 py-2">
 	<div class="flex min-w-0 items-center gap-2">
-		<button
-			type="button"
-			class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			aria-label={m.git_compare_back()}
-			title={m.git_diff_document_back()}
-			onclick={onBack}
-		>
-			<ArrowLeft class="h-4 w-4" />
-		</button>
 		<div class="min-w-0 flex-1">
 			<h3 class="text-sm font-semibold text-foreground">{m.git_compare_title()}</h3>
 			<div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -77,34 +43,6 @@
 		{#if showFileTreeToggle}
 			<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
 		{/if}
-		<button
-			type="button"
-			class="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			onclick={onEdit}
-		>
-			<Pencil class="h-3.5 w-3.5" />
-			{m.git_compare_edit()}
-		</button>
-		{#if snapshot.to.kind === 'working-tree'}
-			<button
-				type="button"
-				class="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				disabled={isRefreshing}
-				aria-label={m.git_compare_refresh()}
-				title={m.git_compare_refresh()}
-				onclick={onRefresh}
-			>
-				<RefreshCw class="h-4 w-4 {isRefreshing ? 'animate-spin' : ''}" />
-			</button>
-		{/if}
-		<GitDiffSettingsMenu
-			{diffMode}
-			{contextLines}
-			{diffFontSize}
-			{onSetDiffMode}
-			{onSetContextLines}
-			{onSetDiffFontSize}
-		/>
 	</div>
 	<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 		<span

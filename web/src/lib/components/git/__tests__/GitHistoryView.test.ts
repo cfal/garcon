@@ -14,10 +14,8 @@ import {
 	GitHistoryController,
 	type GitHistoryRevertTarget,
 } from '$lib/git/history/git-history.svelte.js';
-import {
-	GIT_EMPTY_TREE_REVISION,
-	GitComparisonController,
-} from '$lib/git/review/git-comparison.svelte.js';
+import { GIT_EMPTY_TREE_REVISION } from '$lib/git/review/git-comparison.svelte.js';
+import { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import GitHistoryView from '../GitHistoryView.svelte';
@@ -148,9 +146,15 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
+function createHistory(): GitHistoryController {
+	const history = new GitHistoryController();
+	void history.loadInitial('/project');
+	return history;
+}
+
 describe('GitHistoryView', () => {
 	let onRevertCommit: ReturnType<typeof vi.fn<(commit: GitHistoryRevertTarget) => void>>;
-	let comparison: GitComparisonController;
+	let comparisonSelection: GitHistoryComparisonSelectionState;
 	let restoreResizeObserver: () => void;
 
 	beforeEach(() => {
@@ -159,7 +163,7 @@ describe('GitHistoryView', () => {
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 		onRevertCommit = vi.fn<(commit: GitHistoryRevertTarget) => void>();
-		comparison = new GitComparisonController();
+		comparisonSelection = new GitHistoryComparisonSelectionState();
 		vi.mocked(getGitHistoryCommits).mockResolvedValue({
 			project: '/project',
 			ref: 'HEAD',
@@ -179,15 +183,14 @@ describe('GitHistoryView', () => {
 	});
 
 	it('navigates from commit list to details and back', async () => {
-		const history = new GitHistoryController();
+		const history = createHistory();
 		render(GitHistoryView, {
 			props: {
 				history,
-				comparison,
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -225,12 +228,11 @@ describe('GitHistoryView', () => {
 	it('resizes, hides, and restores the wide changed-file tree', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
-				comparison,
+				history: createHistory(),
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -269,43 +271,14 @@ describe('GitHistoryView', () => {
 		expect(screen.getByRole('slider', { name: 'Resize file tree, 316 pixels' })).toBeTruthy();
 	});
 
-	it('reloads the list when effective project identity changes at the same path', async () => {
-		const history = new GitHistoryController();
-		const props = {
-			history,
-			comparison,
-			onOpenComparison: vi.fn(),
-			onOpenChat: vi.fn(),
-			projectPath: '/project',
-			effectiveProjectKey: 'alpha',
-			isMobile: false,
-			diffMode: 'unified' as const,
-			contextLines: 5,
-			diffFontSize: 12,
-			onRevertCommit,
-		};
-		const { rerender } = render(GitHistoryView, { props });
-		await screen.findByText('List commit');
-		expect(getGitHistoryCommits).toHaveBeenCalledTimes(1);
-		history.screen = 'commit';
-
-		await rerender({ ...props, effectiveProjectKey: 'beta' });
-
-		await waitFor(() => {
-			expect(history.screen).toBe('list');
-			expect(getGitHistoryCommits).toHaveBeenCalledTimes(2);
-		});
-	});
-
 	it('uses files and diff tabs on mobile commit details', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
-				comparison,
+				history: createHistory(),
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: true,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -358,12 +331,11 @@ describe('GitHistoryView', () => {
 	it('switches a narrow desktop container without remounting the diff', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
-				comparison,
+				history: createHistory(),
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -432,12 +404,11 @@ describe('GitHistoryView', () => {
 			);
 		const { container } = render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
-				comparison,
+				history: createHistory(),
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -483,12 +454,11 @@ describe('GitHistoryView', () => {
 	it('loads a selected file outside the initial body candidates in a narrow layout', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
-				comparison,
+				history: createHistory(),
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -541,15 +511,14 @@ describe('GitHistoryView', () => {
 				return bodiesForPaths(paths);
 			},
 		);
-		const history = new GitHistoryController();
+		const history = createHistory();
 		const { container } = render(GitHistoryView, {
 			props: {
 				history,
-				comparison,
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -599,12 +568,11 @@ describe('GitHistoryView', () => {
 	it('reports list row revert requests without opening the commit', async () => {
 		render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
-				comparison,
+				history: createHistory(),
+				comparisonSelection,
 				onOpenComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -625,19 +593,18 @@ describe('GitHistoryView', () => {
 	});
 
 	it('routes History and commit comparison intents through the parent opener', async () => {
-		const history = new GitHistoryController();
+		const history = createHistory();
 		const onOpenComparison = vi.fn();
-		comparison.beginHistorySelection();
-		comparison.selectHistoryCommit('older');
-		comparison.selectHistoryCommit('newer');
+		comparisonSelection.begin();
+		comparisonSelection.select('older');
+		comparisonSelection.select('newer');
 		render(GitHistoryView, {
 			props: {
 				history,
-				comparison,
+				comparisonSelection,
 				onOpenComparison,
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -665,16 +632,15 @@ describe('GitHistoryView', () => {
 	});
 
 	it('opens editable revision endpoints or explicit commit selection from History', async () => {
-		const history = new GitHistoryController();
+		const history = createHistory();
 		const onOpenComparison = vi.fn();
 		render(GitHistoryView, {
 			props: {
 				history,
-				comparison,
+				comparisonSelection,
 				onOpenComparison,
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -692,7 +658,7 @@ describe('GitHistoryView', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Select commits' }));
-		expect(comparison.historySelectionActive).toBe(true);
+		expect(comparisonSelection.active).toBe(true);
 		const commitButton = screen.getByRole('button', { name: 'Select List commit as From' });
 		expect(commitButton.getAttribute('aria-pressed')).toBe('false');
 		await fireEvent.click(commitButton);
@@ -711,12 +677,11 @@ describe('GitHistoryView', () => {
 		const onOpenComparison = vi.fn();
 		render(GitHistoryView, {
 			props: {
-				history: new GitHistoryController(),
-				comparison,
+				history: createHistory(),
+				comparisonSelection,
 				onOpenComparison,
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,

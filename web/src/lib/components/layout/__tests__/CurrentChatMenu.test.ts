@@ -99,4 +99,46 @@ describe('CurrentChatMenu', () => {
 
 		expect(openNavigator).toHaveBeenCalledOnce();
 	});
+
+	it('renders mobile Git view commands before chat actions and invokes each callback', async () => {
+		const openHistory = vi.fn();
+		const openCompare = vi.fn();
+		render(CurrentChatMenu, {
+			...props(),
+			onOpenGitHistory: openHistory,
+			onOpenGitCompare: openCompare,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		const history = screen.getByRole('menuitem', {
+			name: m.workspace_open_git_history(),
+		});
+		const compare = screen.getByRole('menuitem', {
+			name: m.workspace_open_git_compare(),
+		});
+		const share = screen.getByRole('menuitem', { name: m.share_button() });
+		const items = screen.getAllByRole('menuitem');
+
+		expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));
+		expect(items.indexOf(compare)).toBeLessThan(items.indexOf(share));
+		await fireEvent.click(history);
+		expect(openHistory).toHaveBeenCalledOnce();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		await fireEvent.click(
+			screen.getByRole('menuitem', { name: m.workspace_open_git_compare() }),
+		);
+		expect(openCompare).toHaveBeenCalledOnce();
+	});
+
+	it('omits Git view commands when mobile callbacks are not supplied', async () => {
+		render(CurrentChatMenu, { ...props(), isMobileLayout: false });
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_chat_more_actions() }));
+
+		expect(
+			screen.queryByRole('menuitem', { name: m.workspace_open_git_history() }),
+		).toBeNull();
+		expect(
+			screen.queryByRole('menuitem', { name: m.workspace_open_git_compare() }),
+		).toBeNull();
+	});
 });

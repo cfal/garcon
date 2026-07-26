@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -74,5 +74,28 @@ describe('CommandMenu', () => {
 
 		await screen.findByRole('dialog');
 		expect(screen.queryByText(m.file_session_open_files())).toBeNull();
+	});
+
+	it.each([
+		['History', 'git-history'],
+		['Compare', 'git-compare'],
+	] as const)('opens standalone %s in desktop main', async (label, kind) => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		await fireEvent.click(await screen.findByText(label));
+		expect(mocks.workspace.openSingleton).toHaveBeenCalledWith(kind, 'main');
+	});
+
+	it.each([
+		['History', 'git-history'],
+		['Compare', 'git-compare'],
+	] as const)('focuses standalone %s on mobile', async (label, kind) => {
+		mocks.workspace.isMobile = true;
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		await fireEvent.click(await screen.findByText(label));
+		expect(mocks.workspace.focusMobileSingleton).toHaveBeenCalledWith(kind);
 	});
 });

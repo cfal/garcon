@@ -15,6 +15,7 @@ const {
 	showOpenFiles,
 	createTerminal,
 	openTerminalSession,
+	openSingleton,
 	terminalRegistry,
 } = vi.hoisted(() => ({
 	surfaces: {
@@ -29,6 +30,7 @@ const {
 	showOpenFiles: vi.fn(),
 	createTerminal: vi.fn(async () => 'terminal-created'),
 	openTerminalSession: vi.fn(async () => undefined),
+	openSingleton: vi.fn(async () => undefined),
 	terminalRegistry: {
 		orderedSessions: [] as Array<{
 			metadata: { terminalId: string; displaySequence: number };
@@ -46,7 +48,7 @@ vi.mock('$lib/context', () => ({
 		popOutFile,
 		closeSurface,
 		isSurfaceCloseBlocked: () => false,
-		openSingleton: vi.fn(),
+		openSingleton,
 		createTerminal,
 		openTerminalSession,
 	}),
@@ -62,6 +64,8 @@ describe('WorkspaceTaskBar', () => {
 		vi.clearAllMocks();
 		terminalRegistry.orderedSessions = [];
 		terminalRegistry.listStatus = 'ready';
+		delete surfaces['singleton:git-history'];
+		delete surfaces['singleton:git-compare'];
 		vi.stubGlobal('ResizeObserver', undefined);
 		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_000);
 	});
@@ -141,6 +145,80 @@ describe('WorkspaceTaskBar', () => {
 		await waitFor(() =>
 			expect(createTerminal).toHaveBeenCalledWith('sidebar', 'workspace-taskbar:sidebar'),
 		);
+	});
+
+	it.each(['main', 'sidebar'] as const)(
+		'places standalone Git view commands directly after New Terminal in the %s menu',
+		async (host) => {
+			terminalRegistry.orderedSessions = [
+				{ metadata: { terminalId: 'one', displaySequence: 1 } },
+			];
+			render(WorkspaceTaskBar, {
+				host,
+				hostState:
+					host === 'main'
+						? {
+								order: ['singleton:chat'],
+								activeId: 'singleton:chat',
+								mru: ['singleton:chat'],
+							}
+						: {
+								order: ['singleton:files'],
+								activeId: 'singleton:files',
+								mru: ['singleton:files'],
+							},
+				labelFor: (surfaceId: string) =>
+					surfaceId === 'singleton:chat' ? 'Chat' : 'Files',
+				onSelect: vi.fn(),
+			});
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+			const items = screen.getAllByRole('menuitem');
+			const terminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });
+			const history = screen.getByRole('menuitem', {
+				name: m.workspace_open_git_history(),
+			});
+			const compare = screen.getByRole('menuitem', {
+				name: m.workspace_open_git_compare(),
+			});
+			const openTerminal = screen.getByRole('menuitem', { name: 'Terminal 1' });
+
+			expect(items.indexOf(terminal)).toBeLessThan(items.indexOf(history));
+			expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));
+			expect(items.indexOf(compare)).toBeLessThan(items.indexOf(openTerminal));
+
+			await fireEvent.click(history);
+			expect(openSingleton).toHaveBeenCalledWith('git-history', host);
+		},
+	);
+
+	it('omits an open Git view command and labels standalone tabs without a Git prefix', async () => {
+		surfaces['singleton:git-history'] = {
+			id: 'singleton:git-history',
+			type: 'singleton',
+			kind: 'git-history',
+		};
+		render(WorkspaceTaskBar, {
+			host: 'main',
+			hostState: {
+				order: ['singleton:chat', 'singleton:git-history'],
+				activeId: 'singleton:git-history',
+				mru: ['singleton:git-history', 'singleton:chat'],
+			},
+			labelFor: (surfaceId: string) =>
+				surfaceId === 'singleton:chat' ? 'Chat' : 'History',
+			onSelect: vi.fn(),
+		});
+
+		expect(screen.getByRole('tab', { name: 'History' })).toBeTruthy();
+		expect(screen.queryByRole('tab', { name: 'Git History' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+		expect(
+			screen.queryByRole('menuitem', { name: m.workspace_open_git_history() }),
+		).toBeNull();
+		expect(
+			screen.getByRole('menuitem', { name: m.workspace_open_git_compare() }),
+		).toBeTruthy();
 	});
 
 	it('offers move, pop out, and close for an inactive tab context menu', async () => {

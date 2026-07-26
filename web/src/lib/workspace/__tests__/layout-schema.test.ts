@@ -126,4 +126,66 @@ describe('workspace layout persistence', () => {
 		expect(restored.snapshot.unplacedTerminalIds).toEqual(['a']);
 		expect(restored.snapshot.surfaces[terminal.id]).toBeUndefined();
 	});
+
+	it('round-trips standalone History and Compare desktop placements', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-history',
+					type: 'singleton',
+					kind: 'git-history',
+				},
+				host: 'main',
+			},
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-compare',
+					type: 'singleton',
+					kind: 'git-compare',
+				},
+				host: 'sidebar',
+			},
+		]);
+
+		const serialized = serializeWorkspaceLayout(snapshot);
+		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized));
+
+		expect(serialized.main.order).toContainEqual({
+			type: 'singleton',
+			kind: 'git-history',
+		});
+		expect(serialized.sidebar.order).toContainEqual({
+			type: 'singleton',
+			kind: 'git-compare',
+		});
+		expect(restored.snapshot.main.order).toContain('singleton:git-history');
+		expect(restored.snapshot.sidebar.order).toContain('singleton:git-compare');
+	});
+
+	it('does not serialize mobile-only History or Compare', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-history',
+					type: 'singleton',
+					kind: 'git-history',
+				},
+			},
+			{
+				type: 'register-surface',
+				surface: {
+					id: 'singleton:git-compare',
+					type: 'singleton',
+					kind: 'git-compare',
+				},
+			},
+		]);
+
+		expect(JSON.stringify(serializeWorkspaceLayout(snapshot))).not.toMatch(
+			/git-history|git-compare/,
+		);
+	});
 });

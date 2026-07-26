@@ -3,9 +3,17 @@ import {
 	CommitController,
 	type CommitControllerDeps,
 } from '$lib/git/commit/commit-controller.svelte.js';
-import type { GitChangesTreeResult, GitTreeNode, GitWorkbenchSnapshotReady } from '$lib/api/git.js';
+import type {
+	GitChangesTreeResult,
+	GitTargetCandidate,
+	GitTreeNode,
+	GitWorkbenchSnapshotReady,
+} from '$lib/api/git.js';
+import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 
 vi.mock('$lib/api/git.js', () => ({
+	getGitTargetCandidates: vi.fn().mockResolvedValue({ targets: [] }),
+	getGitRefs: vi.fn().mockResolvedValue({ refs: [] }),
 	getGitWorkbenchSnapshot: vi.fn(),
 	gitStagePaths: vi.fn(),
 	gitCommitIndex: vi.fn(),
@@ -130,8 +138,26 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 	};
 }
 
+function targetCandidate(
+	projectPath: string,
+	overrides: Partial<GitTargetCandidate> = {},
+): GitTargetCandidate {
+	return {
+		projectPath,
+		repoRoot: '/repo',
+		worktreePath: projectPath,
+		label: projectPath.split('/').pop() ?? projectPath,
+		branch: 'main',
+		source: 'worktree',
+		isCurrent: projectPath === '/project',
+		isMissing: false,
+		...overrides,
+	};
+}
+
 function makeController(overrides: Partial<CommitControllerDeps> = {}) {
 	return new CommitController({
+		...createGitSurfaceTestDeps(),
 		refreshSummary: vi.fn().mockResolvedValue(undefined),
 		markProjectChanged: vi.fn(),
 		...overrides,
@@ -564,5 +590,66 @@ describe('CommitController', () => {
 		refresh.resolve(snapshot([fileNode('staged.ts', { staged: true, hasUnstaged: false })]));
 		await refreshPromise;
 		expect(controller.isRefreshingTree).toBe(false);
+	});
+
+	it('keeps drafts and trees scoped to the selected physical worktree', async () => {
+		const project = targetCandidate('/project', {
+			source: 'chat-project',
+			isCurrent: true,
+		});
+		const worktree = targetCandidate('/repo/worktree', { isCurrent: false });
+		mockedApi.getGitTargetCandidates.mockResolvedValue({
+			targets: [project, worktree],
+		});
+		mockedApi.getGitWorkbenchSnapshot.mockImplementation(async (projectPath) =>
+			snapshot([
+				fileNode(
+					projectPath === '/project' ? 'project.ts' : 'worktree.ts',
+					{ staged: true, hasUnstaged: false },
+				),
+			]),
+		);
+		const controller = makeController();
+		await controller.setContext('chat', '/project');
+		await controller.setPresentationVisible(true);
+		controller.message = 'Project draft';
+
+		await controller.target.selectTarget(worktree);
+		expect(controller.projectPath).toBe('/repo/worktree');
+		expect(controller.fileNodes.map((node) => node.path)).toEqual(['worktree.ts']);
+		expect(controller.message).toBe('');
+		controller.message = 'Worktree draft';
+
+		await controller.target.selectTarget(project);
+		expect(controller.projectPath).toBe('/project');
+		expect(controller.fileNodes.map((node) => node.path)).toEqual(['project.ts']);
+		expect(controller.message).toBe('Project draft');
+		expect(controller.retainedDraftCount).toBe(2);
+	});
+
+	it('does not publish a generated message after a programmatic same-chat target change', async () => {
+		const generation = deferred<{ message: string }>();
+		mockedApi.generateCommitMessage.mockReturnValueOnce(generation.promise);
+		const controller = makeController();
+		await controller.setContext('chat', '/project');
+		await controller.setPresentationVisible(true);
+
+		const pending = controller.generateMessage();
+		await vi.waitFor(() =>
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']),
+		);
+		await controller.target.applyExternalTarget('chat', {
+			projectPath: '/repo/worktree',
+			repoRoot: '/repo',
+			worktreePath: '/repo/worktree',
+			label: 'worktree',
+			branch: 'feature',
+			source: 'worktree',
+		});
+		generation.resolve({ message: 'Stale project message' });
+		await pending;
+
+		expect(controller.projectPath).toBe('/repo/worktree');
+		expect(controller.message).toBe('');
 	});
 });

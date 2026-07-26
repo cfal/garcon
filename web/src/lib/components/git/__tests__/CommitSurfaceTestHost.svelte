@@ -1,11 +1,18 @@
 <script lang="ts">
 	import type { ComponentProps } from 'svelte';
 	import CommitSurface from '../CommitSurface.svelte';
-	import { setGitBranchActions, setWorkspaceCoordinator } from '$lib/context';
-	import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+	import {
+		setRemoteSettings,
+		setTransientLayers,
+		setWorkspaceCoordinator,
+	} from '$lib/context';
+	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 
 	let props: ComponentProps<typeof CommitSurface> = $props();
-	setGitBranchActions(new GitBranchSelectorState());
+	setRemoteSettings(createRemoteSettingsStore());
+	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
 	setWorkspaceCoordinator({
 		moveSurface: () => Promise.resolve(),
 		closeSurface: () => Promise.resolve(true),

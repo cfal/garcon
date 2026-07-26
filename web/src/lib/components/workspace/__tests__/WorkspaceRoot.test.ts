@@ -1,8 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
+import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import {
@@ -32,10 +32,13 @@ vi.mock('$lib/context', () => ({
 	getGhCapability: () => testContext.current?.ghCapability,
 	getGitBranchActions: () => testContext.current?.gitBranchActions,
 	getGitQuickSummary: () => testContext.current?.gitQuickSummary,
+	getGitReviewDisplay: () => testContext.current?.gitReviewDisplay,
+	getGitViewLauncher: () => testContext.current?.gitViewLauncher,
 	getLocalSettings: () => testContext.current?.localSettings,
 	getModelCatalog: () => testContext.current?.modelCatalog,
 	getNotifications: () => testContext.current?.notifications,
 	getOptionalTransientLayers: () => testContext.current?.transientLayers ?? null,
+	getRemoteSettings: () => testContext.current?.remoteSettings,
 	getSingletonSurfaces: () => testContext.current?.singletonSurfaces,
 	getSplitLayout: () => testContext.current?.splitLayout,
 	getSurfaceFrames: () => testContext.current?.surfaceFrames,
@@ -61,7 +64,13 @@ vi.mock('$lib/components/files/FileSurface.svelte', async () => ({
 vi.mock('$lib/components/files/FilesPanel.svelte', async () => ({
 	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
-vi.mock('$lib/components/git/GitPanel.svelte', async () => ({
+vi.mock('$lib/components/git/GitWorkbenchPanel.svelte', async () => ({
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
+}));
+vi.mock('$lib/components/git/GitHistoryPanel.svelte', async () => ({
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
+}));
+vi.mock('$lib/components/git/GitComparePanel.svelte', async () => ({
 	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 vi.mock('$lib/components/pr/PullRequestsPanel.svelte', async () => ({
@@ -114,12 +123,11 @@ class TestResizeObserver implements ResizeObserver {
 }
 
 function createSingletonSurfaces(): SingletonSurfaceRegistry {
+	const gitSurfaceDeps = createGitSurfaceTestDeps();
 	return new SingletonSurfaceRegistry({
-		createCommit: () => new CommitController({}),
+		...gitSurfaceDeps,
+		createCommit: () => new CommitController(gitSurfaceDeps),
 		createPullRequests: () => new PullRequestsStore(),
-		gitBranchActions: new GitBranchSelectorState(),
-		gitMutations: { run: vi.fn() } as never,
-		getCurrentEffectiveProjectKey: () => '/canonical/project',
 	});
 }
 
@@ -129,7 +137,11 @@ function singletonController(
 ): unknown {
 	switch (kind) {
 		case 'git':
-			return registry.git();
+			return registry.gitWorkbench();
+		case 'git-history':
+			return registry.gitHistory();
+		case 'git-compare':
+			return registry.gitCompare();
 		case 'files':
 			return registry.files();
 		case 'pull-requests':
@@ -330,6 +342,15 @@ function installContext(initial: WorkspaceLayoutSnapshot = withAdditionalSurface
 			startPolling: vi.fn(() => vi.fn()),
 			scheduleRefresh: vi.fn(),
 		},
+		gitReviewDisplay: createGitSurfaceTestDeps().reviewDisplay,
+		gitViewLauncher: {
+			openHistory: vi.fn(),
+			openCompare: vi.fn(),
+		},
+		remoteSettings: {
+			snapshot: null,
+			ensureLoadedInBackground: vi.fn(async () => undefined),
+		},
 		gitBranchActions: {
 			showNewBranchModal: false,
 			closeNewBranchDialog: vi.fn(),
@@ -359,6 +380,22 @@ const portableSurfaces: Array<{ name: string; descriptor: SurfaceDescriptor }> =
 	{ name: 'file', descriptor: { id: 'file:one', type: 'file', fileSessionId: 'one' } },
 	{ name: 'Files', descriptor: { id: 'singleton:files', type: 'singleton', kind: 'files' } },
 	{ name: 'Git', descriptor: { id: 'singleton:git', type: 'singleton', kind: 'git' } },
+	{
+		name: 'History',
+		descriptor: {
+			id: 'singleton:git-history',
+			type: 'singleton',
+			kind: 'git-history',
+		},
+	},
+	{
+		name: 'Compare',
+		descriptor: {
+			id: 'singleton:git-compare',
+			type: 'singleton',
+			kind: 'git-compare',
+		},
+	},
 	{
 		name: 'pull requests',
 		descriptor: {

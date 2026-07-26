@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShellBreakpointWorkspace } from './AppShellBreakpointWorkspace.svelte.js';
+import { reduceWorkspaceLayout } from '$lib/workspace/workspace-layout.svelte.js';
+import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -34,7 +36,7 @@ vi.mock('../ResizeHandle.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/workspace/BottomTabBar.svelte', async () => ({
-	default: (await import('./AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellBottomTabBarStub.svelte')).default,
 }));
 vi.mock('$lib/components/shared/NotificationHost.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
@@ -279,4 +281,85 @@ describe('AppShell responsive workspace binding', () => {
 		expect(workspace.focusChatCalls).toBe(1);
 		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
 	});
+
+	it.each(['git', 'git-history', 'git-compare'] as const)(
+		'hides the desktop chat list when %s is active and the Git setting is enabled',
+		async (kind) => {
+			const workspace = installContext();
+			(testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean })
+				.hideChatListWhenGitInMain = true;
+			const surfaceId = `singleton:${kind}`;
+			if (!workspace.layout.surface(surfaceId)) {
+				const registered = reduceWorkspaceLayout(workspace.layout.snapshot, [
+					{
+						type: 'register-surface',
+						surface: portableSingletonDescriptor(kind),
+						host: 'main',
+					},
+				]);
+				workspace.layout.publish(workspace.layout.revision, registered);
+			}
+			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
+				{ type: 'focus-host', host: 'main', surfaceId },
+			]);
+			workspace.layout.publish(workspace.layout.revision, focused);
+
+			render(AppShell);
+			await waitFor(() =>
+				expect(
+					document
+						.querySelector('[data-workspace-chat-list]')
+						?.getAttribute('aria-hidden'),
+				).toBe('true'),
+			);
+		},
+	);
+
+	it.each(['commit', 'files', 'pull-requests'] as const)(
+		'keeps the desktop chat list visible when %s is active',
+		async (kind) => {
+			const workspace = installContext();
+			(testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean })
+				.hideChatListWhenGitInMain = true;
+			const surfaceId = `singleton:${kind}`;
+			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
+				{ type: 'focus-host', host: kind === 'pull-requests' ? 'main' : 'sidebar', surfaceId },
+			]);
+			workspace.layout.publish(workspace.layout.revision, focused);
+
+			render(AppShell);
+			await waitFor(() =>
+				expect(
+					document
+						.querySelector('[data-workspace-chat-list]')
+						?.getAttribute('aria-hidden'),
+				).toBe('false'),
+			);
+		},
+	);
+
+	it.each(['git-history', 'git-compare'] as const)(
+		'hides the mobile bottom bar for transient %s',
+		async (kind) => {
+			const workspace = installContext();
+			const surfaceId = `singleton:${kind}`;
+			const mobile = reduceWorkspaceLayout(workspace.layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: portableSingletonDescriptor(kind),
+				},
+				{
+					type: 'set-mobile-presentation',
+					activeId: surfaceId,
+					returnStack: [],
+				},
+			]);
+			workspace.layout.publish(workspace.layout.revision, mobile);
+			workspace.isMobile = true;
+			mediaQuery.matches = true;
+
+			render(AppShell);
+			expect(screen.queryByTestId('bottom-tab-bar-stub')).toBeNull();
+		},
+	);
 });

@@ -294,21 +294,6 @@ describe('GitComparisonController', () => {
 		await vi.waitFor(() => expect(comparison.bodyError).toBeNull());
 	});
 
-	it('fills explicit From and To slots from History selection', () => {
-		const comparison = new GitComparisonController();
-		comparison.beginHistorySelection();
-		comparison.selectHistoryCommit('older');
-		comparison.selectHistoryCommit('newer');
-		const defaults = comparison.takeSelectedHistoryRange();
-
-			expect(defaults).toEqual({
-				fromRevision: 'older',
-				toKind: 'revision',
-				toRevision: 'newer',
-			});
-		expect(comparison.historySelectionActive).toBe(false);
-	});
-
 	it('preserves typed endpoint and merge-base failures for dialog recovery', async () => {
 		vi.mocked(getGitComparisonSnapshot)
 			.mockResolvedValueOnce({

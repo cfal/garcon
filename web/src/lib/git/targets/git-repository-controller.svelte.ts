@@ -21,7 +21,11 @@ import {
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
-import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
+
+export interface GitRepositoryControllerOptions {
+	branches: GitBranchSelectorState;
+	surfaceId: string;
+}
 
 const EMPTY_STATUS: GitStatus = {
 	branch: '',
@@ -58,9 +62,11 @@ export class GitRepositoryController {
 	private statusGeneration = 0;
 	private remoteStatusGeneration = 0;
 	private readonly branchSelector: GitBranchSelectorState;
+	private readonly surfaceId: string;
 
-	constructor(branchSelector: GitBranchSelectorState) {
-		this.branchSelector = branchSelector;
+	constructor(options: GitRepositoryControllerOptions) {
+		this.branchSelector = options.branches;
+		this.surfaceId = options.surfaceId;
 	}
 
 	get currentBranch(): string {
@@ -106,7 +112,7 @@ export class GitRepositoryController {
 	openNewBranchDialog(projectPath: string, effectiveProjectKey: string): void {
 		this.branchSelector.openNewBranchDialog(
 			projectPath,
-			singletonSurfaceId('git'),
+			this.surfaceId,
 			effectiveProjectKey,
 		);
 	}
@@ -225,11 +231,6 @@ export class GitRepositoryController {
 		this.projectPath = projectPath;
 		this.statusGeneration += 1;
 		this.remoteStatusGeneration += 1;
-		this.branchSelector.resetForProject(
-			projectPath,
-			options.currentBranch ?? '',
-			options.effectiveProjectKey ?? projectPath,
-		);
 		this.gitStatus = null;
 		this.remoteStatus = null;
 		this.commitMessage = '';
@@ -337,7 +338,7 @@ export class GitRepositoryController {
 			projectPath,
 			branch,
 			refKind,
-			singletonSurfaceId('git'),
+			this.surfaceId,
 			effectiveProjectKey,
 		);
 		if (ok)

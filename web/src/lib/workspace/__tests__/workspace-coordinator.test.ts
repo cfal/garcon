@@ -583,6 +583,100 @@ describe('WorkspaceCoordinator', () => {
 		expect(appShell.isMobile).toBe(false);
 	});
 
+	it.each(['git-history', 'git-compare'] as const)(
+		'closes mobile-only %s and returns to Chat',
+		async (kind) => {
+			const { coordinator, layout, singletons } = createHarness();
+			await coordinator.enterMobilePresentation();
+			await coordinator.focusMobileSingleton(kind);
+			const surfaceId = `singleton:${kind}`;
+
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
+			expect(layout.snapshot.mobileOnlySurfaceIds).toContain(surfaceId);
+			await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
+			expect(layout.surface(surfaceId)).toBeNull();
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+			expect(singletons.disposeSurface).toHaveBeenCalledWith(kind);
+		},
+	);
+
+	it('destroys every mobile-only Git view on responsive desktop return', async () => {
+		const { coordinator, layout, singletons } = createHarness();
+		await coordinator.enterMobilePresentation();
+		await coordinator.focusMobileSingleton('git-history');
+		await coordinator.focusMobileSingleton('git-compare');
+
+		await coordinator.exitMobilePresentation();
+
+		expect(coordinator.isMobile).toBe(false);
+		expect(layout.surface('singleton:git-history')).toBeNull();
+		expect(layout.surface('singleton:git-compare')).toBeNull();
+		expect(singletons.disposeSurface).toHaveBeenCalledWith('git-history');
+		expect(singletons.disposeSurface).toHaveBeenCalledWith('git-compare');
+	});
+
+	it('disposes a removed Git view when mobile re-entry supersedes desktop reconciliation', async () => {
+		const context: {
+			coordinator?: WorkspaceCoordinator;
+			layout?: ReturnType<typeof createWorkspaceLayoutStore>;
+		} = {};
+		let reentry: Promise<void> | null = null;
+		let triggerReentry = false;
+		const harness = createHarness({
+			onLayoutChanged: () => {
+				if (
+					triggerReentry &&
+					!context.layout?.surface('singleton:git-compare') &&
+					!reentry
+				) {
+					reentry = context.coordinator?.enterMobilePresentation() ?? null;
+				}
+			},
+		});
+		context.coordinator = harness.coordinator;
+		context.layout = harness.layout;
+		await harness.coordinator.enterMobilePresentation();
+		await harness.coordinator.focusMobileSingleton('git-compare');
+		triggerReentry = true;
+
+		await harness.coordinator.exitMobilePresentation();
+		await reentry;
+
+		expect(harness.coordinator.isMobile).toBe(true);
+		expect(harness.layout.surface('singleton:git-compare')).toBeNull();
+		expect(harness.singletons.disposeSurface).toHaveBeenCalledWith('git-compare');
+	});
+
+	it('preserves a desktop-owned Git view across a mobile presentation', async () => {
+		const { coordinator, layout, singletons } = createHarness();
+		await coordinator.openSingleton('git-history', 'main');
+		await coordinator.enterMobilePresentation();
+		await coordinator.focusMobileSingleton('git-history');
+
+		await coordinator.exitMobilePresentation();
+
+		expect(layout.snapshot.main.order).toContain('singleton:git-history');
+		expect(layout.surface('singleton:git-history')).not.toBeNull();
+		expect(singletons.disposeSurface).not.toHaveBeenCalledWith('git-history');
+	});
+
+	it('rolls back a failed desktop return and remains retryable', async () => {
+		const { coordinator, layout } = createHarness({ failLayoutPublishAt: 4 });
+		await coordinator.enterMobilePresentation();
+		await coordinator.focusMobileSingleton('git-history');
+
+		await expect(coordinator.exitMobilePresentation()).rejects.toThrow(
+			'layout publication failed',
+		);
+		expect(coordinator.isMobile).toBe(true);
+		expect(layout.surface('singleton:git-history')).not.toBeNull();
+
+		await expect(coordinator.exitMobilePresentation()).resolves.toBeUndefined();
+		expect(coordinator.isMobile).toBe(false);
+		expect(layout.surface('singleton:git-history')).toBeNull();
+	});
+
 	it('prepares a queued commit for the presentation mode active in its arbiter turn', async () => {
 		const { coordinator, singletons } = createHarness();
 

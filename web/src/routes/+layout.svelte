@@ -53,6 +53,8 @@
 		setGitQuickSummary,
 		setGitBranchActions,
 		setGitMutations,
+		setGitReviewDisplay,
+		setGitViewLauncher,
 		setSingletonSurfaces,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
@@ -131,6 +133,8 @@
 	const gitQuickSummary = workspaceServices.gitQuickSummary;
 	const gitMutations = workspaceServices.gitMutations;
 	const gitBranchActions = workspaceServices.gitBranchActions;
+	const gitReviewDisplay = workspaceServices.gitReviewDisplay;
+	const gitViews = workspaceServices.gitViews;
 	const singletonSurfaces = workspaceServices.singletonSurfaces;
 	const fileSessions = workspaceServices.files;
 	const workspace = workspaceServices.coordinator;
@@ -168,6 +172,8 @@
 	setGitQuickSummary(gitQuickSummary);
 	setGitBranchActions(gitBranchActions);
 	setGitMutations(gitMutations);
+	setGitReviewDisplay(gitReviewDisplay);
+	setGitViewLauncher(gitViews);
 	setSingletonSurfaces(singletonSurfaces);
 	setWs(ws);
 	setFileSessions(fileSessions);

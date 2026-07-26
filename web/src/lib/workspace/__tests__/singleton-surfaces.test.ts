@@ -1,8 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
-import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
+import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import SingletonSurfaceRegistryTemplateHost from './SingletonSurfaceRegistryTemplateHost.svelte';
@@ -21,9 +20,11 @@ function createRegistry() {
 		setPresentationVisible: ReturnType<typeof vi.fn>;
 		dispose: ReturnType<typeof vi.fn>;
 	}> = [];
+	const gitSurfaceDeps = createGitSurfaceTestDeps();
 	const registry = new SingletonSurfaceRegistry({
+		...gitSurfaceDeps,
 		createCommit: () => {
-			const controller = new CommitController({});
+			const controller = new CommitController(gitSurfaceDeps);
 			const tracked = {
 				setProjectState: vi.spyOn(controller, 'setProjectState'),
 				setPresentationVisible: vi.spyOn(controller, 'setPresentationVisible'),
@@ -43,9 +44,6 @@ function createRegistry() {
 			pullRequestsStores.push(tracked);
 			return controller;
 		},
-		gitBranchActions: new GitBranchSelectorState(),
-		gitMutations: new GitMutationCoordinator({ onChanged: vi.fn() }),
-		getCurrentEffectiveProjectKey: () => '/canonical/project',
 	});
 	return { registry, commits, pullRequestsStores };
 }
@@ -61,7 +59,7 @@ describe('SingletonSurfaceRegistry', () => {
 				effectiveProjectKey: '/canonical/a',
 			},
 		});
-		const git = registry.git();
+		const git = registry.gitWorkbench();
 		const files = registry.files();
 		registry.commit();
 		registry.pullRequests();
@@ -76,8 +74,8 @@ describe('SingletonSurfaceRegistry', () => {
 
 		registry.setProjectState(resolving);
 
-		expect(git.baseProjectPath).toBe('/project-a');
-		expect(git.effectiveProjectKey).toBe('/canonical/a');
+		expect(git.target.baseProjectPath).toBe('/project-a');
+		expect(git.target.effectiveProjectKey).toBe('/canonical/a');
 		expect(files.tree.projectPath).toBe('/project-a');
 		expect(files.tree.effectiveProjectKey).toBe('/canonical/a');
 		expect(commits[0]?.setProjectState).toHaveBeenLastCalledWith(resolving);
@@ -88,17 +86,17 @@ describe('SingletonSurfaceRegistry', () => {
 		const { registry } = createRegistry();
 		registry.setPresentationVisible('git', true);
 		registry.setPresentationVisible('files', true);
-		const git = registry.git();
+		const git = registry.gitWorkbench();
 		const files = registry.files();
-		git.showTargetDialog = true;
+		git.target.showTargetDialog = true;
 
 		registry.setPresentationVisible('git', false);
 		registry.setPresentationVisible('files', false);
 
-		expect(registry.git()).toBe(git);
+		expect(registry.gitWorkbench()).toBe(git);
 		expect(registry.files()).toBe(files);
 		expect(git.presentationVisible).toBe(false);
-		expect(git.showTargetDialog).toBe(true);
+		expect(git.target.showTargetDialog).toBe(false);
 		expect(files.presentationVisible).toBe(false);
 	});
 
@@ -113,22 +111,18 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(screen.getByText('visible')).toBeTruthy();
 	});
 
-	it('consumes each project invalidation once across Git placement remounts', () => {
+	it('retains each controller across Git placement remounts', () => {
 		const { registry } = createRegistry();
-		const git = registry.git();
+		const git = registry.gitWorkbench();
 
-		expect(git.takeInvalidationRefresh('/project', 1)).toBe(true);
-		expect(git.takeInvalidationRefresh('/project', 1)).toBe(false);
 		registry.setPresentationVisible('git', false);
 		registry.setPresentationVisible('git', true);
-		expect(registry.git()).toBe(git);
-		expect(git.takeInvalidationRefresh('/project', 1)).toBe(false);
-		expect(git.takeInvalidationRefresh('/project', 2)).toBe(true);
+		expect(registry.gitWorkbench()).toBe(git);
 	});
 
 	it('disposes only on destructive Close and creates a fresh controller on reopen', () => {
 		const { registry } = createRegistry();
-		const firstGit = registry.git();
+		const firstGit = registry.gitWorkbench();
 		const firstFiles = registry.files();
 		const firstPullRequests = registry.pullRequests();
 		const firstCommit = registry.commit();
@@ -138,12 +132,29 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.disposeSurface('pull-requests');
 		registry.disposeSurface('commit');
 
-		expect(registry.git()).not.toBe(firstGit);
+		expect(registry.gitWorkbench()).not.toBe(firstGit);
 		expect(registry.files()).not.toBe(firstFiles);
 		expect(registry.pullRequests()).not.toBe(firstPullRequests);
 		expect(registry.commit()).not.toBe(firstCommit);
 		expect(firstPullRequests.dispose).toHaveBeenCalledOnce();
 		expect(firstCommit.dispose).toHaveBeenCalledOnce();
+	});
+
+	it('constructs independent Workbench, History, and Compare controllers', () => {
+		const { registry } = createRegistry();
+		const workbench = registry.gitWorkbench();
+		const history = registry.gitHistory();
+		const compare = registry.gitCompare();
+
+		expect(workbench).not.toBe(history);
+		expect(history).not.toBe(compare);
+		expect(workbench.target.branches).not.toBe(history.target.branches);
+		expect(history.target.branches).not.toBe(compare.target.branches);
+
+		registry.disposeSurface('git-compare');
+		expect(registry.gitWorkbench()).toBe(workbench);
+		expect(registry.gitHistory()).toBe(history);
+		expect(registry.gitCompare()).not.toBe(compare);
 	});
 
 	it('routes visibility for every singleton through one lifecycle owner', () => {

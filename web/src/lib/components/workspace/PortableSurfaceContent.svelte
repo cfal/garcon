@@ -9,7 +9,15 @@
 	);
 	const fileRenderer = lazyRenderer(() => import('$lib/components/files/FileSurface.svelte'));
 	const filesRenderer = lazyRenderer(() => import('$lib/components/files/FilesPanel.svelte'));
-	const gitRenderer = lazyRenderer(() => import('$lib/components/git/GitPanel.svelte'));
+	const gitWorkbenchRenderer = lazyRenderer(
+		() => import('$lib/components/git/GitWorkbenchPanel.svelte'),
+	);
+	const gitHistoryRenderer = lazyRenderer(
+		() => import('$lib/components/git/GitHistoryPanel.svelte'),
+	);
+	const gitCompareRenderer = lazyRenderer(
+		() => import('$lib/components/git/GitComparePanel.svelte'),
+	);
 	const pullRequestsRenderer = lazyRenderer(
 		() => import('$lib/components/pr/PullRequestsPanel.svelte'),
 	);
@@ -110,31 +118,49 @@
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'git'}
-		{@const controller = singletonSurfaces.git()}
-		{@const projectPath =
-			projectState.kind === 'available'
-				? projectState.project.projectPath
-				: projectState.kind === 'resolving'
-					? controller.baseProjectPath
-					: null}
-		{@const effectiveProjectKey =
-			projectState.kind === 'available'
-				? projectState.project.effectiveProjectKey
-				: projectState.kind === 'resolving'
-					? controller.effectiveProjectKey
-					: null}
+		{@const controller = singletonSurfaces.gitWorkbench()}
 		<ProjectSurfaceGate
 			{projectState}
-			retainedProjectPath={controller.baseProjectPath}
-			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
 		>
-			{#await gitRenderer() then GitPanel}
-				<GitPanel
-					{projectPath}
-					{effectiveProjectKey}
-					isMobile={presentation === 'mobile'}
+			{#await gitWorkbenchRenderer() then GitWorkbenchPanel}
+				<GitWorkbenchPanel
+					{controller}
 					{presentation}
-					isVisible={visible}
+					{visible}
+					{onAppendToChatDraft}
+				/>
+			{/await}
+		</ProjectSurfaceGate>
+	{:else if surface.type === 'singleton' && surface.kind === 'git-history'}
+		{@const controller = singletonSurfaces.gitHistory()}
+		<ProjectSurfaceGate
+			{projectState}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+		>
+			{#await gitHistoryRenderer() then GitHistoryPanel}
+				<GitHistoryPanel
+					{controller}
+					{presentation}
+					{visible}
+					{onAppendToChatDraft}
+				/>
+			{/await}
+		</ProjectSurfaceGate>
+	{:else if surface.type === 'singleton' && surface.kind === 'git-compare'}
+		{@const controller = singletonSurfaces.gitCompare()}
+		<ProjectSurfaceGate
+			{projectState}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
+		>
+			{#await gitCompareRenderer() then GitComparePanel}
+				<GitComparePanel
+					{controller}
+					{presentation}
+					{visible}
 					{onAppendToChatDraft}
 				/>
 			{/await}
@@ -160,8 +186,8 @@
 		{@const controller = singletonSurfaces.commit()}
 		<ProjectSurfaceGate
 			{projectState}
-			retainedProjectPath={controller.projectPath}
-			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+			retainedProjectPath={controller.target.baseProjectPath}
+			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
 		>
 			{#await commitRenderer() then CommitSurface}
 				<CommitSurface {controller} {presentation} />

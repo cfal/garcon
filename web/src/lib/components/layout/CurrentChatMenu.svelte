@@ -29,6 +29,8 @@
 		onToggleSplitMode: () => void;
 		onToggleDesktopFullscreen?: () => void;
 		onOpenUserMessageNavigator?: () => void;
+		onOpenGitHistory?: () => void;
+		onOpenGitCompare?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
 		onReload: () => void;
@@ -53,6 +55,8 @@
 		onToggleSplitMode,
 		onToggleDesktopFullscreen,
 		onOpenUserMessageNavigator,
+		onOpenGitHistory,
+		onOpenGitCompare,
 		onRename,
 		onDetails,
 		onReload,
@@ -88,6 +92,8 @@
 			{onToggleSplitMode}
 			{onToggleDesktopFullscreen}
 			{onOpenUserMessageNavigator}
+			{onOpenGitHistory}
+			{onOpenGitCompare}
 			{onRename}
 			{onDetails}
 			{onReload}

@@ -2,10 +2,13 @@ import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import CommitSurfaceTestHost from './CommitSurfaceTestHost.svelte';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
+import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import * as m from '$lib/paraglide/messages.js';
 
 function makeController(): CommitController {
-	return new CommitController({});
+	const controller = new CommitController(createGitSurfaceTestDeps());
+	void controller.setContext('/project', '/project');
+	return controller;
 }
 
 describe('CommitSurface', () => {
@@ -36,5 +39,24 @@ describe('CommitSurface', () => {
 		});
 
 		expect(screen.getByRole('textbox').classList.contains('text-base')).toBe(true);
+	});
+
+	it('uses the shared folder and branch target controls', () => {
+		render(CommitSurfaceTestHost, {
+			controller: makeController(),
+			presentation: 'main',
+		});
+
+		expect(screen.getByRole('button', { name: '/project' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();
+	});
+
+	it('owns branch state independently from another Commit controller', () => {
+		const first = makeController();
+		const second = makeController();
+		first.target.branches.currentBranch = 'feature';
+
+		expect(second.target.branches.currentBranch).toBe('');
+		expect(first.target.branches).not.toBe(second.target.branches);
 	});
 });

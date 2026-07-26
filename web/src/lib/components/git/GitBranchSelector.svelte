@@ -32,6 +32,7 @@
 		remoteStatus?: GitRemoteStatus | null;
 		isOpen: boolean;
 		isLoading?: boolean;
+		disabled?: boolean;
 		isMobile?: boolean;
 		side?: DropdownSide;
 		align?: DropdownAlign;
@@ -58,6 +59,7 @@
 		remoteStatus = null,
 		isOpen,
 		isLoading = false,
+		disabled = false,
 		isMobile = false,
 		side = 'bottom',
 		align = 'start',
@@ -322,6 +324,7 @@
 		aria-haspopup="listbox"
 		aria-expanded={isOpen}
 		aria-label={m.git_branch_selector_trigger_label({ branch: currentBranchLabel })}
+		{disabled}
 		class={resolvedTriggerClass}
 		title={currentBranchLabel}
 	>

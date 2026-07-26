@@ -6,6 +6,7 @@
 		getModelCatalog,
 		getSplitLayout,
 		getChatInteractionGate,
+		getGitViewLauncher,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
@@ -92,6 +93,7 @@
 	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
 	const chatInteractionGate = getChatInteractionGate();
+	const gitViews = getGitViewLauncher();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const splitPanePreviews = new SplitPanePreviewStore(chatTranscriptCache);
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
@@ -339,6 +341,12 @@
 			onToggleSplitMode={toggleSplitMode}
 			{onToggleDesktopFullscreen}
 			onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
+			onOpenGitHistory={isMobileLayout
+				? () => void gitViews.openHistory({ presentation: 'mobile' })
+				: undefined}
+			onOpenGitCompare={isMobileLayout
+				? () => void gitViews.openCompare({ presentation: 'mobile' })
+				: undefined}
 			onRename={() => chatActions.requestRename(selectedChat)}
 			onDetails={() => chatActions.requestDetails(selectedChat)}
 			onReload={() => chatActions.reload(selectedChat)}

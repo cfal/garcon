@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import History from '@lucide/svelte/icons/history';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -10,23 +9,21 @@
 	import {
 		GIT_EMPTY_TREE_REVISION,
 		recentCommitComparisonDefaults,
-		type GitComparisonController,
 		type GitComparisonDialogDefaults,
 	} from '$lib/git/review/git-comparison.svelte.js';
+	import type { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
 
 	interface GitHistoryViewProps {
 		history: GitHistoryController;
-		comparison: GitComparisonController;
+		comparisonSelection: GitHistoryComparisonSelectionState;
 		projectPath: string | null;
-		effectiveProjectKey: string | null;
 		isMobile: boolean;
 		active?: boolean;
 		diffMode: DiffMode;
 		contextLines: number;
 		diffFontSize: number;
-		refreshToken?: number;
 		onRevertCommit: (commit: GitHistoryRevertTarget) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 		onOpenComparison: (defaults: GitComparisonDialogDefaults) => void;
@@ -39,15 +36,13 @@
 
 	let {
 		history,
-		comparison,
+		comparisonSelection,
 		projectPath,
-		effectiveProjectKey,
 		isMobile,
 		active = true,
 		diffMode,
 		contextLines,
 		diffFontSize,
-		refreshToken = 0,
 		onRevertCommit,
 		onOpenInEditor,
 		onOpenComparison,
@@ -58,50 +53,6 @@
 		onSetDiffFontSize = () => undefined,
 	}: GitHistoryViewProps = $props();
 
-	let loadedProjectPath = $state<string | null>(null);
-	let loadedEffectiveProjectKey = $state<string | null>(null);
-	let lastRefreshToken = $state(0);
-
-	$effect(() => {
-		const project = projectPath;
-		const projectKey = effectiveProjectKey;
-		untrack(() => {
-			if (!project || !projectKey) {
-				loadedProjectPath = null;
-				loadedEffectiveProjectKey = null;
-				history.resetForProject(null);
-				return;
-			}
-			if (loadedProjectPath === project && loadedEffectiveProjectKey === projectKey) return;
-			const identityChanged =
-				loadedEffectiveProjectKey !== null && loadedEffectiveProjectKey !== projectKey;
-			loadedProjectPath = project;
-			loadedEffectiveProjectKey = projectKey;
-			if (identityChanged) history.resetForProject(project);
-			history.ensureInitialLoaded(project);
-		});
-	});
-
-	$effect(() => {
-		const project = projectPath;
-		const mode = diffMode;
-		const context = contextLines;
-		untrack(() => {
-			history.setDisplayOptions(project, mode, context);
-			if (project) comparison.setDisplayOptions(project, mode, context);
-		});
-	});
-
-	$effect(() => {
-		const project = projectPath;
-		const token = refreshToken;
-		untrack(() => {
-			if (token === lastRefreshToken) return;
-			lastRefreshToken = token;
-			if (project) history.loadInitial(project);
-		});
-	});
-
 	function revertListCommit(commit: { hash: string; shortHash: string; subject: string }): void {
 		onRevertCommit({
 			hash: commit.hash,
@@ -111,7 +62,7 @@
 	}
 
 	function openSelectedHistoryRange(): void {
-		const defaults = comparison.takeSelectedHistoryRange();
+		const defaults = comparisonSelection.take();
 		if (defaults) onOpenComparison(defaults);
 	}
 
@@ -137,14 +88,14 @@
 		onRevertCommit={revertListCommit}
 		onLoadMore={() => history.loadMore(projectPath)}
 		onScrollSave={(top) => history.saveListScrollTop(top)}
-		comparisonSelectionActive={comparison.historySelectionActive}
-		comparisonSelectionSlot={comparison.historySelectionSlot}
-		comparisonFrom={comparison.historySelectionFrom}
-		comparisonTo={comparison.historySelectionTo}
-		onBeginComparison={() => comparison.beginHistorySelection()}
-		onCancelComparison={() => comparison.cancelHistorySelection()}
-		onSelectComparisonCommit={(hash) => comparison.selectHistoryCommit(hash)}
-		onSelectComparisonSlot={(slot) => comparison.setHistorySelectionSlot(slot)}
+		comparisonSelectionActive={comparisonSelection.active}
+		comparisonSelectionSlot={comparisonSelection.slot}
+		comparisonFrom={comparisonSelection.from}
+		comparisonTo={comparisonSelection.to}
+		onBeginComparison={() => comparisonSelection.begin()}
+		onCancelComparison={() => comparisonSelection.cancel()}
+		onSelectComparisonCommit={(hash) => comparisonSelection.select(hash)}
+		onSelectComparisonSlot={(slot) => comparisonSelection.setSlot(slot)}
 		onOpenComparison={openHistoryComparison}
 		onOpenSelectedComparison={openSelectedHistoryRange}
 	/>

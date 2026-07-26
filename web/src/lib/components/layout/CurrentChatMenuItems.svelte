@@ -3,6 +3,8 @@
 	import Edit2 from '@lucide/svelte/icons/pencil';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitFork from '@lucide/svelte/icons/git-fork';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+	import History from '@lucide/svelte/icons/history';
 	import Info from '@lucide/svelte/icons/info';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
@@ -27,6 +29,8 @@
 		onToggleSplitMode,
 		onToggleDesktopFullscreen,
 		onOpenUserMessageNavigator,
+		onOpenGitHistory,
+		onOpenGitCompare,
 		onRename,
 		onDetails,
 		onReload,
@@ -47,6 +51,8 @@
 		onToggleSplitMode: () => void;
 		onToggleDesktopFullscreen?: () => void;
 		onOpenUserMessageNavigator?: () => void;
+		onOpenGitHistory?: () => void;
+		onOpenGitCompare?: () => void;
 		onRename: () => void;
 		onDetails: () => void;
 		onReload: () => void;
@@ -63,6 +69,22 @@
 		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
 	);
 </script>
+
+{#if onOpenGitHistory || onOpenGitCompare}
+	{#if onOpenGitHistory}
+		<DropdownMenuItem onclick={onOpenGitHistory}>
+			<History />
+			{m.workspace_open_git_history()}
+		</DropdownMenuItem>
+	{/if}
+	{#if onOpenGitCompare}
+		<DropdownMenuItem onclick={onOpenGitCompare}>
+			<GitCompareArrows />
+			{m.workspace_open_git_compare()}
+		</DropdownMenuItem>
+	{/if}
+	<DropdownMenuSeparator />
+{/if}
 
 {#if showSplitViewAction || showFullscreenAction}
 	{#if showSplitViewAction}

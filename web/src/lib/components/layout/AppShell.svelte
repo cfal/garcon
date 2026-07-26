@@ -96,7 +96,9 @@
 	const hideLeftForGit = $derived(
 		!isMobile &&
 			localSettings.hideChatListWhenGitInMain &&
-			workspace.layout.activeMainKind === 'git',
+			(workspace.layout.activeMainKind === 'git' ||
+				workspace.layout.activeMainKind === 'git-history' ||
+				workspace.layout.activeMainKind === 'git-compare'),
 	);
 	const hideLeftSidebar = $derived(effectiveWorkspaceFullscreen || hideLeftForGit);
 	const mobileActiveDescriptor = $derived(
@@ -115,7 +117,10 @@
 	});
 	const mobileTransientSurface = $derived(
 		mobileActiveDescriptor?.type === 'file' ||
-			(mobileActiveDescriptor?.type === 'singleton' && mobileActiveDescriptor.kind === 'commit'),
+			(mobileActiveDescriptor?.type === 'singleton' &&
+				(mobileActiveDescriptor.kind === 'commit' ||
+					mobileActiveDescriptor.kind === 'git-history' ||
+					mobileActiveDescriptor.kind === 'git-compare')),
 	);
 	let notificationDesktopInlineStartPx = $state(16);
 	const sidebarMounted = $derived(!isMobile || appShell.sidebarOpen);

@@ -235,15 +235,58 @@ export class SpaDriver {
   }
 
   async selectMainWorkspaceSurface(name: string): Promise<void> {
+    await this.#selectWorkspaceSurface(
+      name,
+      '[data-floating-workspace-toolbar]',
+      'main',
+    );
+  }
+
+  async selectSidebarWorkspaceSurface(name: string): Promise<void> {
+    await this.#selectWorkspaceSurface(
+      name,
+      '[data-floating-sidebar-toolbar]',
+      'sidebar',
+    );
+  }
+
+  async setViewport(width: number, height: number): Promise<void> {
+    await this.#page.setViewport({ width, height, isMobile: width <= 768 });
+    await this.#page.waitForFunction(
+      (expected) => matchMedia('(max-width: 768px)').matches === expected,
+      { timeout: 20_000 },
+      width <= 768,
+    );
+  }
+
+  async openWorkspaceActions(host: 'main' | 'sidebar'): Promise<void> {
+    const toolbarSelector = host === 'main'
+      ? '[data-floating-workspace-toolbar]'
+      : '[data-floating-sidebar-toolbar]';
+    await this.#page.evaluate((selector) => {
+      const trigger = document.querySelector<HTMLButtonElement>(
+        `${selector} [data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]`,
+      );
+      if (!trigger) throw new Error(`Missing ${selector} workspace menu.`);
+      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
+    }, toolbarSelector);
+  }
+
+  async #selectWorkspaceSurface(
+    name: string,
+    toolbarSelector: string,
+    hostLabel: 'main' | 'sidebar',
+  ): Promise<void> {
     const result = await this.#page.evaluate((expected) => {
       const taskbar = document.querySelector<HTMLElement>(
-        '[data-floating-workspace-toolbar] [data-workspace-taskbar]',
+        `${expected.toolbarSelector} [data-workspace-taskbar]`,
       );
       if (!taskbar) return 'missing-taskbar';
 
       const tab = [...taskbar.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
         (element) =>
-          (element.getAttribute('aria-label') || element.textContent?.trim() || '') === expected,
+          (element.getAttribute('aria-label') || element.textContent?.trim() || '')
+            === expected.name,
       );
       if (tab) {
         if (tab.disabled || tab.getAttribute('aria-disabled') === 'true') return 'disabled';
@@ -255,33 +298,22 @@ export class SpaDriver {
       );
       if (!menuTrigger) return 'missing-menu';
       return 'menu';
-    }, name);
+    }, { name, toolbarSelector });
 
     if (result === 'tab') {
       await this.clickButton(name);
       return;
     }
     if (result === 'disabled') throw new Error(`Workspace surface is disabled: ${name}`);
-    if (result === 'missing-taskbar') throw new Error('Missing main workspace taskbar.');
-    if (result === 'missing-menu') throw new Error('Missing main workspace menu.');
+    if (result === 'missing-taskbar') throw new Error(`Missing ${hostLabel} workspace taskbar.`);
+    if (result === 'missing-menu') throw new Error(`Missing ${hostLabel} workspace menu.`);
     try {
-      await this.#page.evaluate(() => {
-        const menuTrigger = document.querySelector<HTMLButtonElement>(
-          '[data-floating-workspace-toolbar] [data-workspace-taskbar-end] '
-            + '[data-slot="dropdown-menu-trigger"]',
-        );
-        if (!menuTrigger) throw new Error('Missing main workspace menu.');
-        menuTrigger.click();
-      });
+      await this.openWorkspaceActions(hostLabel);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
     }
     await this.waitForMenuItemEnabled(name);
-    try {
-      await this.clickMenuItem(name);
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
-    }
+    await this.clickMenuItem(name);
   }
 
   async clickResponsiveAction(name: string): Promise<void> {
@@ -321,15 +353,21 @@ export class SpaDriver {
   }
 
   async clickMenuItem(name: string): Promise<void> {
-    await this.#page.evaluate((expected) => {
-      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) =>
-        (element.getAttribute('aria-label') || element.textContent?.trim()) === expected);
-      if (!item) throw new Error(`Missing menu item: ${expected}`);
-      if (item.getAttribute('aria-disabled') === 'true') {
-        throw new Error(`Menu item is disabled: ${expected}`);
-      }
-      item.click();
-    }, name);
+    try {
+      await this.#page.evaluate((expected) => {
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) =>
+          (element.getAttribute('aria-label') || element.textContent?.trim()) === expected);
+        if (!item) throw new Error(`Missing menu item: ${expected}`);
+        if (item.getAttribute('aria-disabled') === 'true') {
+          throw new Error(`Menu item is disabled: ${expected}`);
+        }
+        item.click();
+      }, name);
+    } catch (error) {
+      // Lightpanda can collect the CDP promise when the click unmounts the menu.
+      // Each caller's next product milestone still verifies that the click took effect.
+      if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
+    }
   }
 
   async waitForMenuItemEnabled(name: string): Promise<void> {

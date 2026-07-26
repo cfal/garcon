@@ -49,7 +49,6 @@
 		onAppendToChatDraft?: ChatDraftAppend;
 		onOpenChat?: () => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
-		onCompareRevisions?: () => void;
 	}
 
 	let {
@@ -62,7 +61,6 @@
 		onAppendToChatDraft,
 		onOpenChat = () => undefined,
 		onOpenInEditor,
-		onCompareRevisions = () => undefined,
 	}: GitWorkbenchProps = $props();
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
@@ -406,7 +404,6 @@
 		projectPath={activeProjectPath ?? ''}
 		selectedFile={files.selectedFile}
 		{porcelain}
-		{onCompareRevisions}
 	/>
 	<GitVirtualDiffSurface
 		layoutIdentity={viewportLayoutIdentity}
