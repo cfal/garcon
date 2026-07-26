@@ -201,13 +201,22 @@ describe('ClaudeProcessTransport', () => {
     }]);
   });
 
-  it('serializes writes and rejects failed writes', async () => {
+  it('serializes writes through backpressure and reports write failures', async () => {
     const fake = createTransport();
-    await Promise.all([
+    const firstWrite = deferred();
+    fake.process.stdin.write.mockImplementationOnce((line) => {
+      fake.writes.push(line);
+      return firstWrite.promise;
+    });
+    const writes = [
       fake.transport.writeLine('{"order":1}'),
       fake.transport.writeLine('{"order":2}'),
       fake.transport.writeLine('{"order":3}'),
-    ]);
+    ];
+    await Promise.resolve();
+    expect(fake.writes).toEqual(['{"order":1}\n']);
+    firstWrite.resolve(1);
+    await Promise.all(writes);
     expect(fake.writes).toEqual([
       '{"order":1}\n',
       '{"order":2}\n',
@@ -218,6 +227,17 @@ describe('ClaudeProcessTransport', () => {
       throw new Error('stdin exploded');
     });
     await expect(fake.transport.writeLine('{"order":4}')).rejects.toThrow('stdin exploded');
+    expect(fake.failures).toEqual([{ kind: 'write', message: 'stdin exploded' }]);
+  });
+
+  it('awaits flush failures and reports them through the transport', async () => {
+    const fake = createTransport();
+    fake.process.stdin.flush.mockImplementationOnce(() => Promise.reject(
+      new Error('flush exploded'),
+    ));
+
+    await expect(fake.transport.writeLine('{"order":1}')).rejects.toThrow('flush exploded');
+    expect(fake.failures).toEqual([{ kind: 'write', message: 'flush exploded' }]);
   });
 
   it('closes stdin and awaits natural exit during retirement', async () => {

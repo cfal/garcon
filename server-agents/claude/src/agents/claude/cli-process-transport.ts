@@ -161,14 +161,17 @@ export class ClaudeProcessTransport<Message> {
   }
 
   writeLine(jsonl: string): Promise<void> {
-    const write = this.#writeTail.then(() => {
+    const write = this.#writeTail.then(async () => {
       if (this.#retiring || this.process.killed) {
         throw new Error('Claude CLI process is not writable');
       }
       const stdin = this.process.stdin as import('bun').FileSink;
       if (!stdin?.write) throw new Error('Claude CLI process has no writable stdin');
-      stdin.write(jsonl + '\n');
-      stdin.flush();
+      await stdin.write(jsonl + '\n');
+      await stdin.flush();
+    }).catch((error: unknown) => {
+      this.#reportFailure({ kind: 'write', message: errorMessage(error) });
+      throw error;
     });
     this.#writeTail = write.catch(() => undefined);
     return write;

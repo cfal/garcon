@@ -890,6 +890,112 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  for (const [name, settle] of [
+    [
+      'successful result',
+      (fake) => fake.stdout.enqueue(encoder.encode(JSON.stringify({
+        type: 'result',
+        is_error: false,
+        result: 'done',
+      }) + '\n')),
+    ],
+    [
+      'stdout failure',
+      (fake) => fake.failStdout(new Error('reader exploded')),
+    ],
+  ]) {
+    it(`cancels a pending permission after ${name} settles the turn`, async () => {
+      const originalSpawn = Bun.spawn;
+      const fake = createFakeClaudeProcess();
+      Bun.spawn = mock(() => fake.proc);
+
+      try {
+        const runtime = createRuntime();
+        const messages = [];
+        runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+        const start = runtime.startClaudeCliSession(startOptions());
+        await enqueueInputStarted(fake);
+
+        fake.stdout.enqueue(encoder.encode(JSON.stringify({
+          type: 'control_request',
+          request_id: 'cli-permission-1',
+          request: {
+            subtype: 'can_use_tool',
+            tool_name: 'Bash',
+            input: { command: 'printf ok' },
+            tool_use_id: 'tool-1',
+          },
+        }) + '\n'));
+        for (let attempt = 0; attempt < 10 && messages.length === 0; attempt += 1) {
+          await Promise.resolve();
+        }
+
+        settle(fake);
+        await start;
+        for (let attempt = 0; attempt < 10 && messages.length < 2; attempt += 1) {
+          await Promise.resolve();
+        }
+        expect(
+          messages
+            .filter((message) => message.type.startsWith('permission-'))
+            .map((message) => message.type),
+        ).toEqual([
+          'permission-request',
+          'permission-cancelled',
+        ]);
+        await runtime.shutdown();
+      } finally {
+        Bun.spawn = originalSpawn;
+      }
+    });
+  }
+
+  it('fails an active turn when a permission response cannot flush', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const messages = [];
+      const failures = [];
+      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+      runtime.onFailed((_chatId, message) => failures.push(message));
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
+
+      fake.stdout.enqueue(encoder.encode(JSON.stringify({
+        type: 'control_request',
+        request_id: 'cli-permission-1',
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'Bash',
+          input: { command: 'printf ok' },
+          tool_use_id: 'tool-1',
+        },
+      }) + '\n'));
+      for (let attempt = 0; attempt < 10 && messages.length === 0; attempt += 1) {
+        await Promise.resolve();
+      }
+      fake.proc.stdin.flush.mockImplementationOnce(() => Promise.reject(
+        new Error('permission flush exploded'),
+      ));
+
+      runtime.resolveInternalToolApproval(
+        messages[0].permissionRequestId,
+        { allow: true, alwaysAllow: false },
+      );
+
+      await start;
+      expect(failures).toEqual([
+        'Claude CLI write failed: permission flush exploded',
+      ]);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('fails and retires the process when init reports an unexpected session id', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();

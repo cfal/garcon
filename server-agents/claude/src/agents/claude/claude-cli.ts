@@ -489,6 +489,16 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.emitMessages(chatId, messages, eventMetadata);
   }
 
+  #cancelPendingPermissions(session: ClaudeRunningSession): void {
+    for (const [permissionRequestId, pending] of this.#pendingPermissions) {
+      if (pending.agentSessionId !== session.id) continue;
+      this.#pendingPermissions.delete(permissionRequestId);
+      this.#emitPermissionMessages(pending.chatId, [
+        new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled'),
+      ], pending.eventMetadata);
+    }
+  }
+
   #handleControlRequest(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
     const request = msg.request;
     const subtype = request?.subtype;
@@ -615,13 +625,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (activeTurn) activeTurn.resolve = null;
     this.#completeSessionInitialization(session);
 
-    for (const [permissionRequestId, pending] of this.#pendingPermissions) {
-      if (pending.agentSessionId !== session.id) continue;
-      this.#emitPermissionMessages(pending.chatId, [
-        new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled'),
-      ], pending.eventMetadata);
-      this.#pendingPermissions.delete(permissionRequestId);
-    }
+    this.#cancelPendingPermissions(session);
     await this.#retireSessionProcess(session);
   }
 
@@ -638,6 +642,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#clearAbortTimer(session);
     session.activeTurn = null;
     this.#controlBroker.rejectSession(session.id, 'Claude turn settled', 'interrupt');
+    this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
     this.emitFailed(session.chatId, message, activeTurn.eventMetadata);
@@ -651,6 +656,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#clearAbortTimer(session);
     session.activeTurn = null;
     this.#controlBroker.rejectSession(session.id, 'Claude turn settled', 'interrupt');
+    this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
     this.emitFinished(session.chatId, 0, activeTurn.eventMetadata);
@@ -881,16 +887,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#clearAbortTimer(session);
     this.#controlBroker.rejectSession(session.id, `Claude CLI process exited with code ${exitCode}`);
     const activeTurn = session.activeTurn;
-    for (const [permissionRequestId, pending] of this.#pendingPermissions) {
-      if (pending.agentSessionId === session.id) {
-        this.#emitPermissionMessages(
-          pending.chatId,
-          [new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled')],
-          pending.eventMetadata,
-        );
-        this.#pendingPermissions.delete(permissionRequestId);
-      }
-    }
+    this.#cancelPendingPermissions(session);
 
     if (activeTurn) {
       this.#failSession(session, `Claude CLI process exited with code ${exitCode}`);
