@@ -254,6 +254,44 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('retires a process when resume initialization fails and spawns a fresh retry', async () => {
+    const originalSpawn = Bun.spawn;
+    const failed = createFakeClaudeProcess({ autoControls: false });
+    const retry = createFakeClaudeProcess();
+    Bun.spawn = mock()
+      .mockReturnValueOnce(failed.proc)
+      .mockReturnValueOnce(retry.proc);
+
+    try {
+      const runtime = createRuntime();
+      const turn = runtime.runClaudeTurn(startOptions());
+      for (let attempt = 0; attempt < 10; attempt += 1) await Promise.resolve();
+      const initialize = failed.proc.stdin.write.mock.calls
+        .map(([line]) => JSON.parse(line))
+        .find((message) => message.request?.subtype === 'initialize');
+
+      failed.stdout.enqueue(encoder.encode(JSON.stringify({
+        type: 'control_response',
+        response: {
+          subtype: 'error',
+          request_id: initialize.request_id,
+          error: 'initialize rejected',
+        },
+      }) + '\n'));
+
+      await expect(turn).rejects.toThrow('initialize rejected');
+      expect(failed.proc.stdin.end).toHaveBeenCalledTimes(1);
+
+      const nextTurn = runtime.runClaudeTurn(startOptions({ command: 'retry' }));
+      await enqueueResult(retry);
+      await expect(nextTurn).resolves.toBeUndefined();
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('logs an unexpected process exit at error severity', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
@@ -273,7 +311,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       await expect(start).rejects.toThrow('Claude CLI process exited with code 137');
       await expect(failed).resolves.toEqual({
         chatId: 'chat-1',
-        errorMessage: 'CLI process exited with code 137',
+        errorMessage: 'Claude CLI process exited with code 137',
       });
       expect(logger.error).toHaveBeenCalledWith(
         'Claude CLI process exited during an active turn',
@@ -285,6 +323,9 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
           exitCode: 137,
           stderrBytes: 0,
           stderrLines: 0,
+          stderrRetainedBytes: 0,
+          stderrTailDigest: null,
+          stderrTruncated: false,
           duringTurn: true,
         },
       );
@@ -1199,7 +1240,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
-  it('retains a stuck process so retries cannot bypass the exit guard', async () => {
+  it('blocks retries until a stuck process eventually exits', async () => {
     const originalSpawn = Bun.spawn;
     const originalSetTimeout = globalThis.setTimeout;
     const fake = createFakeClaudeProcess({
@@ -1237,6 +1278,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         [],
         ['SIGKILL'],
       ]);
+      fake.exit(137);
+      await fake.proc.exited;
+      await expect(
+        runtime.prepareClaudeProjectPathUpdate(request),
+      ).resolves.toBeUndefined();
     } finally {
       globalThis.setTimeout = originalSetTimeout;
       fake.exit(137);

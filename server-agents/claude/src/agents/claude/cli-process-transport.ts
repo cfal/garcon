@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 
-const MAX_STDOUT_FRAME_BYTES = 1024 * 1024;
+// Covers Garcon's attachment budget after base64 expansion plus its command envelope.
+const MAX_STDOUT_FRAME_BYTES = 64 * 1024 * 1024;
 const MAX_STDERR_TAIL_BYTES = 16 * 1024;
 const PROCESS_EXIT_GRACE_MS = 5_000;
 const PROCESS_EXIT_TERM_MS = 5_000;
@@ -23,6 +25,9 @@ export interface ClaudeProcessExit {
   readonly exitCode: number;
   readonly stderrBytes: number;
   readonly stderrLines: number;
+  readonly stderrRetainedBytes: number;
+  readonly stderrTailDigest: string | null;
+  readonly stderrTruncated: boolean;
 }
 
 interface ClaudeProcessTransportOptions<Message> {
@@ -33,12 +38,15 @@ interface ClaudeProcessTransportOptions<Message> {
   readonly onFailure: (failure: ClaudeTransportFailure) => void;
   readonly onEof: () => void;
   readonly onExit: (exit: ClaudeProcessExit) => void;
+  readonly maxStdoutFrameBytes?: number;
 }
 
 interface StderrSummary {
   bytes: number;
   lines: number;
   retainedBytes: number;
+  tailDigest: string | null;
+  truncated: boolean;
 }
 
 function byteLength(value: string): number {
@@ -79,6 +87,7 @@ async function readBoundedStdout<Message>(
   stream: ReadableStream<Uint8Array>,
   onMessage: (message: Message) => void,
   onNoise: () => void,
+  maxFrameBytes: number,
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -93,7 +102,7 @@ async function readBoundedStdout<Message>(
     while (newline >= 0) {
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
-      if (byteLength(line) > MAX_STDOUT_FRAME_BYTES) {
+      if (byteLength(line) > maxFrameBytes) {
         throw new Error('Claude CLI emitted an oversized JSON frame');
       }
       const message = parseStdoutLine<Message>(line);
@@ -102,14 +111,14 @@ async function readBoundedStdout<Message>(
       newline = buffer.indexOf('\n');
     }
 
-    if (byteLength(buffer) > MAX_STDOUT_FRAME_BYTES) {
+    if (byteLength(buffer) > maxFrameBytes) {
       throw new Error('Claude CLI emitted an oversized JSON frame');
     }
   }
 
   buffer += decoder.decode();
   if (!buffer.trim()) return;
-  if (byteLength(buffer) > MAX_STDOUT_FRAME_BYTES) {
+  if (byteLength(buffer) > maxFrameBytes) {
     throw new Error('Claude CLI emitted an oversized JSON frame');
   }
   const message = parseStdoutLine<Message>(buffer);
@@ -136,6 +145,7 @@ export class ClaudeProcessTransport<Message> {
   readonly process: ClaudeSubprocess;
   readonly #options: ClaudeProcessTransportOptions<Message>;
   #writeTail: Promise<void> = Promise.resolve();
+  #stderrReader: Promise<void> = Promise.resolve();
   #retirement: Promise<void> | null = null;
   #retiring = false;
   #failureReported = false;
@@ -172,10 +182,15 @@ export class ClaudeProcessTransport<Message> {
   }
 
   stderrSummary(): StderrSummary {
+    const retainedBytes = byteLength(this.#stderrTail);
     return {
       bytes: this.#stderrBytes,
       lines: this.#stderrLines,
-      retainedBytes: byteLength(this.#stderrTail),
+      retainedBytes,
+      tailDigest: retainedBytes > 0
+        ? createHash('sha256').update(this.#stderrTail).digest('hex').slice(0, 16)
+        : null,
+      truncated: this.#stderrBytes > retainedBytes,
     };
   }
 
@@ -204,9 +219,15 @@ export class ClaudeProcessTransport<Message> {
         stdout,
         this.#options.onMessage,
         () => this.#recordStdoutNoise(),
+        this.#options.maxStdoutFrameBytes ?? MAX_STDOUT_FRAME_BYTES,
       ).then(
-        () => {
-          if (!this.#retiring) this.#options.onEof();
+        async () => {
+          if (
+            !this.#retiring
+            && !(await waitForExit(this.process, 0))
+          ) {
+            this.#options.onEof();
+          }
         },
         (error: unknown) => {
           if (!this.#retiring) {
@@ -218,7 +239,7 @@ export class ClaudeProcessTransport<Message> {
 
     const stderr = this.process.stderr;
     if (stderr && typeof stderr !== 'number') {
-      void drainStderr(stderr, (chunk) => this.#recordStderr(chunk)).catch((error: unknown) => {
+      this.#stderrReader = drainStderr(stderr, (chunk) => this.#recordStderr(chunk)).catch((error: unknown) => {
         if (!this.#retiring) {
           this.#reportFailure({ kind: 'stderr', message: errorMessage(error) });
         }
@@ -226,11 +247,18 @@ export class ClaudeProcessTransport<Message> {
     }
 
     void this.process.exited.then(
-      (exitCode: number) => this.#options.onExit({
-        exitCode,
-        stderrBytes: this.#stderrBytes,
-        stderrLines: this.#stderrLines,
-      }),
+      async (exitCode: number) => {
+        await this.#stderrReader;
+        const stderr = this.stderrSummary();
+        this.#options.onExit({
+          exitCode,
+          stderrBytes: stderr.bytes,
+          stderrLines: stderr.lines,
+          stderrRetainedBytes: stderr.retainedBytes,
+          stderrTailDigest: stderr.tailDigest,
+          stderrTruncated: stderr.truncated,
+        });
+      },
       (error: unknown) => this.#reportFailure({
         kind: 'stdout',
         message: `Claude CLI exit status failed: ${errorMessage(error)}`,

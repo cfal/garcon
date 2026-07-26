@@ -36,7 +36,7 @@ function createStream() {
   };
 }
 
-function createTransport() {
+function createTransport(options = {}) {
   const stdout = createStream();
   const stderr = createStream();
   const exited = deferred();
@@ -75,6 +75,7 @@ function createTransport() {
     onFailure: (failure) => failures.push(failure),
     onEof: eof,
     onExit: (exit) => exits.push(exit),
+    ...options,
   });
   return {
     transport,
@@ -92,6 +93,7 @@ function createTransport() {
 
 async function flush() {
   for (let attempt = 0; attempt < 5; attempt += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe('ClaudeProcessTransport', () => {
@@ -113,7 +115,6 @@ describe('ClaudeProcessTransport', () => {
   for (const [name, output, failure] of [
     ['malformed JSON-looking frames', '{"type":}\n', 'malformed JSON'],
     ['truncated JSON frames', '{"type":"partial"', 'malformed JSON'],
-    ['oversized frames', `${'x'.repeat(MAX_STDOUT_FRAME_BYTES + 1)}\n`, 'oversized JSON frame'],
   ]) {
     it(`fails ${name}`, async () => {
       const fake = createTransport();
@@ -128,6 +129,30 @@ describe('ClaudeProcessTransport', () => {
       expect(fake.eof).not.toHaveBeenCalled();
     });
   }
+
+  it('accepts replay frames above the SDK default within Garcon attachment limits', async () => {
+    const fake = createTransport();
+    const content = 'x'.repeat(1024 * 1024 + 1);
+    fake.stdout.enqueue(`${JSON.stringify({ type: 'user', content })}\n`);
+    fake.stdout.close();
+    await flush();
+
+    expect(MAX_STDOUT_FRAME_BYTES).toBeGreaterThan(Buffer.byteLength(content));
+    expect(fake.messages).toEqual([{ type: 'user', content }]);
+    expect(fake.failures).toEqual([]);
+  });
+
+  it('fails frames above the configured transport limit', async () => {
+    const fake = createTransport({ maxStdoutFrameBytes: 32 });
+    fake.stdout.enqueue(`${'x'.repeat(33)}\n`);
+    fake.stdout.close();
+    await flush();
+
+    expect(fake.failures).toEqual([{
+      kind: 'stdout',
+      message: expect.stringContaining('oversized JSON frame'),
+    }]);
+  });
 
   it('propagates stdout and stderr reader failures once', async () => {
     const stdoutFailure = createTransport();
@@ -154,12 +179,26 @@ describe('ClaudeProcessTransport', () => {
     fake.stderr.close();
     await flush();
 
-    expect(fake.transport.stderrSummary()).toEqual({
+    const summary = fake.transport.stderrSummary();
+    expect(summary).toEqual({
       bytes: Buffer.byteLength(privateStderr),
       lines: 1,
       retainedBytes: MAX_STDERR_TAIL_BYTES,
+      tailDigest: expect.stringMatching(/^[a-f0-9]{16}$/),
+      truncated: true,
     });
     expect(JSON.stringify(loggerCalls(fake.logger))).not.toContain('secret prompt');
+
+    fake.process.stdin.end();
+    await flush();
+    expect(fake.exits).toEqual([{
+      exitCode: 0,
+      stderrBytes: summary.bytes,
+      stderrLines: summary.lines,
+      stderrRetainedBytes: summary.retainedBytes,
+      stderrTailDigest: summary.tailDigest,
+      stderrTruncated: true,
+    }]);
   });
 
   it('serializes writes and rejects failed writes', async () => {

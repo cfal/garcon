@@ -1,41 +1,42 @@
 interface ProcessRetirementGroup {
   readonly chatId: string;
-  readonly retirements: Set<Promise<void>>;
+  readonly processExits: Set<Promise<void>>;
 }
 
 export class ClaudeProcessRetirementTracker {
-  readonly #retirements = new Map<string, ProcessRetirementGroup>();
+  readonly #processExits = new Map<string, ProcessRetirementGroup>();
 
   track(
     agentSessionId: string,
     chatId: string,
-    retirement: Promise<void>,
+    processExit: Promise<void>,
   ): void {
-    let group = this.#retirements.get(agentSessionId);
+    let group = this.#processExits.get(agentSessionId);
     if (!group) {
-      group = { chatId, retirements: new Set() };
-      this.#retirements.set(agentSessionId, group);
+      group = { chatId, processExits: new Set() };
+      this.#processExits.set(agentSessionId, group);
     } else if (group.chatId !== chatId) {
       throw new Error('Chat ID mismatch');
     }
-    group.retirements.add(retirement);
-    void retirement.then(
-      () => this.#forget(agentSessionId, retirement),
+    group.processExits.add(processExit);
+    void processExit.then(
+      () => this.#forget(agentSessionId, processExit),
+      // An unobservable exit must remain fail-closed to prevent concurrent writers.
       () => undefined,
     );
   }
 
   async wait(agentSessionId: string, chatId: string): Promise<void> {
-    const group = this.#retirements.get(agentSessionId);
+    const group = this.#processExits.get(agentSessionId);
     if (!group) return;
     if (group.chatId !== chatId) throw new Error('Chat ID mismatch');
-    await Promise.all(group.retirements);
+    await Promise.all(group.processExits);
   }
 
-  #forget(agentSessionId: string, retirement: Promise<void>): void {
-    const group = this.#retirements.get(agentSessionId);
+  #forget(agentSessionId: string, processExit: Promise<void>): void {
+    const group = this.#processExits.get(agentSessionId);
     if (!group) return;
-    group.retirements.delete(retirement);
-    if (group.retirements.size === 0) this.#retirements.delete(agentSessionId);
+    group.processExits.delete(processExit);
+    if (group.processExits.size === 0) this.#processExits.delete(agentSessionId);
   }
 }

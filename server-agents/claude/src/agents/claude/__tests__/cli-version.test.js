@@ -19,6 +19,23 @@ async function createFakeClaudeBinary(versionOutput) {
   return { binaryPath, callLogPath };
 }
 
+async function createFlakyClaudeBinary() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-cli-version-flaky-'));
+  const binaryPath = path.join(dir, 'claude');
+  const callLogPath = path.join(dir, 'calls.log');
+  const successMarker = path.join(dir, 'failed-once');
+  await fs.writeFile(binaryPath, `#!/bin/sh
+echo probe >> ${callLogPath}
+if [ ! -f ${successMarker} ]; then
+  touch ${successMarker}
+  echo "transient failure" >&2
+  exit 1
+fi
+echo "2.1.220 (Claude Code)"
+`, { mode: 0o755 });
+  return { binaryPath, callLogPath };
+}
+
 describe('parseClaudeCliVersion', () => {
   it('parses the semver from Claude Code version output', () => {
     expect(parseClaudeCliVersion('2.1.198 (Claude Code)')).toEqual([2, 1, 198]);
@@ -63,5 +80,16 @@ describe('ClaudeCliVersionProbe', () => {
     expect(await probe.assertCompatible(binaryPath)).toEqual(MINIMUM_CLAUDE_CLI_VERSION);
     const calls = await fs.readFile(callLogPath, 'utf8');
     expect(calls.trim().split('\n')).toHaveLength(1);
+  });
+
+  it('retries a binary after a transient probe failure', async () => {
+    const { binaryPath, callLogPath } = await createFlakyClaudeBinary();
+    const probe = createProbe();
+
+    await expect(probe.assertCompatible(binaryPath)).rejects.toThrow('transient failure');
+    await expect(probe.assertCompatible(binaryPath)).resolves.toEqual(MINIMUM_CLAUDE_CLI_VERSION);
+
+    const calls = await fs.readFile(callLogPath, 'utf8');
+    expect(calls.trim().split('\n')).toHaveLength(2);
   });
 });

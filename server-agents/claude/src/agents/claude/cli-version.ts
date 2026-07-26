@@ -112,6 +112,11 @@ export class ClaudeCliVersionProbe {
     if (!cached) {
       cached = probeClaudeCliVersion(claudeBinary);
       this.#versions.set(claudeBinary, cached);
+      void cached.catch(() => {
+        if (this.#versions.get(claudeBinary) === cached) {
+          this.#versions.delete(claudeBinary);
+        }
+      });
     }
     return cached;
   }

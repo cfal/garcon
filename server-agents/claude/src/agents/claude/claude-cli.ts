@@ -57,6 +57,9 @@ const NOOP_LOGGER: AgentLogger = {
   error() {},
 };
 
+const INTERRUPT_RECEIPT_TIMEOUT_MS = 5_000;
+const INTERRUPT_COMPLETION_TIMEOUT_MS = 15_000;
+
 interface ClaudeRunningSession {
   id: string;
   chatId: string;
@@ -82,7 +85,6 @@ interface ClaudeActiveTurn {
   readonly completion: Promise<void>;
   resolve: (() => void) | null;
   abortTimer: ReturnType<typeof setTimeout> | null;
-  abortKilledProc: ReturnType<typeof Bun.spawn> | null;
   // Pairs a compact boundary with the synthetic summary user message.
   pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
 }
@@ -149,7 +151,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       completion,
       resolve,
       abortTimer: null,
-      abortKilledProc: null,
     };
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
@@ -279,7 +280,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       });
       if (session.id !== msg.session_id) {
         this.#failSession(session, `Unexpected Claude session ID: ${msg.session_id || 'missing'}`);
-        void this.#retireSessionProcess(session);
+        this.#retireSessionProcessInBackground(session);
       }
       return;
     }
@@ -588,9 +589,21 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const priorRetirement = session.retirement ?? Promise.resolve();
     const retirement = priorRetirement.then(() => transport.retire());
     session.retirement = retirement;
-    this.#processRetirements.track(session.id, session.chatId, retirement);
+    const processExit = proc.exited.then(() => {
+      if (session.retirement === retirement) session.retirement = null;
+    });
+    this.#processRetirements.track(session.id, session.chatId, processExit);
     await retirement;
-    if (session.retirement === retirement) session.retirement = null;
+  }
+
+  #retireSessionProcessInBackground(session: ClaudeRunningSession): void {
+    void this.#retireSessionProcess(session).catch((error: unknown) => {
+      this.#dependencies.logger.error('Claude CLI process retirement failed', {
+        chatId: session.chatId,
+        sessionId: session.id.slice(0, 8),
+        error: errorMessage(error),
+      });
+    });
   }
 
   async #retireSession(session: ClaudeRunningSession): Promise<void> {
@@ -707,7 +720,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.options = { ...session.options, thinkingMode: mode };
 
     if (session.process && !session.activeTurn) {
-      void this.#retireSessionProcess(session);
+      this.#retireSessionProcessInBackground(session);
     }
   }
 
@@ -718,7 +731,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.options = { ...session.options, claudeThinkingMode: mode };
 
     if (session.process && !session.activeTurn) {
-      void this.#retireSessionProcess(session);
+      this.#retireSessionProcessInBackground(session);
     }
   }
 
@@ -831,7 +844,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (activeTurn) {
       this.#failSession(session, `Claude CLI ${failure.kind} failed: ${failure.message}`);
     }
-    void this.#retireSessionProcess(session);
+    this.#retireSessionProcessInBackground(session);
   }
 
   #handleStdoutEof(
@@ -849,7 +862,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       session,
       'Claude CLI stdout ended before the submitted message produced a terminal result.',
     );
-    void this.#retireSessionProcess(session);
+    this.#retireSessionProcessInBackground(session);
   }
 
   #handleProcessExit(
@@ -868,9 +881,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#clearAbortTimer(session);
     this.#controlBroker.rejectSession(session.id, `Claude CLI process exited with code ${exitCode}`);
     const activeTurn = session.activeTurn;
-    const wasAbortKill = activeTurn?.abortKilledProc === proc;
-    if (activeTurn) activeTurn.abortKilledProc = null;
-
     for (const [permissionRequestId, pending] of this.#pendingPermissions) {
       if (pending.agentSessionId === session.id) {
         this.#emitPermissionMessages(
@@ -883,16 +893,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
 
     if (activeTurn) {
-      if (wasAbortKill && activeTurn.protocol.inputStarted) {
-        this.#finishTurn(session);
-      } else if (wasAbortKill) {
-        this.#failSession(
-          session,
-          'Claude CLI exited before confirming cancellation of the queued message.',
-        );
-      } else {
-        this.#failSession(session, `CLI process exited with code ${exitCode}`);
-      }
+      this.#failSession(session, `Claude CLI process exited with code ${exitCode}`);
     }
   }
 
@@ -941,8 +942,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       onEof: () => this.#handleStdoutEof(session, proc),
       onExit: exit => {
         const exitedDuringTurn = session.process === proc
-          && session.activeTurn !== null
-          && session.activeTurn.abortKilledProc !== proc;
+          && session.activeTurn !== null;
         const activeTurn = session.activeTurn;
         const details = {
           chatId: session.chatId,
@@ -952,6 +952,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
           exitCode: exit.exitCode,
           stderrBytes: exit.stderrBytes,
           stderrLines: exit.stderrLines,
+          stderrRetainedBytes: exit.stderrRetainedBytes,
+          stderrTailDigest: exit.stderrTailDigest,
+          stderrTruncated: exit.stderrTruncated,
           duringTurn: exitedDuringTurn,
         };
         if (exitedDuringTurn) {
@@ -963,22 +966,27 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       },
     });
     session.transport = transport;
-    const initializeStartedAt = Date.now();
-    const initializeResponse = await this.#controlBroker.request(
-      session.id,
-      { subtype: 'initialize' },
-      60_000,
-    );
-    const initializeInfo = isRecord(initializeResponse) ? initializeResponse : {};
-    this.#dependencies.logger.info('Claude CLI control protocol initialized', {
-      chatId: session.chatId,
-      sessionId: session.id.slice(0, 8),
-      processId: proc.pid ?? null,
-      durationMs: Date.now() - initializeStartedAt,
-      commandCount: Array.isArray(initializeInfo.commands)
-        ? initializeInfo.commands.length
-        : 0,
-    });
+    try {
+      const initializeStartedAt = Date.now();
+      const initializeResponse = await this.#controlBroker.request(
+        session.id,
+        { subtype: 'initialize' },
+        60_000,
+      );
+      const initializeInfo = isRecord(initializeResponse) ? initializeResponse : {};
+      this.#dependencies.logger.info('Claude CLI control protocol initialized', {
+        chatId: session.chatId,
+        sessionId: session.id.slice(0, 8),
+        processId: proc.pid ?? null,
+        durationMs: Date.now() - initializeStartedAt,
+        commandCount: Array.isArray(initializeInfo.commands)
+          ? initializeInfo.commands.length
+          : 0,
+      });
+    } catch (error) {
+      await this.#retireSessionProcess(session);
+      throw error;
+    }
 
     return proc;
   }
@@ -1162,6 +1170,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       throw new Error(`Claude session ${agentSessionId} already has an active turn`);
     }
 
+    let ownedTurn: ClaudeActiveTurn | null = null;
     try {
       if (chatId !== session.chatId) {
         throw new Error('Chat ID mismatch');
@@ -1232,13 +1241,14 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         session,
         claudeEventMetadata({ clientRequestId, turnId }),
       );
+      ownedTurn = activeTurn;
       await this.#sendUserMessage(session, activeTurn, command, images);
       executionAdmission?.markStarted();
       this.emitProcessing(chatId, true);
       onAbortable?.();
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
-      if (session.activeTurn) {
+      if (ownedTurn && session.activeTurn === ownedTurn) {
         await this.#retireSession(session);
       }
       throw error;
@@ -1279,6 +1289,13 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       return;
     }
     this.#dependencies.logger.debug('Claude CLI acknowledged interrupt', details);
+    if (activeTurn.protocol.inputStarted) {
+      this.#armAbortFallback(
+        session,
+        activeTurn,
+        INTERRUPT_COMPLETION_TIMEOUT_MS,
+      );
+    }
   }
 
   #forceAbortProcess(
@@ -1293,15 +1310,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       this.#failSession(session, reason);
       return;
     }
-    activeTurn.abortKilledProc = process;
+    this.#failSession(session, reason);
     if (!process.killed) process.kill();
-    void transport.retire().catch((error: unknown) => {
-      if (session.activeTurn !== activeTurn) return;
-      this.#failSession(
-        session,
-        `${reason} Claude process teardown also failed: ${errorMessage(error)}`,
-      );
-    });
+    this.#retireSessionProcessInBackground(session);
   }
 
   async abortClaudeInternalSession(agentSessionId: string): Promise<boolean> {
@@ -1331,16 +1342,25 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       },
     );
 
+    this.#armAbortFallback(session, activeTurn, INTERRUPT_RECEIPT_TIMEOUT_MS);
+
+    return true;
+  }
+
+  #armAbortFallback(
+    session: ClaudeRunningSession,
+    activeTurn: ClaudeActiveTurn,
+    timeoutMs: number,
+  ): void {
     const proc = session.process;
+    if (!proc) return;
     this.#clearAbortTimer(session);
     activeTurn.abortTimer = setTimeout(() => {
       activeTurn.abortTimer = null;
-      // Only fires when the interrupt was never acknowledged: the same process
-      // is still stuck on the aborted turn. An acknowledged interrupt or a new
-      // turn clears this timer first, so a reused process is never killed here.
+      // Fires until Claude confirms cancellation with a correlated terminal event.
       if (session.process === proc && !proc.killed) {
-        this.#dependencies.logger.warn('Claude CLI interrupt was not acknowledged', {
-          sessionId: agentSessionId.slice(0, 8),
+        this.#dependencies.logger.warn('Claude CLI interrupt was not confirmed', {
+          sessionId: session.id.slice(0, 8),
         });
         this.#forceAbortProcess(
           session,
@@ -1348,9 +1368,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
           'Claude CLI did not confirm the interrupt.',
         );
       }
-    }, 5000);
-
-    return true;
+    }, timeoutMs);
   }
 
   failClaudeInternalSession(
@@ -1362,7 +1380,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const session = this.#runningSessions.get(agentSessionId);
     if (session) {
       this.#failSession(session, errorMessage);
-      void this.#retireSessionProcess(session);
+      this.#retireSessionProcessInBackground(session);
       return;
     }
     this.emitProcessing(chatId, false);
