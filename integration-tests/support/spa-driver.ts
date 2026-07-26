@@ -313,11 +313,7 @@ export class SpaDriver {
       if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
     }
     await this.waitForMenuItemEnabled(name);
-    try {
-      await this.clickMenuItem(name);
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
-    }
+    await this.clickMenuItem(name);
   }
 
   async clickResponsiveAction(name: string): Promise<void> {
@@ -357,15 +353,21 @@ export class SpaDriver {
   }
 
   async clickMenuItem(name: string): Promise<void> {
-    await this.#page.evaluate((expected) => {
-      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) =>
-        (element.getAttribute('aria-label') || element.textContent?.trim()) === expected);
-      if (!item) throw new Error(`Missing menu item: ${expected}`);
-      if (item.getAttribute('aria-disabled') === 'true') {
-        throw new Error(`Menu item is disabled: ${expected}`);
-      }
-      item.click();
-    }, name);
+    try {
+      await this.#page.evaluate((expected) => {
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) =>
+          (element.getAttribute('aria-label') || element.textContent?.trim()) === expected);
+        if (!item) throw new Error(`Missing menu item: ${expected}`);
+        if (item.getAttribute('aria-disabled') === 'true') {
+          throw new Error(`Menu item is disabled: ${expected}`);
+        }
+        item.click();
+      }, name);
+    } catch (error) {
+      // Lightpanda can collect the CDP promise when the click unmounts the menu.
+      // Each caller's next product milestone still verifies that the click took effect.
+      if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
+    }
   }
 
   async waitForMenuItemEnabled(name: string): Promise<void> {
