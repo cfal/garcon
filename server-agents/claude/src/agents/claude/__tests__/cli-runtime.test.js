@@ -158,6 +158,8 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         turnId: null,
         sessionId: 'expected',
         processId: null,
+        inputId: expect.any(String),
+        resultInputId: null,
         outcome: 'success',
         isError: false,
         apiErrorStatus: null,
@@ -376,6 +378,46 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('ignores a result correlated to another user input', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const finishes = [];
+      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      const input = await enqueueInputStarted(fake);
+      fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        user_message_uuid: 'another-input',
+        result: 'unrelated response',
+      }) + '\n'));
+      await Promise.resolve();
+
+      expect(finishes).toEqual([]);
+      expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
+
+      fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        user_message_uuid: input.uuid,
+        result: 'correlated response',
+      }) + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('surfaces a setup failure that cancels the submitted input before it starts', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
@@ -584,6 +626,57 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         'Claude CLI completed the submitted message without producing a response.'
           + ' Last API retry: 529 overloaded (attempt 10/10).',
       ]);
+      runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('cancels a pending permission when Claude abandons its control request', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const messages = [];
+      runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
+
+      fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+        type: 'control_request',
+        request_id: 'cli-permission-1',
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'Bash',
+          input: { command: 'printf ok' },
+          tool_use_id: 'tool-1',
+        },
+      }) + '\n'));
+      for (let attempt = 0; attempt < 10 && messages.length === 0; attempt += 1) {
+        await Promise.resolve();
+      }
+      expect(messages.map((message) => message.type)).toEqual(['permission-request']);
+
+      fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+        type: 'control_cancel_request',
+        request_id: 'cli-permission-1',
+      }) + '\n'));
+      for (let attempt = 0; attempt < 10 && messages.length < 2; attempt += 1) {
+        await Promise.resolve();
+      }
+      expect(messages.map((message) => message.type)).toEqual([
+        'permission-request',
+        'permission-cancelled',
+      ]);
+
+      fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+        type: 'result',
+        is_error: false,
+        result: 'done',
+      }) + '\n'));
+      await start;
       runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;

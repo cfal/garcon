@@ -29,6 +29,7 @@ export interface ClaudeCLIMessage {
   stop_reason?: string | null;
   terminal_reason?: string;
   result?: unknown;
+  user_message_uuid?: string;
   command_uuid?: string;
   state?: string;
   permission_denials?: unknown[];
@@ -73,9 +74,11 @@ export interface ClaudeApiRetryDiagnostics {
 
 export type ClaudeTurnStartSource = 'lifecycle' | 'replay';
 export type ClaudeTurnTerminalState = 'completed' | 'cancelled' | 'discarded';
+export type ClaudeTurnPhase = 'submitted' | 'started' | 'interrupting';
 export type ClaudeTurnInputEvent =
   | { type: 'started'; source: ClaudeTurnStartSource }
   | { type: 'terminal-before-start'; state: ClaudeTurnTerminalState };
+export type ClaudeResultCorrelation = 'before-start' | 'matched' | 'mismatched';
 
 function isClaudeContentPart(value: unknown): value is ClaudeContentPart {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -98,16 +101,21 @@ export function claudeResultFailureMessage(message: ClaudeCLIMessage): string {
   return `Claude CLI turn failed: ${outcome}${apiStatus}`;
 }
 
-export class ClaudeTurnTracker {
-  #inputUuid: string | null = null;
+export class ClaudeTurnState {
+  readonly inputUuid: string;
+  #phase: ClaudeTurnPhase = 'submitted';
   #inputStarted = false;
-  #abortRequested = false;
   #outputMessageCount = 0;
+  #assistantContentSeen = false;
   #lastApiRetry: ClaudeApiRetryDiagnostics | null = null;
   #resultBeforeStart: ClaudeCLIMessage | null = null;
 
-  get inputUuid(): string | null {
-    return this.#inputUuid;
+  constructor(inputUuid: string) {
+    this.inputUuid = inputUuid;
+  }
+
+  get phase(): ClaudeTurnPhase {
+    return this.#phase;
   }
 
   get inputStarted(): boolean {
@@ -115,48 +123,44 @@ export class ClaudeTurnTracker {
   }
 
   get abortRequested(): boolean {
-    return this.#abortRequested;
+    return this.#phase === 'interrupting';
   }
 
   get outputMessageCount(): number {
     return this.#outputMessageCount;
   }
 
-  beginInput(inputUuid: string): void {
-    this.#inputUuid = inputUuid;
-    this.#inputStarted = false;
-    this.#abortRequested = false;
-    this.#outputMessageCount = 0;
-    this.#lastApiRetry = null;
-    this.#resultBeforeStart = null;
+  get assistantContentSeen(): boolean {
+    return this.#assistantContentSeen;
   }
 
   observeInput(message: ClaudeCLIMessage): ClaudeTurnInputEvent | null {
-    if (!this.#inputUuid) return null;
     if (
-      !this.#inputStarted
+      !this.inputStarted
       && message.type === 'command_lifecycle'
       && message.state === 'started'
-      && message.command_uuid === this.#inputUuid
+      && message.command_uuid === this.inputUuid
     ) {
       this.#inputStarted = true;
+      if (this.#phase !== 'interrupting') this.#phase = 'started';
       this.#resultBeforeStart = null;
       return { type: 'started', source: 'lifecycle' };
     }
     if (
-      !this.#inputStarted
+      !this.inputStarted
       && message.type === 'user'
       && message.isReplay === true
-      && message.uuid === this.#inputUuid
+      && message.uuid === this.inputUuid
     ) {
       this.#inputStarted = true;
+      if (this.#phase !== 'interrupting') this.#phase = 'started';
       this.#resultBeforeStart = null;
       return { type: 'started', source: 'replay' };
     }
     if (
-      !this.#inputStarted
+      !this.inputStarted
       && message.type === 'command_lifecycle'
-      && message.command_uuid === this.#inputUuid
+      && message.command_uuid === this.inputUuid
       && (
         message.state === 'completed'
         || message.state === 'cancelled'
@@ -169,15 +173,11 @@ export class ClaudeTurnTracker {
   }
 
   markAbortRequested(): void {
-    this.#abortRequested = true;
-  }
-
-  clearAbortRequested(): void {
-    this.#abortRequested = false;
+    this.#phase = 'interrupting';
   }
 
   recordResultBeforeStart(message: ClaudeCLIMessage): void {
-    if (!this.#inputStarted) this.#resultBeforeStart = message;
+    if (!this.inputStarted) this.#resultBeforeStart = message;
   }
 
   takeResultBeforeStart(): ClaudeCLIMessage | null {
@@ -186,8 +186,9 @@ export class ClaudeTurnTracker {
     return result;
   }
 
-  addOutputMessages(count: number): void {
+  addOutputMessages(count: number, assistantContentSeen = false): void {
     this.#outputMessageCount += count;
+    this.#assistantContentSeen ||= assistantContentSeen;
   }
 
   recordApiRetry(message: ClaudeCLIMessage): ClaudeApiRetryDiagnostics {
@@ -198,13 +199,24 @@ export class ClaudeTurnTracker {
       errorStatus: message.error_status ?? null,
       error: typeof message.error === 'string' ? message.error.slice(0, 200) : null,
     };
-    if (this.#inputStarted) this.#lastApiRetry = retry;
+    if (this.inputStarted) this.#lastApiRetry = retry;
     return retry;
+  }
+
+  correlateResult(message: ClaudeCLIMessage): ClaudeResultCorrelation {
+    if (!this.inputStarted) return 'before-start';
+    if (
+      message.user_message_uuid
+      && message.user_message_uuid !== this.inputUuid
+    ) {
+      return 'mismatched';
+    }
+    return 'matched';
   }
 
   completedWithoutResponse(message: ClaudeCLIMessage): boolean {
     return !message.is_error
-      && this.#outputMessageCount === 0
+      && !this.#assistantContentSeen
       && (typeof message.result !== 'string' || message.result.trim().length === 0);
   }
 
