@@ -3,10 +3,8 @@ import {
 	getGitWorkbenchSnapshot,
 	gitCommitIndex,
 	gitStagePaths,
-	type GitFileChangeFacet,
 	type GitChangeStats,
 	type GitTreeNode,
-	type GitStatusCode,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -18,6 +16,13 @@ import {
 	GitTargetSessionController,
 	type GitTargetChangeReason,
 } from '$lib/git/targets/git-target-session.svelte.js';
+import {
+	commitStatsForNode,
+	findCommitTreeNode,
+	flattenCommitFileNodes,
+	reconcileCommitTreeAfterStage,
+	type QuickCommitStageMode,
+} from './commit-tree-reconciliation.js';
 
 export interface QuickCommitPathIntent {
 	path: string;
@@ -55,173 +60,11 @@ interface CommitTargetSnapshot {
 }
 
 type QueueAction = 'generate' | 'commit' | null;
-type QuickCommitStageMode = 'stage' | 'unstage';
 type QuickCommitTreeLoadState = 'idle' | 'initial-loading' | 'refreshing';
 
 interface QuickCommitStageBatch {
 	mode: QuickCommitStageMode;
 	paths: string[];
-}
-
-function flattenFileNodes(nodes: GitTreeNode[]): GitTreeNode[] {
-	const result: GitTreeNode[] = [];
-	for (const node of nodes) {
-		if (node.kind === 'file') {
-			result.push(node);
-			continue;
-		}
-		if (node.children) result.push(...flattenFileNodes(node.children));
-	}
-	return result;
-}
-
-function findTreeNode(nodes: GitTreeNode[], path: string): GitTreeNode | null {
-	for (const node of nodes) {
-		if (node.path === path) return node;
-		if (node.children) {
-			const match = findTreeNode(node.children, path);
-			if (match) return match;
-		}
-	}
-	return null;
-}
-
-function statsForNode(node: GitTreeNode): GitChangeStats {
-	return (
-		node.stagedFacet?.stats ??
-		node.unstagedFacet?.stats ?? {
-			additions: node.additions ?? 0,
-			deletions: node.deletions ?? 0,
-		}
-	);
-}
-
-function mergeStats(...stats: Array<GitChangeStats | undefined>): GitChangeStats {
-	let additions = 0;
-	let deletions = 0;
-	let isBinary = false;
-	for (const item of stats) {
-		if (!item) continue;
-		additions += item.additions ?? 0;
-		deletions += item.deletions ?? 0;
-		isBinary = isBinary || Boolean(item.isBinary);
-	}
-	return { additions, deletions, ...(isBinary ? { isBinary: true } : {}) };
-}
-
-function facetForStage(node: GitTreeNode): GitFileChangeFacet | undefined {
-	const stagedFacet = node.stagedFacet;
-	const unstagedFacet = node.unstagedFacet;
-	const source = unstagedFacet ?? stagedFacet;
-	if (!source) return undefined;
-	const stats = mergeStats(stagedFacet?.stats, unstagedFacet?.stats);
-	return {
-		...source,
-		status: source.status === '?' ? 'A' : source.status,
-		changeKind: source.changeKind === 'untracked' ? 'added' : source.changeKind,
-		stats,
-	};
-}
-
-function facetForUnstage(node: GitTreeNode): GitFileChangeFacet | undefined {
-	const stagedFacet = node.stagedFacet;
-	const unstagedFacet = node.unstagedFacet;
-	const source = unstagedFacet ?? stagedFacet;
-	if (!source) return undefined;
-	const addedOnly = stagedFacet?.changeKind === 'added' && !unstagedFacet;
-	const changeKind = addedOnly ? 'untracked' : source.changeKind;
-	const status: GitStatusCode = addedOnly ? '?' : source.status;
-	return {
-		...source,
-		status,
-		changeKind,
-		stats: mergeStats(unstagedFacet?.stats, stagedFacet?.stats),
-	};
-}
-
-function reconcileFileNodeAfterStage(node: GitTreeNode, staged: boolean): GitTreeNode {
-	if (staged) {
-		const stagedFacet = facetForStage(node);
-		return {
-			...node,
-			indexStatus: stagedFacet?.status ?? 'M',
-			workTreeStatus: ' ',
-			stagedFacet,
-			unstagedFacet: undefined,
-			changeKind: stagedFacet?.changeKind ?? node.changeKind,
-			staged: true,
-			hasUnstaged: false,
-			additions: stagedFacet?.stats.additions ?? node.additions,
-			deletions: stagedFacet?.stats.deletions ?? node.deletions,
-			category: stagedFacet?.category ?? node.category,
-		};
-	}
-
-	const unstagedFacet = facetForUnstage(node);
-	return {
-		...node,
-		indexStatus: ' ',
-		workTreeStatus: unstagedFacet?.status ?? 'M',
-		stagedFacet: undefined,
-		unstagedFacet,
-		changeKind: unstagedFacet?.changeKind ?? node.changeKind,
-		staged: false,
-		hasUnstaged: true,
-		additions: unstagedFacet?.stats.additions ?? node.additions,
-		deletions: unstagedFacet?.stats.deletions ?? node.deletions,
-		category: unstagedFacet?.category ?? node.category,
-	};
-}
-
-function aggregateDirectoryNode(node: GitTreeNode, children: GitTreeNode[]): GitTreeNode {
-	let staged = false;
-	let hasUnstaged = false;
-	let additions = 0;
-	let deletions = 0;
-	let stagedFacet: GitFileChangeFacet | undefined;
-	let unstagedFacet: GitFileChangeFacet | undefined;
-	for (const child of children) {
-		staged = staged || child.staged;
-		hasUnstaged = hasUnstaged || child.hasUnstaged;
-		additions += child.additions ?? 0;
-		deletions += child.deletions ?? 0;
-		stagedFacet = stagedFacet ?? child.stagedFacet;
-		unstagedFacet = unstagedFacet ?? child.unstagedFacet;
-	}
-	return {
-		...node,
-		children,
-		staged,
-		hasUnstaged,
-		stagedFacet,
-		unstagedFacet,
-		changeKind: unstagedFacet?.changeKind ?? stagedFacet?.changeKind,
-		indexStatus: staged ? 'M' : ' ',
-		workTreeStatus: hasUnstaged ? 'M' : ' ',
-		additions,
-		deletions,
-	};
-}
-
-function reconcileTreeAfterStage(
-	nodes: GitTreeNode[],
-	paths: Set<string>,
-	staged: boolean,
-): { nodes: GitTreeNode[]; changed: boolean } {
-	let changed = false;
-	const next = nodes.map((node) => {
-		if (node.kind === 'file') {
-			if (!paths.has(node.path)) return node;
-			changed = true;
-			return reconcileFileNodeAfterStage(node, staged);
-		}
-		if (!node.children) return node;
-		const childResult = reconcileTreeAfterStage(node.children, paths, staged);
-		if (!childResult.changed) return node;
-		changed = true;
-		return aggregateDirectoryNode(node, childResult.nodes);
-	});
-	return { nodes: next, changed };
 }
 
 export class CommitController implements PortableSingletonController {
@@ -275,7 +118,7 @@ export class CommitController implements PortableSingletonController {
 	}
 
 	get fileNodes(): GitTreeNode[] {
-		return flattenFileNodes(this.tree);
+		return flattenCommitFileNodes(this.tree);
 	}
 
 	get isLoadingTree(): boolean {
@@ -429,8 +272,8 @@ export class CommitController implements PortableSingletonController {
 	}
 
 	directorySelection(path: string): QuickCommitDirectorySelection {
-		const node = findTreeNode(this.tree, path);
-		const files = node ? flattenFileNodes([node]) : [];
+		const node = findCommitTreeNode(this.tree, path);
+		const files = node ? flattenCommitFileNodes([node]) : [];
 		const intents = files
 			.map((file) => this.intentFor(file.path))
 			.filter((item): item is QuickCommitPathIntent => Boolean(item));
@@ -447,7 +290,7 @@ export class CommitController implements PortableSingletonController {
 
 	nodeStats(path: string): GitChangeStats {
 		const node = this.fileNodes.find((candidate) => candidate.path === path);
-		return node ? statsForNode(node) : { additions: 0, deletions: 0 };
+		return node ? commitStatsForNode(node) : { additions: 0, deletions: 0 };
 	}
 
 	togglePath(path: string, desiredSelected: boolean): void {
@@ -458,10 +301,10 @@ export class CommitController implements PortableSingletonController {
 
 	toggleDirectory(path: string, desiredSelected: boolean): void {
 		if (this.projectIdentityPending) return;
-		const node = findTreeNode(this.tree, path);
+		const node = findCommitTreeNode(this.tree, path);
 		if (!node) return;
 		let queued = false;
-		for (const file of flattenFileNodes([node])) {
+		for (const file of flattenCommitFileNodes([node])) {
 			queued = this.enqueueStageIntent(file.path, desiredSelected) || queued;
 		}
 		if (queued) void this.drainQueue();
@@ -809,7 +652,7 @@ export class CommitController implements PortableSingletonController {
 	private applyTree(tree: GitTreeNode[], preserveDesired: boolean): void {
 		const previous = this.intents;
 		const nextIntents: Record<string, QuickCommitPathIntent> = {};
-		for (const node of flattenFileNodes(tree)) {
+		for (const node of flattenCommitFileNodes(tree)) {
 			const actualSelected = Boolean(node.staged);
 			const previousIntent = previous[node.path];
 			const hasPendingOperation =
@@ -856,7 +699,7 @@ export class CommitController implements PortableSingletonController {
 		for (const node of this.fileNodes) {
 			const intent = this.intentFor(node.path);
 			if (!intent?.desiredSelected) continue;
-			const stats = statsForNode(node);
+			const stats = commitStatsForNode(node);
 			additions += stats.additions;
 			deletions += stats.deletions;
 		}
@@ -897,7 +740,11 @@ export class CommitController implements PortableSingletonController {
 	}
 
 	private reconcilePathsAfterStage(paths: string[], desiredSelected: boolean): void {
-		const result = reconcileTreeAfterStage(this.tree, new Set(paths), desiredSelected);
+		const result = reconcileCommitTreeAfterStage(
+			this.tree,
+			new Set(paths),
+			desiredSelected,
+		);
 		if (result.changed) this.tree = result.nodes;
 	}
 
