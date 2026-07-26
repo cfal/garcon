@@ -15,7 +15,7 @@
 		contextLines: number;
 		diffFontSize: string;
 		onSetDiffMode: (mode: DiffMode) => void;
-		onSetContextLines: (lines: number) => void;
+		onSetContextLines: (lines: number) => boolean | void;
 		onSetDiffFontSize: (size: string) => void;
 	}
 
@@ -30,9 +30,20 @@
 
 	const CONTEXT_OPTIONS = ['3', '5', '10', '20'];
 	let popoverOpen = $state(false);
+	let contextChangeBlocked = $state(false);
+
+	function handleOpenChange(open: boolean): void {
+		popoverOpen = open;
+		if (open) contextChangeBlocked = false;
+	}
+
+	function handleContextLines(value: string | undefined): void {
+		if (!value) return;
+		contextChangeBlocked = onSetContextLines(Number(value)) === false;
+	}
 </script>
 
-<Popover.Root bind:open={popoverOpen}>
+<Popover.Root open={popoverOpen} onOpenChange={handleOpenChange}>
 	<Popover.Trigger>
 		<Button
 			variant="ghost"
@@ -90,9 +101,7 @@
 				<Select.Root
 					type="single"
 					value={String(contextLines)}
-					onValueChange={(v) => {
-						if (v) onSetContextLines(Number(v));
-					}}
+					onValueChange={handleContextLines}
 				>
 					<Select.Trigger class="w-[80px]" size="sm">
 						{contextLines} lines
@@ -104,6 +113,11 @@
 					</Select.Content>
 				</Select.Root>
 			</div>
+			{#if contextChangeBlocked}
+				<p class="px-4 pb-3 text-xs text-destructive" role="status">
+					{m.git_comment_finish_before_context_change()}
+				</p>
+			{/if}
 		</div>
 	</Popover.Content>
 </Popover.Root>
