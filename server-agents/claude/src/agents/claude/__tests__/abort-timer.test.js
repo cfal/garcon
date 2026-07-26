@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-let versionProbe = () => Promise.resolve(false);
+let versionProbe = () => Promise.resolve([2, 1, 220]);
 
 import { ClaudeCliRuntime } from '../claude-cli.js';
 
@@ -14,8 +14,7 @@ function createRuntime() {
       error: mock(() => undefined),
     },
     versionProbe: {
-      assertCompatible: () => Promise.resolve([2, 1, 220]),
-      supportsLegacyThinkingFlag: () => versionProbe(),
+      assertCompatible: () => versionProbe(),
     },
   });
 }
@@ -133,7 +132,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     spawnMock = mock();
     Bun.spawn = spawnMock;
-    versionProbe = () => Promise.resolve(false);
+    versionProbe = () => Promise.resolve([2, 1, 220]);
 
     scheduled = [];
     cleared = [];
@@ -437,7 +436,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(finishes).toEqual([]);
     expect(failures).toEqual([]);
 
-    resolveProbe(false);
+    resolveProbe([2, 1, 220]);
     await flush();
     expect(spawnMock).toHaveBeenCalledTimes(2);
 

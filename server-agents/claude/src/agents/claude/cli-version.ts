@@ -1,7 +1,3 @@
-import { errorMessage } from '@garcon/server-agent-common/lib/errors';
-import type { AgentLogger } from '@garcon/server-agent-interface';
-
-const THINKING_FLAG_REMOVED_VERSION: readonly [number, number, number] = [2, 1, 198];
 const MINIMUM_CLAUDE_CLI_VERSION: readonly [number, number, number] = [2, 1, 220];
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 const VERSION_PROBE_EXIT_GRACE_MS = 1_000;
@@ -100,8 +96,6 @@ async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion> 
 export class ClaudeCliVersionProbe {
   readonly #versions = new Map<string, Promise<CliVersion>>();
 
-  constructor(private readonly logger: AgentLogger) {}
-
   async assertCompatible(claudeBinary: string): Promise<CliVersion> {
     const version = await this.#version(claudeBinary);
     if (isVersionBefore(version, MINIMUM_CLAUDE_CLI_VERSION)) {
@@ -111,19 +105,6 @@ export class ClaudeCliVersionProbe {
       );
     }
     return version;
-  }
-
-  async supportsLegacyThinkingFlag(claudeBinary: string): Promise<boolean> {
-    try {
-      const version = await this.#version(claudeBinary);
-      return isVersionBefore(version, THINKING_FLAG_REMOVED_VERSION);
-    } catch (error: unknown) {
-      this.logger.warn('Claude CLI version probe failed; legacy thinking disabled', {
-        binary: claudeBinary,
-        error: errorMessage(error),
-      });
-      return false;
-    }
   }
 
   #version(claudeBinary: string): Promise<CliVersion> {
@@ -140,5 +121,4 @@ export {
   isVersionBefore,
   MINIMUM_CLAUDE_CLI_VERSION,
   parseClaudeCliVersion,
-  THINKING_FLAG_REMOVED_VERSION,
 };

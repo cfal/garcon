@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -7,7 +7,6 @@ import {
   isVersionBefore,
   MINIMUM_CLAUDE_CLI_VERSION,
   parseClaudeCliVersion,
-  THINKING_FLAG_REMOVED_VERSION,
 } from '../cli-version.js';
 
 // Writes an executable fake `claude` binary that logs each invocation and
@@ -34,21 +33,16 @@ describe('parseClaudeCliVersion', () => {
 
 describe('isVersionBefore', () => {
   it('compares versions numerically per component', () => {
-    expect(isVersionBefore([2, 1, 197], THINKING_FLAG_REMOVED_VERSION)).toBe(true);
-    expect(isVersionBefore([1, 9, 999], THINKING_FLAG_REMOVED_VERSION)).toBe(true);
-    expect(isVersionBefore([2, 1, 198], THINKING_FLAG_REMOVED_VERSION)).toBe(false);
-    expect(isVersionBefore([2, 2, 0], THINKING_FLAG_REMOVED_VERSION)).toBe(false);
-    expect(isVersionBefore([3, 0, 0], THINKING_FLAG_REMOVED_VERSION)).toBe(false);
+    expect(isVersionBefore([2, 1, 219], MINIMUM_CLAUDE_CLI_VERSION)).toBe(true);
+    expect(isVersionBefore([1, 9, 999], MINIMUM_CLAUDE_CLI_VERSION)).toBe(true);
+    expect(isVersionBefore([2, 1, 220], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
+    expect(isVersionBefore([2, 2, 0], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
+    expect(isVersionBefore([3, 0, 0], MINIMUM_CLAUDE_CLI_VERSION)).toBe(false);
   });
 });
 
 function createProbe() {
-  return new ClaudeCliVersionProbe({
-    debug: mock(() => undefined),
-    info: mock(() => undefined),
-    warn: mock(() => undefined),
-    error: mock(() => undefined),
-  });
+  return new ClaudeCliVersionProbe();
 }
 
 describe('ClaudeCliVersionProbe', () => {
@@ -62,29 +56,11 @@ describe('ClaudeCliVersionProbe', () => {
       .rejects.toThrow('Upgrade to 2.1.220 or newer');
   });
 
-  it('reports support for CLIs older than the flag removal', async () => {
-    const { binaryPath } = await createFakeClaudeBinary('2.1.150 (Claude Code)');
-    expect(await createProbe().supportsLegacyThinkingFlag(binaryPath)).toBe(true);
-  });
-
-  it('reports no support for CLIs at or beyond the flag removal', async () => {
-    const removed = await createFakeClaudeBinary('2.1.198 (Claude Code)');
-    const newer = await createFakeClaudeBinary('2.2.0 (Claude Code)');
-    expect(await createProbe().supportsLegacyThinkingFlag(removed.binaryPath)).toBe(false);
-    expect(await createProbe().supportsLegacyThinkingFlag(newer.binaryPath)).toBe(false);
-  });
-
-  it('defaults to no support when the version cannot be determined', async () => {
-    const { binaryPath } = await createFakeClaudeBinary('mystery build');
-    expect(await createProbe().supportsLegacyThinkingFlag(binaryPath)).toBe(false);
-    expect(await createProbe().supportsLegacyThinkingFlag('/nonexistent/claude-binary')).toBe(false);
-  });
-
   it('probes each binary path only once', async () => {
-    const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.0.0 (Claude Code)');
+    const { binaryPath, callLogPath } = await createFakeClaudeBinary('2.1.220 (Claude Code)');
     const probe = createProbe();
-    expect(await probe.supportsLegacyThinkingFlag(binaryPath)).toBe(true);
-    expect(await probe.supportsLegacyThinkingFlag(binaryPath)).toBe(true);
+    expect(await probe.assertCompatible(binaryPath)).toEqual(MINIMUM_CLAUDE_CLI_VERSION);
+    expect(await probe.assertCompatible(binaryPath)).toEqual(MINIMUM_CLAUDE_CLI_VERSION);
     const calls = await fs.readFile(callLogPath, 'utf8');
     expect(calls.trim().split('\n')).toHaveLength(1);
   });

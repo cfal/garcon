@@ -93,7 +93,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     const config = createClaudeConfig(host.environment);
     const logger = createScopedAgentLogger(host.logger, 'claude');
     const nativeSessions = createPathNativeSessionCodec('claude');
-    const versionProbe = new ClaudeCliVersionProbe(logger);
+    const versionProbe = new ClaudeCliVersionProbe();
     const runtime = new ClaudeCliRuntime({
       binary: config.binary,
       logger,

@@ -19,7 +19,6 @@ function createRuntime(logger = createLogger()) {
     logger,
     versionProbe: {
       assertCompatible: mock(() => Promise.resolve([2, 1, 220])),
-      supportsLegacyThinkingFlag: mock(() => Promise.resolve(false)),
     },
   });
 }

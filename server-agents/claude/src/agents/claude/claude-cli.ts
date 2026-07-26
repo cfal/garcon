@@ -133,7 +133,6 @@ interface ClaudeCLIArgOptions {
   sessionId?: string;
   resumeSessionId?: string;
   streamJson?: boolean;
-  supportsLegacyThinkingFlag?: boolean;
 }
 
 interface ClaudeSingleQueryOptions {
@@ -272,8 +271,13 @@ async function runSingleQuery(
   return withSingleQueryControl({ signal, timeoutMs }, async (querySignal) => {
     const claudeBinary = dependencies.binary();
     await dependencies.versionProbe.assertCompatible(claudeBinary);
-    const supportsLegacyThinkingFlag = await dependencies.versionProbe.supportsLegacyThinkingFlag(claudeBinary);
-    const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt, supportsLegacyThinkingFlag });
+    const args = buildClaudeCLIArgs({
+      model,
+      permissionMode,
+      thinkingMode,
+      claudeThinkingMode,
+      prompt,
+    });
 
     return runClaudeSingleQueryProcess({
       binary: claudeBinary,
@@ -297,19 +301,6 @@ function normalizeClaudeThinkingModeForState(claudeThinkingMode: ClaudeThinkingM
   return claudeThinkingMode ?? 'auto';
 }
 
-function mapClaudeThinkingModeToCliValue(claudeThinkingMode: ClaudeThinkingMode | undefined): string | undefined {
-  switch (claudeThinkingMode) {
-    case 'auto':
-      return 'adaptive';
-    case 'on':
-      return 'enabled';
-    case 'off':
-      return 'disabled';
-    default:
-      return undefined;
-  }
-}
-
 function buildClaudeCLIArgs({
   model,
   permissionMode,
@@ -319,7 +310,6 @@ function buildClaudeCLIArgs({
   sessionId,
   resumeSessionId,
   streamJson = false,
-  supportsLegacyThinkingFlag = false,
 }: ClaudeCLIArgOptions): string[] {
   const args = streamJson
     ? [
@@ -350,16 +340,6 @@ function buildClaudeCLIArgs({
   const effort = mapThinkingModeToClaudeEffort(thinkingMode);
   if (effort) {
     args.push('--effort', effort);
-  }
-
-  // Claude Code 2.1.198 removed the legacy `--thinking` flag. Forward the
-  // mode only when a version probe confirmed the installed CLI still
-  // supports it; newer CLIs control thinking via `--effort` above.
-  if (supportsLegacyThinkingFlag) {
-    const mappedClaudeThinkingMode = mapClaudeThinkingModeToCliValue(claudeThinkingMode);
-    if (mappedClaudeThinkingMode) {
-      args.push('--thinking', mappedClaudeThinkingMode);
-    }
   }
 
   if (streamJson) {
@@ -1073,7 +1053,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     return activeTurn.completion;
   }
 
-  #buildCLIArgs(session: ClaudeRunningSession, options: ClaudeSessionOptions, resume: boolean, supportsLegacyThinkingFlag: boolean): string[] {
+  #buildCLIArgs(
+    session: ClaudeRunningSession,
+    options: ClaudeSessionOptions,
+    resume: boolean,
+  ): string[] {
     return buildClaudeCLIArgs({
       model: options.model,
       permissionMode: options.permissionMode,
@@ -1083,7 +1067,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       streamJson: true,
       sessionId: resume ? undefined : session.id,
       resumeSessionId: resume ? session.id : undefined,
-      supportsLegacyThinkingFlag,
     });
   }
 
@@ -1174,7 +1157,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session: ClaudeRunningSession,
     options: ClaudeSessionOptions,
     resume: boolean,
-    supportsLegacyThinkingFlag: boolean,
     cliVersion: readonly [number, number, number],
   ): Promise<ReturnType<typeof Bun.spawn>> {
     await session.retirement;
@@ -1183,7 +1165,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       throw new Error(`Claude session ${session.id} already has a process`);
     }
     const claudeBinary = this.#dependencies.binary();
-    const args = this.#buildCLIArgs(session, options, resume, supportsLegacyThinkingFlag);
+    const args = this.#buildCLIArgs(session, options, resume);
 
     this.#dependencies.logger.info('Spawning Claude CLI', {
       binary: claudeBinary,
@@ -1323,12 +1305,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (previous) await this.#retireSession(previous);
     this.#runningSessions.set(agentSessionId, session);
 
-    let supportsLegacyThinkingFlag: boolean;
     let cliVersion: readonly [number, number, number];
     try {
       cliVersion = await this.#dependencies.versionProbe.assertCompatible(this.#dependencies.binary());
-      supportsLegacyThinkingFlag = await this.#dependencies.versionProbe
-        .supportsLegacyThinkingFlag(this.#dependencies.binary());
     } catch (error) {
       if (this.#runningSessions.get(agentSessionId) === session) {
         session.activeTurn = null;
@@ -1345,7 +1324,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     try {
       assertClaudeExecutionOpen(requestAdmission);
       this.emitSessionCreated(chatId);
-      await this.#spawnCLI(session, allOpts, false, supportsLegacyThinkingFlag, cliVersion);
+      await this.#spawnCLI(session, allOpts, false, cliVersion);
       assertClaudeExecutionOpen(requestAdmission);
       await this.#sendUserMessage(session, activeTurn, command, images);
       executionAdmission?.markStarted();
@@ -1394,8 +1373,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     // Resolved before any session-state checks so the spawn path below stays
     // free of interleaving awaits.
     const cliVersion = await this.#dependencies.versionProbe.assertCompatible(this.#dependencies.binary());
-    const supportsLegacyThinkingFlag = await this.#dependencies.versionProbe
-      .supportsLegacyThinkingFlag(this.#dependencies.binary());
     assertClaudeExecutionOpen(requestAdmission);
     if (this.#shuttingDown) throw new Error('Claude runtime is shutting down');
 
@@ -1485,7 +1462,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
           session,
           session.options,
           true,
-          supportsLegacyThinkingFlag,
           cliVersion,
         );
       }
@@ -1693,7 +1669,7 @@ function defaultClaudeCliDependencies(): ClaudeCliDependencies {
   return {
     binary: () => 'claude',
     logger: NOOP_LOGGER,
-    versionProbe: new ClaudeCliVersionProbe(NOOP_LOGGER),
+    versionProbe: new ClaudeCliVersionProbe(),
   };
 }
 
