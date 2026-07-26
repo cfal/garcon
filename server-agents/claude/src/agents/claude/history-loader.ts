@@ -7,7 +7,6 @@ import {
   readJsonlLineEntries,
   readJsonlTailLines,
 } from '@garcon/server-agent-common/shared/history-loader-utils';
-import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import {
   UserMessage,
   AssistantMessage,
@@ -18,6 +17,7 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import { convertClaudeToolUse } from './tool-use-converter.js';
+import { claudeToolResultContent } from './tool-result-converter.js';
 import { extractCompactionSummary, parseCompactMetadata } from './compaction.js';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { attachNativeMessageSource, getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
@@ -159,18 +159,6 @@ function getMessageText(content: unknown): string {
     return content.trim();
   }
   return '';
-}
-
-function toolResultContentForEntry(
-  entry: Record<string, unknown>,
-  content: unknown,
-): Record<string, unknown> {
-  const normalized = normalizeToolResultContent(content);
-  const toolUseResult = entry.toolUseResult;
-  if (toolUseResult && typeof toolUseResult === 'object' && !Array.isArray(toolUseResult)) {
-    return { ...normalized, toolUseResult: toolUseResult as Record<string, unknown> };
-  }
-  return normalized;
 }
 
 function isSystemUserMessage(text: string): boolean {
@@ -332,7 +320,12 @@ export function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMe
         for (const rawPart of content) {
           const part = asRecord(rawPart);
           if (part.type === 'tool_result') {
-            pushMessage(entry, new ToolResultMessage(ts, asString(part.tool_use_id) || '', toolResultContentForEntry(entry, part.content), Boolean(part.is_error)));
+            pushMessage(entry, new ToolResultMessage(
+              ts,
+              asString(part.tool_use_id) || '',
+              claudeToolResultContent(part.content, entry.toolUseResult ?? entry.tool_use_result),
+              Boolean(part.is_error),
+            ));
           }
         }
       }

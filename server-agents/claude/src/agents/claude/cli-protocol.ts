@@ -1,7 +1,7 @@
 import { AssistantMessage, ThinkingMessage, ToolResultMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
-import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { convertClaudeToolUse } from './tool-use-converter.js';
+import { claudeToolResultContent } from './tool-result-converter.js';
 
 interface CompactMetadata {
   trigger?: string;
@@ -39,6 +39,8 @@ export interface ClaudeCLIMessage {
   status?: string | null;
   compact_result?: string;
   compact_error?: string;
+  tool_use_result?: unknown;
+  toolUseResult?: unknown;
   compact_metadata?: CompactMetadata;
   request?: {
     subtype?: string;
@@ -262,7 +264,10 @@ export function convertCLIMessageToChatMessages(message: ClaudeCLIMessage): Chat
       chatMessages.push(new ToolResultMessage(
         now,
         part.tool_use_id || '',
-        normalizeToolResultContent(part.content),
+        claudeToolResultContent(
+          part.content,
+          message.tool_use_result ?? message.toolUseResult,
+        ),
         Boolean(part.is_error),
       ));
     }
