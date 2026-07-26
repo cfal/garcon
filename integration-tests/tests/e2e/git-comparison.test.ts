@@ -54,18 +54,28 @@ describe('Lightpanda Git comparison', () => {
       await app.startOpenAiDirectChat('git-comparison-seed');
       await app.waitForText('echo:git-comparison-seed');
 
-			await fixture.page.evaluate(() => {
-				window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
-			});
-			await fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
-			await fixture.page.evaluate(() => {
-				const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-					.find((button) => button.textContent?.includes('Switch to Git'));
-				if (!option) throw new Error('Missing Switch to Git command.');
-				option.click();
-			});
-			await app.waitForButton('Compare revisions');
-			await app.clickButton('Compare revisions');
+      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+          + '[aria-hidden="false"]',
+      );
+      await fixture.page.waitForSelector('[data-git-diff-document]');
+      await fixture.page.waitForFunction(
+        () => {
+          const panel = document.querySelector(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"]',
+          );
+          return panel?.textContent?.includes('Working Tree') === true
+            && !panel.textContent.includes('Loading comparison');
+        },
+        { timeout: 20_000 },
+      );
+      expect(await fixture.page.$eval(
+        '[data-git-diff-document]',
+        (element) => element.textContent,
+      )).toContain('Working Tree');
+      await app.clickResponsiveAction('Edit');
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
 
       expect(await fixture.page.$eval(
@@ -78,100 +88,103 @@ describe('Lightpanda Git comparison', () => {
         (element) => element.textContent,
       )).toContain('staged, unstaged, untracked');
       await app.clickDialogButton('Compare');
-			await fixture.page.waitForFunction(
-				() => !document.querySelector('[role="dialog"][aria-label="Compare revisions"]'),
-				{ timeout: 20_000 },
-			);
-			await fixture.page.waitForSelector('[data-git-diff-document]');
-			await fixture.page.waitForFunction(
-				() => document.querySelector('[data-git-diff-document]')?.getAttribute('data-git-history-layout') === 'narrow',
-				{ timeout: 20_000 },
-			);
-			await app.fill('[data-git-history-files-pane] input[type="search"]', 'large.txt');
-			await fixture.page.waitForSelector(
-				'[data-git-history-files-pane] [title="large.txt"]',
-			);
-			await fixture.page.evaluate(() => {
-				const label = document.querySelector<HTMLElement>(
-					'[data-git-history-files-pane] [title="large.txt"]',
-				);
-				const row = label?.closest<HTMLButtonElement>('[data-git-file-list-row]');
-				if (!row) throw new Error('Missing large.txt comparison row.');
-				row.click();
-			});
-			await fixture.page.waitForSelector('[data-git-history-diff-pane][aria-hidden="false"]');
+      await fixture.page.waitForFunction(
+        () => !document.querySelector('[role="dialog"][aria-label="Compare revisions"]'),
+        { timeout: 20_000 },
+      );
+      await fixture.page.waitForSelector('[data-git-diff-document]');
+      await fixture.page.waitForFunction(
+        () => document.querySelector('[data-git-diff-document]')
+          ?.getAttribute('data-git-history-layout') === 'narrow',
+        { timeout: 20_000 },
+      );
+      await app.fill('[data-git-history-files-pane] input[type="search"]', 'large.txt');
+      await fixture.page.waitForSelector(
+        '[data-git-history-files-pane] [title="large.txt"]',
+      );
+      await fixture.page.evaluate(() => {
+        const label = document.querySelector<HTMLElement>(
+          '[data-git-history-files-pane] [title="large.txt"]',
+        );
+        const row = label?.closest<HTMLButtonElement>('[data-git-file-list-row]');
+        if (!row) throw new Error('Missing large.txt comparison row.');
+        row.click();
+      });
+      await fixture.page.waitForSelector('[data-git-history-diff-pane][aria-hidden="false"]');
       await fixture.page.waitForSelector('[data-git-virtual-diff-root]');
-			await app.waitForText('large after marker');
-			const mountedRows = await fixture.page.$$eval(
+      await app.waitForText('large after marker');
+      const mountedRows = await fixture.page.$$eval(
         '[data-git-virtual-row]',
-				(rows) => rows.length,
-			);
-			expect(mountedRows).toBeLessThan(30);
+        (rows) => rows.length,
+      );
+      expect(mountedRows).toBeLessThan(30);
 
-			await app.selectMainWorkspaceSurface('Chat');
-			await fixture.page.waitForSelector(
-				'[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
-			);
-			await writeFile(join(project, 'large.txt'), `${refreshed}\n`, 'utf8');
-			await app.selectMainWorkspaceSurface('Git');
-			await fixture.page.waitForSelector(
-				'[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]',
-			);
-			await fixture.page.waitForFunction(
-				() => document.body.textContent?.includes('The Working Tree changed.'),
-				{ timeout: 5_000 },
-			);
-			expect(await fixture.page.$eval('body', (element) => element.textContent)).toContain(
-				'large after marker',
-			);
-			expect(await fixture.page.$eval('body', (element) => element.textContent)).not.toContain(
-				'large refreshed marker',
-			);
-			await fixture.page.evaluate(() => {
-				const button = [...document.querySelectorAll<HTMLButtonElement>('button')]
-					.find((candidate) => candidate.textContent?.trim() === 'Refresh comparison');
-				if (!button) throw new Error('Missing stale comparison refresh action.');
-				button.click();
-			});
-			await fixture.page.waitForFunction(
-				() => {
-					const button = document.querySelector<HTMLButtonElement>(
-						'button[aria-label="Refresh comparison"]',
-					);
-					return Boolean(
-						button &&
-						!button.disabled &&
-						!document.body.textContent?.includes('The Working Tree changed.'),
-					);
-				},
-				{ timeout: 20_000 },
-			);
-			await app.clickButton('Files (12)');
-			await app.fill('[data-git-history-files-pane] input[type="search"]', 'large.txt');
-			await fixture.page.waitForSelector(
-				'[data-git-history-files-pane] [title="large.txt"]',
-			);
-			await fixture.page.evaluate(() => {
-				const label = document.querySelector<HTMLElement>(
-					'[data-git-history-files-pane] [title="large.txt"]',
-				);
-				const row = label?.closest<HTMLButtonElement>('[data-git-file-list-row]');
-				if (!row) throw new Error('Missing refreshed large.txt comparison row.');
-				row.click();
-			});
-			await fixture.page.waitForSelector('[data-git-history-diff-pane][aria-hidden="false"]');
-			await app.waitForText('large refreshed marker');
-			await fixture.page.waitForFunction(
-				() => {
-					const button = [...document.querySelectorAll<HTMLButtonElement>(
-						'button[aria-label="Add to chat"]',
-					)].find((element) => !element.closest('[aria-hidden="true"]'));
-					if (!button) return false;
-					button.click();
-					return true;
-				},
-				{ timeout: 20_000 },
-			);
+      await app.selectMainWorkspaceSurface('Chat');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
+      );
+      await writeFile(join(project, 'large.txt'), `${refreshed}\n`, 'utf8');
+      await app.selectMainWorkspaceSurface('Compare');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+          + '[aria-hidden="false"]',
+      );
+      await fixture.page.waitForFunction(
+        () => document.body.textContent?.includes('The Working Tree changed.'),
+        { timeout: 5_000 },
+      );
+      expect(await fixture.page.$eval('body', (element) => element.textContent)).toContain(
+        'large after marker',
+      );
+      expect(await fixture.page.$eval('body', (element) => element.textContent)).not.toContain(
+        'large refreshed marker',
+      );
+      await fixture.page.evaluate(() => {
+        const button = [...document.querySelectorAll<HTMLButtonElement>('button')]
+          .find((candidate) => candidate.textContent?.trim() === 'Refresh comparison');
+        if (!button) throw new Error('Missing stale comparison refresh action.');
+        button.click();
+      });
+      await fixture.page.waitForFunction(
+        () => {
+          const button = document.querySelector<HTMLButtonElement>(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"] button[aria-label="Refresh"]',
+          );
+          return Boolean(
+            button
+              && !button.disabled
+              && !document.body.textContent?.includes('The Working Tree changed.'),
+          );
+        },
+        { timeout: 20_000 },
+      );
+      await app.clickButton('Files (12)');
+      await app.fill('[data-git-history-files-pane] input[type="search"]', 'large.txt');
+      await fixture.page.waitForSelector(
+        '[data-git-history-files-pane] [title="large.txt"]',
+      );
+      await fixture.page.evaluate(() => {
+        const label = document.querySelector<HTMLElement>(
+          '[data-git-history-files-pane] [title="large.txt"]',
+        );
+        const row = label?.closest<HTMLButtonElement>('[data-git-file-list-row]');
+        if (!row) throw new Error('Missing refreshed large.txt comparison row.');
+        row.click();
+      });
+      await fixture.page.waitForSelector('[data-git-history-diff-pane][aria-hidden="false"]');
+      await app.waitForText('large refreshed marker');
+      await fixture.page.waitForFunction(
+        () => {
+          const button = [...document.querySelectorAll<HTMLButtonElement>(
+            'button[aria-label="Add to chat"]',
+          )].find((element) => !element.closest('[aria-hidden="true"]'));
+          if (!button) return false;
+          button.click();
+          return true;
+        },
+        { timeout: 20_000 },
+      );
       await fixture.page.waitForSelector('[data-git-comment-composer] textarea');
       await app.fill('[data-git-comment-composer] textarea', 'Please verify this line.');
       try {
@@ -220,20 +233,24 @@ describe('Lightpanda Git comparison', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-revision-freshness-seed');
       await app.waitForText('echo:git-revision-freshness-seed');
-      await fixture.page.evaluate(() => {
-        window.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }),
-        );
-      });
-      await fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
-      await fixture.page.evaluate(() => {
-        const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-          .find((button) => button.textContent?.includes('Switch to Git'));
-        if (!option) throw new Error('Missing Switch to Git command.');
-        option.click();
-      });
-      await app.waitForButton('Compare revisions');
-      await app.clickButton('Compare revisions');
+      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+          + '[aria-hidden="false"]',
+      );
+      await fixture.page.waitForSelector('[data-git-diff-document]');
+      await fixture.page.waitForFunction(
+        () => {
+          const panel = document.querySelector(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"]',
+          );
+          return panel?.textContent?.includes('Working Tree') === true
+            && !panel.textContent.includes('Loading comparison');
+        },
+        { timeout: 20_000 },
+      );
+      await app.clickResponsiveAction('Edit');
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       await app.fill('#git-comparison-from', 'origin/main');
       await app.clickDialogButton('Revision');
