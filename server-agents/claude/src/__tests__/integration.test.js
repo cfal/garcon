@@ -30,6 +30,7 @@ describe('ClaudeAgentIntegration', () => {
     expect(ClaudeAgentIntegration.apiVersion).toBe(2);
     expect(ClaudeAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('claude');
+    expect(integration.descriptor.requiresNativePathForProjectPathUpdate).toBe(false);
     expect(integration.execution.prepareProjectPathUpdate).toBeDefined();
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({

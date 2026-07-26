@@ -4,6 +4,7 @@ import {
   computeAgentTranscriptRevisions,
   type AgentExecutionContext,
   type AgentOperationIdentity,
+  type AgentProjectPathUpdatePreparation,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -261,16 +262,23 @@ export class AgentRuntimeRouter {
   async prepareProjectPathUpdate(
     agentId: string,
     request: PrepareProjectPathUpdateRequest,
-  ): Promise<void> {
+  ): Promise<AgentProjectPathUpdatePreparation | void> {
     const integration = this.#directory.require(agentId);
     if (!integration.execution.prepareProjectPathUpdate) return;
     const entry = this.#registry.getChat(request.chatId);
     if (!entry) throw new Error(`Session not found: ${request.chatId}`);
-    await integration.execution.prepareProjectPathUpdate({
+    if (
+      entry.agentId !== agentId
+      || entry.agentSessionId !== request.agentSessionId
+      || entry.projectPath !== request.previousProjectPath
+    ) {
+      throw new Error(`Session changed while preparing project path: ${request.chatId}`);
+    }
+    return integration.execution.prepareProjectPathUpdate({
       chat: toAgentChatReference(
         integration,
         request.chatId,
-        entry,
+        { ...entry, nativeSession: request.nativeSession },
         this.#getCarryOverRevision(request.chatId),
       ),
       nextProjectPath: request.nextProjectPath,

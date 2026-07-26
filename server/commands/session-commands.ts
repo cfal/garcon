@@ -7,6 +7,7 @@ import type {
   ProjectPathPatchResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
+import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
 import {
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
@@ -308,32 +309,37 @@ export class SessionCommands {
     await this.assertChatIdleForProjectPathUpdate(input.chatId, chat);
     const nativeSession = await this.nativeSessionForProjectPathUpdate(input.chatId, chat);
 
-    try {
-      await this.deps.agents.prepareProjectPathUpdate(chat.agentId, {
-        chatId: input.chatId,
-        agentSessionId: chat.agentSessionId,
-        previousProjectPath: chat.projectPath,
-        nextProjectPath,
-        nativeSession,
-      });
-    } catch (error) {
-      throw new CommandValidationError(
-        'CHAT_NOT_IDLE',
-        error instanceof Error ? error.message : String(error),
-        409,
-        true,
-      );
-    }
-
     const event = {
       chatId: input.chatId,
       projectPath: nextProjectPath,
       effectiveProjectKey,
       previousProjectPath: chat.projectPath,
       previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
-      ...(nativeSession !== chat.nativeSession ? { nativeSession } : {}),
     };
-    const updated = await this.deps.chats.updateProjectPath(input.chatId, event, { flush: true });
+    const updated = await runProjectPathUpdateTransaction({
+      chatId: input.chatId,
+      agentId: chat.agentId,
+      fallbackNativeSession:
+        nativeSession !== chat.nativeSession ? nativeSession : undefined,
+      prepare: () => this.deps.agents.prepareProjectPathUpdate(chat.agentId, {
+        chatId: input.chatId,
+        agentSessionId: chat.agentSessionId,
+        previousProjectPath: chat.projectPath,
+        nextProjectPath,
+        nativeSession,
+      }),
+      persist: (nextNativeSession) => this.deps.chats.updateProjectPath(
+        input.chatId,
+        {
+          ...event,
+          ...(nextNativeSession !== undefined
+            ? { nativeSession: nextNativeSession }
+            : {}),
+        },
+        { flush: true },
+      ),
+      logger,
+    });
     if (!updated) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
