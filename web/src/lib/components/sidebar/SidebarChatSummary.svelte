@@ -52,7 +52,7 @@
 				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>
-			<span class={cn('min-w-0 truncate', isUnread ? 'font-semibold' : 'font-medium')}>
+			<span class={cn('min-w-0 truncate', isUnread ? 'font-bold' : 'font-medium')}>
 				{chatName}
 			</span>
 			{#if isUnread}
@@ -107,6 +107,7 @@
 			<div
 				class={cn(
 					'mb-1 mt-0.5 truncate text-[13px] italic',
+					isUnread ? 'font-semibold' : 'font-normal',
 					isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
 				)}
 			>

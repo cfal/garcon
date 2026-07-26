@@ -74,7 +74,7 @@ describe('shared sidebar chat row', () => {
 		const pinnedBadges = document.querySelectorAll('.border-sidebar-badge-pinned-border');
 		expect(pinnedBadges).toHaveLength(1);
 		const title = screen.getByText('Shared row chat');
-		expect(title.className).toContain('font-semibold');
+		expect(title.className).toContain('font-bold');
 		const unreadStatus = screen.getByText('Unread');
 		expect(unreadStatus.className).toContain('sr-only');
 		expect(unreadStatus.getAttribute('data-slot')).toBe('sidebar-chat-unread-status');
@@ -94,6 +94,7 @@ describe('shared sidebar chat row', () => {
 		const sidebarPreview = screen.getByText('Latest preview text');
 		expect(sidebarPreview.className).toContain('mt-0.5');
 		expect(sidebarPreview.className).toContain('mb-1');
+		expect(sidebarPreview.className).toContain('font-semibold');
 		expect(screen.getByText('Claude')).toBeTruthy();
 		expect(screen.getByText('ops')).toBeTruthy();
 		expect(screen.getByText('prod')).toBeTruthy();
@@ -121,7 +122,7 @@ describe('shared sidebar chat row', () => {
 		expect(onManageTags).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-1' }));
 	});
 
-	it('uses independent title weight and activity treatments for unread and processing states', async () => {
+	it('uses independent unread emphasis and activity treatments', async () => {
 		const { rerender } = render(SidebarChatItemHost, {
 			session: createChat({ isUnread: true, isProcessing: true }),
 		});
@@ -130,7 +131,9 @@ describe('shared sidebar chat row', () => {
 		const processingIndicator = document.querySelector(
 			'[data-slot="sidebar-chat-processing-indicator"]',
 		);
-		expect(title.className).toContain('font-semibold');
+		const preview = screen.getByText('Latest preview text');
+		expect(title.className).toContain('font-bold');
+		expect(preview.className).toContain('font-semibold');
 		expect(title.className).not.toContain('flex-1');
 		expect(title.parentElement?.className).toContain('gap-1.5');
 		expect(screen.getByText('Unread').className).toContain('sr-only');
@@ -145,7 +148,9 @@ describe('shared sidebar chat row', () => {
 		});
 
 		expect(title.className).toContain('font-medium');
-		expect(title.className).not.toContain('font-semibold');
+		expect(title.className).not.toContain('font-bold');
+		expect(preview.className).toContain('font-normal');
+		expect(preview.className).not.toContain('font-semibold');
 		expect(screen.queryByText('Unread')).toBeNull();
 		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
 
@@ -155,7 +160,9 @@ describe('shared sidebar chat row', () => {
 		});
 
 		expect(title.className).toContain('font-medium');
-		expect(title.className).not.toContain('font-semibold');
+		expect(title.className).not.toContain('font-bold');
+		expect(preview.className).toContain('font-normal');
+		expect(preview.className).not.toContain('font-semibold');
 		expect(screen.queryByText('Unread')).toBeNull();
 		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
 
@@ -330,14 +337,16 @@ describe('shared sidebar chat row', () => {
 		expect(processingIndicator).toBeTruthy();
 		expect(processingIndicator?.closest('.sidebar-reduce-motion')).toBeTruthy();
 		const searchTitle = screen.getByText('Shared row chat');
-		expect(searchTitle.className).toContain('font-semibold');
+		expect(searchTitle.className).toContain('font-bold');
 		expect(processingIndicator?.parentElement).toBe(searchTitle.parentElement);
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByText('3h ago')).toBeTruthy();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
-		expect(screen.getByText('Latest preview text').className).toContain('mt-0.5');
-		expect(screen.getByText('Latest preview text').className).toContain('mb-1');
+		const searchPreview = screen.getByText('Latest preview text');
+		expect(searchPreview.className).toContain('mt-0.5');
+		expect(searchPreview.className).toContain('mb-1');
+		expect(searchPreview.className).toContain('font-semibold');
 		expect(screen.getByText('Claude')).toBeTruthy();
 		expect(screen.getByText('ops')).toBeTruthy();
 		expect(screen.getByText('prod')).toBeTruthy();
