@@ -109,6 +109,8 @@ From the repository root:
 bun run typecheck
 bun run test:integration:server
 
+ANTHROPIC_TESTING_KEY=... bun run test:live:claude
+
 bun run build
 LIGHTPANDA_BIN=/path/to/lightpanda bun run test:integration:e2e
 
@@ -116,7 +118,7 @@ bun run check
 bun run test
 ```
 
-`bun run test:integration` runs the server integration lane but not the Lightpanda lane. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
+`bun run test:integration` runs the deterministic server integration lane but not the credential-backed live-provider or Lightpanda lanes. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. Credential-backed suites use the separate `test:live` and `test:live:<provider>` commands; do not run them locally unless actively changing those tests, and rely on the PR CI live-provider gate otherwise. The live Claude lane requires `ANTHROPIC_TESTING_KEY`; it uses the pinned test-only Claude CLI, Haiku, low effort, a temporary Claude home without changing the user's CLI login, and redacted failure diagnostics that omit provider content and server logs. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
 
 Focused runs are useful while iterating:
 
@@ -132,7 +134,9 @@ Keep the configured single-test concurrency. The suites exercise process lifecyc
 
 The deterministic lane exercises `direct-openai-compatible` and `direct-anthropic-compatible` through separate protocol fakes. Both providers are present in every fixture and remain alive across Garcon restarts. The Anthropic fake covers the Messages HTTP and SSE contract; it is not a fake Claude Code process or Claude Agent SDK. Together the fakes prove Garcon's multi-agent routing, lifecycle, queue, transcript, persistence, search, and SPA behavior without spending credentials or depending on external availability. They do not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.
 
-Future credential-backed provider suites should be opt-in, isolated from the deterministic required lane, and explicit about cost, rate limits, cleanup, and supported environments. Add them when test API keys are available; do not weaken or replace fake-provider coverage with live-provider tests.
+Credential-backed provider suites remain isolated from the deterministic required lane and must be explicit about cost, rate limits, cleanup, and supported environments. The live Claude lane receives its testing key only in the temporary Garcon process environment. Do not weaken or replace fake-provider coverage with live-provider tests.
+
+The live Claude lane covers correlated activity, consecutive queue dispatch, whole and historical forks, immediate re-forks, native graph isolation, restart/resume, permission decisions, live and reloaded tool results, interruption, stop, and post-cancellation recovery.
 
 ## Change Checklist
 

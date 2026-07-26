@@ -6,9 +6,12 @@
     "test": "bun run test:server",
     "test:server": "bun test --max-concurrency=1 --timeout=30000 tests/server",
     "test:e2e": "bun test --max-concurrency=1 --timeout=60000 tests/e2e",
+    "test:live": "bun run test:live:claude",
+    "test:live:claude": "bun test --max-concurrency=1 --timeout=120000 tests/live/claude",
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.220",
     "@types/bun": "1.3.14",
     "puppeteer-core": "25.3.0",
     "typescript": "7.0.2"

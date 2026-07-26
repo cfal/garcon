@@ -19,6 +19,7 @@ import type {
   ForkChatResponse,
   ForkRunCommandRequest,
   ForkRunCommandResponse,
+  PermissionDecisionCommandRequest,
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
@@ -534,6 +535,15 @@ export class GarconTestClient {
 
   forkRunChat(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse> {
     return this.post<ForkRunCommandResponse>('/api/v1/chats/fork-run', request);
+  }
+
+  sendPermissionDecision(
+    request: PermissionDecisionCommandRequest,
+  ): Promise<CommandAcceptedResponse> {
+    return this.post<CommandAcceptedResponse>(
+      '/api/v1/chats/permissions/decision',
+      request,
+    );
   }
 
   switchAgentModel(request: AgentModelPatchRequest): Promise<AgentModelPatchResponse> {

@@ -42,6 +42,8 @@
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",
+    "test:live": "bun run --cwd integration-tests test:live",
+    "test:live:claude": "bun run --cwd integration-tests test:live:claude",
     "lint": "bun run --cwd web lint",
     "check": "bun run lint && bun run --cwd web check",
     "typecheck": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck && bun run --cwd web check && bun run --cwd integration-tests typecheck",
