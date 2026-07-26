@@ -108,10 +108,18 @@ describe('Lightpanda Git comparison', () => {
 			);
 			expect(mountedRows).toBeLessThan(30);
 
+			await app.selectMainWorkspaceSurface('Chat');
+			await fixture.page.waitForSelector(
+				'[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
+			);
 			await writeFile(join(project, 'large.txt'), `${refreshed}\n`, 'utf8');
+			await app.selectMainWorkspaceSurface('Git');
+			await fixture.page.waitForSelector(
+				'[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]',
+			);
 			await fixture.page.waitForFunction(
 				() => document.body.textContent?.includes('The Working Tree changed.'),
-				{ timeout: 25_000 },
+				{ timeout: 5_000 },
 			);
 			expect(await fixture.page.$eval('body', (element) => element.textContent)).toContain(
 				'large after marker',
