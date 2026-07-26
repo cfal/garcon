@@ -22,7 +22,7 @@ if (args.includes('--version')) {
 async function runStreamSession(): Promise<void> {
   const sessionId = argumentValue('--session-id') ?? argumentValue('--resume');
   if (!sessionId) {
-    writeOutput({ type: 'system', subtype: 'init', slash_commands: [] });
+    await runInitializeProbe();
     return;
   }
 
@@ -64,7 +64,35 @@ async function runStreamSession(): Promise<void> {
   if (buffered.trim()) handleInput(buffered, nativePath, sessionId);
 }
 
+async function runInitializeProbe(): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffered = '';
+  for await (const chunk of Bun.stdin.stream()) {
+    buffered += decoder.decode(chunk, { stream: true });
+    const newline = buffered.indexOf('\n');
+    if (newline < 0) continue;
+    const input = JSON.parse(buffered.slice(0, newline)) as {
+      type?: string;
+      request_id?: string;
+      request?: { subtype?: string };
+    };
+    if (input.type === 'control_request' && input.request?.subtype === 'initialize') {
+      writeOutput({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: input.request_id,
+          response: { commands: [] },
+        },
+      });
+    }
+    return;
+  }
+}
+
 function argumentValue(name: string): string | null {
+  const inline = args.find((value) => value.startsWith(`${name}=`));
+  if (inline) return inline.slice(name.length + 1);
   const index = args.indexOf(name);
   return index >= 0 && typeof args[index + 1] === 'string'
     ? args[index + 1]!
@@ -86,9 +114,25 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
   if (!line.trim()) return;
   const input = JSON.parse(line) as {
     type?: string;
+    request_id?: string;
+    request?: { subtype?: string };
     uuid?: string;
     message?: { role?: string; content?: unknown };
   };
+  if (
+    input.type === 'control_request'
+    && (input.request?.subtype === 'initialize' || input.request?.subtype === 'set_model')
+  ) {
+    writeOutput({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: input.request_id,
+        response: { commands: [], capabilities: ['interrupt_cancel_queued_v1'] },
+      },
+    });
+    return;
+  }
   if (input.type !== 'user' || input.message?.role !== 'user') return;
   if (!input.uuid) throw new Error('Claude stream input requires a command UUID');
 

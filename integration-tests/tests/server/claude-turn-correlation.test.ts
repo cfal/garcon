@@ -56,6 +56,24 @@ const processInput = async (input) => {
     session_id: input.session_id,
   });
 
+  if (
+    input.message?.content === 'trigger malformed output'
+    || input.message?.content === 'trigger process crash'
+  ) {
+    emit({
+      type: 'command_lifecycle',
+      command_uuid: input.uuid,
+      state: 'started',
+      session_id: input.session_id,
+    });
+    if (input.message.content === 'trigger malformed output') {
+      process.stdout.write('{"type":}\\n');
+    } else {
+      process.exit(23);
+    }
+    return;
+  }
+
   if (firstUserMessage) {
     firstUserMessage = false;
     emit({
@@ -163,6 +181,20 @@ for await (const chunk of Bun.stdin.stream()) {
   for (const line of lines) {
     if (!line.trim()) continue;
     const input = JSON.parse(line);
+    if (
+      input.type === 'control_request'
+      && (input.request?.subtype === 'initialize' || input.request?.subtype === 'set_model')
+    ) {
+      emit({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: input.request_id,
+          response: { commands: [], capabilities: ['interrupt_cancel_queued_v1'] },
+        },
+      });
+      continue;
+    }
     if (input.type !== 'user') continue;
     recordInput(input);
     pendingInputs.push(input);
@@ -376,4 +408,56 @@ describe('Claude turn correlation', () => {
       },
     });
   });
+
+  for (const scenario of [
+    {
+      name: 'malformed CLI output',
+      command: 'trigger malformed output',
+      error: 'malformed JSON',
+    },
+    {
+      name: 'an unexpected CLI process exit',
+      command: 'trigger process crash',
+      error: 'Claude CLI',
+    },
+  ]) {
+    test(`fails an active turn on ${scenario.name}`, async () => {
+      const serverEnvironment: Record<string, string> = {};
+
+      await withIntegrationFixture(`claude-${scenario.command.replaceAll(' ', '-')}`, async (fixture) => {
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const accepted = await fixture.client.startChat({
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          chatId,
+          agentId: 'claude',
+          projectPath: fixture.dirs.project,
+          model: 'haiku',
+          permissionMode: 'default',
+          thinkingMode: 'low',
+          agentSettings: {
+            ownerId: 'claude',
+            schemaVersion: 1,
+            values: {},
+          },
+          command: scenario.command,
+        });
+
+        const terminal = await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
+          afterIndex: cursor,
+        });
+        expect(terminal.type).toBe('agent-run-failed');
+        expect((terminal as AgentRunFailedMessage).error).toContain(scenario.error);
+      }, {
+        serverEnvironment,
+        prepareWorkspace: async (directories) => {
+          const fakeClaude = join(directories.root, 'fake-claude');
+          await writeFile(fakeClaude, fakeClaudeSource());
+          await chmod(fakeClaude, 0o755);
+          serverEnvironment.CLAUDE_BINARY = fakeClaude;
+        },
+      });
+    });
+  }
 });

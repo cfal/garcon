@@ -56,7 +56,7 @@ describe('buildClaudeCLIArgs', () => {
       '--permission-mode', 'acceptEdits',
       '--permission-prompt-tool', 'stdio',
       '--effort', 'medium',
-      '--session-id', 'session-1',
+      '--session-id=session-1',
       '-p', '',
     ]);
   });
@@ -82,9 +82,21 @@ describe('buildClaudeCLIArgs', () => {
       '--permission-prompt-tool', 'stdio',
       '--effort', 'medium',
       '--thinking', 'disabled',
-      '--session-id', 'session-1',
+      '--session-id=session-1',
       '-p', '',
     ]);
+  });
+
+  it('passes session identifiers with inline values', () => {
+    const args = buildClaudeCLIArgs({
+      resumeSessionId: 'session-1',
+      prompt: '',
+      streamJson: true,
+    });
+
+    expect(args).toContain('--resume=session-1');
+    expect(args).not.toContain('--resume');
+    expect(args).not.toContain('session-1');
   });
 
   it('starts manual bypass as normal Claude mode with stdio permission prompts', () => {
@@ -175,10 +187,15 @@ describe('convertCLIMessageToChatMessages', () => {
           {
             type: 'tool_result',
             tool_use_id: 'tool-1',
-            content: [{ type: 'text', text: 'command output' }],
+            content: 'command output',
             is_error: false,
           },
         ],
+      },
+      tool_use_result: {
+        stdout: 'command output',
+        stderr: '',
+        interrupted: false,
       },
     };
 
@@ -189,6 +206,14 @@ describe('convertCLIMessageToChatMessages', () => {
       type: 'tool-result',
       toolId: 'tool-1',
       isError: false,
+      content: {
+        raw: 'command output',
+        toolUseResult: {
+          stdout: 'command output',
+          stderr: '',
+          interrupted: false,
+        },
+      },
     });
     expect(JSON.stringify(result)).not.toContain('do not render this prompt again');
   });

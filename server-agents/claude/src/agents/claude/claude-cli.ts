@@ -31,9 +31,13 @@ import { isManualBypassMode, providerStartupPermissionMode } from '@garcon/serve
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import { runClaudeSingleQueryProcess } from './single-query-process.js';
-import { pipeClaudeProcessOutput } from './cli-stdio.js';
-import { ClaudeProjectPathProcessTracker } from './project-path-processes.js';
+import { ClaudeProcessRetirementTracker } from './process-retirements.js';
 import { ClaudeControlBroker } from './cli-control.js';
+import {
+  ClaudeProcessTransport,
+  type ClaudeProcessExit,
+  type ClaudeTransportFailure,
+} from './cli-process-transport.js';
 import {
   ClaudeTurnState,
   claudeResultFailureMessage,
@@ -70,6 +74,8 @@ interface ClaudeRunningSession {
   lastActivityAt: number;
   activeTurn: ClaudeActiveTurn | null;
   process: ReturnType<typeof Bun.spawn> | null;
+  transport: ClaudeProcessTransport<ClaudeCLIMessage> | null;
+  retirement: Promise<void> | null;
   options: ClaudeSessionOptions;
   currentPermissionMode: PermissionMode;
   currentThinkingMode: ThinkingMode;
@@ -265,6 +271,7 @@ async function runSingleQuery(
 ): Promise<string> {
   return withSingleQueryControl({ signal, timeoutMs }, async (querySignal) => {
     const claudeBinary = dependencies.binary();
+    await dependencies.versionProbe.assertCompatible(claudeBinary);
     const supportsLegacyThinkingFlag = await dependencies.versionProbe.supportsLegacyThinkingFlag(claudeBinary);
     const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt, supportsLegacyThinkingFlag });
 
@@ -357,9 +364,9 @@ function buildClaudeCLIArgs({
 
   if (streamJson) {
     if (resumeSessionId) {
-      args.push('--resume', resumeSessionId);
+      args.push(`--resume=${resumeSessionId}`);
     } else if (sessionId) {
-      args.push('--session-id', sessionId);
+      args.push(`--session-id=${sessionId}`);
     }
   }
 
@@ -369,7 +376,7 @@ function buildClaudeCLIArgs({
 
 class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
-  #projectPathProcesses = new ClaudeProjectPathProcessTracker();
+  #processRetirements = new ClaudeProcessRetirementTracker();
   #pendingPermissions = new Map<string, PendingPermission>();
   #controlBroker: ClaudeControlBroker;
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
@@ -426,26 +433,21 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     return activeTurn;
   }
 
-  #writeToCLI(sessionId: string, jsonl: string): void {
+  async #writeToCLI(sessionId: string, jsonl: string): Promise<void> {
     const session = this.#runningSessions.get(sessionId);
-    if (!session?.process) throw new Error(`Claude session ${sessionId} has no writable process`);
-    const stdin = session.process.stdin as import('bun').FileSink;
-    if (!stdin?.write) throw new Error(`Claude session ${sessionId} has no writable stdin`);
-    stdin.write(jsonl + '\n');
-    stdin.flush();
+    if (!session?.transport) {
+      throw new Error(`Claude session ${sessionId} has no writable process`);
+    }
+    await session.transport.writeLine(jsonl);
   }
 
-  #trySendToCLI(sessionId: string, jsonl: string): boolean {
-    try {
-      this.#writeToCLI(sessionId, jsonl);
-      return true;
-    } catch (err: unknown) {
+  #trySendToCLI(sessionId: string, jsonl: string): void {
+    void this.#writeToCLI(sessionId, jsonl).catch((err: unknown) => {
       this.#dependencies.logger.warn('Claude CLI stdin write failed', {
         sessionId: sessionId.slice(0, 8),
         error: errorMessage(err),
       });
-      return false;
-    }
+    });
   }
 
   #routeCLIMessage(
@@ -464,6 +466,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         processId: session.process?.pid ?? null,
         inputId: activeTurn?.protocol.inputUuid.slice(0, 8) ?? null,
         source: inputEvent.source,
+        submitToStartMs: activeTurn ? Date.now() - activeTurn.startedAt : null,
       });
     } else if (inputEvent?.type === 'terminal-before-start') {
       this.#handleInputTerminalBeforeStart(session, inputEvent.state);
@@ -553,7 +556,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       });
       if (session.id !== msg.session_id) {
         this.#failSession(session, `Unexpected Claude session ID: ${msg.session_id || 'missing'}`);
-        this.#killSessionProcess(session);
+        void this.#retireSessionProcess(session);
       }
       return;
     }
@@ -848,21 +851,28 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#controlBroker.handleResponse(session.id, msg);
   }
 
-  #killSessionProcess(session: ClaudeRunningSession): void {
+  async #retireSessionProcess(session: ClaudeRunningSession): Promise<void> {
     this.#clearAbortTimer(session);
     this.#controlBroker.rejectSession(session.id, 'Claude CLI process was retired');
     const proc = session.process;
-    if (!proc) return;
-    session.process = null;
-    this.#projectPathProcesses.trackDetached(session.id, session.chatId, proc);
-    if (!proc.killed) {
-      proc.kill();
+    const transport = session.transport;
+    if (!proc || !transport) {
+      await session.retirement;
+      return;
     }
+    session.process = null;
+    session.transport = null;
+    const priorRetirement = session.retirement ?? Promise.resolve();
+    const retirement = priorRetirement.then(() => transport.retire());
+    session.retirement = retirement;
+    this.#processRetirements.track(session.id, session.chatId, retirement);
+    await retirement;
+    if (session.retirement === retirement) session.retirement = null;
   }
 
-  #retireSession(session: ClaudeRunningSession): void {
+  async #retireSession(session: ClaudeRunningSession): Promise<void> {
     const activeTurn = session.activeTurn;
-    this.#killSessionProcess(session);
+    this.#clearAbortTimer(session);
     session.activeTurn = null;
     if (activeTurn) this.emitProcessing(session.chatId, false);
     activeTurn?.resolve?.();
@@ -876,6 +886,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       ], pending.eventMetadata);
       this.#pendingPermissions.delete(permissionRequestId);
     }
+    await this.#retireSessionProcess(session);
   }
 
   #completeSessionInitialization(session: ClaudeRunningSession): void {
@@ -912,8 +923,13 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #evictIdleSession(id: string, session: ClaudeRunningSession): void {
-    this.#killSessionProcess(session);
     this.#runningSessions.delete(id);
+    void this.#retireSession(session).catch((error: unknown) => {
+      this.#dependencies.logger.error('Claude idle process retirement failed', {
+        sessionId: session.id.slice(0, 8),
+        error: errorMessage(error),
+      });
+    });
   }
 
   async prepareClaudeProjectPathUpdate(request: ClaudeProjectPathUpdate): Promise<void> {
@@ -933,12 +949,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }
     }
 
-    if (session) this.#clearAbortTimer(session);
-    await this.#projectPathProcesses.stopForUpdate({
-      agentSessionId,
-      chatId: request.chatId,
-      activeProcess: session?.process ?? null,
-    });
+    if (session) {
+      this.#clearAbortTimer(session);
+      await this.#retireSessionProcess(session);
+    }
+    await this.#processRetirements.wait(agentSessionId, request.chatId);
   }
 
   setInternalPermissionMode(agentSessionId: string, mode: PermissionMode): void {
@@ -969,7 +984,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.options = { ...session.options, thinkingMode: mode };
 
     if (session.process && !session.activeTurn) {
-      this.#killSessionProcess(session);
+      void this.#retireSessionProcess(session);
     }
   }
 
@@ -980,7 +995,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.options = { ...session.options, claudeThinkingMode: mode };
 
     if (session.process && !session.activeTurn) {
-      this.#killSessionProcess(session);
+      void this.#retireSessionProcess(session);
     }
   }
 
@@ -1012,12 +1027,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     );
   }
 
-  #sendUserMessage(
+  async #sendUserMessage(
     session: ClaudeRunningSession,
     activeTurn: ClaudeActiveTurn,
     command: string,
     images?: readonly AgentAttachment[],
-  ): void {
+  ): Promise<void> {
     const prompt = appendTextAttachmentContext(command, images);
     const imageParts = imageAttachments(images);
     const documentParts = documentAttachments(images);
@@ -1051,7 +1066,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       uuid: activeTurn.protocol.inputUuid,
     });
 
-    this.#writeToCLI(session.id, jsonl);
+    await this.#writeToCLI(session.id, jsonl);
   }
 
   #waitForTurnComplete(activeTurn: ClaudeActiveTurn): Promise<void> {
@@ -1072,12 +1087,57 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  #handleProcessExit(session: ClaudeRunningSession, proc: ReturnType<typeof Bun.spawn>, exitCode: number): void {
+  #handleTransportFailure(
+    session: ClaudeRunningSession,
+    proc: ReturnType<typeof Bun.spawn>,
+    failure: ClaudeTransportFailure,
+  ): void {
+    if (session.process !== proc) return;
+    const activeTurn = session.activeTurn;
+    this.#dependencies.logger.error('Claude CLI transport failed', {
+      chatId: session.chatId,
+      turnId: activeTurn?.eventMetadata.turnId ?? null,
+      sessionId: session.id.slice(0, 8),
+      processId: proc.pid ?? null,
+      failureKind: failure.kind,
+      error: failure.message,
+    });
+    if (activeTurn) {
+      this.#failSession(session, `Claude CLI ${failure.kind} failed: ${failure.message}`);
+    }
+    void this.#retireSessionProcess(session);
+  }
+
+  #handleStdoutEof(
+    session: ClaudeRunningSession,
+    proc: ReturnType<typeof Bun.spawn>,
+  ): void {
+    if (session.process !== proc || !session.activeTurn) return;
+    this.#dependencies.logger.error('Claude CLI stdout ended during an active turn', {
+      chatId: session.chatId,
+      turnId: session.activeTurn.eventMetadata.turnId ?? null,
+      sessionId: session.id.slice(0, 8),
+      processId: proc.pid ?? null,
+    });
+    this.#failSession(
+      session,
+      'Claude CLI stdout ended before the submitted message produced a terminal result.',
+    );
+    void this.#retireSessionProcess(session);
+  }
+
+  #handleProcessExit(
+    session: ClaudeRunningSession,
+    proc: ReturnType<typeof Bun.spawn>,
+    exit: ClaudeProcessExit,
+  ): void {
     if (session.process !== proc) {
       return;
     }
 
+    const { exitCode } = exit;
     session.process = null;
+    session.transport = null;
     session.lastActivityAt = Date.now();
     this.#clearAbortTimer(session);
     this.#controlBroker.rejectSession(session.id, `Claude CLI process exited with code ${exitCode}`);
@@ -1110,15 +1170,27 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  // Stays synchronous so callers can check process liveness and spawn without
-  // an interleaving await; the legacy-flag probe is resolved by callers first.
-  #spawnCLI(session: ClaudeRunningSession, options: ClaudeSessionOptions, resume: boolean, supportsLegacyThinkingFlag: boolean): ReturnType<typeof Bun.spawn> {
+  async #spawnCLI(
+    session: ClaudeRunningSession,
+    options: ClaudeSessionOptions,
+    resume: boolean,
+    supportsLegacyThinkingFlag: boolean,
+    cliVersion: readonly [number, number, number],
+  ): Promise<ReturnType<typeof Bun.spawn>> {
+    await session.retirement;
+    await this.#processRetirements.wait(session.id, session.chatId);
+    if (session.process || session.transport) {
+      throw new Error(`Claude session ${session.id} already has a process`);
+    }
     const claudeBinary = this.#dependencies.binary();
     const args = this.#buildCLIArgs(session, options, resume, supportsLegacyThinkingFlag);
 
     this.#dependencies.logger.info('Spawning Claude CLI', {
       binary: claudeBinary,
-      arguments: args,
+      chatId: session.chatId,
+      sessionId: session.id.slice(0, 8),
+      resumed: resume,
+      cliVersion: cliVersion.join('.'),
     });
 
     const proc = Bun.spawn([claudeBinary, ...args], {
@@ -1135,32 +1207,52 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.currentClaudeThinkingMode = normalizeClaudeThinkingModeForState(options.claudeThinkingMode);
     session.currentModel = options.model || '';
     session.currentEnvOverrides = options.envOverrides;
-    pipeClaudeProcessOutput<ClaudeCLIMessage>({
+    const transport = new ClaudeProcessTransport<ClaudeCLIMessage>({
       process: proc,
       logger: this.#dependencies.logger,
       sessionId: session.id,
       onMessage: msg => this.#routeCLIMessage(session, proc, msg),
+      onFailure: failure => this.#handleTransportFailure(session, proc, failure),
+      onEof: () => this.#handleStdoutEof(session, proc),
+      onExit: exit => {
+        const exitedDuringTurn = session.process === proc
+          && session.activeTurn !== null
+          && session.activeTurn.abortKilledProc !== proc;
+        const activeTurn = session.activeTurn;
+        const details = {
+          chatId: session.chatId,
+          turnId: activeTurn?.eventMetadata.turnId ?? null,
+          sessionId: session.id.slice(0, 8),
+          processId: proc.pid ?? null,
+          exitCode: exit.exitCode,
+          stderrBytes: exit.stderrBytes,
+          stderrLines: exit.stderrLines,
+          duringTurn: exitedDuringTurn,
+        };
+        if (exitedDuringTurn) {
+          this.#dependencies.logger.error('Claude CLI process exited during an active turn', details);
+        } else {
+          this.#dependencies.logger.info('Claude CLI process exited', details);
+        }
+        this.#handleProcessExit(session, proc, exit);
+      },
     });
-
-    proc.exited.then((exitCode: number) => {
-      const exitedDuringTurn = session.process === proc
-        && session.activeTurn !== null
-        && session.activeTurn.abortKilledProc !== proc;
-      const activeTurn = session.activeTurn;
-      const details = {
-        chatId: session.chatId,
-        turnId: activeTurn?.eventMetadata.turnId ?? null,
-        sessionId: session.id.slice(0, 8),
-        processId: proc.pid ?? null,
-        exitCode,
-        duringTurn: exitedDuringTurn,
-      };
-      if (exitedDuringTurn) {
-        this.#dependencies.logger.error('Claude CLI process exited during an active turn', details);
-      } else {
-        this.#dependencies.logger.info('Claude CLI process exited', details);
-      }
-      this.#handleProcessExit(session, proc, exitCode);
+    session.transport = transport;
+    const initializeStartedAt = Date.now();
+    const initializeResponse = await this.#controlBroker.request(
+      session.id,
+      { subtype: 'initialize' },
+      60_000,
+    );
+    const initializeInfo = isRecord(initializeResponse) ? initializeResponse : {};
+    this.#dependencies.logger.info('Claude CLI control protocol initialized', {
+      chatId: session.chatId,
+      sessionId: session.id.slice(0, 8),
+      processId: proc.pid ?? null,
+      durationMs: Date.now() - initializeStartedAt,
+      commandCount: Array.isArray(initializeInfo.commands)
+        ? initializeInfo.commands.length
+        : 0,
     });
 
     return proc;
@@ -1213,6 +1305,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       lastActivityAt: Date.now(),
       activeTurn: null,
       process: null,
+      transport: null,
+      retirement: null,
       options: allOpts,
       currentPermissionMode: permissionMode || 'default',
       currentThinkingMode: thinkingMode || 'none',
@@ -1226,11 +1320,13 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     );
 
     const previous = this.#runningSessions.get(agentSessionId);
-    if (previous) this.#retireSession(previous);
+    if (previous) await this.#retireSession(previous);
     this.#runningSessions.set(agentSessionId, session);
 
     let supportsLegacyThinkingFlag: boolean;
+    let cliVersion: readonly [number, number, number];
     try {
+      cliVersion = await this.#dependencies.versionProbe.assertCompatible(this.#dependencies.binary());
       supportsLegacyThinkingFlag = await this.#dependencies.versionProbe
         .supportsLegacyThinkingFlag(this.#dependencies.binary());
     } catch (error) {
@@ -1249,9 +1345,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     try {
       assertClaudeExecutionOpen(requestAdmission);
       this.emitSessionCreated(chatId);
-      this.#spawnCLI(session, allOpts, false, supportsLegacyThinkingFlag);
+      await this.#spawnCLI(session, allOpts, false, supportsLegacyThinkingFlag, cliVersion);
       assertClaudeExecutionOpen(requestAdmission);
-      this.#sendUserMessage(session, activeTurn, command, images);
+      await this.#sendUserMessage(session, activeTurn, command, images);
       executionAdmission?.markStarted();
       this.emitProcessing(chatId, true);
       onAbortable?.();
@@ -1259,7 +1355,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
       if (this.#runningSessions.get(agentSessionId) === session) {
-        this.#retireSession(session);
+        await this.#retireSession(session);
         this.#runningSessions.delete(agentSessionId);
       }
       throw error;
@@ -1297,6 +1393,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     // Resolved before any session-state checks so the spawn path below stays
     // free of interleaving awaits.
+    const cliVersion = await this.#dependencies.versionProbe.assertCompatible(this.#dependencies.binary());
     const supportsLegacyThinkingFlag = await this.#dependencies.versionProbe
       .supportsLegacyThinkingFlag(this.#dependencies.binary());
     assertClaudeExecutionOpen(requestAdmission);
@@ -1329,6 +1426,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         lastActivityAt: Date.now(),
         activeTurn: null,
         process: null,
+        transport: null,
+        retirement: null,
         options: allOpts,
         currentPermissionMode: permissionMode || 'default',
         currentThinkingMode: thinkingMode || 'none',
@@ -1349,74 +1448,79 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }
 
       session.options = mergeClaudeSessionOptions(session.options, allOpts);
+      session.chatId = chatId;
+      session.lastActivityAt = Date.now();
+      const desiredThinkingMode = session.options.thinkingMode || 'none';
+      const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(
+        session.options.claudeThinkingMode,
+      );
+      const desiredModel = session.options.model || '';
+      const desiredPermissionMode = session.options.permissionMode || 'default';
+      const previousProviderPermissionMode = session.process
+        ? providerStartupPermissionMode(session.currentPermissionMode)
+        : 'default';
+      const desiredProviderPermissionMode = providerStartupPermissionMode(desiredPermissionMode);
+      const permissionStartupChanged = previousProviderPermissionMode !== desiredProviderPermissionMode
+        && (
+          previousProviderPermissionMode === 'bypassPermissions'
+          || desiredProviderPermissionMode === 'bypassPermissions'
+        );
+      const envChanged = this.#envOverridesChanged(
+        session.currentEnvOverrides,
+        session.options.envOverrides,
+      );
+      if (session.process && (
+        desiredThinkingMode !== session.currentThinkingMode
+        || desiredClaudeThinkingMode !== session.currentClaudeThinkingMode
+        || permissionStartupChanged
+        || envChanged
+      )) {
+        await this.#retireSessionProcess(session);
+      }
 
-    const effectiveChatId = chatId || session.chatId;
-    session.chatId = effectiveChatId;
-    session.lastActivityAt = Date.now();
-    const desiredThinkingMode = session.options.thinkingMode || 'none';
-    const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(session.options.claudeThinkingMode);
-    const desiredModel = session.options.model || '';
-    const desiredPermissionMode = session.options.permissionMode || 'default';
-    const previousProviderPermissionMode = session.process
-      ? providerStartupPermissionMode(session.currentPermissionMode)
-      : 'default';
-    const desiredProviderPermissionMode = providerStartupPermissionMode(desiredPermissionMode);
-    const permissionStartupChanged = previousProviderPermissionMode !== desiredProviderPermissionMode
-      && (previousProviderPermissionMode === 'bypassPermissions' || desiredProviderPermissionMode === 'bypassPermissions');
-    const previousModel = session.process ? (session.currentModel || '') : '';
-    const envChanged = this.#envOverridesChanged(session.currentEnvOverrides, session.options.envOverrides);
-    if (session.process && (
-      desiredThinkingMode !== session.currentThinkingMode
-      || desiredClaudeThinkingMode !== session.currentClaudeThinkingMode
-      || desiredModel !== previousModel
-      || permissionStartupChanged
-      || envChanged
-    )) {
-      this.#killSessionProcess(session);
-    }
+      if (!session.process) {
+        // Always resumes because the native transcript owns conversation context.
+        assertClaudeExecutionOpen(requestAdmission);
+        await this.#spawnCLI(
+          session,
+          session.options,
+          true,
+          supportsLegacyThinkingFlag,
+          cliVersion,
+        );
+      }
 
-    if (!session.process) {
-      const spawnOpts: ClaudeSessionOptions = {
-        agentSessionId,
-        sessionId: agentSessionId,
-        chatId: effectiveChatId,
-        images: allOpts.images ?? session.options?.images,
-        model: allOpts.model ?? session.options?.model,
-        permissionMode: allOpts.permissionMode ?? session.options?.permissionMode,
-        projectPath: allOpts.projectPath ?? session.options?.projectPath,
-        thinkingMode: allOpts.thinkingMode ?? session.options?.thinkingMode,
-        claudeThinkingMode: allOpts.claudeThinkingMode ?? session.options?.claudeThinkingMode,
-        envOverrides: allOpts.envOverrides ?? session.options?.envOverrides,
-      };
-      // Always resume: the session file preserves conversation context.
-      // Cross-boundary local/cloud switches are blocked by
-      // AgentRegistry.runAgentTurn before reaching here.
+      if (session.process && desiredModel !== session.currentModel) {
+        await this.#controlBroker.request(session.id, {
+          subtype: 'set_model',
+          model: desiredModel,
+        });
+        session.currentModel = desiredModel;
+      }
+
+      if (
+        session.currentPermissionMode
+        && desiredPermissionMode !== session.currentPermissionMode
+      ) {
+        this.setInternalPermissionMode(agentSessionId, desiredPermissionMode);
+      }
+      session.currentPermissionMode = desiredPermissionMode;
+
+      // A new turn supersedes any prior abort fallback.
+      this.#clearAbortTimer(session);
       assertClaudeExecutionOpen(requestAdmission);
-      this.#spawnCLI(session, spawnOpts, true, supportsLegacyThinkingFlag);
-    }
-
-    const newMode = desiredPermissionMode;
-    if (session.currentPermissionMode && newMode !== session.currentPermissionMode) {
-      this.setInternalPermissionMode(agentSessionId, newMode);
-    }
-    session.currentPermissionMode = newMode;
-
-    // A new turn supersedes any prior abort, so cancel its force-kill fallback
-    // before it can fire against the process now serving this turn.
-    this.#clearAbortTimer(session);
-    assertClaudeExecutionOpen(requestAdmission);
-    const activeTurn = this.#beginTurn(
-      session,
-      claudeEventMetadata({ clientRequestId, turnId }),
-    );
-    this.#sendUserMessage(session, activeTurn, command, images);
-    executionAdmission?.markStarted();
-    this.emitProcessing(effectiveChatId, true);
-    onAbortable?.();
+      const activeTurn = this.#beginTurn(
+        session,
+        claudeEventMetadata({ clientRequestId, turnId }),
+      );
+      await this.#sendUserMessage(session, activeTurn, command, images);
+      executionAdmission?.markStarted();
+      this.emitProcessing(chatId, true);
+      onAbortable?.();
       await this.#waitForTurnComplete(activeTurn);
     } catch (error) {
       if (session.activeTurn) {
-        this.#retireSession(session);
+        await this.#retireSession(session);
       }
       throw error;
     }
@@ -1458,23 +1562,39 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#dependencies.logger.debug('Claude CLI acknowledged interrupt', details);
   }
 
+  #forceAbortProcess(
+    session: ClaudeRunningSession,
+    activeTurn: ClaudeActiveTurn,
+    reason: string,
+  ): void {
+    if (session.activeTurn !== activeTurn) return;
+    const process = session.process;
+    const transport = session.transport;
+    if (!process || !transport) {
+      this.#failSession(session, reason);
+      return;
+    }
+    activeTurn.abortKilledProc = process;
+    if (!process.killed) process.kill();
+    void transport.retire().catch((error: unknown) => {
+      if (session.activeTurn !== activeTurn) return;
+      this.#failSession(
+        session,
+        `${reason} Claude process teardown also failed: ${errorMessage(error)}`,
+      );
+    });
+  }
+
   async abortClaudeInternalSession(agentSessionId: string): Promise<boolean> {
     const session = this.#runningSessions.get(agentSessionId);
     const activeTurn = session?.activeTurn;
     if (!session?.process || !activeTurn) return false;
 
     activeTurn.protocol.markAbortRequested();
-    let receipt: Promise<unknown>;
-    try {
-      receipt = this.#controlBroker.request(session.id, {
-        subtype: 'interrupt',
-        cancel_queued: true,
-      });
-    } catch {
-      this.#failSession(session, 'Failed to send interrupt to Claude CLI.');
-      this.#killSessionProcess(session);
-      return false;
-    }
+    const receipt = this.#controlBroker.request(session.id, {
+      subtype: 'interrupt',
+      cancel_queued: true,
+    });
     void receipt.then(
       (value) => this.#handleInterruptReceipt(session, activeTurn, value),
       (error: unknown) => {
@@ -1484,6 +1604,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
           inputId: activeTurn.protocol.inputUuid.slice(0, 8),
           error: errorMessage(error),
         });
+        this.#forceAbortProcess(
+          session,
+          activeTurn,
+          'Claude CLI interrupt request failed.',
+        );
       },
     );
 
@@ -1498,8 +1623,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         this.#dependencies.logger.warn('Claude CLI interrupt was not acknowledged', {
           sessionId: agentSessionId.slice(0, 8),
         });
-        activeTurn.abortKilledProc = proc;
-        proc.kill();
+        this.#forceAbortProcess(
+          session,
+          activeTurn,
+          'Claude CLI did not confirm the interrupt.',
+        );
       }
     }, 5000);
 
@@ -1515,7 +1643,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const session = this.#runningSessions.get(agentSessionId);
     if (session) {
       this.#failSession(session, errorMessage);
-      this.#killSessionProcess(session);
+      void this.#retireSessionProcess(session);
       return;
     }
     this.emitProcessing(chatId, false);
@@ -1541,27 +1669,23 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#idlePurger.start();
   }
 
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     this.#shuttingDown = true;
     this.#idlePurger.stop();
-    for (const session of this.#runningSessions.values()) {
-      this.#clearAbortTimer(session);
-      this.#controlBroker.rejectSession(session.id, 'Claude runtime shut down');
-      if (session.process && !session.process.killed) {
-        session.process.kill();
-      }
-      const activeTurn = session.activeTurn;
-      session.activeTurn = null;
-      if (activeTurn) {
-        this.emitProcessing(session.chatId, false);
-      }
-      activeTurn?.resolve?.();
-      if (activeTurn) activeTurn.resolve = null;
-      this.#completeSessionInitialization(session);
-    }
+    this.#controlBroker.shutdown('Claude runtime shut down');
+    const sessions = [...this.#runningSessions.values()];
+    const retirements = await Promise.allSettled(
+      sessions.map((session) => this.#retireSession(session)),
+    );
+    retirements.forEach((result, index) => {
+      if (result.status === 'fulfilled') return;
+      this.#dependencies.logger.error('Claude process shutdown failed', {
+        sessionId: sessions[index].id.slice(0, 8),
+        error: errorMessage(result.reason),
+      });
+    });
     this.#runningSessions.clear();
     this.#pendingPermissions.clear();
-    this.#controlBroker.shutdown('Claude runtime shut down');
   }
 }
 

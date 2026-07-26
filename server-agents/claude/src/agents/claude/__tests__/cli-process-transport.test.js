@@ -106,7 +106,7 @@ describe('ClaudeProcessTransport', () => {
     expect(fake.eof).toHaveBeenCalledTimes(1);
     expect(fake.logger.warn).toHaveBeenCalledWith(
       'Claude CLI emitted non-JSON stdout',
-      { sessionId: 'session-', processId: 42 },
+      { sessionId: 'session-', processId: 42, occurrence: 1 },
     );
   });
 

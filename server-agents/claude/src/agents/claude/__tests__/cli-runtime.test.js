@@ -2,6 +2,8 @@ import { describe, expect, it, mock } from 'bun:test';
 
 import { ClaudeCliRuntime } from '../claude-cli.js';
 
+const encoder = new TextEncoder();
+
 function createLogger() {
   return {
     debug: mock(() => undefined),
@@ -16,6 +18,7 @@ function createRuntime(logger = createLogger()) {
     binary: () => 'claude',
     logger,
     versionProbe: {
+      assertCompatible: mock(() => Promise.resolve([2, 1, 220])),
       supportsLegacyThinkingFlag: mock(() => Promise.resolve(false)),
     },
   });
@@ -36,15 +39,46 @@ function createFakeClaudeProcess(options = {}) {
   const finish = (exitCode) => {
     if (!stdoutClosed) {
       stdoutClosed = true;
-      stdoutController.close();
+      try {
+        stdoutController.close();
+      } catch {
+        // A reader failure may already have errored the stream.
+      }
     }
     exited.resolve(exitCode);
   };
   const proc = {
     killed: false,
     stdin: {
-      write: mock(() => undefined),
+      write: mock((line) => {
+        const message = JSON.parse(line);
+        if (
+          message.type !== 'control_request'
+          || !['initialize', 'set_model'].includes(message.request?.subtype)
+          || options.autoControls === false
+        ) return;
+        queueMicrotask(() => {
+          if (stdoutClosed) return;
+          stdoutController.enqueue(new TextEncoder().encode(JSON.stringify({
+            type: 'control_response',
+            response: {
+              subtype: 'success',
+              request_id: message.request_id,
+              response: { commands: [] },
+            },
+          }) + '\n'));
+        });
+      }),
       flush: mock(() => undefined),
+      end: mock(() => {
+        if ('onEnd' in options) {
+          const exitCode = options.onEnd();
+          if (exitCode === null) return;
+          finish(exitCode);
+          return;
+        }
+        finish(0);
+      }),
     },
     stdout: new ReadableStream({
       start(controller) {
@@ -75,6 +109,16 @@ function createFakeClaudeProcess(options = {}) {
     exit(exitCode) {
       finish(exitCode);
     },
+    closeStdout() {
+      if (stdoutClosed) return;
+      stdoutClosed = true;
+      stdoutController.close();
+    },
+    failStdout(error) {
+      if (stdoutClosed) return;
+      stdoutClosed = true;
+      stdoutController.error(error);
+    },
   };
 }
 
@@ -96,7 +140,7 @@ function writtenUserMessage(fake) {
 const startedInputByFake = new WeakMap();
 
 async function waitForWrittenUserMessage(fake, excludeUuid) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     const input = writtenUserMessage(fake);
     if (input && input.uuid !== excludeUuid) return input;
     await Promise.resolve();
@@ -178,6 +222,39 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('completes the initialize handshake before writing user input', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess({ autoControls: false });
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions());
+      for (let attempt = 0; attempt < 10; attempt += 1) await Promise.resolve();
+
+      const initialize = fake.proc.stdin.write.mock.calls
+        .map(([line]) => JSON.parse(line))
+        .find((message) => message.request?.subtype === 'initialize');
+      expect(initialize).toBeDefined();
+      expect(writtenUserMessage(fake)).toBeUndefined();
+
+      fake.stdout.enqueue(encoder.encode(JSON.stringify({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: initialize.request_id,
+          response: { commands: [] },
+        },
+      }) + '\n'));
+      await enqueueResult(fake);
+
+      await expect(start).resolves.toBe('expected-session');
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('logs an unexpected process exit at error severity', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
@@ -194,7 +271,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       await Promise.resolve();
       fake.exit(137);
 
-      await expect(start).resolves.toBe('expected-session');
+      await expect(start).rejects.toThrow('Claude CLI process exited with code 137');
       await expect(failed).resolves.toEqual({
         chatId: 'chat-1',
         errorMessage: 'CLI process exited with code 137',
@@ -207,6 +284,8 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
           sessionId: 'expected',
           processId: null,
           exitCode: 137,
+          stderrBytes: 0,
+          stderrLines: 0,
           duringTurn: true,
         },
       );
@@ -214,6 +293,46 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       Bun.spawn = originalSpawn;
     }
   });
+
+  for (const [name, trigger, expected] of [
+    [
+      'malformed JSON output',
+      (fake) => fake.stdout.enqueue(encoder.encode('{"type":}\n')),
+      'Claude CLI stdout failed: Claude CLI emitted malformed JSON',
+    ],
+    [
+      'stdout reader failure',
+      (fake) => fake.failStdout(new Error('reader exploded')),
+      'Claude CLI stdout failed: reader exploded',
+    ],
+    [
+      'unexpected stdout EOF',
+      (fake) => fake.closeStdout(),
+      'Claude CLI stdout ended before the submitted message produced a terminal result.',
+    ],
+  ]) {
+    it(`fails an active turn on ${name}`, async () => {
+      const originalSpawn = Bun.spawn;
+      const fake = createFakeClaudeProcess();
+      Bun.spawn = mock(() => fake.proc);
+
+      try {
+        const runtime = createRuntime();
+        const failures = [];
+        runtime.onFailed((_chatId, message) => failures.push(message));
+        const start = runtime.startClaudeCliSession(startOptions());
+        await waitForWrittenUserMessage(fake);
+
+        trigger(fake);
+
+        await expect(start).resolves.toBe('expected-session');
+        expect(failures).toEqual([expected]);
+        await runtime.shutdown();
+      } finally {
+        Bun.spawn = originalSpawn;
+      }
+    });
+  }
 
   it('surfaces an error result as a failed turn', async () => {
     const originalSpawn = Bun.spawn;
@@ -731,7 +850,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
-  it('fails and kills the process when init reports an unexpected session id', async () => {
+  it('fails and retires the process when init reports an unexpected session id', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     Bun.spawn = mock(() => fake.proc);
@@ -753,13 +872,12 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         session_id: 'wrong-session',
       }) + '\n'));
 
-      await expect(start).resolves.toBe('expected-session');
+      await expect(start).rejects.toThrow('Claude CLI process was retired');
       await expect(failed).resolves.toEqual({
         chatId: 'chat-1',
         errorMessage: 'Unexpected Claude session ID: wrong-session',
       });
-      expect(fake.proc.kill).toHaveBeenCalledTimes(1);
-      expect(processing).toContainEqual({ chatId: 'chat-1', isProcessing: true });
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
       expect(processing).toContainEqual({ chatId: 'chat-1', isProcessing: false });
     } finally {
       Bun.spawn = originalSpawn;
@@ -802,6 +920,78 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('updates the model through the control protocol without restarting', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'sonnet' }));
+      await enqueueResult(fake);
+      await start;
+
+      const resumed = runtime.runClaudeTurn(startOptions({
+        command: 'switch model',
+        model: 'opus',
+      }));
+      await enqueueResult(fake);
+      await resumed;
+
+      const controls = fake.proc.stdin.write.mock.calls
+        .map(([line]) => JSON.parse(line))
+        .filter((message) => message.type === 'control_request');
+      expect(controls.map((message) => message.request)).toContainEqual({
+        subtype: 'set_model',
+        model: 'opus',
+      });
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('does not spawn a replacement until the previous native-session writer exits', async () => {
+    const originalSpawn = Bun.spawn;
+    const first = createFakeClaudeProcess({ onEnd: () => null });
+    const second = createFakeClaudeProcess();
+    let runtime;
+    Bun.spawn = mock()
+      .mockReturnValueOnce(first.proc)
+      .mockReturnValueOnce(second.proc);
+
+    try {
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions({ thinkingMode: 'none' }));
+      await enqueueResult(first);
+      await start;
+
+      const resumed = runtime.runClaudeTurn(startOptions({
+        command: 'restart after config change',
+        thinkingMode: 'high',
+      }));
+      for (
+        let attempt = 0;
+        attempt < 10 && first.proc.stdin.end.mock.calls.length === 0;
+        attempt += 1
+      ) {
+        await Promise.resolve();
+      }
+      expect(first.proc.stdin.end).toHaveBeenCalledTimes(1);
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+
+      first.exit(0);
+      await enqueueResult(second);
+      await resumed;
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('waits for the idle Claude process to exit before preparing a path update', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
@@ -822,7 +1012,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         nativePath: '/config/projects/tmp/expected-session.jsonl',
       })).resolves.toBeUndefined();
 
-      expect(fake.proc.kill).toHaveBeenCalledTimes(1);
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
     } finally {
       runtime?.shutdown();
       Bun.spawn = originalSpawn;
@@ -833,6 +1023,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     const originalSpawn = Bun.spawn;
     const originalSetTimeout = globalThis.setTimeout;
     const fake = createFakeClaudeProcess({
+      onEnd: () => null,
       onKill: (signal) => signal === 'SIGKILL' ? 137 : null,
     });
     let runtime;
@@ -871,6 +1062,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     const originalSpawn = Bun.spawn;
     const originalSetTimeout = globalThis.setTimeout;
     const fake = createFakeClaudeProcess({
+      onEnd: () => null,
       onKill: (signal) => signal === 'SIGKILL' ? 137 : null,
     });
     let runtime;
@@ -912,6 +1104,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     const originalSetTimeout = globalThis.setTimeout;
     const originalDateNow = Date.now;
     const fake = createFakeClaudeProcess({
+      onEnd: () => null,
       onKill: (signal) => signal === 'SIGKILL' ? 137 : null,
     });
     let purgeIdleSessions;
@@ -957,10 +1150,61 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('waits for an evicted writer before recreating the native session', async () => {
+    const originalSpawn = Bun.spawn;
+    const originalSetInterval = globalThis.setInterval;
+    const originalDateNow = Date.now;
+    const first = createFakeClaudeProcess({ onEnd: () => null });
+    const second = createFakeClaudeProcess();
+    let purgeIdleSessions;
+    let runtime;
+    Bun.spawn = mock()
+      .mockReturnValueOnce(first.proc)
+      .mockReturnValueOnce(second.proc);
+
+    try {
+      globalThis.setInterval = mock((callback) => {
+        purgeIdleSessions = callback;
+        return 1;
+      });
+      runtime = createRuntime();
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueResult(first);
+      await start;
+
+      const idleSince = Date.now();
+      Date.now = mock(() => idleSince + 31 * 60 * 1000);
+      runtime.startPurgeTimer();
+      purgeIdleSessions();
+      const resumed = runtime.runClaudeTurn(startOptions({ command: 'after eviction' }));
+      for (
+        let attempt = 0;
+        attempt < 10 && first.proc.stdin.end.mock.calls.length === 0;
+        attempt += 1
+      ) {
+        await Promise.resolve();
+      }
+
+      expect(first.proc.stdin.end).toHaveBeenCalledTimes(1);
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+      first.exit(0);
+
+      await enqueueResult(second);
+      await resumed;
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+    } finally {
+      Date.now = originalDateNow;
+      globalThis.setInterval = originalSetInterval;
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('retains a stuck process so retries cannot bypass the exit guard', async () => {
     const originalSpawn = Bun.spawn;
     const originalSetTimeout = globalThis.setTimeout;
     const fake = createFakeClaudeProcess({
+      onEnd: () => null,
       onKill: () => null,
     });
     let runtime;
@@ -992,7 +1236,6 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
       expect(fake.proc.kill.mock.calls).toEqual([
         [],
-        ['SIGKILL'],
         ['SIGKILL'],
       ]);
     } finally {

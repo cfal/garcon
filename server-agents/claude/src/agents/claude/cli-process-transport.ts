@@ -139,6 +139,7 @@ export class ClaudeProcessTransport<Message> {
   #retirement: Promise<void> | null = null;
   #retiring = false;
   #failureReported = false;
+  #stdoutNoiseCount = 0;
   #stderrTail = '';
   #stderrBytes = 0;
   #stderrLines = 0;
@@ -202,10 +203,7 @@ export class ClaudeProcessTransport<Message> {
       void readBoundedStdout<Message>(
         stdout,
         this.#options.onMessage,
-        () => this.#options.logger.warn('Claude CLI emitted non-JSON stdout', {
-          sessionId: this.#options.sessionId.slice(0, 8),
-          processId: this.process.pid ?? null,
-        }),
+        () => this.#recordStdoutNoise(),
       ).then(
         () => {
           if (!this.#retiring) this.#options.onEof();
@@ -249,6 +247,16 @@ export class ClaudeProcessTransport<Message> {
         .subarray(-MAX_STDERR_TAIL_BYTES)
         .toString('utf8');
     }
+  }
+
+  #recordStdoutNoise(): void {
+    this.#stdoutNoiseCount += 1;
+    if (this.#stdoutNoiseCount > 3) return;
+    this.#options.logger.warn('Claude CLI emitted non-JSON stdout', {
+      sessionId: this.#options.sessionId.slice(0, 8),
+      processId: this.process.pid ?? null,
+      occurrence: this.#stdoutNoiseCount,
+    });
   }
 
   #reportFailure(failure: ClaudeTransportFailure): void {

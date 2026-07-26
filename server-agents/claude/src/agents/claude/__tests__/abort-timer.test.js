@@ -14,6 +14,7 @@ function createRuntime() {
       error: mock(() => undefined),
     },
     versionProbe: {
+      assertCompatible: () => Promise.resolve([2, 1, 220]),
       supportsLegacyThinkingFlag: () => versionProbe(),
     },
   });
@@ -35,16 +36,42 @@ function createControllableProc() {
   const exited = new Promise((resolve) => { resolveExit = resolve; });
   const encoder = new TextEncoder();
   const writes = [];
+  let exitedOnce = false;
+  const exit = (code) => {
+    if (exitedOnce) return;
+    exitedOnce = true;
+    resolveExit(code);
+  };
 
   const proc = {
     stdout,
     stderr,
-    stdin: { write(value) { writes.push(value); }, flush() {} },
+    stdin: {
+      write(value) {
+        writes.push(value);
+        const message = JSON.parse(value);
+        if (message.type !== 'control_request' || message.request?.subtype !== 'initialize') return;
+        queueMicrotask(() => stdoutController.enqueue(encoder.encode(JSON.stringify({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: message.request_id,
+            response: { commands: [] },
+          },
+        }) + '\n')));
+      },
+      flush() {},
+      end() {
+        proc.ended = true;
+        exit(0);
+      },
+    },
     exited,
     killed: false,
+    ended: false,
     kill() {
       this.killed = true;
-      resolveExit(143);
+      exit(143);
     },
   };
 
@@ -70,7 +97,7 @@ function createControllableProc() {
     },
     startLatestInput() { this.pushLatestInputLifecycle('started'); },
     // Simulate the process dying on its own (not via our kill()), e.g. an OOM.
-    crash(code) { resolveExit(code); },
+    crash(code) { exit(code); },
   };
 }
 
@@ -159,8 +186,10 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   it('kills and rolls back a process whose prompt write fails synchronously', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
-    ctrl.proc.stdin.write = () => {
-      throw new Error('stdin failed');
+    const write = ctrl.proc.stdin.write.bind(ctrl.proc.stdin);
+    ctrl.proc.stdin.write = (line) => {
+      if (JSON.parse(line).type === 'user') throw new Error('stdin failed');
+      write(line);
     };
     spawnMock.mockReturnValueOnce(ctrl.proc);
     const markStarted = mock();
@@ -172,7 +201,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
       },
     }))).rejects.toThrow('stdin failed');
 
-    expect(ctrl.proc.killed).toBe(true);
+    expect(ctrl.proc.ended).toBe(true);
     expect(markStarted).not.toHaveBeenCalled();
     expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(false);
     runtime.shutdown();
@@ -282,6 +311,36 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(ctrl.proc.killed).toBe(false);
   });
 
+  it('retires the process immediately when the interrupt control fails', async () => {
+    const runtime = createRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+    const failures = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+
+    const turn = runtime.startClaudeCliSession(startOptions());
+    ctrl.push(INIT);
+    await flush();
+    ctrl.startLatestInput();
+    await runtime.abortClaudeInternalSession('session-1');
+    const interrupt = ctrl.writes
+      .map((line) => JSON.parse(line))
+      .find((message) => message.request?.subtype === 'interrupt');
+
+    ctrl.push({
+      type: 'control_response',
+      response: {
+        subtype: 'error',
+        request_id: interrupt.request_id,
+        error: 'interrupt unavailable',
+      },
+    });
+    await turn;
+
+    expect(ctrl.proc.killed).toBe(true);
+    expect(failures).toEqual([]);
+  });
+
   it('does not kill a process reused by a new turn sent right after an abort', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
@@ -366,7 +425,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const second = runtime.startClaudeCliSession(startOptions({ command: 'replacement' }));
     await flush();
 
-    expect(firstCtrl.proc.killed).toBe(true);
+    expect(firstCtrl.proc.ended).toBe(true);
     expect(cleared).toContain(abortTimerId);
     await first;
     expect(spawnMock).toHaveBeenCalledTimes(1);

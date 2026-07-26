@@ -231,7 +231,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
-        runtime.shutdown();
+        await runtime.shutdown();
         login.stop();
         commandDiscovery.clear();
       },

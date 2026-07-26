@@ -16,7 +16,7 @@ export class ClaudeControlBroker {
   readonly #pending = new Map<string, PendingControlRequest>();
 
   constructor(
-    private readonly write: (agentSessionId: string, jsonl: string) => void,
+    private readonly write: (agentSessionId: string, jsonl: string) => Promise<void>,
   ) {}
 
   request(
@@ -46,17 +46,17 @@ export class ClaudeControlBroker {
       timeout,
     });
 
-    try {
-      this.write(agentSessionId, JSON.stringify({
-        type: 'control_request',
-        request_id: requestId,
-        request,
-      }));
-    } catch (error) {
-      clearTimeout(timeout);
+    void this.write(agentSessionId, JSON.stringify({
+      type: 'control_request',
+      request_id: requestId,
+      request,
+    })).catch((error: unknown) => {
+      const pending = this.#pending.get(requestId);
+      if (!pending) return;
+      clearTimeout(pending.timeout);
       this.#pending.delete(requestId);
-      throw error instanceof Error ? error : new Error(errorMessage(error));
-    }
+      pending.reject(error instanceof Error ? error : new Error(errorMessage(error)));
+    });
     return response;
   }
 
