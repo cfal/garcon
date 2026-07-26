@@ -616,6 +616,38 @@ describe('WorkspaceCoordinator', () => {
 		expect(singletons.disposeSurface).toHaveBeenCalledWith('git-compare');
 	});
 
+	it('disposes a removed Git view when mobile re-entry supersedes desktop reconciliation', async () => {
+		const context: {
+			coordinator?: WorkspaceCoordinator;
+			layout?: ReturnType<typeof createWorkspaceLayoutStore>;
+		} = {};
+		let reentry: Promise<void> | null = null;
+		let triggerReentry = false;
+		const harness = createHarness({
+			onLayoutChanged: () => {
+				if (
+					triggerReentry &&
+					!context.layout?.surface('singleton:git-compare') &&
+					!reentry
+				) {
+					reentry = context.coordinator?.enterMobilePresentation() ?? null;
+				}
+			},
+		});
+		context.coordinator = harness.coordinator;
+		context.layout = harness.layout;
+		await harness.coordinator.enterMobilePresentation();
+		await harness.coordinator.focusMobileSingleton('git-compare');
+		triggerReentry = true;
+
+		await harness.coordinator.exitMobilePresentation();
+		await reentry;
+
+		expect(harness.coordinator.isMobile).toBe(true);
+		expect(harness.layout.surface('singleton:git-compare')).toBeNull();
+		expect(harness.singletons.disposeSurface).toHaveBeenCalledWith('git-compare');
+	});
+
 	it('preserves a desktop-owned Git view across a mobile presentation', async () => {
 		const { coordinator, layout, singletons } = createHarness();
 		await coordinator.openSingleton('git-history', 'main');

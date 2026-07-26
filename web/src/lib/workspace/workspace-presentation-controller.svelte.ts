@@ -482,6 +482,7 @@ export class WorkspacePresentationController {
 		plannedKinds: readonly TransientMobileSingletonKind[],
 		responsiveGeneration: number,
 	): Promise<void> {
+		this.#disposeAbsentTransientMobileGitViews(plannedKinds);
 		if (
 			responsiveGeneration !== this.#responsiveGeneration ||
 			this.#presentationMode !== 'desktop'
@@ -498,7 +499,13 @@ export class WorkspacePresentationController {
 				return removeTransientMobileGitViews(latest);
 			},
 		);
-		for (const kind of new Set([...plannedKinds, ...reconciledKinds])) {
+		this.#disposeAbsentTransientMobileGitViews([...plannedKinds, ...reconciledKinds]);
+	}
+
+	#disposeAbsentTransientMobileGitViews(
+		kinds: readonly TransientMobileSingletonKind[],
+	): void {
+		for (const kind of new Set(kinds)) {
 			if (!this.layout.surface(singletonSurfaceId(kind))) {
 				this.deps.singletons.disposeSurface(kind);
 			}
