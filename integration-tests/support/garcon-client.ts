@@ -26,6 +26,8 @@ import type {
   QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
+  ProjectPathPatchRequest,
+  ProjectPathPatchResponse,
   StartChatCommandRequest,
   StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
@@ -503,6 +505,10 @@ export class GarconTestClient {
 
   switchAgentModel(request: AgentModelPatchRequest): Promise<AgentModelPatchResponse> {
     return this.patch<AgentModelPatchResponse>('/api/v1/chats/agent-model', request);
+  }
+
+  updateProjectPath(request: ProjectPathPatchRequest): Promise<ProjectPathPatchResponse> {
+    return this.patch<ProjectPathPatchResponse>('/api/v1/chats/project-path', request);
   }
 
   deleteChat(chatId: string): Promise<{ success: boolean }> {

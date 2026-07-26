@@ -156,6 +156,29 @@ describe('ChatRegistry', () => {
     });
   });
 
+  it('restores project-path fields in memory when persistence fails', async () => {
+    const originalNativeSession = nativeSession('test');
+    registry.addChat(newChat({ nativeSession: originalNativeSession }));
+    const saveRegistry = registry.saveRegistry.bind(registry);
+    registry.saveRegistry = mock(() => Promise.reject(new Error('disk full')));
+
+    await expect(registry.updateProjectPath(CHAT_ID, {
+      chatId: CHAT_ID,
+      projectPath: '/next',
+      effectiveProjectKey: '/next',
+      previousProjectPath: '/repo',
+      previousEffectiveProjectKey: '/repo',
+      nativeSession: nativeSession('test', { path: '/tmp/next.jsonl' }),
+    }, { flush: true })).rejects.toThrow('disk full');
+
+    expect(registry.getChat(CHAT_ID)).toMatchObject({
+      projectPath: '/repo',
+      nativeSession: originalNativeSession,
+    });
+
+    registry.saveRegistry = saveRegistry;
+  });
+
   it('removes records, indexes, and emits the removal identity', () => {
     registry.addChat(newChat({ agentSessionId: 'native-1' }));
     const removed = mock(() => undefined);

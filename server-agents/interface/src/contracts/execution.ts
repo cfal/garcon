@@ -22,7 +22,9 @@ export interface AgentExecution {
     permissionRequestId: string,
     decision: PermissionDecisionPayload,
   ): Promise<void>;
-  prepareProjectPathUpdate?(request: AgentProjectPathUpdateRequest): Promise<void>;
+  prepareProjectPathUpdate?(
+    request: AgentProjectPathUpdateRequest,
+  ): Promise<AgentProjectPathUpdatePreparation | void>;
   subscribe(listener: (event: AgentExecutionEvent) => void): () => void;
 }
 
@@ -71,6 +73,12 @@ export interface AgentProjectPathUpdateRequest {
   readonly chat: AgentChatReference;
   readonly nextProjectPath: string;
   readonly signal: AbortSignal;
+}
+
+export interface AgentProjectPathUpdatePreparation {
+  readonly nativeSession: AgentNativeSessionRef | null;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
 }
 
 export interface AgentOperationIdentity {
