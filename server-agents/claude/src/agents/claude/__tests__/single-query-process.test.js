@@ -64,23 +64,35 @@ describe('runClaudeSingleQueryProcess', () => {
 
     try {
       await expect(runClaudeSingleQueryProcess(options()))
-        .rejects.toThrow('Claude CLI exited with code 1: authentication failed');
+        .rejects.toThrow(/Claude CLI exited with code 1 \(stderr digest [a-f0-9]{16}\)/);
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('authentication failed');
     } finally {
       Bun.spawn = originalSpawn;
     }
   });
 
-  it('rejects oversized output instead of retaining it indefinitely', async () => {
+  it('kills and reaps a process after oversized output', async () => {
     const originalSpawn = Bun.spawn;
-    Bun.spawn = mock(() => ({
+    let resolveExit;
+    const exited = new Promise((resolve) => {
+      resolveExit = resolve;
+    });
+    const proc = {
       stdout: outputStream('x'.repeat(MAX_SINGLE_QUERY_STDOUT_BYTES + 1)),
       stderr: outputStream(''),
-      exited: Promise.resolve(0),
-    }));
+      exited,
+      killed: false,
+      kill: mock(() => {
+        proc.killed = true;
+        resolveExit(143);
+      }),
+    };
+    Bun.spawn = mock(() => proc);
 
     try {
       await expect(runClaudeSingleQueryProcess(options()))
         .rejects.toThrow(`Claude one-shot stdout exceeded ${MAX_SINGLE_QUERY_STDOUT_BYTES} bytes`);
+      expect(proc.kill).toHaveBeenCalledTimes(1);
     } finally {
       Bun.spawn = originalSpawn;
     }
