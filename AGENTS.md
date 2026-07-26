@@ -389,6 +389,11 @@ After completion of a task, verify:
 
 Integration coverage is mandatory when correctness crosses server, HTTP/WebSocket, persistence, provider, or SPA boundaries. Add black-box server tests under `integration-tests/tests/server` for chat lifecycle, queueing, reconnect, restart semantics (including empty execution state), provider failure, ownership-journal recovery, fork, and deletion behavior. Add Lightpanda tests under `integration-tests/tests/e2e` when the browser workflow itself is part of the contract. Every production regression in these flows must gain an integration test that reproduces it; unit tests remain required for the underlying component behavior.
 
+- Always use Haiku for Claude integration tests and `gpt-5.4-nano` for Codex integration tests.
+- Always use the lowest supported reasoning effort in integration tests.
+- Keep credential-backed agent suites under `test:live:*`, outside routine test commands.
+- Never run live-agent tests locally unless actively changing those tests; rely on the PR CI live-provider gate otherwise.
+
 ### Regression Focus Areas
 
 - Chat lifecycle transitions.
