@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type {
   ChatMessagesMessage,
   PendingUserInputUpdatedMessage,
-  ServerWsMessage,
 } from '../../../../common/ws-events.js';
 import {
   assistantContents,
@@ -17,84 +16,19 @@ import {
   withIntegrationFixture,
 } from '../../../support/integration-fixture.js';
 import {
+  exactReplyPrompt,
+  expectAssistantMarker,
+  expectFinished,
+  liveMarker as marker,
+  LIVE_TURN_TIMEOUT_MS as TURN_TIMEOUT_MS,
+  waitForVisibleResponse as waitForVisibleClaudeResponse,
+} from '../../../support/live-agent.js';
+import {
   liveClaudeForkRunRequest,
   liveClaudeRunRequest,
   liveClaudeServerEnvironment,
   liveClaudeStartRequest,
 } from '../../../support/live-claude.js';
-
-const TURN_TIMEOUT_MS = 90_000;
-
-function marker(label: string): string {
-  return `GARCON_LIVE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
-}
-
-function exactReplyPrompt(value: string): string {
-  return `Reply with exactly ${value}. Do not use tools.`;
-}
-
-function expectFinished(type: string): void {
-  expect(type).toBe('agent-run-finished');
-}
-
-function expectAssistantMarker(contents: readonly string[], value: string): void {
-  expect(contents.some((content) => content.includes(value))).toBe(true);
-}
-
-function expectVisibleResponseBeforeSettlement(input: {
-  events: readonly ServerWsMessage[];
-  chatId: string;
-  turnId: string | undefined;
-  marker: string;
-}): void {
-  const processingStarted = input.events.findIndex((event) =>
-    event.type === 'chat-processing-updated'
-    && event.chatId === input.chatId
-    && event.isProcessing);
-  const assistantResponse = input.events.findIndex((event) =>
-    event.type === 'chat-messages'
-    && event.chatId === input.chatId
-    && event.messages.some((entry) =>
-      entry.message.type === 'assistant-message'
-      && entry.message.content.includes(input.marker)));
-  const processingStopped = input.events.findIndex((event) =>
-    event.type === 'chat-processing-updated'
-    && event.chatId === input.chatId
-    && !event.isProcessing);
-  const terminal = input.events.findIndex((event) =>
-    (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
-    && event.chatId === input.chatId
-    && event.turnId === input.turnId);
-
-  expect(processingStarted).toBeGreaterThanOrEqual(0);
-  expect(assistantResponse).toBeGreaterThan(processingStarted);
-  expect(processingStopped).toBeGreaterThan(assistantResponse);
-  expect(terminal).toBeGreaterThan(assistantResponse);
-}
-
-async function waitForVisibleClaudeResponse(input: {
-  fixture: IntegrationFixture;
-  chatId: string;
-  turnId: string | undefined;
-  marker: string;
-  afterIndex: number;
-}): Promise<void> {
-  expectFinished((await input.fixture.client.waitForTurnTerminal(
-    input.chatId,
-    input.turnId,
-    { afterIndex: input.afterIndex, timeoutMs: TURN_TIMEOUT_MS },
-  )).type);
-  await input.fixture.client.waitForProcessing(input.chatId, false, {
-    afterIndex: input.afterIndex,
-    timeoutMs: TURN_TIMEOUT_MS,
-  });
-  expectVisibleResponseBeforeSettlement({
-    events: input.fixture.client.eventsSince(input.afterIndex),
-    chatId: input.chatId,
-    turnId: input.turnId,
-    marker: input.marker,
-  });
-}
 
 describe('live Claude lifecycle', () => {
   test('holds queue ownership across a background Bash continuation', async () => {

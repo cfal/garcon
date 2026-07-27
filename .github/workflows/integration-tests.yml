@@ -66,6 +66,7 @@ jobs:
           ANTHROPIC_TESTING_KEY: ${{ secrets.ANTHROPIC_TESTING_KEY }}
         run: |
           if [ -n "$ANTHROPIC_TESTING_KEY" ]; then
+            echo "::add-mask::$ANTHROPIC_TESTING_KEY"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "ANTHROPIC_TESTING_KEY is unavailable; skipping live Claude tests."
@@ -102,6 +103,60 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: claude-live-integration-diagnostics
+          path: integration-tests/artifacts/server/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  codex-live:
+    name: Live Codex conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check for OpenAI testing key
+        id: openai-key
+        shell: bash
+        env:
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+        run: |
+          if [ -n "$OPENAI_TESTING_KEY" ]; then
+            echo "::add-mask::$OPENAI_TESTING_KEY"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "OPENAI_TESTING_KEY is unavailable; skipping live Codex tests."
+          fi
+
+      - name: Check out repository
+        if: steps.openai-key.outputs.available == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        if: steps.openai-key.outputs.available == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install server dependencies
+        if: steps.openai-key.outputs.available == 'true'
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        if: steps.openai-key.outputs.available == 'true'
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Run live Codex conformance tests
+        if: steps.openai-key.outputs.available == 'true'
+        env:
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+        run: bun run test:live:codex
+
+      - name: Upload live Codex diagnostics
+        if: failure() && steps.openai-key.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-live-integration-diagnostics
           path: integration-tests/artifacts/server/
           if-no-files-found: ignore
           retention-days: 7

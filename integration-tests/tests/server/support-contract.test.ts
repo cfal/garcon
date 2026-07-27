@@ -5,6 +5,7 @@ import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
+import { redactSensitiveEnvironmentText } from '../../support/garcon-process.js';
 import { fakeAnthropicRequestHeaders } from '../../support/anthropic-test-contract.js';
 import {
   createCodexRolloutFileName,
@@ -56,6 +57,15 @@ function anthropicStreamText(body: string): string {
 }
 
 describe('integration support contracts', () => {
+  test('redacts credential environment values from process diagnostics', () => {
+    const text = 'key=sk-testing-secret token=auth-testing-secret path=/tmp/test-home';
+    expect(redactSensitiveEnvironmentText(text, {
+      OPENAI_API_KEY: 'sk-testing-secret',
+      ANTHROPIC_AUTH_TOKEN: 'auth-testing-secret',
+      HOME: '/tmp/test-home',
+    })).toBe('key=[REDACTED] token=[REDACTED] path=/tmp/test-home');
+  });
+
   test('settles deferred values only once', async () => {
     const deferred = new Deferred<string>();
     expect(deferred.resolve('first')).toBe(true);
