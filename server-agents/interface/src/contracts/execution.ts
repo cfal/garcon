@@ -9,6 +9,7 @@ import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js'
 export interface AgentExecution {
   start(request: AgentStartRequest): Promise<AgentStartedSession>;
   resume(request: AgentResumeRequest): Promise<void>;
+  // Resolves true after provider acknowledgement or a synchronous local abort.
   abort(agentSessionId: string): Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   runningSessions(): readonly AgentRunningSession[];

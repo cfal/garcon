@@ -1270,8 +1270,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session: ClaudeRunningSession,
     activeTurn: ClaudeActiveTurn,
     value: unknown,
-  ): void {
-    if (session.activeTurn !== activeTurn) return;
+  ): boolean {
+    if (session.activeTurn !== activeTurn) return false;
     const receipt = isRecord(value) ? value : {};
     const cancelled = Array.isArray(receipt.cancelled)
       ? receipt.cancelled.filter((entry): entry is string => typeof entry === 'string')
@@ -1293,11 +1293,13 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!activeTurn.protocol.inputStarted && cancelled.includes(inputUuid)) {
       this.#dependencies.logger.info('Claude CLI confirmed queued input cancellation', details);
       this.#finishTurn(session);
-      return;
+      return true;
     }
     if (stillQueued.includes(inputUuid)) {
+      this.#clearAbortTimer(session);
+      activeTurn.protocol.markAbortRejected();
       this.#dependencies.logger.warn('Claude CLI interrupt left the submitted input queued', details);
-      return;
+      return false;
     }
     this.#dependencies.logger.debug('Claude CLI acknowledged interrupt', details);
     if (activeTurn.protocol.inputStarted) {
@@ -1307,6 +1309,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         INTERRUPT_COMPLETION_TIMEOUT_MS,
       );
     }
+    return true;
   }
 
   #forceAbortProcess(
@@ -1332,30 +1335,28 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!session?.process || !activeTurn) return false;
 
     activeTurn.protocol.markAbortRequested();
-    const receipt = this.#controlBroker.request(session.id, {
-      subtype: 'interrupt',
-      cancel_queued: true,
-    });
-    void receipt.then(
-      (value) => this.#handleInterruptReceipt(session, activeTurn, value),
-      (error: unknown) => {
-        if (session.activeTurn !== activeTurn) return;
-        this.#dependencies.logger.warn('Claude CLI interrupt request failed', {
-          sessionId: agentSessionId.slice(0, 8),
-          inputId: activeTurn.protocol.inputUuid.slice(0, 8),
-          error: errorMessage(error),
-        });
-        this.#forceAbortProcess(
-          session,
-          activeTurn,
-          'Claude CLI interrupt request failed.',
-        );
-      },
-    );
-
     this.#armAbortFallback(session, activeTurn, INTERRUPT_RECEIPT_TIMEOUT_MS);
-
-    return true;
+    try {
+      const receipt = await this.#controlBroker.request(session.id, {
+        subtype: 'interrupt',
+        cancel_queued: true,
+      });
+      if (session.activeTurn !== activeTurn) return false;
+      return this.#handleInterruptReceipt(session, activeTurn, receipt);
+    } catch (error) {
+      if (session.activeTurn !== activeTurn) return false;
+      this.#dependencies.logger.warn('Claude CLI interrupt request failed', {
+        sessionId: agentSessionId.slice(0, 8),
+        inputId: activeTurn.protocol.inputUuid.slice(0, 8),
+        error: errorMessage(error),
+      });
+      this.#forceAbortProcess(
+        session,
+        activeTurn,
+        'Claude CLI interrupt request failed.',
+      );
+      throw error;
+    }
   }
 
   #armAbortFallback(

@@ -235,6 +235,10 @@ export class ClaudeTurnState {
     this.#phase = 'interrupting';
   }
 
+  markAbortRejected(): void {
+    this.#phase = this.#inputStarted ? 'started' : 'submitted';
+  }
+
   observeBackgroundTaskCount(count: number): void {
     this.#backgroundTaskCount = count;
     if (count > 0) this.#backgroundContinuationPending = true;
