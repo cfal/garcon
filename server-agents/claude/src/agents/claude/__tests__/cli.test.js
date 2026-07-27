@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages } from '../claude-cli.js';
-import { claudeResultFailureMessage } from '../cli-protocol.js';
+import {
+  ClaudeTurnState,
+  claudeProviderSessionState,
+  claudeResultFailureMessage,
+} from '../cli-protocol.js';
 import { convertClaudePermissionTool } from '../permission-tool-converter.js';
 import { AskUserQuestionToolUseMessage, BashToolUseMessage, ExitPlanModeToolUseMessage } from '@garcon/common/chat-types';
 
@@ -339,6 +343,54 @@ describe('claudeResultFailureMessage', () => {
         '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null',
       ],
     })).toBe('Claude CLI turn failed: error_during_execution');
+  });
+});
+
+describe('Claude provider run boundaries', () => {
+  it('decodes only recognized session state events', () => {
+    expect(claudeProviderSessionState({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'running',
+    })).toBe('running');
+    expect(claudeProviderSessionState({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'idle',
+    })).toBe('idle');
+    expect(claudeProviderSessionState({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'future-state',
+    })).toBeNull();
+    expect(claudeProviderSessionState({
+      type: 'assistant',
+      subtype: 'session_state_changed',
+      state: 'idle',
+    })).toBeNull();
+  });
+
+  it('treats later results as continuations of the accepted input', () => {
+    const turn = new ClaudeTurnState('input-1');
+    turn.observeInput({
+      type: 'command_lifecycle',
+      command_uuid: 'input-1',
+      state: 'started',
+    });
+    expect(turn.correlateResult({
+      type: 'result',
+      user_message_uuid: 'another-input',
+    })).toBe('mismatched');
+
+    const inputResult = { type: 'result', user_message_uuid: 'input-1', is_error: false };
+    expect(turn.correlateResult(inputResult)).toBe('input');
+    turn.addOutputMessages(1, true);
+    turn.recordAcceptedResult(inputResult);
+
+    expect(turn.correlateResult({
+      type: 'result',
+      user_message_uuid: 'provider-owned-continuation',
+    })).toBe('continuation');
   });
 });
 

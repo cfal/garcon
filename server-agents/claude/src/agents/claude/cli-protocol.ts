@@ -77,10 +77,12 @@ export interface ClaudeApiRetryDiagnostics {
 export type ClaudeTurnStartSource = 'lifecycle' | 'replay';
 export type ClaudeTurnTerminalState = 'completed' | 'cancelled' | 'discarded';
 export type ClaudeTurnPhase = 'submitted' | 'started' | 'interrupting';
+export type ClaudeProviderSessionState = 'unknown' | 'running' | 'requires_action' | 'idle';
+export type ClaudeReportedSessionState = Exclude<ClaudeProviderSessionState, 'unknown'>;
 export type ClaudeTurnInputEvent =
   | { type: 'started'; source: ClaudeTurnStartSource }
   | { type: 'terminal-before-start'; state: ClaudeTurnTerminalState };
-export type ClaudeResultCorrelation = 'before-start' | 'matched' | 'mismatched';
+export type ClaudeResultCorrelation = 'before-start' | 'input' | 'continuation' | 'mismatched';
 
 function isClaudeContentPart(value: unknown): value is ClaudeContentPart {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -103,12 +105,36 @@ export function claudeResultFailureMessage(message: ClaudeCLIMessage): string {
   return `Claude CLI turn failed: ${outcome}${apiStatus}`;
 }
 
+export function claudeProviderSessionState(
+  message: ClaudeCLIMessage,
+): ClaudeReportedSessionState | null {
+  if (
+    message.type !== 'system'
+    || message.subtype !== 'session_state_changed'
+  ) {
+    return null;
+  }
+  if (
+    message.state === 'running'
+    || message.state === 'requires_action'
+    || message.state === 'idle'
+  ) {
+    return message.state;
+  }
+  return null;
+}
+
 export class ClaudeTurnState {
   readonly inputUuid: string;
   #phase: ClaudeTurnPhase = 'submitted';
   #inputStarted = false;
   #outputMessageCount = 0;
   #assistantContentSeen = false;
+  #assistantContentVersion = 0;
+  #lastResultAssistantContentVersion = 0;
+  #acceptedResultCount = 0;
+  #resultFailure: string | null = null;
+  #cleanAbortResultSeen = false;
   #lastApiRetry: ClaudeApiRetryDiagnostics | null = null;
   #resultBeforeStart: ClaudeCLIMessage | null = null;
 
@@ -134,6 +160,18 @@ export class ClaudeTurnState {
 
   get assistantContentSeen(): boolean {
     return this.#assistantContentSeen;
+  }
+
+  get assistantContentSinceLastResult(): boolean {
+    return this.#assistantContentVersion > this.#lastResultAssistantContentVersion;
+  }
+
+  get hasAcceptedResult(): boolean {
+    return this.#acceptedResultCount > 0;
+  }
+
+  get cleanAbortResultSeen(): boolean {
+    return this.#cleanAbortResultSeen;
   }
 
   observeInput(message: ClaudeCLIMessage): ClaudeTurnInputEvent | null {
@@ -191,6 +229,7 @@ export class ClaudeTurnState {
   addOutputMessages(count: number, assistantContentSeen = false): void {
     this.#outputMessageCount += count;
     this.#assistantContentSeen ||= assistantContentSeen;
+    if (assistantContentSeen) this.#assistantContentVersion += 1;
   }
 
   recordApiRetry(message: ClaudeCLIMessage): ClaudeApiRetryDiagnostics {
@@ -208,18 +247,34 @@ export class ClaudeTurnState {
   correlateResult(message: ClaudeCLIMessage): ClaudeResultCorrelation {
     if (!this.inputStarted) return 'before-start';
     if (
-      message.user_message_uuid
+      !this.hasAcceptedResult
+      && message.user_message_uuid
       && message.user_message_uuid !== this.inputUuid
     ) {
       return 'mismatched';
     }
-    return 'matched';
+    return this.hasAcceptedResult ? 'continuation' : 'input';
   }
 
-  completedWithoutResponse(message: ClaudeCLIMessage): boolean {
-    return !message.is_error
-      && !this.#assistantContentSeen
-      && (typeof message.result !== 'string' || message.result.trim().length === 0);
+  recordAcceptedResult(message: ClaudeCLIMessage): void {
+    this.#acceptedResultCount += 1;
+    this.#lastResultAssistantContentVersion = this.#assistantContentVersion;
+    if (!message.is_error) return;
+    if (
+      this.abortRequested
+      && message.terminal_reason === 'aborted_streaming'
+    ) {
+      this.#cleanAbortResultSeen = true;
+      return;
+    }
+    this.#resultFailure ??= claudeResultFailureMessage(message);
+  }
+
+  settlementFailureMessage(): string | null {
+    if (this.#resultFailure) return this.#resultFailure;
+    if (this.#cleanAbortResultSeen) return null;
+    if (!this.#assistantContentSeen) return this.emptyCompletionFailureMessage();
+    return null;
   }
 
   emptyCompletionFailureMessage(): string {
