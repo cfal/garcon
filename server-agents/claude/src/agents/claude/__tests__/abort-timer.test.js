@@ -279,6 +279,54 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     }]);
   });
 
+  it('settles cleanly when an interrupt ends a fenced background wait', async () => {
+    const runtime = createRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+    const failures = [];
+    const finishes = [];
+    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+
+    const turn = runtime.startClaudeCliSession(startOptions());
+    ctrl.push(INIT);
+    await flush();
+    ctrl.startLatestInput();
+    ctrl.push({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [{ task_id: 'background-build', task_type: 'local_bash' }],
+    });
+    ctrl.push({ type: 'assistant', content: [{ type: 'text', text: 'started' }] });
+    ctrl.push(RESULT);
+    ctrl.push(IDLE);
+    await flush();
+    expect(runtime.isClaudeInternalSessionRunning('session-1')).toBe(true);
+
+    await runtime.abortClaudeInternalSession('session-1');
+    const interrupt = ctrl.writes
+      .map((line) => JSON.parse(line))
+      .find((message) => message.request?.subtype === 'interrupt');
+    ctrl.push({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: interrupt.request_id,
+        response: { cancelled: [], still_queued: [] },
+      },
+    });
+    await flush();
+    const completionFallback = scheduled.find((entry) => entry.ms === 15_000);
+    expect(completionFallback).toBeDefined();
+
+    ctrl.push(IDLE);
+    await turn;
+    expect(cleared).toContain(completionFallback.id);
+    expect(ctrl.proc.killed).toBe(false);
+    expect(failures).toEqual([]);
+    expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+  });
+
   it('cancels a queued submitted input when an internal turn is interrupted', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();

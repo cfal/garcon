@@ -117,7 +117,7 @@ export function handleClaudeProviderLifecycleMessage(
     handlers.retire();
     return true;
   }
-  if (protocol.backgroundContinuationPending) {
+  if (protocol.backgroundContinuationPending && !protocol.abortRequested) {
     handlers.logger.info(
       'Claude CLI became idle while a background continuation remains pending',
       details,
