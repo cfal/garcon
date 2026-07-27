@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { AssistantMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
-import type { ChatMessage, CompactionTrigger } from '@garcon/common/chat-types';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
@@ -43,7 +43,6 @@ import {
   type ClaudeTransportFailure,
 } from './cli-process-transport.js';
 import {
-  ClaudeTurnState,
   claudeResultFailureMessage,
   convertCLIMessageToChatMessages,
   type ClaudeCLIMessage,
@@ -51,6 +50,7 @@ import {
   type ClaudeTurnTerminalState,
 } from './cli-protocol.js';
 import { handleClaudeProviderLifecycleMessage } from './cli-session-state.js';
+import { ClaudeActiveTurn } from './active-turn.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -81,17 +81,6 @@ interface ClaudeRunningSession {
   currentClaudeThinkingMode: ClaudeThinkingMode;
   currentModel: string;
   currentEnvOverrides?: Record<string, string>;
-}
-
-interface ClaudeActiveTurn {
-  readonly protocol: ClaudeTurnState;
-  readonly eventMetadata: ReturnType<typeof claudeEventMetadata>;
-  readonly startedAt: number;
-  readonly completion: Promise<void>;
-  resolve: (() => void) | null;
-  abortTimer: ReturnType<typeof setTimeout> | null;
-  // Pairs a compact boundary with the synthetic summary user message.
-  pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
 }
 
 interface PendingPermission {
@@ -145,18 +134,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (session.activeTurn) {
       throw new Error(`Claude session ${session.id} already has an active turn`);
     }
-    let resolve: (() => void) | null = null;
-    const completion = new Promise<void>((complete) => {
-      resolve = complete;
-    });
-    const activeTurn: ClaudeActiveTurn = {
-      protocol: new ClaudeTurnState(crypto.randomUUID(), session.backgroundTaskCount),
-      eventMetadata,
-      startedAt: Date.now(),
-      completion,
-      resolve,
-      abortTimer: null,
-    };
+    const activeTurn = new ClaudeActiveTurn(eventMetadata, session.backgroundTaskCount);
     session.unownedProviderActivity = false;
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
@@ -462,6 +440,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     if (state === 'cancelled' && abortRequested) {
       this.#dependencies.logger.info('Claude CLI cancelled queued user input after an interrupt', details);
+      activeTurn.confirmPreStartAbort();
       this.#finishTurn(session);
       return;
     }
@@ -618,8 +597,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#clearAbortTimer(session);
     session.activeTurn = null;
     if (activeTurn) this.emitProcessing(session.chatId, false);
-    activeTurn?.resolve?.();
-    if (activeTurn) activeTurn.resolve = null;
+    activeTurn?.finish();
     this.#completeSessionInitialization(session);
 
     this.#cancelPendingPermissions(session);
@@ -644,8 +622,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
     this.emitFailed(session.chatId, message, activeTurn.eventMetadata);
-    activeTurn.resolve?.();
-    activeTurn.resolve = null;
+    activeTurn.finish();
   }
 
   #finishTurn(session: ClaudeRunningSession): void {
@@ -653,13 +630,14 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!activeTurn) return;
     this.#clearAbortTimer(session);
     session.activeTurn = null;
-    this.#controlBroker.rejectSession(session.id, 'Claude turn settled', 'interrupt');
+    if (!activeTurn.protocol.abortRequested) {
+      this.#controlBroker.rejectSession(session.id, 'Claude turn settled', 'interrupt');
+    }
     this.#cancelPendingPermissions(session);
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
     this.emitFinished(session.chatId, 0, activeTurn.eventMetadata);
-    activeTurn.resolve?.();
-    activeTurn.resolve = null;
+    activeTurn.finish();
   }
 
   #evictIdleSession(id: string, session: ClaudeRunningSession): void {
@@ -976,7 +954,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       const initializeResponse = await this.#controlBroker.request(
         session.id,
         { subtype: 'initialize' },
-        60_000,
+        { timeoutMs: 60_000 },
       );
       const initializeInfo = isRecord(initializeResponse) ? initializeResponse : {};
       this.#dependencies.logger.info('Claude CLI control protocol initialized', {
@@ -1070,8 +1048,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     } catch (error) {
       if (this.#runningSessions.get(agentSessionId) === session) {
         session.activeTurn = null;
-        activeTurn.resolve?.();
-        activeTurn.resolve = null;
+        activeTurn.finish();
         this.#runningSessions.delete(agentSessionId);
       }
       this.#completeSessionInitialization(session);
@@ -1271,7 +1248,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     activeTurn: ClaudeActiveTurn,
     value: unknown,
   ): boolean {
-    if (session.activeTurn !== activeTurn) return false;
+    const turnIsCurrent = session.activeTurn === activeTurn;
     const receipt = isRecord(value) ? value : {};
     const cancelled = Array.isArray(receipt.cancelled)
       ? receipt.cancelled.filter((entry): entry is string => typeof entry === 'string')
@@ -1292,17 +1269,26 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     if (!activeTurn.protocol.inputStarted && cancelled.includes(inputUuid)) {
       this.#dependencies.logger.info('Claude CLI confirmed queued input cancellation', details);
-      this.#finishTurn(session);
+      if (turnIsCurrent) this.#finishTurn(session);
       return true;
     }
+    if (!activeTurn.protocol.inputStarted && !stillQueued.includes(inputUuid)) {
+      this.#dependencies.logger.warn(
+        'Claude CLI interrupt did not confirm queued input cancellation',
+        details,
+      );
+      return false;
+    }
     if (stillQueued.includes(inputUuid)) {
-      this.#clearAbortTimer(session);
-      activeTurn.protocol.markAbortRejected();
+      if (turnIsCurrent) {
+        this.#clearAbortTimer(session);
+        activeTurn.protocol.markAbortRejected();
+      }
       this.#dependencies.logger.warn('Claude CLI interrupt left the submitted input queued', details);
       return false;
     }
     this.#dependencies.logger.debug('Claude CLI acknowledged interrupt', details);
-    if (activeTurn.protocol.inputStarted) {
+    if (turnIsCurrent && activeTurn.protocol.inputStarted) {
       this.#armAbortFallback(
         session,
         activeTurn,
@@ -1336,12 +1322,22 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     activeTurn.protocol.markAbortRequested();
     this.#armAbortFallback(session, activeTurn, INTERRUPT_RECEIPT_TIMEOUT_MS);
+    const receiptCancellation = new AbortController();
     try {
-      const receipt = await this.#controlBroker.request(session.id, {
-        subtype: 'interrupt',
-        cancel_queued: true,
-      });
-      if (session.activeTurn !== activeTurn) return false;
+      const response = this.#controlBroker.request(
+        session.id,
+        {
+          subtype: 'interrupt',
+          cancel_queued: true,
+        },
+        { signal: receiptCancellation.signal },
+      ).then(value => ({ type: 'receipt' as const, value }));
+      const lifecycle = activeTurn.preStartAbortConfirmation.then(
+        () => ({ type: 'lifecycle' as const }),
+      );
+      const acknowledgement = await Promise.race([response, lifecycle]);
+      if (acknowledgement.type === 'lifecycle') return true;
+      const receipt = acknowledgement.value;
       return this.#handleInterruptReceipt(session, activeTurn, receipt);
     } catch (error) {
       if (session.activeTurn !== activeTurn) return false;
@@ -1356,6 +1352,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         'Claude CLI interrupt request failed.',
       );
       throw error;
+    } finally {
+      receiptCancellation.abort(new Error('Claude interrupt settled through another signal'));
     }
   }
 

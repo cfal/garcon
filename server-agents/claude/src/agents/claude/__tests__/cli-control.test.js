@@ -42,7 +42,7 @@ describe('ClaudeControlBroker', () => {
     const write = mock(() => Promise.resolve());
     const broker = new ClaudeControlBroker(write);
 
-    await expect(broker.request('session-1', { subtype: 'slow' }, 1))
+    await expect(broker.request('session-1', { subtype: 'slow' }, { timeoutMs: 1 }))
       .rejects.toThrow('Claude CLI slow control request timed out');
 
     const processExit = broker.request('session-1', { subtype: 'interrupt' });
@@ -73,5 +73,25 @@ describe('ClaudeControlBroker', () => {
     })).toBe(false);
     broker.rejectSession('session-1', 'test complete');
     await expect(pending).rejects.toThrow('test complete');
+  });
+
+  it('removes a cancelled request before a late response arrives', async () => {
+    const write = mock(() => Promise.resolve());
+    const broker = new ClaudeControlBroker(write);
+    const controller = new AbortController();
+    const pending = broker.request(
+      'session-1',
+      { subtype: 'interrupt' },
+      { signal: controller.signal },
+    );
+    await Promise.resolve();
+    const id = requestId(write);
+
+    controller.abort(new Error('turn already cancelled'));
+    await expect(pending).rejects.toThrow('turn already cancelled');
+    expect(broker.handleResponse('session-1', {
+      type: 'control_response',
+      response: { subtype: 'success', request_id: id, response: {} },
+    })).toBe(false);
   });
 });

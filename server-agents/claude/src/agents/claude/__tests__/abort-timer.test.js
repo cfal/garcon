@@ -416,7 +416,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
       command_uuid: input.uuid,
       state: 'cancelled',
     });
-    await expect(abort).resolves.toBe(false);
+    await expect(abort).resolves.toBe(true);
     await turn;
 
     expect(cleared).toContain(abortTimerId);
@@ -449,6 +449,56 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     expect(failures).toEqual([]);
     expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+    expect(ctrl.proc.killed).toBe(false);
+  });
+
+  it('does not acknowledge a pre-start interrupt without matching cancellation evidence', async () => {
+    const runtime = createRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+
+    void runtime.startClaudeCliSession(startOptions());
+    ctrl.push(INIT);
+    await flush();
+
+    const abort = runtime.abortClaudeInternalSession('session-1');
+    const [abortTimerId] = abortTimerIds();
+    await acknowledgeInterrupt(ctrl);
+
+    await expect(abort).resolves.toBe(false);
+    expect(cleared).not.toContain(abortTimerId);
+  });
+
+  it('keeps an interrupt acknowledged when its turn settles before the receipt continuation', async () => {
+    const runtime = createRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+
+    const turn = runtime.startClaudeCliSession(startOptions());
+    ctrl.push(INIT);
+    await flush();
+    ctrl.startLatestInput();
+
+    const abort = runtime.abortClaudeInternalSession('session-1');
+    await flush();
+    const interrupt = latestInterrupt(ctrl);
+    ctrl.push({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: interrupt.request_id,
+        response: { cancelled: [], still_queued: [] },
+      },
+    });
+    settleTurn(ctrl, {
+      type: 'result',
+      subtype: 'error_during_execution',
+      terminal_reason: 'aborted_streaming',
+      is_error: true,
+    });
+
+    await expect(abort).resolves.toBe(true);
+    await turn;
     expect(ctrl.proc.killed).toBe(false);
   });
 
@@ -559,6 +609,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     const first = runtime.startClaudeCliSession(startOptions());
     firstCtrl.push(INIT);
     await flush();
+    firstCtrl.startLatestInput();
 
     const abort = runtime.abortClaudeInternalSession('session-1');
     await acknowledgeInterrupt(firstCtrl);
