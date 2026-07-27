@@ -12,9 +12,26 @@ export interface GarconProcessOptions {
   homeDir: string;
   startupTimeoutMs?: number;
   environment?: Record<string, string>;
+  redactEnvironmentValues?: boolean;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+const SENSITIVE_ENVIRONMENT_NAME =
+  /(?:api[_-]?key|auth[_-]?token|credential|password|secret|token)/i;
+
+export function redactSensitiveEnvironmentText(
+  text: string,
+  environment: Record<string, string> = {},
+): string {
+  const values = Object.entries(environment)
+    .filter(([name, value]) => SENSITIVE_ENVIRONMENT_NAME.test(name) && value.length > 0)
+    .map(([, value]) => value)
+    .sort((left, right) => right.length - left.length);
+  return values.reduce(
+    (redacted, value) => redacted.replaceAll(value, '[REDACTED]'),
+    text,
+  );
+}
 
 function isolatedEnvironment(
   homeDir: string,
@@ -75,7 +92,11 @@ export class GarconProcess {
   #unexpectedExit: string | null = null;
   #exitCode: number | null = null;
 
-  private constructor(child: GarconChild, ready: Deferred<string>) {
+  private constructor(
+    child: GarconChild,
+    ready: Deferred<string>,
+    redactedEnvironment: Record<string, string>,
+  ) {
     this.#child = child;
     let readinessText = '';
     const inspectText = (text: string) => {
@@ -83,8 +104,11 @@ export class GarconProcess {
       const match = SERVER_READY_PATTERN.exec(readinessText);
       if (match) ready.resolve(match[1]);
     };
-    this.#stdoutPump = pumpLines(child.stdout, 'stdout', inspectText, (line) => this.#logs.push(line));
-    this.#stderrPump = pumpLines(child.stderr, 'stderr', inspectText, (line) => this.#logs.push(line));
+    const captureLine = (line: string) => {
+      this.#logs.push(redactSensitiveEnvironmentText(line, redactedEnvironment));
+    };
+    this.#stdoutPump = pumpLines(child.stdout, 'stdout', inspectText, captureLine);
+    this.#stderrPump = pumpLines(child.stderr, 'stderr', inspectText, captureLine);
     void child.exited.then((exitCode) => {
       this.#exitCode = exitCode;
       if (!this.#expectedExit) {
@@ -118,7 +142,11 @@ export class GarconProcess {
       stdout: 'pipe',
       stderr: 'pipe',
     });
-    const instance = new GarconProcess(child, ready);
+    const instance = new GarconProcess(
+      child,
+      ready,
+      options.redactEnvironmentValues ? options.environment ?? {} : {},
+    );
 
     try {
       instance.#baseUrl = await withTimeout(

@@ -171,6 +171,7 @@ export class IntegrationFixture {
         projectDir: dirs.project,
         homeDir: dirs.home,
         environment: options.serverEnvironment,
+        redactEnvironmentValues: options.redactSensitiveDiagnostics,
       });
       client = await GarconTestClient.connect(garcon.baseUrl, {
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
@@ -431,7 +432,10 @@ export class IntegrationFixture {
     this.fakeProviders.openAiResponses.stop();
     this.fakeProviders.anthropic.stop();
 
-    if (errors.length === 0 && process.env.KEEP_INTEGRATION_ARTIFACTS !== '1') {
+    if (
+      this.#redactSensitiveDiagnostics
+      || (errors.length === 0 && process.env.KEEP_INTEGRATION_ARTIFACTS !== '1')
+    ) {
       await rm(this.dirs.root, { recursive: true, force: true });
     }
     if (errors.length > 0) {
@@ -450,6 +454,7 @@ export class IntegrationFixture {
       projectDir: this.dirs.project,
       homeDir: this.dirs.home,
       environment: this.#serverEnvironment,
+      redactEnvironmentValues: this.#redactSensitiveDiagnostics,
     });
     this.client = await GarconTestClient.connect(this.garcon.baseUrl, {
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
