@@ -57,6 +57,7 @@ export interface AuthResult {
 }
 
 export class AuthStore {
+	private statusCheck: Promise<void> | null = null;
 	token = $state<string | null>(null);
 	user = $state<AuthUser | null>(null);
 	isLoading = $state(true);
@@ -72,6 +73,17 @@ export class AuthStore {
 
 	/** Queries the server for auth status and validates any stored token. */
 	async checkAuthStatus(): Promise<void> {
+		if (this.statusCheck) return this.statusCheck;
+		const check = this.performAuthStatusCheck();
+		this.statusCheck = check;
+		try {
+			await check;
+		} finally {
+			if (this.statusCheck === check) this.statusCheck = null;
+		}
+	}
+
+	private async performAuthStatusCheck(): Promise<void> {
 		try {
 			this.isLoading = true;
 			this.isUnavailable = false;
@@ -158,6 +170,7 @@ export class AuthStore {
 			this.token = data.token;
 			this.user = data.user;
 			this.needsSetup = false;
+			this.isUnavailable = false;
 			setAuthToken(data.token);
 			return { success: true };
 		} catch (err: unknown) {

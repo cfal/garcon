@@ -66,6 +66,27 @@ describe('AuthStore', () => {
 	});
 
 	describe('checkAuthStatus', () => {
+		it('coalesces concurrent recovery checks', async () => {
+			let resolveStatus!: (status: {
+				needsSetup: boolean;
+				isAuthenticated: boolean;
+				authDisabled: boolean;
+			}) => void;
+			vi.mocked(getAuthStatus).mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveStatus = resolve;
+					}),
+			);
+			const auth = new AuthStore();
+			const first = auth.checkAuthStatus();
+			const second = auth.checkAuthStatus();
+			expect(getAuthStatus).toHaveBeenCalledTimes(1);
+			resolveStatus({ needsSetup: false, isAuthenticated: false, authDisabled: false });
+			await Promise.all([first, second]);
+			expect(getAuthStatus).toHaveBeenCalledTimes(1);
+		});
+
 		it('sets needsSetup when server reports setup needed', async () => {
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: true,
@@ -210,9 +231,11 @@ describe('AuthStore', () => {
 			});
 			const auth = new AuthStore();
 			auth.needsSetup = true;
+			auth.isUnavailable = true;
 			const result = await auth.register('newuser', 'pass');
 			expect(result.success).toBe(true);
 			expect(auth.needsSetup).toBe(false);
+			expect(auth.isUnavailable).toBe(false);
 			expect(auth.token).toBe('reg-token');
 			expect(setAuthToken).toHaveBeenCalledWith('reg-token');
 		});

@@ -300,12 +300,27 @@
 	});
 
 	onMount(() => {
-		auth.checkAuthStatus();
+		void auth.checkAuthStatus();
 		const handleOnline = () => {
-			if (auth.isUnavailable) void auth.checkAuthStatus();
+			void auth.checkAuthStatus();
 		};
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === 'visible' && auth.isUnavailable) {
+				void auth.checkAuthStatus();
+			}
+		};
+		const retryInterval = window.setInterval(() => {
+			if (document.visibilityState === 'visible' && auth.isUnavailable) {
+				void auth.checkAuthStatus();
+			}
+		}, 15_000);
 		window.addEventListener('online', handleOnline);
-		return () => window.removeEventListener('online', handleOnline);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		return () => {
+			window.clearInterval(retryInterval);
+			window.removeEventListener('online', handleOnline);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+		};
 	});
 
 	function handlePageHide() {

@@ -3,6 +3,8 @@
 
 import { apiGet, apiPost, parseApiResponse } from './client.js';
 
+const AUTH_REQUEST_TIMEOUT_MS = 5_000;
+
 export interface AuthStatusResponse {
 	needsSetup: boolean;
 	isAuthenticated: boolean;
@@ -32,7 +34,9 @@ export interface UserResponse {
 
 /** Checks whether the server requires authentication. Unauthenticated. */
 export async function getAuthStatus(): Promise<AuthStatusResponse> {
-	const response = await fetch('/api/v1/auth/status');
+	const response = await fetch('/api/v1/auth/status', {
+		signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+	});
 	return parseApiResponse<AuthStatusResponse>(response);
 }
 
@@ -58,7 +62,7 @@ export async function register(username: string, password: string): Promise<Regi
 
 /** Fetches the current authenticated user. */
 export async function getUser(): Promise<UserResponse> {
-	return apiGet<UserResponse>('/api/v1/auth/user');
+	return apiGet<UserResponse>('/api/v1/auth/user', { timeoutMs: AUTH_REQUEST_TIMEOUT_MS });
 }
 
 /** Logs out the current session. */
