@@ -99,7 +99,7 @@ Lightpanda validates DOM, routing, events, and browser/server coordination. It d
 - Assert `fixture.assertNoBrowserErrors()` in successful E2E workflows. Do not swallow console, protocol, cleanup, or shutdown failures.
 - Do not commit generated files under `artifacts/`. Successful runs remove their temporary directories automatically.
 
-Set `KEEP_INTEGRATION_ARTIFACTS=1` to retain isolated fixture directories for investigation. Failed server tests write diagnostics under `artifacts/server/`; failed E2E tests write the DOM snapshot, browser errors, Lightpanda logs, server exchanges, WebSocket events, and provider requests under `artifacts/e2e/`.
+Set `KEEP_INTEGRATION_ARTIFACTS=1` to retain isolated non-credential fixture directories for investigation. Credential-backed fixtures always remove their temporary provider homes and transcripts. Failed server tests write diagnostics under `artifacts/server/`; failed E2E tests write the DOM snapshot, browser errors, Lightpanda logs, server exchanges, WebSocket events, and provider requests under `artifacts/e2e/`.
 
 ## Running Tests
 
@@ -110,6 +110,7 @@ bun run typecheck
 bun run test:integration:server
 
 ANTHROPIC_TESTING_KEY=... bun run test:live:claude
+OPENAI_TESTING_KEY=... bun run test:live:codex
 
 bun run build
 LIGHTPANDA_BIN=/path/to/lightpanda bun run test:integration:e2e
@@ -118,7 +119,7 @@ bun run check
 bun run test
 ```
 
-`bun run test:integration` runs the deterministic server integration lane but not the credential-backed live-provider or Lightpanda lanes. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. Credential-backed suites use the separate `test:live` and `test:live:<provider>` commands; do not run them locally unless actively changing those tests, and rely on the PR CI live-provider gate otherwise. The live Claude lane requires `ANTHROPIC_TESTING_KEY`; it uses the pinned test-only Claude CLI, Haiku, low effort, a temporary Claude home without changing the user's CLI login, and redacted failure diagnostics that omit provider content and server logs. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
+`bun run test:integration` runs the deterministic server integration lane but not the credential-backed live-provider or Lightpanda lanes. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. Credential-backed suites use the separate `test:live` and `test:live:<provider>` commands; do not run them locally unless actively changing those tests, and rely on the PR CI live-provider gate otherwise. The live Claude lane requires `ANTHROPIC_TESTING_KEY` and uses the pinned test-only Claude CLI, Haiku, and low effort. The live Codex lane requires `OPENAI_TESTING_KEY` and uses the pinned test-only Codex CLI, `gpt-5.4-nano`, and low effort. Both live lanes use a temporary provider home without changing the user's CLI login and redact failure diagnostics that omit provider content and server logs. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
 
 Focused runs are useful while iterating:
 
