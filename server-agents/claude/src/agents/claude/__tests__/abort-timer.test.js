@@ -246,6 +246,39 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(failures).toEqual([]);
   });
 
+  it('retains the force-kill fallback until provider idle follows an abort result', async () => {
+    const runtime = createRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+    const failures = [];
+    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+
+    const turn = runtime.startClaudeCliSession(startOptions());
+    ctrl.push(INIT);
+    await flush();
+    ctrl.startLatestInput();
+
+    await runtime.abortClaudeInternalSession('session-1');
+    const fallback = scheduled.find((entry) => entry.ms === 5000);
+    expect(fallback).toBeDefined();
+    ctrl.push({
+      type: 'result',
+      subtype: 'error_during_execution',
+      terminal_reason: 'aborted_streaming',
+      is_error: true,
+    });
+    await flush();
+
+    expect(cleared).not.toContain(fallback.id);
+    fallback.fn();
+    await turn;
+    expect(ctrl.proc.killed).toBe(true);
+    expect(failures).toEqual([{
+      chatId: 'chat-1',
+      message: 'Claude CLI did not confirm the interrupt.',
+    }]);
+  });
+
   it('cancels a queued submitted input when an internal turn is interrupted', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();

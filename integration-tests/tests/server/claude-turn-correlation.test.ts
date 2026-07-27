@@ -234,6 +234,14 @@ const processInput = async (input) => {
     while (!interruptedInputs.has(input.uuid)) await Bun.sleep(5);
     return;
   }
+  if (content === 'trigger background continuation') {
+    emit({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [{ task_id: 'background-build', task_type: 'local_bash' }],
+      session_id: input.session_id,
+    });
+  }
   emit({
     type: 'assistant',
     content: [{ type: 'text', text: response }],
@@ -255,21 +263,27 @@ const processInput = async (input) => {
     emit({
       type: 'system',
       subtype: 'session_state_changed',
-      state: 'requires_action',
+      state: 'idle',
       session_id: input.session_id,
     });
     while (continuationReleasePath && !existsSync(continuationReleasePath)) await Bun.sleep(5);
     const continuation = 'background continuation finished';
     emit({
       type: 'system',
-      subtype: 'session_state_changed',
-      state: 'running',
+      subtype: 'background_tasks_changed',
+      tasks: [],
       session_id: input.session_id,
     });
     emit({
       type: 'system',
       subtype: 'task_notification',
       status: 'completed',
+      session_id: input.session_id,
+    });
+    emit({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'running',
       session_id: input.session_id,
     });
     appendContinuation(continuation);

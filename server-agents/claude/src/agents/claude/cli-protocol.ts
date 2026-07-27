@@ -32,6 +32,7 @@ export interface ClaudeCLIMessage {
   user_message_uuid?: string;
   command_uuid?: string;
   state?: string;
+  tasks?: unknown[];
   permission_denials?: unknown[];
   content?: unknown[];
   message?: { role?: string; content?: unknown };
@@ -124,6 +125,17 @@ export function claudeProviderSessionState(
   return null;
 }
 
+export function claudeBackgroundTaskCount(message: ClaudeCLIMessage): number | null {
+  if (
+    message.type !== 'system'
+    || message.subtype !== 'background_tasks_changed'
+    || !Array.isArray(message.tasks)
+  ) {
+    return null;
+  }
+  return message.tasks.length;
+}
+
 export class ClaudeTurnState {
   readonly inputUuid: string;
   #phase: ClaudeTurnPhase = 'submitted';
@@ -135,6 +147,8 @@ export class ClaudeTurnState {
   #acceptedResultCount = 0;
   #resultFailure: string | null = null;
   #cleanAbortResultSeen = false;
+  #backgroundContinuationPending = false;
+  #backgroundContinuationStarted = false;
   #lastApiRetry: ClaudeApiRetryDiagnostics | null = null;
   #resultBeforeStart: ClaudeCLIMessage | null = null;
 
@@ -172,6 +186,10 @@ export class ClaudeTurnState {
 
   get cleanAbortResultSeen(): boolean {
     return this.#cleanAbortResultSeen;
+  }
+
+  get backgroundContinuationPending(): boolean {
+    return this.#backgroundContinuationPending;
   }
 
   observeInput(message: ClaudeCLIMessage): ClaudeTurnInputEvent | null {
@@ -214,6 +232,28 @@ export class ClaudeTurnState {
 
   markAbortRequested(): void {
     this.#phase = 'interrupting';
+  }
+
+  observeBackgroundTaskCount(count: number): void {
+    if (count <= 0) return;
+    this.#backgroundContinuationPending = true;
+    this.#backgroundContinuationStarted = false;
+  }
+
+  observeProviderSessionState(
+    state: ClaudeReportedSessionState,
+    backgroundTaskCount: number,
+  ): void {
+    // An empty task set precedes the provider-owned completion turn, so the
+    // following running/result pair closes the continuation fence.
+    if (
+      state === 'running'
+      && this.hasAcceptedResult
+      && this.#backgroundContinuationPending
+      && backgroundTaskCount === 0
+    ) {
+      this.#backgroundContinuationStarted = true;
+    }
   }
 
   recordResultBeforeStart(message: ClaudeCLIMessage): void {
@@ -259,6 +299,10 @@ export class ClaudeTurnState {
   recordAcceptedResult(message: ClaudeCLIMessage): void {
     this.#acceptedResultCount += 1;
     this.#lastResultAssistantContentVersion = this.#assistantContentVersion;
+    if (this.#backgroundContinuationStarted) {
+      this.#backgroundContinuationPending = false;
+      this.#backgroundContinuationStarted = false;
+    }
     if (!message.is_error) return;
     if (
       this.abortRequested
@@ -275,6 +319,10 @@ export class ClaudeTurnState {
     if (this.#cleanAbortResultSeen) return null;
     if (!this.#assistantContentSeen) return this.emptyCompletionFailureMessage();
     return null;
+  }
+
+  get recordedResultFailureMessage(): string | null {
+    return this.#resultFailure;
   }
 
   emptyCompletionFailureMessage(): string {

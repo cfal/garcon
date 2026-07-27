@@ -459,6 +459,33 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('preserves a structured result failure when stdout ends before idle', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const failures = [];
+      runtime.onFailed((_chatId, message) => failures.push(message));
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueInputStarted(fake);
+      fake.stdout.enqueue(encoder.encode(JSON.stringify({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        result: 'Provider request failed',
+      }) + '\n'));
+      fake.closeStdout();
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(failures).toEqual(['Provider request failed']);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('handles a terminal result without a trailing newline', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
@@ -618,6 +645,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'running');
       fake.stdout.enqueue(encoder.encode([
         JSON.stringify({
+          type: 'system',
+          subtype: 'background_tasks_changed',
+          tasks: [{ task_id: 'background-build', task_type: 'local_bash' }],
+        }),
+        JSON.stringify({
           type: 'assistant',
           content: [{ type: 'text', text: 'Background build started.' }],
         }),
@@ -630,8 +662,19 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         }),
         JSON.stringify({
           type: 'system',
+          subtype: 'background_tasks_changed',
+          tasks: [],
+        }),
+        JSON.stringify({
+          type: 'system',
+          subtype: 'task_notification',
+          task_id: 'background-build',
+          status: 'completed',
+        }),
+        JSON.stringify({
+          type: 'system',
           subtype: 'session_state_changed',
-          state: 'requires_action',
+          state: 'idle',
         }),
       ].join('\n') + '\n'));
       await Promise.resolve();
@@ -673,6 +716,42 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         { chatId: 'chat-1', isProcessing: true },
         { chatId: 'chat-1', isProcessing: false },
       ]);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('logs and retires provider activity without an active Garcon turn', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const logger = createLogger();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime(logger);
+      const start = runtime.startClaudeCliSession(startOptions());
+      await enqueueResult(fake);
+      await start;
+
+      enqueueProviderState(fake, 'running');
+      enqueueProviderState(fake, 'idle');
+      for (
+        let attempt = 0;
+        attempt < 20 && fake.proc.stdin.end.mock.calls.length === 0;
+        attempt += 1
+      ) {
+        await Promise.resolve();
+      }
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Claude CLI emitted provider activity without an active Garcon turn',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          next: 'running',
+        }),
+      );
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
       await runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;

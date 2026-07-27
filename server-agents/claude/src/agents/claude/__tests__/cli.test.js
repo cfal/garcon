@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages } from '../claude-cli.js';
 import {
   ClaudeTurnState,
+  claudeBackgroundTaskCount,
   claudeProviderSessionState,
   claudeResultFailureMessage,
 } from '../cli-protocol.js';
@@ -370,6 +371,24 @@ describe('Claude provider run boundaries', () => {
     })).toBeNull();
   });
 
+  it('decodes background task snapshots as a level count', () => {
+    expect(claudeBackgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [{ task_id: 'one' }, { task_id: 'two' }],
+    })).toBe(2);
+    expect(claudeBackgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [],
+    })).toBe(0);
+    expect(claudeBackgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: 'malformed',
+    })).toBeNull();
+  });
+
   it('treats later results as continuations of the accepted input', () => {
     const turn = new ClaudeTurnState('input-1');
     turn.observeInput({
@@ -391,6 +410,27 @@ describe('Claude provider run boundaries', () => {
       type: 'result',
       user_message_uuid: 'provider-owned-continuation',
     })).toBe('continuation');
+  });
+
+  it('keeps a background continuation fenced through its completion turn', () => {
+    const turn = new ClaudeTurnState('input-1');
+    turn.observeInput({
+      type: 'command_lifecycle',
+      command_uuid: 'input-1',
+      state: 'started',
+    });
+    turn.observeBackgroundTaskCount(1);
+    turn.recordAcceptedResult({
+      type: 'result',
+      user_message_uuid: 'input-1',
+      is_error: false,
+    });
+    expect(turn.backgroundContinuationPending).toBe(true);
+
+    turn.observeBackgroundTaskCount(0);
+    turn.observeProviderSessionState('running', 0);
+    turn.recordAcceptedResult({ type: 'result', is_error: false });
+    expect(turn.backgroundContinuationPending).toBe(false);
   });
 });
 
