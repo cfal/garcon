@@ -28,6 +28,7 @@
 	import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
+	import { ChatProcessingReconciler } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
@@ -144,6 +145,7 @@
 	const agentState = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const conversationUi = new ConversationUiState();
+	const processingReconciler = new ChatProcessingReconciler(ws, sessions, lifecycle);
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
 	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
@@ -278,6 +280,7 @@
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
+		processingReconciler.destroy();
 		drainHandle.cleanup();
 		transcriptCache.flush();
 	});
@@ -340,6 +343,7 @@
 			},
 		},
 		reloadTranscript: (chatId) => reloadChatFromNative(ws, chatState, chatId),
+		requestProcessingSnapshot: () => ws.requestProcessingSnapshot(),
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.setPinnedToBottom(v);
 		},

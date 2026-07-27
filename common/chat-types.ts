@@ -10,6 +10,27 @@ export interface ChatImage {
 
 export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'unconfirmed' | 'failed';
 export type ChatStopIntent = 'stop' | 'interrupt-and-send' | 'chat-deletion';
+export const CHAT_STOP_OUTCOMES = [
+  'interrupt-requested',
+  'already-idle',
+  'failed',
+] as const;
+export type ChatStopOutcome = typeof CHAT_STOP_OUTCOMES[number];
+export const CHAT_PROCESSING_PHASES = ['running', 'stopping'] as const;
+export type ChatProcessingPhase = typeof CHAT_PROCESSING_PHASES[number];
+
+export interface ChatProcessingEntry {
+  chatId: string;
+  phase: ChatProcessingPhase;
+}
+
+export function isStopSatisfied(outcome: ChatStopOutcome): boolean {
+  return outcome !== 'failed';
+}
+
+export function isAbortAcknowledged(outcome: ChatStopOutcome): boolean {
+  return outcome === 'interrupt-requested';
+}
 
 export interface ChatMessageMetadata {
   clientRequestId?: string;

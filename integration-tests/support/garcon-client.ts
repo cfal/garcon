@@ -735,7 +735,7 @@ export class GarconTestClient {
       (message): message is ChatProcessingUpdatedMessage =>
         message.type === 'chat-processing-updated'
         && message.chatId === chatId
-        && message.isProcessing === isProcessing,
+        && (message.phase !== null) === isProcessing,
       `${chatId} processing=${isProcessing}`,
       options,
     );

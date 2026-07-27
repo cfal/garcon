@@ -44,7 +44,7 @@ describe('persistence lifecycle', () => {
       expect(restored.messages.map((entry) => entry.seq)).toEqual(before.messages.map((entry) => entry.seq));
       expect((await fixture.client.reconnectState([])).processing).toEqual({
         outcome: 'snapshot',
-        runningChatIds: [],
+        chats: [],
       });
 
       const third = await fixture.client.runDirectChat({
@@ -82,7 +82,7 @@ describe('persistence lifecycle', () => {
       expect(paused.control.queue.pause?.kind).toBe('manual');
       expect((await fixture.client.reconnectState([chatId])).processing).toEqual({
         outcome: 'snapshot',
-        runningChatIds: [chatId],
+        chats: [{ chatId, phase: 'running' }],
       });
 
       const activeAborted = held.expectAbort();
@@ -101,7 +101,7 @@ describe('persistence lifecycle', () => {
       const restarted = await fixture.client.reconnectState([chatId]);
       expect(restarted.processing).toEqual({
         outcome: 'snapshot',
-        runningChatIds: [],
+        chats: [],
       });
       expect(restarted.controlResults).toEqual([{
         chatId,

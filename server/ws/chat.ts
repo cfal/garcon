@@ -25,7 +25,7 @@ import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { isDomainError } from '../lib/domain-error.js';
-import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatExecutionQueries } from '../chat-execution/chat-execution-coordinator.js';
@@ -38,11 +38,6 @@ const logger = createLogger('ws:chat');
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
 type WS = import('bun').ServerWebSocket<unknown>;
 
-type AgentRegistryDep = Pick<
-  AgentRegistryServiceContract,
-  'getRunningChatIdsSnapshot'
->;
-
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 type QueueDep = Pick<ChatExecutionQueries, 'readChatExecutionControl'>;
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
@@ -54,7 +49,7 @@ type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Prom
 type ChatIdRequest = { type: string; chatId?: string | null };
 
 interface ChatHandlerDeps {
-  agents: AgentRegistryDep;
+  processing: Pick<ChatProcessingActivity, 'snapshot'>;
   chatViews: ChatViewsDep;
   nativeReloader: NativeReloaderDep;
   queue: QueueDep;
@@ -65,12 +60,12 @@ interface ChatHandlerDeps {
 const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
 
 function readReconnectProcessingResult(
-  agents: AgentRegistryDep,
+  processing: Pick<ChatProcessingActivity, 'snapshot'>,
 ): ReconnectProcessingResult {
   try {
     return {
       outcome: 'snapshot',
-      runningChatIds: agents.getRunningChatIdsSnapshot(),
+      chats: processing.snapshot(),
     };
   } catch (error: unknown) {
     logger.warn(
@@ -111,7 +106,7 @@ function reloadErrorCode(error: unknown): ClientRequestErrorCode {
 }
 
 export class ChatHandler {
-  #agents: AgentRegistryDep;
+  #processing: Pick<ChatProcessingActivity, 'snapshot'>;
   #chatViews: ChatViewsDep;
   #nativeReloader: NativeReloaderDep;
   #queue: QueueDep;
@@ -120,14 +115,14 @@ export class ChatHandler {
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
   constructor({
-    agents,
+    processing,
     chatViews,
     nativeReloader,
     queue,
     pendingInputs,
     registry,
   }: ChatHandlerDeps) {
-    this.#agents = agents;
+    this.#processing = processing;
     this.#chatViews = chatViews;
     this.#nativeReloader = nativeReloader;
     this.#queue = queue;
@@ -185,7 +180,7 @@ export class ChatHandler {
           }
         },
       );
-      const processing = readReconnectProcessingResult(this.#agents);
+      const processing = readReconnectProcessingResult(this.#processing);
       writer.send(new ReconnectStateMessage(
         processing,
         controlResults,
@@ -216,6 +211,7 @@ export class ChatHandler {
       data.clientRequestId,
       data.sentAt,
       new Date().toISOString(),
+      readReconnectProcessingResult(this.#processing),
     ));
   }
 

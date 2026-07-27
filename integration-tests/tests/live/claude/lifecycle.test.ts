@@ -452,7 +452,7 @@ describe('live Claude lifecycle', () => {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });
-      expect(interrupted.stopped).toBe(true);
+      expect(interrupted.outcome).toBe('interrupt-requested');
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
         afterIndex: interruptCursor,
         timeoutMs: TURN_TIMEOUT_MS,
@@ -503,7 +503,7 @@ describe('live Claude lifecycle', () => {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });
-      expect(stopped.stopped).toBe(true);
+      expect(stopped.outcome).toBe('interrupt-requested');
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, stoppedTurn.turnId, {
         afterIndex: stopCursor,
         timeoutMs: TURN_TIMEOUT_MS,

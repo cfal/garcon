@@ -1,4 +1,8 @@
-import { parseChatMessages, type ChatMessage } from '../common/chat-types.js';
+import {
+  isAbortAcknowledged,
+  parseChatMessages,
+  type ChatMessage,
+} from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
@@ -11,6 +15,7 @@ import type { PendingUserInputService } from './chats/pending-user-input-service
 import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
+import type { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { commandLedgerKey, type CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
@@ -63,6 +68,7 @@ export interface ServerEventWiringDeps {
   chatRegistry: ChatRegistry;
   settings: SettingsStore;
   queue: ChatExecutionCoordinator;
+  processing: ChatProcessingActivity;
   metadata: MetadataIndex;
   chatViews: ChatViewStore;
   chatNativeReloader: NativeReloaderDep;
@@ -87,6 +93,7 @@ export function wireServerEvents({
   chatRegistry,
   settings,
   queue,
+  processing,
   metadata,
   chatViews,
   chatNativeReloader,
@@ -353,7 +360,7 @@ export function wireServerEvents({
     options: TurnEventMetadata,
   ): Promise<void> {
     // Clears queue-dispatching's optimistic state when launch fails before the provider starts.
-    broadcast(new ChatProcessingUpdatedMessage(chatId, false));
+    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     if (consumeProcessFailure(chatId, options)) return;
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
     if (options.clientRequestId) {
@@ -418,9 +425,15 @@ export function wireServerEvents({
     });
   });
 
-  agentRegistry.onProcessing((chatId, isProcessing) => {
+  const publishProcessing = (chatId: string) => {
     if (!chatExists(chatId)) return;
-    broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
+    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
+  };
+  agentRegistry.onProcessing((chatId) => {
+    publishProcessing(chatId);
+  });
+  queue.onProcessingInvalidated((chatId) => {
+    publishProcessing(chatId);
   });
   agentRegistry.onSessionCreated((chatId) => {
     if (!chatExists(chatId)) return;
@@ -599,8 +612,12 @@ export function wireServerEvents({
       new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
     );
   });
-  queue.onSessionStopped((chatId, success, intent, stopId) => {
-    const acknowledgement = userAbortLifecycle.onSessionStopped(chatId, stopId, success);
+  queue.onSessionStopped((chatId, outcome, intent, stopId) => {
+    const acknowledgement = userAbortLifecycle.onSessionStopped(
+      chatId,
+      stopId,
+      isAbortAcknowledged(outcome),
+    );
     if (acknowledgement.terminalDisposition === 'suppress') {
       const failure = takeDeferredTerminalFailure(chatId, acknowledgement.turn);
       if (failure) {
@@ -612,7 +629,7 @@ export function wireServerEvents({
       if (failure) releaseDeferredTerminalFailure(failure);
       else reconcilePendingAfterTerminal(chatId, 'rejected stop');
     }
-    broadcast(new ChatSessionStoppedMessage(chatId, success, intent));
+    broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
     const expectedAbort = userAbortLifecycle.onTurnTerminal(chatId, options);

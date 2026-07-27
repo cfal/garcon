@@ -270,7 +270,7 @@ describe('OpenAI Responses chat lifecycle', () => {
         chatId,
         agentId: fixture.directAgents.openAiResponses.agentId,
       });
-      expect(stopped.stopped).toBe(true);
+      expect(stopped.outcome).toBe('interrupt-requested');
       expect((await aborted).abortedAt).toBeNumber();
       expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
         afterIndex: cursor,

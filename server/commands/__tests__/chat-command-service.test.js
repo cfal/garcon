@@ -398,8 +398,11 @@ function makeService(overrides = {}) {
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
-    stopActiveTurn: mock(() => Promise.resolve({ stopped: true, control: storedQueue() })),
-    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    stopActiveTurn: mock(() => Promise.resolve({
+      outcome: 'interrupt-requested',
+      control: storedQueue(),
+    })),
+    interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     waitForDispatches: mock(() => Promise.all([...executionTasks]).then(() => undefined)),
@@ -829,7 +832,7 @@ describe('ChatCommandService', () => {
     });
     const stopActiveTurn = mock(async () => {
       events.push('stop');
-      return { stopped: true, control: storedQueue() };
+      return { outcome: 'interrupt-requested', control: storedQueue() };
     });
     const { service } = makeService({
       agents: { startSession },
@@ -857,6 +860,56 @@ describe('ChatCommandService', () => {
     startGate.resolve();
     await Promise.all([start, stop]);
     expect(events).toEqual(['start-entered', 'start-finished', 'stop']);
+  });
+
+  it('records already-idle Stop as finished and replays its exact outcome', async () => {
+    const stopActiveTurn = mock(async () => ({
+      outcome: 'already-idle',
+      control: storedQueue(),
+    }));
+    const { service } = makeService({ queue: { stopActiveTurn } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-already-idle',
+    };
+
+    const first = await service.submitStop(input);
+    const duplicate = await service.submitStop(input);
+
+    expect(first).toMatchObject({
+      status: 'accepted',
+      outcome: 'already-idle',
+    });
+    expect(duplicate).toMatchObject({
+      status: 'duplicate',
+      outcome: 'already-idle',
+    });
+    expect(stopActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('records provider Stop rejection as failed and replays its exact outcome', async () => {
+    const stopActiveTurn = mock(async () => ({
+      outcome: 'failed',
+      control: storedQueue(),
+    }));
+    const { service } = makeService({ queue: { stopActiveTurn } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-failed',
+    };
+
+    const first = await service.submitStop(input);
+    const duplicate = await service.submitStop(input);
+
+    expect(first).toMatchObject({
+      status: 'accepted',
+      outcome: 'failed',
+    });
+    expect(duplicate).toMatchObject({
+      status: 'duplicate',
+      outcome: 'failed',
+    });
+    expect(stopActiveTurn).toHaveBeenCalledTimes(1);
   });
 
   it('settles Send now through the command lock before launching its successor once', async () => {
@@ -953,7 +1006,7 @@ describe('ChatCommandService', () => {
 
     runtimeRunning = false;
     queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, predecessorTurn);
-    await expect(interrupt).resolves.toMatchObject({ stopped: true });
+    await expect(interrupt).resolves.toMatchObject({ outcome: 'interrupt-requested' });
     await successorStarted.promise;
 
     queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, predecessorTurn);
@@ -994,7 +1047,7 @@ describe('ChatCommandService', () => {
     const stopActiveTurn = mock(async () => {
       markStopEntered();
       await stopGate;
-      return { stopped: true, control: storedQueue() };
+      return { outcome: 'interrupt-requested', control: storedQueue() };
     });
     const { service, queue } = makeService({ queue: { stopActiveTurn } });
 

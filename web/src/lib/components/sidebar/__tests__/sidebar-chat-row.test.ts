@@ -28,6 +28,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: true,
 		status: 'draft',
 		lastMessage: 'Latest preview text',

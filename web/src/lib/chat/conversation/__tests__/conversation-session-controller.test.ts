@@ -108,6 +108,7 @@ function captureAnimationFrames() {
 }
 
 function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
+	const isProcessing = overrides.isProcessing ?? false;
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
@@ -128,7 +129,8 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		lastReadAt: null,
 		isPinned: false,
 		isArchived: false,
-		isProcessing: false,
+		isProcessing,
+		processingPhase: isProcessing ? 'running' : null,
 		isUnread: true,
 		status: 'running',
 		tags: [],
@@ -180,6 +182,8 @@ function createServerEntry(id: string) {
 		isPinned: false,
 		isArchived: false,
 		isActive: false,
+		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 	};
 }
@@ -282,6 +286,9 @@ function createDeps(chat = createRunningChat()) {
 			patchLastReadAt: vi.fn(),
 			applyStartEntry: vi.fn(),
 			applyProcessingEvent: vi.fn(),
+			processingPhase: vi.fn((chatId: string) => (
+				chatId === chat.id ? chat.processingPhase : null
+			)),
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			renameChat: vi.fn().mockResolvedValue(true),
@@ -317,9 +324,15 @@ function createDeps(chat = createRunningChat()) {
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		},
 		lifecycle: {
-			currentChatId: null as string | null,
+			currentChatId: chat.id as string | null,
 			loadingStatus: null as LoadingStatus | null,
 			clearTurnStatus: vi.fn(),
+			beginStopping: vi.fn(() => ({
+				turnStatus: 'running' as const,
+				loadingStatusStack: [],
+			})),
+			restoreStopping: vi.fn(),
+			applyProcessingPhase: vi.fn(),
 			markTurnRunning: vi.fn(),
 			setCurrentChatId: vi.fn(),
 			setLoadingStatus: vi.fn(),
@@ -334,6 +347,10 @@ function createDeps(chat = createRunningChat()) {
 			sendMessage: vi.fn(),
 			waitForConnection,
 		},
+		requestProcessingSnapshot: vi.fn().mockResolvedValue({
+			outcome: 'snapshot',
+			chats: [],
+		}),
 		appShell: {
 			openNewChatDialog: vi.fn(),
 		},
@@ -765,7 +782,7 @@ describe('ConversationSessionController', () => {
 			clientRequestId: 'req-stop',
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
-			stopped: true,
+			outcome: 'interrupt-requested',
 			control,
 		});
 		const controller = new ConversationSessionController(deps);
@@ -773,7 +790,9 @@ describe('ConversationSessionController', () => {
 		await controller.handleAbort();
 
 		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', control);
-		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
+		expect(deps.lifecycle.beginStopping).toHaveBeenCalledWith('chat-1', expect.any(String));
+		expect(deps.requestProcessingSnapshot).toHaveBeenCalledOnce();
+		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
 	});
 
 	it('uses the distinct interrupt command without invoking Stop', async () => {
@@ -784,7 +803,7 @@ describe('ConversationSessionController', () => {
 			clientRequestId: 'req-interrupt',
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
-			stopped: true,
+			outcome: 'interrupt-requested',
 			control: emptyControl(),
 		});
 		const controller = new ConversationSessionController(deps);
@@ -798,98 +817,63 @@ describe('ConversationSessionController', () => {
 			}),
 		);
 		expect(mockStopChat).not.toHaveBeenCalled();
-		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
+		expect(deps.requestProcessingSnapshot).toHaveBeenCalledOnce();
+		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
 	});
 
-	it('restores status and reports a Stop that did not stop an active turn', async () => {
+	it('treats an already-idle Stop as satisfied and requests reconciliation', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
-		let loadingStatus: LoadingStatus | null = previousStatus;
-		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
-			get: () => loadingStatus,
-		});
-		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
-			loadingStatus = status;
-		});
 		mockStopChat.mockResolvedValue({
 			success: true,
 			commandType: 'agent-stop',
 			clientRequestId: 'req-stop-false',
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
-			stopped: false,
+			outcome: 'already-idle',
 			control: emptyControl(),
 		});
 		const controller = new ConversationSessionController(deps);
 
 		await controller.handleAbort();
 
-		expect(loadingStatus).toEqual(previousStatus);
-		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
-		expect(deps.chatState.localNotices).toEqual([
-			expect.objectContaining({
-				noticeType: 'error',
-				content: 'Failed to stop chat: The active turn had already finished.',
-			}),
-		]);
+		expect(deps.requestProcessingSnapshot).toHaveBeenCalledOnce();
+		expect(deps.lifecycle.restoreStopping).not.toHaveBeenCalled();
+		expect(deps.chatState.localNotices).toEqual([]);
 	});
 
-	it('restores status and reports an Interrupt that did not stop an active turn', async () => {
+	it('treats an already-idle Interrupt and Send as satisfied', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
-		let loadingStatus: LoadingStatus | null = previousStatus;
-		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
-			get: () => loadingStatus,
-		});
-		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
-			loadingStatus = status;
-		});
 		mockInterruptAndSendChat.mockResolvedValue({
 			success: true,
 			commandType: 'agent-interrupt-and-send',
 			clientRequestId: 'req-interrupt-false',
 			status: 'accepted',
 			acceptedAt: '2026-07-17T00:00:00.000Z',
-			stopped: false,
+			outcome: 'already-idle',
 			control: emptyControl(),
 		});
 		const controller = new ConversationSessionController(deps);
 
 		await controller.handleInterruptAndSend();
 
-		expect(loadingStatus).toEqual(previousStatus);
-		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
-		expect(deps.chatState.localNotices).toEqual([
-			expect.objectContaining({
-				noticeType: 'error',
-				content: 'Failed to stop chat: The active turn had already finished.',
-			}),
-		]);
+		expect(deps.lifecycle.restoreStopping).not.toHaveBeenCalled();
+		expect(deps.chatState.localNotices).toEqual([]);
 	});
 
-	it('restores the previous loading status when abort fails', async () => {
+	it('restores the request-scoped status when abort transport fails', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
-		let loadingStatus: LoadingStatus | null = previousStatus;
-		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
-			get: () => loadingStatus,
-		});
-		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
-			loadingStatus = status;
-		});
 		mockStopChat.mockRejectedValueOnce(new Error('network failed'));
 		const controller = new ConversationSessionController(deps);
 
 		controller.handleAbort();
 		await flushPromises();
 
-		expect(deps.lifecycle.setLoadingStatus).toHaveBeenNthCalledWith(1, {
-			text: 'Stopping',
-			tokens: 0,
-			can_interrupt: false,
-		});
-		expect(deps.lifecycle.setLoadingStatus).toHaveBeenNthCalledWith(2, previousStatus);
-		expect(loadingStatus).toEqual(previousStatus);
+		expect(deps.lifecycle.beginStopping).toHaveBeenCalledWith('chat-1', expect.any(String));
+		expect(deps.lifecycle.restoreStopping).toHaveBeenCalledWith(
+			'chat-1',
+			expect.any(String),
+			expect.any(Object),
+		);
 		expect(deps.chatState.localNotices).toEqual([
 			expect.objectContaining({
 				noticeType: 'error',
@@ -898,32 +882,26 @@ describe('ConversationSessionController', () => {
 		]);
 	});
 
-	it('keeps newer loading status when abort fails after another lifecycle update', async () => {
-		const failedStop = deferred<never>();
+	it('restores status and reports an explicit provider stop failure', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
-		const newerStatus: LoadingStatus = { text: 'Processing', tokens: 13, can_interrupt: true };
-		let loadingStatus: LoadingStatus | null = previousStatus;
-		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
-			get: () => loadingStatus,
+		mockStopChat.mockResolvedValue({
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop-failed',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			outcome: 'failed',
+			control: emptyControl(),
 		});
-		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
-			loadingStatus = status;
-		});
-		mockStopChat.mockReturnValueOnce(failedStop.promise);
 		const controller = new ConversationSessionController(deps);
 
-		controller.handleAbort();
-		loadingStatus = newerStatus;
-		failedStop.reject(new Error('network failed'));
-		await flushPromises();
+		await controller.handleAbort();
 
-		expect(deps.lifecycle.setLoadingStatus).toHaveBeenCalledTimes(1);
-		expect(loadingStatus).toEqual(newerStatus);
+		expect(deps.lifecycle.restoreStopping).toHaveBeenCalledOnce();
 		expect(deps.chatState.localNotices).toEqual([
 			expect.objectContaining({
 				noticeType: 'error',
-				content: 'Failed to stop chat: network failed',
+				content: 'Failed to stop chat: Stop request failed. The chat is still running.',
 			}),
 		]);
 	});

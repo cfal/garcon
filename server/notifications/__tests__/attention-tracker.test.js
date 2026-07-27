@@ -272,7 +272,7 @@ describe('AttentionTracker', () => {
     it('sends stopped notification with user message as title', async () => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'run tests' });
-      queue.emitSessionStopped('c1', true);
+      queue.emitSessionStopped('c1', 'interrupt-requested');
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).toHaveBeenCalledTimes(1);
@@ -285,7 +285,7 @@ describe('AttentionTracker', () => {
     it('does not report an unsuccessful stop as stopped', async () => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'run tests' });
-      queue.emitSessionStopped('c1', false);
+      queue.emitSessionStopped('c1', 'failed');
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).not.toHaveBeenCalled();

@@ -1,10 +1,10 @@
 import type { ChatListEntry, ChatOrderGroup } from '../../common/chat-list.js';
+import type { ChatProcessingPhase } from '../../common/chat-types.js';
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { chatIdCreatedAt } from '../../common/chat-id.js';
-import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatMetadata } from './metadata-store.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { PathCache, ProjectPathStatus } from './path-cache.js';
@@ -32,7 +32,7 @@ export interface ChatListProjectorDeps {
   registry: Pick<IChatRegistry, 'getChat'>;
   settings: ChatListProjectorSettings;
   metadata: ChatListProjectorMetadata;
-  agents: Pick<AgentRegistryServiceContract, 'isAgentSessionRunning'>;
+  processing: { phase(chatId: string): ChatProcessingPhase | null };
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
 }
 
@@ -106,6 +106,7 @@ export class ChatListProjector {
     );
     const lastReadAt = session.lastReadAt ?? null;
     const lastActivityAt = metadata?.lastActivity ?? null;
+    const processingPhase = this.deps.processing.phase(chatId);
     return {
       id: chatId,
       agentId: session.agentId,
@@ -134,10 +135,9 @@ export class ChatListProjector {
         lastMessage: lastPreview,
         firstMessage: firstPreview,
       },
-      isActive: this.deps.agents.isAgentSessionRunning(
-        session.agentId,
-        session.agentSessionId,
-      ),
+      isActive: processingPhase !== null,
+      isProcessing: processingPhase !== null,
+      processingPhase,
       isPinned: orderGroup === 'pinned',
       isArchived: orderGroup === 'archived',
       isUnread: Boolean(

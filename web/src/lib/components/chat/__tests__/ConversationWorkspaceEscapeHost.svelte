@@ -42,6 +42,7 @@
 		isPinned: false,
 		isArchived: false,
 		isProcessing: true,
+		processingPhase: 'running',
 		isUnread: false,
 		status: 'running',
 		tags: [],
@@ -63,10 +64,11 @@
 		get order() {
 			return [selectedChat.id];
 		},
-		startupByChatId: {},
-		hasChat: (chatId: string) => chatId === selectedChat.id,
-		isDraft: () => false,
-		patchDraftStartup: () => {},
+			startupByChatId: {},
+			hasChat: (chatId: string) => chatId === selectedChat.id,
+			isDraft: () => false,
+			processingPhase: () => 'running',
+			patchDraftStartup: () => {},
 		patchPreview: () => {},
 		patchChat: () => {},
 		patchLastReadAt: () => {},
@@ -76,7 +78,6 @@
 		setSelectedChatId: () => {},
 		applyProcessingEvent: () => {},
 		reconcileProcessing: () => {},
-		invalidateProcessingAuthority: () => {},
 		quietRefreshChats: () => Promise.resolve(),
 	};
 
@@ -94,10 +95,11 @@
 	setWs({
 		messages: [],
 		trimOffset: 0,
-		isConnected: false,
-		registerCursor: (_cursor: DrainCursor) => () => {},
-		sendRequest: () => Promise.resolve({}),
-	} as never);
+			isConnected: false,
+			registerCursor: (_cursor: DrainCursor) => () => {},
+			addMessageConsumer: () => () => {},
+			sendRequest: () => Promise.resolve({}),
+		} as never);
 	setReadReceiptOutbox({
 		enqueue: () => {},
 	} as never);

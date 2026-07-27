@@ -86,15 +86,13 @@ describe('AgentRuntimeRouter running chat snapshots', () => {
     }
   });
 
-  it('fails closed during the normal runtime-to-registry pre-bind window', () => {
+  it('omits a running session during the normal runtime-to-registry pre-bind window', () => {
     const router = makeRouter({ claude: [{ agentSessionId: 'starting-session' }] });
 
-    expect(() => router.getRunningChatIdsSnapshot()).toThrow(
-      'Running chat snapshot has 1 unmapped session(s)',
-    );
+    expect(router.getRunningChatIdsSnapshot()).toEqual([]);
   });
 
-  it('reports aggregate content-free diagnostics without returning a partial snapshot', () => {
+  it('returns the mapped portion when other running sessions are temporarily unmapped', () => {
     const router = makeRouter(
       {
         claude: [
@@ -106,15 +104,6 @@ describe('AgentRuntimeRouter running chat snapshots', () => {
       { 'mapped-session': 'chat-mapped' },
     );
 
-    expect.assertions(5);
-    try {
-      router.getRunningChatIdsSnapshot();
-    } catch (error) {
-      expect(error.message).toBe('Running chat snapshot has 2 unmapped session(s)');
-      expect(error.message).not.toContain('orphan-session');
-      expect(error.message).not.toContain('second-orphan');
-      expect(error.message).not.toContain('claude');
-      expect(error.message).not.toContain('codex');
-    }
+    expect(router.getRunningChatIdsSnapshot()).toEqual(['chat-mapped']);
   });
 });

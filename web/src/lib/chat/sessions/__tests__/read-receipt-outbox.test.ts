@@ -147,6 +147,8 @@ describe('ReadReceiptOutboxStore', () => {
 				isPinned: false,
 				isArchived: false,
 				isActive: false,
+				isProcessing: false,
+				processingPhase: null,
 				isUnread: true,
 			},
 		]);
@@ -188,6 +190,8 @@ describe('ReadReceiptOutboxStore', () => {
 				isPinned: false,
 				isArchived: false,
 				isActive: false,
+				isProcessing: false,
+				processingPhase: null,
 				isUnread: true,
 			},
 			{
@@ -211,6 +215,8 @@ describe('ReadReceiptOutboxStore', () => {
 				isPinned: false,
 				isArchived: false,
 				isActive: false,
+				isProcessing: false,
+				processingPhase: null,
 				isUnread: false,
 			},
 		]);

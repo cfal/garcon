@@ -1,4 +1,9 @@
 import crypto from 'crypto';
+import {
+  isAbortAcknowledged,
+  isStopSatisfied,
+  type ChatStopOutcome,
+} from '../../common/chat-types.ts';
 import type { AutomaticQueuePauseKind } from '../../common/queue-state.ts';
 import type { RunAgentTurnOptions } from '../agents/session-types.ts';
 import type { StoredQueueEntry } from './control-state.ts';
@@ -26,7 +31,7 @@ export interface QueueDispatchCallbacks {
   publishIdle(chatId: string): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
   settleAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
-  stopBarrier(chatId: string): Promise<boolean> | null;
+  stopBarrier(chatId: string): Promise<ChatStopOutcome> | null;
   removeSent(chatId: string, entryId: string): Promise<unknown>;
 }
 
@@ -105,12 +110,12 @@ export class QueueDrainer {
       }
       const stop = this.#callbacks.stopBarrier(chatId);
       if (stop) {
-        const stopped = await stop.catch(() => false);
+        const outcome = await stop.catch((): ChatStopOutcome => 'failed');
         if (this.#hasManualStop(chatId)) {
           await this.#controls.restoreStopped(chatId, entry.id);
           return;
         }
-        if (!stopped) {
+        if (!isStopSatisfied(outcome)) {
           await this.#controls.returnUnsent(chatId, entry.id);
           return;
         }
@@ -255,14 +260,14 @@ export class QueueDrainer {
     runError: unknown,
     finalization: QueuedTurnFinalizationHandle | undefined,
   ): Promise<boolean> {
-    let stopped = false;
+    let outcome: ChatStopOutcome = 'failed';
     try {
       const stop = this.#callbacks.stopBarrier(chatId);
-      stopped = stop ? await stop : false;
+      outcome = stop ? await stop : 'failed';
     } catch {
       // The provider failure remains authoritative when the stop acknowledgement fails.
     }
-    if (!stopped) {
+    if (!isAbortAcknowledged(outcome)) {
       await this.#settleFailure(chatId, entry, options, 'running', runError, finalization);
       return false;
     }

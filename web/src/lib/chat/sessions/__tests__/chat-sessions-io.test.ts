@@ -54,6 +54,8 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		isPinned: false,
 		isArchived: false,
 		isActive: false,
+		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		...overrides,

@@ -324,7 +324,7 @@ export class AgentRuntimeRouter {
 
   getRunningChatIdsSnapshot(): string[] {
     const chatIds = new Set<string>();
-    const unmapped: string[] = [];
+    let unmappedCount = 0;
     for (const integration of this.#directory.list()) {
       const sessions = integration.execution.runningSessions();
       if (!Array.isArray(sessions)) {
@@ -335,11 +335,11 @@ export class AgentRuntimeRouter {
         if (!id) throw new Error(`Running session for ${integration.descriptor.id} has no ID`);
         const match = this.#registry.getChatByAgentSessionId(id);
         if (match) chatIds.add(match[0]);
-        else unmapped.push(id);
+        else unmappedCount += 1;
       }
     }
-    if (unmapped.length > 0) {
-      throw new Error(`Running chat snapshot has ${unmapped.length} unmapped session(s)`);
+    if (unmappedCount > 0) {
+      logger.warn('Running chat snapshot omitted unmapped sessions', { count: unmappedCount });
     }
     return [...chatIds].sort();
   }

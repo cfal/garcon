@@ -99,6 +99,8 @@ describe('chats API contract', () => {
 					isPinned: false,
 					isArchived: false,
 					isActive: false,
+					isProcessing: false,
+					processingPhase: null,
 					isUnread: false,
 				},
 			],
@@ -334,7 +336,7 @@ describe('chats API contract', () => {
 				clientRequestId: 'req-stop',
 				status: 'accepted',
 				acceptedAt: 't',
-				stopped: true,
+				outcome: 'interrupt-requested',
 				control: emptyControl(),
 			}),
 		);
@@ -386,7 +388,7 @@ describe('chats API contract', () => {
 				clientRequestId: 'req-interrupt',
 				status: 'accepted',
 				acceptedAt: 't',
-				stopped: true,
+				outcome: 'already-idle',
 				control: emptyControl(),
 			}),
 		);

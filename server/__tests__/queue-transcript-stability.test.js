@@ -122,7 +122,7 @@ describe('queue and transcript stability', () => {
       const interrupt = queue.interruptActiveTurn('chat-direct');
       await abortStarted.promise;
       streamResult.reject(new Error('request aborted'));
-      await expect(interrupt).resolves.toBe(true);
+      await expect(interrupt).resolves.toBe('interrupt-requested');
       await expect(settled.promise).resolves.toEqual({
         chatId: 'chat-direct',
         turn: { clientRequestId: 'req-a', turnId: 'turn-a' },
@@ -167,6 +167,7 @@ describe('queue and transcript stability', () => {
         }
       });
       let activeTurn;
+      const stopRequested = deferred();
       const coordinator = new UserAbortLifecycleCoordinator(pendingInputs, {
         terminalTimeoutMs: 60_000,
       });
@@ -201,9 +202,14 @@ describe('queue and transcript stability', () => {
       );
       queue.onSessionStopRequested((requestedChatId, stopId, turn) => {
         coordinator.onStopRequested(requestedChatId, stopId, turn);
+        stopRequested.resolve();
       });
-      queue.onSessionStopped((requestedChatId, success, _intent, stopId) => {
-        coordinator.onSessionStopped(requestedChatId, stopId, success);
+      queue.onSessionStopped((requestedChatId, outcome, _intent, stopId) => {
+        coordinator.onSessionStopped(
+          requestedChatId,
+          stopId,
+          outcome === 'interrupt-requested',
+        );
       });
       queue.onTurnSettled((requestedChatId, turn) => {
         coordinator.onTurnSettled(requestedChatId, turn);
@@ -214,9 +220,11 @@ describe('queue and transcript stability', () => {
       const drain = queue.triggerDrain(chatId);
       await firstTurnStarted.promise;
 
-      await queue.interruptActiveTurn(chatId);
+      const interrupt = queue.interruptActiveTurn(chatId);
+      await stopRequested.promise;
       coordinator.onTurnTerminal(chatId, activeTurn);
       firstTurnResult.reject(new Error('interrupted by user'));
+      await expect(interrupt).resolves.toBe('interrupt-requested');
       await Promise.all([nativeLoadStarted.promise, secondTurnStarted.promise]);
       nativeLoadResult.resolve([]);
       await interruptedSettled.promise;
@@ -308,7 +316,7 @@ describe('queue and transcript stability', () => {
 
       releaseRegistration.resolve();
       runtimeAbortable.resolve(true);
-      await expect(stop).resolves.toMatchObject({ stopped: true });
+      await expect(stop).resolves.toMatchObject({ outcome: 'interrupt-requested' });
       await drain;
       await inputSettled.promise;
 

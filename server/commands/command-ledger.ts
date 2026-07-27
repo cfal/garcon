@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { ChatStopOutcome } from '../../common/chat-types.js';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -29,6 +30,7 @@ export interface CommandLedgerRecord {
   error?: string;
   errorCode?: string;
   forkPreparation?: ForkPreparationState;
+  stopOutcome?: ChatStopOutcome;
 }
 
 export interface LedgerAcceptInput {

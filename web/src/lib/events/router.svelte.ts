@@ -12,7 +12,6 @@ import {
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
 	ChatSessionStoppedMessage,
-	ChatProcessingUpdatedMessage,
 	ChatExecutionControlUpdatedMessage,
 	QueueDispatchingMessage,
 	PendingUserInputUpdatedMessage,
@@ -50,13 +49,11 @@ import {
 } from './handlers/permissions';
 import {
 	handleExecutionControlUpdated,
-	handleQueueSending,
 	type QueueContext,
 } from './handlers/queue';
 import {
 	handleChatCreated,
 	handleChatAborted,
-	handleChatStatus,
 	handleWsError,
 	type ChatEventContext,
 } from './handlers/chat';
@@ -130,7 +127,7 @@ export interface EventRouterLifecycleStore {
 	currentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	markTurnRunning: (chatId?: string | null) => void;
-	clearTurnStatus: () => void;
+	clearTurnStatus: (chatId: string) => void;
 	setLoadingStatus: (
 		status: { text: string; tokens: number; can_interrupt: boolean } | null,
 	) => void;
@@ -234,7 +231,9 @@ function createHelpers(stores: EventRouterStores) {
 		stores.lifecycle.markTurnRunning(chatId);
 	};
 
-	const clearTurnStatus = (_chatId?: string | null) => stores.lifecycle.clearTurnStatus();
+	const clearTurnStatus = (chatId?: string | null) => {
+		if (chatId) stores.lifecycle.clearTurnStatus(chatId);
+	};
 	const isChatProcessing = (chatId?: string | null) =>
 		Boolean(chatId && stores.sessions.isChatProcessing(chatId));
 
@@ -249,13 +248,6 @@ function buildDispatch(
 	const { markTurnRunning, clearTurnStatus, isChatProcessing } = createHelpers(stores);
 
 	const onNavigateToChat = (chatId: string) => stores.navigation.navigateToChat(chatId);
-	const onChatProcessing = (chatId?: string | null) => {
-		if (chatId) stores.sessions.applyProcessingEvent(chatId, true);
-	};
-	const onChatNotProcessing = (chatId?: string | null) => {
-		if (chatId) stores.sessions.applyProcessingEvent(chatId, false);
-	};
-
 	const lifecycleCtx: LifecycleContext = {
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
@@ -276,11 +268,7 @@ function buildDispatch(
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
 		appendLocalNotice: stores.chatState.appendLocalNotice,
 		conversationUi: stores.conversationUi,
-		markTurnRunning,
-		clearTurnStatus,
 		isChatProcessing,
-		onChatProcessing,
-		onChatNotProcessing,
 		startupCoordinator: stores.startup.startupCoordinator,
 		onExternalChatCreated: stores.startup.onExternalChatCreated,
 		getPendingChatId,
@@ -297,11 +285,7 @@ function buildDispatch(
 	};
 
 	const queueCtx: QueueContext = {
-		getCurrentChatId: stores.lifecycle.currentChatId,
-		getSelectedChatId: () => stores.sessions.selectedChat?.id || null,
 		conversationUi: stores.conversationUi,
-		markTurnRunning,
-		onChatProcessing,
 	};
 
 	const planModeCtx: PlanModeContext = {
@@ -370,9 +354,6 @@ function buildDispatch(
 				handleChatAborted(msg, chatEventCtx);
 			}
 		},
-		'chat-processing-updated': (msg) => {
-			if (msg instanceof ChatProcessingUpdatedMessage) handleChatStatus(msg, chatEventCtx);
-		},
 
 		'chat-execution-control-updated': (msg) => {
 			if (msg instanceof ChatExecutionControlUpdatedMessage) {
@@ -381,7 +362,6 @@ function buildDispatch(
 		},
 		'queue-dispatching': (msg) => {
 			if (!(msg instanceof QueueDispatchingMessage)) return;
-			handleQueueSending(msg, queueCtx);
 			const sendChatId = msg.chatId || stores.lifecycle.currentChatId();
 			if (sendChatId && msg.content) {
 				stores.sessions.patchPreview(

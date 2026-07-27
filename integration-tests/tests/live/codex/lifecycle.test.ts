@@ -248,7 +248,7 @@ describe('live Codex lifecycle', () => {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });
-      expect(interrupted.stopped).toBe(true);
+      expect(interrupted.outcome).toBe('interrupt-requested');
       const successorInput = await fixture.client.waitForEvent(
         (event): event is PendingUserInputUpdatedMessage =>
           event.type === 'pending-user-input-updated'
@@ -288,7 +288,7 @@ describe('live Codex lifecycle', () => {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });
-      expect(stopped.stopped).toBe(true);
+      expect(stopped.outcome).toBe('interrupt-requested');
       await fixture.client.waitForProcessing(chatId, false, {
         afterIndex: stopCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,

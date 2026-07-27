@@ -19,6 +19,13 @@ import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatListEntry, ChatOrderGroup } from '$shared/chat-list';
+import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
+
+export interface ChatProcessingTransition {
+	chatId: string;
+	previousPhase: ChatProcessingPhase | null;
+	phase: ChatProcessingPhase | null;
+}
 
 export interface ChatSessionsStoreDeps {
 	listChats?: typeof listChats;
@@ -48,9 +55,9 @@ export interface ChatSessionsPort {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
 	isChatProcessing(chatId: string): boolean;
-	applyProcessingEvent(chatId: string, isProcessing: boolean): void;
-	invalidateProcessingAuthority(): void;
-	reconcileProcessing(activeChatIds: Set<string>): void;
+	processingPhase(chatId: string): ChatProcessingPhase | null;
+	applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null): ChatProcessingTransition;
+	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[];
 }
 
 function normalizeExecutionFields<
@@ -75,6 +82,9 @@ function normalizeExecutionFields<
 }
 
 function toRecord(session: ChatSession): ChatSessionRecord {
+	if (session.isProcessing !== (session.processingPhase !== null)) {
+		throw new Error(`Invalid processing projection for chat ${session.id}`);
+	}
 	return {
 		id: session.id,
 		projectPath: session.projectPath,
@@ -93,7 +103,8 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		lastReadAt: session.activity?.lastReadAt ?? null,
 		isPinned: session.isPinned,
 		isArchived: session.isArchived ?? false,
-		isProcessing: session.isActive,
+		isProcessing: session.processingPhase !== null,
+		processingPhase: session.processingPhase,
 		isUnread: session.isUnread ?? false,
 		status: 'running',
 		lastMessage: session.preview?.lastMessage || undefined,
@@ -132,6 +143,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.isPinned === b.isPinned &&
 		a.isArchived === b.isArchived &&
 		a.isProcessing === b.isProcessing &&
+		a.processingPhase === b.processingPhase &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
 		a.lastMessage === b.lastMessage &&
@@ -243,8 +255,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#selectionWriteInFlight = false;
 	#selectionWritePending: string | null | undefined = undefined;
 	#selectionWriteAcked: string | null = null;
-	#processingSnapshot: Set<string> | null = null;
-	readonly #processingOverrides = new Map<string, boolean>();
+	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
+	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
 
 	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
@@ -428,7 +440,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 		for (const session of sessions) {
 			const next = toRecord(session);
-			next.isProcessing = this.#resolveProcessing(next.id, next.isProcessing);
+			next.processingPhase = this.#resolveProcessing(next.id, next.processingPhase);
+			next.isProcessing = next.processingPhase !== null;
 			const prev = this.byId[next.id];
 			reconcileActivityProjection(prev, next);
 			if (prev && sameRecord(prev, next)) {
@@ -496,6 +509,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			isPinned: false,
 			isArchived: false,
 			isProcessing: false,
+			processingPhase: null,
 			isUnread: false,
 			status: 'draft',
 			tags: normalizedStartup.tags ?? [],
@@ -537,7 +551,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const next = toRecord(entry);
 		const previous = this.byId[entry.id];
 		reconcileActivityProjection(previous, next);
-		next.isProcessing = this.#resolveProcessing(entry.id, next.isProcessing);
+		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
+		next.isProcessing = next.processingPhase !== null;
 		const nextById = { ...this.byId, [entry.id]: next };
 		const nextOrder = insertServerEntry(this.order, nextById, entry.id, entry.orderGroup, previous);
 		this.byId = nextById;
@@ -625,41 +640,57 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	/** Returns WebSocket-authoritative processing state before or after list hydration. */
 	isChatProcessing(chatId: string): boolean {
-		return this.#resolveProcessing(chatId, this.byId[chatId]?.isProcessing ?? false);
+		return this.processingPhase(chatId) !== null;
+	}
+
+	processingPhase(chatId: string): ChatProcessingPhase | null {
+		return this.#resolveProcessing(chatId, this.byId[chatId]?.processingPhase ?? null);
 	}
 
 	/** Applies a WebSocket-authoritative processing event for one chat. */
-	applyProcessingEvent(chatId: string, isProcessing: boolean): void {
-		this.#processingOverrides.set(chatId, isProcessing);
+	applyProcessingEvent(
+		chatId: string,
+		phase: ChatProcessingPhase | null,
+	): ChatProcessingTransition {
+		const previousPhase = this.processingPhase(chatId);
+		this.#processingOverrides.set(chatId, phase);
 		const chat = this.byId[chatId];
-		if (!chat) return;
+		if (!chat) return { chatId, previousPhase, phase };
 
-		if (chat.isProcessing === isProcessing) return;
-		this.byId = {
-			...this.byId,
-			[chatId]: { ...chat, isProcessing },
-		};
+		if (chat.processingPhase !== phase || chat.isProcessing !== (phase !== null)) {
+			this.byId = {
+				...this.byId,
+				[chatId]: { ...chat, isProcessing: phase !== null, processingPhase: phase },
+			};
+		}
+		return { chatId, previousPhase, phase };
 	}
 
-	/** Drops authority retained from a previous socket so REST can converge state. */
-	invalidateProcessingAuthority(): void {
-		this.#processingSnapshot = null;
-		this.#processingOverrides.clear();
-	}
-
-	/** Replaces processing state from a reconnect snapshot. Later WebSocket
+	/** Replaces processing state from a correlated snapshot. Later WebSocket
 	 *  events override this baseline; REST list responses never do. */
-	reconcileProcessing(activeChatIds: Set<string>): void {
-		this.#processingSnapshot = new Set(activeChatIds);
+	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[] {
+		const snapshot = new Map(entries.map((entry) => [entry.chatId, entry.phase]));
+		const chatIds = new Set([
+			...Object.keys(this.byId),
+			...(this.#processingSnapshot?.keys() ?? []),
+			...this.#processingOverrides.keys(),
+			...snapshot.keys(),
+		]);
+		const transitions = [...chatIds].map((chatId) => ({
+			chatId,
+			previousPhase: this.processingPhase(chatId),
+			phase: snapshot.get(chatId) ?? null,
+		}));
+		this.#processingSnapshot = snapshot;
 		this.#processingOverrides.clear();
 
 		let changed = false;
 		const nextById = { ...this.byId };
 
 		for (const [id, record] of Object.entries(nextById)) {
-			const shouldBeProcessing = activeChatIds.has(id);
-			if (record.isProcessing !== shouldBeProcessing) {
-				nextById[id] = { ...record, isProcessing: shouldBeProcessing };
+			const phase = snapshot.get(id) ?? null;
+			if (record.processingPhase !== phase || record.isProcessing !== (phase !== null)) {
+				nextById[id] = { ...record, isProcessing: phase !== null, processingPhase: phase };
 				changed = true;
 			}
 		}
@@ -667,12 +698,16 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (changed) {
 			this.byId = nextById;
 		}
+		return transitions.filter((transition) => transition.previousPhase !== transition.phase);
 	}
 
-	#resolveProcessing(chatId: string, restValue: boolean): boolean {
+	#resolveProcessing(
+		chatId: string,
+		restValue: ChatProcessingPhase | null,
+	): ChatProcessingPhase | null {
 		const override = this.#processingOverrides.get(chatId);
-		if (override !== undefined) return override;
-		if (this.#processingSnapshot) return this.#processingSnapshot.has(chatId);
+		if (override !== undefined || this.#processingOverrides.has(chatId)) return override ?? null;
+		if (this.#processingSnapshot) return this.#processingSnapshot.get(chatId) ?? null;
 		return restValue;
 	}
 }

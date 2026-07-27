@@ -42,8 +42,6 @@ export interface ChatReconnectCoordinatorOptions {
 	sessions: Pick<
 		ChatSessionsPort,
 		| 'selectedChatId'
-		| 'reconcileProcessing'
-		| 'invalidateProcessingAuthority'
 		| 'quietRefreshChats'
 	>;
 	getExecutionControl?: (chatId: string) => Promise<{ control: ChatExecutionControlState }>;
@@ -89,7 +87,6 @@ export class ChatReconnectCoordinator {
 		if (!connected) {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
-			this.options.sessions.invalidateProcessingAuthority();
 			return;
 		}
 		if (this.#wasConnected) return;
@@ -139,7 +136,7 @@ export class ChatReconnectCoordinator {
 		selectedChatId: string | null,
 		epoch: number,
 	): Promise<{ controlRefresh: Promise<void> }> {
-		const { runningChatIds, controlRefresh } = await this.#requestReconnectState(
+		const { controlRefresh } = await this.#requestReconnectState(
 			this.#knownControlChatIds(selectedChatId),
 			epoch,
 		);
@@ -147,11 +144,6 @@ export class ChatReconnectCoordinator {
 			return { controlRefresh: Promise.resolve() };
 		}
 
-		if (runningChatIds !== null) {
-			this.options.sessions.reconcileProcessing(runningChatIds);
-		} else {
-			this.options.sessions.invalidateProcessingAuthority();
-		}
 		await this.#refreshChatsQuietly();
 		if (epoch !== this.#reconnectEpoch) {
 			return { controlRefresh: Promise.resolve() };
@@ -163,7 +155,7 @@ export class ChatReconnectCoordinator {
 	async #requestReconnectState(
 		controlChatIds: string[],
 		epoch: number,
-	): Promise<{ runningChatIds: Set<string> | null; controlRefresh: Promise<void> }> {
+	): Promise<{ controlRefresh: Promise<void> }> {
 		try {
 			const raw = await this.options.ws.sendRequest({
 				type: 'reconnect-state-query',
@@ -193,15 +185,10 @@ export class ChatReconnectCoordinator {
 			}
 
 			return {
-				runningChatIds:
-					message.processing.outcome === 'snapshot'
-						? new Set(message.processing.runningChatIds)
-						: null,
 				controlRefresh: this.#refreshControls(unavailableChatIds, epoch),
 			};
 		} catch {
 			return {
-				runningChatIds: null,
 				controlRefresh: this.#refreshControls(controlChatIds, epoch),
 			};
 		}

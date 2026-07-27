@@ -28,8 +28,8 @@ import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
 import {
   ChatExecutionCoordinator,
-  queueDrainOptions,
 } from './chat-execution/chat-execution-coordinator.js';
+import { queueDrainOptions } from './chats/chat-execution-options.js';
 import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
@@ -42,6 +42,7 @@ import {
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatExecutionActivity } from './chats/chat-execution-activity.js';
+import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
@@ -420,13 +421,14 @@ export async function startServer(): Promise<void> {
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
     chatExecutionActivity.attachReservedExecutions(queue);
+    const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
       registry: chatRegistry,
       settings,
       metadata,
-      agents: agentRegistry,
+      processing: chatProcessingActivity,
       pathCache,
     });
     const chatCommands = new ChatCommandService({
@@ -497,6 +499,7 @@ export async function startServer(): Promise<void> {
         chatRegistry,
         settings,
         queue,
+        processing: chatProcessingActivity,
         metadata,
         chatViews,
         chatNativeReloader: indexedNativeReloader,
@@ -541,7 +544,7 @@ export async function startServer(): Promise<void> {
     });
 
     const chatHandler = new ChatHandler({
-      agents: agentRegistry,
+      processing: chatProcessingActivity,
       chatViews: {
         ...chatViewPages,
         readReplay: (chatId, generationId, afterSeq) =>

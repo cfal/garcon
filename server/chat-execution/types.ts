@@ -5,6 +5,7 @@ import type {
   ChatImage,
   ChatMessage,
   ChatStopIntent,
+  ChatStopOutcome,
   UserMessageDeliveryStatus,
 } from '../../common/chat-types.ts';
 import type { ChatViewMessage } from '../../common/chat-view.ts';
@@ -65,7 +66,7 @@ export interface QueueCommandMutationResult {
 }
 
 export interface StopActiveTurnResult {
-  stopped: boolean;
+  outcome: ChatStopOutcome;
   control: StoredChatExecutionControlState;
 }
 
@@ -225,11 +226,12 @@ export type SessionStopRequestedCallback = (
 ) => void;
 export type SessionStoppedCallback = (
   chatId: string,
-  success: boolean,
+  outcome: ChatStopOutcome,
   intent: ChatStopIntent,
   stopId: string,
 ) => void;
 export type ChatIdleCallback = (chatId: string) => void;
+export type ProcessingInvalidatedCallback = (chatId: string) => void;
 export type TurnFailedCallback = (
   chatId: string,
   errorMessage: string,
@@ -248,10 +250,12 @@ export type ChatExistsResolver = (chatId: string) => boolean;
 export interface SessionStopInFlight {
   intent: ChatStopIntent;
   stopId: string;
-  promise: Promise<boolean>;
-  resolve(success: boolean): void;
+  promise: Promise<ChatStopOutcome>;
+  resolve(outcome: ChatStopOutcome): void;
   reject(error: unknown): void;
   started: boolean;
+  phase: 'requesting' | 'settling';
+  outcome?: ChatStopOutcome;
 }
 
 export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
@@ -269,7 +273,7 @@ export interface ChatExecutionCommands {
   deliverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
   recoverAcceptedActiveInput(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
-  interruptActiveTurn(chatId: string): Promise<boolean>;
+  interruptActiveTurn(chatId: string): Promise<ChatStopOutcome>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
   releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void>;
@@ -299,6 +303,9 @@ export interface ChatExecutionLifecycle {
 export interface ChatExecutionQueries {
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
   isChatDraining(chatId: string): boolean;
+  isChatTurnReserved(chatId: string): boolean;
+  getTurnReservedChatIds(): string[];
+  isChatStopInFlight(chatId: string): boolean;
 }
 
 // Full composition-root surface: the facets plus the direct-turn and low-level

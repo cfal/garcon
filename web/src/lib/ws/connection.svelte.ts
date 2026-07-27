@@ -7,6 +7,11 @@ import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
 import { createRandomId } from '$lib/utils/random-id';
 import { reconnectDelayMs } from './reconnect-policy';
+import {
+	parseServerWsMessage,
+	WsPongMessage,
+	type ReconnectProcessingResult,
+} from '$shared/ws-events';
 
 // Trims the message log once all registered consumers have drained
 // past this many entries. Keeps memory bounded on long-running sessions.
@@ -229,11 +234,11 @@ export class WsConnection {
 				try {
 					const data = JSON.parse(event.data as string) as Record<string, unknown>;
 
-					// Resolve pending request-response correlation before
-					// pushing to the shared log. Correlated responses are
-					// consumed here and never dispatched to the event router.
+					// Applies synchronous consumers before resolving correlated requests.
+					// Correlated responses are never dispatched to the event router.
 					const rid = data.clientRequestId as string | undefined;
 					if (rid && this.#pendingRequests.has(rid)) {
+						this.#consumeMessage(data);
 						const pending = this.#pendingRequests.get(rid)!;
 						this.#pendingRequests.delete(rid);
 						clearTimeout(pending.timer);
@@ -439,6 +444,18 @@ export class WsConnection {
 		});
 	}
 
+	async requestProcessingSnapshot(): Promise<ReconnectProcessingResult> {
+		const raw = await this.sendRequest<Record<string, unknown>>(
+			{ type: 'ws-ping', sentAt: Date.now() },
+			HEARTBEAT_TIMEOUT_MS,
+		);
+		const parsed = parseServerWsMessage(raw);
+		if (!(parsed instanceof WsPongMessage)) {
+			throw new Error('Malformed processing snapshot response');
+		}
+		return parsed.processing;
+	}
+
 	/** Registers a drain cursor for cooperative trimming. Returns a cleanup function. */
 	registerCursor(cursor: DrainCursor): () => void {
 		this.#cursors.add(cursor);
@@ -555,7 +572,8 @@ export class WsConnection {
 				HEARTBEAT_TIMEOUT_MS,
 			);
 			if (generation !== this.#heartbeatGeneration) return;
-			if (raw.type !== 'ws-pong') throw new Error('Unexpected heartbeat response');
+			const parsed = parseServerWsMessage(raw);
+			if (!(parsed instanceof WsPongMessage)) throw new Error('Unexpected heartbeat response');
 			this.#heartbeatInFlight = false;
 			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 		} catch {

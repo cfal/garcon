@@ -9,7 +9,11 @@ import {
 	interruptAndSendChat,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
-import type { ChatImage } from '$shared/chat-types';
+import {
+	isStopSatisfied,
+	type ChatImage,
+	type ChatStopOutcome,
+} from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 import {
@@ -105,7 +109,10 @@ type SessionLifecycleState = Pick<
 	| 'currentChatId'
 	| 'loadingStatus'
 	| 'beginTurn'
+	| 'beginStopping'
 	| 'clearTurnStatus'
+	| 'restoreStopping'
+	| 'applyProcessingPhase'
 	| 'markTurnRunning'
 	| 'setCurrentChatId'
 	| 'setLoadingStatus'
@@ -138,6 +145,7 @@ export interface SessionControllerDeps {
 		| 'patchLastReadAt'
 		| 'applyStartEntry'
 		| 'applyProcessingEvent'
+		| 'processingPhase'
 		| 'upsertServerChat'
 		| 'setSelectedChatId'
 		| 'renameChat'
@@ -182,6 +190,7 @@ export interface SessionControllerDeps {
 	navigation: { navigateToChat?: (chatId: string) => void };
 	/** Rebuilds the chat transcript from native history (e.g. after an agent switch). */
 	reloadTranscript?: (chatId: string) => Promise<void>;
+	requestProcessingSnapshot?: () => Promise<unknown>;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;
 	scrollToBottom: () => void;
@@ -249,10 +258,11 @@ export class ConversationSessionController {
 
 	#resetSelectionState(): void {
 		const { deps } = this;
+		const currentChatId = deps.lifecycle.currentChatId;
 		deps.chatState.activateChat(null);
 		deps.composerState.inputText = '';
 		deps.composerState.clearImages();
-		deps.lifecycle.clearTurnStatus();
+		if (currentChatId) deps.lifecycle.clearTurnStatus(currentChatId);
 		deps.lifecycle.setCurrentChatId(null);
 		deps.conversationUi.clearPendingPermissionRequests();
 		deps.setIsViewportPinnedToBottom(true);
@@ -296,7 +306,8 @@ export class ConversationSessionController {
 
 		deps.composerState.inputText = '';
 		deps.composerState.clearImages();
-		deps.lifecycle.clearTurnStatus();
+		const previousChatId = deps.lifecycle.currentChatId;
+		if (previousChatId) deps.lifecycle.clearTurnStatus(previousChatId);
 		deps.conversationUi.clearPendingPermissionRequests();
 		deps.setIsViewportPinnedToBottom(true);
 
@@ -359,6 +370,7 @@ export class ConversationSessionController {
 		}
 
 		deps.lifecycle.setCurrentChatId(chatId);
+		deps.lifecycle.applyProcessingPhase(chatId, deps.sessions.processingPhase(chatId));
 		deps.composerState.restoreDraft(chatId);
 		void this.#queue.startControlRefresh(chatId);
 
@@ -532,51 +544,38 @@ export class ConversationSessionController {
 		});
 	}
 
-	#requestTurnStop<T extends { stopped: boolean }>(
+	#requestTurnStop<T extends { outcome: ChatStopOutcome }>(
 		request: (input: Parameters<typeof stopChat>[0]) => Promise<T>,
 		onResult?: (chatId: string, result: T) => void,
 	): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return Promise.resolve();
-		const previousLoadingStatus = deps.lifecycle.loadingStatus
-			? { ...deps.lifecycle.loadingStatus }
-			: null;
-		const stoppingStatus = { text: m.chat_loading_stopping(), tokens: 0, can_interrupt: false };
-		const restorePreviousStatus = () => {
-			const currentLoadingStatus = deps.lifecycle.loadingStatus;
-			if (
-				currentLoadingStatus?.text === stoppingStatus.text &&
-				currentLoadingStatus.tokens === stoppingStatus.tokens &&
-				currentLoadingStatus.can_interrupt === stoppingStatus.can_interrupt
-			) {
-				deps.lifecycle.setLoadingStatus(previousLoadingStatus);
-			}
+		const clientRequestId = createClientCommandId();
+		const previous = deps.lifecycle.beginStopping(chatId, clientRequestId);
+		const restore = () => deps.lifecycle.restoreStopping(chatId, clientRequestId, previous);
+		const appendFailure = (detail: string) => {
+			if (deps.chatState.activeChatId !== chatId) return;
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_stop_chat({ detail }),
+			);
 		};
-		deps.lifecycle.setLoadingStatus(stoppingStatus);
 		return request({
-			clientRequestId: createClientCommandId(),
+			clientRequestId,
 			chatId,
 			agentId: deps.agentState.agentId,
 		})
-			.then((result) => {
+			.then(async (result) => {
 				onResult?.(chatId, result);
-				if (!result.stopped) {
-					restorePreviousStatus();
-					deps.chatState.appendLocalNotice(
-						'error',
-						m.chat_notice_failed_stop_chat({ detail: m.chat_notice_stop_not_active() }),
-					);
-					return;
-				}
-				deps.lifecycle.clearTurnStatus();
+				await deps.requestProcessingSnapshot?.().catch(() => undefined);
+				if (isStopSatisfied(result.outcome)) return;
+				restore();
+				appendFailure(m.chat_notice_stop_request_failed());
 			})
 			.catch((error) => {
-				restorePreviousStatus();
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_stop_chat({ detail: errorDetail(error) }),
-				);
+				restore();
+				appendFailure(errorDetail(error));
 			});
 	}
 

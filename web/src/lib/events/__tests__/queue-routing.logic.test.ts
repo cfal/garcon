@@ -8,11 +8,7 @@ function makeContext(
 	setExecutionControl: (chatId: string, control: ChatExecutionControlState | null) => void,
 ): QueueContext {
 	return {
-		getCurrentChatId: () => 'chat-a',
-		getSelectedChatId: () => 'chat-a',
 		conversationUi: { setExecutionControl },
-		markTurnRunning: vi.fn(),
-		onChatProcessing: vi.fn(),
 	};
 }
 

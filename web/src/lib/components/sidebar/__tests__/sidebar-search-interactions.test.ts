@@ -32,6 +32,7 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 		status: 'draft',
 		lastMessage: `${title} preview`,
