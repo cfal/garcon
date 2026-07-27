@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import { Button } from '$lib/components/ui/button/index.js';
 
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
@@ -300,6 +301,11 @@
 
 	onMount(() => {
 		auth.checkAuthStatus();
+		const handleOnline = () => {
+			if (auth.isUnavailable) void auth.checkAuthStatus();
+		};
+		window.addEventListener('online', handleOnline);
+		return () => window.removeEventListener('online', handleOnline);
 	});
 
 	function handlePageHide() {
@@ -373,6 +379,7 @@
 	$effect(() => {
 		if (auth.isLoading) return;
 		if (auth.authDisabled) return;
+		if (auth.isUnavailable) return;
 
 		if (page.url.pathname === '/setup' && !auth.needsSetup && !auth.isAuthenticated) {
 			goto('/login');
@@ -392,6 +399,7 @@
 	// Shared view routes are excluded -- they are public by design.
 	$effect(() => {
 		if (auth.isLoading) return;
+		if (auth.isUnavailable) return;
 		if (!isPublicRoute) return;
 		if (page.url.pathname.startsWith('/shared/')) return;
 		if (auth.authDisabled || (auth.isAuthenticated && !auth.needsSetup)) {
@@ -418,7 +426,7 @@
 	});
 </script>
 
-{#if auth.isLoading && !isPublicRoute}
+{#if auth.isLoading && (!isPublicRoute || auth.token)}
 	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
 		<div class="text-center">
 			<div class="flex justify-center mb-4">
@@ -439,6 +447,21 @@
 				></div>
 			</div>
 			<p class="text-muted-foreground mt-2">{m.status_loading()}</p>
+		</div>
+	</div>
+{:else if auth.isUnavailable && (!isPublicRoute || auth.token)}
+	<div class="min-h-dvh bg-background flex items-center justify-center p-4">
+		<div class="max-w-md text-center">
+			<div class="flex justify-center mb-4">
+				<div class="w-16 h-16 bg-primary rounded-lg flex items-center justify-center shadow-sm">
+					<MessageSquare class="w-8 h-8 text-primary-foreground" />
+				</div>
+			</div>
+			<h1 class="text-2xl font-bold text-foreground mb-2">{m.auth_reconnecting_title()}</h1>
+			<p class="text-muted-foreground mb-4">{m.auth_reconnecting_description()}</p>
+			<Button onclick={() => auth.checkAuthStatus()} disabled={auth.isLoading}>
+				{m.common_retry()}
+			</Button>
 		</div>
 	</div>
 {:else if isPublicRoute}

@@ -30,6 +30,8 @@
 	"auth_errors_auth_disabled": "Authentication is disabled by server configuration.",
 	"auth_errors_invalid_credentials": "Invalid credentials. Please try again.",
 	"auth_errors_network": "Network error. Please check your connection.",
+	"auth_reconnecting_title": "Reconnecting to Garcon",
+	"auth_reconnecting_description": "Your session is still saved. Garcon will retry when your network returns.",
 	"auth_errors_server": "Server error. Please try again later.",
 	"chat_empty_no_chat_selected": "No chat selected",
 	"chat_empty_press_new_chat": "Press New Chat to start.",

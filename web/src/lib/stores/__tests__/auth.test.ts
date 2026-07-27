@@ -27,6 +27,7 @@ vi.mock('$lib/api/client.js', () => ({
 	clearAuthToken: vi.fn(),
 	ApiError: class extends Error {
 		status: number;
+		retryable = false;
 		constructor(status: number, message: string) {
 			super(message);
 			this.status = status;
@@ -41,10 +42,11 @@ import {
 	getUser,
 	logout as apiLogout,
 } from '$lib/api/auth.js';
-import { setAuthToken, clearAuthToken } from '$lib/api/client.js';
+import { setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
 
 describe('AuthStore', () => {
 	beforeEach(() => {
+		vi.useRealTimers();
 		for (const k of Object.keys(store)) delete store[k];
 		vi.clearAllMocks();
 	});
@@ -91,18 +93,62 @@ describe('AuthStore', () => {
 			expect(auth.user).toEqual({ id: '1', username: 'admin' });
 		});
 
-		it('clears invalid token when getUser fails', async () => {
-			store[LOCAL_STORAGE_KEYS.authToken] = 'expired-token';
+		it.each([401, 403])(
+			'clears an invalid token after an authoritative %i rejection',
+			async (status) => {
+				store[LOCAL_STORAGE_KEYS.authToken] = 'expired-token';
+				vi.mocked(getAuthStatus).mockResolvedValue({
+					needsSetup: false,
+					isAuthenticated: false,
+					authDisabled: false,
+				});
+				vi.mocked(getUser).mockRejectedValue(new ApiError(status, 'Rejected'));
+				const auth = new AuthStore();
+				await auth.checkAuthStatus();
+				expect(auth.token).toBeNull();
+				expect(clearAuthToken).toHaveBeenCalled();
+			},
+		);
+
+		it('keeps the token and retries when auth status is temporarily unreachable', async () => {
+			vi.useFakeTimers();
+			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
+			vi.mocked(getAuthStatus).mockRejectedValue(new TypeError('Failed to fetch'));
+			const auth = new AuthStore();
+
+			const check = auth.checkAuthStatus();
+			await vi.runAllTimersAsync();
+			await check;
+
+			expect(getAuthStatus).toHaveBeenCalledTimes(5);
+			expect(auth.token).toBe('saved-token');
+			expect(auth.isUnavailable).toBe(true);
+			expect(auth.error).toBe('Network error. Please check your connection.');
+			expect(clearAuthToken).not.toHaveBeenCalled();
+		});
+
+		it('recovers from transient user validation without clearing the token', async () => {
+			vi.useFakeTimers();
+			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
-				isAuthenticated: false,
+				isAuthenticated: true,
 				authDisabled: false,
 			});
-			vi.mocked(getUser).mockRejectedValue(new Error('401'));
+			vi.mocked(getUser)
+				.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+				.mockResolvedValueOnce({ user: { id: '1', username: 'admin' } });
 			const auth = new AuthStore();
-			await auth.checkAuthStatus();
-			expect(auth.token).toBeNull();
-			expect(clearAuthToken).toHaveBeenCalled();
+
+			const check = auth.checkAuthStatus();
+			await vi.runAllTimersAsync();
+			await check;
+
+			expect(getUser).toHaveBeenCalledTimes(2);
+			expect(auth.token).toBe('saved-token');
+			expect(auth.user).toEqual({ id: '1', username: 'admin' });
+			expect(auth.isUnavailable).toBe(false);
+			expect(clearAuthToken).not.toHaveBeenCalled();
 		});
 
 		it('enters app mode without token when auth is disabled by server config', async () => {
@@ -142,6 +188,16 @@ describe('AuthStore', () => {
 			const result = await auth.login('admin', 'wrong');
 			expect(result.success).toBe(false);
 			expect(auth.error).toBeTruthy();
+		});
+
+		it('maps transport failures to a useful network error', async () => {
+			vi.mocked(apiLogin).mockRejectedValue(new TypeError('Failed to fetch'));
+			const auth = new AuthStore();
+			const result = await auth.login('admin', 'pass');
+			expect(result).toEqual({
+				success: false,
+				error: 'Network error. Please check your connection.',
+			});
 		});
 	});
 

@@ -12,6 +12,32 @@ import {
 import { getAuthToken, setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 
+const AUTH_RETRY_DELAYS_MS = [250, 500, 1_000, 2_000] as const;
+
+function isAuthoritativeAuthRejection(err: unknown): boolean {
+	return err instanceof ApiError && (err.status === 401 || err.status === 403);
+}
+
+function isRetryableAuthError(err: unknown): boolean {
+	if (!(err instanceof ApiError)) return true;
+	const apiError = err as ApiError;
+	return apiError.retryable || apiError.status === 429 || apiError.status >= 500;
+}
+
+async function retryAuthRequest<T>(request: () => Promise<T>): Promise<T> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt <= AUTH_RETRY_DELAYS_MS.length; attempt += 1) {
+		try {
+			return await request();
+		} catch (err) {
+			lastError = err;
+			if (!isRetryableAuthError(err) || attempt === AUTH_RETRY_DELAYS_MS.length) throw err;
+			await new Promise((resolve) => setTimeout(resolve, AUTH_RETRY_DELAYS_MS[attempt]));
+		}
+	}
+	throw lastError;
+}
+
 /** Maps API errors to user-facing messages based on HTTP status. */
 function describeAuthError(err: unknown): string {
 	if (err instanceof ApiError) {
@@ -21,7 +47,7 @@ function describeAuthError(err: unknown): string {
 		if (err.status >= 500) return m.auth_errors_server();
 		return err.message;
 	}
-	if (err instanceof Error) return err.message;
+	if (err instanceof Error) return m.auth_errors_network();
 	return m.auth_errors_network();
 }
 
@@ -36,6 +62,7 @@ export class AuthStore {
 	isLoading = $state(true);
 	needsSetup = $state(false);
 	authDisabled = $state(false);
+	isUnavailable = $state(false);
 	error = $state<string | null>(null);
 	isAuthenticated = $derived(this.authDisabled || (!!this.token && !!this.user));
 
@@ -47,9 +74,10 @@ export class AuthStore {
 	async checkAuthStatus(): Promise<void> {
 		try {
 			this.isLoading = true;
+			this.isUnavailable = false;
 			this.error = null;
 
-			const status = await getAuthStatus();
+			const status = await retryAuthRequest(getAuthStatus);
 			this.authDisabled = Boolean(status.authDisabled);
 
 			if (this.authDisabled) {
@@ -72,10 +100,11 @@ export class AuthStore {
 
 			if (this.token) {
 				try {
-					const data = await getUser();
+					const data = await retryAuthRequest(getUser);
 					this.user = data.user;
-				} catch {
-					// Token is invalid or expired
+				} catch (err) {
+					if (!isAuthoritativeAuthRejection(err)) throw err;
+					// The server authoritatively rejected the token.
 					clearAuthToken();
 					this.token = null;
 					this.user = null;
@@ -85,6 +114,7 @@ export class AuthStore {
 			}
 		} catch (err) {
 			console.error('[AuthStore] Auth status check failed:', err);
+			this.isUnavailable = true;
 			this.error = describeAuthError(err);
 		} finally {
 			this.isLoading = false;
@@ -104,6 +134,7 @@ export class AuthStore {
 			const data = await apiLogin(username, password);
 			this.token = data.token;
 			this.user = data.user;
+			this.isUnavailable = false;
 			setAuthToken(data.token);
 			return { success: true };
 		} catch (err: unknown) {
