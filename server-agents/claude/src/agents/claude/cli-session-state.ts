@@ -124,11 +124,15 @@ export function handleClaudeProviderLifecycleMessage(
     );
     return true;
   }
+  const retireAfterSettlement =
+    protocol.backgroundContinuationPending && protocol.abortRequested;
+  if (retireAfterSettlement) session.backgroundTaskCount = 0;
 
   const failure = protocol.settlementFailureMessage();
   if (failure) {
     handlers.logger.warn('Claude CLI run settled with an error', details);
     handlers.fail(failure);
+    if (retireAfterSettlement) handlers.retire();
     return true;
   }
   if (protocol.cleanAbortResultSeen) {
@@ -137,5 +141,6 @@ export function handleClaudeProviderLifecycleMessage(
     handlers.logger.info('Claude CLI run settled at provider idle', details);
   }
   handlers.finish();
+  if (retireAfterSettlement) handlers.retire();
   return true;
 }

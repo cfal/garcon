@@ -282,7 +282,8 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
   it('settles cleanly when an interrupt ends a fenced background wait', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
-    spawnMock.mockReturnValue(ctrl.proc);
+    const nextCtrl = createControllableProc();
+    spawnMock.mockReturnValueOnce(ctrl.proc).mockReturnValueOnce(nextCtrl.proc);
     const failures = [];
     const finishes = [];
     runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
@@ -321,10 +322,21 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     ctrl.push(IDLE);
     await turn;
+    await flush();
     expect(cleared).toContain(completionFallback.id);
     expect(ctrl.proc.killed).toBe(false);
+    expect(ctrl.proc.ended).toBe(true);
     expect(failures).toEqual([]);
     expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+
+    const nextTurn = runtime.runClaudeTurn(startOptions({ command: 'after stop' }));
+    await flush();
+    nextCtrl.push(INIT);
+    nextCtrl.startLatestInput();
+    nextCtrl.push({ type: 'assistant', content: [{ type: 'text', text: 'continued' }] });
+    settleTurn(nextCtrl);
+    await nextTurn;
+    expect(spawnMock).toHaveBeenCalledTimes(2);
   });
 
   it('cancels a queued submitted input when an internal turn is interrupted', async () => {
