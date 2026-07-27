@@ -61,7 +61,6 @@ export function handleClaudeProviderLifecycleMessage(
   session.providerState = next;
   session.lastActivityAt = Date.now();
   const activeTurn = session.activeTurn;
-  activeTurn?.protocol.observeProviderSessionState(next, session.backgroundTaskCount);
   handlers.logger.debug('Claude CLI session state changed', {
     chatId: session.chatId,
     turnId: activeTurn?.eventMetadata.turnId ?? null,
@@ -87,7 +86,7 @@ export function handleClaudeProviderLifecycleMessage(
         next,
         backgroundTaskCount: session.backgroundTaskCount,
       });
-    } else if (session.unownedProviderActivity) {
+    } else if (next === 'idle' && session.unownedProviderActivity) {
       session.unownedProviderActivity = false;
       handlers.retire();
     }

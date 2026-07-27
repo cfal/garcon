@@ -650,17 +650,6 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
           tasks: [{ task_id: 'background-build', task_type: 'local_bash' }],
         }),
         JSON.stringify({
-          type: 'assistant',
-          content: [{ type: 'text', text: 'Background build started.' }],
-        }),
-        JSON.stringify({
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          user_message_uuid: input.uuid,
-          result: 'Background build started.',
-        }),
-        JSON.stringify({
           type: 'system',
           subtype: 'background_tasks_changed',
           tasks: [],
@@ -672,9 +661,15 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
           status: 'completed',
         }),
         JSON.stringify({
-          type: 'system',
-          subtype: 'session_state_changed',
-          state: 'idle',
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Background build started.' }],
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          user_message_uuid: input.uuid,
+          result: 'Background build started.',
         }),
       ].join('\n') + '\n'));
       await Promise.resolve();
@@ -684,11 +679,6 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       expect(processing).not.toContainEqual({ chatId: 'chat-1', isProcessing: false });
 
       fake.stdout.enqueue(encoder.encode([
-        JSON.stringify({
-          type: 'system',
-          subtype: 'session_state_changed',
-          state: 'running',
-        }),
         JSON.stringify({
           type: 'assistant',
           content: [{ type: 'text', text: 'Background build finished.' }],
@@ -735,6 +725,9 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       await start;
 
       enqueueProviderState(fake, 'running');
+      enqueueProviderState(fake, 'requires_action');
+      await Promise.resolve();
+      expect(fake.proc.stdin.end).not.toHaveBeenCalled();
       enqueueProviderState(fake, 'idle');
       for (
         let attempt = 0;

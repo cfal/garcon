@@ -413,13 +413,12 @@ describe('Claude provider run boundaries', () => {
   });
 
   it('keeps a background continuation fenced through its completion turn', () => {
-    const turn = new ClaudeTurnState('input-1');
+    const turn = new ClaudeTurnState('input-1', 1);
     turn.observeInput({
       type: 'command_lifecycle',
       command_uuid: 'input-1',
       state: 'started',
     });
-    turn.observeBackgroundTaskCount(1);
     turn.recordAcceptedResult({
       type: 'result',
       user_message_uuid: 'input-1',
@@ -428,7 +427,6 @@ describe('Claude provider run boundaries', () => {
     expect(turn.backgroundContinuationPending).toBe(true);
 
     turn.observeBackgroundTaskCount(0);
-    turn.observeProviderSessionState('running', 0);
     turn.recordAcceptedResult({ type: 'result', is_error: false });
     expect(turn.backgroundContinuationPending).toBe(false);
   });

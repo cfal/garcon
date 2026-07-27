@@ -150,13 +150,14 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       resolve = complete;
     });
     const activeTurn: ClaudeActiveTurn = {
-      protocol: new ClaudeTurnState(crypto.randomUUID()),
+      protocol: new ClaudeTurnState(crypto.randomUUID(), session.backgroundTaskCount),
       eventMetadata,
       startedAt: Date.now(),
       completion,
       resolve,
       abortTimer: null,
     };
+    session.unownedProviderActivity = false;
     session.activeTurn = activeTurn;
     session.lastActivityAt = activeTurn.startedAt;
     return activeTurn;

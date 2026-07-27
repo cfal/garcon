@@ -148,12 +148,13 @@ export class ClaudeTurnState {
   #resultFailure: string | null = null;
   #cleanAbortResultSeen = false;
   #backgroundContinuationPending = false;
-  #backgroundContinuationStarted = false;
+  #backgroundTaskCount = 0;
   #lastApiRetry: ClaudeApiRetryDiagnostics | null = null;
   #resultBeforeStart: ClaudeCLIMessage | null = null;
 
-  constructor(inputUuid: string) {
+  constructor(inputUuid: string, backgroundTaskCount = 0) {
     this.inputUuid = inputUuid;
+    this.observeBackgroundTaskCount(backgroundTaskCount);
   }
 
   get phase(): ClaudeTurnPhase {
@@ -235,25 +236,8 @@ export class ClaudeTurnState {
   }
 
   observeBackgroundTaskCount(count: number): void {
-    if (count <= 0) return;
-    this.#backgroundContinuationPending = true;
-    this.#backgroundContinuationStarted = false;
-  }
-
-  observeProviderSessionState(
-    state: ClaudeReportedSessionState,
-    backgroundTaskCount: number,
-  ): void {
-    // An empty task set precedes the provider-owned completion turn, so the
-    // following running/result pair closes the continuation fence.
-    if (
-      state === 'running'
-      && this.hasAcceptedResult
-      && this.#backgroundContinuationPending
-      && backgroundTaskCount === 0
-    ) {
-      this.#backgroundContinuationStarted = true;
-    }
+    this.#backgroundTaskCount = count;
+    if (count > 0) this.#backgroundContinuationPending = true;
   }
 
   recordResultBeforeStart(message: ClaudeCLIMessage): void {
@@ -297,11 +281,17 @@ export class ClaudeTurnState {
   }
 
   recordAcceptedResult(message: ClaudeCLIMessage): void {
+    const isContinuation = this.hasAcceptedResult;
     this.#acceptedResultCount += 1;
     this.#lastResultAssistantContentVersion = this.#assistantContentVersion;
-    if (this.#backgroundContinuationStarted) {
+    // The empty snapshot precedes its notification; the accepted continuation
+    // result proves Claude consumed that completion.
+    if (
+      isContinuation
+      && this.#backgroundContinuationPending
+      && this.#backgroundTaskCount === 0
+    ) {
       this.#backgroundContinuationPending = false;
-      this.#backgroundContinuationStarted = false;
     }
     if (!message.is_error) return;
     if (
