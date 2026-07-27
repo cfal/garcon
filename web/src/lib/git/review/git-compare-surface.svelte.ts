@@ -34,6 +34,14 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	#externalTargetApplications = 0;
 	#unregisterReviewDisplay: () => void;
 
+	get isLoading(): boolean {
+		return (
+			this.comparison.isLoading ||
+			(!this.comparison.snapshot &&
+				(this.target.projectIdentityPending || this.target.isLoadingTargets))
+		);
+	}
+
 	constructor(private readonly deps: GitSurfaceControllerDeps) {
 		this.target = new GitTargetSessionController({
 			kind: 'git-compare',

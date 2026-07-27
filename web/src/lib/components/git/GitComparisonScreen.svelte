@@ -8,6 +8,7 @@
 
 	interface GitComparisonScreenProps {
 		comparison: GitComparisonController;
+		isLoading: boolean;
 		isMobile: boolean;
 		active?: boolean;
 		fontSize: number;
@@ -20,6 +21,7 @@
 
 	let {
 		comparison,
+		isLoading,
 		isMobile,
 		active = true,
 		fontSize,
@@ -53,7 +55,7 @@
 				<button
 					type="button"
 					class="rounded border border-status-warning-border px-2 py-1 font-medium hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					disabled={comparison.isLoading}
+					disabled={isLoading}
 					onclick={onRefresh}>{m.git_compare_refresh()}</button
 				>
 			</div>
@@ -77,7 +79,7 @@
 	documentId={comparison.snapshot?.documentId ?? null}
 	documentAvailable={Boolean(comparison.snapshot)}
 	files={comparison.document.visibleFiles}
-	isLoading={comparison.isLoading}
+	{isLoading}
 	error={comparison.documentError}
 	onDismissError={() => comparison.dismissDocumentError()}
 	source={comparison.document.rowSource}

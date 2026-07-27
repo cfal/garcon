@@ -107,6 +107,7 @@
 
 	<GitComparisonScreen
 		{comparison}
+		isLoading={controller.isLoading}
 		isMobile={presentation === 'mobile'}
 		active={presentationVisible}
 		fontSize={diffFontSize}

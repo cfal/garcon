@@ -12,6 +12,14 @@ vi.mock('$lib/api/git.js', () => ({
 
 const api = vi.mocked(await import('$lib/api/git.js'));
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
+
 function candidate(
 	projectPath = '/project',
 	overrides: Partial<GitTargetCandidate> = {},
@@ -62,6 +70,26 @@ describe('GitCompareSurfaceController', () => {
 		expect(controller.comparison.toKind).toBe('working-tree');
 		expect(controller.comparison.mode).toBe('direct');
 		expect(controller.comparison.dialogOpen).toBe(false);
+	});
+
+	it('reports loading while target discovery delays the initial comparison', async () => {
+		const targets = deferred<{ targets: GitTargetCandidate[] }>();
+		api.getGitTargetCandidates.mockReturnValueOnce(targets.promise);
+		const controller = new GitCompareSurfaceController(createGitSurfaceTestDeps());
+		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
+		setProject(controller);
+
+		controller.setPresentationVisible(true);
+
+		expect(controller.target.isLoadingTargets).toBe(true);
+		expect(controller.isLoading).toBe(true);
+		expect(compare).not.toHaveBeenCalled();
+
+		targets.resolve({ targets: [candidate()] });
+		await controller.target.activate();
+		await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
+
+		expect(controller.isLoading).toBe(false);
 	});
 
 	it('preserves edited endpoints and issues no request on generic refocus', async () => {

@@ -42,8 +42,8 @@
 			label: m.git_header_refresh(),
 			icon: RefreshCw,
 			onclick: onRefresh,
-			disabled: controller.comparison.isLoading,
-			busy: controller.comparison.isLoading,
+			disabled: controller.isLoading,
+			busy: controller.isLoading,
 			priority: 1,
 		},
 	]);
