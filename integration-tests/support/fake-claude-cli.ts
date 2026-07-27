@@ -170,6 +170,12 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
     session_id: sessionId,
   });
   writeOutput({
+    type: 'system',
+    subtype: 'session_state_changed',
+    state: 'running',
+    session_id: sessionId,
+  });
+  writeOutput({
     type: 'command_lifecycle',
     command_uuid: input.uuid,
     state: 'started',
@@ -203,6 +209,12 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
     type: 'command_lifecycle',
     command_uuid: input.uuid,
     state: 'completed',
+    session_id: sessionId,
+  });
+  writeOutput({
+    type: 'system',
+    subtype: 'session_state_changed',
+    state: 'idle',
     session_id: sessionId,
   });
 }

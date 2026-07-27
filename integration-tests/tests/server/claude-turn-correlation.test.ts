@@ -6,11 +6,14 @@ import type {
   ChatMessagesMessage,
   PendingUserInputUpdatedMessage,
 } from '../../../common/ws-events.js';
+import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 function fakeClaudeSource(): string {
   return `#!${process.execPath}
-const { appendFileSync, existsSync } = await import('node:fs');
+const { appendFileSync, existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+const { randomUUID } = await import('node:crypto');
+const { dirname, join, resolve } = await import('node:path');
 const args = process.argv.slice(2);
 
 if (args.includes('--version')) {
@@ -24,6 +27,19 @@ if (args[0] === 'auth' && args[1] === 'status') {
 }
 
 const emit = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+const argumentValue = (name) => {
+  const inline = args.find((value) => value.startsWith(name + '='));
+  if (inline) return inline.slice(name.length + 1);
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] ?? null : null;
+};
+const sessionId = argumentValue('--session-id') ?? argumentValue('--resume');
+const configHome = process.env.CLAUDE_CONFIG_DIR ?? join(process.env.HOME, '.claude');
+const projectKey = resolve(process.cwd()).normalize('NFC').replace(/[^a-zA-Z0-9]/g, '-');
+const nativePath = join(configHome, 'projects', projectKey, sessionId + '.jsonl');
+mkdirSync(dirname(nativePath), { recursive: true });
+if (!existsSync(nativePath)) writeFileSync(nativePath, '');
+
 const decoder = new TextDecoder();
 let buffer = '';
 let firstUserMessage = true;
@@ -37,6 +53,49 @@ const receivedPath = process.env.CLAUDE_TEST_RECEIVED_PATH;
 const releasePath = process.env.CLAUDE_TEST_RELEASE_PATH;
 const internalResultPath = process.env.CLAUDE_TEST_INTERNAL_RESULT_PATH;
 const startedPath = process.env.CLAUDE_TEST_STARTED_PATH;
+const continuationResultPath = process.env.CLAUDE_TEST_CONTINUATION_RESULT_PATH;
+const continuationReleasePath = process.env.CLAUDE_TEST_CONTINUATION_RELEASE_PATH;
+let parentUuid = null;
+
+const appendTranscriptTurn = (input, response) => {
+  const assistantUuid = randomUUID();
+  appendFileSync(nativePath, [
+    JSON.stringify({
+      sessionId,
+      type: 'user',
+      uuid: input.uuid,
+      parentUuid,
+      timestamp: new Date().toISOString(),
+      cwd: process.cwd(),
+      message: { role: 'user', content: input.message?.content },
+    }),
+    JSON.stringify({
+      sessionId,
+      type: 'assistant',
+      uuid: assistantUuid,
+      parentUuid: input.uuid,
+      timestamp: new Date(Date.now() + 1).toISOString(),
+      cwd: process.cwd(),
+      message: { role: 'assistant', content: [{ type: 'text', text: response }] },
+    }),
+    '',
+  ].join('\\n'));
+  parentUuid = assistantUuid;
+};
+
+const appendContinuation = (response) => {
+  const assistantUuid = randomUUID();
+  appendFileSync(nativePath, JSON.stringify({
+    sessionId,
+    type: 'assistant',
+    uuid: assistantUuid,
+    parentUuid,
+    timestamp: new Date().toISOString(),
+    cwd: process.cwd(),
+    message: { role: 'assistant', content: [{ type: 'text', text: response }] },
+  }) + '\\n');
+  parentUuid = assistantUuid;
+};
 
 const recordInput = (input) => {
   if (!receivedPath) return;
@@ -58,6 +117,12 @@ const processInput = async (input) => {
     type: 'command_lifecycle',
     command_uuid: input.uuid,
     state: 'queued',
+    session_id: input.session_id,
+  });
+  emit({
+    type: 'system',
+    subtype: 'session_state_changed',
+    state: 'running',
     session_id: input.session_id,
   });
 
@@ -105,6 +170,12 @@ const processInput = async (input) => {
         state: 'cancelled',
         session_id: input.session_id,
       });
+      emit({
+        type: 'system',
+        subtype: 'session_state_changed',
+        state: 'idle',
+        session_id: input.session_id,
+      });
       return;
     }
     emit({
@@ -117,8 +188,20 @@ const processInput = async (input) => {
       stop_reason: null,
       session_id: input.session_id,
     });
+    emit({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'requires_action',
+      session_id: input.session_id,
+    });
     await waitForRelease(input.uuid);
     if (interruptedInputs.has(input.uuid)) return;
+    emit({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'running',
+      session_id: input.session_id,
+    });
   }
 
   const content = input.message?.content;
@@ -133,6 +216,7 @@ const processInput = async (input) => {
   });
   startedInputs.add(input.uuid);
   if (startedPath) appendFileSync(startedPath, input.uuid + '\\n');
+  appendTranscriptTurn(input, response);
   emit({
     type: 'system',
     subtype: 'init',
@@ -166,10 +250,55 @@ const processInput = async (input) => {
     stop_reason: 'end_turn',
     session_id: input.session_id,
   });
+  if (content === 'trigger background continuation') {
+    if (continuationResultPath) appendFileSync(continuationResultPath, 'emitted\\n');
+    emit({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'requires_action',
+      session_id: input.session_id,
+    });
+    while (continuationReleasePath && !existsSync(continuationReleasePath)) await Bun.sleep(5);
+    const continuation = 'background continuation finished';
+    emit({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'running',
+      session_id: input.session_id,
+    });
+    emit({
+      type: 'system',
+      subtype: 'task_notification',
+      status: 'completed',
+      session_id: input.session_id,
+    });
+    appendContinuation(continuation);
+    emit({
+      type: 'assistant',
+      content: [{ type: 'text', text: continuation }],
+      session_id: input.session_id,
+    });
+    emit({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_ms: 20,
+      num_turns: 1,
+      result: continuation,
+      stop_reason: 'end_turn',
+      session_id: input.session_id,
+    });
+  }
   emit({
     type: 'command_lifecycle',
     command_uuid: input.uuid,
     state: 'completed',
+    session_id: input.session_id,
+  });
+  emit({
+    type: 'system',
+    subtype: 'session_state_changed',
+    state: 'idle',
     session_id: input.session_id,
   });
 };
@@ -224,6 +353,12 @@ for await (const chunk of Bun.stdin.stream()) {
             response: { cancelled: [inputUuid], still_queued: [] },
           },
         });
+        emit({
+          type: 'system',
+          subtype: 'session_state_changed',
+          state: 'idle',
+          session_id: activeInput.session_id,
+        });
         continue;
       }
 
@@ -250,6 +385,12 @@ for await (const chunk of Bun.stdin.stream()) {
         type: 'command_lifecycle',
         command_uuid: inputUuid,
         state: 'cancelled',
+        session_id: activeInput.session_id,
+      });
+      emit({
+        type: 'system',
+        subtype: 'session_state_changed',
+        state: 'idle',
         session_id: activeInput.session_id,
       });
       continue;
@@ -432,6 +573,115 @@ describe('Claude turn correlation', () => {
         serverEnvironment.CLAUDE_TEST_RECEIVED_PATH = receivedPath;
         serverEnvironment.CLAUDE_TEST_RELEASE_PATH = releasePath;
         serverEnvironment.CLAUDE_TEST_INTERNAL_RESULT_PATH = internalResultPath;
+      },
+    });
+  });
+
+  test('keeps queue and fork ownership through a post-result background continuation', async () => {
+    const serverEnvironment: Record<string, string> = {};
+    let receivedPath = '';
+    let continuationResultPath = '';
+    let continuationReleasePath = '';
+
+    await withIntegrationFixture('claude-background-continuation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const firstCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        agentId: 'claude',
+        projectPath: fixture.dirs.project,
+        model: 'haiku',
+        permissionMode: 'default',
+        thinkingMode: 'low',
+        agentSettings: {
+          ownerId: 'claude',
+          schemaVersion: 1,
+          values: {},
+        },
+        command: 'trigger background continuation',
+      });
+      await waitForFile(continuationResultPath);
+
+      expect(fixture.client.eventsSince(firstCursor)).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-finished',
+        chatId,
+        turnId: first.turnId,
+      }));
+      const queueCursor = fixture.client.markEvents();
+      const queued = await fixture.client.enqueueNew(chatId, 'after-background');
+      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([
+        'after-background',
+      ]);
+      expect((await readFile(receivedPath, 'utf8')).trim().split('\n').map(
+        (line) => JSON.parse(line).content,
+      )).toEqual(['trigger background continuation']);
+
+      let busyFork: unknown;
+      try {
+        await fixture.client.forkChat({
+          sourceChatId: chatId,
+          chatId: fixture.newChatId(),
+        });
+      } catch (error) {
+        busyFork = error;
+      }
+      expect(busyFork).toBeInstanceOf(GarconApiError);
+      expect(busyFork).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          errorCode: 'SESSION_BUSY',
+          retryable: true,
+        },
+      });
+
+      await writeFile(continuationReleasePath, 'release');
+      expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
+        afterIndex: firstCursor,
+      })).type).toBe('agent-run-finished');
+      const pending = await fixture.client.waitForEvent(
+        (event): event is PendingUserInputUpdatedMessage =>
+          event.type === 'pending-user-input-updated'
+          && event.input.chatId === chatId
+          && event.input.content === 'after-background',
+        'queued input after Claude background continuation',
+        { afterIndex: queueCursor },
+      );
+      expect((await fixture.client.waitForTurnTerminal(chatId, pending.input.turnId!, {
+        afterIndex: queueCursor,
+      })).type).toBe('agent-run-finished');
+
+      const forkChatId = fixture.newChatId();
+      await expect(fixture.client.forkChat({
+        sourceChatId: chatId,
+        chatId: forkChatId,
+      })).resolves.toMatchObject({ chat: { id: forkChatId } });
+      const forked = await fixture.client.getMessages(forkChatId);
+      expect(forked.messages.map((entry) => entry.message)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'assistant-message',
+          content: 'background continuation finished',
+        }),
+        expect.objectContaining({
+          type: 'user-message',
+          content: 'after-background',
+        }),
+      ]));
+    }, {
+      serverEnvironment,
+      prepareWorkspace: async (directories) => {
+        const fakeClaude = join(directories.root, 'fake-claude');
+        receivedPath = join(directories.root, 'claude-received.jsonl');
+        continuationResultPath = join(directories.root, 'continuation-result-emitted');
+        continuationReleasePath = join(directories.root, 'release-continuation');
+        await writeFile(fakeClaude, fakeClaudeSource());
+        await chmod(fakeClaude, 0o755);
+        serverEnvironment.CLAUDE_BINARY = fakeClaude;
+        serverEnvironment.CLAUDE_TEST_RECEIVED_PATH = receivedPath;
+        serverEnvironment.CLAUDE_TEST_CONTINUATION_RESULT_PATH = continuationResultPath;
+        serverEnvironment.CLAUDE_TEST_CONTINUATION_RELEASE_PATH = continuationReleasePath;
       },
     });
   });

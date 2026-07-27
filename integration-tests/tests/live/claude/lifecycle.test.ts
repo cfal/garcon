@@ -97,6 +97,93 @@ async function waitForVisibleClaudeResponse(input: {
 }
 
 describe('live Claude lifecycle', () => {
+  test('holds queue ownership across a background Bash continuation', async () => {
+    const serverEnvironment = await liveClaudeServerEnvironment();
+    await withIntegrationFixture('live-claude-background-continuation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const launchedMarker = marker('BACKGROUND_LAUNCHED');
+      const completedMarker = marker('BACKGROUND_COMPLETED');
+      const successorMarker = marker('BACKGROUND_SUCCESSOR');
+      const prompt = [
+        'Use the Bash tool exactly once with run_in_background set to true.',
+        `Run exactly \`sleep 20; printf done\`.`,
+        `As soon as Bash reports that the command started in the background, reply with exactly ${launchedMarker} and end that model turn.`,
+        'Do not call TaskOutput, poll, sleep in another tool, or wait synchronously.',
+        `When the background task completion notification arrives, reply with exactly ${completedMarker}.`,
+      ].join(' ');
+      const cursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        permissionMode: 'bypassPermissions',
+      }));
+
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'assistant-message'
+            && entry.message.content.includes(launchedMarker)),
+        'live Claude background launch response',
+        { afterIndex: cursor, timeoutMs: TURN_TIMEOUT_MS },
+      );
+      expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-finished',
+        chatId,
+        turnId: first.turnId,
+      }));
+
+      const queueCursor = fixture.client.markEvents();
+      const successorPrompt = exactReplyPrompt(successorMarker);
+      const queued = await fixture.client.enqueueNew(chatId, successorPrompt);
+      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([
+        successorPrompt,
+      ]);
+
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'assistant-message'
+            && entry.message.content.includes(completedMarker)),
+        'live Claude background completion response',
+        { afterIndex: cursor, timeoutMs: TURN_TIMEOUT_MS },
+      );
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
+        afterIndex: cursor,
+        timeoutMs: TURN_TIMEOUT_MS,
+      })).type);
+
+      const successor = await fixture.client.waitForEvent(
+        (event): event is PendingUserInputUpdatedMessage =>
+          event.type === 'pending-user-input-updated'
+          && event.input.chatId === chatId
+          && event.input.content === successorPrompt
+          && typeof event.input.turnId === 'string',
+        'live Claude post-background successor identity',
+        { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
+      );
+      expectFinished((await fixture.client.waitForTurnTerminal(
+        chatId,
+        successor.input.turnId,
+        { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
+      )).type);
+
+      const transcript = await fixture.client.getMessages(chatId);
+      const contents = assistantContents(transcript.messages);
+      const launchedIndex = contents.findIndex((content) => content.includes(launchedMarker));
+      const completedIndex = contents.findIndex((content) => content.includes(completedMarker));
+      const successorIndex = contents.findIndex((content) => content.includes(successorMarker));
+      expect(launchedIndex).toBeGreaterThanOrEqual(0);
+      expect(completedIndex).toBeGreaterThan(launchedIndex);
+      expect(successorIndex).toBeGreaterThan(completedIndex);
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
+    }, { redactSensitiveDiagnostics: true, serverEnvironment });
+  });
+
   test('queues consecutive turns, forks immediately, and forks the fork', async () => {
     const serverEnvironment = await liveClaudeServerEnvironment();
     await withIntegrationFixture('live-claude-queue-and-fork', async (fixture) => {
