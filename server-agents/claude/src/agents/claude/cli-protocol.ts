@@ -300,7 +300,10 @@ export class ClaudeTurnState {
     if (!message.is_error) return;
     if (
       this.abortRequested
-      && message.terminal_reason === 'aborted_streaming'
+      && (
+        message.terminal_reason === 'aborted_streaming'
+        || message.terminal_reason === 'aborted_tools'
+      )
     ) {
       this.#cleanAbortResultSeen = true;
       return;

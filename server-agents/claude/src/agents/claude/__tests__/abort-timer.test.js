@@ -238,7 +238,10 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     runtime.shutdown();
   });
 
-  it('cancels the force-kill fallback once an interrupt is acknowledged', async () => {
+  it.each([
+    'aborted_streaming',
+    'aborted_tools',
+  ])('settles %s as a clean acknowledged interrupt', async (terminalReason) => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
     spawnMock.mockReturnValue(ctrl.proc);
@@ -265,7 +268,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     settleTurn(ctrl, {
       type: 'result',
       subtype: 'error_during_execution',
-      terminal_reason: 'aborted_streaming',
+      terminal_reason: terminalReason,
       is_error: true,
     });
     await turn;
