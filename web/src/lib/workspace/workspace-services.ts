@@ -266,6 +266,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		appShell: deps.appShell,
 		navigation: deps.navigation,
 		files,
+		localSettings: deps.localSettings,
 	});
 
 	return {

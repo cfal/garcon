@@ -74,7 +74,36 @@ describe('KeyboardShortcuts', () => {
 		expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledTimes(1);
 	});
 
-	it('does not request delete while Chat owns focus', async () => {
+	it('uses a customized delete shortcut immediately', () => {
+		const appShell = createMockAppShell();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			globalShortcuts: { 'delete-chat': { key: 'x', ctrl: true } },
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', ctrlKey: true }));
+
+		expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledOnce();
+	});
+
+	it('does not route a disabled shortcut', () => {
+		const appShell = createMockAppShell();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			globalShortcuts: { 'delete-chat': null },
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true }));
+
+		expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
+	});
+
+	it('requests delete instead of scrolling while Chat owns focus', async () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
@@ -91,7 +120,7 @@ describe('KeyboardShortcuts', () => {
 
 		try {
 			input.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }));
-			expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
+			expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledOnce();
 		} finally {
 			input.remove();
 		}

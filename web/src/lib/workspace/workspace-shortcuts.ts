@@ -3,6 +3,12 @@ import type { FileSessionRegistry } from '$lib/files/sessions/file-session-regis
 import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
+import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import {
+	getEffectiveGlobalShortcut,
+	globalShortcutMatchesEvent,
+	type GlobalShortcutId,
+} from './global-shortcuts.js';
 
 export type WorkspaceSurfaceShortcutHandler = (event: KeyboardEvent) => boolean;
 
@@ -12,6 +18,7 @@ interface WorkspaceShortcutDeps {
 	appShell: AppShellStore;
 	navigation: NavigationStore;
 	files: FileSessionRegistry;
+	localSettings: Pick<LocalSettingsStore, 'globalShortcuts'>;
 }
 
 export class WorkspaceShortcutDispatcher {
@@ -40,8 +47,10 @@ export class WorkspaceShortcutDispatcher {
 	handle(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
 		if (event.key === 'Escape' && this.deps.transients.handleEscape(event)) return;
-		const key = event.key.toLowerCase();
-		const command = event.ctrlKey || event.metaKey;
+		const matches = (id: GlobalShortcutId) => {
+			const binding = getEffectiveGlobalShortcut(id, this.deps.localSettings.globalShortcuts);
+			return binding ? globalShortcutMatchesEvent(binding, event) : false;
+		};
 		const explicitOwner = this.#ownerForTarget(event.target);
 		const modalSurfaceOwnsTarget =
 			explicitOwner?.kind === 'surface' && this.deps.transients.ownsTopModalTarget(event.target);
@@ -53,38 +62,37 @@ export class WorkspaceShortcutDispatcher {
 			explicitOwner?.kind === 'surface' &&
 			this.deps.workspace.isSurfacePresented(explicitOwner.surfaceId) &&
 			this.deps.workspace.layout.surface(explicitOwner.surfaceId)?.type === 'terminal';
-		if (command && !event.shiftKey && key === 'p' && (!terminalOwnsInput || event.metaKey)) {
+		if (matches('toggle-command-palette') && (!terminalOwnsInput || event.metaKey)) {
 			event.preventDefault();
 			this.#toggleCommandMenu?.();
 			return;
 		}
-		if (event.ctrlKey && key === ',') {
+		if (matches('open-settings')) {
 			event.preventDefault();
 			this.deps.appShell.openSettings();
 			return;
 		}
-		if (event.ctrlKey && !event.shiftKey && key === 'n' && !terminalOwnsInput) {
+		if (matches('new-chat') && !terminalOwnsInput) {
 			event.preventDefault();
 			this.deps.appShell.requestNewChat();
 			return;
 		}
-		if (event.ctrlKey && event.shiftKey && key === 'o') {
+		if (matches('toggle-main-sidebar-focus')) {
 			event.preventDefault();
 			this.deps.workspace.toggleFocusBetweenMainAndSidebar(owner);
 			return;
 		}
-		if (event.ctrlKey && event.shiftKey && (key === 'j' || key === 'l')) {
-			const handled =
-				key === 'j'
-					? this.deps.workspace.focusPreviousTabInFocusedHost(owner)
-					: this.deps.workspace.focusNextTabInFocusedHost(owner);
+		if (matches('navigate-tab-left') || matches('navigate-tab-right')) {
+			const handled = matches('navigate-tab-left')
+				? this.deps.workspace.focusPreviousTabInFocusedHost(owner)
+				: this.deps.workspace.focusNextTabInFocusedHost(owner);
 			if (handled) event.preventDefault();
 			return;
 		}
-		if (event.ctrlKey && event.shiftKey && (key === 'p' || key === 'n')) {
+		if (matches('navigate-chat-above') || matches('navigate-chat-below')) {
 			if (owner.kind === 'chat-list') {
 				event.preventDefault();
-				if (key === 'p') this.deps.navigation.requestNavigateChatAbove();
+				if (matches('navigate-chat-above')) this.deps.navigation.requestNavigateChatAbove();
 				else this.deps.navigation.requestNavigateChatBelow();
 			}
 			return;
@@ -93,7 +101,10 @@ export class WorkspaceShortcutDispatcher {
 			if (!this.deps.workspace.isSurfacePresented(owner.surfaceId)) return;
 			const descriptor = this.deps.workspace.layout.surface(owner.surfaceId);
 			if (descriptor?.type === 'terminal') return;
-			if (descriptor?.type === 'file' && command && key === 's') {
+			if (
+				descriptor?.type === 'file' &&
+				globalShortcutMatchesEvent({ key: 's', primary: true }, event)
+			) {
 				event.preventDefault();
 				void this.deps.files.save(descriptor.fileSessionId);
 				return;
@@ -101,11 +112,19 @@ export class WorkspaceShortcutDispatcher {
 			if (
 				descriptor?.type === 'singleton' &&
 				descriptor.kind === 'chat' &&
-				command &&
-				key === 's'
+				matches('open-sidebar-search')
 			) {
 				event.preventDefault();
 				this.deps.appShell.openSidebarSearch();
+				return;
+			}
+			if (
+				descriptor?.type === 'singleton' &&
+				descriptor.kind === 'chat' &&
+				matches('delete-chat')
+			) {
+				event.preventDefault();
+				this.deps.appShell.requestDeleteSelectedChat();
 				return;
 			}
 			for (const handler of this.#handlers.get(owner.surfaceId) ?? []) {
@@ -114,13 +133,13 @@ export class WorkspaceShortcutDispatcher {
 			return;
 		}
 		if (owner.kind !== 'chat-list') return;
-		if (command && key === 's') {
+		if (matches('open-sidebar-search')) {
 			event.preventDefault();
 			this.deps.appShell.openSidebarSearch();
-		} else if (event.ctrlKey && key === 'r') {
+		} else if (matches('rename-chat')) {
 			event.preventDefault();
 			this.deps.appShell.requestRenameSelectedChat();
-		} else if (event.ctrlKey && key === 'd') {
+		} else if (matches('delete-chat')) {
 			event.preventDefault();
 			this.deps.appShell.requestDeleteSelectedChat();
 		}

@@ -1098,4 +1098,39 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
 	});
+
+	it('keeps Ctrl-U half-page scrolling without consuming Ctrl-D', () => {
+		const scroller = document.createElement('div');
+		scroller.tabIndex = 0;
+		Object.defineProperty(scroller, 'clientHeight', { value: 600 });
+		scroller.scrollBy = vi.fn();
+		document.body.append(scroller);
+		scroller.focus();
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState({}),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		const scrollUp = new KeyboardEvent('keydown', {
+			key: 'u',
+			ctrlKey: true,
+			cancelable: true,
+		});
+		controller.handleHalfPageScroll(scrollUp);
+		expect(scrollUp.defaultPrevented).toBe(true);
+		expect(scroller.scrollBy).toHaveBeenCalledWith({ top: -300, behavior: 'instant' });
+
+		const deleteChat = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			cancelable: true,
+		});
+		controller.handleHalfPageScroll(deleteChat);
+		expect(deleteChat.defaultPrevented).toBe(false);
+		expect(scroller.scrollBy).toHaveBeenCalledOnce();
+
+		scroller.remove();
+	});
 });

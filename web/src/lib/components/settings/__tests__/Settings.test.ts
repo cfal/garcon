@@ -242,7 +242,9 @@ describe('Settings', () => {
 			await fireEvent.click(screen.getByRole('tab', { name: 'Shortcuts' }));
 			expect(appShell.settingsTab).toBe('shortcuts');
 			expect(
-				screen.getByText('Keyboard shortcuts and slash commands available across the app.'),
+				screen.getByText(
+					'View and customize keyboard shortcuts, or reference composer and slash commands.',
+				),
 			).toBeTruthy();
 			expect(screen.getByText('New chat')).toBeTruthy();
 			expect(screen.getByText('Delete selected chat')).toBeTruthy();

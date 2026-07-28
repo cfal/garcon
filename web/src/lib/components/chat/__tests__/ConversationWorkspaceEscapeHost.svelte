@@ -151,6 +151,7 @@
 		appShell: {} as never,
 		navigation: {} as never,
 		files: {} as never,
+		localSettings: { globalShortcuts: {} } as never,
 	});
 	setWorkspaceCoordinator(workspace);
 	setWorkspaceShortcuts(workspaceShortcuts);

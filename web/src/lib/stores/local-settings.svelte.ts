@@ -13,6 +13,10 @@ import {
 	normalizeDesktopLayoutOrder,
 	type DesktopLayoutOrder,
 } from '$lib/layout/desktop-layout.js';
+import {
+	sanitizeGlobalShortcutOverrides,
+	type GlobalShortcutOverrides,
+} from '$lib/workspace/global-shortcuts.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
@@ -112,6 +116,7 @@ export interface LocalSettingsSnapshot {
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
 	language: string;
 	hiddenToolTypes: HideableToolType[];
+	globalShortcuts: GlobalShortcutOverrides;
 }
 
 type BooleanLocalSettingKey =
@@ -161,6 +166,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	markdownViewerOpenPlacement: 'source',
 	language: 'en',
 	hiddenToolTypes: [],
+	globalShortcuts: {},
 };
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
@@ -280,6 +286,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		language: parseString(parsed.language, DEFAULTS.language),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
+		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
 	};
 }
 
@@ -335,6 +342,7 @@ export class LocalSettingsStore {
 	);
 	language = $state(DEFAULTS.language);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
+	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 
 	#storageListener = (event: StorageEvent) => {
 		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
@@ -360,6 +368,9 @@ export class LocalSettingsStore {
 		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
 		if (key === 'desktopLayoutOrder') {
 			next.desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
+		}
+		if (key === 'globalShortcuts') {
+			next.globalShortcuts = sanitizeGlobalShortcutOverrides(value);
 		}
 		this.#apply(next);
 		persistLocalSettings(next);
@@ -412,6 +423,7 @@ export class LocalSettingsStore {
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			language: this.language,
 			hiddenToolTypes: this.hiddenToolTypes,
+			globalShortcuts: { ...this.globalShortcuts },
 		};
 	}
 
@@ -445,6 +457,7 @@ export class LocalSettingsStore {
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
+		this.globalShortcuts = { ...snap.globalShortcuts };
 	}
 }
 

@@ -45,6 +45,39 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('persists and sanitizes global shortcut overrides', () => {
+		const store = createLocalSettingsStore();
+		store.set('globalShortcuts', {
+			'delete-chat': { key: 'X', ctrl: true },
+			'new-chat': null,
+		});
+
+		const restored = createLocalSettingsStore();
+		expect(restored.globalShortcuts).toEqual({
+			'delete-chat': { key: 'x', ctrl: true },
+			'new-chat': null,
+		});
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('drops malformed persisted global shortcuts', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				globalShortcuts: {
+					'delete-chat': { key: 'Control', ctrl: true },
+					unknown: { key: 'x', ctrl: true },
+				},
+			}),
+		);
+
+		const store = createLocalSettingsStore();
+		expect(store.globalShortcuts).toEqual({});
+		store.destroy();
+	});
+
 	it.each([
 		['chat-list', 'main'],
 		['chat-list', 'main', 'main'],

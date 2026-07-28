@@ -14,6 +14,7 @@
 		normalizeDesktopLayoutOrder,
 		type DesktopLayoutOrder,
 	} from '$lib/layout/desktop-layout.js';
+	import type { GlobalShortcutOverrides } from '$lib/workspace/global-shortcuts.js';
 
 	interface SettingsTestHostProps {
 		appShell: AppShellStore;
@@ -29,6 +30,7 @@
 		onLocalToggle = () => undefined,
 	}: SettingsTestHostProps = $props();
 	let desktopLayoutOrder = $state<DesktopLayoutOrder>(['chat-list', 'main', 'workspace-sidebar']);
+	let globalShortcuts = $state<GlobalShortcutOverrides>({});
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -197,12 +199,16 @@
 		showQuickCommitTray: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
+		get globalShortcuts() {
+			return globalShortcuts;
+		},
 		chatMaxWidth: 'none',
 		textEditorOpenPlacement: 'source',
 		imageViewerOpenPlacement: 'source',
 		markdownViewerOpenPlacement: 'source',
 		set(key: string, value: unknown) {
 			if (key === 'desktopLayoutOrder') desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
+			if (key === 'globalShortcuts') globalShortcuts = value as GlobalShortcutOverrides;
 			onLocalSet(key, value);
 		},
 		toggle(key: string) {

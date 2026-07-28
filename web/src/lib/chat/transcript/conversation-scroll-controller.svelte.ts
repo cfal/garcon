@@ -456,7 +456,7 @@ export class ConversationScrollController {
 		const scrollContainer = this.deps.getScrollContainer();
 		if (!scrollContainer) return;
 
-		if (event.ctrlKey && (event.key === 'u' || event.key === 'd')) {
+		if (event.ctrlKey && event.key === 'u') {
 			const active = document.activeElement;
 			const inTextarea = active?.tagName === 'TEXTAREA';
 			const inContainer = scrollContainer.contains(active) || active === scrollContainer;
@@ -465,7 +465,7 @@ export class ConversationScrollController {
 				this.noteUserScrollIntent();
 				const half = scrollContainer.clientHeight / 2;
 				scrollContainer.scrollBy({
-					top: event.key === 'd' ? half : -half,
+					top: -half,
 					behavior: 'instant',
 				});
 			}
