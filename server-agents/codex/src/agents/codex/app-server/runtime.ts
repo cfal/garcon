@@ -92,8 +92,7 @@ interface RunningCodexSession {
   status: RunningStatus;
   permissionMode: PermissionMode;
   startedAt: string;
-  // Set when this session was started by an explicit /compact, so the resulting
-  // contextCompaction item is labeled 'manual' rather than 'auto'.
+  // Labels contextCompaction from an explicit /compact as manual rather than auto.
   manualCompactionPending?: boolean;
   cleanupAttachments?: () => Promise<void>;
   turnStartWaiters: Set<TurnStartWaiter>;
@@ -771,6 +770,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return false;
     }
     if (this.#sessions.get(agentSessionId) !== session) return true;
+    // Codex replies immediately before turn/completed, so the runtime remains attached until that event.
     session.status = 'interrupting';
     return true;
   }

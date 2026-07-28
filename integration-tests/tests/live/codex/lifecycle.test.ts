@@ -474,6 +474,7 @@ describe('live Codex lifecycle', () => {
         && event.turnId === stoppedTurn.turnId
           ? event.messages
           : []);
+      // Codex may omit an interrupted command item entirely, so only cross-source parity is stable.
       const liveStoppedExecutions = toolExecutionProjections(liveStoppedMessages);
       expect(toolExecutionProjections(stoppedTranscript.messages, priorBashToolIds))
         .toEqual(liveStoppedExecutions);
