@@ -54,6 +54,7 @@ export interface IntegrationDirectories {
 export interface IntegrationFixtureOptions {
   chatTitleEnabled?: boolean;
   chatTitleAgent?: keyof DirectTestAgents;
+  forbiddenPersistedValues?: readonly string[];
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
   redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
@@ -171,6 +172,7 @@ export class IntegrationFixture {
     anthropic: FakeAnthropicServer;
   };
   readonly directAgents: DirectTestAgents;
+  readonly #forbiddenPersistedValues: readonly string[];
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #serverEnvironment: Record<string, string>;
   garcon: GarconProcess;
@@ -185,6 +187,7 @@ export class IntegrationFixture {
     garcon: GarconProcess;
     client: GarconTestClient;
     directAgents: DirectTestAgents;
+    forbiddenPersistedValues?: readonly string[];
     redactSensitiveDiagnostics?: boolean;
     serverEnvironment?: Record<string, string>;
   }) {
@@ -194,6 +197,7 @@ export class IntegrationFixture {
     this.client = input.client;
     this.#clients.set('primary', input.client);
     this.directAgents = input.directAgents;
+    this.#forbiddenPersistedValues = [...(input.forbiddenPersistedValues ?? [])];
     this.#redactSensitiveDiagnostics = input.redactSensitiveDiagnostics === true;
     this.#serverEnvironment = { ...(input.serverEnvironment ?? {}) };
   }
@@ -271,6 +275,7 @@ export class IntegrationFixture {
         garcon,
         client,
         directAgents,
+        forbiddenPersistedValues: options.forbiddenPersistedValues,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
         serverEnvironment: options.serverEnvironment,
       });
@@ -473,7 +478,6 @@ export class IntegrationFixture {
   }
 
   describe(): string {
-    // Credential-backed fixtures verify that redaction never became on-disk persistence.
     if (this.#redactSensitiveDiagnostics) {
       return JSON.stringify(this.#diagnosticsForOutput(), null, 2);
     }
@@ -508,12 +512,17 @@ export class IntegrationFixture {
     } catch (error) {
       errors.push(error);
     }
-    if (this.#redactSensitiveDiagnostics) {
+    const forbiddenPersistedValues = [
+      ...sensitiveEnvironmentValues(this.#serverEnvironment),
+      ...this.#forbiddenPersistedValues,
+    ];
+    // Credential-backed fixtures verify that redaction never became on-disk persistence.
+    if (forbiddenPersistedValues.length > 0) {
       try {
         await assertSensitiveValuesNotPersisted({
           directory: this.dirs.root,
           diagnostics: this.diagnostics(),
-          values: sensitiveEnvironmentValues(this.#serverEnvironment),
+          values: forbiddenPersistedValues,
         });
       } catch (error) {
         errors.push(error);

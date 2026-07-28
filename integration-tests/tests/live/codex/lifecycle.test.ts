@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { PendingUserInputUpdatedMessage } from '../../../../common/ws-events.js';
@@ -23,14 +23,26 @@ import {
 import {
   liveCodexForkRunRequest,
   liveCodexRunRequest,
-  liveCodexServerEnvironment,
   liveCodexStartRequest,
-  prepareLiveCodexHome,
+  startLiveCodexTestEnvironment,
+  type LiveCodexTestEnvironment,
 } from '../../../support/live-codex.js';
 
 describe('live Codex lifecycle', () => {
+  let liveEnvironment: LiveCodexTestEnvironment | undefined;
+
+  beforeAll(async () => {
+    liveEnvironment = await startLiveCodexTestEnvironment();
+  });
+
+  afterAll(async () => {
+    await liveEnvironment?.dispose();
+  });
+
   test('queues turns, forks immediately, reforks, and resumes after restart', async () => {
-    const serverEnvironment = await liveCodexServerEnvironment();
+    if (!liveEnvironment) throw new Error('Live Codex test environment was not initialized.');
+    const testEnvironment = liveEnvironment;
+    const serverEnvironment = testEnvironment.serverEnvironment;
     const toolOutput = liveMarker('CODEX_TOOL_OUTPUT');
     const fixtureName = 'live-codex-input.txt';
     const toolCommand = `sleep 2 && cat ${fixtureName}`;
@@ -211,17 +223,20 @@ describe('live Codex lifecycle', () => {
       expect(countUserContent(parent.messages, firstPrompt)).toBe(1);
       expect((await fixture.client.getExecutionControl(parentChatId)).queue.entries).toEqual([]);
     }, {
+      forbiddenPersistedValues: testEnvironment.forbiddenPersistedValues,
       redactSensitiveDiagnostics: true,
       serverEnvironment,
       prepareWorkspace: async (directories) => {
-        await prepareLiveCodexHome(directories);
+        await testEnvironment.prepareWorkspace(directories);
         await writeFile(join(directories.project, fixtureName), toolOutput, 'utf8');
       },
     });
   });
 
   test('interrupts and stops active tools while preserving later delivery', async () => {
-    const serverEnvironment = await liveCodexServerEnvironment();
+    if (!liveEnvironment) throw new Error('Live Codex test environment was not initialized.');
+    const testEnvironment = liveEnvironment;
+    const serverEnvironment = testEnvironment.serverEnvironment;
     await withIntegrationFixture('live-codex-interrupt-and-send', async (fixture) => {
       const chatId = fixture.newChatId();
       const interruptedStarted = join(fixture.dirs.project, '.codex-interrupt-started');
@@ -312,9 +327,10 @@ describe('live Codex lifecycle', () => {
         afterIndex: recoveryCursor,
       });
     }, {
+      forbiddenPersistedValues: testEnvironment.forbiddenPersistedValues,
       redactSensitiveDiagnostics: true,
       serverEnvironment,
-      prepareWorkspace: prepareLiveCodexHome,
+      prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   });
 });
