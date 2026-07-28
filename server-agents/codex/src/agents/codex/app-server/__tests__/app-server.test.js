@@ -130,6 +130,36 @@ async function writeJsonl(filePath, entries) {
   await fs.writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
 }
 
+function commandHistoryEntries(callId, command, output) {
+  return [
+    {
+      type: 'session_meta',
+      timestamp: '2026-07-28T00:00:00.000Z',
+      payload: { id: 'thread-1', history_mode: 'legacy' },
+    },
+    {
+      type: 'event_msg',
+      timestamp: '2026-07-28T00:00:01.000Z',
+      payload: { type: 'user_message', message: 'Run the command' },
+    },
+    {
+      type: 'response_item',
+      timestamp: '2026-07-28T00:00:02.000Z',
+      payload: {
+        type: 'function_call',
+        name: 'exec_command',
+        arguments: JSON.stringify({ cmd: command, workdir: '/repo' }),
+        call_id: callId,
+      },
+    },
+    {
+      type: 'response_item',
+      timestamp: '2026-07-28T00:00:03.000Z',
+      payload: { type: 'function_call_output', call_id: callId, output },
+    },
+  ];
+}
+
 class FakeClient extends EventEmitter {
   constructor(script = {}) {
     super();
@@ -1431,13 +1461,7 @@ describe('CodexAppServerRuntime', () => {
       exitCode: 0,
       durationMs: 12,
     };
-    const fake = new FakeClient({
-      listThreadTurns: async () => ({
-        data: [makeTurn({ items: [commandItem], status: 'interrupted' })],
-        nextCursor: null,
-        backwardsCursor: null,
-      }),
-    });
+    const fake = new FakeClient();
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
     const emitted = [];
     const processing = [];
@@ -1492,32 +1516,19 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('recovers interrupted items persisted without an item completion notification', async () => {
-    const commandItem = {
-      type: 'commandExecution',
-      id: 'persisted-command',
-      command: 'printf recovered',
-      cwd: '/repo',
-      processId: null,
-      source: 'agent',
-      status: 'completed',
-      commandActions: [],
-      aggregatedOutput: 'recovered',
-      exitCode: 0,
-      durationMs: 8,
-    };
-    const fake = new FakeClient({
-      listThreadTurns: async () => ({
-        data: [makeTurn({ items: [commandItem], status: 'interrupted' })],
-        nextCursor: null,
-        backwardsCursor: null,
-      }),
-    });
+    const nativePath = path.join(tmpDir, 'interrupted-recovery.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
+    const fake = new FakeClient();
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
-    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath }));
     await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await writeJsonl(nativePath, [
+      ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
+      ...commandHistoryEntries('persisted-command', 'printf recovered', 'recovered').slice(2),
+    ]);
     const terminal = new Promise((resolve) => provider.onFinished(resolve));
     fake.emit('notification', {
       method: 'turn/completed',
@@ -1525,13 +1536,6 @@ describe('CodexAppServerRuntime', () => {
     });
     await terminal;
 
-    expect(fake.listThreadTurns).toHaveBeenCalledWith({
-      threadId: 'thread-1',
-      cursor: null,
-      limit: 10,
-      sortDirection: 'desc',
-      itemsView: 'full',
-    });
     expect(emitted).toHaveLength(2);
     expect(emitted[0]).toMatchObject({ type: 'bash-tool-use', toolId: 'persisted-command' });
     expect(emitted[1]).toMatchObject({
@@ -1543,16 +1547,15 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('reconciles once when a completed terminal notification wins the interrupt response race', async () => {
-    const terminalItem = {
-      type: 'agentMessage',
-      id: 'race-terminal-item',
-      text: 'Recovered at the interrupt boundary',
-      phase: null,
-      memoryCitation: null,
-    };
+    const nativePath = path.join(tmpDir, 'interrupt-response-race.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('prior-command', 'printf prior', 'prior'));
     let fake;
     fake = new FakeClient({
       interruptTurn: async () => {
+        await writeJsonl(nativePath, [
+          ...commandHistoryEntries('prior-command', 'printf prior', 'prior'),
+          ...commandHistoryEntries('race-command', 'printf raced', 'raced').slice(2),
+        ]);
         fake.emit('notification', {
           method: 'turn/completed',
           params: {
@@ -1562,11 +1565,6 @@ describe('CodexAppServerRuntime', () => {
         });
         return {};
       },
-      listThreadTurns: async () => ({
-        data: [makeTurn({ items: [terminalItem], status: 'completed' })],
-        nextCursor: null,
-        backwardsCursor: null,
-      }),
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
     const emitted = [];
@@ -1578,11 +1576,15 @@ describe('CodexAppServerRuntime', () => {
 
     await provider.runTurn(makeRequest({
       agentSessionId: 'thread-1',
-      nativePath: null,
+      nativePath,
     }));
+    const terminal = new Promise((resolve) => provider.onFinished(resolve));
     await expect(provider.abort('thread-1')).resolves.toBe(true);
+    await terminal;
 
-    expect(emitted.map((message) => message.content)).toEqual(['Recovered at the interrupt boundary']);
+    expect(emitted).toHaveLength(2);
+    expect(emitted[0]).toMatchObject({ type: 'bash-tool-use', toolId: 'race-command' });
+    expect(emitted[1]).toMatchObject({ type: 'tool-result', toolId: 'race-command' });
     expect(finished).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
     expect(processing).toEqual([true, false]);
     expect(provider.isRunning('thread-1')).toBe(false);

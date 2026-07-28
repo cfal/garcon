@@ -637,6 +637,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         eventMetadata: codexEventMetadata(request),
       });
       activeSession = session;
+      await session.turnItems.seedHistory(session.nativePath);
       session.onAbortable = request.onAbortable;
       session.activeDeliveryReservations += 1;
       try {
@@ -726,8 +727,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         permissionMode: request.permissionMode,
         eventMetadata: codexEventMetadata(request),
       });
-      session.turnItems.markManualCompaction();
       activeSession = session;
+      await session.turnItems.seedHistory(session.nativePath);
+      session.turnItems.markManualCompaction();
       session.onAbortable = request.onAbortable;
       this.#releaseBufferedClientEvents(client);
       markCodexExecutionStarted(request);
@@ -1132,7 +1134,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #handleTurnStarted(client: CodexAppServerClient, params: TurnStartedNotification): void {
     const session = this.#sessionForClientThread(client, params.threadId);
     if (!session) return;
-    session.turnItems.beginTurn();
     session.activeTurnId = params.turn.id;
     if (session.status !== 'interrupting') session.status = 'running';
     this.#notifyAbortable(session);
@@ -1268,6 +1269,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       new Date().toISOString(),
       session.liveCodeModeResultToolIds,
     );
+    session.turnItems.recordMessages(messages);
     if (messages.length) this.emitMessages(session.chatId, messages);
   }
 
@@ -1310,10 +1312,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return;
     }
     const aborted = params.turn.status === 'interrupted' || session.status === 'interrupting';
-    const completionItems = aborted
-      ? await session.turnItems.interruptedItems(session.client, session.threadId, params.turn)
-      : params.turn.items;
-    for (const item of completionItems) session.turnItems.emit(item);
+    for (const item of params.turn.items) session.turnItems.emit(item);
+    if (aborted) await session.turnItems.reconcileInterrupted(session.nativePath);
     session.capacityRetryCount = 0;
     session.pendingCapacityFailure = null;
     session.status = 'completing';
