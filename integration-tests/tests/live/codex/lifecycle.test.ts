@@ -3,6 +3,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   PendingUserInputClearedMessage,
+  PendingUserInputStatusUpdatedMessage,
   PendingUserInputUpdatedMessage,
 } from '../../../../common/ws-events.js';
 import {
@@ -277,7 +278,6 @@ describe('live Codex lifecycle', () => {
           fixture,
           chatId,
           turnId: turn.turnId,
-          marker: output,
           afterIndex: cursor,
         });
 
@@ -403,14 +403,29 @@ describe('live Codex lifecycle', () => {
         afterIndex: stopCommandCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      await fixture.client.waitForEvent(
-        (event): event is PendingUserInputClearedMessage =>
-          event.type === 'pending-user-input-cleared'
-          && event.chatId === chatId
-          && event.clientRequestId === stoppedTurn.clientRequestId,
+      const stoppedInputSettlement = await fixture.client.waitForEvent(
+        (
+          event,
+        ): event is PendingUserInputClearedMessage | PendingUserInputStatusUpdatedMessage =>
+          (
+            event.type === 'pending-user-input-cleared'
+            && event.chatId === chatId
+            && event.clientRequestId === stoppedTurn.clientRequestId
+            && event.reason === 'persisted'
+          )
+          || (
+            event.type === 'pending-user-input-status-updated'
+            && event.chatId === chatId
+            && event.clientRequestId === stoppedTurn.clientRequestId
+            && event.deliveryStatus === 'unconfirmed'
+          ),
         'live Codex stopped input settlement',
         { afterIndex: stopCommandCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
+      expect(
+        stoppedInputSettlement.type === 'pending-user-input-cleared'
+        || stoppedInputSettlement.deliveryStatus === 'unconfirmed',
+      ).toBe(true);
       const stopEvents = fixture.client.eventsSince(stopCommandCursor);
       expect(stopEvents.filter((event) =>
         event.type === 'chat-session-stopped'

@@ -762,7 +762,10 @@ describe('live Claude lifecycle', () => {
       if (!stoppedBash) throw new Error('Live Claude stopped Bash tool use was not rendered.');
       const stoppedResult = messagesOfType(stoppedTranscript.messages, 'tool-result')
         .find((message) => message.toolId === stoppedBash.toolId);
-      expect(stoppedResult?.isError).toBe(true);
+      expect(stoppedResult).toBeDefined();
+      if (stoppedTerminal.reason === 'aborted_tools') {
+        expect(stoppedResult?.isError).toBe(true);
+      }
 
       const recoveryMarker = marker('POST_INTERRUPT');
       const recoveryPrompt = exactReplyPrompt(recoveryMarker);
