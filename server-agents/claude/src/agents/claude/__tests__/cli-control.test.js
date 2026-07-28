@@ -75,6 +75,22 @@ describe('ClaudeControlBroker', () => {
     await expect(pending).rejects.toThrow('test complete');
   });
 
+  it('rejects a correlated response without an explicit success or error subtype', async () => {
+    const write = mock(() => Promise.resolve());
+    const broker = new ClaudeControlBroker(write);
+    const pending = broker.request('session-1', { subtype: 'interrupt' });
+    await Promise.resolve();
+    const id = requestId(write);
+
+    expect(broker.handleResponse('session-1', {
+      type: 'control_response',
+      response: { request_id: id, response: {} },
+    })).toBe(true);
+    await expect(pending).rejects.toThrow(
+      'Claude CLI interrupt control request returned an invalid response',
+    );
+  });
+
   it('removes a cancelled request before a late response arrives', async () => {
     const write = mock(() => Promise.resolve());
     const broker = new ClaudeControlBroker(write);

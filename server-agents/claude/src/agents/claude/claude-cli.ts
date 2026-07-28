@@ -61,6 +61,7 @@ const NOOP_LOGGER: AgentLogger = {
 
 const INTERRUPT_RECEIPT_TIMEOUT_MS = 5_000;
 const INTERRUPT_COMPLETION_TIMEOUT_MS = 15_000;
+type InterruptFallbackStage = 'receipt' | 'completion';
 
 interface ClaudeRunningSession {
   id: string;
@@ -824,6 +825,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       error: failure.message,
     });
     if (activeTurn) {
+      activeTurn.markInterruptRequestFailed();
+      this.#controlBroker.rejectSession(
+        session.id,
+        `Claude CLI ${failure.kind} transport failed: ${failure.message}`,
+        'interrupt',
+      );
       this.#failSession(session, `Claude CLI ${failure.kind} failed: ${failure.message}`);
     }
     this.#retireSessionProcessInBackground(session);
@@ -840,6 +847,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       sessionId: session.id.slice(0, 8),
       processId: proc.pid ?? null,
     });
+    session.activeTurn.markInterruptRequestFailed();
+    this.#controlBroker.rejectSession(
+      session.id,
+      'Claude CLI stdout ended during an active turn',
+      'interrupt',
+    );
     this.#failSession(
       session,
       'Claude CLI stdout ended before the submitted message produced a terminal result.',
@@ -866,6 +879,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#cancelPendingPermissions(session);
 
     if (activeTurn) {
+      activeTurn.markInterruptRequestFailed();
       this.#failSession(session, `Claude CLI process exited with code ${exitCode}`);
     }
   }
@@ -1293,6 +1307,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         session,
         activeTurn,
         INTERRUPT_COMPLETION_TIMEOUT_MS,
+        'completion',
       );
     }
     return true;
@@ -1321,7 +1336,12 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!session?.process || !activeTurn) return false;
 
     activeTurn.protocol.markAbortRequested();
-    this.#armAbortFallback(session, activeTurn, INTERRUPT_RECEIPT_TIMEOUT_MS);
+    this.#armAbortFallback(
+      session,
+      activeTurn,
+      INTERRUPT_RECEIPT_TIMEOUT_MS,
+      'receipt',
+    );
     const receiptCancellation = new AbortController();
     try {
       const response = this.#controlBroker.request(
@@ -1342,7 +1362,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       const receipt = acknowledgement.value;
       return this.#handleInterruptReceipt(session, activeTurn, receipt);
     } catch (error) {
-      if (session.activeTurn !== activeTurn) return false;
+      if (session.activeTurn !== activeTurn) {
+        if (activeTurn.interruptRequestFailed) throw error;
+        return false;
+      }
       this.#dependencies.logger.warn('Claude CLI interrupt request failed', {
         sessionId: agentSessionId.slice(0, 8),
         inputId: activeTurn.protocol.inputUuid.slice(0, 8),
@@ -1363,6 +1386,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session: ClaudeRunningSession,
     activeTurn: ClaudeActiveTurn,
     timeoutMs: number,
+    stage: InterruptFallbackStage,
   ): void {
     const proc = session.process;
     if (!proc) return;
@@ -1373,7 +1397,16 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       if (session.process === proc && !proc.killed) {
         this.#dependencies.logger.warn('Claude CLI interrupt was not confirmed', {
           sessionId: session.id.slice(0, 8),
+          stage,
         });
+        if (stage === 'receipt') {
+          activeTurn.markInterruptRequestFailed();
+          this.#controlBroker.rejectSession(
+            session.id,
+            'Claude CLI interrupt control request timed out',
+            'interrupt',
+          );
+        }
         this.#forceAbortProcess(
           session,
           activeTurn,

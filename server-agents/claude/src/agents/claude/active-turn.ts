@@ -13,6 +13,7 @@ export class ClaudeActiveTurn {
   pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
   #resolve: (() => void) | null = null;
   #confirmPreStartAbort: (() => void) | null = null;
+  #interruptRequestFailed = false;
 
   constructor(
     readonly eventMetadata: RuntimeEventMetadata,
@@ -35,5 +36,13 @@ export class ClaudeActiveTurn {
   confirmPreStartAbort(): void {
     this.#confirmPreStartAbort?.();
     this.#confirmPreStartAbort = null;
+  }
+
+  markInterruptRequestFailed(): void {
+    if (this.protocol.abortRequested) this.#interruptRequestFailed = true;
+  }
+
+  get interruptRequestFailed(): boolean {
+    return this.#interruptRequestFailed;
   }
 }

@@ -87,8 +87,12 @@ export class ClaudeControlBroker {
       pending.reject(new Error(
         message.response.error || `Claude CLI ${pending.subtype} control request failed`,
       ));
-    } else {
+    } else if (message.response?.subtype === 'success') {
       pending.resolve(message.response?.response ?? {});
+    } else {
+      pending.reject(new Error(
+        `Claude CLI ${pending.subtype} control request returned an invalid response`,
+      ));
     }
     return true;
   }
