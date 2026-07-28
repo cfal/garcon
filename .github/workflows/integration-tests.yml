@@ -98,8 +98,35 @@ jobs:
           ANTHROPIC_TESTING_KEY: ${{ secrets.ANTHROPIC_TESTING_KEY }}
         run: bun run test:live:claude
 
+      - name: Verify Claude diagnostics contain no testing credential
+        id: claude-diagnostics-audit
+        if: always() && steps.anthropic-key.outputs.available == 'true'
+        shell: bash
+        env:
+          ANTHROPIC_TESTING_KEY: ${{ secrets.ANTHROPIC_TESTING_KEY }}
+        run: |
+          echo "::add-mask::$ANTHROPIC_TESTING_KEY"
+          if [ -d integration-tests/artifacts/server ]; then
+            set +e
+            grep --recursive --fixed-strings --files-with-matches \
+              -- "$ANTHROPIC_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+            audit_status=$?
+            set -e
+            if [ "$audit_status" -eq 0 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live Claude diagnostics contain the testing credential and will not be uploaded."
+              exit 1
+            fi
+            if [ "$audit_status" -ne 1 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live Claude diagnostics could not be audited and will not be uploaded."
+              exit 1
+            fi
+          fi
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+
       - name: Upload live Claude diagnostics
-        if: failure() && steps.anthropic-key.outputs.available == 'true'
+        if: failure() && steps.anthropic-key.outputs.available == 'true' && steps.claude-diagnostics-audit.outputs.safe == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: claude-live-integration-diagnostics
@@ -152,8 +179,35 @@ jobs:
           OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
         run: bun run test:live:codex
 
+      - name: Verify Codex diagnostics contain no testing credential
+        id: codex-diagnostics-audit
+        if: always() && steps.openai-key.outputs.available == 'true'
+        shell: bash
+        env:
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+        run: |
+          echo "::add-mask::$OPENAI_TESTING_KEY"
+          if [ -d integration-tests/artifacts/server ]; then
+            set +e
+            grep --recursive --fixed-strings --files-with-matches \
+              -- "$OPENAI_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+            audit_status=$?
+            set -e
+            if [ "$audit_status" -eq 0 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live Codex diagnostics contain the testing credential and will not be uploaded."
+              exit 1
+            fi
+            if [ "$audit_status" -ne 1 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live Codex diagnostics could not be audited and will not be uploaded."
+              exit 1
+            fi
+          fi
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+
       - name: Upload live Codex diagnostics
-        if: failure() && steps.openai-key.outputs.available == 'true'
+        if: failure() && steps.openai-key.outputs.available == 'true' && steps.codex-diagnostics-audit.outputs.safe == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: codex-live-integration-diagnostics

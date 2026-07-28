@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
@@ -16,6 +19,7 @@ import {
   stopLightpandaChild,
   type LightpandaStopChild,
 } from '../../support/lightpanda-process.js';
+import { assertSensitiveValuesNotPersisted } from '../../support/integration-fixture.js';
 
 class ControlledWebSocket extends EventTarget {
   readyState = 0;
@@ -64,6 +68,56 @@ describe('integration support contracts', () => {
       ANTHROPIC_AUTH_TOKEN: 'auth-testing-secret',
       HOME: '/tmp/test-home',
     })).toBe('key=[REDACTED] token=[REDACTED] path=/tmp/test-home');
+  });
+
+  test('rejects persisted sensitive values without echoing them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-sensitive-audit-'));
+    const sensitiveValue = 'credential-value-that-must-not-escape';
+    try {
+      const nested = join(root, 'nested');
+      await mkdir(nested);
+      await writeFile(join(nested, 'safe.txt'), 'ordinary diagnostic content');
+      await expect(assertSensitiveValuesNotPersisted({
+        directory: root,
+        diagnostics: { status: 'safe' },
+        values: [sensitiveValue],
+      })).resolves.toBeUndefined();
+
+      let diagnosticError: unknown;
+      try {
+        await assertSensitiveValuesNotPersisted({
+          directory: root,
+          diagnostics: { unexpected: sensitiveValue },
+          values: [sensitiveValue],
+        });
+      } catch (error) {
+        diagnosticError = error;
+      }
+      expect(diagnosticError).toBeInstanceOf(Error);
+      expect((diagnosticError as Error).message).toBe(
+        'A sensitive integration credential was persisted by the test workflow.',
+      );
+      expect((diagnosticError as Error).message).not.toContain(sensitiveValue);
+
+      await writeFile(join(nested, 'unsafe.txt'), sensitiveValue);
+      let fileError: unknown;
+      try {
+        await assertSensitiveValuesNotPersisted({
+          directory: root,
+          diagnostics: { status: 'safe' },
+          values: [sensitiveValue],
+        });
+      } catch (error) {
+        fileError = error;
+      }
+      expect(fileError).toBeInstanceOf(Error);
+      expect((fileError as Error).message).toBe(
+        'A sensitive integration credential was persisted by the test workflow.',
+      );
+      expect((fileError as Error).message).not.toContain(sensitiveValue);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test('settles deferred values only once', async () => {

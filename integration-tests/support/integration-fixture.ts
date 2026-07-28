@@ -1,4 +1,13 @@
-import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +57,51 @@ export interface IntegrationFixtureOptions {
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
   redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
+}
+
+const SENSITIVE_ENVIRONMENT_NAME =
+  /(?:api[_-]?key|auth[_-]?token|credential|password|secret|token)/i;
+
+function sensitiveEnvironmentValues(environment: Record<string, string>): string[] {
+  return [...new Set(Object.entries(environment)
+    .filter(([name, value]) => SENSITIVE_ENVIRONMENT_NAME.test(name) && value.length > 0)
+    .map(([, value]) => value))];
+}
+
+async function directoryContainsAnyValue(
+  directory: string,
+  values: readonly Buffer[],
+): Promise<boolean> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (await directoryContainsAnyValue(path, values)) return true;
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const contents = await readFile(path);
+    if (values.some((value) => contents.indexOf(value) >= 0)) return true;
+  }
+  return false;
+}
+
+export async function assertSensitiveValuesNotPersisted(input: {
+  directory: string;
+  diagnostics: unknown;
+  values: readonly string[];
+}): Promise<void> {
+  const values = [...new Set(input.values.filter((value) => value.length > 0))];
+  if (values.length === 0) return;
+  const diagnostics = JSON.stringify(input.diagnostics) ?? '';
+  if (
+    values.some((value) => diagnostics.includes(value))
+    || await directoryContainsAnyValue(
+      input.directory,
+      values.map((value) => Buffer.from(value)),
+    )
+  ) {
+    throw new Error('A sensitive integration credential was persisted by the test workflow.');
+  }
 }
 
 interface IntegrationProcessRunDiagnostics {
@@ -419,6 +473,7 @@ export class IntegrationFixture {
   }
 
   describe(): string {
+    // Credential-backed fixtures verify that redaction never became on-disk persistence.
     if (this.#redactSensitiveDiagnostics) {
       return JSON.stringify(this.#diagnosticsForOutput(), null, 2);
     }
@@ -452,6 +507,17 @@ export class IntegrationFixture {
       this.garcon.assertNoUnexpectedExit();
     } catch (error) {
       errors.push(error);
+    }
+    if (this.#redactSensitiveDiagnostics) {
+      try {
+        await assertSensitiveValuesNotPersisted({
+          directory: this.dirs.root,
+          diagnostics: this.diagnostics(),
+          values: sensitiveEnvironmentValues(this.#serverEnvironment),
+        });
+      } catch (error) {
+        errors.push(error);
+      }
     }
     this.fakeProviders.openAi.stop();
     this.fakeProviders.openAiResponses.stop();
