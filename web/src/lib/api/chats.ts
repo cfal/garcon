@@ -12,6 +12,7 @@ import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import type {
+	ChatListEntry,
 	ChatListResponse,
 	MarkChatsReadEntry,
 	MarkChatsReadRequest,
@@ -106,9 +107,34 @@ export type { ChatDetailsResponse } from '$shared/chat-details';
 
 export type ListChatsResponse = ChatListResponse;
 
+function hasConsistentProcessingPhase(
+	entry: Pick<ChatListEntry, 'isProcessing' | 'processingPhase'>,
+): boolean {
+	return (
+		(entry.processingPhase === null ||
+			entry.processingPhase === 'running' ||
+			entry.processingPhase === 'stopping') &&
+		entry.isProcessing === (entry.processingPhase !== null)
+	);
+}
+
 /** Lists all chat sessions. */
 export async function listChats(): Promise<ListChatsResponse> {
-	return apiGet<ListChatsResponse>('/api/v1/chats');
+	const response = await apiGet<ListChatsResponse>('/api/v1/chats');
+	if (
+		!response ||
+		!Array.isArray(response.sessions) ||
+		response.sessions.some(
+			(entry) =>
+				!entry ||
+				typeof entry !== 'object' ||
+				typeof entry.isProcessing !== 'boolean' ||
+				!hasConsistentProcessingPhase(entry),
+		)
+	) {
+		throw new Error('Invalid chat list processing response');
+	}
+	return response;
 }
 
 export async function setLastSelectedChat(
@@ -441,8 +467,7 @@ export interface ReorderChatsRequest {
 }
 
 export type ReorderQuickTarget =
-	| { chatIdAbove: string; chatIdBelow?: never }
-	| { chatIdBelow: string; chatIdAbove?: never };
+	{ chatIdAbove: string; chatIdBelow?: never } | { chatIdBelow: string; chatIdAbove?: never };
 
 export type ReorderQuickRequest = { chatId: string } & ReorderQuickTarget;
 

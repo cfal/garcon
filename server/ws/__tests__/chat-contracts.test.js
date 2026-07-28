@@ -358,6 +358,10 @@ describe('chat WebSocket handler', () => {
       type: 'ws-pong',
       clientRequestId: 'req-ping-1',
       sentAt: 1234,
+      processing: {
+        outcome: 'snapshot',
+        chats: [{ chatId: 'chat-running', phase: 'running' }],
+      },
     });
     expect(typeof lastSentPayload().serverTime).toBe('string');
   });

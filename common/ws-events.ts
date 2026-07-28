@@ -163,14 +163,14 @@ export type ReconnectControlResult =
   | { chatId: string; outcome: 'not-found' }
   | { chatId: string; outcome: 'unavailable' };
 
-export type ReconnectProcessingResult =
+export type ChatProcessingSnapshotResult =
   | { outcome: 'snapshot'; chats: ChatProcessingEntry[] }
   | { outcome: 'unavailable' };
 
 export class ReconnectStateMessage {
   readonly type = 'reconnect-state' as const;
   constructor(
-    public processing: ReconnectProcessingResult,
+    public processing: ChatProcessingSnapshotResult,
     public controlResults: ReconnectControlResult[],
     public clientRequestId?: string,
   ) {}
@@ -210,7 +210,7 @@ export class WsPongMessage {
     public clientRequestId: string,
     public sentAt: number,
     public serverTime: string,
-    public processing: ReconnectProcessingResult,
+    public processing: ChatProcessingSnapshotResult,
   ) {}
 }
 
@@ -387,7 +387,7 @@ function reconnectControlResults(value: unknown): ReconnectControlResult[] | nul
   return results;
 }
 
-function reconnectProcessingResult(value: unknown): ReconnectProcessingResult | null {
+function chatProcessingSnapshotResult(value: unknown): ChatProcessingSnapshotResult | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const result = value as Record<string, unknown>;
@@ -632,7 +632,7 @@ export function parseServerWsMessage(
         : null;
     }
     case 'reconnect-state': {
-      const processing = reconnectProcessingResult(data.processing);
+      const processing = chatProcessingSnapshotResult(data.processing);
       const controlResults = reconnectControlResults(data.controlResults);
       if (!processing || !controlResults) return null;
       return new ReconnectStateMessage(
@@ -679,7 +679,7 @@ export function parseServerWsMessage(
           ? data.sentAt
           : null;
       const serverTime = requiredStr(data.serverTime);
-      const processing = reconnectProcessingResult(data.processing);
+      const processing = chatProcessingSnapshotResult(data.processing);
       return clientRequestId && sentAt !== null && serverTime && processing
         ? new WsPongMessage(clientRequestId, sentAt, serverTime, processing)
         : null;

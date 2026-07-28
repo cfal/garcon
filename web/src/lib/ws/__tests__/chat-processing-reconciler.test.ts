@@ -5,7 +5,11 @@ import type {
 	ChatSessionsPort,
 } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { ChatProcessingPhase } from '$shared/chat-types';
-import type { WsMessageConsumer } from '../connection.svelte.js';
+import type {
+	ChatProcessingSnapshotSource,
+	WsMessageConsumer,
+	WsMessageContext,
+} from '../connection.svelte.js';
 import {
 	ChatProcessingReconciler,
 	type ChatProcessingPresentation,
@@ -25,8 +29,8 @@ function makeConnection() {
 	return {
 		connection,
 		remove,
-		consume(data: Record<string, unknown>) {
-			return consumer?.(data);
+		consume(data: Record<string, unknown>, context: WsMessageContext = {}) {
+			return consumer?.(data, context);
 		},
 	};
 }
@@ -74,10 +78,7 @@ function makePresentation(currentChatId = 'chat-1') {
 	};
 }
 
-function pong(
-	chats: Array<{ chatId: string; phase: ChatProcessingPhase }> = [],
-	sentAt = 1,
-) {
+function pong(chats: Array<{ chatId: string; phase: ChatProcessingPhase }> = [], sentAt = 1) {
 	return {
 		type: 'ws-pong',
 		clientRequestId: 'probe-1',
@@ -95,11 +96,13 @@ describe('ChatProcessingReconciler', () => {
 		const presentation = makePresentation();
 		reconciler.addPresentation(presentation.presentation);
 
-		expect(socket.consume({
-			type: 'chat-processing-updated',
-			chatId: 'chat-1',
-			phase: 'stopping',
-		})).toBe(true);
+		expect(
+			socket.consume({
+				type: 'chat-processing-updated',
+				chatId: 'chat-1',
+				phase: 'stopping',
+			}),
+		).toBe(true);
 		expect(sessions.applyProcessingEvent).toHaveBeenCalledWith('chat-1', 'stopping');
 		expect(presentation.applyProcessingPhase).toHaveBeenCalledWith('chat-1', 'stopping');
 		expect(sessions.applyProcessingEvent.mock.invocationCallOrder[0]).toBeLessThan(
@@ -125,15 +128,16 @@ describe('ChatProcessingReconciler', () => {
 				{ chatId: 'chat-2', phase: 'running' },
 			]);
 			expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledOnce();
-			expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith(
-				'chat-1',
-				null,
-				1,
-			);
+			expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith('chat-1', null, 1);
 			expect(presentation.clearTurnPermissionRequests).toHaveBeenCalledOnce();
 			expect(info).toHaveBeenCalledWith(
 				'[ChatProcessingReconciler] Processing snapshot repaired state',
-				{ transitionCount: 2, runningCount: 1, stoppingCount: 0, idleCount: 1 },
+				{
+					source: 'heartbeat',
+					changedChatCount: 2,
+					previous: { running: 0, stopping: 1, idle: 1 },
+					next: { running: 1, stopping: 0, idle: 1 },
+				},
 			);
 		} finally {
 			info.mockRestore();
@@ -150,11 +154,7 @@ describe('ChatProcessingReconciler', () => {
 		socket.consume(pong([{ chatId: 'chat-1', phase: 'running' }]));
 
 		expect(sessions.reconcileProcessing).toHaveReturnedWith([]);
-		expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith(
-			'chat-1',
-			'running',
-			1,
-		);
+		expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith('chat-1', 'running', 1);
 		expect(presentation.clearTurnPermissionRequests).not.toHaveBeenCalled();
 	});
 
@@ -210,10 +210,42 @@ describe('ChatProcessingReconciler', () => {
 			expect(presentation.applyProcessingPhase).not.toHaveBeenCalled();
 			expect(presentation.applyProcessingSnapshotPhase).not.toHaveBeenCalled();
 			expect(warn).toHaveBeenCalledOnce();
+			expect(warn).toHaveBeenCalledWith(
+				'[ChatProcessingReconciler] Processing snapshot unavailable',
+				{ source: 'reconnect' },
+			);
 		} finally {
 			warn.mockRestore();
 		}
 	});
+
+	it.each(['heartbeat', 'visibility', 'stop-probe'] satisfies ChatProcessingSnapshotSource[])(
+		'attributes %s snapshot repairs without logging chat IDs',
+		(source) => {
+			const socket = makeConnection();
+			const sessions = makeSessions([
+				{ chatId: 'private-chat-id', previousPhase: 'running', phase: null },
+			]);
+			new ChatProcessingReconciler(socket.connection, sessions);
+			const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+			try {
+				socket.consume(pong(), { processingSnapshotSource: source });
+
+				expect(info).toHaveBeenCalledWith(
+					'[ChatProcessingReconciler] Processing snapshot repaired state',
+					{
+						source,
+						changedChatCount: 1,
+						previous: { running: 1, stopping: 0, idle: 0 },
+						next: { running: 0, stopping: 0, idle: 1 },
+					},
+				);
+				expect(JSON.stringify(info.mock.calls)).not.toContain('private-chat-id');
+			} finally {
+				info.mockRestore();
+			}
+		},
+	);
 
 	it('replaces Stopping with an interruptible successor after a dropped idle event', () => {
 		const socket = makeConnection();
@@ -300,7 +332,8 @@ describe('ChatProcessingReconciler', () => {
 		reconciler.destroy();
 
 		expect(socket.remove).toHaveBeenCalledOnce();
-		expect(socket.consume({ type: 'chat-processing-updated', chatId: 'chat-1', phase: null }))
-			.toBeUndefined();
+		expect(
+			socket.consume({ type: 'chat-processing-updated', chatId: 'chat-1', phase: null }),
+		).toBeUndefined();
 	});
 });

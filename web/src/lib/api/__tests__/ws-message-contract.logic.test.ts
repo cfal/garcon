@@ -32,7 +32,7 @@ import {
 	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
-import { ErrorMessage } from '$shared/chat-types';
+import { CHAT_STOP_OUTCOMES, ErrorMessage } from '$shared/chat-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 const chatViewMessage = {
@@ -372,9 +372,7 @@ describe('parseServerWsMessage', () => {
 				outcome: 'interrupt-requested',
 				intent: 'interrupt-and-send',
 			}),
-		).toEqual(
-			new ChatSessionStoppedMessage('c-1', 'interrupt-requested', 'interrupt-and-send'),
-		);
+		).toEqual(new ChatSessionStoppedMessage('c-1', 'interrupt-requested', 'interrupt-and-send'));
 		expect(
 			parseServerWsMessage({
 				type: 'chat-session-stopped',
@@ -382,9 +380,35 @@ describe('parseServerWsMessage', () => {
 				outcome: 'interrupt-requested',
 			}),
 		).toBeNull();
+		for (const outcome of CHAT_STOP_OUTCOMES) {
+			expect(
+				parseServerWsMessage({
+					type: 'chat-session-stopped',
+					chatId: 'c-1',
+					outcome,
+					intent: 'stop',
+				}),
+			).toEqual(new ChatSessionStoppedMessage('c-1', outcome, 'stop'));
+		}
+		for (const outcome of [undefined, 'unexpected']) {
+			expect(
+				parseServerWsMessage({
+					type: 'chat-session-stopped',
+					chatId: 'c-1',
+					outcome,
+					intent: 'stop',
+				}),
+			).toBeNull();
+		}
 		expect(
 			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'running' }),
 		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'running'));
+		expect(
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'stopping' }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'stopping'));
+		expect(
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: null }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', null));
 		expect(
 			parseServerWsMessage({
 				type: 'chat-execution-control-updated',
@@ -529,7 +553,7 @@ describe('parseServerWsMessage', () => {
 		}
 	});
 
-	it('strictly parses reconnect processing outcomes', () => {
+	it('strictly parses shared reconnect and pong processing outcomes', () => {
 		const snapshot = parseServerWsMessage({
 			type: 'reconnect-state',
 			clientRequestId: 'req-reconnect',
@@ -570,6 +594,33 @@ describe('parseServerWsMessage', () => {
 		expect((unavailable as ReconnectStateMessage).processing).toEqual({
 			outcome: 'unavailable',
 		});
+
+		const pong = parseServerWsMessage({
+			type: 'ws-pong',
+			clientRequestId: 'req-ping',
+			sentAt: 42,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: {
+				outcome: 'snapshot',
+				chats: [{ chatId: 'chat-a', phase: 'stopping' }],
+			},
+		});
+		expect(pong).toBeInstanceOf(WsPongMessage);
+		expect((pong as WsPongMessage).processing).toEqual({
+			outcome: 'snapshot',
+			chats: [{ chatId: 'chat-a', phase: 'stopping' }],
+		});
+		const unavailablePong = parseServerWsMessage({
+			type: 'ws-pong',
+			clientRequestId: 'req-ping-unavailable',
+			sentAt: 43,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: { outcome: 'unavailable' },
+		});
+		expect(unavailablePong).toBeInstanceOf(WsPongMessage);
+		expect((unavailablePong as WsPongMessage).processing).toEqual({
+			outcome: 'unavailable',
+		});
 	});
 
 	it('rejects malformed reconnect processing data and legacy session payloads', () => {
@@ -600,6 +651,15 @@ describe('parseServerWsMessage', () => {
 					type: 'reconnect-state',
 					processing,
 					controlResults: [],
+				}),
+			).toBeNull();
+			expect(
+				parseServerWsMessage({
+					type: 'ws-pong',
+					clientRequestId: 'req-ping',
+					sentAt: 42,
+					serverTime: '2026-07-27T00:00:00.000Z',
+					processing,
 				}),
 			).toBeNull();
 		}
@@ -647,7 +707,6 @@ describe('parseServerWsMessage', () => {
 		).toBeNull();
 		expect(parseServerWsMessage({ type: 'unknown-event', data: 123 })).toBeNull();
 	});
-
 });
 describe('parseClientWsMessage', () => {
 	it('parses read/resume request messages', () => {

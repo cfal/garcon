@@ -3,12 +3,16 @@ import {
 	ReconnectStateMessage,
 	WsPongMessage,
 	parseServerWsMessage,
-	type ReconnectProcessingResult,
+	type ChatProcessingSnapshotResult,
 } from '$shared/ws-events';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import type { WsConnection } from './connection.svelte.js';
+import type {
+	ChatProcessingSnapshotSource,
+	WsConnection,
+	WsMessageContext,
+} from './connection.svelte.js';
 
 export interface ChatProcessingPresentation {
 	readonly currentChatId: string | null;
@@ -32,7 +36,9 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 			'applyProcessingEvent' | 'processingPhase' | 'reconcileProcessing'
 		>,
 	) {
-		this.#removeConsumer = connection.addMessageConsumer((data) => this.#consume(data));
+		this.#removeConsumer = connection.addMessageConsumer((data, context) =>
+			this.#consume(data, context),
+		);
 	}
 
 	addPresentation(presentation: ChatProcessingPresentation): () => void {
@@ -45,12 +51,13 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 		this.#removeConsumer();
 	}
 
-	#consume(data: Record<string, unknown>): boolean {
+	#consume(data: Record<string, unknown>, context: WsMessageContext = {}): boolean {
 		if (
-			data.type !== 'chat-processing-updated'
-			&& data.type !== 'reconnect-state'
-			&& data.type !== 'ws-pong'
-		) return false;
+			data.type !== 'chat-processing-updated' &&
+			data.type !== 'reconnect-state' &&
+			data.type !== 'ws-pong'
+		)
+			return false;
 
 		const message = parseServerWsMessage(data);
 		if (message instanceof ChatProcessingUpdatedMessage) {
@@ -62,23 +69,38 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 			this.#applySnapshot(
 				message.processing,
 				message instanceof WsPongMessage ? message.sentAt : null,
+				message instanceof ReconnectStateMessage
+					? 'reconnect'
+					: (context.processingSnapshotSource ?? 'heartbeat'),
 			);
 		}
 		return false;
 	}
 
-	#applySnapshot(result: ReconnectProcessingResult, sentAt: number | null): void {
+	#applySnapshot(
+		result: ChatProcessingSnapshotResult,
+		sentAt: number | null,
+		source: ChatProcessingSnapshotSource,
+	): void {
 		if (result.outcome !== 'snapshot') {
-			console.warn('[ChatProcessingReconciler] Processing snapshot unavailable');
+			console.warn('[ChatProcessingReconciler] Processing snapshot unavailable', { source });
 			return;
 		}
 		const transitions = this.sessions.reconcileProcessing(result.chats);
 		if (transitions.length > 0) {
 			console.info('[ChatProcessingReconciler] Processing snapshot repaired state', {
-				transitionCount: transitions.length,
-				runningCount: transitions.filter((entry) => entry.phase === 'running').length,
-				stoppingCount: transitions.filter((entry) => entry.phase === 'stopping').length,
-				idleCount: transitions.filter((entry) => entry.phase === null).length,
+				source,
+				changedChatCount: transitions.length,
+				previous: {
+					running: transitions.filter((entry) => entry.previousPhase === 'running').length,
+					stopping: transitions.filter((entry) => entry.previousPhase === 'stopping').length,
+					idle: transitions.filter((entry) => entry.previousPhase === null).length,
+				},
+				next: {
+					running: transitions.filter((entry) => entry.phase === 'running').length,
+					stopping: transitions.filter((entry) => entry.phase === 'stopping').length,
+					idle: transitions.filter((entry) => entry.phase === null).length,
+				},
 			});
 		}
 		const changedChatIds = new Set<string>();

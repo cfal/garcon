@@ -13,7 +13,10 @@ import {
   ChatReloadedMessage,
   WsPongMessage,
 } from '../../common/ws-events.ts';
-import type { ClientRequestErrorCode, ReconnectProcessingResult } from '../../common/ws-events.ts';
+import type {
+  ChatProcessingSnapshotResult,
+  ClientRequestErrorCode,
+} from '../../common/ws-events.ts';
 import {
   parseClientWsMessage,
   ChatSubscribeRequest,
@@ -59,9 +62,9 @@ interface ChatHandlerDeps {
 
 const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
 
-function readReconnectProcessingResult(
+function readProcessingSnapshot(
   processing: Pick<ChatProcessingActivity, 'snapshot'>,
-): ReconnectProcessingResult {
+): ChatProcessingSnapshotResult {
   try {
     return {
       outcome: 'snapshot',
@@ -69,7 +72,7 @@ function readReconnectProcessingResult(
     };
   } catch (error: unknown) {
     logger.warn(
-      'reconnect processing snapshot unavailable:',
+      'processing snapshot unavailable:',
       error instanceof Error ? error.message : String(error),
     );
     return { outcome: 'unavailable' };
@@ -180,7 +183,7 @@ export class ChatHandler {
           }
         },
       );
-      const processing = readReconnectProcessingResult(this.#processing);
+      const processing = readProcessingSnapshot(this.#processing);
       writer.send(new ReconnectStateMessage(
         processing,
         controlResults,
@@ -211,7 +214,7 @@ export class ChatHandler {
       data.clientRequestId,
       data.sentAt,
       new Date().toISOString(),
-      readReconnectProcessingResult(this.#processing),
+      readProcessingSnapshot(this.#processing),
     ));
   }
 
