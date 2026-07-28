@@ -1335,8 +1335,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       const lifecycle = activeTurn.preStartAbortConfirmation.then(
         () => ({ type: 'lifecycle' as const }),
       );
-      const acknowledgement = await Promise.race([response, lifecycle]);
+      const completion = activeTurn.completion.then(() => ({ type: 'completion' as const }));
+      const acknowledgement = await Promise.race([response, lifecycle, completion]);
       if (acknowledgement.type === 'lifecycle') return true;
+      if (acknowledgement.type === 'completion') return false;
       const receipt = acknowledgement.value;
       return this.#handleInterruptReceipt(session, activeTurn, receipt);
     } catch (error) {

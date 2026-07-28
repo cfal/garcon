@@ -502,6 +502,38 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
     expect(ctrl.proc.killed).toBe(false);
   });
 
+  it('settles an active interrupt as unacknowledged when the turn finishes before its receipt', async () => {
+    const runtime = createRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+
+    const turn = runtime.startClaudeCliSession(startOptions());
+    ctrl.push(INIT);
+    await flush();
+    ctrl.startLatestInput();
+
+    const abort = runtime.abortClaudeInternalSession('session-1');
+    await flush();
+    const interrupt = latestInterrupt(ctrl);
+    const [abortTimerId] = abortTimerIds();
+    settleTurn(ctrl);
+
+    await turn;
+    await expect(abort).resolves.toBe(false);
+    expect(cleared).toContain(abortTimerId);
+
+    ctrl.push({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: interrupt.request_id,
+        response: { cancelled: [], still_queued: [] },
+      },
+    });
+    await flush();
+    expect(ctrl.proc.killed).toBe(false);
+  });
+
   it('retires the process immediately when the interrupt control fails', async () => {
     const runtime = createRuntime();
     const ctrl = createControllableProc();
