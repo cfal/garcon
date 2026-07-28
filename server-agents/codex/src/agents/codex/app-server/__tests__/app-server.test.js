@@ -1542,7 +1542,14 @@ describe('CodexAppServerRuntime', () => {
     });
   });
 
-  it('settles once when the interrupted terminal notification wins the response race', async () => {
+  it('reconciles once when a completed terminal notification wins the interrupt response race', async () => {
+    const terminalItem = {
+      type: 'agentMessage',
+      id: 'race-terminal-item',
+      text: 'Recovered at the interrupt boundary',
+      phase: null,
+      memoryCitation: null,
+    };
     let fake;
     fake = new FakeClient({
       interruptTurn: async () => {
@@ -1550,15 +1557,22 @@ describe('CodexAppServerRuntime', () => {
           method: 'turn/completed',
           params: {
             threadId: 'thread-1',
-            turn: makeTurn({ status: 'interrupted' }),
+            turn: makeTurn({ status: 'completed' }),
           },
         });
         return {};
       },
+      listThreadTurns: async () => ({
+        data: [makeTurn({ items: [terminalItem], status: 'completed' })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
     const processing = [];
     const finished = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
     provider.onProcessing((_chatId, value) => processing.push(value));
     provider.onFinished((chatId, exitCode) => finished.push({ chatId, exitCode }));
 
@@ -1568,10 +1582,26 @@ describe('CodexAppServerRuntime', () => {
     }));
     await expect(provider.abort('thread-1')).resolves.toBe(true);
 
+    expect(emitted.map((message) => message.content)).toEqual(['Recovered at the interrupt boundary']);
     expect(finished).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
     expect(processing).toEqual([true, false]);
     expect(provider.isRunning('thread-1')).toBe(false);
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores running status when the interrupt request is rejected', async () => {
+    const fake = new FakeClient({
+      interruptTurn: async () => {
+        throw new Error('interrupt rejected');
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
+
+    await expect(provider.abort('thread-1')).resolves.toBe(false);
+    expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'running' }]);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('does not restore a managed goal turn that completes before its start response', async () => {

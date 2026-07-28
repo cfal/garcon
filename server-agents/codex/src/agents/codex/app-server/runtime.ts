@@ -760,9 +760,13 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       this.#finishSession(session, { aborted: true });
       return true;
     }
+    if (session.status === 'interrupting') return true;
+    // Set before awaiting because the RPC response and turn/completed can arrive in one stdout read.
+    session.status = 'interrupting';
     try {
       await session.client.interruptTurn(session.threadId, turnId);
     } catch (error) {
+      if (this.#sessions.get(agentSessionId) === session && session.status === 'interrupting') session.status = 'running';
       this.#logger.warn('Codex turn interruption failed', {
         turnId,
         error: error instanceof Error ? error.message : String(error),
@@ -770,8 +774,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return false;
     }
     if (this.#sessions.get(agentSessionId) !== session) return true;
-    // Codex replies immediately before turn/completed, so the runtime remains attached until that event.
-    session.status = 'interrupting';
     return true;
   }
 
