@@ -19,7 +19,7 @@ export interface LifecycleContext {
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiPort,
-		'setPendingPermissionRequests' | 'clearPendingPermissionRequests'
+		'clearPendingPermissionRequests' | 'clearTurnPermissionRequests'
 	>;
 	clearTurnStatus: (chatId?: string | null) => void;
 	isChatProcessing: (chatId?: string | null) => boolean;
@@ -55,9 +55,7 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 
 	// Preserve plan-exit permission requests across turn boundaries
 	if (!successorIsProcessing) {
-		ctx.conversationUi.setPendingPermissionRequests((prev) =>
-			prev.filter((r) => r.permissionRequestId.startsWith('plan-exit-')),
-		);
+		ctx.conversationUi.clearTurnPermissionRequests();
 	}
 }
 

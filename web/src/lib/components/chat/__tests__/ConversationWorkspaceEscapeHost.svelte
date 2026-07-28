@@ -14,9 +14,11 @@
 		setTransientLayers,
 		setGitQuickSummary,
 		setGitBranchActions,
+		setChatProcessingReconciler,
 	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
+	import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
@@ -95,11 +97,14 @@
 	setWs({
 		messages: [],
 		trimOffset: 0,
-			isConnected: false,
-			registerCursor: (_cursor: DrainCursor) => () => {},
-			addMessageConsumer: () => () => {},
-			sendRequest: () => Promise.resolve({}),
-		} as never);
+		isConnected: false,
+		registerCursor: (_cursor: DrainCursor) => () => {},
+		addMessageConsumer: () => () => {},
+		sendRequest: () => Promise.resolve({}),
+	} as never);
+	setChatProcessingReconciler({
+		addPresentation: () => () => {},
+	} satisfies ChatProcessingPresentationRegistry);
 	setReadReceiptOutbox({
 		enqueue: () => {},
 	} as never);

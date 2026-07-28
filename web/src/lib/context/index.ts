@@ -9,6 +9,7 @@ import type { NavigationStore } from '$lib/stores/navigation.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
+import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
@@ -45,6 +46,8 @@ export const [getNavigation, setNavigation] = createContext<NavigationStore>();
 export const [getChatSessions, setChatSessions] = createContext<ChatSessionsStore>();
 export const [getAppShell, setAppShell] = createContext<AppShellStore>();
 export const [getWs, setWs] = createContext<WsConnection>();
+export const [getChatProcessingReconciler, setChatProcessingReconciler] =
+	createContext<ChatProcessingPresentationRegistry>();
 export const [getFileSessions, setFileSessions] = createContext<FileSessionRegistry>();
 export const [getReadReceiptOutbox, setReadReceiptOutbox] = createContext<ReadReceiptOutboxStore>();
 export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStore>();

@@ -15,6 +15,7 @@
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
+	import { ChatProcessingReconciler } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 	import { createSplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
@@ -29,6 +30,7 @@
 		setChatSessions,
 		setAppShell,
 		setWs,
+		setChatProcessingReconciler,
 		setFileSessions,
 		setReadReceiptOutbox,
 		setModelCatalog,
@@ -96,6 +98,7 @@
 	});
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
+	const chatProcessingReconciler = new ChatProcessingReconciler(ws, chatSessions);
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
 	const ghCapability = createGhCapabilityStore();
@@ -176,6 +179,7 @@
 	setGitViewLauncher(gitViews);
 	setSingletonSurfaces(singletonSurfaces);
 	setWs(ws);
+	setChatProcessingReconciler(chatProcessingReconciler);
 	setFileSessions(fileSessions);
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
@@ -363,6 +367,7 @@
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();
+		chatProcessingReconciler.destroy();
 		ws.disconnect();
 		workspaceServices.destroy();
 		terminalIdentity.destroy();

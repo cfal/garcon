@@ -268,7 +268,6 @@ function buildDispatch(
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
 		appendLocalNotice: stores.chatState.appendLocalNotice,
 		conversationUi: stores.conversationUi,
-		isChatProcessing,
 		startupCoordinator: stores.startup.startupCoordinator,
 		onExternalChatCreated: stores.startup.onExternalChatCreated,
 		getPendingChatId,

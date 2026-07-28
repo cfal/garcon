@@ -9,7 +9,6 @@ function makeConversationUi(): ChatEventContext['conversationUi'] {
 		pendingViewChat: null,
 		setPendingViewChat: vi.fn(),
 		setPendingPermissionRequests: vi.fn(),
-		clearPendingPermissionRequests: vi.fn(),
 	};
 }
 
@@ -20,7 +19,6 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		setCurrentChatId: vi.fn(),
 		appendLocalNotice: vi.fn(),
 		conversationUi: makeConversationUi(),
-		isChatProcessing: vi.fn(() => false),
 		startupCoordinator: new StartupCoordinator(),
 		onExternalChatCreated: vi.fn(),
 		getPendingChatId: vi.fn().mockReturnValue(null),
@@ -34,7 +32,6 @@ describe('handleChatAborted', () => {
 	it('preserves successor-turn metadata and permission requests', () => {
 		const ctx = makeCtx({
 			getCurrentChatId: () => 'chat-a',
-			isChatProcessing: () => true,
 		});
 
 		handleChatAborted(
@@ -42,14 +39,12 @@ describe('handleChatAborted', () => {
 			ctx,
 		);
 
-		expect(ctx.conversationUi.clearPendingPermissionRequests).not.toHaveBeenCalled();
 		expect(ctx.appendLocalNotice).not.toHaveBeenCalled();
 	});
 
 	it('leaves lifecycle cleanup to processing phases after plain Stop acknowledgement', () => {
 		const ctx = makeCtx({
 			getCurrentChatId: () => 'chat-a',
-			isChatProcessing: () => true,
 		});
 
 		handleChatAborted(
@@ -57,7 +52,6 @@ describe('handleChatAborted', () => {
 			ctx,
 		);
 
-		expect(ctx.conversationUi.clearPendingPermissionRequests).not.toHaveBeenCalled();
 		expect(ctx.appendLocalNotice).toHaveBeenCalledWith('warning', 'Chat interrupted by user.');
 	});
 
@@ -70,6 +64,5 @@ describe('handleChatAborted', () => {
 		);
 
 		expect(ctx.appendLocalNotice).not.toHaveBeenCalled();
-		expect(ctx.conversationUi.clearPendingPermissionRequests).not.toHaveBeenCalled();
 	});
 });

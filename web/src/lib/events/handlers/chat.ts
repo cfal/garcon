@@ -22,9 +22,7 @@ export interface ChatEventContext {
 		| 'pendingViewChat'
 		| 'setPendingViewChat'
 		| 'setPendingPermissionRequests'
-		| 'clearPendingPermissionRequests'
 	>;
-	isChatProcessing: (chatId?: string | null) => boolean;
 	// Startup ownership callbacks.
 	startupCoordinator: StartupCoordinator;
 	onExternalChatCreated: (chatId: string) => void;
@@ -66,9 +64,6 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 
 	if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
 		ctx.clearPendingChatId();
-	}
-	if (!ctx.isChatProcessing(abortedChatId)) {
-		ctx.conversationUi.clearPendingPermissionRequests();
 	}
 	if (msg.intent === 'stop' && abortedChatId === ctx.getCurrentChatId()) {
 		ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());

@@ -34,6 +34,7 @@ export class ConversationLifecycleState {
 	currentChatId = $state<string | null>(null);
 	isSystemChatChange = $state(false);
 	#stoppingRequestId: string | null = null;
+	#stoppingStartedAt: number | null = null;
 
 	/** Returns the top (most recent) status entry, or null if empty. */
 	get loadingStatus(): LoadingStatus | null {
@@ -87,6 +88,7 @@ export class ConversationLifecycleState {
 	/** Starts status metadata for an accepted assistant turn. */
 	beginTurn(chatId: string): void {
 		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
 		this.markTurnRunning(chatId);
 		this.setLoadingStatus({ text: m.chat_loading_processing(), tokens: 0, can_interrupt: true });
 	}
@@ -95,6 +97,7 @@ export class ConversationLifecycleState {
 	clearTurnStatus(chatId: string): void {
 		if (this.currentChatId !== chatId) return;
 		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
 		this.loadingStatusStack = [];
 		this.turnStatus = 'idle';
 	}
@@ -106,6 +109,7 @@ export class ConversationLifecycleState {
 			loadingStatusStack: this.loadingStatusStack.map((entry) => ({ ...entry })),
 		};
 		this.#stoppingRequestId = requestId;
+		this.#stoppingStartedAt = Date.now();
 		this.turnStatus = 'stopping';
 		this.setLoadingStatus({
 			text: m.chat_loading_stopping(),
@@ -118,8 +122,24 @@ export class ConversationLifecycleState {
 	restoreStopping(chatId: string, requestId: string, snapshot: StoppingSnapshot | null): void {
 		if (!snapshot || this.currentChatId !== chatId || this.#stoppingRequestId !== requestId) return;
 		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
 		this.turnStatus = snapshot.turnStatus;
 		this.loadingStatusStack = snapshot.loadingStatusStack;
+	}
+
+	applyProcessingSnapshotPhase(
+		chatId: string,
+		phase: ChatProcessingPhase | null,
+		sentAt: number | null,
+	): void {
+		if (
+			phase === 'running'
+			&& this.currentChatId === chatId
+			&& this.#stoppingStartedAt !== null
+			&& sentAt !== null
+			&& sentAt <= this.#stoppingStartedAt
+		) return;
+		this.applyProcessingPhase(chatId, phase);
 	}
 
 	applyProcessingPhase(chatId: string, phase: ChatProcessingPhase | null): void {
@@ -138,6 +158,7 @@ export class ConversationLifecycleState {
 			return;
 		}
 		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
 		this.markTurnRunning(chatId);
 		const current = this.loadingStatus;
 		if (!current || current.text === m.chat_loading_stopping()) {

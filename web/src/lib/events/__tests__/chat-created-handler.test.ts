@@ -11,7 +11,6 @@ function makeConversationUi(
 		pendingViewChat: null,
 		setPendingViewChat: vi.fn(),
 		setPendingPermissionRequests: vi.fn(),
-		clearPendingPermissionRequests: vi.fn(),
 		...overrides,
 	};
 }
@@ -23,7 +22,6 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		setCurrentChatId: vi.fn(),
 		appendLocalNotice: vi.fn(),
 		conversationUi: makeConversationUi(),
-		isChatProcessing: vi.fn(() => false),
 		startupCoordinator: new StartupCoordinator(),
 		onExternalChatCreated: vi.fn(),
 		getPendingChatId: vi.fn().mockReturnValue(null),

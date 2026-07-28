@@ -13,8 +13,8 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		appendLocalNotice: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
 		conversationUi: {
-			setPendingPermissionRequests: vi.fn(),
 			clearPendingPermissionRequests: vi.fn(),
+			clearTurnPermissionRequests: vi.fn(),
 		},
 		clearTurnStatus: vi.fn(),
 		isChatProcessing: vi.fn(() => false),
@@ -51,7 +51,7 @@ describe('handleAgentComplete', () => {
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 
 		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
-		expect(ctx.conversationUi.setPendingPermissionRequests).not.toHaveBeenCalled();
+		expect(ctx.conversationUi.clearTurnPermissionRequests).not.toHaveBeenCalled();
 	});
 
 	it('navigates to pending chat on success', () => {
@@ -71,27 +71,16 @@ describe('handleAgentComplete', () => {
 	});
 
 	it('preserves plan-exit permission requests', () => {
-		const setPendingPermissionRequests = vi.fn();
+		const clearTurnPermissionRequests = vi.fn();
 		const ctx = createCtx({
 			conversationUi: {
-				setPendingPermissionRequests,
 				clearPendingPermissionRequests: vi.fn(),
+				clearTurnPermissionRequests,
 			},
 		});
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 
-		expect(setPendingPermissionRequests).toHaveBeenCalledWith(expect.any(Function));
-
-		// Verify the filter function keeps plan-exit- prefixed entries.
-		const filterFn = setPendingPermissionRequests.mock.calls[0][0] as (
-			prev: Array<{ permissionRequestId: string }>,
-		) => Array<{ permissionRequestId: string }>;
-		const result = filterFn([
-			{ permissionRequestId: 'plan-exit-1' },
-			{ permissionRequestId: 'tool-request-2' },
-		]);
-		expect(result).toHaveLength(1);
-		expect(result[0].permissionRequestId).toBe('plan-exit-1');
+		expect(clearTurnPermissionRequests).toHaveBeenCalledOnce();
 	});
 });
 
