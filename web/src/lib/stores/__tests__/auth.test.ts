@@ -148,6 +148,26 @@ describe('AuthStore', () => {
 			expect(clearAuthToken).not.toHaveBeenCalled();
 		});
 
+		it('recovers when auth status becomes reachable during retries', async () => {
+			vi.useFakeTimers();
+			vi.mocked(getAuthStatus)
+				.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+				.mockResolvedValueOnce({
+					needsSetup: false,
+					isAuthenticated: false,
+					authDisabled: false,
+				});
+			const auth = new AuthStore();
+
+			const check = auth.checkAuthStatus();
+			await vi.runAllTimersAsync();
+			await check;
+
+			expect(getAuthStatus).toHaveBeenCalledTimes(2);
+			expect(auth.isUnavailable).toBe(false);
+			expect(auth.error).toBeNull();
+		});
+
 		it('recovers from transient user validation without clearing the token', async () => {
 			vi.useFakeTimers();
 			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
@@ -170,6 +190,80 @@ describe('AuthStore', () => {
 			expect(auth.user).toEqual({ id: '1', username: 'admin' });
 			expect(auth.isUnavailable).toBe(false);
 			expect(clearAuthToken).not.toHaveBeenCalled();
+		});
+
+		it('keeps the token when user validation exhausts its retries', async () => {
+			vi.useFakeTimers();
+			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
+			vi.mocked(getAuthStatus).mockResolvedValue({
+				needsSetup: false,
+				isAuthenticated: true,
+				authDisabled: false,
+			});
+			vi.mocked(getUser).mockRejectedValue(new TypeError('Failed to fetch'));
+			const auth = new AuthStore();
+
+			const check = auth.checkAuthStatus();
+			await vi.runAllTimersAsync();
+			await check;
+
+			expect(getUser).toHaveBeenCalledTimes(5);
+			expect(auth.token).toBe('saved-token');
+			expect(auth.user).toBeNull();
+			expect(auth.isUnavailable).toBe(true);
+			expect(clearAuthToken).not.toHaveBeenCalled();
+		});
+
+		it('does not let a stale status response overwrite successful registration', async () => {
+			let resolveStatus!: (status: {
+				needsSetup: boolean;
+				isAuthenticated: boolean;
+				authDisabled: boolean;
+			}) => void;
+			vi.mocked(getAuthStatus).mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveStatus = resolve;
+					}),
+			);
+			vi.mocked(apiRegister).mockResolvedValue({
+				success: true,
+				token: 'reg-token',
+				user: { id: '2', username: 'newuser' },
+			});
+			const auth = new AuthStore();
+			const check = auth.checkAuthStatus();
+
+			await auth.register('newuser', 'password');
+			resolveStatus({ needsSetup: true, isAuthenticated: false, authDisabled: false });
+			await check;
+
+			expect(auth.needsSetup).toBe(false);
+			expect(auth.token).toBe('reg-token');
+			expect(auth.user).toEqual({ id: '2', username: 'newuser' });
+			expect(auth.isUnavailable).toBe(false);
+		});
+
+		it('does not let stale status retries mark a successful login unavailable', async () => {
+			vi.useFakeTimers();
+			vi.mocked(getAuthStatus).mockRejectedValue(new TypeError('Failed to fetch'));
+			vi.mocked(apiLogin).mockResolvedValue({
+				success: true,
+				token: 'new-token',
+				user: { id: '1', username: 'admin' },
+			});
+			const auth = new AuthStore();
+			const check = auth.checkAuthStatus();
+
+			await auth.login('admin', 'password');
+			expect(auth.isLoading).toBe(false);
+			await vi.runAllTimersAsync();
+			await check;
+
+			expect(auth.token).toBe('new-token');
+			expect(auth.user).toEqual({ id: '1', username: 'admin' });
+			expect(auth.isUnavailable).toBe(false);
+			expect(auth.error).toBeNull();
 		});
 
 		it('enters app mode without token when auth is disabled by server config', async () => {

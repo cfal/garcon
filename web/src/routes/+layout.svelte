@@ -302,7 +302,7 @@
 	onMount(() => {
 		void auth.checkAuthStatus();
 		const handleOnline = () => {
-			void auth.checkAuthStatus();
+			if (auth.isUnavailable) void auth.checkAuthStatus();
 		};
 		const handleVisibilityChange = () => {
 			if (document.visibilityState === 'visible' && auth.isUnavailable) {
@@ -473,7 +473,9 @@
 				</div>
 			</div>
 			<h1 class="text-2xl font-bold text-foreground mb-2">{m.auth_reconnecting_title()}</h1>
-			<p class="text-muted-foreground mb-4">{m.auth_reconnecting_description()}</p>
+			<p class="text-muted-foreground mb-4">
+				{auth.token ? m.auth_reconnecting_session_description() : m.auth_reconnecting_description()}
+			</p>
 			<Button onclick={() => auth.checkAuthStatus()} disabled={auth.isLoading}>
 				{m.common_retry()}
 			</Button>
