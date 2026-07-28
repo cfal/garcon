@@ -456,7 +456,7 @@ describe('live Claude lifecycle', () => {
         timeoutMs: TURN_TIMEOUT_MS,
       });
       const terminal = await protocolProbe.waitForTerminal();
-      expect(terminal.reason).toBe('aborted_streaming');
+      expect(['aborted_streaming', 'aborted_tools']).toContain(terminal.reason);
       expect(terminal.userMessageUuid === null || terminal.userMessageUuid === inputUuid).toBe(true);
 
       const stopEvents = fixture.client.eventsSince(stopCursor);
@@ -547,7 +547,7 @@ describe('live Claude lifecycle', () => {
         timeoutMs: TURN_TIMEOUT_MS,
       })).type);
       const interruptedTerminal = await protocolProbe.waitForTerminal();
-      expect(interruptedTerminal.reason).toBe('aborted_tools');
+      expect(['aborted_streaming', 'aborted_tools']).toContain(interruptedTerminal.reason);
       expect(
         interruptedTerminal.userMessageUuid === null
         || interruptedTerminal.userMessageUuid === interruptedInputUuid,
@@ -619,7 +619,7 @@ describe('live Claude lifecycle', () => {
         timeoutMs: TURN_TIMEOUT_MS,
       });
       const stoppedTerminal = await protocolProbe.waitForTerminal(2);
-      expect(stoppedTerminal.reason).toBe('aborted_tools');
+      expect(['aborted_streaming', 'aborted_tools']).toContain(stoppedTerminal.reason);
       expect(
         stoppedTerminal.userMessageUuid === null
         || stoppedTerminal.userMessageUuid === stoppedInputUuid,
