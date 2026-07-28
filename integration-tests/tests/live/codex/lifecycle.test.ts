@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
-  ChatMessagesMessage,
+  PendingUserInputClearedMessage,
   PendingUserInputUpdatedMessage,
 } from '../../../../common/ws-events.js';
 import {
@@ -377,23 +377,12 @@ describe('live Codex lifecycle', () => {
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE.',
       ].join(' ');
-      const stoppedCursor = fixture.client.markEvents();
       const stoppedTurn = await fixture.client.runChat(liveCodexRunRequest({
         chatId,
         command: stoppedPrompt,
         permissionMode: 'bypassPermissions',
       }));
       await waitForFile(stoppedStarted);
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'bash-tool-use'
-            && entry.message.command.includes(stoppedCommand)),
-        'live Codex stopped shell tool use',
-        { afterIndex: stoppedCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-      );
       const stopCommandCursor = fixture.client.markEvents();
       const stopRequestId = crypto.randomUUID();
       const stopped = await Promise.all([
@@ -414,6 +403,14 @@ describe('live Codex lifecycle', () => {
         afterIndex: stopCommandCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await fixture.client.waitForEvent(
+        (event): event is PendingUserInputClearedMessage =>
+          event.type === 'pending-user-input-cleared'
+          && event.chatId === chatId
+          && event.clientRequestId === stoppedTurn.clientRequestId,
+        'live Codex stopped input settlement',
+        { afterIndex: stopCommandCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
       const stopEvents = fixture.client.eventsSince(stopCommandCursor);
       expect(stopEvents.filter((event) =>
         event.type === 'chat-session-stopped'
@@ -451,20 +448,19 @@ describe('live Codex lifecycle', () => {
         .not.toContain('CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE');
       const stoppedBash = messagesOfType(stoppedTranscript.messages, 'bash-tool-use')
         .findLast((message) => message.command.includes(stoppedCommand));
-      if (!stoppedBash) throw new Error('Live Codex stopped shell tool use was not rendered.');
       const stoppedResult = messagesOfType(stoppedTranscript.messages, 'tool-result')
-        .find((message) => message.toolId === stoppedBash.toolId);
-      expect(stoppedResult?.isError).toBe(true);
+        .find((message) => message.toolId === stoppedBash?.toolId);
+      expect(countUserContent(stoppedTranscript.messages, stoppedPrompt)).toBe(1);
 
       await fixture.restartGarcon();
       const restoredTranscript = await fixture.client.getMessages(chatId);
       const restoredBash = messagesOfType(restoredTranscript.messages, 'bash-tool-use')
-        .findLast((message) => message.command.includes('sleep 30'));
+        .findLast((message) => message.command.includes(stoppedCommand));
       const restoredResult = messagesOfType(restoredTranscript.messages, 'tool-result')
         .find((message) => message.toolId === restoredBash?.toolId);
-      expect(restoredBash).toBeDefined();
-      expect(restoredResult?.isError).toBe(true);
-      expect(restoredResult?.content).toEqual(stoppedResult?.content);
+      expect(restoredBash).toEqual(stoppedBash);
+      expect(restoredResult).toEqual(stoppedResult);
+      expect(countUserContent(restoredTranscript.messages, stoppedPrompt)).toBe(1);
 
       const recoveryMarker = liveMarker('CODEX_POST_INTERRUPT');
       const recoveryPrompt = exactReplyPrompt(recoveryMarker);
