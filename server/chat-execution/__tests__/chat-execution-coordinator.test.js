@@ -1754,6 +1754,10 @@ describe('orchestration', () => {
     it('retains an acknowledged Stop latch until canonical runtime inactivity', async () => {
       let running = true;
       mockAgents.isChatRunning.mockImplementation(() => running);
+      let latchAtOutcome;
+      orchQueue.onSessionStopped(() => {
+        latchAtOutcome = orchQueue.isChatStopInFlight('c1');
+      });
 
       const first = await orchQueue.stopActiveTurn('c1');
       const second = await orchQueue.stopActiveTurn('c1');
@@ -1761,6 +1765,7 @@ describe('orchestration', () => {
       expect(first.outcome).toBe('interrupt-requested');
       expect(second.outcome).toBe('interrupt-requested');
       expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
+      expect(latchAtOutcome).toBe(true);
       expect(orchQueue.isChatStopInFlight('c1')).toBe(true);
 
       running = false;
@@ -1773,10 +1778,15 @@ describe('orchestration', () => {
       mockAgents.abortSession
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce(true);
+      const latchAtOutcome = [];
+      orchQueue.onSessionStopped(() => {
+        latchAtOutcome.push(orchQueue.isChatStopInFlight('c1'));
+      });
 
       await expect(orchQueue.stopActiveTurn('c1')).resolves.toMatchObject({
         outcome: 'failed',
       });
+      expect(latchAtOutcome[0]).toBe(false);
       expect(orchQueue.isChatStopInFlight('c1')).toBe(false);
       await expect(orchQueue.stopActiveTurn('c1')).resolves.toMatchObject({
         outcome: 'interrupt-requested',

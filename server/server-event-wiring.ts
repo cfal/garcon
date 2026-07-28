@@ -637,6 +637,7 @@ export function wireServerEvents({
       if (failure) releaseDeferredTerminalFailure(failure);
       else reconcilePendingAfterTerminal(chatId, 'rejected stop');
     }
+    publishProcessing(chatId);
     broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {

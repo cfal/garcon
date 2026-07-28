@@ -97,6 +97,11 @@ interface ChatExecutionCoordinatorEvents {
   'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
 }
 
+interface StopResolution {
+  outcome: ChatStopOutcome;
+  waitMs: number;
+}
+
 export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordinatorEvents> implements ChatExecutionService {
   #locks = new KeyedPromiseLock();
   #shuttingDown = false;
@@ -855,17 +860,23 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #startStop(chatId: string, operation: SessionStopInFlight): void {
     if (operation.started) return;
     operation.started = true;
-    this.#performStop(chatId, operation.intent, operation.stopId).then(
-      (outcome) => {
+    this.#performStop(chatId, operation.stopId).then(
+      ({ outcome, waitMs }) => {
         operation.outcome = outcome;
         operation.phase = outcome === 'interrupt-requested' ? 'settling' : 'requesting';
-        operation.resolve(outcome);
-        if (outcome === 'interrupt-requested') {
-          this.#reconcileStopLatch(chatId);
-        } else {
+        if (outcome !== 'interrupt-requested') {
           this.#ownership.clearStop(chatId, operation);
-          this.#invalidateProcessing(chatId);
         }
+        try {
+          this.#invalidateProcessing(chatId);
+          this.emit('session-stopped', chatId, outcome, operation.intent, operation.stopId, waitMs);
+        } catch (error) {
+          this.#ownership.clearStop(chatId, operation);
+          operation.reject(error);
+          return;
+        }
+        operation.resolve(outcome);
+        if (outcome === 'interrupt-requested') this.#reconcileStopLatch(chatId);
       },
       (error) => {
         this.#ownership.clearStop(chatId, operation);
@@ -877,9 +888,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   async #performStop(
     chatId: string,
-    intent: ChatStopIntent,
     stopId: string,
-  ): Promise<ChatStopOutcome> {
+  ): Promise<StopResolution> {
     const startedAt = Date.now();
     const attempt = this.#ownership.attempt(chatId);
     const registered = attempt?.entryId ? await attempt.waitUntilRegistered() : Boolean(attempt);
@@ -887,8 +897,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       ? attempt
       : undefined;
     if (!this.#hasAbortTarget(chatId, currentAttempt)) {
-      this.emit('session-stopped', chatId, 'already-idle', intent, stopId, Date.now() - startedAt);
-      return 'already-idle';
+      return { outcome: 'already-idle', waitMs: Date.now() - startedAt };
     }
     try {
       this.emit('session-stop-requested', chatId, stopId, currentAttempt?.identity());
@@ -907,8 +916,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (!abortable) {
         currentAttempt.clearExpectedAbort(stopId);
         const outcome = await this.#outcomeAfterUnacknowledgedAbort(chatId, currentAttempt);
-        this.emit('session-stopped', chatId, outcome, intent, stopId, Date.now() - startedAt);
-        return outcome;
+        return { outcome, waitMs: Date.now() - startedAt };
       }
       if (currentAttempt.entryId) currentAttempt.expectAbort(stopId);
     }
@@ -920,20 +928,18 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       const outcome: ChatStopOutcome = acknowledged
         ? 'interrupt-requested'
         : await this.#outcomeAfterUnacknowledgedAbort(chatId, currentAttempt);
-      this.emit('session-stopped', chatId, outcome, intent, stopId, Date.now() - startedAt);
       if (isAbortAcknowledged(outcome) && currentAttempt && !this.#turnRunner.isChatRunning(chatId)) {
         currentAttempt.markTerminalObserved();
         this.#settleDirectAttempt(chatId, currentAttempt);
       }
-      return outcome;
+      return { outcome, waitMs: Date.now() - startedAt };
     } catch (error) {
       currentAttempt?.clearExpectedAbort(stopId);
       logger.warn('queue: provider interrupt failed', {
         chatId,
         errorType: error instanceof Error ? error.name : typeof error,
       });
-      this.emit('session-stopped', chatId, 'failed', intent, stopId, Date.now() - startedAt);
-      return 'failed';
+      return { outcome: 'failed', waitMs: Date.now() - startedAt };
     }
   }
 

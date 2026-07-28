@@ -124,7 +124,6 @@ describe('server event wiring', () => {
     });
 
     phase = 'stopping';
-    fixture.queueListeners.processing('chat-1');
     fixture.queueListeners.sessionStopped(
       'chat-1',
       'interrupt-requested',
@@ -152,7 +151,6 @@ describe('server event wiring', () => {
       },
     });
 
-    fixture.queueListeners.processing('chat-1');
     fixture.queueListeners.sessionStopped('chat-1', 'already-idle', 'stop', 'stop-1', 3);
 
     expect(published).toMatchObject([
@@ -161,6 +159,28 @@ describe('server event wiring', () => {
         type: 'chat-session-stopped',
         chatId: 'chat-1',
         outcome: 'already-idle',
+        intent: 'stop',
+      },
+    ]);
+  });
+
+  it('publishes running before a rejected active Stop outcome', () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      processing: { phase: mock(() => 'running') },
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.queueListeners.sessionStopped('chat-1', 'failed', 'stop', 'stop-1', 8);
+
+    expect(published).toMatchObject([
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
+      {
+        type: 'chat-session-stopped',
+        chatId: 'chat-1',
+        outcome: 'failed',
         intent: 'stop',
       },
     ]);
