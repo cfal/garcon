@@ -24,7 +24,7 @@ function expectVisibleResponseBeforeSettlement(input: {
   events: readonly ServerWsMessage[];
   chatId: string;
   turnId: string | undefined;
-  marker: string;
+  marker?: string;
 }): void {
   const processingStarted = input.events.findIndex((event) =>
     event.type === 'chat-processing-updated'
@@ -33,9 +33,13 @@ function expectVisibleResponseBeforeSettlement(input: {
   const assistantResponse = input.events.findIndex((event) =>
     event.type === 'chat-messages'
     && event.chatId === input.chatId
+    && event.turnId === input.turnId
     && event.messages.some((entry) =>
       entry.message.type === 'assistant-message'
-      && entry.message.content.includes(input.marker)));
+      && (
+        input.marker === undefined
+        || entry.message.content.includes(input.marker)
+      )));
   const processingStopped = input.events.findIndex((event) =>
     event.type === 'chat-processing-updated'
     && event.chatId === input.chatId
@@ -55,7 +59,7 @@ export async function waitForVisibleResponse(input: {
   fixture: IntegrationFixture;
   chatId: string;
   turnId: string | undefined;
-  marker: string;
+  marker?: string;
   afterIndex: number;
 }): Promise<void> {
   expectFinished((await input.fixture.client.waitForTurnTerminal(

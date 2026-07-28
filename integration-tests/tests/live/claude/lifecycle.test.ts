@@ -573,9 +573,12 @@ describe('live Claude lifecycle', () => {
         fixture,
         chatId,
         turnId: recovery.turnId,
-        marker: recoveryMarker,
         afterIndex: recoveryCursor,
       });
+      expect(countUserContent(
+        (await fixture.client.getMessages(chatId)).messages,
+        recoveryPrompt,
+      )).toBe(1);
     }, {
       prepareWorkspace: protocolProbe.prepareWorkspace,
       redactSensitiveDiagnostics: true,
@@ -658,36 +661,29 @@ describe('live Claude lifecycle', () => {
       expect(assistantContents(transcript.messages).join('\n')).not.toContain('SHOULD_NOT_COMPLETE');
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
 
+      const stoppedStarted = join(fixture.dirs.project, '.claude-stop-started');
+      const stoppedCommand = 'touch .claude-stop-started && sleep 30';
       const stoppedPrompt = [
-        'Use the Bash tool now to run exactly `sleep 30`.',
+        `Use the Bash tool now to run exactly \`${stoppedCommand}\`.`,
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly STOPPED_TURN_SHOULD_NOT_COMPLETE.',
       ].join(' ');
-      const stopCursor = fixture.client.markEvents();
       const stoppedTurn = await fixture.client.runChat(liveClaudeRunRequest({
         chatId,
         command: stoppedPrompt,
         permissionMode: 'bypassPermissions',
       }));
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'bash-tool-use'
-            && entry.message.command.includes('sleep 30')),
-        'live Claude stopped sleep tool use',
-        { afterIndex: stopCursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
+      await waitForFile(stoppedStarted);
       const stoppedInputUuid = await protocolProbe.waitForInputStarted(3);
       const stopCommandCursor = fixture.client.markEvents();
+      const stopRequestId = crypto.randomUUID();
       const stopped = await Promise.all([
         fixture.client.stopChat({
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: stopRequestId,
           chatId,
         }),
         fixture.client.stopChat({
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: stopRequestId,
           chatId,
         }),
       ]);
@@ -751,7 +747,7 @@ describe('live Claude lifecycle', () => {
       expect(assistantContents(stoppedTranscript.messages).join('\n'))
         .not.toContain('STOPPED_TURN_SHOULD_NOT_COMPLETE');
       const stoppedBash = messagesOfType(stoppedTranscript.messages, 'bash-tool-use')
-        .findLast((message) => message.command.includes('sleep 30'));
+        .findLast((message) => message.command.includes(stoppedCommand));
       if (!stoppedBash) throw new Error('Live Claude stopped Bash tool use was not rendered.');
       const stoppedResult = messagesOfType(stoppedTranscript.messages, 'tool-result')
         .find((message) => message.toolId === stoppedBash.toolId);
@@ -792,6 +788,15 @@ async function expectBusyFork(promise: Promise<unknown>): Promise<void> {
     status: 409,
     body: { errorCode: 'SESSION_BUSY', retryable: true },
   });
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (await Bun.file(path).exists()) return;
+    await Bun.sleep(25);
+  }
+  throw new Error('Timed out waiting for the live Claude command marker.');
 }
 
 interface PersistedClaudeChat {

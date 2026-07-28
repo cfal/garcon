@@ -380,13 +380,14 @@ describe('live Codex lifecycle', () => {
       }));
       await waitForFile(stoppedStarted);
       const stopCommandCursor = fixture.client.markEvents();
+      const stopRequestId = crypto.randomUUID();
       const stopped = await Promise.all([
         fixture.client.stopChat({
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: stopRequestId,
           chatId,
         }),
         fixture.client.stopChat({
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: stopRequestId,
           chatId,
         }),
       ]);
