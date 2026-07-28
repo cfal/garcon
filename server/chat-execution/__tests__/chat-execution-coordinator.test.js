@@ -879,6 +879,7 @@ describe('orchestration', () => {
       await orchQueue.completeDirectTurn(reservation);
 
       expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
+      expect(orchQueue.isChatTurnReserved('c1')).toBe(false);
       expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
       expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(/owns execution/);
       expect(settled).toEqual([]);

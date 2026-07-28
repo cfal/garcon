@@ -282,10 +282,10 @@ describe('AttentionTracker', () => {
       expect(html).toContain('Stopped');
     });
 
-    it('does not report an unsuccessful stop as stopped', async () => {
+    it.each(['already-idle', 'failed'])('does not report %s as an acknowledged stop', async (outcome) => {
       createTracker();
       historyMessages.push({ type: 'user-message', content: 'run tests' });
-      queue.emitSessionStopped('c1', 'failed');
+      queue.emitSessionStopped('c1', outcome);
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).not.toHaveBeenCalled();

@@ -912,6 +912,87 @@ describe('ChatCommandService', () => {
     expect(stopActiveTurn).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['finished', 'interrupt-requested'],
+    ['failed', 'failed'],
+  ])('maps a legacy %s Stop ledger record to %s', async (status, expectedOutcome) => {
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: `req-stop-legacy-${status}`,
+    };
+    const { service, ledger, queue } = makeService();
+    await service.submitStop(input);
+    await ledger.update(
+      commandLedgerKey('agent-stop', SOURCE_CHAT_ID, input.clientRequestId),
+      { status, stopOutcome: undefined },
+    );
+
+    await expect(service.submitStop(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      outcome: expectedOutcome,
+    });
+    expect(queue.stopActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays an Interrupt and Send outcome without executing a second abort', async () => {
+    const interruptActiveTurn = mock(async () => 'already-idle');
+    const { service } = makeService({ queue: { interruptActiveTurn } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-interrupt-duplicate',
+    };
+
+    const first = await service.submitInterruptAndSend(input);
+    const duplicate = await service.submitInterruptAndSend(input);
+
+    expect(first).toMatchObject({
+      status: 'accepted',
+      outcome: 'already-idle',
+    });
+    expect(duplicate).toMatchObject({
+      status: 'duplicate',
+      outcome: 'already-idle',
+    });
+    expect(interruptActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('records one acknowledged latch outcome for two unique Stop commands', async () => {
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    let running = true;
+    const abortSession = mock(async () => true);
+    const queueService = makeRealQueue(pendingInputsService, {
+      abortSession,
+      isChatRunning: mock(() => running),
+    });
+    const { service, ledger } = makeService({
+      pendingInputsService,
+      queueService,
+    });
+
+    const first = await service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-first',
+    });
+    const second = await service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-second',
+    });
+
+    expect(first.outcome).toBe('interrupt-requested');
+    expect(second.outcome).toBe('interrupt-requested');
+    expect(abortSession).toHaveBeenCalledTimes(1);
+    expect((await readLedgerRecord(ledger, 'agent-stop', 'req-stop-first')).stopOutcome)
+      .toBe('interrupt-requested');
+    expect((await readLedgerRecord(ledger, 'agent-stop', 'req-stop-second')).stopOutcome)
+      .toBe('interrupt-requested');
+
+    running = false;
+    await queueService.checkChatIdle(SOURCE_CHAT_ID);
+  });
+
   it('settles Send now through the command lock before launching its successor once', async () => {
     const firstTurnStarted = deferred();
     const firstTurnResult = deferred();

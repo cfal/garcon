@@ -103,12 +103,17 @@ describe('ConversationLifecycleState', () => {
 		it('clears stale stopping metadata when the phase becomes idle', () => {
 			const store = makeStore();
 			store.beginTurn('chat-1');
-			store.beginStopping('chat-1', 'request-1');
+			const snapshot = store.beginStopping('chat-1', 'request-1');
 
 			store.applyProcessingPhase('chat-1', null);
 
 			expect(store.turnStatus).toBe('idle');
 			expect(store.loadingStatus).toBeNull();
+
+			store.beginTurn('chat-1');
+			store.restoreStopping('chat-1', 'request-1', snapshot);
+			expect(store.turnStatus).toBe('running');
+			expect(store.loadingStatus).toMatchObject({ text: 'Processing', can_interrupt: true });
 		});
 	});
 

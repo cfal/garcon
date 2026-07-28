@@ -186,6 +186,28 @@ describe('server event wiring', () => {
     ]);
   });
 
+  it('recomputes processing phases for terminal, successor, and provider transitions', () => {
+    let phase = null;
+    const published = [];
+    const fixture = createWiringFixture({
+      processing: { phase: mock(() => phase) },
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.queueListeners.processing('chat-1');
+    phase = 'running';
+    fixture.queueListeners.processing('chat-1');
+    fixture.agentListeners.processing('chat-1', false);
+
+    expect(published).toEqual([
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: null },
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
+    ]);
+  });
+
   it('clears optimistic processing before publishing a queued launch failure', async () => {
     const published = [];
     const fixture = createWiringFixture({

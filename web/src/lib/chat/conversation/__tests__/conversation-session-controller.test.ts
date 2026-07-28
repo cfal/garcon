@@ -33,7 +33,10 @@ import type {
 	PermissionMode,
 	ChatExecutionControlState,
 } from '$lib/types/chat';
-import type { LoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import {
+	ConversationLifecycleState,
+	type LoadingStatus,
+} from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 
 vi.mock('$lib/api/chats.js', () => ({
@@ -286,9 +289,9 @@ function createDeps(chat = createRunningChat()) {
 			patchLastReadAt: vi.fn(),
 			applyStartEntry: vi.fn(),
 			applyProcessingEvent: vi.fn(),
-			processingPhase: vi.fn((chatId: string) => (
-				chatId === chat.id ? chat.processingPhase : null
-			)),
+			processingPhase: vi.fn((chatId: string) =>
+				chatId === chat.id ? chat.processingPhase : null,
+			),
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			renameChat: vi.fn().mockResolvedValue(true),
@@ -841,6 +844,51 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.localNotices).toEqual([]);
 	});
 
+	it('keeps a satisfied Stop successful when its immediate reconciliation fails', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		mockStopChat.mockResolvedValue({
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop-idle',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			outcome: 'already-idle',
+			control: emptyControl(),
+		});
+		deps.requestProcessingSnapshot.mockRejectedValue(new Error('probe unavailable'));
+		const controller = new ConversationSessionController(deps);
+
+		await controller.handleAbort();
+
+		expect(deps.lifecycle.restoreStopping).not.toHaveBeenCalled();
+		expect(deps.chatState.localNotices).toEqual([]);
+	});
+
+	it('does not issue a second Stop while the first request owns noninterruptible Stopping', async () => {
+		const result = deferred<Awaited<ReturnType<typeof stopChat>>>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const lifecycle = new ConversationLifecycleState();
+		lifecycle.beginTurn('chat-1');
+		Object.defineProperty(deps, 'lifecycle', { value: lifecycle });
+		mockStopChat.mockReturnValue(result.promise);
+		const controller = new ConversationSessionController(deps);
+
+		const first = controller.handleAbort();
+		await controller.handleAbort();
+
+		expect(mockStopChat).toHaveBeenCalledOnce();
+		result.resolve({
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			outcome: 'already-idle',
+			control: emptyControl(),
+		});
+		await first;
+	});
+
 	it('treats an already-idle Interrupt and Send as satisfied', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		mockInterruptAndSendChat.mockResolvedValue({
@@ -904,6 +952,65 @@ describe('ConversationSessionController', () => {
 				content: 'Failed to stop chat: Stop request failed. The chat is still running.',
 			}),
 		]);
+	});
+
+	it('does not let a failed Stop restore over a newer processing phase', async () => {
+		const result = deferred<Awaited<ReturnType<typeof stopChat>>>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const lifecycle = new ConversationLifecycleState();
+		lifecycle.beginTurn('chat-1');
+		Object.defineProperty(deps, 'lifecycle', { value: lifecycle });
+		mockStopChat.mockReturnValue(result.promise);
+		const controller = new ConversationSessionController(deps);
+
+		const stop = controller.handleAbort();
+		lifecycle.applyProcessingPhase('chat-1', 'running');
+		result.resolve({
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop-failed',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			outcome: 'failed',
+			control: emptyControl(),
+		});
+		await stop;
+
+		expect(lifecycle.turnStatus).toBe('running');
+		expect(lifecycle.loadingStatus).toMatchObject({
+			text: 'Processing',
+			can_interrupt: true,
+		});
+	});
+
+	it('does not let a delayed failed Stop mutate the newly selected chat', async () => {
+		const result = deferred<Awaited<ReturnType<typeof stopChat>>>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const lifecycle = new ConversationLifecycleState();
+		lifecycle.beginTurn('chat-1');
+		Object.defineProperty(deps, 'lifecycle', { value: lifecycle });
+		mockStopChat.mockReturnValue(result.promise);
+		const controller = new ConversationSessionController(deps);
+
+		const stop = controller.handleAbort();
+		deps.sessions.selectedChatId = 'chat-2';
+		deps.chatState.activeChatId = 'chat-2';
+		lifecycle.beginTurn('chat-2');
+		result.resolve({
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop-failed',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			outcome: 'failed',
+			control: emptyControl(),
+		});
+		await stop;
+
+		expect(lifecycle.currentChatId).toBe('chat-2');
+		expect(lifecycle.turnStatus).toBe('running');
+		expect(lifecycle.loadingStatus).toMatchObject({ text: 'Processing', can_interrupt: true });
+		expect(deps.chatState.localNotices).toEqual([]);
 	});
 
 	it('submits /fork with a message as a fork-run request after appending the status message', async () => {
@@ -1947,11 +2054,13 @@ describe('ConversationSessionController', () => {
 			{
 				entries: [],
 				dispatchingEntryId: null,
-				recentlyDispatched: [{
-					entryId: 'entry-1',
-					revision: 1,
-					dispatchedAt: '2026-07-16T00:00:00.000Z',
-				}],
+				recentlyDispatched: [
+					{
+						entryId: 'entry-1',
+						revision: 1,
+						dispatchedAt: '2026-07-16T00:00:00.000Z',
+					},
+				],
 				pause: null,
 			},
 			{

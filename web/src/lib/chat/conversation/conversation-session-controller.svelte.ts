@@ -551,6 +551,7 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return Promise.resolve();
+		if (deps.lifecycle.loadingStatus?.can_interrupt === false) return Promise.resolve();
 		const clientRequestId = createClientCommandId();
 		const previous = deps.lifecycle.beginStopping(chatId, clientRequestId);
 		const restore = () => deps.lifecycle.restoreStopping(chatId, clientRequestId, previous);

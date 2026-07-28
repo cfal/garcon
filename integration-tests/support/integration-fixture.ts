@@ -306,7 +306,7 @@ export class IntegrationFixture {
     clientRequestId?: string;
     turnId?: string;
   }): Promise<void> {
-    const nativePath = await this.#directOpenAiNativePath(input.chatId);
+    const nativePath = await this.directOpenAiNativePath(input.chatId);
     const raw = await readFile(nativePath, 'utf8');
     if (raw.length > 0 && !raw.endsWith('\n')) {
       throw new Error('Direct native transcript has an incomplete tail.');
@@ -320,7 +320,7 @@ export class IntegrationFixture {
     })}\n`, 'utf8');
   }
 
-  async #directOpenAiNativePath(chatId: string): Promise<string> {
+  async directOpenAiNativePath(chatId: string): Promise<string> {
     const registry = JSON.parse(
       await readFile(join(this.dirs.workspace, 'chats.json'), 'utf8'),
     ) as { sessions?: Record<string, Record<string, unknown>> };
@@ -358,7 +358,7 @@ export class IntegrationFixture {
   }
 
   async #removeFinalNativeUserRow(input: { chatId: string; clientRequestId: string }): Promise<void> {
-    const expectedPath = await this.#directOpenAiNativePath(input.chatId);
+    const expectedPath = await this.directOpenAiNativePath(input.chatId);
     const raw = await readFile(expectedPath, 'utf8');
     if (!raw.endsWith('\n')) throw new Error('Direct native transcript has an incomplete tail.');
     const lines = raw.split('\n').filter((line) => line.length > 0);

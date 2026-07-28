@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   accessSync,
   appendFileSync,
+  existsSync,
   mkdirSync,
   writeFileSync,
 } from 'node:fs';
@@ -10,6 +11,11 @@ import { join, resolve } from 'node:path';
 
 const MAX_SANITIZED_LENGTH = 200;
 const args = process.argv.slice(2);
+let heldInput: {
+  uuid: string;
+  sessionId: string;
+} | null = null;
+let heldAbortPoll: ReturnType<typeof setInterval> | null = null;
 
 if (args.includes('--version')) {
   console.log('2.1.220 (Claude Code)');
@@ -119,6 +125,20 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
     uuid?: string;
     message?: { role?: string; content?: unknown };
   };
+  if (input.type === 'control_request' && input.request?.subtype === 'interrupt') {
+    writeOutput({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: input.request_id,
+        response: { cancelled: [], still_queued: [] },
+      },
+    });
+    const interruptPath = process.env.CLAUDE_TEST_INTERRUPT_PATH;
+    if (interruptPath) appendFileSync(interruptPath, 'interrupt\n');
+    scheduleHeldAbortSettlement();
+    return;
+  }
   if (
     input.type === 'control_request'
     && (input.request?.subtype === 'initialize' || input.request?.subtype === 'set_model')
@@ -140,6 +160,45 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
   const response = `echo:${prompt}`;
   const userTimestamp = new Date().toISOString();
   const assistantTimestamp = new Date(Date.now() + 1).toISOString();
+  if (process.env.CLAUDE_TEST_HOLD_ACTIVE === '1') {
+    appendFileSync(nativePath, `${JSON.stringify({
+      sessionId,
+      type: 'user',
+      uuid: input.uuid,
+      timestamp: userTimestamp,
+      cwd: process.cwd(),
+      message: { role: 'user', content: prompt },
+    })}\n`);
+    writeOutput({
+      type: 'command_lifecycle',
+      command_uuid: input.uuid,
+      state: 'queued',
+      session_id: sessionId,
+    });
+    writeOutput({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'running',
+      session_id: sessionId,
+    });
+    writeOutput({
+      type: 'command_lifecycle',
+      command_uuid: input.uuid,
+      state: 'started',
+      session_id: sessionId,
+    });
+    writeOutput({
+      type: 'user',
+      uuid: input.uuid,
+      isReplay: true,
+      message: input.message,
+      session_id: sessionId,
+    });
+    heldInput = { uuid: input.uuid, sessionId };
+    const startedPath = process.env.CLAUDE_TEST_STARTED_PATH;
+    if (startedPath) writeFileSync(startedPath, `${input.uuid}\n`);
+    return;
+  }
   appendFileSync(nativePath, [
     JSON.stringify({
       sessionId,
@@ -217,6 +276,42 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
     state: 'idle',
     session_id: sessionId,
   });
+}
+
+function scheduleHeldAbortSettlement(): void {
+  if (!heldInput || heldAbortPoll) return;
+  const releasePath = process.env.CLAUDE_TEST_RELEASE_PATH;
+  if (!releasePath) return;
+  heldAbortPoll = setInterval(() => {
+    if (!heldInput || !existsSync(releasePath)) return;
+    const input = heldInput;
+    heldInput = null;
+    if (heldAbortPoll) clearInterval(heldAbortPoll);
+    heldAbortPoll = null;
+    writeOutput({
+      type: 'result',
+      subtype: 'error_during_execution',
+      terminal_reason: 'aborted_tools',
+      is_error: true,
+      duration_ms: 1,
+      num_turns: 1,
+      result: '',
+      user_message_uuid: input.uuid,
+      session_id: input.sessionId,
+    });
+    writeOutput({
+      type: 'command_lifecycle',
+      command_uuid: input.uuid,
+      state: 'cancelled',
+      session_id: input.sessionId,
+    });
+    writeOutput({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'idle',
+      session_id: input.sessionId,
+    });
+  }, 5);
 }
 
 function messageText(content: unknown): string {
