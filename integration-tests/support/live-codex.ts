@@ -298,6 +298,7 @@ export function liveCodexForkRunRequest(input: {
   sourceChatId: string;
   chatId: string;
   command: string;
+  permissionMode?: ForkRunCommandRequest['permissionMode'];
 }): ForkRunCommandRequest {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -305,7 +306,7 @@ export function liveCodexForkRunRequest(input: {
     sourceChatId: input.sourceChatId,
     chatId: input.chatId,
     command: input.command,
-    permissionMode: 'default',
+    permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CODEX_THINKING_MODE,
     agentSettings: CODEX_AGENT_SETTINGS,
     model: LIVE_CODEX_MODEL,

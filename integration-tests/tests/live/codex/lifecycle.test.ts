@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { PendingUserInputUpdatedMessage } from '../../../../common/ws-events.js';
 import {
@@ -12,6 +12,7 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../../support/integration-fixture.js';
+import { GarconApiError } from '../../../support/garcon-client.js';
 import {
   exactReplyPrompt,
   expectAssistantMarker,
@@ -27,6 +28,7 @@ import {
   startLiveCodexTestEnvironment,
   type LiveCodexTestEnvironment,
 } from '../../../support/live-codex.js';
+import { createLiveCodexProtocolProbe } from '../../../support/live-codex-protocol-probe.js';
 
 describe('live Codex lifecycle', () => {
   let liveEnvironment: LiveCodexTestEnvironment | undefined;
@@ -68,6 +70,21 @@ describe('live Codex lifecycle', () => {
       const queueCursor = fixture.client.markEvents();
       const queued = await fixture.client.enqueueNew(parentChatId, secondPrompt);
       expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([secondPrompt]);
+      const childChatId = fixture.newChatId();
+      const childMarker = liveMarker('CODEX_CHILD');
+      const childPrompt = [
+        'Use the shell tool now to run exactly `sleep 2`.',
+        `After it succeeds, reply with exactly ${childMarker}.`,
+        'Do not run any other command.',
+      ].join(' ');
+      const childCursor = fixture.client.markEvents();
+      const childRequest = liveCodexForkRunRequest({
+        sourceChatId: parentChatId,
+        chatId: childChatId,
+        command: childPrompt,
+        permissionMode: 'bypassPermissions',
+      });
+      await expectBusyFork(fixture.client.forkRunChat(childRequest));
 
       expectFinished((await fixture.client.waitForTurnTerminal(parentChatId, first.turnId, {
         afterIndex: firstCursor,
@@ -88,21 +105,31 @@ describe('live Codex lifecycle', () => {
         { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       )).type);
 
-      const childChatId = fixture.newChatId();
-      const childMarker = liveMarker('CODEX_CHILD');
-      const childPrompt = exactReplyPrompt(childMarker);
-      const childCursor = fixture.client.markEvents();
-      const child = await fixture.client.forkRunChat(liveCodexForkRunRequest({
-        sourceChatId: parentChatId,
-        chatId: childChatId,
-        command: childPrompt,
-      }));
+      const child = await fixture.client.forkRunChat(childRequest);
+      const grandchildChatId = fixture.newChatId();
+      const grandchildMarker = liveMarker('CODEX_GRANDCHILD');
+      const grandchildPrompt = exactReplyPrompt(grandchildMarker);
+      const grandchildCursor = fixture.client.markEvents();
+      const grandchildRequest = liveCodexForkRunRequest({
+        sourceChatId: childChatId,
+        chatId: grandchildChatId,
+        command: grandchildPrompt,
+      });
+      await expectBusyFork(fixture.client.forkRunChat(grandchildRequest));
       await waitForVisibleResponse({
         fixture,
         chatId: childChatId,
         turnId: child.turnId,
         marker: childMarker,
         afterIndex: childCursor,
+      });
+      const grandchild = await fixture.client.forkRunChat(grandchildRequest);
+      await waitForVisibleResponse({
+        fixture,
+        chatId: grandchildChatId,
+        turnId: grandchild.turnId,
+        marker: grandchildMarker,
+        afterIndex: grandchildCursor,
       });
 
       const parentAfterQueue = await fixture.client.getMessages(parentChatId);
@@ -131,23 +158,6 @@ describe('live Codex lifecycle', () => {
         turnId: pointTurn.turnId,
         marker: pointMarker,
         afterIndex: pointCursor,
-      });
-
-      const grandchildChatId = fixture.newChatId();
-      const grandchildMarker = liveMarker('CODEX_GRANDCHILD');
-      const grandchildPrompt = exactReplyPrompt(grandchildMarker);
-      const grandchildCursor = fixture.client.markEvents();
-      const grandchild = await fixture.client.forkRunChat(liveCodexForkRunRequest({
-        sourceChatId: childChatId,
-        chatId: grandchildChatId,
-        command: grandchildPrompt,
-      }));
-      await waitForVisibleResponse({
-        fixture,
-        chatId: grandchildChatId,
-        turnId: grandchild.turnId,
-        marker: grandchildMarker,
-        afterIndex: grandchildCursor,
       });
 
       const parentContinuationMarker = liveMarker('CODEX_PARENT_CONTINUATION');
@@ -233,6 +243,70 @@ describe('live Codex lifecycle', () => {
     });
   });
 
+  test('auto-approves an escalated app-server command in manual bypass', async () => {
+    if (!liveEnvironment) throw new Error('Live Codex test environment was not initialized.');
+    const testEnvironment = liveEnvironment;
+    const serverEnvironment = { ...testEnvironment.serverEnvironment };
+    const protocolProbe = createLiveCodexProtocolProbe(serverEnvironment);
+    const output = liveMarker('CODEX_MANUAL_BYPASS');
+    const outsidePath = join(
+      process.cwd(),
+      `.live-codex-manual-bypass-${crypto.randomUUID()}`,
+    );
+    const command = `printf %s ${output} > ${outsidePath} && cat ${outsidePath}`;
+
+    try {
+      await withIntegrationFixture('live-codex-manual-bypass', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const prompt = [
+          `Use the shell tool to run exactly \`${command}\`.`,
+          `After it succeeds, reply with exactly ${output}.`,
+          'Do not run any other command.',
+        ].join(' ');
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(liveCodexStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: prompt,
+          permissionMode: 'manualBypass',
+        }));
+        await waitForVisibleResponse({
+          fixture,
+          chatId,
+          turnId: turn.turnId,
+          marker: output,
+          afterIndex: cursor,
+        });
+
+        expect((await readFile(outsidePath, 'utf8')).trim()).toBe(output);
+        expect(await protocolProbe.waitForApprovalRequest()).toBe(
+          'item/commandExecution/requestApproval',
+        );
+        expect(await protocolProbe.readApprovalRequests()).toEqual([
+          'item/commandExecution/requestApproval',
+        ]);
+        const transcript = await fixture.client.getMessages(chatId);
+        expectPersistedCommand(transcript, command, output);
+        expect(messagesOfType(transcript.messages, 'permission-request')).toEqual([]);
+
+        await fixture.restartGarcon();
+        const restored = await fixture.client.getMessages(chatId);
+        expectPersistedCommand(restored, command, output);
+        expect(countUserContent(restored.messages, prompt)).toBe(1);
+      }, {
+        forbiddenPersistedValues: testEnvironment.forbiddenPersistedValues,
+        redactSensitiveDiagnostics: true,
+        serverEnvironment,
+        prepareWorkspace: async (directories) => {
+          await testEnvironment.prepareWorkspace(directories);
+          await protocolProbe.prepareWorkspace(directories);
+        },
+      });
+    } finally {
+      await rm(outsidePath, { force: true });
+    }
+  });
+
   test('interrupts and stops active tools while preserving later delivery', async () => {
     if (!liveEnvironment) throw new Error('Live Codex test environment was not initialized.');
     const testEnvironment = liveEnvironment;
@@ -247,7 +321,7 @@ describe('live Codex lifecycle', () => {
       ].join(' ');
       const successorMarker = liveMarker('CODEX_INTERRUPT_SUCCESSOR');
       const successorPrompt = exactReplyPrompt(successorMarker);
-      await fixture.client.startChat(liveCodexStartRequest({
+      const active = await fixture.client.startChat(liveCodexStartRequest({
         chatId,
         projectPath: fixture.dirs.project,
         command: interruptedPrompt,
@@ -284,6 +358,13 @@ describe('live Codex lifecycle', () => {
       expectAssistantMarker(assistantContents(transcript.messages), successorMarker);
       expect(assistantContents(transcript.messages).join('\n'))
         .not.toContain('CODEX_SHOULD_NOT_COMPLETE');
+      expect(fixture.client.eventsSince(interruptCursor)).not.toContainEqual(
+        expect.objectContaining({
+          type: 'agent-run-failed',
+          chatId,
+          turnId: active.turnId,
+        }),
+      );
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
 
       const stoppedStarted = join(fixture.dirs.project, '.codex-stop-started');
@@ -292,25 +373,82 @@ describe('live Codex lifecycle', () => {
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE.',
       ].join(' ');
-      const stopCursor = fixture.client.markEvents();
-      await fixture.client.runChat(liveCodexRunRequest({
+      const stoppedTurn = await fixture.client.runChat(liveCodexRunRequest({
         chatId,
         command: stoppedPrompt,
         permissionMode: 'bypassPermissions',
       }));
       await waitForFile(stoppedStarted);
-      const stopped = await fixture.client.stopChat({
-        clientRequestId: crypto.randomUUID(),
-        chatId,
-      });
-      expect(stopped.outcome).toBe('interrupt-requested');
+      const stopCommandCursor = fixture.client.markEvents();
+      const stopped = await Promise.all([
+        fixture.client.stopChat({
+          clientRequestId: crypto.randomUUID(),
+          chatId,
+        }),
+        fixture.client.stopChat({
+          clientRequestId: crypto.randomUUID(),
+          chatId,
+        }),
+      ]);
+      expect(stopped.map((response) => response.outcome)).toEqual([
+        'interrupt-requested',
+        'interrupt-requested',
+      ]);
       await fixture.client.waitForProcessing(chatId, false, {
-        afterIndex: stopCursor,
+        afterIndex: stopCommandCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
-      expect(assistantContents(
-        (await fixture.client.getMessages(chatId)).messages,
-      ).join('\n')).not.toContain('CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE');
+      const stopEvents = fixture.client.eventsSince(stopCommandCursor);
+      expect(stopEvents.filter((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'interrupt-requested'
+        && event.intent === 'stop')).toHaveLength(1);
+      const stoppingIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.phase === 'stopping');
+      const outcomeIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'interrupt-requested'
+        && event.intent === 'stop');
+      const idleIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.phase === null);
+      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
+      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+      expect(idleIndex).toBeGreaterThan(stoppingIndex);
+      expect(stopEvents).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-failed',
+        chatId,
+        turnId: stoppedTurn.turnId,
+      }));
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+
+      const stoppedTranscript = await fixture.client.getMessages(chatId);
+      expect(assistantContents(stoppedTranscript.messages).join('\n'))
+        .not.toContain('CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE');
+      const stoppedBash = messagesOfType(stoppedTranscript.messages, 'bash-tool-use')
+        .findLast((message) => message.command.includes('sleep 30'));
+      if (!stoppedBash) throw new Error('Live Codex stopped shell tool use was not rendered.');
+      const stoppedResult = messagesOfType(stoppedTranscript.messages, 'tool-result')
+        .find((message) => message.toolId === stoppedBash.toolId);
+      expect(stoppedResult?.isError).toBe(true);
+
+      await fixture.restartGarcon();
+      const restoredTranscript = await fixture.client.getMessages(chatId);
+      const restoredBash = messagesOfType(restoredTranscript.messages, 'bash-tool-use')
+        .findLast((message) => message.command.includes('sleep 30'));
+      const restoredResult = messagesOfType(restoredTranscript.messages, 'tool-result')
+        .find((message) => message.toolId === restoredBash?.toolId);
+      expect(restoredBash).toBeDefined();
+      expect(restoredResult?.isError).toBe(true);
+      expect(restoredResult?.content).toEqual(stoppedResult?.content);
 
       const recoveryMarker = liveMarker('CODEX_POST_INTERRUPT');
       const recoveryPrompt = exactReplyPrompt(recoveryMarker);
@@ -334,6 +472,20 @@ describe('live Codex lifecycle', () => {
     });
   });
 });
+
+async function expectBusyFork(promise: Promise<unknown>): Promise<void> {
+  let error: unknown;
+  try {
+    await promise;
+  } catch (cause) {
+    error = cause;
+  }
+  expect(error).toBeInstanceOf(GarconApiError);
+  expect(error).toMatchObject({
+    status: 409,
+    body: { errorCode: 'SESSION_BUSY', retryable: true },
+  });
+}
 
 function expectPersistedCommand(
   transcript: Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>,
