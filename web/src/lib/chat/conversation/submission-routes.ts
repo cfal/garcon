@@ -113,8 +113,8 @@ export async function submitDraftRoute(
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
 			onRejected: () => {
-				deps.lifecycle.clearTurnStatus();
-				deps.sessions.applyProcessingEvent(chatId, false);
+				deps.lifecycle.clearTurnStatus(chatId);
+				deps.sessions.applyProcessingEvent(chatId, null);
 			},
 		});
 	} finally {

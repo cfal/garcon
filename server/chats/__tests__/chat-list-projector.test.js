@@ -55,7 +55,7 @@ function makeDeps() {
           lastMessage: 'Latest line',
         })),
       },
-      agents: { isAgentSessionRunning: mock(() => true) },
+      processing: { phase: mock(() => 'running') },
       pathCache: {
         resolveProjectPath: mock(() =>
           Promise.resolve({
@@ -93,6 +93,8 @@ describe('ChatListProjector', () => {
       isPinned: false,
       isArchived: false,
       isActive: true,
+      isProcessing: true,
+      processingPhase: 'running',
       title: 'First line',
     });
   });

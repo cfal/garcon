@@ -38,7 +38,7 @@ class FakeConnection implements PrimaryWsConnectionPort {
 
 	receive(message: Record<string, unknown>): boolean {
 		for (const consumer of [...this.consumers]) {
-			if (consumer(message)) return true;
+			if (consumer(message, {})) return true;
 		}
 		return false;
 	}

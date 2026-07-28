@@ -16,6 +16,8 @@ import {
 	setAppShell,
 	getWs,
 	setWs,
+	getChatProcessingReconciler,
+	setChatProcessingReconciler,
 	getModelCatalog,
 	setModelCatalog,
 	getActiveTranscriptState,
@@ -54,6 +56,8 @@ describe('context factories', () => {
 		expect(typeof setAppShell).toBe('function');
 		expect(typeof getWs).toBe('function');
 		expect(typeof setWs).toBe('function');
+		expect(typeof getChatProcessingReconciler).toBe('function');
+		expect(typeof setChatProcessingReconciler).toBe('function');
 		expect(typeof getModelCatalog).toBe('function');
 		expect(typeof setModelCatalog).toBe('function');
 		expect(typeof getNotifications).toBe('function');

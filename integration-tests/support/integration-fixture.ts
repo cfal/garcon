@@ -1,4 +1,13 @@
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,9 +54,55 @@ export interface IntegrationDirectories {
 export interface IntegrationFixtureOptions {
   chatTitleEnabled?: boolean;
   chatTitleAgent?: keyof DirectTestAgents;
+  forbiddenPersistedValues?: readonly string[];
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
   redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
+}
+
+const SENSITIVE_ENVIRONMENT_NAME =
+  /(?:api[_-]?key|auth[_-]?token|credential|password|secret|token)/i;
+
+function sensitiveEnvironmentValues(environment: Record<string, string>): string[] {
+  return [...new Set(Object.entries(environment)
+    .filter(([name, value]) => SENSITIVE_ENVIRONMENT_NAME.test(name) && value.length > 0)
+    .map(([, value]) => value))];
+}
+
+async function directoryContainsAnyValue(
+  directory: string,
+  values: readonly Buffer[],
+): Promise<boolean> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (await directoryContainsAnyValue(path, values)) return true;
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const contents = await readFile(path);
+    if (values.some((value) => contents.indexOf(value) >= 0)) return true;
+  }
+  return false;
+}
+
+export async function assertSensitiveValuesNotPersisted(input: {
+  directory: string;
+  diagnostics: unknown;
+  values: readonly string[];
+}): Promise<void> {
+  const values = [...new Set(input.values.filter((value) => value.length > 0))];
+  if (values.length === 0) return;
+  const diagnostics = JSON.stringify(input.diagnostics) ?? '';
+  if (
+    values.some((value) => diagnostics.includes(value))
+    || await directoryContainsAnyValue(
+      input.directory,
+      values.map((value) => Buffer.from(value)),
+    )
+  ) {
+    throw new Error('A sensitive integration credential was persisted by the test workflow.');
+  }
 }
 
 interface IntegrationProcessRunDiagnostics {
@@ -117,6 +172,7 @@ export class IntegrationFixture {
     anthropic: FakeAnthropicServer;
   };
   readonly directAgents: DirectTestAgents;
+  readonly #forbiddenPersistedValues: readonly string[];
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #serverEnvironment: Record<string, string>;
   garcon: GarconProcess;
@@ -131,6 +187,7 @@ export class IntegrationFixture {
     garcon: GarconProcess;
     client: GarconTestClient;
     directAgents: DirectTestAgents;
+    forbiddenPersistedValues?: readonly string[];
     redactSensitiveDiagnostics?: boolean;
     serverEnvironment?: Record<string, string>;
   }) {
@@ -140,6 +197,7 @@ export class IntegrationFixture {
     this.client = input.client;
     this.#clients.set('primary', input.client);
     this.directAgents = input.directAgents;
+    this.#forbiddenPersistedValues = [...(input.forbiddenPersistedValues ?? [])];
     this.#redactSensitiveDiagnostics = input.redactSensitiveDiagnostics === true;
     this.#serverEnvironment = { ...(input.serverEnvironment ?? {}) };
   }
@@ -217,6 +275,7 @@ export class IntegrationFixture {
         garcon,
         client,
         directAgents,
+        forbiddenPersistedValues: options.forbiddenPersistedValues,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
         serverEnvironment: options.serverEnvironment,
       });
@@ -299,14 +358,35 @@ export class IntegrationFixture {
     await this.#startReplacementGarcon();
   }
 
-  async #removeFinalNativeUserRow(input: { chatId: string; clientRequestId: string }): Promise<void> {
+  async appendDirectOpenAiNativeMessage(input: {
+    chatId: string;
+    role: 'user' | 'assistant';
+    content: string;
+    clientRequestId?: string;
+    turnId?: string;
+  }): Promise<void> {
+    const nativePath = await this.directOpenAiNativePath(input.chatId);
+    const raw = await readFile(nativePath, 'utf8');
+    if (raw.length > 0 && !raw.endsWith('\n')) {
+      throw new Error('Direct native transcript has an incomplete tail.');
+    }
+    await appendFile(nativePath, `${JSON.stringify({
+      role: input.role,
+      content: input.content,
+      timestamp: new Date().toISOString(),
+      ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+    })}\n`, 'utf8');
+  }
+
+  async directOpenAiNativePath(chatId: string): Promise<string> {
     const registry = JSON.parse(
       await readFile(join(this.dirs.workspace, 'chats.json'), 'utf8'),
     ) as { sessions?: Record<string, Record<string, unknown>> };
-    const chat = registry.sessions?.[input.chatId];
-    if (!chat) throw new Error(`Chat ${input.chatId} was not persisted before crash.`);
+    const chat = registry.sessions?.[chatId];
+    if (!chat) throw new Error(`Chat ${chatId} was not persisted before restart.`);
     if (chat.agentId !== DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
-      throw new Error(`Chat ${input.chatId} is not a direct OpenAI-compatible chat.`);
+      throw new Error(`Chat ${chatId} is not a direct OpenAI-compatible chat.`);
     }
     const nativeSession = chat.nativeSession && typeof chat.nativeSession === 'object'
       ? chat.nativeSession as Record<string, unknown>
@@ -331,9 +411,13 @@ export class IntegrationFixture {
       || !nativePath
       || resolve(nativePath) !== expectedPath
     ) {
-      throw new Error(`Chat ${input.chatId} has an unexpected native transcript path.`);
+      throw new Error(`Chat ${chatId} has an unexpected native transcript path.`);
     }
+    return expectedPath;
+  }
 
+  async #removeFinalNativeUserRow(input: { chatId: string; clientRequestId: string }): Promise<void> {
+    const expectedPath = await this.directOpenAiNativePath(input.chatId);
     const raw = await readFile(expectedPath, 'utf8');
     if (!raw.endsWith('\n')) throw new Error('Direct native transcript has an incomplete tail.');
     const lines = raw.split('\n').filter((line) => line.length > 0);
@@ -427,6 +511,22 @@ export class IntegrationFixture {
       this.garcon.assertNoUnexpectedExit();
     } catch (error) {
       errors.push(error);
+    }
+    const forbiddenPersistedValues = [
+      ...sensitiveEnvironmentValues(this.#serverEnvironment),
+      ...this.#forbiddenPersistedValues,
+    ];
+    // Credential-backed fixtures verify that redaction never became on-disk persistence.
+    if (forbiddenPersistedValues.length > 0) {
+      try {
+        await assertSensitiveValuesNotPersisted({
+          directory: this.dirs.root,
+          diagnostics: this.diagnostics(),
+          values: forbiddenPersistedValues,
+        });
+      } catch (error) {
+        errors.push(error);
+      }
     }
     this.fakeProviders.openAi.stop();
     this.fakeProviders.openAiResponses.stop();

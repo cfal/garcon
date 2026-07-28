@@ -29,7 +29,7 @@ function expectVisibleResponseBeforeSettlement(input: {
   const processingStarted = input.events.findIndex((event) =>
     event.type === 'chat-processing-updated'
     && event.chatId === input.chatId
-    && event.isProcessing);
+    && event.phase !== null);
   const assistantResponse = input.events.findIndex((event) =>
     event.type === 'chat-messages'
     && event.chatId === input.chatId
@@ -39,7 +39,7 @@ function expectVisibleResponseBeforeSettlement(input: {
   const processingStopped = input.events.findIndex((event) =>
     event.type === 'chat-processing-updated'
     && event.chatId === input.chatId
-    && !event.isProcessing);
+    && event.phase === null);
   const terminal = input.events.findIndex((event) =>
     (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
     && event.chatId === input.chatId

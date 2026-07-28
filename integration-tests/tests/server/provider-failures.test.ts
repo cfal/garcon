@@ -184,7 +184,7 @@ describe('provider failures', () => {
         index > dispatchEventIndex
         && event.type === 'chat-processing-updated'
         && event.chatId === chatId
-        && event.isProcessing === false
+        && event.phase === null
       ));
       const terminalEventIndex = failureEvents.findIndex((event) => (
         event.type === 'agent-run-failed' && event.chatId === chatId
@@ -352,7 +352,10 @@ describe('provider failures', () => {
       await healthy.received;
       expect((await fixture.client.waitForTurnTerminal(failedChat, failed.turnId)).type).toBe('agent-run-failed');
       const reconnect = await fixture.client.reconnectState([failedChat, healthyChat]);
-      expect(reconnect.processing).toEqual({ outcome: 'snapshot', runningChatIds: [healthyChat] });
+      expect(reconnect.processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId: healthyChat, phase: 'running' }],
+      });
       expect((await fixture.client.getMessages(healthyChat)).pendingUserInputs).toHaveLength(1);
 
       const completionCursor = fixture.client.markEvents();

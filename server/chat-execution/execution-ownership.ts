@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { ChatStopIntent } from '../../common/chat-types.ts';
+import type { ChatStopIntent, ChatStopOutcome } from '../../common/chat-types.ts';
 import type { AgentExecutionAdmission } from '../agents/session-types.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
@@ -156,6 +156,23 @@ export class ExecutionOwnership {
       || state.directReservationId !== null
       || state.transcriptSnapshotReservationId !== null
     );
+  }
+
+  isTurnReserved(chatId: string): boolean {
+    const state = this.#chats.get(chatId);
+    return state !== undefined && (
+      state.directReservationId !== null
+      || state.activeDrainEntryId !== null
+    );
+  }
+
+  turnReservedChatIds(): string[] {
+    return [...this.#chats]
+      .filter(([, state]) => (
+        state.directReservationId !== null
+        || state.activeDrainEntryId !== null
+      ))
+      .map(([chatId]) => chatId);
   }
 
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation {
@@ -374,9 +391,9 @@ export class ExecutionOwnership {
   reserveStop(chatId: string, intent: ChatStopIntent): SessionStopInFlight {
     const state = this.#state(chatId);
     if (state.sessionStop) return state.sessionStop;
-    let resolveStop!: (success: boolean) => void;
+    let resolveStop!: (outcome: ChatStopOutcome) => void;
     let rejectStop!: (error: unknown) => void;
-    const promise = new Promise<boolean>((resolve, reject) => {
+    const promise = new Promise<ChatStopOutcome>((resolve, reject) => {
       resolveStop = resolve;
       rejectStop = reject;
     });
@@ -387,6 +404,7 @@ export class ExecutionOwnership {
       resolve: resolveStop,
       reject: rejectStop,
       started: false,
+      phase: 'requesting',
     };
     state.sessionStop = operation;
     if (state.draining && !state.drainStop) {

@@ -8,6 +8,11 @@ import {
   parseQueueEntryReplaceCommandRequest,
   parseStartChatCommandRequest,
 } from '../chat-command-contracts.ts';
+import {
+  CHAT_STOP_OUTCOMES,
+  isAbortAcknowledged,
+  isStopSatisfied,
+} from '../chat-types.ts';
 
 const CHAT_ID = '1783725900000000';
 const SOURCE_CHAT_ID = '1783725900000001';
@@ -17,6 +22,18 @@ function agentSettings(ownerId = 'claude') {
 }
 
 describe('chat command request parsers', () => {
+  it('classifies every Stop outcome by command satisfaction and provider acknowledgement', () => {
+    expect(CHAT_STOP_OUTCOMES.map((outcome) => ({
+      outcome,
+      satisfied: isStopSatisfied(outcome),
+      acknowledged: isAbortAcknowledged(outcome),
+    }))).toEqual([
+      { outcome: 'interrupt-requested', satisfied: true, acknowledged: true },
+      { outcome: 'already-idle', satisfied: true, acknowledged: false },
+      { outcome: 'failed', satisfied: false, acknowledged: false },
+    ]);
+  });
+
   it('normalizes start modes and tags once at the wire boundary', () => {
     const parsed = parseStartChatCommandRequest({
       clientRequestId: ' request-1 ',

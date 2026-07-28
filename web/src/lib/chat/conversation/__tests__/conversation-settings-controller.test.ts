@@ -43,6 +43,7 @@ function chat(): ChatSessionRecord {
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 		status: 'running',
 		tags: [],

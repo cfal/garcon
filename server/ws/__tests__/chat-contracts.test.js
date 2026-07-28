@@ -13,8 +13,8 @@ const chatViewMessage = {
   message: { type: 'user-message', content: 'hello', timestamp: '2024-01-01T00:00:00Z' },
 };
 
-const mockAgents = {
-  getRunningChatIdsSnapshot: mock(() => ['chat-running']),
+const mockProcessing = {
+  snapshot: mock(() => [{ chatId: 'chat-running', phase: 'running' }]),
 };
 
 const mockRegistry = {
@@ -62,7 +62,7 @@ function storedQueue() {
 }
 
 const injectedMocks = [
-  mockAgents.getRunningChatIdsSnapshot,
+  mockProcessing.snapshot,
   mockRegistry.getChat,
   mockChatViews.readReplay,
   mockNativeReloader.reloadFromNative,
@@ -74,7 +74,7 @@ const moduleMocks = [sendWebSocketJson];
 
 function createHandler() {
   const instance = new ChatHandler({
-    agents: mockAgents,
+    processing: mockProcessing,
     chatViews: mockChatViews,
     nativeReloader: mockNativeReloader,
     queue: mockQueue,
@@ -116,7 +116,7 @@ describe('chat WebSocket handler', () => {
   beforeEach(() => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
-    mockAgents.getRunningChatIdsSnapshot.mockReturnValue(['chat-running']);
+    mockProcessing.snapshot.mockReturnValue([{ chatId: 'chat-running', phase: 'running' }]);
     mockRegistry.getChat.mockReturnValue({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' });
     mockQueue.readChatExecutionControl.mockResolvedValue(storedQueue());
     mockChatViews.readReplay.mockReturnValue({
@@ -153,7 +153,10 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload()).toEqual({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-1',
-      processing: { outcome: 'snapshot', runningChatIds: ['chat-running'] },
+      processing: {
+        outcome: 'snapshot',
+        chats: [{ chatId: 'chat-running', phase: 'running' }],
+      },
       controlResults: [
         { chatId: 'chat-1', outcome: 'snapshot', control: expect.objectContaining({ version: 3 }) },
         { chatId: 'chat-2', outcome: 'snapshot', control: expect.objectContaining({ version: 3 }) },
@@ -194,7 +197,7 @@ describe('chat WebSocket handler', () => {
   });
 
   it('returns an authoritative empty processing snapshot', async () => {
-    mockAgents.getRunningChatIdsSnapshot.mockReturnValue([]);
+    mockProcessing.snapshot.mockReturnValue([]);
 
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
@@ -205,7 +208,7 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload()).toEqual({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-empty',
-      processing: { outcome: 'snapshot', runningChatIds: [] },
+      processing: { outcome: 'snapshot', chats: [] },
       controlResults: [],
     });
   });
@@ -231,7 +234,10 @@ describe('chat WebSocket handler', () => {
     expect(mockQueue.readChatExecutionControl).toHaveBeenCalledTimes(2);
     expect(lastSentPayload()).toMatchObject({
       type: 'reconnect-state',
-      processing: { outcome: 'snapshot', runningChatIds: ['chat-running'] },
+      processing: {
+        outcome: 'snapshot',
+        chats: [{ chatId: 'chat-running', phase: 'running' }],
+      },
       controlResults: [
         { chatId: 'chat-1', outcome: 'snapshot' },
         { chatId: 'deleted-chat', outcome: 'not-found' },
@@ -241,7 +247,7 @@ describe('chat WebSocket handler', () => {
   });
 
   it('preserves queue outcomes when the processing projection is unavailable', async () => {
-    mockAgents.getRunningChatIdsSnapshot.mockImplementation(() => {
+    mockProcessing.snapshot.mockImplementation(() => {
       throw new Error('mapping incomplete');
     });
     mockRegistry.getChat.mockImplementation((chatId) => (
@@ -275,8 +281,8 @@ describe('chat WebSocket handler', () => {
 
   it('captures processing after asynchronous queue reads finish', async () => {
     const heldQueue = deferred();
-    let runningChatIds = ['chat-before'];
-    mockAgents.getRunningChatIdsSnapshot.mockImplementation(() => runningChatIds);
+    let chats = [{ chatId: 'chat-before', phase: 'running' }];
+    mockProcessing.snapshot.mockImplementation(() => chats);
     mockQueue.readChatExecutionControl.mockReturnValue(heldQueue.promise);
 
     const response = chatHandler.message(ws, {
@@ -285,15 +291,18 @@ describe('chat WebSocket handler', () => {
       controlChatIds: ['chat-1'],
     });
     await Promise.resolve();
-    expect(mockAgents.getRunningChatIdsSnapshot).not.toHaveBeenCalled();
+    expect(mockProcessing.snapshot).not.toHaveBeenCalled();
 
-    runningChatIds = ['chat-after'];
+    chats = [{ chatId: 'chat-after', phase: 'stopping' }];
     heldQueue.resolve(storedQueue());
     await response;
 
     expect(lastSentPayload()).toMatchObject({
       type: 'reconnect-state',
-      processing: { outcome: 'snapshot', runningChatIds: ['chat-after'] },
+      processing: {
+        outcome: 'snapshot',
+        chats: [{ chatId: 'chat-after', phase: 'stopping' }],
+      },
     });
   });
 
@@ -339,12 +348,20 @@ describe('chat WebSocket handler', () => {
       type: 'ws-ping',
       clientRequestId: 'req-ping-1',
       sentAt: 1234,
+      processing: {
+        outcome: 'snapshot',
+        chats: [{ chatId: 'chat-running', phase: 'running' }],
+      },
     });
 
     expect(lastSentPayload()).toMatchObject({
       type: 'ws-pong',
       clientRequestId: 'req-ping-1',
       sentAt: 1234,
+      processing: {
+        outcome: 'snapshot',
+        chats: [{ chatId: 'chat-running', phase: 'running' }],
+      },
     });
     expect(typeof lastSentPayload().serverTime).toBe('string');
   });

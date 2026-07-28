@@ -5,6 +5,7 @@ import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatOrderGroup } from '$shared/chat-list';
+import type { ChatProcessingPhase } from '$shared/chat-types';
 
 export type ChatStatus = 'draft' | 'running';
 
@@ -43,6 +44,7 @@ export interface ChatSessionRecord {
 	isPinned: boolean;
 	isArchived: boolean;
 	isProcessing: boolean;
+	processingPhase: ChatProcessingPhase | null;
 	isUnread: boolean;
 	status: ChatStatus;
 	lastMessage?: string;

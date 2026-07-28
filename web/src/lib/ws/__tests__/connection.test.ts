@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GARCON_WS_AUTH_PROTOCOL_PREFIX, GARCON_WS_PROTOCOL } from '$shared/ws-auth';
+import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
+import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte';
+import { ChatProcessingReconciler } from '../chat-processing-reconciler.svelte';
 import { WsConnection } from '../connection.svelte';
 
 vi.mock('$lib/api/client', () => ({
@@ -56,6 +59,42 @@ function lastSentPayload(socket: MockWebSocket): Record<string, unknown> {
 	const raw = socket.send.mock.calls.at(-1)?.[0];
 	if (typeof raw !== 'string') throw new Error('No socket payload was sent');
 	return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function processingHarness() {
+	const phases = new Map<string, ChatProcessingPhase>();
+	const order: string[] = [];
+	const sessions = {
+		applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null) {
+			const previousPhase = phases.get(chatId) ?? null;
+			if (phase === null) phases.delete(chatId);
+			else phases.set(chatId, phase);
+			order.push(`event:${String(phase)}`);
+			return { chatId, previousPhase, phase };
+		},
+		processingPhase(chatId: string) {
+			return phases.get(chatId) ?? null;
+		},
+		reconcileProcessing(entries: readonly ChatProcessingEntry[]) {
+			const snapshot = new Map(entries.map((entry) => [entry.chatId, entry.phase]));
+			const chatIds = new Set([...phases.keys(), ...snapshot.keys()]);
+			const transitions = [...chatIds]
+				.map((chatId) => ({
+					chatId,
+					previousPhase: phases.get(chatId) ?? null,
+					phase: snapshot.get(chatId) ?? null,
+				}))
+				.filter((transition) => transition.previousPhase !== transition.phase);
+			phases.clear();
+			for (const [chatId, phase] of snapshot) phases.set(chatId, phase);
+			order.push(`snapshot:${String(phases.get('chat-1') ?? null)}`);
+			return transitions;
+		},
+	} satisfies Pick<
+		ChatSessionsPort,
+		'applyProcessingEvent' | 'processingPhase' | 'reconcileProcessing'
+	>;
+	return { sessions, order, phase: (chatId: string) => phases.get(chatId) ?? null };
 }
 
 describe('WsConnection', () => {
@@ -173,7 +212,12 @@ describe('WsConnection', () => {
 		expect(connection.messageVersion).toBe(0);
 
 		removeConsumer();
-		socket.message({ type: 'terminal-output', terminalId: 'terminal-1', sequence: 2, data: 'next' });
+		socket.message({
+			type: 'terminal-output',
+			terminalId: 'terminal-1',
+			sequence: 2,
+			data: 'next',
+		});
 		expect(connection.messages).toHaveLength(1);
 		connection.disconnect();
 	});
@@ -261,6 +305,13 @@ describe('WsConnection', () => {
 
 	it('sends application heartbeats and accepts matching pongs', async () => {
 		const connection = new WsConnection();
+		const snapshotSources: Array<string | undefined> = [];
+		connection.addMessageConsumer((data, context) => {
+			if (data.type === 'ws-pong') {
+				snapshotSources.push(context.processingSnapshotSource);
+			}
+			return false;
+		});
 
 		connection.connect('token');
 		const socket = mockSockets[0];
@@ -278,12 +329,168 @@ describe('WsConnection', () => {
 			clientRequestId: ping.clientRequestId,
 			sentAt: ping.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: { outcome: 'snapshot', chats: [] },
 		});
 		await flushPromises();
 
 		expect(connection.isConnected).toBe(true);
 		expect(mockSockets).toHaveLength(1);
+		expect(snapshotSources).toEqual(['heartbeat']);
 
+		connection.disconnect();
+	});
+
+	it('applies synchronous consumers before resolving a processing probe', async () => {
+		const connection = new WsConnection();
+		const order: string[] = [];
+		connection.addMessageConsumer((data, context) => {
+			if (data.type === 'ws-pong') {
+				order.push(`consumer:${context.processingSnapshotSource}`);
+			}
+			return false;
+		});
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		const probe = connection.requestProcessingSnapshot().then((result) => {
+			order.push('resolved');
+			return result;
+		});
+		const ping = lastSentPayload(socket);
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: ping.clientRequestId,
+			sentAt: ping.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: {
+				outcome: 'snapshot',
+				chats: [{ chatId: 'chat-1', phase: 'stopping' }],
+			},
+		});
+
+		await expect(probe).resolves.toEqual({
+			outcome: 'snapshot',
+			chats: [{ chatId: 'chat-1', phase: 'stopping' }],
+		});
+		expect(order).toEqual(['consumer:stop-probe', 'resolved']);
+		connection.disconnect();
+	});
+
+	it('sends a fresh processing probe while a scheduled heartbeat is pending', async () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		await vi.advanceTimersByTimeAsync(16_500);
+		const heartbeat = lastSentPayload(socket);
+		const probe = connection.requestProcessingSnapshot();
+		const fresh = lastSentPayload(socket);
+
+		expect(fresh.clientRequestId).not.toBe(heartbeat.clientRequestId);
+		expect(socket.send).toHaveBeenCalledTimes(2);
+
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: fresh.clientRequestId,
+			sentAt: fresh.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: { outcome: 'snapshot', chats: [] },
+		});
+		await expect(probe).resolves.toEqual({ outcome: 'snapshot', chats: [] });
+		connection.disconnect();
+	});
+
+	it('sends an explicit processing probe while the document is hidden', async () => {
+		vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		const probe = connection.requestProcessingSnapshot();
+		const ping = lastSentPayload(socket);
+		expect(ping).toMatchObject({ type: 'ws-ping' });
+
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: ping.clientRequestId,
+			sentAt: ping.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: { outcome: 'snapshot', chats: [] },
+		});
+		await expect(probe).resolves.toEqual({ outcome: 'snapshot', chats: [] });
+		connection.disconnect();
+	});
+
+	it('reduces phase events and correlated snapshots in same-socket receipt order', async () => {
+		const connection = new WsConnection();
+		const processing = processingHarness();
+		const reconciler = new ChatProcessingReconciler(connection, processing.sessions);
+		const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		socket.message({
+			type: 'chat-processing-updated',
+			chatId: 'chat-1',
+			phase: 'running',
+		});
+		const probe = connection.requestProcessingSnapshot();
+		const ping = lastSentPayload(socket);
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: ping.clientRequestId,
+			sentAt: ping.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: { outcome: 'snapshot', chats: [] },
+		});
+		await probe;
+		socket.message({
+			type: 'chat-processing-updated',
+			chatId: 'chat-1',
+			phase: 'running',
+		});
+
+		expect(processing.order).toEqual(['event:running', 'snapshot:null', 'event:running']);
+		expect(processing.phase('chat-1')).toBe('running');
+		info.mockRestore();
+		reconciler.destroy();
+		connection.disconnect();
+	});
+
+	it('rejects a malformed processing probe response without mutating processing state', async () => {
+		const connection = new WsConnection();
+		const processing = processingHarness();
+		const reconciler = new ChatProcessingReconciler(connection, processing.sessions);
+		const protocolError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		const probe = connection.requestProcessingSnapshot();
+		const ping = lastSentPayload(socket);
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: ping.clientRequestId,
+			sentAt: ping.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: {
+				outcome: 'snapshot',
+				chats: [{ chatId: 'chat-1', phase: 'unknown' }],
+			},
+		});
+
+		await expect(probe).rejects.toThrow('Malformed processing snapshot response');
+		expect(processing.order).toEqual([]);
+		expect(protocolError).toHaveBeenCalledWith(
+			'[WsConnection] Malformed processing snapshot response',
+			{ source: 'stop-probe' },
+		);
+		protocolError.mockRestore();
+		reconciler.destroy();
 		connection.disconnect();
 	});
 
@@ -291,6 +498,13 @@ describe('WsConnection', () => {
 		let visibilityState: DocumentVisibilityState = 'visible';
 		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
 		const connection = new WsConnection();
+		const snapshotSources: Array<string | undefined> = [];
+		connection.addMessageConsumer((data, context) => {
+			if (data.type === 'ws-pong') {
+				snapshotSources.push(context.processingSnapshotSource);
+			}
+			return false;
+		});
 
 		connection.connect('token');
 		const socket = mockSockets[0];
@@ -303,8 +517,17 @@ describe('WsConnection', () => {
 
 		visibilityState = 'visible';
 		document.dispatchEvent(new Event('visibilitychange'));
-		await vi.advanceTimersByTimeAsync(250);
-		expect(lastSentPayload(socket)).toMatchObject({ type: 'ws-ping' });
+		const ping = lastSentPayload(socket);
+		expect(ping).toMatchObject({ type: 'ws-ping' });
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: ping.clientRequestId,
+			sentAt: ping.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: { outcome: 'snapshot', chats: [] },
+		});
+		await flushPromises();
+		expect(snapshotSources).toEqual(['visibility']);
 
 		connection.disconnect();
 	});
@@ -330,7 +553,6 @@ describe('WsConnection', () => {
 
 		visibilityState = 'visible';
 		document.dispatchEvent(new Event('visibilitychange'));
-		await vi.advanceTimersByTimeAsync(250);
 		expect(socket.send).toHaveBeenCalledTimes(2);
 
 		connection.disconnect();

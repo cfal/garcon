@@ -29,6 +29,7 @@ import {
   liveClaudeServerEnvironment,
   liveClaudeStartRequest,
 } from '../../../support/live-claude.js';
+import { createLiveClaudeProtocolProbe } from '../../../support/live-claude-protocol-probe.js';
 
 describe('live Claude lifecycle', () => {
   test('holds queue ownership across a background Bash continuation', async () => {
@@ -115,7 +116,10 @@ describe('live Claude lifecycle', () => {
       expect(completedIndex).toBeGreaterThan(launchedIndex);
       expect(successorIndex).toBeGreaterThan(completedIndex);
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
-    }, { redactSensitiveDiagnostics: true, serverEnvironment });
+    }, {
+      redactSensitiveDiagnostics: true,
+      serverEnvironment,
+    });
   });
 
   test('queues consecutive turns, forks immediately, and forks the fork', async () => {
@@ -287,7 +291,10 @@ describe('live Claude lifecycle', () => {
       expectAssistantMarker(assistantContents(grandchildTranscript.messages), resumedMarker);
       expect(userContents(grandchildTranscript.messages)).not.toContain(parentContinuationPrompt);
       expect((await fixture.client.getExecutionControl(parentChatId)).queue.entries).toEqual([]);
-    }, { redactSensitiveDiagnostics: true, serverEnvironment });
+    }, {
+      redactSensitiveDiagnostics: true,
+      serverEnvironment,
+    });
   });
 
   test('approves a real tool call, reloads its result, and resumes after restart', async () => {
@@ -415,8 +422,89 @@ describe('live Claude lifecycle', () => {
     });
   });
 
+  test('accepts a real streaming abort result and resumes the session', async () => {
+    const serverEnvironment = await liveClaudeServerEnvironment();
+    const protocolProbe = createLiveClaudeProtocolProbe(serverEnvironment);
+    await withIntegrationFixture('live-claude-streaming-interrupt', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: [
+          'Do not use tools.',
+          'Begin immediately and write 4000 numbered lines, one line at a time.',
+          'Keep writing until every line is complete.',
+        ].join(' '),
+      }));
+
+      const inputUuid = await protocolProbe.waitForInputStarted();
+      await Bun.sleep(1_000);
+      const stopCursor = fixture.client.markEvents();
+      const stopped = await fixture.client.stopChat({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+      });
+
+      expect(stopped.outcome).toBe('interrupt-requested');
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: stopCursor,
+        timeoutMs: TURN_TIMEOUT_MS,
+      })).type);
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: stopCursor,
+        timeoutMs: TURN_TIMEOUT_MS,
+      });
+      const terminal = await protocolProbe.waitForTerminal();
+      expect(['aborted_streaming', 'aborted_tools']).toContain(terminal.reason);
+      expect(terminal.userMessageUuid === null || terminal.userMessageUuid === inputUuid).toBe(true);
+
+      const stopEvents = fixture.client.eventsSince(stopCursor);
+      const stoppingIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.phase === 'stopping');
+      const outcomeIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'interrupt-requested'
+        && event.intent === 'stop');
+      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
+      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+      expect(stopEvents).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-failed',
+        chatId,
+        turnId: turn.turnId,
+      }));
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+
+      const recoveryMarker = marker('POST_STREAMING_INTERRUPT');
+      const recoveryPrompt = exactReplyPrompt(recoveryMarker);
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId,
+        command: recoveryPrompt,
+      }));
+      await waitForVisibleClaudeResponse({
+        fixture,
+        chatId,
+        turnId: recovery.turnId,
+        marker: recoveryMarker,
+        afterIndex: recoveryCursor,
+      });
+    }, {
+      prepareWorkspace: protocolProbe.prepareWorkspace,
+      redactSensitiveDiagnostics: true,
+      serverEnvironment,
+    });
+  });
+
   test('interrupts and stops active tool turns while preserving later delivery', async () => {
     const serverEnvironment = await liveClaudeServerEnvironment();
+    const protocolProbe = createLiveClaudeProtocolProbe(serverEnvironment);
     await withIntegrationFixture('live-claude-interrupt-and-send', async (fixture) => {
       const chatId = fixture.newChatId();
       const interruptedPrompt = [
@@ -444,6 +532,7 @@ describe('live Claude lifecycle', () => {
         'live Claude sleep tool use',
         { afterIndex: activeCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
+      const interruptedInputUuid = await protocolProbe.waitForInputStarted();
       const queued = await fixture.client.enqueueNew(chatId, successorPrompt);
       expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([successorPrompt]);
 
@@ -452,11 +541,17 @@ describe('live Claude lifecycle', () => {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });
-      expect(interrupted.stopped).toBe(true);
+      expect(interrupted.outcome).toBe('interrupt-requested');
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
         afterIndex: interruptCursor,
         timeoutMs: TURN_TIMEOUT_MS,
       })).type);
+      const interruptedTerminal = await protocolProbe.waitForTerminal();
+      expect(['aborted_streaming', 'aborted_tools']).toContain(interruptedTerminal.reason);
+      expect(
+        interruptedTerminal.userMessageUuid === null
+        || interruptedTerminal.userMessageUuid === interruptedInputUuid,
+      ).toBe(true);
       const successorInput = await fixture.client.waitForEvent(
         (event): event is PendingUserInputUpdatedMessage =>
           event.type === 'pending-user-input-updated'
@@ -499,18 +594,78 @@ describe('live Claude lifecycle', () => {
         'live Claude stopped sleep tool use',
         { afterIndex: stopCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
-      const stopped = await fixture.client.stopChat({
-        clientRequestId: crypto.randomUUID(),
-        chatId,
-      });
-      expect(stopped.stopped).toBe(true);
+      const stoppedInputUuid = await protocolProbe.waitForInputStarted(3);
+      const stopCommandCursor = fixture.client.markEvents();
+      const stopped = await Promise.all([
+        fixture.client.stopChat({
+          clientRequestId: crypto.randomUUID(),
+          chatId,
+        }),
+        fixture.client.stopChat({
+          clientRequestId: crypto.randomUUID(),
+          chatId,
+        }),
+      ]);
+      expect(stopped.map((response) => response.outcome)).toEqual([
+        'interrupt-requested',
+        'interrupt-requested',
+      ]);
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, stoppedTurn.turnId, {
-        afterIndex: stopCursor,
+        afterIndex: stopCommandCursor,
         timeoutMs: TURN_TIMEOUT_MS,
       })).type);
-      expect(assistantContents(
-        (await fixture.client.getMessages(chatId)).messages,
-      ).join('\n')).not.toContain('STOPPED_TURN_SHOULD_NOT_COMPLETE');
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: stopCommandCursor,
+        timeoutMs: TURN_TIMEOUT_MS,
+      });
+      const stoppedTerminal = await protocolProbe.waitForTerminal(2);
+      expect(['aborted_streaming', 'aborted_tools']).toContain(stoppedTerminal.reason);
+      expect(
+        stoppedTerminal.userMessageUuid === null
+        || stoppedTerminal.userMessageUuid === stoppedInputUuid,
+      ).toBe(true);
+
+      const stopEvents = fixture.client.eventsSince(stopCommandCursor);
+      expect(stopEvents.filter((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'interrupt-requested'
+        && event.intent === 'stop')).toHaveLength(1);
+      const stoppingIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.phase === 'stopping');
+      const outcomeIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'interrupt-requested'
+        && event.intent === 'stop');
+      const idleIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.phase === null);
+      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
+      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+      expect(idleIndex).toBeGreaterThan(stoppingIndex);
+      expect(stopEvents).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-failed',
+        chatId,
+        turnId: stoppedTurn.turnId,
+      }));
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+
+      const stoppedTranscript = await fixture.client.getMessages(chatId);
+      expect(assistantContents(stoppedTranscript.messages).join('\n'))
+        .not.toContain('STOPPED_TURN_SHOULD_NOT_COMPLETE');
+      const stoppedBash = messagesOfType(stoppedTranscript.messages, 'bash-tool-use')
+        .findLast((message) => message.command.includes('sleep 30'));
+      if (!stoppedBash) throw new Error('Live Claude stopped Bash tool use was not rendered.');
+      const stoppedResult = messagesOfType(stoppedTranscript.messages, 'tool-result')
+        .find((message) => message.toolId === stoppedBash.toolId);
+      expect(stoppedResult?.isError).toBe(true);
 
       const recoveryMarker = marker('POST_INTERRUPT');
       const recoveryPrompt = exactReplyPrompt(recoveryMarker);
@@ -527,7 +682,11 @@ describe('live Claude lifecycle', () => {
         assistantContents((await fixture.client.getMessages(chatId)).messages),
         recoveryMarker,
       );
-    }, { redactSensitiveDiagnostics: true, serverEnvironment });
+    }, {
+      prepareWorkspace: protocolProbe.prepareWorkspace,
+      redactSensitiveDiagnostics: true,
+      serverEnvironment,
+    });
   });
 });
 

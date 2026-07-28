@@ -1,3 +1,6 @@
+import { chmod, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 import type {
   ChatMessagesMessage,
@@ -11,6 +14,15 @@ import {
   userContents,
 } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+
+async function waitForFile(filePath: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (await Bun.file(filePath).exists()) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
 
 async function waitForQueuedTurnIdentity(
   client: GarconTestClient,
@@ -512,6 +524,10 @@ describe('queue lifecycle', () => {
       });
       await heldA.received;
       await fixture.client.enqueueNew(chatId, 'stop-b');
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId, phase: 'running' }],
+      });
 
       const activeAborted = heldA.expectAbort();
       const stopCursor = fixture.client.markEvents();
@@ -521,24 +537,39 @@ describe('queue lifecycle', () => {
       };
       const stopped = await fixture.client.stopChat(stopRequest);
       await activeAborted;
+      await fixture.client.waitForProcessing(chatId, false, { afterIndex: stopCursor });
       const duplicateStop = await fixture.client.stopChat(stopRequest);
-      expect(stopped.stopped).toBe(true);
+      expect(stopped.outcome).toBe('interrupt-requested');
       expect(duplicateStop).toMatchObject({
         status: 'duplicate',
-        stopped: true,
+        outcome: 'interrupt-requested',
         control: stopped.control,
       });
-      await fixture.client.ping();
-      expect(fixture.client.eventsSince(stopCursor).filter((event) =>
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+      const stopEvents = fixture.client.eventsSince(stopCursor);
+      expect(stopEvents.filter((event) =>
         event.type === 'chat-session-stopped'
         && event.chatId === chatId
         && event.intent === 'stop')).toHaveLength(1);
-		expect(stopped.control.queue.pause).not.toBeNull();
-		expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['stop-b']);
-		expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['stop-a']);
+      const stoppingIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.phase === 'stopping');
+      const outcomeIndex = stopEvents.findIndex((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.intent === 'stop');
+      expect(stoppingIndex).toBeGreaterThanOrEqual(0);
+      expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
+      expect(stopped.control.queue.pause).not.toBeNull();
+      expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['stop-b']);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual(['stop-a']);
 
-		const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-b' });
-		await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
+      const heldB = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stop-b' });
+      await fixture.client.resumeQueue(chatId, stopped.control.queue.pause!.id);
       await heldB.received;
       const queuedTurnB = await waitForQueuedTurnIdentity(fixture.client, chatId, 'stop-b');
       const cursor = fixture.client.markEvents();
@@ -548,6 +579,251 @@ describe('queue lifecycle', () => {
         'stop-a',
         'stop-b',
       ]);
+    });
+  });
+
+  test('treats repeated Stop commands after terminal settlement as already idle', async () => {
+    await withIntegrationFixture('queue-stop-already-idle', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const accepted = await fixture.client.startDirectChat({
+        chatId,
+        content: 'already-idle-seed',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+
+      const cursor = fixture.client.markEvents();
+      const outcomes = await Promise.all([
+        fixture.client.stopChat({ chatId, clientRequestId: crypto.randomUUID() }),
+        fixture.client.stopChat({ chatId, clientRequestId: crypto.randomUUID() }),
+      ]);
+
+      expect(outcomes.map((outcome) => outcome.outcome)).toEqual([
+        'already-idle',
+        'already-idle',
+      ]);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
+        'already-idle-seed',
+      ]);
+      expect(fixture.client.eventsSince(cursor).filter((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'already-idle')).toHaveLength(2);
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+    });
+  });
+
+  test('repairs a stale client processing level before resolving an idle Stop', async () => {
+    await withIntegrationFixture('queue-stop-stale-processing', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'stale-processing-seed' });
+      const accepted = await fixture.client.startDirectChat({
+        chatId,
+        content: 'stale-processing-seed',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await held.received;
+      await fixture.client.enqueueNew(chatId, 'must-remain-paused');
+      const activeAborted = held.expectAbort();
+      const initialStop = await fixture.client.stopChat({
+        chatId,
+        clientRequestId: crypto.randomUUID(),
+      });
+      expect(initialStop.outcome).toBe('interrupt-requested');
+      await activeAborted;
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+
+      const cursor = fixture.client.markEvents();
+      const stopped = await fixture.client.stopChat({
+        chatId,
+        clientRequestId: crypto.randomUUID(),
+      });
+
+      expect(stopped.outcome).toBe('already-idle');
+      expect(stopped.control.queue.pause?.kind).toBe('manual');
+      expect(stopped.control.queue.entries.map((entry) => entry.content))
+        .toEqual(['must-remain-paused']);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText))
+        .toEqual(['stale-processing-seed']);
+
+      const events = fixture.client.eventsSince(cursor);
+      const idleIndex = events.findIndex((event) =>
+        event.type === 'chat-processing-updated'
+        && event.chatId === chatId
+        && event.phase === null);
+      const outcomeIndex = events.findIndex((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'already-idle');
+      expect(idleIndex).toBeGreaterThanOrEqual(0);
+      expect(outcomeIndex).toBeGreaterThan(idleIndex);
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+    });
+  });
+
+  test('coalesces unique active Stop commands behind one interrupt latch', async () => {
+    const environment: Record<string, string> = {};
+    let startedPath = '';
+    let releasePath = '';
+    let interruptPath = '';
+    await withIntegrationFixture('queue-stop-unique-latch', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const accepted = await fixture.client.startChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        agentId: 'claude',
+        projectPath: fixture.dirs.project,
+        model: 'haiku',
+        permissionMode: 'default',
+        thinkingMode: 'low',
+        agentSettings: {
+          ownerId: 'claude',
+          schemaVersion: 1,
+          values: {},
+        },
+        command: 'unique-stop-seed',
+      });
+      await waitForFile(startedPath);
+
+      const results = await Promise.all([
+        fixture.client.stopChat({ chatId, clientRequestId: crypto.randomUUID() }),
+        fixture.client.stopChat({ chatId, clientRequestId: crypto.randomUUID() }),
+      ]);
+
+      expect(results.map((result) => result.outcome)).toEqual([
+        'interrupt-requested',
+        'interrupt-requested',
+      ]);
+      expect((await readFile(interruptPath, 'utf8')).trim().split('\n')).toEqual(['interrupt']);
+      expect(fixture.client.eventsSince(cursor).filter((event) =>
+        event.type === 'chat-session-stopped'
+        && event.chatId === chatId
+        && event.outcome === 'interrupt-requested')).toHaveLength(1);
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId, phase: 'stopping' }],
+      });
+
+      await writeFile(releasePath, 'release');
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, { afterIndex: cursor });
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [],
+      });
+    }, {
+      serverEnvironment: environment,
+      async prepareWorkspace(directories) {
+        const fakeModule = fileURLToPath(
+          new URL('../../support/fake-claude-cli.ts', import.meta.url),
+        );
+        const binaryPath = join(directories.root, 'claude');
+        startedPath = join(directories.root, 'claude-started');
+        releasePath = join(directories.root, 'claude-release');
+        interruptPath = join(directories.root, 'claude-interrupts');
+        await writeFile(
+          binaryPath,
+          `#!${process.execPath}\nimport ${JSON.stringify(pathToFileURL(fakeModule).href)};\n`,
+        );
+        await chmod(binaryPath, 0o755);
+        environment.CLAUDE_BINARY = binaryPath;
+        environment.CLAUDE_CONFIG_DIR = join(directories.home, '.claude-integration');
+        environment.ANTHROPIC_API_KEY = 'integration-fake-claude-key';
+        environment.CLAUDE_TEST_HOLD_ACTIVE = '1';
+        environment.CLAUDE_TEST_STARTED_PATH = startedPath;
+        environment.CLAUDE_TEST_RELEASE_PATH = releasePath;
+        environment.CLAUDE_TEST_INTERRUPT_PATH = interruptPath;
+      },
+    });
+  });
+
+  test('keeps a fork transcript snapshot out of every processing projection', async () => {
+    await withIntegrationFixture('fork-snapshot-processing', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const accepted = await fixture.client.startDirectChat({
+        chatId: sourceChatId,
+        content: 'fork-snapshot-seed',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(sourceChatId, accepted.turnId);
+
+      const sourcePath = await fixture.directOpenAiNativePath(sourceChatId);
+      const sourceContent = await readFile(sourcePath);
+      await rm(sourcePath);
+      // Blocks the source read while the transcript-snapshot reservation is live.
+      const mkfifo = Bun.spawn(['mkfifo', sourcePath], {
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
+      const mkfifoExit = await mkfifo.exited;
+      if (mkfifoExit !== 0) {
+        throw new Error(`mkfifo failed: ${await new Response(mkfifo.stderr).text()}`);
+      }
+
+      const targetChatId = fixture.newChatId();
+      const eventCursor = fixture.client.markEvents();
+      let forkSettled = false;
+      const fork = fixture.client.forkChat({
+        sourceChatId,
+        chatId: targetChatId,
+      }).finally(() => {
+        forkSettled = true;
+      });
+      await Bun.sleep(50);
+      let forkResult: PromiseSettledResult<Awaited<typeof fork>>;
+      try {
+        expect(forkSettled).toBe(false);
+        expect((await fixture.client.ping()).processing).toEqual({
+          outcome: 'snapshot',
+          chats: [],
+        });
+        const sourceListEntry = (await fixture.client.listChats()).sessions.find(
+          (entry) => entry.id === sourceChatId,
+        );
+        expect(sourceListEntry).toMatchObject({
+          isProcessing: false,
+          processingPhase: null,
+        });
+        expect(forkSettled).toBe(false);
+        expect(fixture.client.eventsSince(eventCursor).filter((event) =>
+          event.type === 'chat-processing-updated'
+          && event.chatId === sourceChatId
+          && event.phase !== null)).toEqual([]);
+      } finally {
+        const feedSourceReads = (async () => {
+          await writeFile(sourcePath, sourceContent);
+        })();
+        const [settledFork, settledFeed] = await Promise.allSettled([fork, feedSourceReads]);
+        if (settledFeed.status === 'rejected') throw settledFeed.reason;
+        forkResult = settledFork;
+      }
+      expect(forkResult).toMatchObject({
+        status: 'rejected',
+        reason: {
+          status: 409,
+          body: { errorCode: 'SOURCE_REVISION_CHANGED' },
+        },
+      });
+      await rm(sourcePath);
+      await writeFile(sourcePath, sourceContent);
+      expect((await fixture.client.forkChat({
+        sourceChatId,
+        chatId: targetChatId,
+      })).chat.id).toBe(targetChatId);
     });
   });
 
@@ -585,7 +861,7 @@ describe('queue lifecycle', () => {
         clientRequestId: crypto.randomUUID(),
       });
       await activeAborted;
-      expect(stopped.stopped).toBe(true);
+      expect(stopped.outcome).toBe('interrupt-requested');
 		expect(stopped.control.queue.pause?.kind).toBe('manual');
 		expect(stopped.control.queue.entries.map((entry) => entry.content)).toEqual(['drain-stop-c']);
 		expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText)).toEqual([
@@ -650,13 +926,16 @@ describe('queue lifecycle', () => {
       const interrupted = await fixture.client.interruptAndSend(interruptRequest);
       await activeAborted;
       const duplicateInterrupt = await fixture.client.interruptAndSend(interruptRequest);
-      expect(interrupted.stopped).toBe(true);
+      expect(interrupted.outcome).toBe('interrupt-requested');
       expect(duplicateInterrupt).toMatchObject({
         status: 'duplicate',
-        stopped: true,
+        outcome: 'interrupt-requested',
       });
       await heldB.received;
-      await fixture.client.ping();
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId, phase: 'running' }],
+      });
       const interruptEvents = fixture.client.eventsSince(eventCursor);
       expect(interruptEvents.filter((event) =>
         event.type === 'chat-session-stopped'

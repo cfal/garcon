@@ -14,9 +14,11 @@
 		setTransientLayers,
 		setGitQuickSummary,
 		setGitBranchActions,
+		setChatProcessingReconciler,
 	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
+	import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
@@ -42,6 +44,7 @@
 		isPinned: false,
 		isArchived: false,
 		isProcessing: true,
+		processingPhase: 'running',
 		isUnread: false,
 		status: 'running',
 		tags: [],
@@ -63,10 +66,11 @@
 		get order() {
 			return [selectedChat.id];
 		},
-		startupByChatId: {},
-		hasChat: (chatId: string) => chatId === selectedChat.id,
-		isDraft: () => false,
-		patchDraftStartup: () => {},
+			startupByChatId: {},
+			hasChat: (chatId: string) => chatId === selectedChat.id,
+			isDraft: () => false,
+			processingPhase: () => 'running',
+			patchDraftStartup: () => {},
 		patchPreview: () => {},
 		patchChat: () => {},
 		patchLastReadAt: () => {},
@@ -76,7 +80,6 @@
 		setSelectedChatId: () => {},
 		applyProcessingEvent: () => {},
 		reconcileProcessing: () => {},
-		invalidateProcessingAuthority: () => {},
 		quietRefreshChats: () => Promise.resolve(),
 	};
 
@@ -96,8 +99,12 @@
 		trimOffset: 0,
 		isConnected: false,
 		registerCursor: (_cursor: DrainCursor) => () => {},
+		addMessageConsumer: () => () => {},
 		sendRequest: () => Promise.resolve({}),
 	} as never);
+	setChatProcessingReconciler({
+		addPresentation: () => () => {},
+	} satisfies ChatProcessingPresentationRegistry);
 	setReadReceiptOutbox({
 		enqueue: () => {},
 	} as never);
@@ -144,6 +151,7 @@
 		appShell: {} as never,
 		navigation: {} as never,
 		files: {} as never,
+		localSettings: { globalShortcuts: {} } as never,
 	});
 	setWorkspaceCoordinator(workspace);
 	setWorkspaceShortcuts(workspaceShortcuts);

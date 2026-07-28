@@ -58,10 +58,62 @@ describe('ConversationLifecycleState', () => {
 			store.markTurnRunning('chat-1');
 			store.pushLoadingStatus(makeEntry('e1'));
 
-			store.clearTurnStatus();
+			store.clearTurnStatus('chat-1');
 
 			expect(store.turnStatus).toBe('idle');
 			expect(store.loadingStatusStack).toEqual([]);
+		});
+
+		it('ignores a clear for a background chat', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+
+			store.clearTurnStatus('chat-2');
+
+			expect(store.turnStatus).toBe('running');
+		});
+
+		it('keeps Stopping until the authoritative phase changes', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+
+			const snapshot = store.beginStopping('chat-1', 'request-1');
+			store.applyProcessingPhase('chat-1', 'stopping');
+
+			expect(store.turnStatus).toBe('stopping');
+			expect(store.loadingStatus).toMatchObject({ text: 'Stopping', can_interrupt: false });
+
+			store.restoreStopping('chat-1', 'request-1', snapshot);
+			expect(store.turnStatus).toBe('running');
+			expect(store.loadingStatus).toMatchObject({ text: 'Processing', can_interrupt: true });
+		});
+
+		it('does not let a failed older Stop overwrite a successor', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+			const snapshot = store.beginStopping('chat-1', 'request-1');
+
+			store.applyProcessingPhase('chat-1', 'running');
+			store.restoreStopping('chat-1', 'request-1', snapshot);
+
+			expect(store.turnStatus).toBe('running');
+			expect(store.loadingStatus).toMatchObject({ text: 'Processing', can_interrupt: true });
+		});
+
+		it('clears stale stopping metadata when the phase becomes idle', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+			const snapshot = store.beginStopping('chat-1', 'request-1');
+
+			store.applyProcessingPhase('chat-1', null);
+
+			expect(store.turnStatus).toBe('idle');
+			expect(store.loadingStatus).toBeNull();
+
+			store.beginTurn('chat-1');
+			store.restoreStopping('chat-1', 'request-1', snapshot);
+			expect(store.turnStatus).toBe('running');
+			expect(store.loadingStatus).toMatchObject({ text: 'Processing', can_interrupt: true });
 		});
 	});
 

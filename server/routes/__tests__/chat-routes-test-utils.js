@@ -53,7 +53,15 @@ export function createRoutePathCache() {
 }
 
 export function createRouteChatListProjector({ registry, settings, metadata, agents, pathCache }) {
-  return new ChatListProjector({ registry, settings, metadata, agents, pathCache });
+  const processing = {
+    phase(chatId) {
+      const session = registry.getChat(chatId);
+      return session && agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
+        ? 'running'
+        : null;
+    },
+  };
+  return new ChatListProjector({ registry, settings, metadata, processing, pathCache });
 }
 
 export function createRouteCommandService({

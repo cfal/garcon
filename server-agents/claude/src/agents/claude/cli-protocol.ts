@@ -235,6 +235,10 @@ export class ClaudeTurnState {
     this.#phase = 'interrupting';
   }
 
+  markAbortRejected(): void {
+    this.#phase = this.#inputStarted ? 'started' : 'submitted';
+  }
+
   observeBackgroundTaskCount(count: number): void {
     this.#backgroundTaskCount = count;
     if (count > 0) this.#backgroundContinuationPending = true;
@@ -296,7 +300,10 @@ export class ClaudeTurnState {
     if (!message.is_error) return;
     if (
       this.abortRequested
-      && message.terminal_reason === 'aborted_streaming'
+      && (
+        message.terminal_reason === 'aborted_streaming'
+        || message.terminal_reason === 'aborted_tools'
+      )
     ) {
       this.#cleanAbortResultSeen = true;
       return;

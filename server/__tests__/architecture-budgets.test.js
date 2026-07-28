@@ -7,9 +7,10 @@ import { join } from 'node:path';
 // MAX_LINES or fewer, its entry must be removed, and no entry may grow past its
 // recorded ceiling. New files start under the budget.
 const MAX_LINES = 1000;
-// Includes queue staging, ordering, boundary parsing, settled transcript snapshot ownership,
-// and recent title-icon source injection.
-const EXECUTION_FOOTPRINT_BUDGET = 7029;
+// Includes queue staging, ordering, boundary parsing, transcript snapshots,
+// title-icon source injection, staged active-turn settlement ownership, and
+// idempotent Stop outcomes with terminal-race and abortability settlement.
+const EXECUTION_FOOTPRINT_BUDGET = 7239;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
@@ -17,7 +18,8 @@ const GRANDFATHER = {
   'common/chat-types.ts': 1325,
   'server-agents/codex/src/agents/codex/app-server/runtime.ts': 1750,
   'server-agents/opencode/src/agents/opencode/opencode.ts': 1550,
-  'server-agents/claude/src/agents/claude/claude-cli.ts': 1450,
+  // Includes correlated interrupt receipts and explicit transport-failure settlement.
+  'server-agents/claude/src/agents/claude/claude-cli.ts': 1483,
 };
 
 const SKIP_DIRS = new Set(['__tests__', 'node_modules', 'dist', 'build']);

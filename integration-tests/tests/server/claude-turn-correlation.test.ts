@@ -730,7 +730,7 @@ describe('Claude turn correlation', () => {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });
-      expect(stopped.stopped).toBe(true);
+      expect(stopped.outcome).toBe('interrupt-requested');
       expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
         afterIndex: cursor,
       })).type).toBe('agent-run-finished');
@@ -783,7 +783,7 @@ describe('Claude turn correlation', () => {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });
-      expect(stopped.stopped).toBe(true);
+      expect(stopped.outcome).toBe('interrupt-requested');
       expect((await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
         afterIndex: cursor,
       })).type).toBe('agent-run-finished');

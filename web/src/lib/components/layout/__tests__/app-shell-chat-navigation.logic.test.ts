@@ -25,6 +25,7 @@ function chat(
 		isPinned: options.isPinned ?? false,
 		isArchived: options.isArchived ?? false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 		status: 'running',
 		tags: [],

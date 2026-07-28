@@ -69,6 +69,20 @@ describe('ConversationUiState', () => {
 		expect(store.pendingPermissionRequests).toEqual([]);
 	});
 
+	it('clears turn requests while preserving plan-exit decisions', () => {
+		const store = new ConversationUiState();
+		store.setPendingPermissionRequests([
+			makePermissionRequest('tool-request'),
+			makePermissionRequest('plan-exit-confirmation'),
+		]);
+
+		store.clearTurnPermissionRequests();
+
+		expect(store.pendingPermissionRequests.map((request) => request.permissionRequestId)).toEqual([
+			'plan-exit-confirmation',
+		]);
+	});
+
 	it('stores execution controls by chat and prunes controls for removed chats', () => {
 		const store = new ConversationUiState();
 		const control = makeControl();

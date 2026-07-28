@@ -137,7 +137,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 			currentChatId: () => deps.lifecycle.currentChatId,
 			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
 			markTurnRunning: (chatId) => deps.lifecycle.markTurnRunning(chatId),
-			clearTurnStatus: () => deps.lifecycle.clearTurnStatus(),
+			clearTurnStatus: (chatId) => deps.lifecycle.clearTurnStatus(chatId),
 			setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
 			pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
 			popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),

@@ -1,4 +1,5 @@
 import { matchesTurnIdentity, type TurnIdentity } from '../lib/turn-identity.js';
+import type { AgentActiveInputHandoff } from '@garcon/server-agent-interface';
 
 type ExecutionAttemptPhase =
   | 'reserved'
@@ -92,6 +93,30 @@ export class QueueExecutionAttempt {
     this.#turn = { ...turn };
   }
 
+  handoffTurn(
+    predecessor: TurnIdentity,
+    successor: TurnIdentity,
+    downstream: AgentActiveInputHandoff,
+  ): AgentActiveInputHandoff {
+    const next = { ...successor };
+    const validate = () => {
+      if (!sameTurnIdentity(this.#turn, predecessor)) {
+        throw new Error('Cannot hand off an execution attempt after its active turn changed');
+      }
+    };
+    validate();
+    return {
+      validate: () => {
+        validate();
+        downstream.validate();
+      },
+      commit: () => {
+        this.#turn = next;
+        downstream.commit();
+      },
+    };
+  }
+
   markRegistered(): void {
     if (this.#phase !== 'registering') return;
     this.#phase = 'registered';
@@ -166,4 +191,8 @@ export class QueueExecutionAttempt {
       return true;
     });
   }
+}
+
+function sameTurnIdentity(left: TurnIdentity, right: TurnIdentity): boolean {
+  return matchesTurnIdentity(left, right) && matchesTurnIdentity(right, left);
 }

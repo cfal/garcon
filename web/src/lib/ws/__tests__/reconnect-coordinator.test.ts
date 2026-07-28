@@ -48,7 +48,10 @@ function reconnectStateResponse(
 	return {
 		type: 'reconnect-state',
 		clientRequestId: 'req-reconnect',
-		processing: { outcome: 'snapshot', runningChatIds: runningIds },
+		processing: {
+			outcome: 'snapshot',
+			chats: runningIds.map((chatId) => ({ chatId, phase: 'running' })),
+		},
 		controlResults: chatIds.map((chatId) => ({
 			chatId,
 			outcome: 'snapshot',
@@ -172,8 +175,6 @@ function createReconnectDeps(
 		conversationUi,
 		sessions: {
 			selectedChatId,
-			reconcileProcessing: vi.fn(),
-			invalidateProcessingAuthority: vi.fn(),
 			quietRefreshChats: vi.fn(async () => undefined),
 		},
 		getExecutionControl: vi.fn(
@@ -203,8 +204,6 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.conversationUi.removeExecutionControl,
 		deps.conversationUi.setExecutionControlFromRefresh,
 		deps.getExecutionControl,
-		deps.sessions.reconcileProcessing,
-		deps.sessions.invalidateProcessingAuthority,
 		deps.sessions.quietRefreshChats,
 		deps.getBackgroundCursors,
 		deps.getVisibleChatIds,
@@ -240,7 +239,6 @@ describe('ChatReconnectCoordinator', () => {
 			type: 'reconnect-state-query',
 			controlChatIds: ['chat-1'],
 		});
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
 			controlState(false),
@@ -260,7 +258,6 @@ describe('ChatReconnectCoordinator', () => {
 
 			await expect(coordinator.handleConnectionState(true)).resolves.toBeUndefined();
 
-			expect(deps.sessions.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 			expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 				'chat-1',
 				controlState(false),
@@ -306,7 +303,6 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalled();
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
 			type: 'reconnect-state-query',
@@ -352,7 +348,6 @@ describe('ChatReconnectCoordinator', () => {
 		const reconnect = coordinator.handleConnectionState(true);
 
 		await flushUntil(() => deps.chatState.transcriptCache.markValidated.mock.calls.length === 1);
-		expect(deps.sessions.reconcileProcessing).not.toHaveBeenCalled();
 		expect(deps.chatState.applyMessages).toHaveBeenCalledWith(
 			'chat-1',
 			'generation-selected',
@@ -384,10 +379,9 @@ describe('ChatReconnectCoordinator', () => {
 
 		await flushUntil(
 			() =>
-				deps.conversationUi.setExecutionControlFromRefresh.mock.calls.length === 1 &&
-				deps.sessions.reconcileProcessing.mock.calls.length === 1,
+				deps.conversationUi.setExecutionControlFromRefresh.mock.calls.length === 1
+				&& deps.sessions.quietRefreshChats.mock.calls.length === 1,
 		);
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalledOnce();
 		expect(deps.getExecutionControl).not.toHaveBeenCalled();
 		expect(deps.getVisibleChatIds).toHaveBeenCalled();
@@ -401,21 +395,11 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledWith(new Set());
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
 			type: 'reconnect-state-query',
 			controlChatIds: ['chat-1'],
 		});
 		expect(deps.getExecutionControl).not.toHaveBeenCalled();
-	});
-
-	it('reconciles an authoritative empty processing snapshot', async () => {
-		const deps = createReconnectDeps({ runningIds: [] });
-
-		await reconnectAfterFirstConnection(deps);
-
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledOnce();
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledWith(new Set());
 	});
 
 	it('refreshes cached background queues after reconnect', async () => {
@@ -476,7 +460,7 @@ describe('ChatReconnectCoordinator', () => {
 					return {
 						type: 'reconnect-state',
 						clientRequestId: 'req-reconnect',
-						processing: { outcome: 'snapshot', runningChatIds: [] },
+						processing: { outcome: 'snapshot', chats: [] },
 						controlResults: [
 							{ chatId: 'chat-1', outcome: 'snapshot', control: controlState(true) },
 							{ chatId: 'chat-2', outcome: 'not-found' },
@@ -507,7 +491,7 @@ describe('ChatReconnectCoordinator', () => {
 		);
 	});
 
-	it('invalidates stale processing authority while applying queues when processing is unavailable', async () => {
+	it('applies queue outcomes when processing is unavailable', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			controlChatIds: ['chat-2', 'chat-3'],
@@ -535,8 +519,6 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.sessions.reconcileProcessing).not.toHaveBeenCalled();
-		expect(deps.sessions.invalidateProcessingAuthority).toHaveBeenCalledTimes(2);
 		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
 			controlState(true),
@@ -546,7 +528,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-3');
 	});
 
-	it('invalidates processing authority when the reconnect-state request fails', async () => {
+	it('refreshes chats and controls when the reconnect-state request fails', async () => {
 		const deps = createReconnectDeps();
 		const coordinator = new ChatReconnectCoordinator(deps);
 		await coordinator.handleConnectionState(true);
@@ -563,8 +545,6 @@ describe('ChatReconnectCoordinator', () => {
 		});
 		await coordinator.handleConnectionState(true);
 
-		expect(deps.sessions.invalidateProcessingAuthority).toHaveBeenCalledTimes(2);
-		expect(deps.sessions.reconcileProcessing).not.toHaveBeenCalled();
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalledOnce();
 	});
 
@@ -578,7 +558,10 @@ describe('ChatReconnectCoordinator', () => {
 				if (request.type === 'reconnect-state-query') {
 					return {
 						type: 'reconnect-state',
-						processing: { outcome: 'snapshot', runningChatIds: [42] },
+						processing: {
+							outcome: 'snapshot',
+							chats: [{ chatId: 42, phase: 'running' }],
+						},
 						controlResults: [
 							{ chatId: 'chat-1', outcome: 'snapshot', control: controlState(true) },
 							{ chatId: 'chat-2', outcome: 'snapshot', control: controlState(true) },
@@ -596,7 +579,6 @@ describe('ChatReconnectCoordinator', () => {
 
 		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-1');
 		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-2');
-		expect(deps.sessions.reconcileProcessing).not.toHaveBeenCalled();
 		expect(deps.conversationUi.setExecutionControlFromRefresh).not.toHaveBeenCalledWith(
 			'chat-1',
 			controlState(true),
@@ -996,9 +978,6 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			controlState(true),
 		);
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledOnce();
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
-
 		firstQueue.resolve(reconnectStateResponse(['chat-1'], ['chat-1']));
 		await first;
 
@@ -1007,6 +986,5 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			controlState(true),
 		);
-		expect(deps.sessions.reconcileProcessing).toHaveBeenCalledOnce();
 	});
 });

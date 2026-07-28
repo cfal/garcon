@@ -147,6 +147,7 @@
 		isPinned: false,
 		isArchived: false,
 		isProcessing: selectedIsProcessing,
+		processingPhase: selectedIsProcessing ? 'running' : null,
 		isUnread: false,
 		status: selectedStatus,
 		tags: [],

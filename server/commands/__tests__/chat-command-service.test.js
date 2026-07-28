@@ -34,12 +34,19 @@ const SOURCE_CHAT_ID = '1783725900000000';
 const TARGET_CHAT_ID = '1783725900000001';
 const SCHEDULED_CHAT_ID = '1783725900000002';
 
+const runtimeHandoff = () => ({
+  validate: () => undefined,
+  commit: () => undefined,
+});
+
 function deferred() {
   let resolve;
-  const promise = new Promise((resolvePromise) => {
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 async function waitForCheckpoint(checkpoint, operation, operationName) {
@@ -391,8 +398,11 @@ function makeService(overrides = {}) {
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
     failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
-    stopActiveTurn: mock(() => Promise.resolve({ stopped: true, control: storedQueue() })),
-    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    stopActiveTurn: mock(() => Promise.resolve({
+      outcome: 'interrupt-requested',
+      control: storedQueue(),
+    })),
+    interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     waitForDispatches: mock(() => Promise.all([...executionTasks]).then(() => undefined)),
@@ -822,7 +832,7 @@ describe('ChatCommandService', () => {
     });
     const stopActiveTurn = mock(async () => {
       events.push('stop');
-      return { stopped: true, control: storedQueue() };
+      return { outcome: 'interrupt-requested', control: storedQueue() };
     });
     const { service } = makeService({
       agents: { startSession },
@@ -852,6 +862,260 @@ describe('ChatCommandService', () => {
     expect(events).toEqual(['start-entered', 'start-finished', 'stop']);
   });
 
+  it('records already-idle Stop as finished and replays its exact outcome', async () => {
+    const stopActiveTurn = mock(async () => ({
+      outcome: 'already-idle',
+      control: storedQueue(),
+    }));
+    const { service } = makeService({ queue: { stopActiveTurn } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-already-idle',
+    };
+
+    const first = await service.submitStop(input);
+    const duplicate = await service.submitStop(input);
+
+    expect(first).toMatchObject({
+      status: 'accepted',
+      outcome: 'already-idle',
+    });
+    expect(duplicate).toMatchObject({
+      status: 'duplicate',
+      outcome: 'already-idle',
+    });
+    expect(stopActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('records provider Stop rejection as failed and replays its exact outcome', async () => {
+    const stopActiveTurn = mock(async () => ({
+      outcome: 'failed',
+      control: storedQueue(),
+    }));
+    const { service } = makeService({ queue: { stopActiveTurn } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-failed',
+    };
+
+    const first = await service.submitStop(input);
+    const duplicate = await service.submitStop(input);
+
+    expect(first).toMatchObject({
+      status: 'accepted',
+      outcome: 'failed',
+    });
+    expect(duplicate).toMatchObject({
+      status: 'duplicate',
+      outcome: 'failed',
+    });
+    expect(stopActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['finished', 'interrupt-requested'],
+    ['failed', 'failed'],
+  ])('maps a legacy %s Stop ledger record to %s', async (status, expectedOutcome) => {
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: `req-stop-legacy-${status}`,
+    };
+    const { service, ledger, queue } = makeService();
+    await service.submitStop(input);
+    await ledger.update(
+      commandLedgerKey('agent-stop', SOURCE_CHAT_ID, input.clientRequestId),
+      { status, stopOutcome: undefined },
+    );
+
+    await expect(service.submitStop(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      outcome: expectedOutcome,
+    });
+    expect(queue.stopActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays an Interrupt and Send outcome without executing a second abort', async () => {
+    const interruptActiveTurn = mock(async () => 'already-idle');
+    const { service } = makeService({ queue: { interruptActiveTurn } });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-interrupt-duplicate',
+    };
+
+    const first = await service.submitInterruptAndSend(input);
+    const duplicate = await service.submitInterruptAndSend(input);
+
+    expect(first).toMatchObject({
+      status: 'accepted',
+      outcome: 'already-idle',
+    });
+    expect(duplicate).toMatchObject({
+      status: 'duplicate',
+      outcome: 'already-idle',
+    });
+    expect(interruptActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('records one acknowledged latch outcome for two unique Stop commands', async () => {
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    let running = true;
+    const abortSession = mock(async () => true);
+    const queueService = makeRealQueue(pendingInputsService, {
+      abortSession,
+      isChatRunning: mock(() => running),
+    });
+    const { service, ledger } = makeService({
+      pendingInputsService,
+      queueService,
+    });
+
+    const first = await service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-first',
+    });
+    const second = await service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-stop-second',
+    });
+
+    expect(first.outcome).toBe('interrupt-requested');
+    expect(second.outcome).toBe('interrupt-requested');
+    expect(abortSession).toHaveBeenCalledTimes(1);
+    expect((await readLedgerRecord(ledger, 'agent-stop', 'req-stop-first')).stopOutcome)
+      .toBe('interrupt-requested');
+    expect((await readLedgerRecord(ledger, 'agent-stop', 'req-stop-second')).stopOutcome)
+      .toBe('interrupt-requested');
+
+    running = false;
+    await queueService.checkChatIdle(SOURCE_CHAT_ID);
+  });
+
+  it('settles Send now through the command lock before launching its successor once', async () => {
+    const firstTurnStarted = deferred();
+    const firstTurnResult = deferred();
+    const firstTurnSettled = deferred();
+    const successorStarted = deferred();
+    const successorResult = deferred();
+    const abortStarted = deferred();
+    const enqueueStarted = deferred();
+    const enqueueAllowed = deferred();
+    let runtimeRunning = false;
+    let predecessorTurn;
+    let successorLaunches = 0;
+    let queueService;
+    const pendingInputsService = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    const abortSession = mock(async () => {
+      abortStarted.resolve();
+      return true;
+    });
+    const runAgentTurn = mock(async (chatId, content, options) => {
+      options.executionAdmission?.markStarted();
+      runtimeRunning = true;
+      if (content === 'active predecessor') {
+        predecessorTurn = options;
+        firstTurnStarted.resolve();
+        try {
+          await firstTurnResult.promise;
+        } finally {
+          firstTurnSettled.resolve();
+        }
+        return;
+      }
+      successorLaunches += 1;
+      successorStarted.resolve();
+      try {
+        await successorResult.promise;
+      } finally {
+        runtimeRunning = false;
+        queueService.onAgentTurnTerminal(chatId, options);
+      }
+    });
+    queueService = makeRealQueue(pendingInputsService, {
+      runAgentTurn,
+      abortSession,
+      isChatRunning: mock(() => runtimeRunning),
+      waitUntilTurnAbortable: mock(async () => true),
+    });
+    const enqueueAccepted = queueService.enqueueAccepted.bind(queueService);
+    queueService.enqueueAccepted = mock(async (input) => {
+      enqueueStarted.resolve();
+      await enqueueAllowed.promise;
+      return enqueueAccepted(input);
+    });
+    const { service, forkChatFileCopy } = makeService({
+      queueService,
+      pendingInputsService,
+    });
+
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'active predecessor',
+      clientRequestId: 'req-send-now-predecessor',
+      clientMessageId: 'msg-send-now-predecessor',
+    });
+    await firstTurnStarted.promise;
+
+    const enqueue = service.submitQueueEntryCreate({
+      chatId: SOURCE_CHAT_ID,
+      content: 'send now successor',
+      clientRequestId: 'req-send-now-successor',
+    });
+    await enqueueStarted.promise;
+    const interrupt = service.submitInterruptAndSend({
+      chatId: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      clientRequestId: 'req-send-now-interrupt',
+    });
+    await Promise.resolve();
+    expect(abortSession).not.toHaveBeenCalled();
+
+    enqueueAllowed.resolve();
+    await enqueue;
+    await abortStarted.promise;
+    expect(successorLaunches).toBe(0);
+
+    firstTurnResult.reject(new Error('interrupted by Send now'));
+    await firstTurnSettled.promise;
+    await Promise.resolve();
+    expect(successorLaunches).toBe(0);
+
+    runtimeRunning = false;
+    queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, predecessorTurn);
+    await expect(interrupt).resolves.toMatchObject({ outcome: 'interrupt-requested' });
+    await successorStarted.promise;
+
+    queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, predecessorTurn);
+    await queueService.triggerDrain(SOURCE_CHAT_ID);
+    expect(successorLaunches).toBe(1);
+
+    successorResult.resolve();
+    await queueService.waitForExecutionOwners();
+    const [pause, fork] = await Promise.all([
+      service.mutateQueue({ chatId: SOURCE_CHAT_ID, action: 'pause' }),
+      service.forkChat({
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        upToSeq: 1,
+      }),
+    ]);
+
+    expect(pause.success).toBe(true);
+    expect(pause.control.queue).toMatchObject({
+      entries: [],
+      dispatchingEntryId: null,
+      pause: null,
+    });
+    expect(fork.success).toBe(true);
+    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(runAgentTurn.mock.calls.filter(([, content]) => content === 'send now successor')).toHaveLength(1);
+  });
+
   it('orders queue creation after an in-progress Stop command', async () => {
     let releaseStop;
     let markStopEntered;
@@ -864,7 +1128,7 @@ describe('ChatCommandService', () => {
     const stopActiveTurn = mock(async () => {
       markStopEntered();
       await stopGate;
-      return { stopped: true, control: storedQueue() };
+      return { outcome: 'interrupt-requested', control: storedQueue() };
     });
     const { service, queue } = makeService({ queue: { stopActiveTurn } });
 
@@ -2182,7 +2446,7 @@ describe('ChatCommandService', () => {
       getRetainedHistoryMessages: mock(() => []),
     });
     const submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
-      await beforeDelivery();
+      await beforeDelivery(runtimeHandoff());
       throw new Error('connection closed after provider acceptance');
     });
     const queueService = makeRealQueue(pendingInputsService, {

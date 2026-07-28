@@ -32,7 +32,7 @@ import {
 	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
-import { ErrorMessage } from '$shared/chat-types';
+import { CHAT_STOP_OUTCOMES, ErrorMessage } from '$shared/chat-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 const chatViewMessage = {
@@ -342,7 +342,10 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'reconnect-state',
 				clientRequestId: 'req-reconnect',
-				processing: { outcome: 'snapshot', runningChatIds: ['running-1'] },
+				processing: {
+					outcome: 'snapshot',
+					chats: [{ chatId: 'running-1', phase: 'running' }],
+				},
 				controlResults: [
 					{
 						chatId: 'c-1',
@@ -366,20 +369,46 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'chat-session-stopped',
 				chatId: 'c-1',
-				success: true,
+				outcome: 'interrupt-requested',
 				intent: 'interrupt-and-send',
 			}),
-		).toEqual(new ChatSessionStoppedMessage('c-1', true, 'interrupt-and-send'));
+		).toEqual(new ChatSessionStoppedMessage('c-1', 'interrupt-requested', 'interrupt-and-send'));
 		expect(
 			parseServerWsMessage({
 				type: 'chat-session-stopped',
 				chatId: 'c-1',
-				success: true,
+				outcome: 'interrupt-requested',
 			}),
 		).toBeNull();
+		for (const outcome of CHAT_STOP_OUTCOMES) {
+			expect(
+				parseServerWsMessage({
+					type: 'chat-session-stopped',
+					chatId: 'c-1',
+					outcome,
+					intent: 'stop',
+				}),
+			).toEqual(new ChatSessionStoppedMessage('c-1', outcome, 'stop'));
+		}
+		for (const outcome of [undefined, 'unexpected']) {
+			expect(
+				parseServerWsMessage({
+					type: 'chat-session-stopped',
+					chatId: 'c-1',
+					outcome,
+					intent: 'stop',
+				}),
+			).toBeNull();
+		}
 		expect(
-			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', isProcessing: true }),
-		).toBeInstanceOf(ChatProcessingUpdatedMessage);
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'running' }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'running'));
+		expect(
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'stopping' }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'stopping'));
+		expect(
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: null }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', null));
 		expect(
 			parseServerWsMessage({
 				type: 'chat-execution-control-updated',
@@ -477,6 +506,7 @@ describe('parseServerWsMessage', () => {
 				clientRequestId: 'req-ping',
 				sentAt: 1234,
 				serverTime: '2026-06-17T00:00:00.000Z',
+				processing: { outcome: 'snapshot', chats: [] },
 			}),
 		).toBeInstanceOf(WsPongMessage);
 	});
@@ -523,31 +553,37 @@ describe('parseServerWsMessage', () => {
 		}
 	});
 
-	it('strictly parses reconnect processing outcomes', () => {
+	it('strictly parses shared reconnect and pong processing outcomes', () => {
 		const snapshot = parseServerWsMessage({
 			type: 'reconnect-state',
 			clientRequestId: 'req-reconnect',
 			processing: {
 				outcome: 'snapshot',
-				runningChatIds: ['chat-b', ' chat-a ', 'chat-b'],
+				chats: [
+					{ chatId: 'chat-b', phase: 'stopping' },
+					{ chatId: ' chat-a ', phase: 'running' },
+				],
 			},
 			controlResults: [],
 		});
 		expect(snapshot).toBeInstanceOf(ReconnectStateMessage);
 		expect((snapshot as ReconnectStateMessage).processing).toEqual({
 			outcome: 'snapshot',
-			runningChatIds: ['chat-b', 'chat-a'],
+			chats: [
+				{ chatId: 'chat-b', phase: 'stopping' },
+				{ chatId: 'chat-a', phase: 'running' },
+			],
 		});
 		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
 
 		const emptySnapshot = parseServerWsMessage({
 			type: 'reconnect-state',
-			processing: { outcome: 'snapshot', runningChatIds: [] },
+			processing: { outcome: 'snapshot', chats: [] },
 			controlResults: [],
 		});
 		expect((emptySnapshot as ReconnectStateMessage).processing).toEqual({
 			outcome: 'snapshot',
-			runningChatIds: [],
+			chats: [],
 		});
 
 		const unavailable = parseServerWsMessage({
@@ -556,6 +592,33 @@ describe('parseServerWsMessage', () => {
 			controlResults: [],
 		});
 		expect((unavailable as ReconnectStateMessage).processing).toEqual({
+			outcome: 'unavailable',
+		});
+
+		const pong = parseServerWsMessage({
+			type: 'ws-pong',
+			clientRequestId: 'req-ping',
+			sentAt: 42,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: {
+				outcome: 'snapshot',
+				chats: [{ chatId: 'chat-a', phase: 'stopping' }],
+			},
+		});
+		expect(pong).toBeInstanceOf(WsPongMessage);
+		expect((pong as WsPongMessage).processing).toEqual({
+			outcome: 'snapshot',
+			chats: [{ chatId: 'chat-a', phase: 'stopping' }],
+		});
+		const unavailablePong = parseServerWsMessage({
+			type: 'ws-pong',
+			clientRequestId: 'req-ping-unavailable',
+			sentAt: 43,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: { outcome: 'unavailable' },
+		});
+		expect(unavailablePong).toBeInstanceOf(WsPongMessage);
+		expect((unavailablePong as WsPongMessage).processing).toEqual({
 			outcome: 'unavailable',
 		});
 	});
@@ -569,10 +632,17 @@ describe('parseServerWsMessage', () => {
 			{},
 			{ outcome: 'unknown' },
 			{ outcome: 'snapshot' },
-			{ outcome: 'snapshot', runningChatIds: {} },
-			{ outcome: 'snapshot', runningChatIds: [42] },
-			{ outcome: 'snapshot', runningChatIds: [''] },
-			{ outcome: 'snapshot', runningChatIds: ['   '] },
+			{ outcome: 'snapshot', chats: {} },
+			{ outcome: 'snapshot', chats: [42] },
+			{ outcome: 'snapshot', chats: [{ chatId: '', phase: 'running' }] },
+			{ outcome: 'snapshot', chats: [{ chatId: 'chat-1', phase: 'unknown' }] },
+			{
+				outcome: 'snapshot',
+				chats: [
+					{ chatId: 'chat-1', phase: 'running' },
+					{ chatId: 'chat-1', phase: 'stopping' },
+				],
+			},
 		];
 
 		for (const processing of invalidProcessingValues) {
@@ -581,6 +651,15 @@ describe('parseServerWsMessage', () => {
 					type: 'reconnect-state',
 					processing,
 					controlResults: [],
+				}),
+			).toBeNull();
+			expect(
+				parseServerWsMessage({
+					type: 'ws-pong',
+					clientRequestId: 'req-ping',
+					sentAt: 42,
+					serverTime: '2026-07-27T00:00:00.000Z',
+					processing,
 				}),
 			).toBeNull();
 		}
@@ -622,64 +701,11 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'reconnect-state',
-				processing: { outcome: 'snapshot', runningChatIds: [] },
+				processing: { outcome: 'snapshot', chats: [] },
 				controlResults: [{ chatId: 'c-1', outcome: 'snapshot' }],
 			}),
 		).toBeNull();
 		expect(parseServerWsMessage({ type: 'unknown-event', data: 123 })).toBeNull();
-	});
-
-	it('strictly parses reconnect processing outcomes', () => {
-		const snapshot = parseServerWsMessage({
-			type: 'reconnect-state',
-			clientRequestId: 'req-reconnect',
-			processing: {
-				outcome: 'snapshot',
-				runningChatIds: [' chat-2 ', 'chat-1', 'chat-2'],
-			},
-			controlResults: [],
-		});
-		expect(snapshot).toBeInstanceOf(ReconnectStateMessage);
-		expect((snapshot as ReconnectStateMessage).processing).toEqual({
-			outcome: 'snapshot',
-			runningChatIds: ['chat-2', 'chat-1'],
-		});
-		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
-
-		const unavailable = parseServerWsMessage({
-			type: 'reconnect-state',
-			processing: { outcome: 'unavailable' },
-			controlResults: [],
-		});
-		expect(unavailable).toBeInstanceOf(ReconnectStateMessage);
-		expect((unavailable as ReconnectStateMessage).processing).toEqual({ outcome: 'unavailable' });
-
-		for (const processing of [
-			undefined,
-			null,
-			[],
-			{},
-			{ outcome: 'unknown' },
-			{ outcome: 'snapshot' },
-			{ outcome: 'snapshot', runningChatIds: 'chat-1' },
-			{ outcome: 'snapshot', runningChatIds: [42] },
-			{ outcome: 'snapshot', runningChatIds: [' '] },
-		]) {
-			expect(
-				parseServerWsMessage({
-					type: 'reconnect-state',
-					processing,
-					controlResults: [],
-				}),
-			).toBeNull();
-		}
-		expect(
-			parseServerWsMessage({
-				type: 'reconnect-state',
-				sessions: { claude: [{ id: 'legacy' }] },
-				controlResults: [],
-			}),
-		).toBeNull();
 	});
 });
 describe('parseClientWsMessage', () => {

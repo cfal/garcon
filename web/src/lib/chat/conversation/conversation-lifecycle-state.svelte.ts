@@ -2,10 +2,12 @@
 // metadata such as status text; per-chat processing state owns tray visibility.
 
 import * as m from '$lib/paraglide/messages.js';
+import type { ChatProcessingPhase } from '$shared/chat-types';
 
 export type TurnStatus =
 	| 'idle'
 	| 'running'
+	| 'stopping'
 	| 'waiting-permission'
 	| 'completed'
 	| 'failed'
@@ -21,11 +23,18 @@ export interface LoadingStatusEntry extends LoadingStatus {
 	id: string;
 }
 
+export interface StoppingSnapshot {
+	turnStatus: TurnStatus;
+	loadingStatusStack: LoadingStatusEntry[];
+}
+
 export class ConversationLifecycleState {
 	turnStatus = $state<TurnStatus>('idle');
 	loadingStatusStack = $state<LoadingStatusEntry[]>([]);
 	currentChatId = $state<string | null>(null);
 	isSystemChatChange = $state(false);
+	#stoppingRequestId: string | null = null;
+	#stoppingStartedAt: number | null = null;
 
 	/** Returns the top (most recent) status entry, or null if empty. */
 	get loadingStatus(): LoadingStatus | null {
@@ -78,13 +87,86 @@ export class ConversationLifecycleState {
 
 	/** Starts status metadata for an accepted assistant turn. */
 	beginTurn(chatId: string): void {
+		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
 		this.markTurnRunning(chatId);
 		this.setLoadingStatus({ text: m.chat_loading_processing(), tokens: 0, can_interrupt: true });
 	}
 
 	/** Clears selected-turn status metadata back to idle defaults. */
-	clearTurnStatus(): void {
+	clearTurnStatus(chatId: string): void {
+		if (this.currentChatId !== chatId) return;
+		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
 		this.loadingStatusStack = [];
 		this.turnStatus = 'idle';
+	}
+
+	beginStopping(chatId: string, requestId: string): StoppingSnapshot | null {
+		if (this.currentChatId !== chatId) return null;
+		const snapshot = {
+			turnStatus: this.turnStatus,
+			loadingStatusStack: this.loadingStatusStack.map((entry) => ({ ...entry })),
+		};
+		this.#stoppingRequestId = requestId;
+		this.#stoppingStartedAt = Date.now();
+		this.turnStatus = 'stopping';
+		this.setLoadingStatus({
+			text: m.chat_loading_stopping(),
+			tokens: 0,
+			can_interrupt: false,
+		});
+		return snapshot;
+	}
+
+	restoreStopping(chatId: string, requestId: string, snapshot: StoppingSnapshot | null): void {
+		if (!snapshot || this.currentChatId !== chatId || this.#stoppingRequestId !== requestId) return;
+		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
+		this.turnStatus = snapshot.turnStatus;
+		this.loadingStatusStack = snapshot.loadingStatusStack;
+	}
+
+	applyProcessingSnapshotPhase(
+		chatId: string,
+		phase: ChatProcessingPhase | null,
+		sentAt: number | null,
+	): void {
+		if (
+			phase === 'running'
+			&& this.currentChatId === chatId
+			&& this.#stoppingStartedAt !== null
+			&& sentAt !== null
+			&& sentAt <= this.#stoppingStartedAt
+		) return;
+		this.applyProcessingPhase(chatId, phase);
+	}
+
+	applyProcessingPhase(chatId: string, phase: ChatProcessingPhase | null): void {
+		if (this.currentChatId !== chatId) return;
+		if (phase === null) {
+			this.clearTurnStatus(chatId);
+			return;
+		}
+		if (phase === 'stopping') {
+			this.turnStatus = 'stopping';
+			this.setLoadingStatus({
+				text: m.chat_loading_stopping(),
+				tokens: 0,
+				can_interrupt: false,
+			});
+			return;
+		}
+		this.#stoppingRequestId = null;
+		this.#stoppingStartedAt = null;
+		this.markTurnRunning(chatId);
+		const current = this.loadingStatus;
+		if (!current || current.text === m.chat_loading_stopping()) {
+			this.setLoadingStatus({
+				text: m.chat_loading_processing(),
+				tokens: 0,
+				can_interrupt: true,
+			});
+		}
 	}
 }

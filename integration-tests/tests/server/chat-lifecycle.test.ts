@@ -43,7 +43,7 @@ function expectSuccessfulTurnContract(
   expect(events).toContainEqual(expect.objectContaining({
     type: 'chat-processing-updated',
     chatId: input.chatId,
-    isProcessing: true,
+    phase: 'running',
   }));
 
   const userEvent = events.find((event): event is ChatMessagesMessage =>
@@ -233,7 +233,10 @@ describe('chat lifecycle', () => {
       heldB.releaseEcho();
       expect((await fixture.client.waitForTurnTerminal(chatB, acceptedB.turnId)).type).toBe('agent-run-finished');
       const reconnectWhileAIsHeld = await fixture.client.reconnectState([chatA, chatB]);
-      expect(reconnectWhileAIsHeld.processing).toEqual({ outcome: 'snapshot', runningChatIds: [chatA] });
+      expect(reconnectWhileAIsHeld.processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId: chatA, phase: 'running' }],
+      });
 
       heldA.releaseEcho();
       expect((await fixture.client.waitForTurnTerminal(chatA, acceptedA.turnId)).type).toBe('agent-run-finished');

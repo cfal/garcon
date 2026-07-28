@@ -28,6 +28,7 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 		status: 'running',
 		tags: [],

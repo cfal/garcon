@@ -6,8 +6,15 @@
 // 2. Chat idle           - turn finished and queue drained (completed/failed)
 // 3. Session stopped     - user-initiated abort
 
-import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
-import type { ChatMessage } from '../../common/chat-types.js';
+import {
+  AssistantMessage,
+  isAbortAcknowledged,
+  PermissionCancelledMessage,
+  PermissionRequestMessage,
+  PermissionResolvedMessage,
+  type ChatMessage,
+  type ChatStopOutcome,
+} from '../../common/chat-types.js';
 import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../lib/log.js';
 
@@ -52,7 +59,7 @@ interface AgentRegistryDep {
 
 interface QueueManagerDep {
   onChatIdle(cb: (chatId: string) => void): void;
-  onSessionStopped(cb: (chatId: string, success: boolean) => void): void;
+  onSessionStopped(cb: (chatId: string, outcome: ChatStopOutcome) => void): void;
 }
 
 interface SettingsStoreDep {
@@ -128,8 +135,8 @@ export class AttentionTracker {
     this.#agents.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
     this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
-    this.#queue.onSessionStopped((chatId, success) => {
-      if (success) this.#handleSessionStopped(chatId);
+    this.#queue.onSessionStopped((chatId, outcome) => {
+      if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId);
     });
     this.#registry.onChatRemoved?.((chatId) => this.#cleanupChat(chatId));
   }

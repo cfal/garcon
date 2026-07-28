@@ -23,7 +23,7 @@ function createWiringFixture(overrides = {}) {
   });
   const agentRegistry = {
     onMessages: mock((callback) => { agentListeners.messages = callback; }),
-    onProcessing: noOpSubscription,
+    onProcessing: mock((callback) => { agentListeners.processing = callback; }),
     onSessionCreated: noOpSubscription,
     onFinished: mock((callback) => { agentListeners.finished = callback; }),
     onFailed: mock((callback) => { agentListeners.failed = callback; }),
@@ -35,7 +35,8 @@ function createWiringFixture(overrides = {}) {
     onSessionStopRequested: noOpSubscription,
     onDispatching: noOpSubscription,
     onChatMessages: noOpSubscription,
-    onSessionStopped: noOpSubscription,
+    onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
+    onProcessingInvalidated: mock((callback) => { queueListeners.processing = callback; }),
     onTurnFailed: mock((callback) => { queueListeners.failed = callback; }),
     onTurnSettled: noOpSubscription,
     getQueuedTurnFinalization: mock(() => null),
@@ -79,6 +80,7 @@ function createWiringFixture(overrides = {}) {
       onRemoteSettingsChanged: noOpSubscription,
     },
     queue,
+    processing: overrides.processing ?? { phase: mock(() => null) },
     metadata,
     chatViews,
     chatNativeReloader: {
@@ -111,6 +113,101 @@ function createWiringFixture(overrides = {}) {
 }
 
 describe('server event wiring', () => {
+  it('publishes canonical processing phases before the Stop outcome', () => {
+    let phase = 'running';
+    const published = [];
+    const fixture = createWiringFixture({
+      processing: { phase: mock(() => phase) },
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    phase = 'stopping';
+    fixture.queueListeners.sessionStopped(
+      'chat-1',
+      'interrupt-requested',
+      'stop',
+      'stop-1',
+      12,
+    );
+
+    expect(published).toMatchObject([
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'stopping' },
+      {
+        type: 'chat-session-stopped',
+        chatId: 'chat-1',
+        outcome: 'interrupt-requested',
+        intent: 'stop',
+      },
+    ]);
+  });
+
+  it('publishes an idle repair before an already-idle Stop outcome', () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.queueListeners.sessionStopped('chat-1', 'already-idle', 'stop', 'stop-1', 3);
+
+    expect(published).toMatchObject([
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: null },
+      {
+        type: 'chat-session-stopped',
+        chatId: 'chat-1',
+        outcome: 'already-idle',
+        intent: 'stop',
+      },
+    ]);
+  });
+
+  it('publishes running before a rejected active Stop outcome', () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      processing: { phase: mock(() => 'running') },
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.queueListeners.sessionStopped('chat-1', 'failed', 'stop', 'stop-1', 8);
+
+    expect(published).toMatchObject([
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
+      {
+        type: 'chat-session-stopped',
+        chatId: 'chat-1',
+        outcome: 'failed',
+        intent: 'stop',
+      },
+    ]);
+  });
+
+  it('recomputes processing phases for terminal, successor, and provider transitions', () => {
+    let phase = null;
+    const published = [];
+    const fixture = createWiringFixture({
+      processing: { phase: mock(() => phase) },
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.queueListeners.processing('chat-1');
+    phase = 'running';
+    fixture.queueListeners.processing('chat-1');
+    fixture.agentListeners.processing('chat-1', false);
+
+    expect(published).toEqual([
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: null },
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
+      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
+    ]);
+  });
+
   it('clears optimistic processing before publishing a queued launch failure', async () => {
     const published = [];
     const fixture = createWiringFixture({
@@ -128,7 +225,7 @@ describe('server event wiring', () => {
     ]);
     expect(published[0]).toMatchObject({
       chatId: 'chat-1',
-      isProcessing: false,
+      phase: null,
     });
   });
 
@@ -227,6 +324,7 @@ describe('server event wiring', () => {
       onDispatching: mock(() => undefined),
       onChatMessages: mock(() => undefined),
       onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
+      onProcessingInvalidated: mock(() => undefined),
       onTurnFailed: mock(() => undefined),
       onTurnSettled: mock((callback) => { queueListeners.turnSettled = callback; }),
       getQueuedTurnFinalization: mock(() => null),
@@ -261,6 +359,7 @@ describe('server event wiring', () => {
         onRemoteSettingsChanged: noOpSubscription,
       },
       queue,
+      processing: { phase: mock(() => null) },
       metadata: {},
       chatViews: {},
       chatNativeReloader: {},
@@ -276,7 +375,7 @@ describe('server event wiring', () => {
     });
 
     queueListeners.stopRequested(chatId, 'stop-a', turn);
-    queueListeners.sessionStopped(chatId, true, 'interrupt-and-send', 'stop-a');
+    queueListeners.sessionStopped(chatId, 'interrupt-requested', 'interrupt-and-send', 'stop-a', 5);
     agentListeners.finished(chatId, 0, turn);
     await nativeLoadStarted.promise;
     releaseNativeLoad.resolve([new UserMessage(timestamp, 'successor')]);
@@ -328,6 +427,7 @@ describe('server event wiring', () => {
       onDispatching: mock(() => undefined),
       onChatMessages: mock(() => undefined),
       onSessionStopped: mock((callback) => { queueListeners.sessionStopped = callback; }),
+      onProcessingInvalidated: mock(() => undefined),
       onTurnFailed: mock(() => undefined),
       onTurnSettled: mock((callback) => { queueListeners.turnSettled = callback; }),
       getQueuedTurnFinalization: mock(() => null),
@@ -358,6 +458,7 @@ describe('server event wiring', () => {
         onRemoteSettingsChanged: noOpSubscription,
       },
       queue,
+      processing: { phase: mock(() => null) },
       metadata: {},
       chatViews: { appendToCurrentOrProvisional: mock(async () => ({ messages: [] })) },
       chatNativeReloader: { reloadFromNative },
@@ -379,7 +480,7 @@ describe('server event wiring', () => {
     expect(reloadFromNative).not.toHaveBeenCalled();
     expect(published.some((message) => message.type === 'agent-run-failed')).toBe(false);
 
-    queueListeners.sessionStopped(chatId, false, 'stop', 'stop-a');
+    queueListeners.sessionStopped(chatId, 'failed', 'stop', 'stop-a', 7);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(reloadFromNative).toHaveBeenCalledWith(

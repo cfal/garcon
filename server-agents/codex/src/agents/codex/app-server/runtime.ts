@@ -1,8 +1,7 @@
 import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage, type CompactionTrigger } from '@garcon/common/chat-types';
-import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { AgentActiveInputHandoff, AgentLogger } from '@garcon/server-agent-interface';
 import { CodexHistoryService } from '../history-source.js';
 import {
   assertCodexExecutionOpen,
@@ -19,7 +18,7 @@ import type { PermissionMode } from '@garcon/common/chat-modes';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
 import { convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from './converter.js';
-import { waitForMaterializedThread } from './durability.js';
+import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
 import { NativePathDiscoveryRefreshLimiter, type NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type {
@@ -158,8 +157,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#capacityRetryDelaysMs = (options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS)
       .slice(0, MAX_CAPACITY_RETRIES);
     this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
-    this.#nativePathDiscoveryRefresh =
-      new NativePathDiscoveryRefreshLimiter(options.nativePathDiscoveryRefresh);
+    this.#nativePathDiscoveryRefresh = new NativePathDiscoveryRefreshLimiter(options.nativePathDiscoveryRefresh);
     this.#logger = options.logger ?? NOOP_LOGGER;
     this.#history = new CodexHistoryService({
       createClient: this.#createClient,
@@ -379,7 +377,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async submitActiveInput(
     request: CodexResumeRequest,
-    beforeDelivery: () => Promise<void> = async () => {},
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void> = async (handoff) => {
+      handoff.validate();
+      handoff.commit();
+    },
   ): Promise<boolean> {
     const session = this.#sessions.get(request.agentSessionId);
     if (!session || session.status === 'completed' || session.status === 'failed' || session.status === 'aborted') {
@@ -397,7 +398,27 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       ) return false;
       session.activeDeliveryReservations += 1;
       try {
-        await beforeDelivery();
+        const validate = () => {
+          if (
+            this.#sessions.get(request.agentSessionId) !== session
+            || hasTerminalPendingFinish(session)
+            || isTerminalSessionStatus(session.status)
+          ) {
+            throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before active input delivery');
+          }
+        };
+        let committed = false;
+        validate();
+        await beforeDelivery({
+          validate,
+          commit: () => {
+            session.eventMetadata = codexEventMetadata(request);
+            session.onAbortable = request.onAbortable;
+            committed = true;
+            if (session.abortableNotified) session.onAbortable?.();
+          },
+        });
+        if (!committed) throw new Error('Codex active input handoff was not committed');
         if (hasTerminalPendingFinish(session) || isTerminalSessionStatus(session.status)) {
           throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before active input delivery');
         }
@@ -461,6 +482,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           const turn = await session.client.startTurn(startParams);
           if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
           session.activeTurnId = turn.turn.id;
+          this.#notifyAbortable(session);
           return;
         } catch (error) {
           const isTurnTransition = isActiveTurnConflictError(error) || isActiveTurnNotSteerableError(error);
@@ -807,10 +829,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async resolveNativePath(session: CodexChatEntry): Promise<string | null> {
     if (!session.agentSessionId) return null;
 
-    return this.#accessibleNativePath(
-      await this.#getThreadListCache(false),
-      session.agentSessionId,
-    );
+    return accessibleThreadPath(await this.#getThreadListCache(false), session.agentSessionId);
   }
 
   requestNativePathDiscoveryRefresh(agentSessionId: string): void {
@@ -907,20 +926,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     });
     this.#threadListCaches.set(useStateDbOnly, pending);
     return pending;
-  }
-
-  async #accessibleNativePath(
-    threads: ReadonlyMap<string, CodexThread>,
-    agentSessionId: string,
-  ): Promise<string | null> {
-    const nativePath = threads.get(agentSessionId)?.path ?? null;
-    if (!nativePath) return null;
-    try {
-      await fs.access(nativePath);
-      return nativePath;
-    } catch {
-      return null;
-    }
   }
 
   async #loadThreadListCache(useStateDbOnly: boolean): Promise<Map<string, CodexThread>> {

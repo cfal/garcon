@@ -9,6 +9,7 @@ import type { AgentChatReference, AgentNativeSessionRef } from './transcript.js'
 export interface AgentExecution {
   start(request: AgentStartRequest): Promise<AgentStartedSession>;
   resume(request: AgentResumeRequest): Promise<void>;
+  // Resolves true after provider acknowledgement or a synchronous local abort.
   abort(agentSessionId: string): Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   runningSessions(): readonly AgentRunningSession[];
@@ -54,7 +55,12 @@ export interface AgentResumeRequest extends AgentExecutionContext {
 }
 
 export interface AgentActiveInput extends AgentResumeRequest {
-  readonly beforeDelivery: () => Promise<void>;
+  readonly beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>;
+}
+
+export interface AgentActiveInputHandoff {
+  validate(): void;
+  commit(): void;
 }
 
 export interface AgentCompactRequest extends AgentResumeRequest {

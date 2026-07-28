@@ -4,12 +4,19 @@ import type { ClaudeCLIMessage } from './cli-protocol.js';
 
 const DEFAULT_CONTROL_TIMEOUT_MS = 10_000;
 
+interface ClaudeControlRequestOptions {
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+}
+
 interface PendingControlRequest {
   readonly agentSessionId: string;
   readonly subtype: string;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   readonly timeout: ReturnType<typeof setTimeout>;
+  readonly signal?: AbortSignal;
+  readonly abortListener?: () => void;
 }
 
 export class ClaudeControlBroker {
@@ -22,10 +29,14 @@ export class ClaudeControlBroker {
   request(
     agentSessionId: string,
     request: Record<string, unknown>,
-    timeoutMs = DEFAULT_CONTROL_TIMEOUT_MS,
+    options: ClaudeControlRequestOptions = {},
   ): Promise<unknown> {
     const requestId = crypto.randomUUID();
     const subtype = typeof request.subtype === 'string' ? request.subtype : 'unknown';
+    const timeoutMs = options.timeoutMs ?? DEFAULT_CONTROL_TIMEOUT_MS;
+    if (options.signal?.aborted) {
+      return Promise.reject(controlCancellationError(options.signal));
+    }
     let resolve!: (value: unknown) => void;
     let reject!: (error: Error) => void;
     const response = new Promise<unknown>((complete, fail) => {
@@ -33,28 +44,34 @@ export class ClaudeControlBroker {
       reject = fail;
     });
     const timeout = setTimeout(() => {
-      const pending = this.#pending.get(requestId);
+      const pending = this.#takePending(requestId);
       if (!pending) return;
-      this.#pending.delete(requestId);
       pending.reject(new Error(`Claude CLI ${subtype} control request timed out`));
     }, timeoutMs);
+    const abortListener = options.signal
+      ? () => {
+          const pending = this.#takePending(requestId);
+          pending?.reject(controlCancellationError(options.signal!));
+        }
+      : undefined;
     this.#pending.set(requestId, {
       agentSessionId,
       subtype,
       resolve,
       reject,
       timeout,
+      signal: options.signal,
+      abortListener,
     });
+    if (abortListener) options.signal!.addEventListener('abort', abortListener, { once: true });
 
     void this.write(agentSessionId, JSON.stringify({
       type: 'control_request',
       request_id: requestId,
       request,
     })).catch((error: unknown) => {
-      const pending = this.#pending.get(requestId);
+      const pending = this.#takePending(requestId);
       if (!pending) return;
-      clearTimeout(pending.timeout);
-      this.#pending.delete(requestId);
       pending.reject(error instanceof Error ? error : new Error(errorMessage(error)));
     });
     return response;
@@ -65,14 +82,17 @@ export class ClaudeControlBroker {
     if (!requestId) return false;
     const pending = this.#pending.get(requestId);
     if (!pending || pending.agentSessionId !== agentSessionId) return false;
-    this.#pending.delete(requestId);
-    clearTimeout(pending.timeout);
+    this.#takePending(requestId);
     if (message.response?.subtype === 'error') {
       pending.reject(new Error(
         message.response.error || `Claude CLI ${pending.subtype} control request failed`,
       ));
-    } else {
+    } else if (message.response?.subtype === 'success') {
       pending.resolve(message.response?.response ?? {});
+    } else {
+      pending.reject(new Error(
+        `Claude CLI ${pending.subtype} control request returned an invalid response`,
+      ));
     }
     return true;
   }
@@ -83,8 +103,7 @@ export class ClaudeControlBroker {
         pending.agentSessionId !== agentSessionId
         || (subtype !== undefined && pending.subtype !== subtype)
       ) continue;
-      this.#pending.delete(requestId);
-      clearTimeout(pending.timeout);
+      this.#takePending(requestId);
       pending.reject(new Error(reason));
     }
   }
@@ -92,8 +111,28 @@ export class ClaudeControlBroker {
   shutdown(reason: string): void {
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timeout);
+      if (pending.signal && pending.abortListener) {
+        pending.signal.removeEventListener('abort', pending.abortListener);
+      }
       pending.reject(new Error(reason));
     }
     this.#pending.clear();
   }
+
+  #takePending(requestId: string): PendingControlRequest | undefined {
+    const pending = this.#pending.get(requestId);
+    if (!pending) return undefined;
+    this.#pending.delete(requestId);
+    clearTimeout(pending.timeout);
+    if (pending.signal && pending.abortListener) {
+      pending.signal.removeEventListener('abort', pending.abortListener);
+    }
+    return pending;
+  }
+}
+
+function controlCancellationError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(signal.reason ? errorMessage(signal.reason) : 'Claude CLI control request cancelled');
 }

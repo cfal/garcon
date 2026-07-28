@@ -1,6 +1,14 @@
 import type { ChatGenerationResetReason, ChatViewMessage } from './chat-view';
 import { parseChatViewMessages } from './chat-view';
-import type { ChatStopIntent, UserMessageDeliveryStatus } from './chat-types';
+import {
+  CHAT_STOP_OUTCOMES,
+  CHAT_PROCESSING_PHASES,
+  type ChatProcessingEntry,
+  type ChatProcessingPhase,
+  type ChatStopIntent,
+  type ChatStopOutcome,
+  type UserMessageDeliveryStatus,
+} from './chat-types';
 import type {
   PendingUserInput,
   PendingUserInputClearReason,
@@ -120,7 +128,7 @@ export class ChatSessionStoppedMessage {
   readonly type = 'chat-session-stopped' as const;
   constructor(
     public chatId: string,
-    public success: boolean,
+    public outcome: ChatStopOutcome,
     public intent: ChatStopIntent,
   ) {}
 }
@@ -129,7 +137,7 @@ export class ChatProcessingUpdatedMessage {
   readonly type = 'chat-processing-updated' as const;
   constructor(
     public chatId: string,
-    public isProcessing: boolean,
+    public phase: ChatProcessingPhase | null,
   ) {}
 }
 
@@ -155,14 +163,14 @@ export type ReconnectControlResult =
   | { chatId: string; outcome: 'not-found' }
   | { chatId: string; outcome: 'unavailable' };
 
-export type ReconnectProcessingResult =
-  | { outcome: 'snapshot'; runningChatIds: string[] }
+export type ChatProcessingSnapshotResult =
+  | { outcome: 'snapshot'; chats: ChatProcessingEntry[] }
   | { outcome: 'unavailable' };
 
 export class ReconnectStateMessage {
   readonly type = 'reconnect-state' as const;
   constructor(
-    public processing: ReconnectProcessingResult,
+    public processing: ChatProcessingSnapshotResult,
     public controlResults: ReconnectControlResult[],
     public clientRequestId?: string,
   ) {}
@@ -202,6 +210,7 @@ export class WsPongMessage {
     public clientRequestId: string,
     public sentAt: number,
     public serverTime: string,
+    public processing: ChatProcessingSnapshotResult,
   ) {}
 }
 
@@ -378,24 +387,26 @@ function reconnectControlResults(value: unknown): ReconnectControlResult[] | nul
   return results;
 }
 
-function reconnectProcessingResult(value: unknown): ReconnectProcessingResult | null {
+function chatProcessingSnapshotResult(value: unknown): ChatProcessingSnapshotResult | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const result = value as Record<string, unknown>;
   if (result.outcome === 'unavailable') return { outcome: 'unavailable' };
-  if (result.outcome !== 'snapshot' || !Array.isArray(result.runningChatIds)) return null;
+  if (result.outcome !== 'snapshot' || !Array.isArray(result.chats)) return null;
 
-  const runningChatIds: string[] = [];
+  const chats: ChatProcessingEntry[] = [];
   const seen = new Set<string>();
-  for (const valueChatId of result.runningChatIds) {
-    const chatId = requiredStr(valueChatId);
-    if (!chatId) return null;
-    if (seen.has(chatId)) continue;
+  for (const valueEntry of result.chats) {
+    if (!valueEntry || typeof valueEntry !== 'object' || Array.isArray(valueEntry)) return null;
+    const entry = valueEntry as Record<string, unknown>;
+    const chatId = requiredStr(entry.chatId);
+    const phase = CHAT_PROCESSING_PHASES.find((valuePhase) => valuePhase === entry.phase);
+    if (!chatId || !phase || seen.has(chatId)) return null;
     seen.add(chatId);
-    runningChatIds.push(chatId);
+    chats.push({ chatId, phase });
   }
 
-  return { outcome: 'snapshot', runningChatIds };
+  return { outcome: 'snapshot', chats };
 }
 
 function hasField(data: Record<string, unknown>, key: string): boolean {
@@ -584,18 +595,22 @@ export function parseServerWsMessage(
     case 'chat-session-stopped': {
       const chatId = requiredStr(data.chatId);
       const intent = data.intent;
+      const outcome = CHAT_STOP_OUTCOMES.find((entry) => entry === data.outcome);
       return chatId && (
         intent === 'stop'
         || intent === 'interrupt-and-send'
         || intent === 'chat-deletion'
-      )
-        ? new ChatSessionStoppedMessage(chatId, Boolean(data.success), intent)
+      ) && outcome
+        ? new ChatSessionStoppedMessage(chatId, outcome, intent)
         : null;
     }
     case 'chat-processing-updated': {
       const chatId = requiredStr(data.chatId);
-      return chatId
-        ? new ChatProcessingUpdatedMessage(chatId, Boolean(data.isProcessing))
+      const phase = data.phase === null
+        ? null
+        : CHAT_PROCESSING_PHASES.find((entry) => entry === data.phase);
+      return chatId && phase !== undefined
+        ? new ChatProcessingUpdatedMessage(chatId, phase)
         : null;
     }
     case 'chat-execution-control-updated': {
@@ -617,7 +632,7 @@ export function parseServerWsMessage(
         : null;
     }
     case 'reconnect-state': {
-      const processing = reconnectProcessingResult(data.processing);
+      const processing = chatProcessingSnapshotResult(data.processing);
       const controlResults = reconnectControlResults(data.controlResults);
       if (!processing || !controlResults) return null;
       return new ReconnectStateMessage(
@@ -664,8 +679,9 @@ export function parseServerWsMessage(
           ? data.sentAt
           : null;
       const serverTime = requiredStr(data.serverTime);
-      return clientRequestId && sentAt !== null && serverTime
-        ? new WsPongMessage(clientRequestId, sentAt, serverTime)
+      const processing = chatProcessingSnapshotResult(data.processing);
+      return clientRequestId && sentAt !== null && serverTime && processing
+        ? new WsPongMessage(clientRequestId, sentAt, serverTime, processing)
         : null;
     }
     case 'chat-title-updated': {

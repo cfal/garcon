@@ -292,10 +292,10 @@ function createRouteAgent(sessionOverrides = {}) {
     failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
     stopActiveTurn: mock(() => Promise.resolve({
-      stopped: true,
+      outcome: 'interrupt-requested',
       control: storedQueue([], { version: 1 }),
     })),
-    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     isChatExecutionReserved: mock(() => false),
@@ -1050,10 +1050,10 @@ describe('REST chat command routes', () => {
     const first = await callJson(handler, payload);
     const retry = await callJson(handler, payload);
 
-    expect(first.body.stopped).toBe(true);
+    expect(first.body.outcome).toBe('interrupt-requested');
     expect(first.body.control.version).toBe(1);
     expect(retry.body.status).toBe('duplicate');
-    expect(retry.body.stopped).toBe(true);
+    expect(retry.body.outcome).toBe('interrupt-requested');
     expect(agent.queue.stopActiveTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -1071,7 +1071,7 @@ describe('REST chat command routes', () => {
     );
 
     expect(result.response.status).toBe(200);
-    expect(result.body.stopped).toBe(true);
+    expect(result.body.outcome).toBe('interrupt-requested');
     expect(agent.queue.interruptActiveTurn).toHaveBeenCalledTimes(1);
     expect(agent.queue.stopActiveTurn).not.toHaveBeenCalled();
   });

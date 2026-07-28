@@ -1,5 +1,6 @@
 import { constants } from 'node:fs';
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
@@ -8,7 +9,11 @@ import type {
   ForkRunCommandRequest,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.js';
-import type { IntegrationDirectories } from './integration-fixture.js';
+import {
+  assertSensitiveValuesNotPersisted,
+  type IntegrationDirectories,
+} from './integration-fixture.js';
+import { withTimeout } from './deferred.js';
 
 export const LIVE_CODEX_MODEL = 'gpt-5.4-nano';
 export const LIVE_CODEX_THINKING_MODE = 'low';
@@ -22,6 +27,8 @@ const CODEX_AGENT_SETTINGS: AgentSettingsEnvelope = {
   values: {},
 };
 const SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+const PROXY_START_TIMEOUT_MS = 10_000;
+const PROXY_STOP_TIMEOUT_MS = 5_000;
 const LIVE_MODEL_CATALOG = {
   models: [{
     slug: LIVE_CODEX_MODEL,
@@ -69,7 +76,94 @@ const LIVE_MODEL_CATALOG = {
   }],
 };
 
-export async function liveCodexServerEnvironment(): Promise<Record<string, string>> {
+export interface LiveCodexTestEnvironment {
+  readonly forbiddenPersistedValues: readonly string[];
+  readonly proxyBaseUrl: string;
+  readonly serverEnvironment: Record<string, string>;
+  prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
+  dispose(): Promise<void>;
+}
+
+interface LiveCodexTestEnvironmentOptions {
+  upstreamUrl?: string;
+}
+
+type CodexProxyProcess = Bun.Subprocess<'pipe', 'ignore', 'ignore'>;
+
+function proxyEnvironment(root: string): Record<string, string> {
+  return {
+    HOME: root,
+    PATH: process.env.PATH ?? SYSTEM_PATH,
+    NO_COLOR: '1',
+    ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
+    ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
+    ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
+  };
+}
+
+async function waitForProxyBaseUrl(
+  child: CodexProxyProcess,
+  serverInfoPath: string,
+): Promise<string> {
+  const deadline = Date.now() + PROXY_START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const parsed = JSON.parse(await readFile(serverInfoPath, 'utf8')) as { port?: unknown };
+      if (
+        typeof parsed.port === 'number'
+        && Number.isInteger(parsed.port)
+        && parsed.port > 0
+        && parsed.port <= 65_535
+      ) {
+        return `http://127.0.0.1:${parsed.port}`;
+      }
+      throw new Error('Live Codex credential proxy wrote invalid startup metadata.');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (child.exitCode !== null) {
+      throw new Error('Live Codex credential proxy exited before startup.');
+    }
+    await Bun.sleep(25);
+  }
+  throw new Error('Timed out waiting for the live Codex credential proxy.');
+}
+
+async function stopProxy(child: CodexProxyProcess, proxyBaseUrl: string): Promise<void> {
+  if (child.exitCode === null) {
+    await fetch(`${proxyBaseUrl}/shutdown`).catch(() => undefined);
+  }
+  try {
+    await withTimeout(
+      child.exited,
+      PROXY_STOP_TIMEOUT_MS,
+      () => 'Timed out stopping the live Codex credential proxy.',
+    );
+  } catch (error) {
+    child.kill('SIGTERM');
+    await child.exited;
+    throw error;
+  }
+}
+
+async function removeProxyRoot(root: string, testingKey: string): Promise<void> {
+  let scanError: unknown;
+  try {
+    await assertSensitiveValuesNotPersisted({
+      directory: root,
+      diagnostics: null,
+      values: [testingKey],
+    });
+  } catch (error) {
+    scanError = error;
+  }
+  await rm(root, { recursive: true, force: true });
+  if (scanError) throw scanError;
+}
+
+export async function startLiveCodexTestEnvironment(
+  options: LiveCodexTestEnvironmentOptions = {},
+): Promise<LiveCodexTestEnvironment> {
   const testingKey = process.env.OPENAI_TESTING_KEY?.trim();
   if (!testingKey) {
     throw new Error('OPENAI_TESTING_KEY is required for live Codex integration tests.');
@@ -80,32 +174,87 @@ export async function liveCodexServerEnvironment(): Promise<Record<string, strin
     throw new Error('Node.js is required to launch the pinned Codex package.');
   }
 
-  // The temporary custom provider keeps the user's Codex home and login untouched.
-  return {
+  const root = await mkdtemp(join(tmpdir(), 'garcon-live-codex-proxy-'));
+  const serverInfoPath = join(root, 'server-info.json');
+  const command = [
+    CODEX_BINARY,
+    'responses-api-proxy',
+    '--http-shutdown',
+    '--server-info',
+    serverInfoPath,
+    ...(options.upstreamUrl ? ['--upstream-url', options.upstreamUrl] : []),
+  ];
+  let child: CodexProxyProcess | undefined;
+  let proxyBaseUrl: string;
+  try {
+    child = Bun.spawn({
+      cmd: command,
+      env: proxyEnvironment(root),
+      stdin: 'pipe',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    child.stdin.write(`${testingKey}\n`);
+    child.stdin.end();
+    proxyBaseUrl = await waitForProxyBaseUrl(child, serverInfoPath);
+  } catch (error) {
+    if (child) {
+      child.kill('SIGTERM');
+      await child.exited.catch(() => undefined);
+    }
+    try {
+      await removeProxyRoot(root, testingKey);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Live Codex credential proxy startup and cleanup failed.',
+      );
+    }
+    throw error;
+  }
+
+  const serverEnvironment = {
     GARCON_CODEX_CLI: CODEX_BINARY,
-    OPENAI_API_KEY: testingKey,
     PATH: `${dirname(nodeBinary)}:${SYSTEM_PATH}`,
   };
-}
 
-export async function prepareLiveCodexHome(
-  directories: IntegrationDirectories,
-): Promise<void> {
-  const codexHome = join(directories.home, '.codex');
-  const catalogPath = join(codexHome, 'live-models.json');
-  await mkdir(codexHome, { recursive: true, mode: 0o700 });
-  await writeFile(catalogPath, JSON.stringify(LIVE_MODEL_CATALOG), { mode: 0o600 });
-  await writeFile(join(codexHome, 'config.toml'), [
-    'model_provider = "garcon-live-openai"',
-    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-    '',
-    '[model_providers.garcon-live-openai]',
-    'name = "Garcon Live OpenAI"',
-    'base_url = "https://api.openai.com/v1"',
-    'env_key = "OPENAI_API_KEY"',
-    'wire_api = "responses"',
-    '',
-  ].join('\n'), { mode: 0o600 });
+  return {
+    forbiddenPersistedValues: [testingKey],
+    proxyBaseUrl,
+    serverEnvironment,
+    async prepareWorkspace(directories) {
+      const codexHome = join(directories.home, '.codex');
+      const catalogPath = join(codexHome, 'live-models.json');
+      await mkdir(codexHome, { recursive: true, mode: 0o700 });
+      await writeFile(catalogPath, JSON.stringify(LIVE_MODEL_CATALOG), { mode: 0o600 });
+      await writeFile(join(codexHome, 'config.toml'), [
+        'model_provider = "garcon-live-openai"',
+        `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+        '',
+        '[model_providers.garcon-live-openai]',
+        'name = "Garcon Live OpenAI"',
+        `base_url = ${JSON.stringify(`${proxyBaseUrl}/v1`)}`,
+        'wire_api = "responses"',
+        '',
+      ].join('\n'), { mode: 0o600 });
+    },
+    async dispose() {
+      const errors: unknown[] = [];
+      try {
+        await stopProxy(child, proxyBaseUrl);
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await removeProxyRoot(root, testingKey);
+      } catch (error) {
+        errors.push(error);
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, 'Live Codex credential proxy cleanup failed.');
+      }
+    },
+  };
 }
 
 export function liveCodexStartRequest(input: {

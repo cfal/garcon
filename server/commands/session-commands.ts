@@ -7,6 +7,7 @@ import type {
   ProjectPathPatchResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
+import { isStopSatisfied, type ChatStopOutcome } from '../../common/chat-types.js';
 import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
 import {
   toClientChatExecutionControlState,
@@ -25,6 +26,7 @@ import {
   type SubmitRunInput,
   type UpdateProjectPathInput,
 } from './command-support.js';
+import type { CommandLedgerRecord } from './command-ledger.js';
 
 const logger = createLogger('commands:session');
 
@@ -166,7 +168,7 @@ export class SessionCommands {
     if (ledger.kind === 'duplicate') {
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
-        stopped: ledger.record.status === 'finished',
+        outcome: recordedStopOutcome(ledger.record),
         control: toClientChatExecutionControlState(
           await this.deps.queue.readChatExecutionControl(input.chatId),
         ),
@@ -176,11 +178,12 @@ export class SessionCommands {
     try {
       const result = await this.deps.queue.stopActiveTurn(input.chatId);
       const updated = await this.deps.ledger.update(ledger.record.key, {
-        status: result.stopped ? 'finished' : 'failed',
+        status: isStopSatisfied(result.outcome) ? 'finished' : 'failed',
+        stopOutcome: result.outcome,
       });
       return {
         ...commandResultFromRecord(updated ?? ledger.record),
-        stopped: result.stopped,
+        outcome: result.outcome,
         control: toClientChatExecutionControlState(result.control),
       };
     } catch (error) {
@@ -204,7 +207,7 @@ export class SessionCommands {
     if (ledger.kind === 'duplicate') {
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
-        stopped: ledger.record.status === 'finished',
+        outcome: recordedStopOutcome(ledger.record),
         control: toClientChatExecutionControlState(
           await this.deps.queue.readChatExecutionControl(input.chatId),
         ),
@@ -212,13 +215,14 @@ export class SessionCommands {
     }
 
     try {
-      const stopped = await this.deps.queue.interruptActiveTurn(input.chatId);
+      const outcome = await this.deps.queue.interruptActiveTurn(input.chatId);
       const updated = await this.deps.ledger.update(ledger.record.key, {
-        status: stopped ? 'finished' : 'failed',
+        status: isStopSatisfied(outcome) ? 'finished' : 'failed',
+        stopOutcome: outcome,
       });
       return {
         ...commandResultFromRecord(updated ?? ledger.record),
-        stopped,
+        outcome,
         control: toClientChatExecutionControlState(
           await this.deps.queue.readChatExecutionControl(input.chatId),
         ),
@@ -465,4 +469,10 @@ export class SessionCommands {
     }
     return null;
   }
+}
+
+function recordedStopOutcome(
+  record: Pick<CommandLedgerRecord, 'status' | 'stopOutcome'>,
+): ChatStopOutcome {
+  return record.stopOutcome ?? (record.status === 'finished' ? 'interrupt-requested' : 'failed');
 }

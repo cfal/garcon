@@ -236,6 +236,7 @@ function selectedChat(): ChatSessionRecord {
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 		status: 'draft',
 		tags: [],

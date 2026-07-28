@@ -59,6 +59,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isPinned: false,
 		isArchived: false,
 		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 		status: 'running',
 		tags: [],
@@ -84,6 +85,8 @@ function createServerEntry(id: string) {
 		isPinned: false,
 		isArchived: false,
 		isActive: false,
+		isProcessing: false,
+		processingPhase: null,
 		isUnread: false,
 	};
 }

@@ -33,6 +33,7 @@ import {
 	setLastSelectedChat,
 } from '../chats';
 import type { ChatListResponse } from '$shared/chat-list';
+import { CHAT_STOP_OUTCOMES } from '$shared/chat-types';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -99,6 +100,8 @@ describe('chats API contract', () => {
 					isPinned: false,
 					isArchived: false,
 					isActive: false,
+					isProcessing: false,
+					processingPhase: null,
 					isUnread: false,
 				},
 			],
@@ -115,6 +118,52 @@ describe('chats API contract', () => {
 		expect(url).toBe('/api/v1/chats');
 		expect(opts.method ?? 'GET').toBe('GET');
 	});
+
+	it.each([
+		[true, 'running'],
+		[true, 'stopping'],
+		[false, null],
+	] as const)(
+		'round-trips the REST processing pair %s/%s',
+		async (isProcessing, processingPhase) => {
+			const payload = {
+				sessions: [
+					{
+						id: 'chat-1',
+						isProcessing,
+						processingPhase,
+					},
+				],
+				total: 1,
+				lastSelectedChatId: 'chat-1',
+			} as unknown as ChatListResponse;
+			fetchMock.mockResolvedValue(jsonResponse(payload));
+
+			await expect(listChats()).resolves.toMatchObject({
+				sessions: [{ isProcessing, processingPhase }],
+			});
+		},
+	);
+
+	it.each([
+		[false, 'running'],
+		[false, 'stopping'],
+		[true, null],
+		[true, 'unknown'],
+	])(
+		'rejects the contradictory REST processing pair %s/%s',
+		async (isProcessing, processingPhase) => {
+			fetchMock.mockResolvedValue(
+				jsonResponse({
+					sessions: [{ id: 'chat-1', isProcessing, processingPhase }],
+					total: 1,
+					lastSelectedChatId: 'chat-1',
+				}),
+			);
+
+			await expect(listChats()).rejects.toThrow('Invalid chat list processing response');
+		},
+	);
 
 	it('setLastSelectedChat sends PUT /api/v1/chats/last-selected', async () => {
 		const payload = { success: true as const, lastSelectedChatId: 'chat-1' };
@@ -334,7 +383,7 @@ describe('chats API contract', () => {
 				clientRequestId: 'req-stop',
 				status: 'accepted',
 				acceptedAt: 't',
-				stopped: true,
+				outcome: 'interrupt-requested',
 				control: emptyControl(),
 			}),
 		);
@@ -386,7 +435,7 @@ describe('chats API contract', () => {
 				clientRequestId: 'req-interrupt',
 				status: 'accepted',
 				acceptedAt: 't',
-				stopped: true,
+				outcome: 'already-idle',
 				control: emptyControl(),
 			}),
 		);
@@ -403,6 +452,49 @@ describe('chats API contract', () => {
 			chatId: 'c-1',
 			agentId: 'claude',
 		});
+	});
+
+	it.each(CHAT_STOP_OUTCOMES)('accepts the %s Stop outcome', async (outcome) => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				commandType: 'agent-stop',
+				clientRequestId: 'req-stop',
+				status: 'accepted',
+				acceptedAt: 't',
+				outcome,
+				control: emptyControl(),
+			}),
+		);
+
+		await expect(
+			stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', agentId: 'claude' }),
+		).resolves.toMatchObject({ outcome });
+	});
+
+	it('rejects missing and unknown Stop outcomes at the HTTP boundary', async () => {
+		const response = {
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop',
+			status: 'accepted',
+			acceptedAt: 't',
+			control: emptyControl(),
+		};
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse(response))
+			.mockResolvedValueOnce(jsonResponse({ ...response, outcome: 'unexpected' }));
+
+		await expect(
+			stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', agentId: 'claude' }),
+		).rejects.toThrow('Invalid chat Stop outcome response');
+		await expect(
+			interruptAndSendChat({
+				clientRequestId: 'req-interrupt',
+				chatId: 'c-1',
+				agentId: 'claude',
+			}),
+		).rejects.toThrow('Invalid chat Stop outcome response');
 	});
 
 	it('queue helpers use REST endpoints and encode identifiers', async () => {

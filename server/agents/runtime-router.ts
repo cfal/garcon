@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevisions,
+  type AgentActiveInputHandoff,
   type AgentExecutionContext,
   type AgentOperationIdentity,
   type AgentProjectPathUpdatePreparation,
@@ -197,7 +198,7 @@ export class AgentRuntimeRouter {
     chatId: string,
     prompt: string,
     opts: RunAgentTurnOptions,
-    beforeDelivery: () => Promise<void>,
+    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
   ): Promise<boolean> {
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) return false;
@@ -212,14 +213,19 @@ export class AgentRuntimeRouter {
     });
     await this.#validateEndpoint(integration, selection);
     const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
-    this.#events.trackTurn(chatId, operationMetadata(operation));
+    const previousTurn = this.#events.getActiveTurn(chatId);
     return integration.execution.submitActiveInput({
       ...this.#executionContext(chatId, entry, selection, operation, opts),
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
       attachments: attachments(opts.images),
-      beforeDelivery,
+      beforeDelivery: (handoff) => beforeDelivery(this.#events.handoffTurn(
+        chatId,
+        previousTurn,
+        operationMetadata(operation),
+        handoff,
+      )),
     });
   }
 
@@ -318,7 +324,7 @@ export class AgentRuntimeRouter {
 
   getRunningChatIdsSnapshot(): string[] {
     const chatIds = new Set<string>();
-    const unmapped: string[] = [];
+    let unmappedCount = 0;
     for (const integration of this.#directory.list()) {
       const sessions = integration.execution.runningSessions();
       if (!Array.isArray(sessions)) {
@@ -329,11 +335,11 @@ export class AgentRuntimeRouter {
         if (!id) throw new Error(`Running session for ${integration.descriptor.id} has no ID`);
         const match = this.#registry.getChatByAgentSessionId(id);
         if (match) chatIds.add(match[0]);
-        else unmapped.push(id);
+        else unmappedCount += 1;
       }
     }
-    if (unmapped.length > 0) {
-      throw new Error(`Running chat snapshot has ${unmapped.length} unmapped session(s)`);
+    if (unmappedCount > 0) {
+      logger.warn('Running chat snapshot omitted unmapped sessions', { count: unmappedCount });
     }
     return [...chatIds].sort();
   }

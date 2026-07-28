@@ -1,6 +1,7 @@
 import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { AgentSettingsEnvelope } from './agent-integration.js';
+import type { ChatProcessingPhase } from './chat-types.js';
 
 export interface ChatListEntry {
   id: string;
@@ -29,6 +30,8 @@ export interface ChatListEntry {
   isPinned: boolean;
   isArchived: boolean;
   isActive: boolean;
+  isProcessing: boolean;
+  processingPhase: ChatProcessingPhase | null;
   isUnread: boolean;
 }
 

@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { GLOBAL_SHORTCUTS, SLASH_COMMANDS } from '../keyboard-shortcut-entries';
+import { formatGlobalShortcut, getEffectiveGlobalShortcut } from '$lib/workspace/global-shortcuts';
 
 describe('keyboard shortcut entries', () => {
 	it('documents pane-tab and chat-list navigation without changing New Chat', () => {
-		const shortcutKeys = new Map(GLOBAL_SHORTCUTS.map((entry) => [entry.label(), entry.keys]));
+		const shortcutKeys = new Map(
+			GLOBAL_SHORTCUTS.map((entry) => {
+				const binding = getEffectiveGlobalShortcut(entry.id, {});
+				return [entry.label(), binding ? formatGlobalShortcut(binding) : []];
+			}),
+		);
 
 		expect(shortcutKeys.get('Go to tab on the left')).toEqual(['Ctrl', 'Shift', 'J']);
 		expect(shortcutKeys.get('Go to tab on the right')).toEqual(['Ctrl', 'Shift', 'L']);

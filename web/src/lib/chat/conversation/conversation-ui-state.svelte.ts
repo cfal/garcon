@@ -24,6 +24,7 @@ export interface ConversationUiPort {
 	readonly executionControlChatIds: string[];
 	setPendingPermissionRequests(update: PendingPermissionRequestUpdate): void;
 	clearPendingPermissionRequests(): void;
+	clearTurnPermissionRequests(): void;
 	setPendingViewChat(chat: PendingViewChat | null): void;
 	setPreviousPermissionMode(mode: PermissionMode | null): void;
 	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
@@ -50,6 +51,12 @@ export class ConversationUiState implements ConversationUiPort {
 
 	clearPendingPermissionRequests(): void {
 		this.pendingPermissionRequests = [];
+	}
+
+	clearTurnPermissionRequests(): void {
+		this.pendingPermissionRequests = this.pendingPermissionRequests.filter(
+			(request) => request.permissionRequestId.startsWith('plan-exit-'),
+		);
 	}
 
 	setPendingViewChat(chat: PendingViewChat | null): void {

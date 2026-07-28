@@ -14,6 +14,7 @@ import type { ChatListEntry } from './chat-list.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
 import { InvalidChatIdError, parseChatId } from './chat-id.js';
+import type { ChatStopOutcome } from './chat-types.js';
 
 export type CommandStatus = 'accepted' | 'duplicate';
 
@@ -244,7 +245,7 @@ export interface AgentStopCommandRequest {
 }
 
 export interface AgentStopResponse extends CommandAcceptedResponse {
-  stopped: boolean;
+  outcome: ChatStopOutcome;
   control: ChatExecutionControlState;
 }
 
@@ -255,7 +256,7 @@ export interface AgentInterruptAndSendCommandRequest {
 }
 
 export interface AgentInterruptAndSendResponse extends CommandAcceptedResponse {
-  stopped: boolean;
+  outcome: ChatStopOutcome;
   control: ChatExecutionControlState;
 }
 

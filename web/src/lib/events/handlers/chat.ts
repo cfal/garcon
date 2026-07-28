@@ -1,9 +1,8 @@
-// Handles chat-session-created, chat-session-stopped, chat-processing-updated, and error events.
+// Handles chat creation, stop acknowledgements, and WebSocket faults.
 
 import type {
 	ChatSessionCreatedMessage,
 	ChatSessionStoppedMessage,
-	ChatProcessingUpdatedMessage,
 	WsFaultMessage,
 } from '$shared/ws-events';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
@@ -11,6 +10,7 @@ import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
+import { isAbortAcknowledged } from '$shared/chat-types';
 
 export interface ChatEventContext {
 	getSelectedChat: () => ChatSessionRouterView | null;
@@ -22,13 +22,7 @@ export interface ChatEventContext {
 		| 'pendingViewChat'
 		| 'setPendingViewChat'
 		| 'setPendingPermissionRequests'
-		| 'clearPendingPermissionRequests'
 	>;
-	markTurnRunning: (chatId?: string | null) => void;
-	clearTurnStatus: (chatId?: string | null) => void;
-	isChatProcessing: (chatId?: string | null) => boolean;
-	onChatProcessing: (chatId?: string | null) => void;
-	onChatNotProcessing: (chatId?: string | null) => void;
 	// Startup ownership callbacks.
 	startupCoordinator: StartupCoordinator;
 	onExternalChatCreated: (chatId: string) => void;
@@ -66,42 +60,13 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEventContext) {
 	const pendingChatId = ctx.getPendingChatId();
 	const abortedChatId = msg.chatId || ctx.getCurrentChatId();
-	const abortSucceeded = msg.success !== false;
-	if (!abortSucceeded) return;
+	if (!isAbortAcknowledged(msg.outcome)) return;
 
-	const successorIsProcessing =
-		msg.intent === 'interrupt-and-send' && ctx.isChatProcessing(abortedChatId);
-	if (!successorIsProcessing) ctx.clearTurnStatus(abortedChatId);
 	if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
 		ctx.clearPendingChatId();
 	}
-	if (!successorIsProcessing) ctx.conversationUi.clearPendingPermissionRequests();
-	if (msg.intent === 'stop') {
+	if (msg.intent === 'stop' && abortedChatId === ctx.getCurrentChatId()) {
 		ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());
-	}
-}
-
-export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEventContext) {
-	const statusChatId = msg.chatId;
-	const currentChatId = ctx.getCurrentChatId();
-	const selectedChat = ctx.getSelectedChat();
-	const isCurrentChat =
-		statusChatId === currentChatId || (selectedChat && statusChatId === selectedChat.id);
-
-	if (statusChatId) {
-		if (msg.isProcessing) {
-			ctx.onChatProcessing(statusChatId);
-		} else {
-			ctx.onChatNotProcessing(statusChatId);
-		}
-	}
-
-	if (!isCurrentChat) return;
-
-	if (msg.isProcessing) {
-		ctx.markTurnRunning(statusChatId);
-	} else {
-		ctx.clearTurnStatus(statusChatId);
 	}
 }
 

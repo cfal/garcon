@@ -88,7 +88,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		});
 		mockStopChat.mockResolvedValue({
 			success: true,
-			stopped: true,
+			outcome: 'interrupt-requested',
 			commandType: 'stop',
 			clientRequestId: 'cmd-stop',
 			status: 'accepted',

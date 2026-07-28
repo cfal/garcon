@@ -70,6 +70,7 @@
 		getWorkspaceShortcuts,
 		getGitQuickSummary,
 		getGitBranchActions,
+		getChatProcessingReconciler,
 	} from '$lib/context';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
@@ -144,6 +145,16 @@
 	const agentState = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const conversationUi = new ConversationUiState();
+	const processingReconciler = getChatProcessingReconciler();
+	const removeProcessingPresentation = processingReconciler.addPresentation({
+		get currentChatId() {
+			return lifecycle.currentChatId;
+		},
+		applyProcessingPhase: (chatId, phase) => lifecycle.applyProcessingPhase(chatId, phase),
+		applyProcessingSnapshotPhase: (chatId, phase, sentAt) =>
+			lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt),
+		clearTurnPermissionRequests: () => conversationUi.clearTurnPermissionRequests(),
+	});
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
 	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
@@ -278,6 +289,7 @@
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
+		removeProcessingPresentation();
 		drainHandle.cleanup();
 		transcriptCache.flush();
 	});
@@ -340,6 +352,7 @@
 			},
 		},
 		reloadTranscript: (chatId) => reloadChatFromNative(ws, chatState, chatId),
+		requestProcessingSnapshot: () => ws.requestProcessingSnapshot(),
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.setPinnedToBottom(v);
 		},

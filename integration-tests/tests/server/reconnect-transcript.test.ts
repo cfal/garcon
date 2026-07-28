@@ -40,7 +40,10 @@ describe('reconnect and transcript stability', () => {
       await fixture.client.reconnect();
       const reconnectCursor = fixture.client.markEvents();
       const state = await fixture.client.reconnectState([chatId]);
-      expect(state.processing).toEqual({ outcome: 'snapshot', runningChatIds: [chatId] });
+      expect(state.processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId, phase: 'running' }],
+      });
       expect(state.controlResults).toHaveLength(1);
       expect(state.controlResults[0]).toMatchObject({ chatId, outcome: 'snapshot' });
 
@@ -120,7 +123,10 @@ describe('reconnect and transcript stability', () => {
 
       const reconnectCursor = fixture.client.markEvents();
       const state = await fixture.client.reconnectState([]);
-      if (state.processing.outcome === 'snapshot' && state.processing.runningChatIds.includes(chatId)) {
+      if (
+        state.processing.outcome === 'snapshot'
+        && state.processing.chats.some((entry) => entry.chatId === chatId)
+      ) {
         await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, { afterIndex: reconnectCursor });
       }
       const replay = await fixture.client.subscribe(chatId, initial.generationId, initial.lastSeq);
