@@ -11,17 +11,19 @@ const PROTOCOL_PROBE_TIMEOUT_MS = 90_000;
 export interface LiveClaudeProtocolProbe {
   prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
   waitForInputStarted(count?: number): Promise<string>;
-  waitForTerminalReason(
-    reason: 'aborted_streaming' | 'aborted_tools',
+  waitForTerminal(
     count?: number,
-  ): Promise<{ reason: 'aborted_streaming' | 'aborted_tools'; userMessageUuid: string }>;
+  ): Promise<{
+    reason: 'aborted_streaming' | 'aborted_tools';
+    userMessageUuid: string | null;
+  }>;
 }
 
 interface LiveClaudeProbeEntry {
   type: 'started' | 'terminal';
   commandUuid?: string;
   reason?: 'aborted_streaming' | 'aborted_tools';
-  userMessageUuid?: string;
+  userMessageUuid?: string | null;
 }
 
 async function readProbeEntries(path: string): Promise<LiveClaudeProbeEntry[]> {
@@ -89,20 +91,20 @@ exec "$GARCON_LIVE_CLAUDE_BUN_BINARY" "$GARCON_LIVE_CLAUDE_FORWARDER" "$@"
         'input start',
       ).then((entry) => entry.commandUuid);
     },
-    waitForTerminalReason(reason, count = 1) {
+    waitForTerminal(count = 1) {
       return waitForProbeEntry(
         () => terminalReasonPath,
         (
           entry,
         ): entry is LiveClaudeProbeEntry & {
           reason: 'aborted_streaming' | 'aborted_tools';
-          userMessageUuid: string;
+          userMessageUuid: string | null;
         } =>
           entry.type === 'terminal'
-          && entry.reason === reason
-          && typeof entry.userMessageUuid === 'string',
+          && (entry.reason === 'aborted_streaming' || entry.reason === 'aborted_tools')
+          && (typeof entry.userMessageUuid === 'string' || entry.userMessageUuid === null),
         count,
-        reason,
+        'terminal result',
       ).then((entry) => ({
         reason: entry.reason,
         userMessageUuid: entry.userMessageUuid,

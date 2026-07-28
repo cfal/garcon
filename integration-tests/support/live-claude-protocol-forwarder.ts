@@ -40,14 +40,14 @@ function observe(line: string): void {
   if (
     message.type === 'result'
     && (message.terminal_reason === 'aborted_streaming' || message.terminal_reason === 'aborted_tools')
-    && typeof message.user_message_uuid === 'string'
   ) {
     appendFileSync(
       terminalReasonPath,
       `${JSON.stringify({
         type: 'terminal',
         reason: message.terminal_reason,
-        userMessageUuid: message.user_message_uuid,
+        userMessageUuid:
+          typeof message.user_message_uuid === 'string' ? message.user_message_uuid : null,
       })}\n`,
     );
   }

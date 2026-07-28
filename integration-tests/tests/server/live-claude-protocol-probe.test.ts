@@ -22,6 +22,10 @@ console.log(JSON.stringify({
   terminal_reason: 'aborted_tools',
   user_message_uuid: ${JSON.stringify(commandUuid)},
 }));
+console.log(JSON.stringify({
+  type: 'result',
+  terminal_reason: 'aborted_streaming',
+}));
 `, { mode: 0o700 });
       const environment = { CLAUDE_BINARY: fakeBinary };
       const probe = createLiveClaudeProtocolProbe(environment);
@@ -43,9 +47,13 @@ console.log(JSON.stringify({
       expect(output).toContain('private output');
 
       expect(await probe.waitForInputStarted()).toBe(commandUuid);
-      expect(await probe.waitForTerminalReason('aborted_tools')).toEqual({
+      expect(await probe.waitForTerminal()).toEqual({
         reason: 'aborted_tools',
         userMessageUuid: commandUuid,
+      });
+      expect(await probe.waitForTerminal(2)).toEqual({
+        reason: 'aborted_streaming',
+        userMessageUuid: null,
       });
       const persistedProbeData = [
         await readFile(join(root, 'claude-started-inputs'), 'utf8'),

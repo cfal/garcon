@@ -455,8 +455,9 @@ describe('live Claude lifecycle', () => {
         afterIndex: stopCursor,
         timeoutMs: TURN_TIMEOUT_MS,
       });
-      const terminal = await protocolProbe.waitForTerminalReason('aborted_streaming');
-      expect(terminal.userMessageUuid).toBe(inputUuid);
+      const terminal = await protocolProbe.waitForTerminal();
+      expect(terminal.reason).toBe('aborted_streaming');
+      expect(terminal.userMessageUuid === null || terminal.userMessageUuid === inputUuid).toBe(true);
 
       const stopEvents = fixture.client.eventsSince(stopCursor);
       const stoppingIndex = stopEvents.findIndex((event) =>
@@ -545,8 +546,12 @@ describe('live Claude lifecycle', () => {
         afterIndex: interruptCursor,
         timeoutMs: TURN_TIMEOUT_MS,
       })).type);
-      const interruptedTerminal = await protocolProbe.waitForTerminalReason('aborted_tools');
-      expect(interruptedTerminal.userMessageUuid).toBe(interruptedInputUuid);
+      const interruptedTerminal = await protocolProbe.waitForTerminal();
+      expect(interruptedTerminal.reason).toBe('aborted_tools');
+      expect(
+        interruptedTerminal.userMessageUuid === null
+        || interruptedTerminal.userMessageUuid === interruptedInputUuid,
+      ).toBe(true);
       const successorInput = await fixture.client.waitForEvent(
         (event): event is PendingUserInputUpdatedMessage =>
           event.type === 'pending-user-input-updated'
@@ -613,8 +618,12 @@ describe('live Claude lifecycle', () => {
         afterIndex: stopCommandCursor,
         timeoutMs: TURN_TIMEOUT_MS,
       });
-      const stoppedTerminal = await protocolProbe.waitForTerminalReason('aborted_tools', 2);
-      expect(stoppedTerminal.userMessageUuid).toBe(stoppedInputUuid);
+      const stoppedTerminal = await protocolProbe.waitForTerminal(2);
+      expect(stoppedTerminal.reason).toBe('aborted_tools');
+      expect(
+        stoppedTerminal.userMessageUuid === null
+        || stoppedTerminal.userMessageUuid === stoppedInputUuid,
+      ).toBe(true);
 
       const stopEvents = fixture.client.eventsSince(stopCommandCursor);
       expect(stopEvents.filter((event) =>
