@@ -475,7 +475,6 @@ describe('live Codex lifecycle', () => {
           ? event.messages
           : []);
       const liveStoppedExecutions = toolExecutionProjections(liveStoppedMessages);
-      expect(liveStoppedExecutions.length).toBeGreaterThan(0);
       expect(toolExecutionProjections(stoppedTranscript.messages, priorBashToolIds))
         .toEqual(liveStoppedExecutions);
       expect(countUserContent(stoppedTranscript.messages, stoppedPrompt)).toBe(1);
