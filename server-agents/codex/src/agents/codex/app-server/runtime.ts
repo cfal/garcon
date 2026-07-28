@@ -53,8 +53,8 @@ import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discov
 import type { CodexGoalCommand } from '../goal-command.js';
 import { cleanupMaterializedGoalDraft, materializeGoalDraft } from './goal-files.js';
 
-type RunningStatus = 'running' | 'completing' | 'completed' | 'failed' | 'aborted';
-type FinishSessionOptions = { failedMessage?: string; aborted?: boolean };
+type RunningStatus = 'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted';
+type FinishSessionOptions = { failedMessage?: string; aborted?: boolean; emitFinishedOnAbort?: boolean };
 type GoalCommandOptions = {
   keepSession: boolean;
   goalSynchronized?: boolean;
@@ -141,7 +141,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #history: CodexHistoryService;
   #idlePurger = new IdleSessionPurger<RunningCodexSession>({
     sessions: () => this.#sessions.entries(),
-    isRunning: (session) => session.status === 'running' || session.status === 'completing',
+    isRunning: (session) => isActiveSessionStatus(session.status),
     lastActivityAt: () => 0,
     purge: (threadId, session) => {
       this.#sessions.delete(threadId);
@@ -771,20 +771,18 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return false;
     }
     if (this.#sessions.get(agentSessionId) !== session) return true;
-    session.status = 'aborted';
-    this.#cancelTurnStartWaiters(session, 'Codex session aborted');
-    this.#finishSession(session, { aborted: true });
+    session.status = 'interrupting';
     return true;
   }
 
   isRunning(agentSessionId: string): boolean {
     const status = this.#sessions.get(agentSessionId)?.status;
-    return status === 'running' || status === 'completing';
+    return status !== undefined && isActiveSessionStatus(status);
   }
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
     return Array.from(this.#sessions.values())
-      .filter((session) => session.status === 'running' || session.status === 'completing')
+      .filter((session) => isActiveSessionStatus(session.status))
       .map((session) => ({ id: session.threadId, status: session.status, startedAt: session.startedAt }));
   }
 
@@ -1132,7 +1130,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const session = this.#sessionForClientThread(client, params.threadId);
     if (!session) return;
     session.activeTurnId = params.turn.id;
-    session.status = 'running';
+    if (session.status !== 'interrupting') session.status = 'running';
     this.#notifyAbortable(session);
     for (const waiter of session.turnStartWaiters) waiter.resolve(params.turn.id);
   }
@@ -1315,7 +1313,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       this.#finishSession(session, { failedMessage });
       return;
     }
-    const aborted = params.turn.status === 'interrupted' || session.status === 'aborted';
+    const aborted = params.turn.status === 'interrupted' || session.status === 'interrupting';
     session.capacityRetryCount = 0;
     session.pendingCapacityFailure = null;
     session.status = 'completing';
@@ -1328,7 +1326,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         return;
       }
     }
-    this.#finishSession(session, { aborted });
+    this.#finishSession(session, { aborted, emitFinishedOnAbort: aborted });
   }
 
   #handleErrorNotification(client: CodexAppServerClient, params: ErrorNotification): void {
@@ -1452,7 +1450,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   #handleClientExit(client: CodexAppServerClient, code: number): void {
     const session = this.#sessionForClient(client);
-    if (!session || (session.status !== 'running' && session.status !== 'completing')) return;
+    if (!session || !isActiveSessionStatus(session.status)) return;
     this.#finishSession(session, { failedMessage: `Codex app-server exited with code ${code}` });
   }
 
@@ -1473,7 +1471,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
     if (opts.failedMessage) {
       this.emitFailed(session.chatId, opts.failedMessage, session.eventMetadata);
-    } else if (!opts.aborted) {
+    } else if (!opts.aborted || opts.emitFinishedOnAbort) {
       this.emitFinished(session.chatId, 0, session.eventMetadata);
     }
 
@@ -1729,6 +1727,7 @@ function mergeFinishOptions(
   return {
     failedMessage: next.failedMessage ?? current?.failedMessage,
     aborted: Boolean(next.aborted || current?.aborted),
+    emitFinishedOnAbort: Boolean(next.emitFinishedOnAbort || current?.emitFinishedOnAbort),
   };
 }
 
@@ -1740,6 +1739,7 @@ function isTerminalSessionStatus(status: RunningStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'aborted';
 }
 
+function isActiveSessionStatus(status: RunningStatus): boolean { return status === 'running' || status === 'interrupting' || status === 'completing'; }
 function hasActiveGoalContinuation(session: RunningCodexSession): boolean {
   return session.managesGoalLifecycle
     && Boolean(session.activeTurnId || session.goal?.status === 'active');

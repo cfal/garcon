@@ -1417,6 +1417,105 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.interruptTurn).toHaveBeenCalledWith('thread-1', 'turn-1');
   });
 
+  it('keeps an interrupted turn attached until the provider terminal notification', async () => {
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    const processing = [];
+    const finished = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    provider.onProcessing((_chatId, value) => processing.push(value));
+    provider.onFinished((chatId, exitCode) => finished.push({ chatId, exitCode }));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+    }));
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(provider.getRunningSessions()).toMatchObject([{ id: 'thread-1', status: 'interrupting' }]);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(processing).toEqual([true]);
+
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'command-after-interrupt',
+          command: 'printf persisted',
+          cwd: '/repo',
+          processId: null,
+          source: 'agent',
+          status: 'completed',
+          commandActions: [],
+          aggregatedOutput: 'persisted',
+          exitCode: 0,
+          durationMs: 12,
+        },
+      },
+    });
+
+    expect(emitted).toHaveLength(2);
+    expect(emitted[0]).toBeInstanceOf(BashToolUseMessage);
+    expect(emitted[1]).toBeInstanceOf(ToolResultMessage);
+    expect(emitted[1]).toMatchObject({
+      toolId: 'command-after-interrupt',
+      content: { raw: 'persisted' },
+      isError: false,
+    });
+
+    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ status: 'interrupted' }),
+      },
+    });
+    await terminal;
+
+    expect(finished).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+    expect(processing).toEqual([true, false]);
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles once when the interrupted terminal notification wins the response race', async () => {
+    let fake;
+    fake = new FakeClient({
+      interruptTurn: async () => {
+        fake.emit('notification', {
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-1',
+            turn: makeTurn({ status: 'interrupted' }),
+          },
+        });
+        return {};
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const processing = [];
+    const finished = [];
+    provider.onProcessing((_chatId, value) => processing.push(value));
+    provider.onFinished((chatId, exitCode) => finished.push({ chatId, exitCode }));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+    }));
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+
+    expect(finished).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+    expect(processing).toEqual([true, false]);
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
   it('does not restore a managed goal turn that completes before its start response', async () => {
     const nativePath = path.join(tmpDir, 'completed-before-start-response-goal-thread.jsonl');
     let fake;

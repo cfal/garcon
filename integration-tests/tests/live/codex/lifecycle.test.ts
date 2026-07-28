@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { ChatViewMessage } from '../../../../common/chat-view.js';
 import type {
   PendingUserInputClearedMessage,
   PendingUserInputStatusUpdatedMessage,
@@ -377,6 +378,12 @@ describe('live Codex lifecycle', () => {
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE.',
       ].join(' ');
+      const beforeStoppedTranscript = await fixture.client.getMessages(chatId);
+      const priorBashToolIds = new Set(
+        messagesOfType(beforeStoppedTranscript.messages, 'bash-tool-use')
+          .map((message) => message.toolId),
+      );
+      const stoppedCursor = fixture.client.markEvents();
       const stoppedTurn = await fixture.client.runChat(liveCodexRunRequest({
         chatId,
         command: stoppedPrompt,
@@ -461,20 +468,22 @@ describe('live Codex lifecycle', () => {
       const stoppedTranscript = await fixture.client.getMessages(chatId);
       expect(assistantContents(stoppedTranscript.messages).join('\n'))
         .not.toContain('CODEX_STOPPED_TURN_SHOULD_NOT_COMPLETE');
-      const stoppedBash = messagesOfType(stoppedTranscript.messages, 'bash-tool-use')
-        .findLast((message) => message.command.includes(stoppedCommand));
-      const stoppedResult = messagesOfType(stoppedTranscript.messages, 'tool-result')
-        .find((message) => message.toolId === stoppedBash?.toolId);
+      const liveStoppedMessages = fixture.client.eventsSince(stoppedCursor).flatMap((event) =>
+        event.type === 'chat-messages'
+        && event.chatId === chatId
+        && event.turnId === stoppedTurn.turnId
+          ? event.messages
+          : []);
+      const liveStoppedExecutions = toolExecutionProjections(liveStoppedMessages);
+      expect(liveStoppedExecutions.length).toBeGreaterThan(0);
+      expect(toolExecutionProjections(stoppedTranscript.messages, priorBashToolIds))
+        .toEqual(liveStoppedExecutions);
       expect(countUserContent(stoppedTranscript.messages, stoppedPrompt)).toBe(1);
 
       await fixture.restartGarcon();
       const restoredTranscript = await fixture.client.getMessages(chatId);
-      const restoredBash = messagesOfType(restoredTranscript.messages, 'bash-tool-use')
-        .findLast((message) => message.command.includes(stoppedCommand));
-      const restoredResult = messagesOfType(restoredTranscript.messages, 'tool-result')
-        .find((message) => message.toolId === restoredBash?.toolId);
-      expect(restoredBash).toEqual(stoppedBash);
-      expect(restoredResult).toEqual(stoppedResult);
+      expect(toolExecutionProjections(restoredTranscript.messages, priorBashToolIds))
+        .toEqual(liveStoppedExecutions);
       expect(countUserContent(restoredTranscript.messages, stoppedPrompt)).toBe(1);
 
       const recoveryMarker = liveMarker('CODEX_POST_INTERRUPT');
@@ -533,6 +542,32 @@ function expectPersistedCommand(
   const resultSeq = transcript.messages.find((entry) =>
     entry.message.type === 'tool-result' && entry.message.toolId === bash.toolId)?.seq;
   expect(resultSeq).toBeGreaterThan(bashSeq ?? Number.MAX_SAFE_INTEGER);
+}
+
+function toolExecutionProjections(
+  messages: readonly ChatViewMessage[],
+  excludedToolIds: ReadonlySet<string> = new Set(),
+): Array<{
+  bash: { toolId: string; command: string; description?: string };
+  result: { toolId: string; content: Record<string, unknown>; isError: boolean } | null;
+}> {
+  const results = messagesOfType(messages, 'tool-result');
+  return messagesOfType(messages, 'bash-tool-use')
+    .filter((bash) => !excludedToolIds.has(bash.toolId))
+    .map((bash) => {
+      const result = results.find((message) => message.toolId === bash.toolId);
+      return {
+        bash: {
+          toolId: bash.toolId,
+          command: bash.command,
+          description: bash.description,
+        },
+        result: result
+          ? { toolId: result.toolId, content: result.content, isError: result.isError }
+          : null,
+      };
+    })
+    .sort((left, right) => left.bash.toolId.localeCompare(right.bash.toolId));
 }
 
 async function waitForFile(path: string): Promise<void> {
