@@ -407,6 +407,31 @@ describe('chats API contract', () => {
 		});
 	});
 
+	it('rejects missing and unknown Stop outcomes at the HTTP boundary', async () => {
+		const response = {
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop',
+			status: 'accepted',
+			acceptedAt: 't',
+			control: emptyControl(),
+		};
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse(response))
+			.mockResolvedValueOnce(jsonResponse({ ...response, outcome: 'unexpected' }));
+
+		await expect(
+			stopChat({ clientRequestId: 'req-stop', chatId: 'c-1', agentId: 'claude' }),
+		).rejects.toThrow('Invalid chat Stop outcome response');
+		await expect(
+			interruptAndSendChat({
+				clientRequestId: 'req-interrupt',
+				chatId: 'c-1',
+				agentId: 'claude',
+			}),
+		).rejects.toThrow('Invalid chat Stop outcome response');
+	});
+
 	it('queue helpers use REST endpoints and encode identifiers', async () => {
 		const control = emptyControl();
 		fetchMock.mockImplementation(() =>

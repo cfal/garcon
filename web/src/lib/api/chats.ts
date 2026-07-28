@@ -65,6 +65,7 @@ import {
 	parseChatExecutionControlState,
 	type ChatExecutionControlState,
 } from '$shared/chat-execution-control';
+import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '$shared/chat-types';
 import type { AgentCommandImage } from '$shared/ws-requests';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
@@ -73,6 +74,14 @@ function withParsedControl<T extends { control: ChatExecutionControlState }>(res
 	const control = parseChatExecutionControlState(response.control);
 	if (!control) throw new Error('Invalid chat execution control response');
 	return { ...response, control };
+}
+
+function withParsedStopOutcome<
+	T extends { control: ChatExecutionControlState; outcome: ChatStopOutcome },
+>(response: T): T {
+	const outcome = CHAT_STOP_OUTCOMES.find((entry) => entry === response.outcome);
+	if (!outcome) throw new Error('Invalid chat Stop outcome response');
+	return { ...withParsedControl(response), outcome };
 }
 
 export interface StartChatParams {
@@ -136,13 +145,13 @@ export async function forkRunChat(params: ForkRunCommandRequest): Promise<ForkRu
 }
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
-	return withParsedControl(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params));
+	return withParsedStopOutcome(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params));
 }
 
 export async function interruptAndSendChat(
 	params: AgentInterruptAndSendCommandRequest,
 ): Promise<AgentInterruptAndSendResponse> {
-	return withParsedControl(
+	return withParsedStopOutcome(
 		await apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params),
 	);
 }
