@@ -668,12 +668,23 @@ describe('live Claude lifecycle', () => {
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly STOPPED_TURN_SHOULD_NOT_COMPLETE.',
       ].join(' ');
+      const stoppedCursor = fixture.client.markEvents();
       const stoppedTurn = await fixture.client.runChat(liveClaudeRunRequest({
         chatId,
         command: stoppedPrompt,
         permissionMode: 'bypassPermissions',
       }));
       await waitForFile(stoppedStarted);
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'bash-tool-use'
+            && entry.message.command.includes(stoppedCommand)),
+        'live Claude stopped Bash tool use',
+        { afterIndex: stoppedCursor, timeoutMs: TURN_TIMEOUT_MS },
+      );
       const stoppedInputUuid = await protocolProbe.waitForInputStarted(3);
       const stopCommandCursor = fixture.client.markEvents();
       const stopRequestId = crypto.randomUUID();
