@@ -10,7 +10,9 @@ const PROTOCOL_PROBE_TIMEOUT_MS = 90_000;
 
 export interface LiveClaudeProtocolProbe {
   prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
+  readInterruptReceipts(): Promise<LiveClaudeInterruptReceipt[]>;
   waitForInputStarted(count?: number): Promise<string>;
+  waitForInterruptReceipt(count?: number): Promise<LiveClaudeInterruptReceipt>;
   waitForTerminal(
     count?: number,
   ): Promise<{
@@ -19,11 +21,18 @@ export interface LiveClaudeProtocolProbe {
   }>;
 }
 
+export interface LiveClaudeInterruptReceipt {
+  cancelledCount: number;
+  stillQueuedCount: number;
+}
+
 interface LiveClaudeProbeEntry {
-  type: 'started' | 'terminal';
+  type: 'started' | 'terminal' | 'interrupt-receipt';
   commandUuid?: string;
   reason?: 'aborted_streaming' | 'aborted_tools';
   userMessageUuid?: string | null;
+  cancelledCount?: number;
+  stillQueuedCount?: number;
 }
 
 async function readProbeEntries(path: string): Promise<LiveClaudeProbeEntry[]> {
@@ -66,12 +75,14 @@ export function createLiveClaudeProtocolProbe(
   if (!realBinary) throw new Error('Live Claude protocol probe requires the Claude binary.');
   let startedPath = '';
   let terminalReasonPath = '';
+  let interruptReceiptPath = '';
 
   return {
     async prepareWorkspace(directories) {
       const wrapperPath = join(directories.root, 'claude-protocol-probe');
       startedPath = join(directories.root, 'claude-started-inputs');
       terminalReasonPath = join(directories.root, 'claude-terminal-results');
+      interruptReceiptPath = join(directories.root, 'claude-interrupt-receipts');
       await writeFile(wrapperPath, `#!/usr/bin/env bash
 exec "$GARCON_LIVE_CLAUDE_BUN_BINARY" "$GARCON_LIVE_CLAUDE_FORWARDER" "$@"
 `, { mode: 0o700 });
@@ -80,7 +91,24 @@ exec "$GARCON_LIVE_CLAUDE_BUN_BINARY" "$GARCON_LIVE_CLAUDE_FORWARDER" "$@"
       serverEnvironment.GARCON_LIVE_CLAUDE_REAL_BINARY = realBinary;
       serverEnvironment.GARCON_LIVE_CLAUDE_STARTED_PATH = startedPath;
       serverEnvironment.GARCON_LIVE_CLAUDE_TERMINAL_REASON_PATH = terminalReasonPath;
+      serverEnvironment.GARCON_LIVE_CLAUDE_INTERRUPT_RECEIPT_PATH = interruptReceiptPath;
       serverEnvironment.CLAUDE_BINARY = wrapperPath;
+    },
+    async readInterruptReceipts() {
+      return (await readProbeEntries(interruptReceiptPath))
+        .filter((
+          entry,
+        ): entry is LiveClaudeProbeEntry & {
+          cancelledCount: number;
+          stillQueuedCount: number;
+        } =>
+          entry.type === 'interrupt-receipt'
+          && typeof entry.cancelledCount === 'number'
+          && typeof entry.stillQueuedCount === 'number')
+        .map((entry) => ({
+          cancelledCount: entry.cancelledCount,
+          stillQueuedCount: entry.stillQueuedCount,
+        }));
     },
     waitForInputStarted(count = 1) {
       return waitForProbeEntry(
@@ -90,6 +118,25 @@ exec "$GARCON_LIVE_CLAUDE_BUN_BINARY" "$GARCON_LIVE_CLAUDE_FORWARDER" "$@"
         count,
         'input start',
       ).then((entry) => entry.commandUuid);
+    },
+    waitForInterruptReceipt(count = 1) {
+      return waitForProbeEntry(
+        () => interruptReceiptPath,
+        (
+          entry,
+        ): entry is LiveClaudeProbeEntry & {
+          cancelledCount: number;
+          stillQueuedCount: number;
+        } =>
+          entry.type === 'interrupt-receipt'
+          && typeof entry.cancelledCount === 'number'
+          && typeof entry.stillQueuedCount === 'number',
+        count,
+        'interrupt receipt',
+      ).then((entry) => ({
+        cancelledCount: entry.cancelledCount,
+        stillQueuedCount: entry.stillQueuedCount,
+      }));
     },
     waitForTerminal(count = 1) {
       return waitForProbeEntry(

@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs';
 const realBinary = requiredEnvironment('GARCON_LIVE_CLAUDE_REAL_BINARY');
 const startedPath = requiredEnvironment('GARCON_LIVE_CLAUDE_STARTED_PATH');
 const terminalReasonPath = requiredEnvironment('GARCON_LIVE_CLAUDE_TERMINAL_REASON_PATH');
+const interruptReceiptPath = requiredEnvironment('GARCON_LIVE_CLAUDE_INTERRUPT_RECEIPT_PATH');
 const child = Bun.spawn([realBinary, ...process.argv.slice(2)], {
   env: process.env,
   stdin: 'inherit',
@@ -16,6 +17,10 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Live Claude protocol forwarder requires ${name}.`);
   return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function observe(line: string): void {
@@ -48,6 +53,24 @@ function observe(line: string): void {
         reason: message.terminal_reason,
         userMessageUuid:
           typeof message.user_message_uuid === 'string' ? message.user_message_uuid : null,
+      })}\n`,
+    );
+  }
+  const control = isRecord(message.response) ? message.response : null;
+  const receipt = control?.subtype === 'success' && isRecord(control.response)
+    ? control.response
+    : null;
+  if (
+    message.type === 'control_response'
+    && receipt
+    && (Array.isArray(receipt.cancelled) || Array.isArray(receipt.still_queued))
+  ) {
+    appendFileSync(
+      interruptReceiptPath,
+      `${JSON.stringify({
+        type: 'interrupt-receipt',
+        cancelledCount: Array.isArray(receipt.cancelled) ? receipt.cancelled.length : 0,
+        stillQueuedCount: Array.isArray(receipt.still_queued) ? receipt.still_queued.length : 0,
       })}\n`,
     );
   }

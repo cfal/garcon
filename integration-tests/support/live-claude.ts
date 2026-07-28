@@ -77,6 +77,7 @@ export function liveClaudeForkRunRequest(input: {
   sourceChatId: string;
   chatId: string;
   command: string;
+  permissionMode?: ForkRunCommandRequest['permissionMode'];
 }): ForkRunCommandRequest {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -84,7 +85,7 @@ export function liveClaudeForkRunRequest(input: {
     sourceChatId: input.sourceChatId,
     chatId: input.chatId,
     command: input.command,
-    permissionMode: 'default',
+    permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CLAUDE_THINKING_MODE,
     agentSettings: CLAUDE_AGENT_SETTINGS,
     model: LIVE_CLAUDE_MODEL,

@@ -15,6 +15,7 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../../support/integration-fixture.js';
+import { GarconApiError } from '../../../support/garcon-client.js';
 import {
   exactReplyPrompt,
   expectAssistantMarker,
@@ -128,18 +129,38 @@ describe('live Claude lifecycle', () => {
       const parentChatId = fixture.newChatId();
       const firstMarker = marker('PARENT_FIRST');
       const secondMarker = marker('PARENT_SECOND');
-      const firstPrompt = exactReplyPrompt(firstMarker);
+      const firstPrompt = [
+        'Use the Bash tool now to run exactly `sleep 2`.',
+        `After it succeeds, reply with exactly ${firstMarker}.`,
+        'Do not run any other command.',
+      ].join(' ');
       const secondPrompt = exactReplyPrompt(secondMarker);
       const firstCursor = fixture.client.markEvents();
       const first = await fixture.client.startChat(liveClaudeStartRequest({
         chatId: parentChatId,
         projectPath: fixture.dirs.project,
         command: firstPrompt,
+        permissionMode: 'bypassPermissions',
       }));
 
       const queueCursor = fixture.client.markEvents();
       const queued = await fixture.client.enqueueNew(parentChatId, secondPrompt);
       expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([secondPrompt]);
+      const childChatId = fixture.newChatId();
+      const childMarker = marker('CHILD');
+      const childPrompt = [
+        'Use the Bash tool now to run exactly `sleep 2`.',
+        `After it succeeds, reply with exactly ${childMarker}.`,
+        'Do not run any other command.',
+      ].join(' ');
+      const childCursor = fixture.client.markEvents();
+      const childRequest = liveClaudeForkRunRequest({
+        sourceChatId: parentChatId,
+        chatId: childChatId,
+        command: childPrompt,
+        permissionMode: 'bypassPermissions',
+      });
+      await expectBusyFork(fixture.client.forkRunChat(childRequest));
 
       expectFinished((await fixture.client.waitForTurnTerminal(parentChatId, first.turnId, {
         afterIndex: firstCursor,
@@ -166,6 +187,33 @@ describe('live Claude lifecycle', () => {
         && entry.message.content.includes(firstMarker));
       if (!firstAssistant) throw new Error('Live Claude first response was not persisted.');
 
+      const child = await fixture.client.forkRunChat(childRequest);
+      const grandchildChatId = fixture.newChatId();
+      const grandchildMarker = marker('GRANDCHILD');
+      const grandchildPrompt = exactReplyPrompt(grandchildMarker);
+      const grandchildCursor = fixture.client.markEvents();
+      const grandchildRequest = liveClaudeForkRunRequest({
+        sourceChatId: childChatId,
+        chatId: grandchildChatId,
+        command: grandchildPrompt,
+      });
+      await expectBusyFork(fixture.client.forkRunChat(grandchildRequest));
+      await waitForVisibleClaudeResponse({
+        fixture,
+        chatId: childChatId,
+        turnId: child.turnId,
+        marker: childMarker,
+        afterIndex: childCursor,
+      });
+      const grandchild = await fixture.client.forkRunChat(grandchildRequest);
+      await waitForVisibleClaudeResponse({
+        fixture,
+        chatId: grandchildChatId,
+        turnId: grandchild.turnId,
+        marker: grandchildMarker,
+        afterIndex: grandchildCursor,
+      });
+
       const pointChatId = fixture.newChatId();
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
@@ -185,40 +233,6 @@ describe('live Claude lifecycle', () => {
         turnId: pointTurn.turnId,
         marker: pointMarker,
         afterIndex: pointCursor,
-      });
-
-      const childChatId = fixture.newChatId();
-      const childMarker = marker('CHILD');
-      const childPrompt = exactReplyPrompt(childMarker);
-      const childCursor = fixture.client.markEvents();
-      const child = await fixture.client.forkRunChat(liveClaudeForkRunRequest({
-        sourceChatId: parentChatId,
-        chatId: childChatId,
-        command: childPrompt,
-      }));
-      await waitForVisibleClaudeResponse({
-        fixture,
-        chatId: childChatId,
-        turnId: child.turnId,
-        marker: childMarker,
-        afterIndex: childCursor,
-      });
-
-      const grandchildChatId = fixture.newChatId();
-      const grandchildMarker = marker('GRANDCHILD');
-      const grandchildPrompt = exactReplyPrompt(grandchildMarker);
-      const grandchildCursor = fixture.client.markEvents();
-      const grandchild = await fixture.client.forkRunChat(liveClaudeForkRunRequest({
-        sourceChatId: childChatId,
-        chatId: grandchildChatId,
-        command: grandchildPrompt,
-      }));
-      await waitForVisibleClaudeResponse({
-        fixture,
-        chatId: grandchildChatId,
-        turnId: grandchild.turnId,
-        marker: grandchildMarker,
-        afterIndex: grandchildCursor,
       });
 
       const parentContinuationMarker = marker('PARENT_CONTINUATION');
@@ -302,7 +316,9 @@ describe('live Claude lifecycle', () => {
     const toolMarker = marker('TOOL_OUTPUT');
     const fixtureName = 'live-tool-input.txt';
     const copyName = 'live-tool-copy.txt';
+    const deniedCopyName = 'live-tool-denied-copy.txt';
     const toolCommand = `cp ${fixtureName} ${copyName} && cat ${copyName}`;
+    const deniedToolCommand = `cp ${fixtureName} ${deniedCopyName} && cat ${deniedCopyName}`;
     await withIntegrationFixture('live-claude-permission-and-restart', async (fixture) => {
       const chatId = fixture.newChatId();
       const prompt = [
@@ -396,6 +412,62 @@ describe('live Claude lifecycle', () => {
       expect(restoredResult?.content).toEqual(result?.content);
       expect(countUserContent(restored.messages, prompt)).toBe(1);
 
+      const deniedPrompt = [
+        'This is the denial half of the Garcon permission integration check.',
+        `Use the Bash tool exactly once to run \`${deniedToolCommand}\`.`,
+        'If permission is denied, do not retry the command.',
+      ].join(' ');
+      const deniedCursor = fixture.client.markEvents();
+      const deniedTurn = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId,
+        command: deniedPrompt,
+      }));
+      const deniedPermissionEvent = await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'permission-request'
+            && entry.message.requestedTool.type === 'bash-tool-use'
+            && entry.message.requestedTool.command.includes(deniedToolCommand)),
+        'live Claude denied Bash permission request',
+        { afterIndex: deniedCursor, timeoutMs: TURN_TIMEOUT_MS },
+      );
+      const deniedPermission = deniedPermissionEvent.messages.find((entry) =>
+        entry.message.type === 'permission-request'
+        && entry.message.requestedTool.type === 'bash-tool-use'
+        && entry.message.requestedTool.command.includes(deniedToolCommand));
+      if (deniedPermission?.message.type !== 'permission-request') {
+        throw new Error('Live Claude denied permission request was not found.');
+      }
+      const deniedPermissionId = deniedPermission.message.permissionRequestId;
+      expect((await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionRequestId: deniedPermissionId,
+        allow: false,
+        alwaysAllow: false,
+      })).status).toBe('accepted');
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, deniedTurn.turnId, {
+        afterIndex: deniedCursor,
+        timeoutMs: TURN_TIMEOUT_MS,
+      })).type);
+
+      const afterDenial = await fixture.client.getMessages(chatId);
+      const deniedResolution = messagesOfType(afterDenial.messages, 'permission-resolved').find(
+        (message) => message.permissionRequestId === deniedPermissionId,
+      );
+      const deniedBash = messagesOfType(afterDenial.messages, 'bash-tool-use').find(
+        (message) => message.command.includes(deniedToolCommand),
+      );
+      const deniedResult = messagesOfType(afterDenial.messages, 'tool-result').find(
+        (message) => message.toolId === deniedBash?.toolId,
+      );
+      expect(deniedResolution?.allowed).toBe(false);
+      expect(deniedResult?.isError).toBe(true);
+      expect(await Bun.file(join(fixture.dirs.project, deniedCopyName)).exists()).toBe(false);
+      expect(countUserContent(afterDenial.messages, deniedPrompt)).toBe(1);
+
       const resumedMarker = marker('TOOL_CHAT_RESUMED');
       const resumedPrompt = exactReplyPrompt(resumedMarker);
       const resumedCursor = fixture.client.markEvents();
@@ -411,7 +483,11 @@ describe('live Claude lifecycle', () => {
         afterIndex: resumedCursor,
       });
       const finalTranscript = await fixture.client.getMessages(chatId);
-      expect(userContents(finalTranscript.messages)).toEqual([prompt, resumedPrompt]);
+      expect(userContents(finalTranscript.messages)).toEqual([
+        prompt,
+        deniedPrompt,
+        resumedPrompt,
+      ]);
       expectAssistantMarker(assistantContents(finalTranscript.messages), resumedMarker);
     }, {
       redactSensitiveDiagnostics: true,
@@ -458,6 +534,11 @@ describe('live Claude lifecycle', () => {
       const terminal = await protocolProbe.waitForTerminal();
       expect(['aborted_streaming', 'aborted_tools']).toContain(terminal.reason);
       expect(terminal.userMessageUuid === null || terminal.userMessageUuid === inputUuid).toBe(true);
+      expect(await protocolProbe.waitForInterruptReceipt()).toEqual({
+        cancelledCount: 0,
+        stillQueuedCount: 0,
+      });
+      expect(await protocolProbe.readInterruptReceipts()).toHaveLength(1);
 
       const stopEvents = fixture.client.eventsSince(stopCursor);
       const stoppingIndex = stopEvents.findIndex((event) =>
@@ -552,6 +633,10 @@ describe('live Claude lifecycle', () => {
         interruptedTerminal.userMessageUuid === null
         || interruptedTerminal.userMessageUuid === interruptedInputUuid,
       ).toBe(true);
+      expect(await protocolProbe.waitForInterruptReceipt()).toEqual({
+        cancelledCount: 0,
+        stillQueuedCount: 0,
+      });
       const successorInput = await fixture.client.waitForEvent(
         (event): event is PendingUserInputUpdatedMessage =>
           event.type === 'pending-user-input-updated'
@@ -624,6 +709,11 @@ describe('live Claude lifecycle', () => {
         stoppedTerminal.userMessageUuid === null
         || stoppedTerminal.userMessageUuid === stoppedInputUuid,
       ).toBe(true);
+      expect(await protocolProbe.waitForInterruptReceipt(2)).toEqual({
+        cancelledCount: 0,
+        stillQueuedCount: 0,
+      });
+      expect(await protocolProbe.readInterruptReceipts()).toHaveLength(2);
 
       const stopEvents = fixture.client.eventsSince(stopCommandCursor);
       expect(stopEvents.filter((event) =>
@@ -689,6 +779,20 @@ describe('live Claude lifecycle', () => {
     });
   });
 });
+
+async function expectBusyFork(promise: Promise<unknown>): Promise<void> {
+  let error: unknown;
+  try {
+    await promise;
+  } catch (cause) {
+    error = cause;
+  }
+  expect(error).toBeInstanceOf(GarconApiError);
+  expect(error).toMatchObject({
+    status: 409,
+    body: { errorCode: 'SESSION_BUSY', retryable: true },
+  });
+}
 
 interface PersistedClaudeChat {
   agentSessionId: string;

@@ -26,6 +26,13 @@ console.log(JSON.stringify({
   type: 'result',
   terminal_reason: 'aborted_streaming',
 }));
+console.log(JSON.stringify({
+  type: 'control_response',
+  response: {
+    subtype: 'success',
+    response: { cancelled: ['private-uuid'], still_queued: [] },
+  },
+}));
 `, { mode: 0o700 });
       const environment = { CLAUDE_BINARY: fakeBinary };
       const probe = createLiveClaudeProtocolProbe(environment);
@@ -55,11 +62,21 @@ console.log(JSON.stringify({
         reason: 'aborted_streaming',
         userMessageUuid: null,
       });
+      expect(await probe.waitForInterruptReceipt()).toEqual({
+        cancelledCount: 1,
+        stillQueuedCount: 0,
+      });
+      expect(await probe.readInterruptReceipts()).toEqual([{
+        cancelledCount: 1,
+        stillQueuedCount: 0,
+      }]);
       const persistedProbeData = [
         await readFile(join(root, 'claude-started-inputs'), 'utf8'),
         await readFile(join(root, 'claude-terminal-results'), 'utf8'),
+        await readFile(join(root, 'claude-interrupt-receipts'), 'utf8'),
       ].join('\n');
       expect(persistedProbeData).not.toContain('private output');
+      expect(persistedProbeData).not.toContain('private-uuid');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
