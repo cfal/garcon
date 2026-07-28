@@ -1,4 +1,4 @@
-import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage, type CompactionTrigger } from '@garcon/common/chat-types';
+import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { AgentActiveInputHandoff, AgentLogger } from '@garcon/server-agent-interface';
@@ -17,7 +17,7 @@ import {
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
-import { convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from './converter.js';
+import { convertCodexRawCodeModeItem } from './converter.js';
 import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
 import { NativePathDiscoveryRefreshLimiter, type NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
@@ -52,6 +52,7 @@ import {
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
 import type { CodexGoalCommand } from '../goal-command.js';
 import { cleanupMaterializedGoalDraft, materializeGoalDraft } from './goal-files.js';
+import { CodexTurnItemLedger } from './turn-item-ledger.js';
 
 type RunningStatus = 'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted';
 type FinishSessionOptions = { failedMessage?: string; aborted?: boolean; emitFinishedOnAbort?: boolean };
@@ -92,8 +93,6 @@ interface RunningCodexSession {
   status: RunningStatus;
   permissionMode: PermissionMode;
   startedAt: string;
-  // Labels contextCompaction from an explicit /compact as manual rather than auto.
-  manualCompactionPending?: boolean;
   cleanupAttachments?: () => Promise<void>;
   turnStartWaiters: Set<TurnStartWaiter>;
   goal: CodexThreadGoal | null;
@@ -104,6 +103,7 @@ interface RunningCodexSession {
   activeDeliveryReservations: number;
   pendingFinish: FinishSessionOptions | null;
   liveCodeModeResultToolIds: Map<string, string>;
+  turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
@@ -726,7 +726,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         permissionMode: request.permissionMode,
         eventMetadata: codexEventMetadata(request),
       });
-      session.manualCompactionPending = true;
+      session.turnItems.markManualCompaction();
       activeSession = session;
       session.onAbortable = request.onAbortable;
       this.#releaseBufferedClientEvents(client);
@@ -1030,6 +1030,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeDeliveryReservations: 0,
       pendingFinish: null,
       liveCodeModeResultToolIds: new Map(),
+      turnItems: new CodexTurnItemLedger(this.#logger, (messages) => this.emitMessages(args.chatId, messages)),
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
@@ -1129,6 +1130,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #handleTurnStarted(client: CodexAppServerClient, params: TurnStartedNotification): void {
     const session = this.#sessionForClientThread(client, params.threadId);
     if (!session) return;
+    session.turnItems.beginTurn();
     session.activeTurnId = params.turn.id;
     if (session.status !== 'interrupting') session.status = 'running';
     this.#notifyAbortable(session);
@@ -1253,15 +1255,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #handleItemCompleted(client: CodexAppServerClient, params: ItemCompletedNotification): void {
     const session = this.#sessionForClientTurn(client, params.threadId, params.turnId);
     if (!session) return;
-    // A contextCompaction item is 'manual' only when this session was started by
-    // /compact; otherwise the app-server auto-compacted to free context.
-    let compactionTrigger: CompactionTrigger | undefined;
-    if (params.item.type === 'contextCompaction') {
-      compactionTrigger = session.manualCompactionPending ? 'manual' : 'auto';
-      session.manualCompactionPending = false;
-    }
-    const messages = convertCodexAppServerLiveItem(params.item, undefined, compactionTrigger);
-    if (messages.length) this.emitMessages(session.chatId, messages);
+    session.turnItems.emit(params.item);
   }
 
   #handleRawResponseItemCompleted(client: CodexAppServerClient, params: RawResponseItemCompletedNotification): void {
@@ -1314,6 +1308,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       return;
     }
     const aborted = params.turn.status === 'interrupted' || session.status === 'interrupting';
+    const completionItems = aborted
+      ? await session.turnItems.interruptedItems(session.client, session.threadId, params.turn)
+      : params.turn.items;
+    for (const item of completionItems) session.turnItems.emit(item);
     session.capacityRetryCount = 0;
     session.pendingCapacityFailure = null;
     session.status = 'completing';

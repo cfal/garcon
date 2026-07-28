@@ -1418,7 +1418,26 @@ describe('CodexAppServerRuntime', () => {
   });
 
   it('keeps an interrupted turn attached until the provider terminal notification', async () => {
-    const fake = new FakeClient();
+    const commandItem = {
+      type: 'commandExecution',
+      id: 'command-after-interrupt',
+      command: 'printf persisted',
+      cwd: '/repo',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'persisted',
+      exitCode: 0,
+      durationMs: 12,
+    };
+    const fake = new FakeClient({
+      listThreadTurns: async () => ({
+        data: [makeTurn({ items: [commandItem], status: 'interrupted' })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
     const emitted = [];
     const processing = [];
@@ -1443,19 +1462,7 @@ describe('CodexAppServerRuntime', () => {
       params: {
         threadId: 'thread-1',
         turnId: 'turn-1',
-        item: {
-          type: 'commandExecution',
-          id: 'command-after-interrupt',
-          command: 'printf persisted',
-          cwd: '/repo',
-          processId: null,
-          source: 'agent',
-          status: 'completed',
-          commandActions: [],
-          aggregatedOutput: 'persisted',
-          exitCode: 0,
-          durationMs: 12,
-        },
+        item: commandItem,
       },
     });
 
@@ -1482,6 +1489,57 @@ describe('CodexAppServerRuntime', () => {
     expect(processing).toEqual([true, false]);
     expect(provider.isRunning('thread-1')).toBe(false);
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers interrupted items persisted without an item completion notification', async () => {
+    const commandItem = {
+      type: 'commandExecution',
+      id: 'persisted-command',
+      command: 'printf recovered',
+      cwd: '/repo',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'recovered',
+      exitCode: 0,
+      durationMs: 8,
+    };
+    const fake = new FakeClient({
+      listThreadTurns: async () => ({
+        data: [makeTurn({ items: [commandItem], status: 'interrupted' })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    const terminal = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ status: 'interrupted' }) },
+    });
+    await terminal;
+
+    expect(fake.listThreadTurns).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      cursor: null,
+      limit: 10,
+      sortDirection: 'desc',
+      itemsView: 'full',
+    });
+    expect(emitted).toHaveLength(2);
+    expect(emitted[0]).toMatchObject({ type: 'bash-tool-use', toolId: 'persisted-command' });
+    expect(emitted[1]).toMatchObject({
+      type: 'tool-result',
+      toolId: 'persisted-command',
+      content: { raw: 'recovered' },
+      isError: false,
+    });
   });
 
   it('settles once when the interrupted terminal notification wins the response race', async () => {
@@ -5473,11 +5531,41 @@ describe('CodexAppServerRuntime', () => {
     });
     fake.emit('notification', {
       method: 'turn/completed',
-      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', items: [liveItem], itemsView: 'summary' }),
+      },
     });
     await finished;
 
     expect(emitted.map((message) => message.content)).toEqual(['Already emitted']);
+  });
+
+  it('uses the terminal agent summary when its item completion notification is absent', async () => {
+    const terminalItem = {
+      type: 'agentMessage',
+      id: 'terminal-agent-message',
+      text: 'Recovered final line',
+      phase: null,
+      memoryCitation: null,
+    };
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.runTurn(makeRequest());
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', items: [terminalItem], itemsView: 'summary' }),
+      },
+    });
+    await finished;
+
+    expect(emitted.map((message) => message.content)).toEqual(['Recovered final line']);
   });
 
   it('retries retryable utility app-server overload responses while resolving native paths', async () => {
