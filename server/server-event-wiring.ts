@@ -612,7 +612,15 @@ export function wireServerEvents({
       new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
     );
   });
-  queue.onSessionStopped((chatId, outcome, intent, stopId) => {
+  queue.onSessionStopped((chatId, outcome, intent, stopId, waitMs) => {
+    logger.info('queue: Stop resolved', {
+      chatId,
+      stopId,
+      intent,
+      outcome,
+      phase: processing.phase(chatId),
+      waitMs,
+    });
     const acknowledgement = userAbortLifecycle.onSessionStopped(
       chatId,
       stopId,

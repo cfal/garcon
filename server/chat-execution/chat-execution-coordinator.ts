@@ -68,6 +68,7 @@ import { ChatExecutionControlOperations } from './chat-execution-control-operati
 import { ExecutionOwnership } from './execution-ownership.ts';
 import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
+import { waitUntilStopAbortable } from './stop-abortability.ts';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 export {
@@ -879,13 +880,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     intent: ChatStopIntent,
     stopId: string,
   ): Promise<ChatStopOutcome> {
+    const startedAt = Date.now();
     const attempt = this.#ownership.attempt(chatId);
     const registered = attempt?.entryId ? await attempt.waitUntilRegistered() : Boolean(attempt);
     const currentAttempt = attempt && this.#ownership.isCurrentAttempt(chatId, attempt)
       ? attempt
       : undefined;
     if (!this.#hasAbortTarget(chatId, currentAttempt)) {
-      this.emit('session-stopped', chatId, 'already-idle', intent, stopId);
+      this.emit('session-stopped', chatId, 'already-idle', intent, stopId, Date.now() - startedAt);
       return 'already-idle';
     }
     try {
@@ -896,11 +898,16 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
     if (currentAttempt && registered) {
       currentAttempt.allowLaunch();
-      const abortable = await this.#waitUntilStopAbortable(chatId, currentAttempt);
+      const abortable = await waitUntilStopAbortable(
+        chatId,
+        currentAttempt,
+        this.#turnRunner,
+        () => this.#ownership.isCurrentAttempt(chatId, currentAttempt),
+      );
       if (!abortable) {
         currentAttempt.clearExpectedAbort(stopId);
-        const outcome = this.#hasAbortTarget(chatId, currentAttempt) ? 'failed' : 'already-idle';
-        this.emit('session-stopped', chatId, outcome, intent, stopId);
+        const outcome = await this.#outcomeAfterUnacknowledgedAbort(chatId, currentAttempt);
+        this.emit('session-stopped', chatId, outcome, intent, stopId, Date.now() - startedAt);
         return outcome;
       }
       if (currentAttempt.entryId) currentAttempt.expectAbort(stopId);
@@ -909,14 +916,11 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       const acknowledged = await this.#turnRunner.abortSession(chatId);
       if (!acknowledged) {
         currentAttempt?.clearExpectedAbort(stopId);
-        if (currentAttempt && !this.#turnRunner.isChatRunning(chatId) && !currentAttempt.isRunSettled) {
-          await currentAttempt.waitUntilSettled();
-        }
       }
       const outcome: ChatStopOutcome = acknowledged
         ? 'interrupt-requested'
-        : this.#hasAbortTarget(chatId, currentAttempt) ? 'failed' : 'already-idle';
-      this.emit('session-stopped', chatId, outcome, intent, stopId);
+        : await this.#outcomeAfterUnacknowledgedAbort(chatId, currentAttempt);
+      this.emit('session-stopped', chatId, outcome, intent, stopId, Date.now() - startedAt);
       if (isAbortAcknowledged(outcome) && currentAttempt && !this.#turnRunner.isChatRunning(chatId)) {
         currentAttempt.markTerminalObserved();
         this.#settleDirectAttempt(chatId, currentAttempt);
@@ -928,7 +932,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         chatId,
         errorType: error instanceof Error ? error.name : typeof error,
       });
-      this.emit('session-stopped', chatId, 'failed', intent, stopId);
+      this.emit('session-stopped', chatId, 'failed', intent, stopId, Date.now() - startedAt);
       return 'failed';
     }
   }
@@ -936,6 +940,16 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #hasAbortTarget(chatId: string, attempt = this.#ownership.attempt(chatId)): boolean {
     return this.#turnRunner.isChatRunning(chatId)
       || Boolean(attempt && !attempt.isRunSettled && !attempt.isSettled);
+  }
+
+  async #outcomeAfterUnacknowledgedAbort(
+    chatId: string,
+    attempt: QueueExecutionAttempt | undefined,
+  ): Promise<ChatStopOutcome> {
+    if (!this.#turnRunner.isChatRunning(chatId) && attempt && !attempt.isRunSettled) {
+      await attempt.waitUntilSettled();
+    }
+    return this.#hasAbortTarget(chatId, attempt) ? 'failed' : 'already-idle';
   }
 
   #reconcileStopLatch(chatId: string): void {
@@ -956,26 +970,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   #invalidateProcessing(chatId: string): void {
     this.emit('processing-invalidated', chatId);
-  }
-
-  async #waitUntilStopAbortable(chatId: string, attempt: QueueExecutionAttempt): Promise<boolean> {
-    const controller = new AbortController();
-    const runtimeAbortable = this.#turnRunner.waitUntilTurnAbortable(
-      chatId,
-      attempt.identity(),
-      controller.signal,
-    ).then(
-      (isAbortable) => {
-        if (isAbortable && this.#ownership.isCurrentAttempt(chatId, attempt)) attempt.markAbortable();
-        return isAbortable;
-      },
-      () => false,
-    );
-    try {
-      return await Promise.race([attempt.waitUntilAbortable(), runtimeAbortable]);
-    } finally {
-      controller.abort();
-    }
   }
 
   #rollbackDeletion(chatId: string): void {

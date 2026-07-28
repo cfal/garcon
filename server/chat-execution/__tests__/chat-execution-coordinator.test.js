@@ -1694,7 +1694,9 @@ describe('orchestration', () => {
 
     it('emits session-stopped event', async () => {
       const events = [];
-      orchQueue.onSessionStopped((chatId, outcome, intent) => events.push({ chatId, outcome, intent }));
+      orchQueue.onSessionStopped((chatId, outcome, intent, _stopId, waitMs) => {
+        events.push({ chatId, outcome, intent, waitMs });
+      });
 
       await orchQueue.interruptActiveTurn('c1');
       expect(events).toHaveLength(1);
@@ -1702,7 +1704,9 @@ describe('orchestration', () => {
         chatId: 'c1',
         outcome: 'already-idle',
         intent: 'interrupt-and-send',
+        waitMs: expect.any(Number),
       });
+      expect(events[0].waitMs).toBeGreaterThanOrEqual(0);
     });
 
     it('identifies plain Stop in the session-stopped event', async () => {
@@ -1928,6 +1932,38 @@ describe('orchestration', () => {
         entries: [{ content: 'tail', status: 'queued' }],
         pause: { kind: 'manual' },
       });
+    });
+
+    it('waits for terminal settlement before classifying a turn that ends before abortability', async () => {
+      const turnStarted = deferred();
+      const turnResult = deferred();
+      const runtimeAbortable = deferred();
+      let providerRunning = false;
+      mockAgents.isChatRunning.mockImplementation(() => providerRunning);
+      mockAgents.waitUntilTurnAbortable = mock(() => runtimeAbortable.promise);
+      mockAgents.runAgentTurn.mockImplementation(async () => {
+        providerRunning = true;
+        turnStarted.resolve();
+        await turnResult.promise;
+      });
+      await orchQueue.createChatQueueEntry('c1', 'finishing naturally');
+      const drain = orchQueue.triggerDrain('c1');
+      await turnStarted.promise;
+
+      const stop = orchQueue.stopActiveTurn('c1');
+      let stopSettled = false;
+      void stop.then(() => { stopSettled = true; });
+      providerRunning = false;
+      runtimeAbortable.resolve(false);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(stopSettled).toBe(false);
+      expect(mockAgents.abortSession).not.toHaveBeenCalled();
+
+      turnResult.resolve();
+      await expect(stop).resolves.toMatchObject({ outcome: 'already-idle' });
+      await drain;
     });
 
     it('reports a genuine preparation failure before Stop can abort the runtime', async () => {

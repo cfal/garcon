@@ -229,6 +229,7 @@ export type SessionStoppedCallback = (
   outcome: ChatStopOutcome,
   intent: ChatStopIntent,
   stopId: string,
+  waitMs: number,
 ) => void;
 export type ChatIdleCallback = (chatId: string) => void;
 export type ProcessingInvalidatedCallback = (chatId: string) => void;

@@ -130,6 +130,7 @@ describe('server event wiring', () => {
       'interrupt-requested',
       'stop',
       'stop-1',
+      12,
     );
 
     expect(published).toMatchObject([
@@ -152,7 +153,7 @@ describe('server event wiring', () => {
     });
 
     fixture.queueListeners.processing('chat-1');
-    fixture.queueListeners.sessionStopped('chat-1', 'already-idle', 'stop', 'stop-1');
+    fixture.queueListeners.sessionStopped('chat-1', 'already-idle', 'stop', 'stop-1', 3);
 
     expect(published).toMatchObject([
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: null },
@@ -332,7 +333,7 @@ describe('server event wiring', () => {
     });
 
     queueListeners.stopRequested(chatId, 'stop-a', turn);
-    queueListeners.sessionStopped(chatId, 'interrupt-requested', 'interrupt-and-send', 'stop-a');
+    queueListeners.sessionStopped(chatId, 'interrupt-requested', 'interrupt-and-send', 'stop-a', 5);
     agentListeners.finished(chatId, 0, turn);
     await nativeLoadStarted.promise;
     releaseNativeLoad.resolve([new UserMessage(timestamp, 'successor')]);
@@ -437,7 +438,7 @@ describe('server event wiring', () => {
     expect(reloadFromNative).not.toHaveBeenCalled();
     expect(published.some((message) => message.type === 'agent-run-failed')).toBe(false);
 
-    queueListeners.sessionStopped(chatId, 'failed', 'stop', 'stop-a');
+    queueListeners.sessionStopped(chatId, 'failed', 'stop', 'stop-a', 7);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(reloadFromNative).toHaveBeenCalledWith(
