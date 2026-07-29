@@ -509,24 +509,31 @@ describe('live Codex lifecycle', () => {
 });
 
 
+// Codex may execute the command more than once: a sandboxed first attempt can fail before an
+// escalated retry succeeds, and native history persists every model call even though the live
+// stream renders only the final one. The assertion therefore targets the execution that carried
+// the output instead of whichever attempt appears first.
 function expectPersistedCommand(
   transcript: Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>,
   command: string,
   output: string,
 ): void {
-  const bash = messagesOfType(transcript.messages, 'bash-tool-use').find(
+  const commands = messagesOfType(transcript.messages, 'bash-tool-use').filter(
     (message) => message.command.includes(command),
   );
-  if (!bash) throw new Error('Live Codex shell tool use was not rendered.');
-  const result = messagesOfType(transcript.messages, 'tool-result').find(
-    (message) => message.toolId === bash.toolId,
-  );
-  expect(result?.isError).toBe(false);
-  expect(JSON.stringify(result?.content)).toContain(output);
+  if (commands.length === 0) throw new Error('Live Codex shell tool use was not rendered.');
+  const results = messagesOfType(transcript.messages, 'tool-result');
+  const succeeded = commands.find((bash) => {
+    const result = results.find((message) => message.toolId === bash.toolId);
+    return result !== undefined
+      && result.isError === false
+      && JSON.stringify(result.content).includes(output);
+  });
+  if (!succeeded) throw new Error('No persisted execution of the command carried its output.');
   const bashSeq = transcript.messages.find((entry) =>
-    entry.message.type === 'bash-tool-use' && entry.message.toolId === bash.toolId)?.seq;
+    entry.message.type === 'bash-tool-use' && entry.message.toolId === succeeded.toolId)?.seq;
   const resultSeq = transcript.messages.find((entry) =>
-    entry.message.type === 'tool-result' && entry.message.toolId === bash.toolId)?.seq;
+    entry.message.type === 'tool-result' && entry.message.toolId === succeeded.toolId)?.seq;
   expect(resultSeq).toBeGreaterThan(bashSeq ?? Number.MAX_SAFE_INTEGER);
 }
 
