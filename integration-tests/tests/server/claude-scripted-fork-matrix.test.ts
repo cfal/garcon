@@ -326,7 +326,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
     const childReply = marker('BACKGROUND_CHILD_REPLY');
     testEnvironment.model.scriptTurn([
       claudeToolUse('toolu_background', 'Bash', {
-        command: 'sleep 30',
+        command: 'sleep 600',
         run_in_background: true,
       }),
     ]);
@@ -361,9 +361,9 @@ describe('scripted Claude fork lifecycle matrix', () => {
         .not.toContain('task-notification');
 
       testEnvironment.model.scriptTurn((request) => {
-        if (JSON.stringify(request.body.messages).includes('task-notification')) {
-          throw new Error('Fork inherited a source background-task notification.');
-        }
+        expect(request.lastUserText).toContain(childPrompt);
+        expect(request.lastUserText).not.toContain(sourcePrompt);
+        expect(JSON.stringify(request.body.messages)).not.toContain('task-notification');
         return [claudeText(childReply)];
       });
       const childCursor = fixture.client.markEvents();
