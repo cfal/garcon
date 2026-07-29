@@ -28,6 +28,7 @@ import type {
   AgentChatEntry,
   AgentExecutionAdmission,
   AgentExecutionCommandType,
+  ForkedAgentSessionOutcome,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
   StartedAgentSession,
@@ -371,7 +372,7 @@ export class AgentRuntimeRouter {
     sourceChatId: string;
     targetChatId: string;
     messageSequence?: number;
-  }): Promise<StartedAgentSession | null> {
+  }): Promise<ForkedAgentSessionOutcome | null> {
     if (
       args.messageSequence !== undefined
       && (!Number.isSafeInteger(args.messageSequence) || args.messageSequence <= 0)
@@ -432,9 +433,13 @@ export class AgentRuntimeRouter {
           },
         } : null,
       });
+      if (result.kind === 'unmaterialized') return result;
       return {
-        agentSessionId: result.agentSessionId,
-        nativeSession: result.nativeSession,
+        kind: 'materialized',
+        session: {
+          agentSessionId: result.session.agentSessionId,
+          nativeSession: result.session.nativeSession,
+        },
       };
     } catch (error) {
       if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {

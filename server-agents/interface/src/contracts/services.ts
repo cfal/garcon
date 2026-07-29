@@ -59,9 +59,14 @@ export interface AgentForking {
   // Gates both whole-session and at-message forks: a running provider session must tolerate
   // having its transcript read and copied while it is still appending to it.
   readonly supportsWhileRunning: boolean;
-  fork(request: AgentForkRequest): Promise<AgentStartedSession>;
+  fork(request: AgentForkRequest): Promise<AgentForkOutcome>;
   discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
 }
+
+// Distinguishes a copied provider session from a successful fork with no resumable provider state.
+export type AgentForkOutcome =
+  | { readonly kind: 'materialized'; readonly session: AgentStartedSession }
+  | { readonly kind: 'unmaterialized' };
 
 export interface AgentForkRequest extends AgentExecutionContext {
   readonly source: AgentChatReference;

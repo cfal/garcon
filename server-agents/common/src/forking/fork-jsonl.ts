@@ -33,6 +33,7 @@ export interface ForkJsonlRequest {
   readonly sourceAgentSessionId: string;
   readonly cutoffLine: number | null;
   readonly allowMissingSource?: boolean;
+  readonly allowUnmaterializedWholeSession?: boolean;
   readonly leadingLineCount?: number;
   readonly retainedMessageCounts?: ReadonlyMap<number, number>;
   readonly sourceSnapshot?: JsonlSourceSnapshot;
@@ -43,11 +44,14 @@ export interface ForkJsonlRequest {
   readonly createTargetPath?: (input: ForkJsonlTargetPathInput) => string;
 }
 
-export interface ForkJsonlResult {
-  readonly agentSessionId: string;
-  readonly nativePath: string;
-  readonly expectedSemanticDigest?: string;
-}
+export type ForkJsonlOutcome =
+  | {
+      readonly kind: 'materialized';
+      readonly agentSessionId: string;
+      readonly nativePath: string;
+      readonly expectedSemanticDigest?: string;
+    }
+  | { readonly kind: 'unmaterialized' };
 
 export interface JsonlSourceSnapshot {
   readonly content: Buffer;
@@ -68,14 +72,8 @@ export function jsonlSourceLineCount(snapshot: JsonlSourceSnapshot, sourcePath: 
   return normalizeJsonl(snapshot.content.toString('utf8'), sourcePath).lineCount;
 }
 
-export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<ForkJsonlResult> {
+export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<ForkJsonlOutcome> {
   const targetAgentSessionId = crypto.randomUUID();
-  const targetPath =
-    request.createTargetPath?.({
-      sourcePath: request.sourcePath,
-      targetAgentSessionId,
-      createdAt: new Date(),
-    }) ?? path.join(path.dirname(request.sourcePath), `${targetAgentSessionId}.jsonl`);
   const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
   const snapshot =
     request.cutoffLine === null
@@ -127,6 +125,23 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     }
     return serialized;
   });
+  if (
+    request.allowUnmaterializedWholeSession
+    && (transformed?.entries.length ?? selected.entries.length) === 0
+  ) {
+    if (request.cutoffLine !== null) {
+      throw new Error('Only whole-session JSONL forks can remain unmaterialized');
+    }
+    await assertWholeSessionSnapshotUnchanged(request, snapshot);
+    return { kind: 'unmaterialized' };
+  }
+
+  const targetPath =
+    request.createTargetPath?.({
+      sourcePath: request.sourcePath,
+      targetAgentSessionId,
+      createdAt: new Date(),
+    }) ?? path.join(path.dirname(request.sourcePath), `${targetAgentSessionId}.jsonl`);
   const content = retained.length > 0 ? `${retained.join('\n')}\n` : '';
   try {
     if (request.allowMissingSource) {
@@ -134,16 +149,7 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     }
     await fs.writeFile(targetPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
     if (request.cutoffLine === null) {
-      const current = await readCurrentSource(
-        request.sourcePath,
-        request.allowMissingSource === true,
-      );
-      // A whole-session fork of a working chat races the provider appending its next entry.
-      // Transcripts only grow, so the copy stays a faithful snapshot as long as what was read is
-      // still a prefix; only a rewrite of already-copied bytes invalidates it.
-      if (!current.content.subarray(0, snapshot.content.length).equals(snapshot.content)) {
-        throw new JsonlSourcePrefixChangedError(request.sourcePath);
-      }
+      await assertWholeSessionSnapshotUnchanged(request, snapshot);
     } else {
       const current = await snapshotJsonlSource(request.sourcePath).catch(
         (error: NodeJS.ErrnoException) => {
@@ -161,12 +167,29 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     throw error;
   }
   return {
+    kind: 'materialized',
     agentSessionId: targetAgentSessionId,
     nativePath: targetPath,
     ...(transformed?.expectedSemanticDigest !== undefined
       ? { expectedSemanticDigest: transformed.expectedSemanticDigest }
       : {}),
   };
+}
+
+async function assertWholeSessionSnapshotUnchanged(
+  request: Pick<ForkJsonlRequest, 'sourcePath' | 'allowMissingSource'>,
+  snapshot: JsonlSourceSnapshot,
+): Promise<void> {
+  const current = await readCurrentSource(
+    request.sourcePath,
+    request.allowMissingSource === true,
+  );
+  // A whole-session fork of a working chat races the provider appending its next entry.
+  // Transcripts only grow, so the snapshot stays faithful as long as the read bytes remain
+  // a prefix; only a rewrite of already-read bytes invalidates it.
+  if (!current.content.subarray(0, snapshot.content.length).equals(snapshot.content)) {
+    throw new JsonlSourcePrefixChangedError(request.sourcePath);
+  }
 }
 
 function serializeJsonlEntry(entry: unknown, sourcePath: string): string {

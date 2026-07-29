@@ -121,7 +121,7 @@ describe('forkJsonlTranscript', () => {
     expect(forked).not.toContain('"value":"appended"');
   });
 
-  it('materializes an empty whole-session fork before the source transcript exists', async () => {
+  it('leaves a missing whole-session source unmaterialized without creating a target', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
     roots.push(root);
     const sourcePath = path.join(root, 'project', 'source.jsonl');
@@ -131,14 +131,67 @@ describe('forkJsonlTranscript', () => {
       sourceAgentSessionId: 'source',
       cutoffLine: null,
       allowMissingSource: true,
+      allowUnmaterializedWholeSession: true,
       transformEntries(input) {
         expect(input.sourceEntries).toEqual([]);
         return { entries: input.selectedEntries };
       },
     });
 
-    expect(await readFile(result.nativePath, 'utf8')).toBe('');
+    expect(result).toEqual({ kind: 'unmaterialized' });
+    expect(await readdir(root)).toEqual([]);
     await expect(stat(sourcePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('leaves an empty whole-session source unmaterialized without creating a target', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    await writeFile(sourcePath, '');
+
+    const result = await forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+      allowUnmaterializedWholeSession: true,
+    });
+
+    expect(result).toEqual({ kind: 'unmaterialized' });
+    expect(await readdir(root)).toEqual(['source.jsonl']);
+  });
+
+  it('leaves a fully filtered whole-session source unmaterialized without creating a target', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    await writeFile(sourcePath, `${JSON.stringify({ type: 'provider-state' })}\n`);
+
+    const result = await forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+      allowUnmaterializedWholeSession: true,
+      transformEntries: () => ({ entries: [] }),
+    });
+
+    expect(result).toEqual({ kind: 'unmaterialized' });
+    expect(await readdir(root)).toEqual(['source.jsonl']);
+  });
+
+  it('rejects the unmaterialized option for message-point forks', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    await writeFile(sourcePath, '');
+
+    await expect(forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: 0,
+      allowUnmaterializedWholeSession: true,
+    })).rejects.toThrow('Only whole-session JSONL forks can remain unmaterialized');
+
+    expect(await readdir(root)).toEqual(['source.jsonl']);
   });
 
   it('preserves physical line positions and passes per-entry retained counts', async () => {

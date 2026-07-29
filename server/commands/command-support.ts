@@ -18,6 +18,7 @@ import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type {
   AgentExecutionCommandType,
+  ForkedAgentSessionOutcome,
   RunAgentTurnOptions,
   StartedAgentSession,
 } from '../agents/session-types.js';
@@ -114,7 +115,7 @@ export type ForkChatFileCopyDep = (args: {
     sourceChatId: string;
     targetChatId: string;
     messageSequence?: number;
-  }) => Promise<StartedAgentSession | null>;
+  }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
 }) => Promise<ForkChatFileCopyResult>;
 

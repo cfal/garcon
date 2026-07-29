@@ -123,12 +123,15 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
           projectPath: request.source.projectPath,
         });
         return {
-          agentSessionId,
-          nativeSession: nativeSessions.encode({
-            path: createArtificialNativePath('opencode', agentSessionId),
+          kind: 'materialized',
+          session: {
             agentSessionId,
-            modelEndpointId: null,
-          }),
+            nativeSession: nativeSessions.encode({
+              path: createArtificialNativePath('opencode', agentSessionId),
+              agentSessionId,
+              modelEndpointId: null,
+            }),
+          },
         };
       },
       // OpenCode exposes no safe API for deleting an uncommitted fork.

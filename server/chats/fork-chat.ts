@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
-import type { StartedAgentSession } from '../agents/session-types.js';
+import type {
+  ForkedAgentSessionOutcome,
+  StartedAgentSession,
+} from '../agents/session-types.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
 import type { CarryOverForkStage } from './chat-carryover-store.js';
@@ -50,7 +53,7 @@ interface ForkChatInput {
     sourceChatId: string;
     targetChatId: string;
     messageSequence?: number;
-  }) => Promise<StartedAgentSession | null>;
+  }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
 }
 
@@ -134,10 +137,10 @@ export async function forkChatFileCopy({
   }
   const needsNativeFork = Boolean(sourceAgentSessionId)
     && (selectedNativeCount === null || selectedNativeCount > 0);
-  let nativeFork: StartedAgentSession | null = null;
+  let forkOutcome: ForkedAgentSessionOutcome | null = null;
   try {
     if (needsNativeFork) {
-      nativeFork = await forkAgentSession({
+      forkOutcome = await forkAgentSession({
         sourceSession,
         sourceChatId,
         targetChatId,
@@ -148,10 +151,11 @@ export async function forkChatFileCopy({
     await carryOver?.discardStaged(targetChatId, targetEpoch);
     throw error;
   }
-  if (needsNativeFork && !nativeFork?.agentSessionId) {
+  if (needsNativeFork && !forkOutcome) {
     await carryOver?.discardStaged(targetChatId, targetEpoch);
     throw new Error(`Failed to create fork target for chat ${targetChatId}`);
   }
+  const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
 
   const sourceTitle = resolveVisibleChatTitle(sourceChatId, settings, metadata);
   const nextForkOrdinal = normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1;

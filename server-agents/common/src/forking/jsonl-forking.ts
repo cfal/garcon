@@ -6,6 +6,7 @@ import {
   getNativeMessageRevisionSource,
   orderedTranscriptDigest,
   type AgentForkRequest,
+  type AgentForkOutcome,
   type AgentForking,
   type AgentHost,
   type AgentStartedSession,
@@ -35,6 +36,7 @@ export interface JsonlForkingOptions {
   readonly transformEntries?: ForkJsonlRequest['transformEntries'];
   readonly createTargetPath?: ForkJsonlRequest['createTargetPath'];
   readonly allowMissingSourceForWholeSession?: boolean;
+  readonly allowUnmaterializedWholeSession?: boolean;
   readonly semanticDigest?: (messages: readonly ChatMessage[]) => string;
 }
 
@@ -46,7 +48,7 @@ export function createJsonlForking(options: JsonlForkingOptions): AgentForking {
       request.admission.signal.throwIfAborted();
       if (!request.point && options.forkWholeSession) {
         const result = await options.forkWholeSession(request);
-        if (result) return result;
+        if (result) return { kind: 'materialized', session: result };
       }
       return forkJsonlAtPoint(options, request);
     },
@@ -62,12 +64,15 @@ export function createJsonlForking(options: JsonlForkingOptions): AgentForking {
 async function forkJsonlAtPoint(
   options: JsonlForkingOptions,
   request: AgentForkRequest,
-): Promise<AgentStartedSession> {
+): Promise<AgentForkOutcome> {
   const resolvedReference = await resolveSourceReference(options, request);
   const sourceNative = options.nativeSessions.decode(resolvedReference);
   const sourceAgentSessionId = request.source.agentSessionId ?? sourceNative.agentSessionId;
   const sourcePath = sourceNative.path;
   if (!sourceAgentSessionId || !sourcePath) {
+    if (!request.point && options.allowUnmaterializedWholeSession && !sourceAgentSessionId) {
+      return { kind: 'unmaterialized' };
+    }
     throw new AgentIntegrationError(
       'TRANSCRIPT_UNAVAILABLE',
       'Source native transcript is unavailable',
@@ -148,6 +153,8 @@ async function forkJsonlAtPoint(
     sourceAgentSessionId,
     cutoffLine,
     allowMissingSource: !request.point && options.allowMissingSourceForWholeSession === true,
+    allowUnmaterializedWholeSession:
+      !request.point && options.allowUnmaterializedWholeSession === true,
     leadingLineCount,
     retainedMessageCounts,
     sourceSnapshot,
@@ -158,6 +165,12 @@ async function forkJsonlAtPoint(
     if (error instanceof JsonlSourcePrefixChangedError) throw sourceRevisionChanged();
     throw error;
   });
+  if (result.kind === 'unmaterialized') {
+    if (request.point) {
+      throw new Error('A message-point fork cannot remain unmaterialized');
+    }
+    return result;
+  }
   try {
     const nativeSession = options.nativeSessions.encode({
       path: result.nativePath,
@@ -190,7 +203,10 @@ async function forkJsonlAtPoint(
         );
       }
     }
-    return { agentSessionId: result.agentSessionId, nativeSession };
+    return {
+      kind: 'materialized',
+      session: { agentSessionId: result.agentSessionId, nativeSession },
+    };
   } catch (error) {
     if (request.point || options.transformEntries) {
       await fs.rm(result.nativePath, { force: true }).catch(() => undefined);

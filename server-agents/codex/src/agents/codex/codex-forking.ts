@@ -27,7 +27,7 @@ export function createCodexForking(options: CodexForkingOptions): AgentForking {
 
       try {
         const forked = await options.forkPaginatedWhole(request);
-        if (forked) return forked;
+        if (forked) return { kind: 'materialized', session: forked };
         throw paginatedForkUnsupported('fork');
       } catch (error) {
         if (isUnsupportedPaginatedFork(error)) throw paginatedForkUnsupported('fork');

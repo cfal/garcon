@@ -3,6 +3,7 @@ import {
   access,
   appendFile,
   readFile,
+  readdir,
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
@@ -30,7 +31,17 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 
-interface PersistedClaudeChat {
+interface PersistedClaudeChatRecord {
+  agentSessionId: string | null;
+  nativeSession: {
+    value: {
+      path: string;
+      agentSessionId: string;
+    };
+  } | null;
+}
+
+interface PersistedClaudeChat extends PersistedClaudeChatRecord {
   agentSessionId: string;
   nativeSession: {
     value: {
@@ -56,6 +67,8 @@ describe('scripted Claude fork lifecycle matrix', () => {
     const testEnvironment = environment;
     const prompt = marker('IMMEDIATE_PROMPT');
     const reply = marker('IMMEDIATE_REPLY');
+    const childPrompt = marker('IMMEDIATE_CHILD_PROMPT');
+    const childReply = marker('IMMEDIATE_CHILD_REPLY');
     const held = testEnvironment.model.scriptHeldTurn([claudeText(reply)]);
     const requestCount = testEnvironment.model.requests().length;
 
@@ -72,6 +85,16 @@ describe('scripted Claude fork lifecycle matrix', () => {
       try {
         await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
         expect(testEnvironment.model.requests()).toHaveLength(requestCount);
+        const sourceRecord = await readClaudeChatRecord(fixture.dirs.workspace, sourceChatId);
+        const forkRecord = await readClaudeChatRecord(fixture.dirs.workspace, forkChatId);
+        expect(sourceRecord.agentSessionId).toEqual(expect.any(String));
+        expect(forkRecord).toMatchObject({
+          agentSessionId: null,
+          nativeSession: null,
+        });
+        const unexpectedJsonl = (await claudeJsonlFileNames(fixture.dirs.home))
+          .filter((file) => file !== `${sourceRecord.agentSessionId}.jsonl`);
+        expect(unexpectedJsonl).toEqual([]);
       } finally {
         held.release();
       }
@@ -83,9 +106,35 @@ describe('scripted Claude fork lifecycle matrix', () => {
         afterIndex: cursor,
       });
 
+      testEnvironment.model.scriptTurn((request) => {
+        expect(request.lastUserText).toContain(childPrompt);
+        expect(JSON.stringify(request.body.messages)).not.toContain(prompt);
+        expect(JSON.stringify(request.body.messages)).not.toContain(reply);
+        return [claudeText(childReply)];
+      });
+      const childCursor = fixture.client.markEvents();
+      const child = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId: forkChatId,
+        command: childPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: forkChatId,
+        turnId: child.turnId,
+        marker: childReply,
+        afterIndex: childCursor,
+      });
+
       const fork = await fixture.client.getMessages(forkChatId);
-      expect(userContents(fork.messages)).toEqual([]);
-      expect(assistantContents(fork.messages).join('\n')).not.toContain(reply);
+      expect(userContents(fork.messages)).toEqual([childPrompt]);
+      expect(assistantContents(fork.messages)).toContain(childReply);
+      await waitForNativeFileContains(fixture.dirs.workspace, forkChatId, childReply);
+      const materialized = await readClaudeChat(fixture.dirs.workspace, forkChatId);
+      expect(materialized.agentSessionId).toEqual(expect.any(String));
+      expect(materialized.nativeSession.value.agentSessionId).toBe(
+        materialized.agentSessionId,
+      );
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
@@ -306,7 +355,6 @@ describe('scripted Claude fork lifecycle matrix', () => {
         outcome: 'snapshot',
         chats: [{ chatId: sourceChatId, phase: 'running' }],
       });
-
       const forkChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
       expect(JSON.stringify((await fixture.client.getMessages(forkChatId)).messages))
@@ -388,14 +436,48 @@ async function waitForNativeFileContains(
 }
 
 async function readClaudeChat(workspace: string, chatId: string): Promise<PersistedClaudeChat> {
-  const registry = JSON.parse(await readFile(join(workspace, 'chats.json'), 'utf8')) as {
-    sessions: Record<string, PersistedClaudeChat>;
-  };
-  const chat = registry.sessions[chatId];
-  if (!chat?.nativeSession.value.path) {
+  const chat = await readClaudeChatRecord(workspace, chatId);
+  if (
+    typeof chat.agentSessionId !== 'string'
+    || !chat.nativeSession?.value.path
+  ) {
     throw new Error(`Claude chat ${chatId} has no persisted native path.`);
   }
+  return chat as PersistedClaudeChat;
+}
+
+async function readClaudeChatRecord(
+  workspace: string,
+  chatId: string,
+): Promise<PersistedClaudeChatRecord> {
+  const registry = JSON.parse(await readFile(join(workspace, 'chats.json'), 'utf8')) as {
+    sessions: Record<string, PersistedClaudeChatRecord>;
+  };
+  const chat = registry.sessions[chatId];
+  if (!chat) throw new Error(`Claude chat ${chatId} was not persisted.`);
   return chat;
+}
+
+async function claudeJsonlFileNames(home: string): Promise<string[]> {
+  const files: string[] = [];
+  await collectJsonlFileNames(join(home, '.claude', 'projects'), files);
+  return files.sort();
+}
+
+async function collectJsonlFileNames(directory: string, files: string[]): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    },
+  );
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      await collectJsonlFileNames(join(directory, entry.name), files);
+    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      files.push(entry.name);
+    }
+  }
 }
 
 async function appendMicrocompaction(chat: PersistedClaudeChat): Promise<void> {

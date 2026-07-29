@@ -63,6 +63,10 @@ export interface StartedAgentSession {
   nativeSession: AgentNativeSessionRef | null;
 }
 
+export type ForkedAgentSessionOutcome =
+  | { readonly kind: 'materialized'; readonly session: StartedAgentSession }
+  | { readonly kind: 'unmaterialized' };
+
 export interface PrepareProjectPathUpdateRequest {
   chatId: string;
   agentSessionId: string | null;

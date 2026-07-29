@@ -128,12 +128,15 @@ export default class PiAgentIntegration implements AgentIntegration {
           config,
         );
         return {
-          agentSessionId: forked.agentSessionId,
-          nativeSession: nativeSessions.encode({
-            path: forked.nativePath,
+          kind: 'materialized',
+          session: {
             agentSessionId: forked.agentSessionId,
-            modelEndpointId: null,
-          }),
+            nativeSession: nativeSessions.encode({
+              path: forked.nativePath,
+              agentSessionId: forked.agentSessionId,
+              modelEndpointId: null,
+            }),
+          },
         };
       },
       // Pi exposes no safe API for deleting an uncommitted fork.

@@ -195,6 +195,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       transformEntries: transformClaudeForkTranscript,
       semanticDigest: claudeForkSemanticDigest,
       allowMissingSourceForWholeSession: true,
+      allowUnmaterializedWholeSession: true,
     });
     this.endpoints = {
       async validate(selection) {

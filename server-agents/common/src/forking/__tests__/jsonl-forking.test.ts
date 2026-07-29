@@ -10,6 +10,7 @@ import {
   computeAgentTranscriptRevision,
   computeAgentTranscriptRevisions,
   getNativeMessageRevisionSource,
+  type AgentForkOutcome,
   type AgentForkRequest,
   type AgentHost,
   type AgentTranscript,
@@ -20,6 +21,12 @@ import { createJsonlForking, type JsonlForkingOptions } from '../jsonl-forking.j
 const roots: string[] = [];
 const sourceAgentSessionId = '11111111-1111-1111-1111-111111111111';
 const timestamp = '2026-07-20T00:00:00.000Z';
+
+function materializedSession(outcome: AgentForkOutcome) {
+  expect(outcome.kind).toBe('materialized');
+  if (outcome.kind !== 'materialized') throw new Error('Expected a materialized fork');
+  return outcome.session;
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -178,7 +185,7 @@ describe('createJsonlForking message validation', () => {
       },
     });
 
-    const forked = await forking.fork(fixture.request);
+    const forked = materializedSession(await forking.fork(fixture.request));
     const native = fixture.nativeSessions.decode(forked.nativeSession);
 
     expect(native.path).toBe(path.join(fixture.root, `provider-${forked.agentSessionId}.jsonl`));
@@ -195,7 +202,7 @@ describe('createJsonlForking message validation', () => {
       })}\n`,
     );
 
-    const forked = await fixture.forking.fork(fixture.request);
+    const forked = materializedSession(await fixture.forking.fork(fixture.request));
     const forkedPath = fixture.nativeSessions.decode(forked.nativeSession).path!;
     const forkedMessages = await fixture.loadMessages(forkedPath);
 
@@ -305,6 +312,27 @@ describe('createJsonlForking error propagation', () => {
 });
 
 describe('createJsonlForking empty native prefixes', () => {
+  it('leaves a whole-session fork without a source session unmaterialized', async () => {
+    const fixture = await createFixture();
+    const forking = createJsonlForking({
+      ...fixture.options,
+      allowUnmaterializedWholeSession: true,
+    });
+
+    const result = await forking.fork({
+      ...fixture.request,
+      point: null,
+      source: {
+        ...fixture.request.source,
+        agentSessionId: null,
+        nativeSession: null,
+      },
+    });
+
+    expect(result).toEqual({ kind: 'unmaterialized' });
+    expect(await readdir(fixture.root)).toEqual(['source.jsonl']);
+  });
+
   it('preserves provider metadata without adding rendered messages', async () => {
     const fixture = await createFixture();
     await writeFile(
@@ -327,7 +355,7 @@ describe('createJsonlForking empty native prefixes', () => {
       },
     } satisfies AgentForkRequest;
 
-    const forked = await fixture.forking.fork(request);
+    const forked = materializedSession(await fixture.forking.fork(request));
     const forkedPath = fixture.nativeSessions.decode(forked.nativeSession).path!;
     const entries = (await readFile(forkedPath, 'utf8'))
       .trimEnd()

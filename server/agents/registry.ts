@@ -24,6 +24,7 @@ import type {
   AgentChatEntry,
   AgentExecutionAdmission,
   AgentExecutionCommandType,
+  ForkedAgentSessionOutcome,
   AgentSessionSettingsPatch,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
@@ -65,7 +66,7 @@ export interface AgentRegistryServiceContract {
     sourceChatId: string;
     targetChatId: string;
     messageSequence?: number;
-  }): Promise<StartedAgentSession | null>;
+  }): Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;

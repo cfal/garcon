@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createJsonlForking } from '@garcon/server-agent-common/forking/jsonl-forking';
@@ -124,9 +124,14 @@ describe('Claude JSONL forking', () => {
       rewriteEntry: projectClaudeForkEntry,
       transformEntries: transformClaudeForkTranscript,
       semanticDigest: claudeForkSemanticDigest,
+      allowMissingSourceForWholeSession: true,
+      allowUnmaterializedWholeSession: true,
     });
 
-    const forked = await forking.fork(request);
+    const outcome = await forking.fork(request);
+    expect(outcome.kind).toBe('materialized');
+    if (outcome.kind !== 'materialized') throw new Error('Expected a materialized Claude fork');
+    const forked = outcome.session;
     const forkedPath = nativeSessions.decode(forked.nativeSession).path;
     const forkedEntries = (await readFile(forkedPath, 'utf8')).trim().split('\n').map(JSON.parse);
 
@@ -150,5 +155,85 @@ describe('Claude JSONL forking', () => {
 
     await forking.discard(forked, new AbortController().signal);
     await expect(access(forkedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('leaves a source containing only task state unmaterialized', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-claude-forking-'));
+    roots.push(root);
+    const sourceAgentSessionId = 'd11dc5c4-73da-43b6-9cac-4ca08a2fd929';
+    const sourcePath = path.join(root, `${sourceAgentSessionId}.jsonl`);
+    await writeFile(sourcePath, [
+      JSON.stringify({ type: 'mode', sessionId: sourceAgentSessionId }),
+      JSON.stringify({ type: 'queue-operation', sessionId: sourceAgentSessionId }),
+      JSON.stringify({ type: 'last-prompt', sessionId: sourceAgentSessionId }),
+      '',
+    ].join('\n'));
+
+    const nativeSessions = createPathNativeSessionCodec('claude');
+    const sourceNativeSession = nativeSessions.encode({
+      path: sourcePath,
+      agentSessionId: sourceAgentSessionId,
+      modelEndpointId: null,
+    });
+    const settings = { ownerId: 'claude', schemaVersion: 1, values: {} };
+    const forking = createJsonlForking({
+      host: {
+        carryOver: {
+          async load() {
+            return { revision: '', messages: [] };
+          },
+        },
+      },
+      supportsWhileRunning: true,
+      transcript: {
+        async resolveNativeSession({ chat }) {
+          return chat.nativeSession;
+        },
+        async load() {
+          throw new Error('An unmaterialized fork must skip digest verification');
+        },
+      },
+      nativeSessions,
+      rewriteEntry: projectClaudeForkEntry,
+      transformEntries: transformClaudeForkTranscript,
+      semanticDigest: claudeForkSemanticDigest,
+      allowMissingSourceForWholeSession: true,
+      allowUnmaterializedWholeSession: true,
+    });
+
+    const outcome = await forking.fork({
+      chatId: 'target-chat',
+      projectPath: root,
+      model: 'claude-sonnet',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      settings,
+      endpoint: null,
+      operation: {
+        commandType: 'fork-run',
+        clientRequestId: null,
+        clientMessageId: null,
+        turnId: 'turn-1',
+      },
+      admission: {
+        signal: new AbortController().signal,
+        markStarted() {},
+        markAbortable() {},
+      },
+      source: {
+        chatId: 'source-chat',
+        agentId: 'claude',
+        agentSessionId: sourceAgentSessionId,
+        projectPath: root,
+        model: 'claude-sonnet',
+        nativeSession: sourceNativeSession,
+        carryOverRevision: '',
+        settings,
+      },
+      point: null,
+    });
+
+    expect(outcome).toEqual({ kind: 'unmaterialized' });
+    expect(await readdir(root)).toEqual([`${sourceAgentSessionId}.jsonl`]);
   });
 });

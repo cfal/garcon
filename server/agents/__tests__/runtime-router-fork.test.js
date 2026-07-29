@@ -29,6 +29,14 @@ function makeRouter(fork) {
     new UserMessage('2026-07-21T00:00:00.000Z', 'first'),
     new UserMessage('2026-07-21T00:00:01.000Z', 'second'),
   ];
+  const execution = {
+    start: mock(async () => ({
+      agentSessionId: 'started-session',
+      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'started-session' } },
+    })),
+    resume: mock(async () => undefined),
+    runningSessions: mock(() => []),
+  };
   const integration = {
     descriptor: {
       id: 'test',
@@ -37,6 +45,7 @@ function makeRouter(fork) {
       supportedThinkingModes: ['none'],
     },
     settings: { parse: (value) => value },
+    execution,
     transcript: {
       load: mock(async () => ({
         messages,
@@ -45,9 +54,23 @@ function makeRouter(fork) {
     },
     forking: { fork, discard: mock(async () => undefined) },
   };
+  const entries = new Map([['source-chat', entry]]);
+  const registry = {
+    getChat: mock((chatId) => entries.get(chatId) ?? null),
+    updateChat: mock(async (chatId, patch) => {
+      const current = entries.get(chatId);
+      if (!current) return null;
+      const updated = { ...current, ...patch };
+      entries.set(chatId, updated);
+      return updated;
+    }),
+  };
   const router = new AgentRuntimeRouter({
-    registry: { getChat: mock(() => entry) },
-    directory: { require: mock(() => integration) },
+    registry,
+    directory: {
+      require: mock(() => integration),
+      list: mock(() => [integration]),
+    },
     endpointResolver: {
       resolveSelection: mock(() => ({
         model: 'model-a',
@@ -58,18 +81,21 @@ function makeRouter(fork) {
       })),
       resolveEndpointReference: mock(() => null),
     },
-    events: {},
+    events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     getCarryOverRevision: () => 'carry-1',
     loadCarryOver: () => [],
   });
-  return { router, entry, messages, integration };
+  return { router, entry, entries, execution, messages, integration };
 }
 
 describe('AgentRuntimeRouter forks', () => {
   it('binds a point fork to the selected native prefix', async () => {
     const fork = mock(async () => ({
-      agentSessionId: 'forked-session',
-      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'forked-session' } },
+      kind: 'materialized',
+      session: {
+        agentSessionId: 'forked-session',
+        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'forked-session' } },
+      },
     }));
     const { router, entry, messages } = makeRouter(fork);
 
@@ -89,6 +115,34 @@ describe('AgentRuntimeRouter forks', () => {
         },
       },
     }));
+  });
+
+  it('preserves a successful unmaterialized whole-session outcome', async () => {
+    const fork = mock(async () => ({ kind: 'unmaterialized' }));
+    const { router, entry, entries, execution } = makeRouter(fork);
+
+    const outcome = await router.forkAgentSession({
+      sourceSession: entry,
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+    });
+    expect(outcome).toEqual({ kind: 'unmaterialized' });
+
+    expect(fork).toHaveBeenCalledWith(expect.objectContaining({ point: null }));
+
+    entries.set('target-chat', {
+      ...entry,
+      id: 'target-chat',
+      agentSessionId: null,
+      nativeSession: null,
+    });
+    await router.runAgentTurn('target-chat', 'child prompt');
+
+    expect(execution.start).toHaveBeenCalledOnce();
+    expect(execution.start).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 'target-chat', prompt: 'child prompt' }),
+    );
+    expect(execution.resume).not.toHaveBeenCalled();
   });
 
   it('maps a changed selected prefix to a retryable conflict', async () => {

@@ -11,6 +11,7 @@ const paginatedProfile = {
   createdAt: '2026-07-20T00:00:00.000Z', historyBase: null,
 };
 const startedSession = { agentSessionId: 'target', nativeSession: null };
+const materialized = { kind: 'materialized', session: startedSession };
 
 function request(point = null) {
   return {
@@ -30,7 +31,7 @@ function request(point = null) {
 }
 
 function setup(profile, nativeImplementation = async () => startedSession) {
-  const legacyFork = mock(async () => startedSession);
+  const legacyFork = mock(async () => materialized);
   const forkPaginatedWhole = mock(nativeImplementation);
   const resolveProfile = mock(async () => profile);
   return {
@@ -48,7 +49,7 @@ function setup(profile, nativeImplementation = async () => startedSession) {
 describe('createCodexForking', () => {
   it('routes every legacy fork through the existing verified JSONL strategy', async () => {
     const full = setup(legacyProfile);
-    await expect(full.forking.fork(request())).resolves.toBe(startedSession);
+    await expect(full.forking.fork(request())).resolves.toBe(materialized);
     expect(full.legacyFork).toHaveBeenCalledTimes(1);
     expect(full.forkPaginatedWhole).not.toHaveBeenCalled();
 
@@ -56,7 +57,7 @@ describe('createCodexForking', () => {
     await expect(point.forking.fork(request({
       messageSequence: 2,
       sourceRevision: { nativePrefix: 'prefix', carryOver: 'carry-over' },
-    }))).resolves.toBe(startedSession);
+    }))).resolves.toBe(materialized);
     expect(point.legacyFork).toHaveBeenCalledTimes(1);
     expect(point.forkPaginatedWhole).not.toHaveBeenCalled();
   });
@@ -77,7 +78,7 @@ describe('createCodexForking', () => {
 
   it('uses only provider-native thread/fork for a paginated full fork', async () => {
     const values = setup(paginatedProfile);
-    await expect(values.forking.fork(request())).resolves.toBe(startedSession);
+    await expect(values.forking.fork(request())).resolves.toEqual(materialized);
     expect(values.forkPaginatedWhole).toHaveBeenCalledTimes(1);
     expect(values.legacyFork).not.toHaveBeenCalled();
   });

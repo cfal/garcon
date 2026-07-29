@@ -135,12 +135,15 @@ export default class CursorAgentIntegration implements AgentIntegration {
           cursorReference(request.source, nativeSessions),
         );
         return {
-          agentSessionId: forked.agentSessionId,
-          nativeSession: nativeSessions.encode({
-            path: forked.nativePath,
+          kind: 'materialized',
+          session: {
             agentSessionId: forked.agentSessionId,
-            modelEndpointId: null,
-          }),
+            nativeSession: nativeSessions.encode({
+              path: forked.nativePath,
+              agentSessionId: forked.agentSessionId,
+              modelEndpointId: null,
+            }),
+          },
         };
       },
       // Cursor exposes no safe API for deleting an uncommitted fork.

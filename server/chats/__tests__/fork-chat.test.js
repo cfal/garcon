@@ -73,8 +73,11 @@ function makeDeps(overrides = {}) {
     }),
   };
   const forkAgentSession = overrides.forkAgentSession ?? mock(async () => ({
-    agentSessionId: 'target-native',
-    nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
+    kind: 'materialized',
+    session: {
+      agentSessionId: 'target-native',
+      nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
+    },
   }));
   const discardForkedAgentSession = overrides.discardForkedAgentSession
     ?? mock(async () => undefined);
@@ -141,6 +144,30 @@ describe('forkChatFileCopy', () => {
 
     expect(result.agentSessionId).toBeNull();
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('creates a lazy child when the provider fork remains unmaterialized', async () => {
+    const deps = makeDeps({
+      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
+    });
+
+    const result = await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    });
+
+    expect(result.agentSessionId).toBeNull();
+    expect(deps.sessions.get('target-chat')).toMatchObject({
+      agentSessionId: null,
+      nativeSession: null,
+    });
+    expect(deps.carryOver.promoteStaged).toHaveBeenCalledWith(
+      'target-chat',
+      expect.any(String),
+    );
+    expect(deps.discardForkedAgentSession).not.toHaveBeenCalled();
   });
 
   it('rejects a point beyond lazy carry-over without leaving staged state', async () => {
