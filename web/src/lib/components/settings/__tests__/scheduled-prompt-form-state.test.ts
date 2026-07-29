@@ -2,13 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { ScheduledPromptFormState } from '../scheduled-prompt-form-state.svelte';
 import { localDateValue, localTimeValue } from '$lib/scheduling/local-schedule';
 import type { ScheduledPrompt } from '$shared/scheduled-prompts';
+import type { SessionAgentId } from '$lib/types/app';
 
-function createForm(existingIds = new Set(['123'])): ScheduledPromptFormState {
+function createForm(
+	existingIds = new Set(['123']),
+	selectableAgentIds: () => readonly SessionAgentId[] = () => ['claude', 'codex'],
+): ScheduledPromptFormState {
 	const sessions = {
 		hasChat: (chatId: string) => existingIds.has(chatId),
 		isDraft: () => false,
 	};
 	const modelCatalog = {
+		getSelectableAgents: () => selectableAgentIds(),
 		getModels: () => [{ value: 'gpt-5', label: 'GPT-5' }],
 		getDefaultModel: () => 'gpt-5',
 		selectionValueFor: (_agentId: string, model: string) => model,
@@ -19,7 +24,11 @@ function createForm(existingIds = new Set(['123'])): ScheduledPromptFormState {
 			modelProtocol: null,
 		}),
 	};
-	const form = new ScheduledPromptFormState(modelCatalog as never, {} as never, sessions as never);
+	const form = new ScheduledPromptFormState(modelCatalog as never, {} as never, sessions as never, {
+		get selectableAgentIds() {
+			return selectableAgentIds();
+		},
+	});
 	form.startup.loadSettingsAndModels = vi.fn().mockResolvedValue(undefined);
 	return form;
 }
@@ -36,6 +45,23 @@ function existingPrompt(schedule: ScheduledPrompt['schedule']): ScheduledPrompt 
 }
 
 describe('ScheduledPromptFormState', () => {
+	it('rejects ineligible agents for new-chat targets', () => {
+		let selectableAgentIds: readonly SessionAgentId[] = ['claude', 'codex'];
+		const form = createForm(new Set(['123']), () => selectableAgentIds);
+		form.targetType = 'new-chat';
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		form.startup.agentId = 'direct-openai-compatible';
+		form.startup.selectedModelsByAgent = {
+			'direct-openai-compatible': 'gpt-5',
+		};
+
+		expect(form.targetValid).toBe(false);
+
+		selectableAgentIds = ['claude', 'codex', 'direct-openai-compatible'];
+		expect(form.targetValid).toBe(true);
+	});
+
 	it('uses one validation gate for missing chats and slash commands', () => {
 		const existingIds = new Set<string>();
 		const form = createForm(existingIds);
@@ -83,10 +109,10 @@ describe('ScheduledPromptFormState', () => {
 
 	it('hydrates and rebuilds new-chat tags when editing a scheduled prompt', async () => {
 		const form = createForm();
-	form.startup.selectAgent = vi.fn();
-	form.startup.setPermissionMode = vi.fn();
-	form.startup.setThinkingMode = vi.fn();
-	form.startup.replaceAgentSettingsById = vi.fn();
+		form.startup.selectAgent = vi.fn();
+		form.startup.setPermissionMode = vi.fn();
+		form.startup.setThinkingMode = vi.fn();
+		form.startup.replaceAgentSettingsById = vi.fn();
 		form.startup.validatePath = vi.fn();
 		const scheduledPrompt: ScheduledPrompt = {
 			id: 'tagged-prompt',

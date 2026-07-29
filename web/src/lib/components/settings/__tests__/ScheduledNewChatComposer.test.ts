@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import type { SessionAgentId } from '$lib/types/app';
 
 vi.mock(
 	'$lib/components/model-selector/ComposerModelSelector.svelte',
@@ -60,7 +61,13 @@ function makeStartup(): NewChatFormState {
 	} as unknown as NewChatFormState;
 }
 
-function renderComposer(overrides: { prompt?: string; promptError?: string | null } = {}) {
+function renderComposer(
+	overrides: {
+		prompt?: string;
+		promptError?: string | null;
+		selectableAgentIds?: readonly SessionAgentId[];
+	} = {},
+) {
 	const onPromptChange = vi.fn();
 	const onPromptKeydown = vi.fn();
 	const startup = makeStartup();
@@ -75,6 +82,7 @@ function renderComposer(overrides: { prompt?: string; promptError?: string | nul
 		startup,
 		modelCatalog,
 		remoteSettings,
+		selectableAgentIds: overrides.selectableAgentIds ?? ['claude', 'codex'],
 		prompt: overrides.prompt ?? '',
 		promptError: overrides.promptError ?? null,
 		knownTags: ['qa', 'review-needed'],
@@ -102,7 +110,9 @@ describe('ScheduledNewChatComposer', () => {
 		expect(composer?.className).not.toContain('pb-1.5');
 		expect(composer?.contains(prompt)).toBe(true);
 		expect(composer?.contains(controls)).toBe(true);
-		expect(controls?.contains(screen.getByRole('button', { name: 'Model selector' }))).toBe(true);
+		const modelSelector = screen.getByRole('button', { name: 'Model selector' });
+		expect(controls?.contains(modelSelector)).toBe(true);
+		expect(modelSelector.dataset.selectableAgentIds).toBe('claude,codex');
 		expect(composer?.contains(projectPath)).toBe(false);
 
 		await fireEvent.click(selectWorktree);

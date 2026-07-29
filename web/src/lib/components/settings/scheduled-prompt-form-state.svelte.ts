@@ -1,4 +1,5 @@
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import type { SessionAgentId } from '$lib/types/app';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
@@ -17,6 +18,10 @@ import {
 	type ScheduledPromptDefinitionInput,
 } from '$shared/scheduled-prompts';
 import * as m from '$lib/paraglide/messages.js';
+
+export interface ScheduledPromptFormStateOptions {
+	get selectableAgentIds(): readonly SessionAgentId[];
+}
 
 export class ScheduledPromptFormState {
 	readonly startup: NewChatFormState;
@@ -43,12 +48,13 @@ export class ScheduledPromptFormState {
 		private readonly modelCatalog: ModelCatalogStore,
 		remoteSettings: RemoteSettingsStore,
 		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'>,
+		private readonly options: ScheduledPromptFormStateOptions,
 	) {
 		this.startup = new NewChatFormState({
 			modelCatalog,
 			remoteSettings,
 			get selectableAgentIds() {
-				return modelCatalog.getSelectableAgents();
+				return options.selectableAgentIds;
 			},
 		});
 	}
@@ -87,6 +93,7 @@ export class ScheduledPromptFormState {
 		}
 		return (
 			this.startup.settingsLoaded &&
+			this.options.selectableAgentIds.includes(this.startup.agentId) &&
 			this.startup.validationStatus === 'valid' &&
 			Boolean(this.startup.modelValue)
 		);

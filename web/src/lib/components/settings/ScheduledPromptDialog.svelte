@@ -5,7 +5,13 @@
 	import ScheduledChatPickerDialog from './ScheduledChatPickerDialog.svelte';
 	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
 	import { ScheduledPromptFormState } from './scheduled-prompt-form-state.svelte';
-	import { getChatSessions, getModelCatalog, getRemoteSettings } from '$lib/context';
+	import {
+		getChatSessions,
+		getLocalSettings,
+		getModelCatalog,
+		getRemoteSettings,
+	} from '$lib/context';
+	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import { browserTimeZoneLabel, localDateValue } from '$lib/scheduling/local-schedule';
 	import {
 		SCHEDULED_PROMPT_INTERVAL_DAYS_MAX,
@@ -25,12 +31,26 @@
 
 	let { open, scheduledPrompt, onSave, onClose }: Props = $props();
 	const modelCatalog = getModelCatalog();
+	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
+	const selectableAgentIds = $derived.by(() => {
+		const allAgentIds = modelCatalog.getSelectableAgents();
+		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
+	});
 	const knownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((chat) => chat.tags))).sort(),
 	);
-	let form = $state(new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions));
+
+	function createForm(): ScheduledPromptFormState {
+		return new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions, {
+			get selectableAgentIds() {
+				return selectableAgentIds;
+			},
+		});
+	}
+
+	let form = $state(createForm());
 	let pickerOpen = $state(false);
 	let isMobile = $state(false);
 	let initialization = 0;
@@ -45,7 +65,7 @@
 		if (!open) return;
 		const currentPrompt = scheduledPrompt;
 		const token = ++initialization;
-		const nextForm = new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions);
+		const nextForm = createForm();
 		form = nextForm;
 		pickerOpen = false;
 		untrack(() => {
@@ -67,6 +87,13 @@
 		if (!open) return;
 		void modelCatalog.version;
 		form.startup.validateAllModelsAgainstLive();
+	});
+
+	$effect(() => {
+		if (!open) return;
+		const eligibleAgentIds = selectableAgentIds;
+		const activeForm = form;
+		untrack(() => activeForm.startup.reconcileAgentSelection(eligibleAgentIds));
 	});
 
 	onMount(() => {
@@ -277,6 +304,7 @@
 						startup={form.startup}
 						{modelCatalog}
 						{remoteSettings}
+						{selectableAgentIds}
 						prompt={form.prompt}
 						promptError={form.promptError}
 						{knownTags}

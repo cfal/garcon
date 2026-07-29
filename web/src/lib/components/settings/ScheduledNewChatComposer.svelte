@@ -20,6 +20,7 @@
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import Check from '@lucide/svelte/icons/check';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -30,6 +31,7 @@
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
+		selectableAgentIds: readonly SessionAgentId[];
 		prompt: string;
 		promptError: string | null;
 		knownTags: string[];
@@ -42,6 +44,7 @@
 		startup,
 		modelCatalog,
 		remoteSettings,
+		selectableAgentIds,
 		prompt,
 		promptError,
 		knownTags,
@@ -260,6 +263,7 @@
 							onChange={handleModelChange}
 							recents={recentSelectorOptions}
 							{preferRecentsOnOpen}
+							{selectableAgentIds}
 							align="end"
 							side="bottom"
 						/>
