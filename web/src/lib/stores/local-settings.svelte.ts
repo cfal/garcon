@@ -92,6 +92,7 @@ export interface LocalSettingsSnapshot {
 	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
 	showThinking: boolean;
+	allowDirectChats: boolean;
 	reduceMotion: boolean;
 	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
@@ -124,6 +125,7 @@ type BooleanLocalSettingKey =
 	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
 	| 'showThinking'
+	| 'allowDirectChats'
 	| 'reduceMotion'
 	| 'showQuickCommitTray'
 	| 'autoScrollToBottom'
@@ -142,6 +144,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
 	showThinking: true,
+	allowDirectChats: false,
 	reduceMotion: false,
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
@@ -235,6 +238,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
+		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
 		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
@@ -316,6 +320,7 @@ export class LocalSettingsStore {
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	showThinking = $state(DEFAULTS.showThinking);
+	allowDirectChats = $state(DEFAULTS.allowDirectChats);
 	reduceMotion = $state(DEFAULTS.reduceMotion);
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
@@ -399,6 +404,7 @@ export class LocalSettingsStore {
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
 			showThinking: this.showThinking,
+			allowDirectChats: this.allowDirectChats,
 			reduceMotion: this.reduceMotion,
 			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
@@ -433,6 +439,7 @@ export class LocalSettingsStore {
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.showThinking = snap.showThinking;
+		this.allowDirectChats = snap.allowDirectChats;
 		this.reduceMotion = snap.reduceMotion;
 		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;

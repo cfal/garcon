@@ -1,9 +1,5 @@
 import * as m from '$lib/paraglide/messages.js';
-import {
-	DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-	DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-} from '$shared/agents';
+import { directAgentShortLabel } from './direct-agents.js';
 
 export function agentLabelFor(agentId: string, fallback?: string): string {
 	if (agentId === 'claude') return m.agent_claude();
@@ -13,15 +9,8 @@ export function agentLabelFor(agentId: string, fallback?: string): string {
 	if (agentId === 'amp') return m.agent_amp();
 	if (agentId === 'factory') return m.agent_factory();
 	if (agentId === 'pi') return m.agent_pi();
-	if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
-		return m.agent_direct_openai_chat_completions();
-	}
-	if (agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID) {
-		return m.agent_direct_openai_responses();
-	}
-	if (agentId === DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID) {
-		return m.agent_direct_anthropic();
-	}
+	const directLabel = directAgentShortLabel(agentId);
+	if (directLabel !== null) return m.agent_direct_qualified({ agent: directLabel });
 	return fallback ?? agentId;
 }
 

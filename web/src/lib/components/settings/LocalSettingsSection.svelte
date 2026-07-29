@@ -181,6 +181,12 @@
 				ls.toggle('showThinking'),
 			)}
 			{@render settingRow(
+				m.settings_chat_allow_direct_chats(),
+				ls.allowDirectChats,
+				() => ls.toggle('allowDirectChats'),
+				{ description: m.settings_chat_allow_direct_chats_description() },
+			)}
+			{@render settingRow(
 				m.settings_chat_reduce_motion(),
 				ls.reduceMotion,
 				() => ls.toggle('reduceMotion'),

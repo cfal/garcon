@@ -13,6 +13,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.desktopLayoutOrder).toEqual(['chat-list', 'main', 'workspace-sidebar']);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.overlayBackdropEffects).toBe(true);
+		expect(store.allowDirectChats).toBe(false);
 		expect(store.sidebarGroupByProject).toBe(true);
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarCompactChatItems).toBe(false);
@@ -140,6 +141,28 @@ describe('LocalSettingsStore', () => {
 
 		expect(store.overlayBackdropEffects).toBe(true);
 		store.destroy();
+	});
+
+	it('persists direct chat opt-in and rejects malformed persisted values', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('allowDirectChats');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ allowDirectChats: true });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.allowDirectChats).toBe(true);
+		restored.destroy();
+		store.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ allowDirectChats: 'enabled' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.allowDirectChats).toBe(false);
+		malformed.destroy();
 	});
 
 	it('persists the terminal font size', () => {
@@ -415,6 +438,7 @@ describe('LocalSettingsStore', () => {
 				sidebarGroupNestedProjectPaths: true,
 				sidebarCompactChatItems: true,
 				showQuickCommitTray: false,
+				allowDirectChats: true,
 				desktopLayoutOrder: ['main', 'workspace-sidebar', 'chat-list'],
 				textEditorOpenPlacement: 'source',
 				imageViewerOpenPlacement: 'sidebar',
@@ -434,6 +458,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarCompactChatItems).toBe(true);
 		expect(secondStore.showQuickCommitTray).toBe(false);
+		expect(secondStore.allowDirectChats).toBe(true);
 		expect(secondStore.desktopLayoutOrder).toEqual([
 			'main',
 			'workspace-sidebar',

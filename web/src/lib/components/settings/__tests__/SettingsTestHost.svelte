@@ -194,6 +194,7 @@
 		},
 		autoExpandTools: false,
 		showThinking: true,
+		allowDirectChats: false,
 		reduceMotion: false,
 		hiddenToolTypes: [],
 		showQuickCommitTray: true,

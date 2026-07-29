@@ -183,6 +183,15 @@ describe('Settings', () => {
 				screen.getByRole('button', { name: 'Move Main view down' }),
 			);
 			expect(screen.getByText('Max chat width')).toBeTruthy();
+			const allowDirectChats = screen.getByRole('switch', { name: 'Allow direct chats' });
+			expect(allowDirectChats.getAttribute('aria-checked')).toBe('false');
+			expect(
+				screen.getByText(
+					'Enables chat sessions directly against configured LLM APIs. These sessions are not connected to a project and cannot read or modify your filesystem.',
+				),
+			).toBeTruthy();
+			await fireEvent.click(allowDirectChats);
+			expect(onLocalToggle).toHaveBeenCalledWith('allowDirectChats');
 			const reduceMotion = screen.getByRole('switch', { name: 'Reduce motion' });
 			expect(reduceMotion.getAttribute('aria-checked')).toBe('false');
 			await fireEvent.click(reduceMotion);
