@@ -129,6 +129,7 @@ function createDeps(chat = createChat()) {
 				modelProtocol: null,
 			})),
 			supportsFork: vi.fn(() => false),
+			supportsForkWhileRunning: vi.fn(() => false),
 		},
 		navigation: { navigateToChat: vi.fn() },
 		scrollToBottom: vi.fn(),

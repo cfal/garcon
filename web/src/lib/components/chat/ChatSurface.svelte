@@ -129,6 +129,7 @@
 		selectedChat
 			? canUseForkAction({
 					supportsFork: canForkSelectedChat,
+					supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(selectedChat.agentId),
 					isProcessing: selectedChat.isProcessing,
 				})
 			: false,

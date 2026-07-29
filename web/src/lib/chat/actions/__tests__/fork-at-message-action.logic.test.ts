@@ -10,6 +10,7 @@ describe('canUseForkAction', () => {
 		expect(
 			canUseForkAction({
 				supportsFork: false,
+				supportsForkWhileRunning: true,
 				isProcessing: false,
 			}),
 		).toBe(false);
@@ -19,18 +20,27 @@ describe('canUseForkAction', () => {
 		expect(
 			canUseForkAction({
 				supportsFork: true,
+				supportsForkWhileRunning: false,
 				isProcessing: false,
 			}),
 		).toBe(true);
 	});
 
-	it('disables whole-chat forks while processing', () => {
+	it('disables running whole-chat forks unless running fork is supported', () => {
 		expect(
 			canUseForkAction({
 				supportsFork: true,
+				supportsForkWhileRunning: false,
 				isProcessing: true,
 			}),
 		).toBe(false);
+		expect(
+			canUseForkAction({
+				supportsFork: true,
+				supportsForkWhileRunning: true,
+				isProcessing: true,
+			}),
+		).toBe(true);
 	});
 });
 
@@ -57,7 +67,7 @@ describe('canUseForkAtMessageAction', () => {
 		expect(
 			canUseForkAtMessageAction({
 				supportsForkAtMessage: false,
-				supportsForkAtMessageWhileRunning: true,
+				supportsForkWhileRunning: true,
 				isProcessing: false,
 			}),
 		).toBe(false);
@@ -67,7 +77,7 @@ describe('canUseForkAtMessageAction', () => {
 		expect(
 			canUseForkAtMessageAction({
 				supportsForkAtMessage: true,
-				supportsForkAtMessageWhileRunning: false,
+				supportsForkWhileRunning: false,
 				isProcessing: false,
 			}),
 		).toBe(true);
@@ -77,14 +87,14 @@ describe('canUseForkAtMessageAction', () => {
 		expect(
 			canUseForkAtMessageAction({
 				supportsForkAtMessage: true,
-				supportsForkAtMessageWhileRunning: false,
+				supportsForkWhileRunning: false,
 				isProcessing: true,
 			}),
 		).toBe(false);
 		expect(
 			canUseForkAtMessageAction({
 				supportsForkAtMessage: true,
-				supportsForkAtMessageWhileRunning: true,
+				supportsForkWhileRunning: true,
 				isProcessing: true,
 			}),
 		).toBe(true);

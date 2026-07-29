@@ -182,6 +182,7 @@ export interface SessionControllerDeps {
 		getPermissionModes: (agentId: SessionAgentId) => readonly PermissionMode[];
 		getThinkingModes: (agentId: SessionAgentId) => readonly ThinkingMode[];
 		supportsFork: (agentId: SessionAgentId) => boolean;
+		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
 	};
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;

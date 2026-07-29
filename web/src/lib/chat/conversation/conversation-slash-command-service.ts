@@ -1,4 +1,5 @@
 import { compactChat, forkChat } from '$lib/api/chats.js';
+import { ApiError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -72,6 +73,7 @@ interface SlashCommandModelCatalog {
 		modelProtocol: ApiProtocol | null;
 	};
 	supportsFork(agentId: SessionAgentId): boolean;
+	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
 }
 
 export interface ConversationSlashCommandDeps {
@@ -139,7 +141,11 @@ export class ConversationSlashCommandService {
 		if (this.deps.modelCatalog.supportsFork(agentId)) {
 			const fork = parseForkCommand(text);
 			if (fork) {
-				if (chat.status === 'running' && chat.isProcessing) {
+				if (
+					chat.status === 'running'
+					&& chat.isProcessing
+					&& !this.deps.modelCatalog.supportsForkWhileRunning(agentId)
+				) {
 					this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return { kind: 'handled', outcome: 'rejected' };
 				}
@@ -392,7 +398,7 @@ export class ConversationSlashCommandService {
 		} catch (error) {
 			this.deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
+				forkFailureNotice(error),
 			);
 		}
 	}
@@ -422,7 +428,7 @@ export class ConversationSlashCommandService {
 			this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
 			this.deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
+				forkFailureNotice(error),
 			);
 			return 'rejected';
 		}
@@ -439,6 +445,14 @@ export class ConversationSlashCommandService {
 		this.deps.composerState.images = previousImages;
 		this.deps.composerState.saveDraft(chatId);
 	}
+}
+
+// A fork point the server could not resolve against native history is a recoverable state the
+// user can act on, so it reads as its own notice instead of a generic fork failure.
+function forkFailureNotice(error: unknown): string {
+	return error instanceof ApiError && error.errorCode === 'MESSAGE_NOT_IN_NATIVE_HISTORY'
+		? m.chat_notice_fork_message_not_in_native_history()
+		: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) });
 }
 
 function scheduleInErrorMessage(error: ScheduleInCommandError): string {

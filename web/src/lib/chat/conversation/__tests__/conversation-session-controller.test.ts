@@ -389,6 +389,7 @@ function createDeps(chat = createRunningChat()) {
 				'ultra' as const,
 			]),
 			supportsFork: vi.fn(() => true),
+			supportsForkWhileRunning: vi.fn(() => false),
 		},
 		readReceiptOutbox: {
 			enqueue: vi.fn(),
