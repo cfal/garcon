@@ -54,7 +54,7 @@ const queue = {
   deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
   reserveTranscriptSnapshot: mock((chatId) => ({ chatId, reservationId: 'snapshot-reservation' })),
   releaseTranscriptSnapshot: mock(() => Promise.resolve(undefined)),
-  hasChatExecutionOwner: mock(() => false),
+  ownsExecution: mock(() => false),
 };
 const pathCache = createRoutePathCache();
 const metadata = {

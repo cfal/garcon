@@ -430,7 +430,7 @@ export class SessionCommands {
       );
     }
 
-    if (this.deps.queue.hasChatExecutionOwner(chatId)) {
+    if (this.deps.queue.ownsExecution(chatId)) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
         'Cannot update project path while a turn is being prepared or finalized',

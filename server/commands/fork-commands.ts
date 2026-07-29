@@ -214,7 +214,7 @@ export class ForkCommands {
     }
     // A starting chat has no provider session to copy yet, so any fork would silently drop the
     // turn that is materializing it.
-    if (this.deps.queue.hasChatExecutionOwner(sourceChatId) && !sourceSession.agentSessionId) {
+    if (this.deps.queue.ownsExecution(sourceChatId) && !sourceSession.agentSessionId) {
       throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is materializing', 409, true);
     }
     if (upToSeq !== undefined) {
@@ -226,7 +226,7 @@ export class ForkCommands {
       }
       // The turn's own echo reaches the view before the provider session reports itself running,
       // so execution ownership rather than provider state marks the unresolvable window.
-      if (this.deps.queue.hasChatExecutionOwner(sourceChatId)) {
+      if (this.deps.queue.ownsExecution(sourceChatId)) {
         this.assertSeqIsNativeBacked(sourceChatId, upToSeq);
       }
     }
@@ -268,7 +268,7 @@ export class ForkCommands {
   // refusal, which also covers a running session with no owner; attempt retirement only happens
   // once the session has stopped running, so that combination is unreachable here.
   private forksSourceDuringExecution(context: ForkContext): boolean {
-    return this.deps.queue.hasChatExecutionOwner(context.sourceChatId)
+    return this.deps.queue.ownsExecution(context.sourceChatId)
       && this.deps.agents.supportsForkWhileRunning(context.sourceSession.agentId);
   }
 

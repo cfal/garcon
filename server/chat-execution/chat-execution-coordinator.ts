@@ -527,7 +527,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (this.#shuttingDown) {
       throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
     }
-    if (this.#ownership.hasOwner(chatId) || this.#turnRunner.isChatRunning(chatId)) {
+    if (this.ownsExecution(chatId)) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
     return this.#ownership.reserveTranscriptSnapshot(chatId);
@@ -576,12 +576,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     });
   }
 
-  isChatDraining(chatId: string): boolean {
-    return this.#ownership.isDraining(chatId);
-  }
-
-  isChatExecutionReserved(chatId: string): boolean {
-    return this.#ownership.isReserved(chatId);
+  // Answers whether any execution state may read or mutate this chat's transcript or view: a
+  // provider session is running, a direct or queued turn holds the chat, a fork holds a
+  // transcript snapshot, or a finished turn has not settled yet. Direct-turn and snapshot
+  // admission refuse on exactly this predicate, so callers that bypass an admission ask this
+  // instead of assembling their own union. Use showsAsProcessing for UI turn visibility: it is
+  // narrower on purpose.
+  ownsExecution(chatId: string): boolean {
+    return this.#ownership.hasOwner(chatId) || this.#turnRunner.isChatRunning(chatId);
   }
 
   isChatTurnReserved(chatId: string): boolean {
@@ -594,11 +596,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   isChatStopInFlight(chatId: string): boolean {
     return this.#ownership.stop(chatId) !== undefined;
-  }
-
-  // Includes retained nonblocking attempts across the reservation-to-runtime handoff.
-  hasChatExecutionOwner(chatId: string): boolean {
-    return this.#ownership.hasOwner(chatId);
   }
 
   async triggerDrain(chatId: string): Promise<void> {
@@ -668,7 +665,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (this.#shuttingDown) {
       throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
     }
-    if (this.#ownership.hasOwner(chatId) || this.#turnRunner.isChatRunning(chatId)) {
+    if (this.ownsExecution(chatId)) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
     const reservation = this.#ownership.reserveDirect(chatId, turn);

@@ -279,8 +279,7 @@ export interface ChatExecutionCommands {
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
   releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void>;
   waitForDispatches(): Promise<void>;
-  isChatExecutionReserved(chatId: string): boolean;
-  hasChatExecutionOwner(chatId: string): boolean;
+  ownsExecution(chatId: string): boolean;
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
   clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
   pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
@@ -303,7 +302,7 @@ export interface ChatExecutionLifecycle {
 // Read-only surface consumed by WebSocket and route handlers.
 export interface ChatExecutionQueries {
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
-  isChatDraining(chatId: string): boolean;
+  ownsExecution(chatId: string): boolean;
   isChatTurnReserved(chatId: string): boolean;
   getTurnReservedChatIds(): string[];
   isChatStopInFlight(chatId: string): boolean;

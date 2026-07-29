@@ -298,8 +298,7 @@ function createRouteAgent(sessionOverrides = {}) {
     interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
-    isChatExecutionReserved: mock(() => false),
-    hasChatExecutionOwner: mock(() => false),
+    ownsExecution: mock(() => false),
     reserveTranscriptSnapshot: mock((chatId) => {
       const source = registry.getChat(chatId);
       if (agents.isAgentSessionRunning(source?.agentId, source?.agentSessionId)) {

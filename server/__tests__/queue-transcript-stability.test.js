@@ -4,7 +4,6 @@ import os from 'os';
 import path from 'path';
 import { UserMessage } from '../../common/chat-types.js';
 import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
-import { ChatExecutionActivity } from '../chats/chat-execution-activity.js';
 import { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { ChatRunningError } from '../chats/errors.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
@@ -342,8 +341,9 @@ describe('queue and transcript stability', () => {
       const nativeMessages = [];
       const firstTurnStarted = deferred();
       const releaseFirstTurn = deferred();
-      const activity = new ChatExecutionActivity({ isChatRunning: () => false });
-      const views = new ChatViewStore(activity.isActive);
+      let executionCoordinator = null;
+      const ownsExecution = (id) => executionCoordinator?.ownsExecution(id) ?? false;
+      const views = new ChatViewStore(ownsExecution);
       const loadNativeMessages = mock(async () => [...nativeMessages]);
       const pendingInputs = new PendingUserInputService({
         loadNativeMessages,
@@ -387,11 +387,11 @@ describe('queue and transcript stability', () => {
         () => ({}),
         () => true,
       );
-      activity.attachReservedExecutions(queue);
+      executionCoordinator = queue;
       const reloader = new ChatNativeReloader(
         views,
         { loadNativeMessages },
-        activity.isActive,
+        ownsExecution,
       );
 
       await Promise.all([
@@ -402,7 +402,7 @@ describe('queue and transcript stability', () => {
       const drain = queue.triggerDrain(chatId);
       await firstTurnStarted.promise;
 
-      expect(activity.isActive(chatId)).toBe(true);
+      expect(ownsExecution(chatId)).toBe(true);
       await expect(reloader.reloadFromNative(chatId, 'manual-reload')).rejects.toBeInstanceOf(
         ChatRunningError,
       );
@@ -410,7 +410,7 @@ describe('queue and transcript stability', () => {
       releaseFirstTurn.resolve();
       await drain;
 
-      expect(activity.isActive(chatId)).toBe(false);
+      expect(ownsExecution(chatId)).toBe(false);
       expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([]);
       expect(pendingInputs.listForChat(chatId)).toEqual([]);
       expect(views.readPage(chatId, 20).messages.map((entry) => entry.message.content)).toEqual([

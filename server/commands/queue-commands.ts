@@ -300,8 +300,7 @@ export class QueueCommands {
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
       }
-      const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
-        || this.deps.queue.isChatExecutionReserved(chatId);
+      const busy = this.deps.queue.ownsExecution(chatId);
       const control = await this.deps.queue.readChatExecutionControl(chatId);
       const queueBlocksDirectRun = control.entries.length > 0
         || control.pause !== null;

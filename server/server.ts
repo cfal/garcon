@@ -41,7 +41,6 @@ import {
 } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
-import { ChatExecutionActivity } from './chats/chat-execution-activity.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
@@ -282,8 +281,16 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
-    const chatExecutionActivity = new ChatExecutionActivity(agentRegistry);
-    const chatViews = new ChatViewStore(chatExecutionActivity.isActive);
+    // Bound once the coordinator exists. Until then nothing can own execution beyond a running
+    // provider session, so transcript retention and reload gating consult the same question the
+    // coordinator answers rather than assembling their own union of ownership state.
+    let executionCoordinator: ChatExecutionCoordinator | null = null;
+    const ownsExecution = (chatId: string): boolean => (
+      executionCoordinator === null
+        ? agentRegistry.isChatRunning(chatId)
+        : executionCoordinator.ownsExecution(chatId)
+    );
+    const chatViews = new ChatViewStore(ownsExecution);
     const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
     chatViewPruneTimer.unref();
     // Prepends carried-over segments, interleaved with agent-switch boundary
@@ -311,7 +318,7 @@ export async function startServer(): Promise<void> {
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
       { loadNativeMessages },
-      chatExecutionActivity.isActive,
+      ownsExecution,
     );
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
@@ -372,7 +379,7 @@ export async function startServer(): Promise<void> {
     };
     const chatViewPages = {
       isChatActive(chatId: string) {
-        return chatExecutionActivity.isActive(chatId);
+        return ownsExecution(chatId);
       },
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
         return chatViews.getOrCreatePage(
@@ -420,7 +427,7 @@ export async function startServer(): Promise<void> {
       undefined,
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
-    chatExecutionActivity.attachReservedExecutions(queue);
+    executionCoordinator = queue;
     const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);

@@ -86,8 +86,7 @@ describe('transcript snapshot ownership', () => {
   it('excludes direct execution until the snapshot is released', async () => {
     const snapshot = queue.reserveTranscriptSnapshot('snapshot-chat');
 
-    expect(queue.hasChatExecutionOwner('snapshot-chat')).toBe(true);
-    expect(queue.isChatExecutionReserved('snapshot-chat')).toBe(true);
+    expect(queue.ownsExecution('snapshot-chat')).toBe(true);
     expect(queue.isChatTurnReserved('snapshot-chat')).toBe(false);
     expect(() => queue.reserveDirectTurn('snapshot-chat')).toThrow('already owns execution');
 
@@ -95,7 +94,7 @@ describe('transcript snapshot ownership', () => {
     const direct = queue.reserveDirectTurn('snapshot-chat');
     expect(queue.isChatTurnReserved('snapshot-chat')).toBe(true);
     await queue.releaseDirectTurn(direct);
-    expect(queue.hasChatExecutionOwner('snapshot-chat')).toBe(false);
+    expect(queue.ownsExecution('snapshot-chat')).toBe(false);
   });
 
   it('defers a requested queue drain and resumes it after release', async () => {
@@ -792,7 +791,7 @@ describe('orchestration', () => {
       finishTurn.resolve();
 
       await expect(turn).resolves.toBeUndefined();
-      expect(deletingQueue.isChatExecutionReserved('deleted')).toBe(false);
+      expect(deletingQueue.ownsExecution('deleted')).toBe(false);
     });
 
     it('reserves execution until a direct turn hands off to queued work', async () => {
@@ -811,7 +810,7 @@ describe('orchestration', () => {
       const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-direct' });
       const directTurn = orchQueue.runReservedTurn(reservation, 'direct', { turnId: 'turn-direct' });
       await directStarted.promise;
-      expect(orchQueue.isChatExecutionReserved('c1')).toBe(true);
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
 
       await orchQueue.createChatQueueEntry('c1', 'queued');
       await orchQueue.triggerDrain('c1');
@@ -826,7 +825,7 @@ describe('orchestration', () => {
         'settled:turn-direct',
         'run:queued',
       ]);
-      expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
+      expect(orchQueue.ownsExecution('c1')).toBe(false);
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
@@ -878,16 +877,20 @@ describe('orchestration', () => {
       running = true;
       await orchQueue.completeDirectTurn(reservation);
 
-      expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
       expect(orchQueue.isChatTurnReserved('c1')).toBe(false);
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
       expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(/owns execution/);
       expect(settled).toEqual([]);
 
+      // The settling attempt alone owns execution once the provider session stops, so a
+      // transcript snapshot is still refused until the terminal event retires it.
       running = false;
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
+      expect(() => orchQueue.reserveTranscriptSnapshot('c1')).toThrow(/owns execution/);
+
       orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-start' });
 
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+      expect(orchQueue.ownsExecution('c1')).toBe(false);
       expect(settled).toEqual([{
         clientRequestId: 'req-start',
         turnId: 'turn-start',
@@ -981,7 +984,7 @@ describe('orchestration', () => {
         clientRequestId: 'request-predecessor',
         turnId: 'turn-predecessor',
       });
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
       expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
 
       running = false;
@@ -1200,10 +1203,10 @@ describe('orchestration', () => {
       const drain = orchQueue.triggerDrain('c1');
       await registrationStarted;
 
-      expect(orchQueue.isChatDraining('c1')).toBe(true);
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
       releaseRegistration();
       await drain;
-      expect(orchQueue.isChatDraining('c1')).toBe(false);
+      expect(orchQueue.ownsExecution('c1')).toBe(false);
     });
 
     it('propagates agent errors to caller', async () => {
@@ -1452,7 +1455,7 @@ describe('orchestration', () => {
         'later queued input',
         expect.any(Object),
       );
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+      expect(orchQueue.ownsExecution('c1')).toBe(false);
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
@@ -1489,12 +1492,12 @@ describe('orchestration', () => {
 
       running = false;
       orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
       orchQueue.onAgentTurnTerminal('c1', {
         clientRequestId: 'request-a',
         turnId: 'turn-a',
       });
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+      expect(orchQueue.ownsExecution('c1')).toBe(false);
     });
 
     it('does not overwrite a replacement attempt captured before active delivery', async () => {
@@ -1530,9 +1533,9 @@ describe('orchestration', () => {
 
       running = false;
       orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
       await orchQueue.releaseDirectTurn(replacement);
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+      expect(orchQueue.ownsExecution('c1')).toBe(false);
     });
 
     it('rejects restored-session delivery when a new attempt appears before its boundary', async () => {
@@ -1561,9 +1564,9 @@ describe('orchestration', () => {
 
       running = false;
       orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
+      expect(orchQueue.ownsExecution('c1')).toBe(true);
       await orchQueue.releaseDirectTurn(replacement);
-      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
+      expect(orchQueue.ownsExecution('c1')).toBe(false);
     });
 
     it('marks a registered input failed when durable admission fails before live delivery', async () => {
