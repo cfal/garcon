@@ -198,9 +198,19 @@ export class ExecutionOwnership {
     this.#gc(reservation.chatId);
   }
 
+  // Refuses every owner kind, including a direct reservation and a turn still settling. The
+  // coordinator already screens callers on the wider `hasOwner || isChatRunning`, so these
+  // throws are unreachable through it; they keep the invariant local to the class instead of
+  // resting on callers, and they are the only guard against re-reserving the same kind, which
+  // would strand the settling attempt this overwrites.
   reserveDirect(chatId: string, turn: TurnIdentity): DirectTurnReservation {
     const state = this.#state(chatId);
-    if (state.draining || state.transcriptSnapshotReservationId !== null) {
+    if (
+      state.draining
+      || state.transcriptSnapshotReservationId !== null
+      || state.directReservationId !== null
+      || state.attempt !== null
+    ) {
       throw new Error('Cannot reserve a direct turn while another operation owns execution');
     }
     const admissionController = new AbortController();

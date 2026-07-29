@@ -9,9 +9,14 @@ import { join } from 'node:path';
 const MAX_LINES = 1000;
 // Includes queue staging, ordering, boundary parsing, transcript snapshots,
 // title-icon source injection, staged active-turn settlement ownership,
-// idempotent Stop outcomes with terminal-race and abortability settlement, and
-// fork admission for running sources and event-stream fork points.
-const EXECUTION_FOOTPRINT_BUDGET = 7282;
+// idempotent Stop outcomes with terminal-race and abortability settlement,
+// fork admission for running sources and event-stream fork points, and
+// direct-turn exclusivity enforced by the ownership record itself.
+// This is the ceiling for the execution-ownership unification: later steps in
+// that work offset each other rather than raising it, because the concepts it
+// removes live outside the measured directories and would otherwise let the
+// footprint grow while the subsystem is supposedly getting simpler.
+const EXECUTION_FOOTPRINT_BUDGET = 7292;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
