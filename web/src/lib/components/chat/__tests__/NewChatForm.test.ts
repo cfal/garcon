@@ -364,6 +364,125 @@ describe('NewChatForm', () => {
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 	});
 
+	it('hides direct agents and direct recents when direct chats are disabled', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'chat-model',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+					{
+						agentId: 'claude',
+						model: 'opus',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		render(NewChatFormTestHost);
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+
+		expect(
+			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
+		).toBeNull();
+		expect(
+			document.querySelector('[data-slot="model-selector-agent-group"][data-group="agents"]'),
+		).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Chat Completions' })).toBeNull();
+		expect(screen.queryByText('Direct (Chat Completions) · Chat Model')).toBeNull();
+	});
+
+	it('shows grouped direct agents when direct chats are enabled', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'chat-model',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		render(NewChatFormTestHost, { allowDirectChats: true });
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const trigger = screen.getByRole('button', {
+			name: /Direct \(Chat Completions\).*Chat Model/,
+		});
+		await fireEvent.click(trigger);
+
+		const groupHeaders = Array.from(
+			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
+		);
+		expect(groupHeaders.map((header) => header.textContent?.trim())).toEqual(['Direct', 'Agents']);
+		expect(screen.getByRole('button', { name: 'Chat Completions' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Responses' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Anthropic' })).toBeTruthy();
+	});
+
+	it('reconciles an open direct selection when direct chats are disabled', async () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'chat-model',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+					{
+						agentId: 'claude',
+						model: 'opus',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		const view = render(NewChatFormTestHost, { allowDirectChats: true });
+		await waitFor(() => {
+			expect(
+				screen.getByRole('button', {
+					name: /Direct \(Chat Completions\).*Chat Model/,
+				}),
+			).toBeTruthy();
+		});
+
+		await view.rerender({ allowDirectChats: false });
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: /Claude .* Opus/ })).toBeTruthy();
+		});
+		expect(
+			screen.queryByRole('button', {
+				name: /Direct \(Chat Completions\).*Chat Model/,
+			}),
+		).toBeNull();
+	});
+
 	it('opens the model selector at the selected model when only one recent target exists', async () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
 

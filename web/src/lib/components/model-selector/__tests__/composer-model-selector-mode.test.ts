@@ -46,6 +46,22 @@ describe('composerModelSelectorMode', () => {
 		});
 	});
 
+	it('uses the eligible agent count instead of the full catalog count', () => {
+		const catalog = makeCatalog({
+			agents: ['claude', 'direct-openai-compatible'],
+			models: {
+				claude: [{ value: 'opus', label: 'Opus' }],
+				'direct-openai-compatible': [{ value: 'gpt-5.5', label: 'GPT-5.5' }],
+			},
+		});
+
+		expect(composerModelSelectorMode(catalog, 'claude', ['claude'])).toEqual({
+			agent: 'fixed',
+			source: 'hidden',
+			surface: 'composer',
+		});
+	});
+
 	it('offers source selection for a single agent that has multiple sources', () => {
 		const catalog = makeCatalog({
 			agents: ['claude'],

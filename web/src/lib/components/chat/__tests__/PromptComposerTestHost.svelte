@@ -26,6 +26,12 @@
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
+	import {
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+	} from '$shared/agents';
 
 	interface Props {
 		selectedChatId?: string;
@@ -38,6 +44,7 @@
 		focusRequestToken?: number;
 		selectableAgents?: SessionAgentId[];
 		recentAgentSettings?: RecentAgentSetting[];
+		allowDirectChats?: boolean;
 		reduceMotion?: boolean;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
@@ -58,6 +65,7 @@
 		focusRequestToken = 0,
 		selectableAgents = ['claude'],
 		recentAgentSettings = [],
+		allowDirectChats = false,
 		reduceMotion = false,
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
@@ -77,6 +85,15 @@
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
 		amp: [{ value: 'amp-smart', label: 'Amp Smart', supportsImages: true }],
+		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: [
+			{ value: 'chat-model', label: 'Chat Model', supportsImages: true },
+		],
+		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: [
+			{ value: 'responses-model', label: 'Responses Model', supportsImages: true },
+		],
+		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: [
+			{ value: 'anthropic-model', label: 'Anthropic Model', supportsImages: true },
+		],
 	};
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -118,7 +135,7 @@
 	});
 
 	function labelForAgent(agentId: string): string {
-		return agentLabels[agentId] ?? agentId;
+		return agentLabelFor(agentId, agentLabels[agentId] ?? agentId);
 	}
 
 	function modelOptionsFor(agentId: string): ModelOption[] {
@@ -185,6 +202,9 @@
 		},
 		get showQuickCommitTray() {
 			return true;
+		},
+		get allowDirectChats() {
+			return allowDirectChats;
 		},
 	} as never);
 	setChatSessions({

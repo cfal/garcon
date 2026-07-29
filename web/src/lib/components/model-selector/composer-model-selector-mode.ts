@@ -10,13 +10,13 @@ import type { ModelSelectorMode } from './model-selector-types';
 export function composerModelSelectorMode(
 	modelCatalog: ModelCatalogStore,
 	agentId: SessionAgentId,
+	selectableAgentIds: readonly SessionAgentId[] = modelCatalog.getSelectableAgents(),
 ): ModelSelectorMode {
-	const canSelectAgent = modelCatalog.getSelectableAgents().length > 1;
+	const canSelectAgent = selectableAgentIds.length > 1;
 	// Different agents can expose different sources, so keep source selection
 	// available whenever the agent can change. Otherwise only offer it when the
 	// current agent genuinely has more than one source to choose between.
-	const canSelectSource =
-		canSelectAgent || buildModelSources(modelCatalog, agentId).length > 1;
+	const canSelectSource = canSelectAgent || buildModelSources(modelCatalog, agentId).length > 1;
 	return {
 		agent: canSelectAgent ? 'select' : 'fixed',
 		source: canSelectSource ? 'select' : 'hidden',

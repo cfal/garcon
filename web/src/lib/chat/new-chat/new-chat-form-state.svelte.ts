@@ -39,6 +39,12 @@ import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 
+export interface NewChatFormStateOptions {
+	modelCatalog: ModelCatalogStore;
+	remoteSettings: RemoteSettingsStore;
+	get selectableAgentIds(): readonly SessionAgentId[];
+}
+
 export class NewChatFormState {
 	// Agent and model
 	agentId = $state<SessionAgentId>(DEFAULT_AGENT_ID);
@@ -93,15 +99,25 @@ export class NewChatFormState {
 	readonly #images = new ImageAttachmentState();
 
 	// Injected dependencies
-	readonly #modelCatalog: ModelCatalogStore;
-	readonly #remoteSettings: RemoteSettingsStore;
+	readonly #options: NewChatFormStateOptions;
 
-	constructor(modelCatalog: ModelCatalogStore, remoteSettings: RemoteSettingsStore) {
-		this.#modelCatalog = modelCatalog;
-		this.#remoteSettings = remoteSettings;
+	constructor(options: NewChatFormStateOptions) {
+		this.#options = options;
 	}
 
 	// Derived accessors
+
+	get #modelCatalog(): ModelCatalogStore {
+		return this.#options.modelCatalog;
+	}
+
+	get #remoteSettings(): RemoteSettingsStore {
+		return this.#options.remoteSettings;
+	}
+
+	get #selectableAgentIds(): readonly SessionAgentId[] {
+		return this.#options.selectableAgentIds;
+	}
 
 	get trimmedPath(): string {
 		return this.projectPath.trim();
@@ -122,6 +138,7 @@ export class NewChatFormState {
 	get canSubmit(): boolean {
 		return (
 			this.settingsLoaded &&
+			this.#selectableAgentIds.includes(this.agentId) &&
 			canSubmitNewChat(
 				this.trimmedPath,
 				this.validationStatus,
@@ -156,6 +173,7 @@ export class NewChatFormState {
 	// Agent selection
 
 	selectAgent(next: SessionAgentId): void {
+		if (!this.#selectableAgentIds.includes(next)) return;
 		this.#awaitingCatalogStartupSelection = false;
 		const changed = this.agentId !== next;
 		this.agentId = next;
@@ -200,7 +218,7 @@ export class NewChatFormState {
 			next[agentId] = cloneAgentSettings(settings);
 			this.#configuredAgentSettings.add(agentId);
 		}
-		for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+		for (const agentId of this.#selectableAgentIds) {
 			next[agentId] = normalizeAgentSettings(
 				agentId,
 				next[agentId],
@@ -233,13 +251,34 @@ export class NewChatFormState {
 	}
 
 	validateAllModelsAgainstLive(): void {
-		for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+		for (const agentId of this.#selectableAgentIds) {
 			this.validateModelAgainstLive(agentId);
 		}
 	}
 
-	#resolveStartupAgent(agentId: string): SessionAgentId {
-		const agents = this.#modelCatalog.getSelectableAgents();
+	reconcileAgentSelection(
+		selectableAgentIds: readonly SessionAgentId[] = this.#selectableAgentIds,
+	): void {
+		if (selectableAgentIds.includes(this.agentId)) return;
+
+		const recent = this.#firstSelectableRecent(this.#startupRecents, selectableAgentIds);
+		const nextAgentId = recent
+			? (recent.agentId as SessionAgentId)
+			: this.#resolveStartupAgent(DEFAULT_AGENT_ID, selectableAgentIds);
+		if (!selectableAgentIds.includes(nextAgentId)) return;
+
+		this.selectAgent(nextAgentId);
+		if (recent) {
+			this.applyResolvedModel(nextAgentId, recent.model, recent.modelEndpointId);
+		} else {
+			this.applyResolvedModel(nextAgentId, this.#modelCatalog.getDefaultModel(nextAgentId));
+		}
+	}
+
+	#resolveStartupAgent(
+		agentId: string,
+		agents: readonly SessionAgentId[] = this.#selectableAgentIds,
+	): SessionAgentId {
 		if (agents.includes(agentId as SessionAgentId)) return agentId as SessionAgentId;
 		if (agents.includes(DEFAULT_AGENT_ID)) return DEFAULT_AGENT_ID;
 		return agents[0] ?? DEFAULT_AGENT_ID;
@@ -488,6 +527,10 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_defaults_loading();
 			return null;
 		}
+		if (!this.#selectableAgentIds.includes(this.agentId)) {
+			this.error = m.chat_new_chat_errors_agent_unavailable();
+			return null;
+		}
 		if (!this.trimmedPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
 			return null;
@@ -545,14 +588,14 @@ export class NewChatFormState {
 
 	/** Loads server settings without blocking the form on live model discovery. */
 	async loadSettingsAndModels(): Promise<void> {
-		this.#awaitingCatalogStartupSelection = this.#modelCatalog.getSelectableAgents().length === 0;
+		this.#awaitingCatalogStartupSelection = this.#selectableAgentIds.length === 0;
 		try {
 			const settingsData = await this.#remoteSettings.ensureLoaded();
 			this.#applySettings(settingsData);
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings', err);
-			for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+			for (const agentId of this.#selectableAgentIds) {
 				this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
 			}
 			if (!this.projectPath) {
@@ -612,14 +655,17 @@ export class NewChatFormState {
 		}
 
 		this.agentId = this.#resolveStartupAgent(DEFAULT_AGENT_ID);
-		for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+		for (const agentId of this.#selectableAgentIds) {
 			this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
 		}
 		this.#applyExecutionDefaultsForAgent(this.agentId);
 	}
 
-	#firstSelectableRecent(recents: RecentAgentSetting[]): RecentAgentSetting | null {
-		const selectable = new Set(this.#modelCatalog.getSelectableAgents());
+	#firstSelectableRecent(
+		recents: RecentAgentSetting[],
+		selectableAgentIds: readonly SessionAgentId[] = this.#selectableAgentIds,
+	): RecentAgentSetting | null {
+		const selectable = new Set(selectableAgentIds);
 		for (const recent of recents) {
 			const agentId = recent.agentId as SessionAgentId;
 			if (!selectable.has(agentId)) continue;
@@ -679,7 +725,7 @@ export class NewChatFormState {
 			next[agentId] = cloneAgentSettings(settings);
 			this.#configuredAgentSettings.add(agentId);
 		}
-		for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+		for (const agentId of this.#selectableAgentIds) {
 			const agentDefaults = defaults.byAgent[agentId];
 			const configured =
 				agentDefaults?.agentSettingsById?.[agentId] ?? defaults.global.agentSettingsById[agentId];
@@ -708,7 +754,7 @@ export class NewChatFormState {
 
 	#reconcileAgentSettingsWithCatalog(): void {
 		const next = { ...this.agentSettingsById };
-		for (const agentId of this.#modelCatalog.getSelectableAgents()) {
+		for (const agentId of this.#selectableAgentIds) {
 			if (this.#configuredAgentSettings.has(agentId)) continue;
 			next[agentId] = normalizeAgentSettings(
 				agentId,

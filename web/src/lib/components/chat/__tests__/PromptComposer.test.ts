@@ -466,6 +466,118 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
 	});
 
+	it('hides direct agents and direct recents in a non-direct chat when disabled', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedAgentId: 'claude',
+			selectedStatus: 'running',
+			selectableAgents: [
+				'direct-openai-compatible',
+				'direct-openai-responses-compatible',
+				'direct-anthropic-compatible',
+				'claude',
+				'codex',
+			],
+			recentAgentSettings: [
+				{
+					agentId: 'direct-openai-compatible',
+					model: 'chat-model',
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				},
+				{
+					agentId: 'codex',
+					model: 'gpt-5',
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				},
+			],
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+
+		expect(
+			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
+		).toBeNull();
+		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
+		expect(screen.queryByText('Direct (Chat Completions) · Chat Model')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
+	});
+
+	it('shows direct agents in a non-direct chat when enabled', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedAgentId: 'claude',
+			selectedStatus: 'running',
+			allowDirectChats: true,
+			selectableAgents: [
+				'direct-openai-compatible',
+				'direct-openai-responses-compatible',
+				'direct-anthropic-compatible',
+				'claude',
+				'codex',
+			],
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+
+		const groupHeaders = Array.from(
+			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
+		);
+		expect(groupHeaders.map((header) => header.textContent?.trim())).toEqual(['Direct', 'Agents']);
+	});
+
+	it('keeps existing direct chats unfiltered and follows optimistic ownership changes', async () => {
+		const selectableAgents = [
+			'direct-openai-compatible',
+			'direct-openai-responses-compatible',
+			'direct-anthropic-compatible',
+			'claude',
+			'codex',
+		] as const;
+		const view = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-direct',
+			selectedAgentId: 'direct-openai-responses-compatible',
+			selectedStatus: 'running',
+			selectableAgents: [...selectableAgents],
+		});
+
+		await fireEvent.click(
+			await screen.findByRole('button', {
+				name: /Direct \(Responses\).*Responses Model/,
+			}),
+		);
+		expect(
+			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
+		).toBeTruthy();
+
+		await view.rerender({
+			selectedChatId: 'chat-direct',
+			selectedAgentId: 'claude',
+			selectedStatus: 'running',
+			selectableAgents: [...selectableAgents],
+		});
+		await waitFor(() => {
+			expect(
+				document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
+			).toBeNull();
+		});
+
+		await view.rerender({
+			selectedChatId: 'chat-direct',
+			selectedAgentId: 'direct-openai-responses-compatible',
+			selectedStatus: 'running',
+			selectableAgents: [...selectableAgents],
+		});
+		await waitFor(() => {
+			expect(
+				document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
+			).toBeTruthy();
+		});
+	});
+
 	it('hides /fork using the selected chat agent capability', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',

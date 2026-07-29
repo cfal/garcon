@@ -44,7 +44,13 @@ export class ScheduledPromptFormState {
 		remoteSettings: RemoteSettingsStore,
 		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'>,
 	) {
-		this.startup = new NewChatFormState(modelCatalog, remoteSettings);
+		this.startup = new NewChatFormState({
+			modelCatalog,
+			remoteSettings,
+			get selectableAgentIds() {
+				return modelCatalog.getSelectableAgents();
+			},
+		});
 	}
 
 	get canSave(): boolean {

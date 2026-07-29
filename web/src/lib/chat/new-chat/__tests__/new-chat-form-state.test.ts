@@ -4,6 +4,7 @@ import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import type { SessionAgentId } from '$lib/types/app';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/files', () => ({
@@ -241,6 +242,7 @@ const mockModelCatalog = {
 describe('NewChatFormState', () => {
 	let formState: NewChatFormState;
 	let mockRemoteSettings: ReturnType<typeof makeMockRemoteSettings>;
+	let selectableAgentIds: SessionAgentId[];
 
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -252,8 +254,20 @@ describe('NewChatFormState', () => {
 			'direct-anthropic-compatible',
 			'direct-openai-compatible',
 		]);
+		selectableAgentIds = [
+			'claude',
+			'codex',
+			'direct-anthropic-compatible',
+			'direct-openai-compatible',
+		];
 		mockRemoteSettings = makeMockRemoteSettings();
-		formState = new NewChatFormState(mockModelCatalog as any, mockRemoteSettings as any);
+		formState = new NewChatFormState({
+			modelCatalog: mockModelCatalog as any,
+			remoteSettings: mockRemoteSettings as any,
+			get selectableAgentIds() {
+				return selectableAgentIds;
+			},
+		});
 	});
 
 	it('normalizes thinking when the next integration does not support the selected mode', () => {
@@ -414,6 +428,70 @@ describe('NewChatFormState', () => {
 		expect(formState.modelValue).toBe('zai_openai:glm-5.1');
 	});
 
+	it('skips a direct startup recent when direct chats are unavailable', async () => {
+		selectableAgentIds = ['claude', 'codex'];
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+	});
+
+	it('applies eligible startup recents after background catalog discovery', async () => {
+		const refresh = deferred<void>();
+		selectableAgentIds = [];
+		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'chat-model',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		selectableAgentIds = ['claude', 'codex'];
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+	});
+
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
@@ -438,6 +516,7 @@ describe('NewChatFormState', () => {
 
 	it('falls back when Direct Anthropic has no endpoint models', async () => {
 		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
+		selectableAgentIds = ['claude', 'codex'];
 		mockRemoteSettings.ensureLoaded.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
@@ -457,6 +536,45 @@ describe('NewChatFormState', () => {
 
 		expect(formState.agentId).toBe('claude');
 		expect(formState.modelValue).toBe('opus');
+	});
+
+	it('ignores selection of an unavailable agent', () => {
+		selectableAgentIds = ['claude', 'codex'];
+
+		formState.selectAgent('direct-openai-compatible');
+
+		expect(formState.agentId).toBe('claude');
+	});
+
+	it('reconciles a direct selection to the first available recent', async () => {
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+		await formState.loadSettingsAndModels();
+		expect(formState.agentId).toBe('direct-openai-compatible');
+
+		selectableAgentIds = ['claude', 'codex'];
+		formState.reconcileAgentSelection();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
 	});
 
 	it('falls back when startup defaults reference a non-agent API provider id', async () => {
@@ -579,6 +697,20 @@ describe('NewChatFormState', () => {
 
 		formState.validationStatus = 'invalid';
 		expect(formState.canSubmit).toBe(false);
+	});
+
+	it('rejects an agent that becomes unavailable before submission', () => {
+		formState.selectAgent('direct-openai-compatible');
+		formState.settingsLoaded = true;
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		selectableAgentIds = ['claude', 'codex'];
+
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+		expect(formState.error).toBe('The selected agent is not available for new chats.');
 	});
 
 	it('rejects submission while startup defaults are still loading', () => {

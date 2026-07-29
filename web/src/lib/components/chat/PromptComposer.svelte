@@ -74,6 +74,7 @@
 	import type { Snippet, SnippetExpansionContext } from '$shared/snippets';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
+	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 
 	interface Props {
 		onsubmit: () => void;
@@ -622,9 +623,17 @@
 	const isActiveModelSelection = $derived(
 		Boolean(sessions.selectedChat) && sessions.selectedChat?.status !== 'draft',
 	);
+	const modelSelectorAgentIds = $derived.by(() => {
+		const allAgentIds = modelCatalog.getSelectableAgents();
+		const selectedAgentId = sessions.selectedChat?.agentId;
+		if (localSettings.allowDirectChats || (selectedAgentId && isDirectAgentId(selectedAgentId))) {
+			return allAgentIds;
+		}
+		return nonDirectAgentIds(allAgentIds);
+	});
 	const modelSelectorMode: ModelSelectorMode = $derived(
 		isActiveModelSelection
-			? composerModelSelectorMode(modelCatalog, agentState.agentId)
+			? composerModelSelectorMode(modelCatalog, agentState.agentId, modelSelectorAgentIds)
 			: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 	);
 	const modelSelectorValue = $derived({
@@ -873,6 +882,7 @@
 						onChange={(next) => onModelChange?.(next)}
 						recents={recentSelectorOptions}
 						{preferRecentsOnOpen}
+						selectableAgentIds={modelSelectorAgentIds}
 						align="end"
 						side="top"
 					/>

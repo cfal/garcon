@@ -17,14 +17,28 @@
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
+	import {
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+	} from '$shared/agents';
 
-	let { onStartChat = () => {} }: { onStartChat?: (config: NewChatConfig) => void } = $props();
+	interface Props {
+		allowDirectChats?: boolean;
+		onStartChat?: (config: NewChatConfig) => void;
+	}
+
+	let { allowDirectChats = false, onStartChat = () => {} }: Props = $props();
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
 
 	setLocalSettings({
 		sendByShiftEnter: false,
 		showQuickCommitTray: true,
+		get allowDirectChats() {
+			return allowDirectChats;
+		},
 	} as never);
 
 	setRemoteSettings(createRemoteSettingsStore());
@@ -46,6 +60,26 @@
 	setAppShell(appShell);
 	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
 	setTransientLayers(transientLayers);
+
+	const selectableAgentIds = [
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		'claude',
+		'codex',
+	];
+
+	function modelForAgent(agentId: string): { value: string; label: string } {
+		if (agentId === 'claude') return { value: 'opus', label: 'Opus' };
+		if (agentId === 'codex') return { value: 'gpt-5.4', label: 'GPT-5.4' };
+		if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
+			return { value: 'chat-model', label: 'Chat Model' };
+		}
+		if (agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID) {
+			return { value: 'responses-model', label: 'Responses Model' };
+		}
+		return { value: 'anthropic-model', label: 'Anthropic Model' };
+	}
 
 	setSnippets(
 		createSnippetsStore({
@@ -74,31 +108,29 @@
 			codex: { label: 'Codex' },
 		},
 		getAgents() {
-			return ['claude', 'codex'];
+			return selectableAgentIds;
 		},
 		getSelectableAgents() {
-			return ['claude', 'codex'];
+			return selectableAgentIds;
 		},
 		getAgent(agentId: string) {
 			return {
 				id: agentId,
-				label: agentId === 'codex' ? 'Codex' : 'Claude',
+				label: agentLabelFor(agentId),
 				description: '',
 				supportsFork: true,
 				supportsUpdateProjectPath: true,
 				supportsImages: true,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
-				defaultModel: agentId === 'codex' ? 'gpt-5.4' : 'opus',
+				defaultModel: modelForAgent(agentId).value,
 			};
 		},
 		getAgentLabel(agentId: string) {
-			return agentId === 'codex' ? 'Codex' : 'Claude';
+			return agentLabelFor(agentId);
 		},
 		getDefaultModel(agentId: string) {
-			if (agentId === 'claude') return 'opus';
-			if (agentId === 'codex') return 'gpt-5.4';
-			return '';
+			return modelForAgent(agentId).value;
 		},
 		getPermissionModes(agentId: string) {
 			return agentId === 'claude'
@@ -145,18 +177,13 @@
 			return { ownerId: agentId, schemaVersion: 1, values: { thinking: 'auto' } };
 		},
 		getModels(agentId: string) {
-			if (agentId === 'claude') return [{ value: 'opus', label: 'Opus' }];
-			if (agentId === 'codex') return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
-			return [];
+			return [modelForAgent(agentId)];
 		},
 		supportsImages() {
 			return true;
 		},
 		getModelForSelection(agentId: string, model: string) {
-			const models =
-				agentId === 'codex'
-					? [{ value: 'gpt-5.4', label: 'GPT-5.4' }]
-					: [{ value: 'opus', label: 'Opus' }];
+			const models = [modelForAgent(agentId)];
 			return models.find((entry) => entry.value === model) ?? null;
 		},
 		selectionFor(_provider: string, model: string) {

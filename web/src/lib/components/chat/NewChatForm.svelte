@@ -2,7 +2,7 @@
 	// New-chat form used inside the NewChatDialog. Delegates state management
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
@@ -53,6 +53,7 @@
 	import type { Snippet } from '$shared/snippets';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
+	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 
 	interface Props {
 		prefill?: string;
@@ -70,7 +71,17 @@
 	const notifications = getNotifications();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
-	const form = new NewChatFormState(modelCatalog, remoteSettings);
+	const newChatAgentIds = $derived.by(() => {
+		const allAgentIds = modelCatalog.getSelectableAgents();
+		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
+	});
+	const form = new NewChatFormState({
+		modelCatalog,
+		remoteSettings,
+		get selectableAgentIds() {
+			return newChatAgentIds;
+		},
+	});
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -142,6 +153,11 @@
 	$effect(() => {
 		void modelCatalog.version;
 		form.validateAllModelsAgainstLive();
+	});
+
+	$effect(() => {
+		const selectableAgentIds = newChatAgentIds;
+		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
 	// Focus textarea when path validates successfully, but not while browsing.
@@ -392,6 +408,7 @@
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
+		if (!newChatAgentIds.includes(next.agentId)) return;
 		form.selectAgent(next.agentId);
 		form.handleModelChange(next.modelValue);
 	}
@@ -603,6 +620,7 @@
 							onChange={handleModelSelectorChange}
 							recents={recentSelectorOptions}
 							{preferRecentsOnOpen}
+							selectableAgentIds={newChatAgentIds}
 							align="end"
 							side="bottom"
 						/>
