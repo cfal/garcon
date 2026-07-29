@@ -86,6 +86,9 @@ export interface LiveCodexTestEnvironment {
 
 interface LiveCodexTestEnvironmentOptions {
   upstreamUrl?: string;
+  // Scripted-model environments proxy to a local fake, so any placeholder key works and no
+  // credential needs to exist in the environment.
+  testingKey?: string;
 }
 
 type CodexProxyProcess = Bun.Subprocess<'pipe', 'ignore', 'ignore'>;
@@ -164,7 +167,7 @@ async function removeProxyRoot(root: string, testingKey: string): Promise<void> 
 export async function startLiveCodexTestEnvironment(
   options: LiveCodexTestEnvironmentOptions = {},
 ): Promise<LiveCodexTestEnvironment> {
-  const testingKey = process.env.OPENAI_TESTING_KEY?.trim();
+  const testingKey = options.testingKey ?? process.env.OPENAI_TESTING_KEY?.trim();
   if (!testingKey) {
     throw new Error('OPENAI_TESTING_KEY is required for live Codex integration tests.');
   }

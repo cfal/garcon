@@ -11,7 +11,7 @@ import type {
 export const LIVE_CLAUDE_MODEL = 'haiku';
 export const LIVE_CLAUDE_THINKING_MODE = 'low';
 
-const CLAUDE_BINARY = fileURLToPath(
+export const CLAUDE_BINARY = fileURLToPath(
   new URL('../node_modules/.bin/claude', import.meta.url),
 );
 const CLAUDE_AGENT_SETTINGS: AgentSettingsEnvelope = {
