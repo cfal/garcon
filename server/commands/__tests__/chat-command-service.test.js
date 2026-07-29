@@ -539,10 +539,14 @@ function makeService(overrides = {}) {
   const chatViews = overrides.chatViews ?? {
     getNativeHistoryLastSeq: mock(() => null),
   };
+  const idleReconciler = overrides.idleReconciler ?? {
+    ensureReconciled: mock(async () => undefined),
+  };
   const service = new ChatCommandService({
     chats,
     queue,
     chatViews,
+    idleReconciler,
     ledger,
     settings,
     recentTitleIcons: {
@@ -565,6 +569,7 @@ function makeService(overrides = {}) {
     chats,
     queue,
     chatViews,
+    idleReconciler,
     settings,
     agents,
     pendingInputs,
@@ -1870,9 +1875,14 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
-  it('allows an idle fork point that the view has not reconciled with native history', async () => {
-    const { service, chatViews, forkChatFileCopy } = makeService();
+  it('reconciles an idle source before resolving its fork point', async () => {
+    const { service, chatViews, idleReconciler, forkChatFileCopy } = makeService();
     chatViews.getNativeHistoryLastSeq.mockReturnValue(0);
+    // Reconciling is what makes an idle view address native positions, so the guard runs against
+    // the rebuilt boundary rather than the stale one.
+    idleReconciler.ensureReconciled.mockImplementation(async () => {
+      chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
+    });
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -1880,9 +1890,27 @@ describe('ChatCommandService', () => {
       upToSeq: 2,
     });
 
+    expect(idleReconciler.ensureReconciled).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(
       expect.objectContaining({ upToSequence: 2 }),
     );
+  });
+
+  it('refuses an idle fork point that native history still does not cover', async () => {
+    const { service, chatViews, forkChatFileCopy } = makeService();
+    chatViews.getNativeHistoryLastSeq.mockReturnValue(1);
+
+    await expect(service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 2,
+    })).rejects.toMatchObject({
+      code: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
+      status: 409,
+      retryable: true,
+    });
+
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
   it('allows a fork point that native history already covers', async () => {

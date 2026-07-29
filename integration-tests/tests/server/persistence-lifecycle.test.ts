@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { ChatViewMessage } from '../../../common/chat-view.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -231,7 +232,18 @@ describe('persistence lifecycle', () => {
         'echo:fork-a',
         'bounded-fork-turn',
       ]);
-      expect((await fixture.client.getMessages(sourceChatId)).messages).toEqual(sourceBefore.messages);
+      // Forking leaves the source conversation alone. It does rebuild the source view from that
+      // chat's own transcript, so persisted timestamps replace the ones assigned while streaming.
+      const sourceAfter = await fixture.client.getMessages(sourceChatId);
+      expect(conversationOf(sourceAfter.messages)).toEqual(conversationOf(sourceBefore.messages));
     });
   });
 });
+
+function conversationOf(messages: readonly ChatViewMessage[]) {
+  return messages.map((entry) => ({
+    seq: entry.seq,
+    type: entry.message.type,
+    content: 'content' in entry.message ? entry.message.content : null,
+  }));
+}

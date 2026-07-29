@@ -10,6 +10,7 @@ import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
 import type { ChatViewStore } from './chats/chat-view-store.js';
+import type { IdleNativeReconciler } from './chats/idle-native-reconciler.js';
 import type { ChatNativeReloader } from './chats/chat-native-reload.js';
 import type { PendingUserInputService } from './chats/pending-user-input-service.js';
 import type { ShareStore } from './chats/share-store.js';
@@ -71,6 +72,7 @@ export interface ServerEventWiringDeps {
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
   chatViews: ChatViewStore;
+  idleReconciler: IdleNativeReconciler;
   chatNativeReloader: NativeReloaderDep;
   pendingInputs: PendingUserInputService;
   commandLedger: CommandLedger;
@@ -96,6 +98,7 @@ export function wireServerEvents({
   processing,
   metadata,
   chatViews,
+  idleReconciler,
   chatNativeReloader,
   pendingInputs,
   commandLedger,
@@ -383,6 +386,15 @@ export function wireServerEvents({
   }
 
   const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
+
+  // A settled view still numbers its messages from the event stream until it is rebuilt from
+  // native history, so reconcile once the chat stops working. Chats report idle more than once
+  // per settle; the reconciler debounces and re-checks ownership before it acts.
+  queue.onChatIdle((chatId) => {
+    if (!chatExists(chatId)) return;
+    idleReconciler.noteIdle(chatId);
+  });
+
   agentRegistry.onMessages((chatId, messages, turnMetadata) => {
     if (!chatExists(chatId)) return;
     const fence = chatViews.captureFence(chatId);

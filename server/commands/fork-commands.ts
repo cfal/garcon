@@ -43,7 +43,7 @@ export class ForkCommands {
       chatId: this.support.requireChatId(input.chatId),
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
-      const context = this.validateFork(normalized);
+      const context = await this.validateFork(normalized);
       if (context.upToSeq !== undefined || this.forksSourceDuringExecution(context)) {
         await this.forkChatFromContext(context);
         return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
@@ -107,7 +107,7 @@ export class ForkCommands {
     const preparedFork = priorRecord?.forkPreparation;
     const forkAlreadyCreated = preparedFork !== undefined
       && this.deps.chats.getChat(input.chatId) !== null;
-    const forkContext = this.validateFork(input, { allowExistingTarget: forkAlreadyCreated });
+    const forkContext = await this.validateFork(input, { allowExistingTarget: forkAlreadyCreated });
     if (preparedFork?.sourceNextForkOrdinal !== undefined) {
       forkContext.sourceNextForkOrdinal = preparedFork.sourceNextForkOrdinal;
     }
@@ -175,10 +175,10 @@ export class ForkCommands {
       : this.withSettledSourceSnapshot(forkContext, submit);
   }
 
-  private validateFork(
+  private async validateFork(
     input: ForkChatCommandRequest,
     options: { allowExistingTarget?: boolean } = {},
-  ): ForkContext {
+  ): Promise<ForkContext> {
     const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
     const targetChatId = this.support.requireChatId(input.chatId);
     const upToSeq = input.upToSeq;
@@ -227,11 +227,11 @@ export class ForkCommands {
       ) {
         throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
       }
-      // The turn's own echo reaches the view before the provider session reports itself running,
-      // so execution ownership rather than provider state marks the unresolvable window.
-      if (this.deps.queue.ownsExecution(sourceChatId)) {
-        this.assertSeqIsNativeBacked(sourceChatId, upToSeq);
-      }
+      // An idle view can still number its messages from the event stream, so rebuild it from
+      // native history first rather than trusting a stale boundary. Reconciling is a no-op once
+      // the view is native-backed, and it declines while a turn owns the chat.
+      await this.deps.idleReconciler.ensureReconciled(sourceChatId);
+      this.assertSeqIsNativeBacked(sourceChatId, upToSeq);
     }
     if (!options.allowExistingTarget && this.deps.chats.getChat(targetChatId)) {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);

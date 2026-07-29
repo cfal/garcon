@@ -80,6 +80,7 @@ export function createRouteCommandService({
     chats: registry,
     queue,
     chatViews: { getNativeHistoryLastSeq: () => null },
+    idleReconciler: { ensureReconciled: async () => undefined },
     settings,
     recentTitleIcons: {
       getRecentIcons: () => [],

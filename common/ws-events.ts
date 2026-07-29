@@ -428,7 +428,9 @@ function parseChatListInvalidationReason(
 }
 
 function parseResetReason(value: unknown): ChatGenerationResetReason | null {
-  return value === 'manual-reload' || value === 'process-error' ? value : null;
+  return value === 'manual-reload' || value === 'process-error' || value === 'idle-reconcile'
+    ? value
+    : null;
 }
 
 function parsePendingUserInputs(value: unknown): PendingUserInput[] | null {

@@ -41,6 +41,7 @@ import {
 } from './ws/transport.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
+import { IdleNativeReconciler } from './chats/idle-native-reconciler.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
@@ -76,7 +77,7 @@ import {
   waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
-import { WsFaultMessage } from '../common/ws-events.ts';
+import { ChatGenerationResetMessage, WsFaultMessage } from '../common/ws-events.ts';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
@@ -428,6 +429,24 @@ export async function startServer(): Promise<void> {
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
     executionCoordinator = queue;
+    const idleReconciler = new IdleNativeReconciler({
+      views: chatViews,
+      source: { loadNativeMessages },
+      ownsExecution,
+      onGenerationReset: (chatId, generationId, lastSeq) => {
+        if (!webSocketPublisher) return;
+        publishWebSocketPayload(
+          webSocketPublisher,
+          'chat',
+          JSON.stringify(new ChatGenerationResetMessage(
+            chatId,
+            generationId,
+            'idle-reconcile',
+            lastSeq,
+          )),
+        );
+      },
+    });
     const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
@@ -442,6 +461,7 @@ export async function startServer(): Promise<void> {
       chats: chatRegistry,
       queue,
       chatViews,
+      idleReconciler,
       ledger: commandLedger,
       settings,
       recentTitleIcons,
@@ -510,6 +530,7 @@ export async function startServer(): Promise<void> {
         processing: chatProcessingActivity,
         metadata,
         chatViews,
+        idleReconciler,
         chatNativeReloader: indexedNativeReloader,
         pendingInputs,
         commandLedger,
