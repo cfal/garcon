@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ModelSelectorPopoverHost from './ModelSelectorPopoverHost.svelte';
 import type { ModelSelectorRecentOption } from '../model-selector-types';
+import { DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID } from '$shared/agents';
 
 let originalMatchMedia: typeof window.matchMedia | undefined;
 
@@ -247,6 +248,42 @@ describe('ModelSelectorPopover', () => {
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
 				agentId: 'claude',
+				modelValue: 'removed-from-catalog',
+				model: 'removed-from-catalog',
+				apiProviderId: 'custom-provider',
+				modelEndpointId: 'custom-endpoint',
+				modelProtocol: 'anthropic-messages',
+				thinkingMode: 'high',
+			});
+		});
+	});
+
+	it('allows effort changes for a saved agent outside the catalog', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: {
+				agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+				model: 'removed-from-catalog',
+				apiProviderId: 'custom-provider',
+				modelEndpointId: 'custom-endpoint',
+				modelProtocol: 'anthropic-messages',
+				thinkingMode: 'none',
+			},
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			onChange,
+		});
+
+		await fireEvent.click(
+			screen.getByRole('button', {
+				name: /Direct \(Anthropic\) .* removed-from-catalog .* Default/,
+			}),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
+
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledWith({
+				agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 				modelValue: 'removed-from-catalog',
 				model: 'removed-from-catalog',
 				apiProviderId: 'custom-provider',

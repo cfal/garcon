@@ -548,7 +548,7 @@ export class ModelSelectorState {
 	}
 
 	isAgentSelectable(agentId: SessionAgentId): boolean {
-		return this.selectableAgentIds.includes(agentId);
+		return this.#options.selectableAgentIds?.includes(agentId) ?? true;
 	}
 
 	#commitDraftSelection(): void {
