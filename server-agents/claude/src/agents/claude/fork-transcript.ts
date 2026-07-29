@@ -121,6 +121,16 @@ export function createClaudeForkTranscriptTransformer(
     if (messages.length > 0) {
       messages[messages.length - 1] = { ...messages[messages.length - 1], timestamp: forkTimestamp };
     }
+    // Microcompaction re-appends retained entries with their original uuids
+    // (rechained via parentUuid), so a source uuid can legitimately occur more
+    // than once. The copy preserves that structure faithfully; the graph
+    // assertion permits each target uuid exactly the source's multiplicity.
+    const allowedUuidCounts = new Map<string, number>();
+    for (const entry of transcript) {
+      if (entry.type === 'progress') continue;
+      const target = uuidMap.get(entry.uuid as string)!;
+      allowedUuidCounts.set(target, (allowedUuidCounts.get(target) ?? 0) + 1);
+    }
     const entries: Record<string, unknown>[] = [...messages];
     const replacements = input.sourceEntries
       .filter(isRecord)
@@ -142,6 +152,7 @@ export function createClaudeForkTranscriptTransformer(
       entries,
       input.sourceEntries.filter(isClaudeTranscriptEntry),
       input.targetAgentSessionId,
+      allowedUuidCounts,
     );
     return {
       entries,
@@ -201,14 +212,21 @@ function assertClaudeForkGraph(
   entries: readonly Record<string, unknown>[],
   sourceEntries: readonly (Record<string, unknown> & { uuid: string })[],
   targetSessionId: string,
+  allowedUuidCounts: ReadonlyMap<string, number>,
 ): void {
   const sourceUuids = new Set(sourceEntries.map((entry) => entry.uuid));
   const writtenUuids = new Set<string>();
+  const emittedUuidCounts = new Map<string, number>();
   for (const entry of entries) {
     if (entry.type === 'content-replacement') continue;
-    if (typeof entry.uuid !== 'string' || writtenUuids.has(entry.uuid) || sourceUuids.has(entry.uuid)) {
+    if (typeof entry.uuid !== 'string' || sourceUuids.has(entry.uuid)) {
       throw unavailable('Claude fork did not create independent message identities');
     }
+    const emitted = (emittedUuidCounts.get(entry.uuid) ?? 0) + 1;
+    if (emitted > (allowedUuidCounts.get(entry.uuid) ?? 1)) {
+      throw unavailable('Claude fork did not create independent message identities');
+    }
+    emittedUuidCounts.set(entry.uuid, emitted);
     if (entry.sessionId !== targetSessionId) {
       throw unavailable('Claude fork contains inconsistent session identity');
     }

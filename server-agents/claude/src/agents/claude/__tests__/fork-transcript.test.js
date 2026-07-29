@@ -146,6 +146,74 @@ describe('transformClaudeForkTranscript', () => {
     expect(sourceEntries).toEqual(original);
   });
 
+  it('copies microcompaction re-appends faithfully instead of refusing the duplicate uuids', () => {
+    const transform = createClaudeForkTranscriptTransformer({
+      now: () => '2026-07-29T00:00:00.000Z',
+    });
+    const base = {
+      sessionId: context.sourceAgentSessionId,
+      isSidechain: false,
+    };
+    const selectedEntries = [
+      {
+        ...base, type: 'user', uuid: 'src-user', parentUuid: null,
+        timestamp: '2026-07-29T00:34:08.457Z', message: { role: 'user', content: 'run the build' },
+      },
+      {
+        ...base, type: 'assistant', uuid: 'src-assistant', parentUuid: 'src-user',
+        timestamp: '2026-07-29T00:34:09.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'building' }] },
+      },
+      {
+        ...base, type: 'user', uuid: 'src-user', parentUuid: null,
+        timestamp: '2026-07-29T00:34:08.457Z', message: { role: 'user', content: 'run the build' },
+      },
+      {
+        ...base, type: 'assistant', uuid: 'src-assistant', parentUuid: 'src-user',
+        timestamp: '2026-07-29T00:34:09.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'building' }] },
+      },
+      {
+        ...base, type: 'system', subtype: 'compact_boundary', uuid: 'src-boundary',
+        parentUuid: 'src-assistant', timestamp: '2026-07-29T07:27:07.261Z',
+        compactMetadata: { trigger: 'auto', pre_tokens: 200000 },
+      },
+      {
+        ...base, type: 'user', uuid: 'src-summary', parentUuid: 'src-assistant',
+        isCompactSummary: true, timestamp: '2026-07-29T07:27:07.259Z',
+        message: { role: 'user', content: 'summary of the build conversation' },
+      },
+      {
+        ...base, type: 'assistant', uuid: 'src-after', parentUuid: 'src-summary',
+        timestamp: '2026-07-29T07:28:00.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'continuing' }] },
+      },
+    ];
+
+    const result = transform({
+      selectedEntries,
+      sourceEntries: selectedEntries,
+      ...context,
+    });
+
+    const emitted = result.entries.filter((entry) => entry.type !== 'content-replacement');
+    expect(emitted).toHaveLength(7);
+    const countsByUuid = new Map();
+    for (const entry of emitted) {
+      countsByUuid.set(entry.uuid, (countsByUuid.get(entry.uuid) ?? 0) + 1);
+    }
+    expect([...countsByUuid.values()].sort()).toEqual([1, 1, 1, 2, 2]);
+    for (const entry of emitted) {
+      expect(entry.uuid).not.toStartWith('src-');
+      expect(entry.sessionId).toBe(context.targetAgentSessionId);
+    }
+    const forkedUser = emitted[0];
+    const forkedSummary = emitted[5];
+    expect(emitted[2].uuid).toBe(forkedUser.uuid);
+    expect(forkedSummary.parentUuid).toBe(emitted[1].uuid);
+    expect(result.expectedSemanticDigest).toStartWith('ordered-v1:');
+  });
+
   it('rejects a child whose retained parent appears later in the file', () => {
     const transform = createClaudeForkTranscriptTransformer({ randomUUID: crypto.randomUUID });
     expect(() => transform({
