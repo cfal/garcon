@@ -234,7 +234,24 @@ export function sortClaudeEntries(entries: Record<string, unknown>[]): Record<st
     .map(({ entry }) => entry);
 }
 
-export function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[] {
+// Microcompaction re-appends retained entries with their original uuids and
+// content, differing only in parent rechaining, so the first occurrence is the
+// canonical one and later copies must not render again.
+function dedupeClaudeEntriesByUuid(
+  entries: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const seenUuids = new Set<string>();
+  return entries.filter((entry) => {
+    const uuid = asString(entry.uuid);
+    if (!uuid) return true;
+    if (seenUuids.has(uuid)) return false;
+    seenUuids.add(uuid);
+    return true;
+  });
+}
+
+export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): ChatMessage[] {
+  const entries = dedupeClaudeEntriesByUuid(rawEntries);
   const messages: ChatMessage[] = [];
   const sourceOrdinals = new WeakMap<Record<string, unknown>, number>();
 
@@ -435,11 +452,24 @@ async function scanClaudeMessagePage(
     windowSize,
     compareCompactionBoundaries,
   );
+  // Mirrors convertClaudeEntries' keep-first uuid dedupe so the paged scan and
+  // the full load agree on totals and numbering for compacted transcripts. The
+  // set holds one string per source entry, which stays small next to the
+  // bounded message windows.
+  const seenEntryUuids = new Set<string>();
   for await (const lineEntry of readJsonlLineEntries(nativePath)) {
     const entry = parseClaudeJsonlEntryWithSource(lineEntry.line, lineEntry.lineNumber ?? 1);
     if (!entry) {
       sourceOrder += 1;
       continue;
+    }
+    const entryUuid = typeof entry.uuid === 'string' ? entry.uuid : null;
+    if (entryUuid) {
+      if (seenEntryUuids.has(entryUuid)) {
+        sourceOrder += 1;
+        continue;
+      }
+      seenEntryUuids.add(entryUuid);
     }
     const entryTimestamp = timestampMs(entry.timestamp);
     if (entry.type === 'system' && entry.subtype === 'compact_boundary') {

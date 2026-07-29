@@ -216,6 +216,60 @@ describe('loadClaudeChatMessagePage', () => {
     });
   });
 
+  it('renders microcompaction re-appends once and keeps page-scan parity', async () => {
+    const entry = (value) => JSON.stringify({ sessionId: 'session-1', ...value });
+    const user = {
+      type: 'user', uuid: 'u-user', parentUuid: null,
+      timestamp: '2026-07-29T00:34:08.457Z',
+      message: { role: 'user', content: 'run the build' },
+    };
+    const assistant = {
+      type: 'assistant', uuid: 'u-assistant', parentUuid: 'u-user',
+      timestamp: '2026-07-29T00:34:09.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'building' }] },
+    };
+    const lines = [
+      entry(user),
+      entry(assistant),
+      entry({ ...user, slug: 'compacted-slug' }),
+      entry({ ...assistant, parentUuid: 'u-user' }),
+      entry({
+        type: 'system', subtype: 'compact_boundary', uuid: 'u-boundary',
+        parentUuid: 'u-assistant', timestamp: '2026-07-29T07:27:07.261Z',
+        compactMetadata: { trigger: 'auto', pre_tokens: 200000 },
+      }),
+      entry({
+        type: 'user', uuid: 'u-summary', parentUuid: 'u-assistant',
+        isCompactSummary: true, timestamp: '2026-07-29T07:27:07.259Z',
+        message: { role: 'user', content: 'summary of the build conversation' },
+      }),
+      entry({
+        type: 'assistant', uuid: 'u-after', parentUuid: 'u-summary',
+        timestamp: '2026-07-29T07:28:00.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'continuing' }] },
+      }),
+    ];
+
+    await withTempJsonl(lines, async (filePath) => {
+      const full = await loadClaudeChatMessages(filePath);
+      const page = await loadClaudeChatMessagePage(filePath, 10, 0);
+
+      expect(full.map((message) => message.type)).toEqual([
+        'user-message',
+        'assistant-message',
+        'compaction',
+        'assistant-message',
+      ]);
+      expect(full[0].content).toBe('run the build');
+      expect(full[1].content).toBe('building');
+      expect(full[2].trigger).toBe('auto');
+      expect(full[3].content).toBe('continuing');
+      expect(page.total).toBe(full.length);
+      expect(page.messages.map((message) => message.type)).toEqual(full.map((message) => message.type));
+      expect(page.revision).toBe(transcriptRevision(full));
+    });
+  });
+
   it('loads the initial page from tail JSONL entries', async () => {
     const lines = Array.from({ length: 6 }, (_, index) => JSON.stringify({
       sessionId: 'session-1',
