@@ -255,7 +255,7 @@ export class ForkCommands {
     if (nativeLastSeq === null || upToSeq <= nativeLastSeq) return;
     throw new CommandValidationError(
       'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      'This message is from the event stream, not from native history. Try reloading from native history.',
+      "This message hasn't been written to the provider's transcript yet. Wait for the turn to finish, then reload from native history and pick the message again.",
       409,
       true,
     );
