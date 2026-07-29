@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 	ActiveTranscriptState,
 	INITIAL_VISIBLE_MESSAGES,
 } from '../active-transcript-state.svelte.js';
@@ -100,6 +101,58 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(['hello', 'hi', 'next']);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
+	});
+
+	it('bounds a bottom-pinned live transcript to the recent message window', () => {
+		const chat = new ActiveTranscriptState();
+		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 51;
+
+		chat.applyMessages(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: messageCount }, (_, index) =>
+				entry(index + 1, assistant(`message-${index + 1}`)),
+			),
+		);
+
+		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(contentOf(chat.chatMessages[0])).toBe('message-52');
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: messageCount });
+		expect(chat.oldestSeq).toBe(52);
+		expect(chat.hasMoreMessages).toBe(true);
+		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
+	});
+
+	it('preserves expanded history while scrolled up and compacts it at the live edge', () => {
+		const chat = new ActiveTranscriptState();
+		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', initial, {
+			lastSeq: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.isUserScrolledUp = true;
+
+		chat.applyMessages(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) =>
+				entry(
+					ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1,
+					assistant(`message-${ACTIVE_TRANSCRIPT_RETENTION_LIMIT + index + 1}`),
+				),
+			),
+		);
+
+		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
+		expect(chat.compactToRecentMessages()).toBe(true);
+		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		expect(contentOf(chat.chatMessages[0])).toBe('message-51');
+		expect(chat.oldestSeq).toBe(51);
+		expect(chat.hasMoreMessages).toBe(true);
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 	});
 
 	it('signals generation changes without replacing the current generation', () => {

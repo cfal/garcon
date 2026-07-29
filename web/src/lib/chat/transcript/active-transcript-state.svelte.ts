@@ -13,6 +13,7 @@ import { createRandomId } from '$lib/utils/random-id';
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
 export const INITIAL_SWITCH_VISIBLE_MESSAGES = 20;
+export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
 const SWITCH_REVEAL_BATCH_SIZE = 20;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
 export type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
@@ -272,10 +273,19 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		}
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
 		if (applied.status === 'applied') {
+			const shouldCompact = !this.isUserScrolledUp;
+			const nextEntries =
+				shouldCompact && applied.messages.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT
+					? applied.messages.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
+					: applied.messages;
 			this.generationId = generationId;
-			this.entries = applied.messages;
+			this.entries = nextEntries;
 			this.lastSeq = applied.lastSeq;
 			this.oldestSeq = this.entries[0]?.seq ?? 0;
+			if (nextEntries.length < applied.messages.length) {
+				this.hasMoreMessages = true;
+				this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+			}
 		} else {
 			const restored = this.transcriptCache.get(chatId);
 			if (!restored || restored.generationId !== generationId) return 'gap-detected';
@@ -587,6 +597,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#snapshotBuffer = null;
 		this.#initialRevealPhase = 'complete';
 		this.isViewingInitialMessages = false;
+	}
+
+	compactToRecentMessages(): boolean {
+		if (this.entries.length <= ACTIVE_TRANSCRIPT_RETENTION_LIMIT) return false;
+		this.entries = this.entries.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		this.oldestSeq = this.entries[0]?.seq ?? 0;
+		this.totalMessages = this.entries.length;
+		this.hasMoreMessages = true;
+		this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+		return true;
 	}
 
 	loadEarlierMessages(): void {

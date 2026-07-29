@@ -15,6 +15,7 @@ const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
+	| 'compactToRecentMessages'
 	| 'displayMessageCount'
 	| 'completeInitialMessagesReveal'
 	| 'generationId'
@@ -72,6 +73,7 @@ export class ConversationScrollController {
 		node.scrollTop = node.scrollHeight;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.setPinnedToBottom(true);
+		this.deps.chatState.compactToRecentMessages();
 	}
 
 	async scrollToLatest(): Promise<void> {

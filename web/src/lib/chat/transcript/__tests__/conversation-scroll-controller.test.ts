@@ -8,6 +8,7 @@ function scrollState<T extends Partial<ConversationScrollState>>(
 	overrides: T,
 ): T & ConversationScrollState {
 	const complete = {
+		compactToRecentMessages: vi.fn(() => false),
 		completeInitialMessagesReveal: vi.fn(),
 		displayMessageCount: 0,
 		generationId: 'generation-1',
@@ -121,6 +122,27 @@ describe('ConversationScrollController', () => {
 
 		expect(scroller.scrollTop).toBe(180);
 		cleanup?.();
+	});
+
+	it('releases expanded transcript history when returning to the live edge', () => {
+		const scroller = { scrollTop: 120, scrollHeight: 900, clientHeight: 400 } as HTMLDivElement;
+		const chatState = scrollState({
+			isUserScrolledUp: true,
+			compactToRecentMessages: vi.fn(() => true),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.scrollToBottom();
+
+		expect(scroller.scrollTop).toBe(900);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+		expect(chatState.compactToRecentMessages).toHaveBeenCalledOnce();
 	});
 
 	it('preserves the viewport anchor after older messages render', async () => {
