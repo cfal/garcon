@@ -87,6 +87,17 @@ describe('IdleNativeReconciler', () => {
     expect(views.reconcileNativeSnapshot).toHaveBeenCalledTimes(1);
   });
 
+  it('abandons pending and future work once stopped', async () => {
+    const { reconciler, views } = harness();
+    reconciler.noteIdle(CHAT_ID);
+
+    reconciler.stop();
+    reconciler.noteIdle(CHAT_ID);
+    await reconciler.ensureReconciled(CHAT_ID);
+
+    expect(views.reconcileNativeSnapshot).not.toHaveBeenCalled();
+  });
+
   it('does not announce a reset when the generation survives', async () => {
     const { reconciler, resets } = harness({
       views: {

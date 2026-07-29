@@ -722,6 +722,7 @@ export async function startServer(): Promise<void> {
       try {
         await server.stop(true);
         clearInterval(chatViewPruneTimer);
+        idleReconciler.stop();
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),

@@ -37,6 +37,7 @@ export class IdleNativeReconciler {
   readonly #debounceMs: number;
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #inFlight = new Map<string, Promise<void>>();
+  #stopped = false;
 
   constructor(options: IdleNativeReconcilerOptions) {
     this.#views = options.views;
@@ -49,6 +50,7 @@ export class IdleNativeReconciler {
   // Chats can report idle several times per settle, and a new turn can start during the wait, so
   // the timer restarts on each signal and the work re-checks ownership when it fires.
   noteIdle(chatId: string): void {
+    if (this.#stopped) return;
     const existing = this.#timers.get(chatId);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
@@ -59,11 +61,13 @@ export class IdleNativeReconciler {
     this.#timers.set(chatId, timer);
   }
 
-  cancel(chatId: string): void {
-    const existing = this.#timers.get(chatId);
-    if (!existing) return;
-    clearTimeout(existing);
-    this.#timers.delete(chatId);
+  // Reconciling reads the provider transcript, so a debounce that fires during shutdown would
+  // start work against integrations that are being torn down. Shutdown drops the pending timers
+  // and refuses new ones; an unreconciled view costs nothing once the process is going away.
+  stop(): void {
+    this.#stopped = true;
+    for (const timer of this.#timers.values()) clearTimeout(timer);
+    this.#timers.clear();
   }
 
   // Reconciles now rather than on the debounce, for callers that need the view to address native
@@ -79,7 +83,7 @@ export class IdleNativeReconciler {
   }
 
   async #reconcile(chatId: string): Promise<void> {
-    if (this.#ownsExecution(chatId)) return;
+    if (this.#stopped || this.#ownsExecution(chatId)) return;
     const before = this.#views.getCursor(chatId);
     // Nothing above the seqs read from the transcript means every client seq already addresses
     // a native position, so there is nothing to rebuild.

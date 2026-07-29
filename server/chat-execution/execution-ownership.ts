@@ -16,8 +16,6 @@ import type {
 } from './types.ts';
 import { executionTurnIdentity } from './types.ts';
 
-// Keeps one chat's execution invariants and garbage collection in one record
-// instead of twelve parallel per-chat collections.
 // Exactly one of these owns a chat at a time, which the reserve methods enforce. Handles that
 // only mean something during a drain live inside that variant so they cannot outlast it.
 type ChatOwner =
@@ -85,7 +83,6 @@ export class ExecutionOwnership {
     return state;
   }
 
-  // Retires the complete record once the chat holds no live execution state.
   // Shutdown aborts whichever admissions are live and records the entry a drain was running, so
   // the drainer can tell an aborted entry from one it never started.
   #abortAdmissions(state: ChatExecutionState, reason: Error): void {
@@ -98,13 +95,14 @@ export class ExecutionOwnership {
   // Drain handles only exist while a drain owns the chat. The drainer sets them between
   // beginDrain and endDrain, so reaching here otherwise means a caller escaped that window.
   #requireDraining(chatId: string, action: string): Extract<ChatOwner, { kind: 'draining' }> {
-    const state = this.#state(chatId);
-    if (state.owner.kind !== 'draining') {
+    const state = this.#chats.get(chatId);
+    if (state?.owner.kind !== 'draining') {
       throw new Error(`Cannot ${action} for a chat that is not draining`);
     }
     return state.owner;
   }
 
+  // Retires the complete record once the chat holds no live execution state.
   #gc(chatId: string): void {
     const state = this.#chats.get(chatId);
     if (state && isIdle(state)) this.#chats.delete(chatId);
