@@ -126,7 +126,7 @@ function failedEvents(message: string): Array<Record<string, unknown>> {
 }
 
 export class FakeCodexModel {
-  readonly #server: Bun.Server;
+  readonly #server: Bun.Server<undefined>;
   readonly #turns: CodexScriptedTurn[] = [];
   readonly #requests: RecordedCodexModelRequest[] = [];
   readonly #issues: string[] = [];

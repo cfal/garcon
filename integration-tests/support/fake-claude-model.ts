@@ -198,7 +198,7 @@ function errorEvents(message: string): SseEvent[] {
 }
 
 export class FakeClaudeModel {
-  readonly #server: Bun.Server;
+  readonly #server: Bun.Server<undefined>;
   readonly #turns: ClaudeScriptedTurn[] = [];
   readonly #requests: RecordedClaudeModelRequest[] = [];
   readonly #issues: string[] = [];
