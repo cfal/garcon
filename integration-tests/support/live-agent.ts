@@ -1,8 +1,15 @@
 import { expect } from 'bun:test';
 import type { ServerWsMessage } from '../../common/ws-events.js';
+import { assistantContents } from './chat-assertions.js';
+import { GarconWsRequestError } from './garcon-client.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 
 export const LIVE_TURN_TIMEOUT_MS = 90_000;
+// Claude keeps a turn active through background continuations, so activity can outlive the
+// turn-terminal event by a wide margin.
+const RELOAD_SETTLE_TIMEOUT_MS = 30_000;
+// Each retry rebuilds the view from native history, so poll gently.
+export const POLL_INTERVAL_MS = 1_000;
 
 export function liveMarker(label: string): string {
   return `GARCON_LIVE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
@@ -53,6 +60,66 @@ function expectVisibleResponseBeforeSettlement(input: {
   expect(assistantResponse).toBeGreaterThan(processingStarted);
   expect(processingStopped).toBeGreaterThan(assistantResponse);
   expect(terminal).toBeGreaterThan(assistantResponse);
+}
+
+// A turn's execution reservation outlives its terminal event, so a reload issued as soon as the
+// turn ends is briefly refused as CHAT_RUNNING. The refusal is retryable by contract.
+export async function reloadFromNativeHistory(
+  fixture: IntegrationFixture,
+  chatId: string,
+): Promise<void> {
+  const deadline = Date.now() + RELOAD_SETTLE_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await fixture.client.reloadChat(chatId);
+      return;
+    } catch (error) {
+      const refusedWhileRunning = error instanceof GarconWsRequestError
+        && error.response.code === 'CHAT_RUNNING';
+      if (!refusedWhileRunning || Date.now() >= deadline) throw error;
+      await Bun.sleep(POLL_INTERVAL_MS);
+    }
+  }
+}
+
+// A provider transcript can still be flushing when its turn reports terminal, so a reload right
+// after the turn can land on history that is missing the turn's final output.
+export async function reloadUntilNativeContains(
+  fixture: IntegrationFixture,
+  chatId: string,
+  marker: string,
+): Promise<void> {
+  const deadline = Date.now() + RELOAD_SETTLE_TIMEOUT_MS;
+  for (;;) {
+    await reloadFromNativeHistory(fixture, chatId);
+    const page = await fixture.client.getMessages(chatId);
+    if (assistantContents(page.messages).some((content) => content.includes(marker))) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`Native history for ${chatId} never persisted ${marker}`);
+    }
+    await Bun.sleep(POLL_INTERVAL_MS);
+  }
+}
+
+// Reloads until native history holds an assistant reply past a known point. Tool-driven turns
+// cannot be pinned to an exact marker, so growth past the prior turn is the durable signal.
+export async function reloadUntilNativeAnswersAfter(
+  fixture: IntegrationFixture,
+  chatId: string,
+  afterSeq: number,
+): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
+  const deadline = Date.now() + RELOAD_SETTLE_TIMEOUT_MS;
+  for (;;) {
+    await reloadFromNativeHistory(fixture, chatId);
+    const page = await fixture.client.getMessages(chatId);
+    const answered = page.messages.some((entry) =>
+      entry.seq > afterSeq && entry.message.type === 'assistant-message');
+    if (answered) return page;
+    if (Date.now() >= deadline) {
+      throw new Error(`Native history for ${chatId} never answered past seq ${afterSeq}`);
+    }
+    await Bun.sleep(POLL_INTERVAL_MS);
+  }
 }
 
 export async function waitForVisibleResponse(input: {

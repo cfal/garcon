@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -47,6 +48,18 @@ function respond(line: string): void {
   }
   if (request.method === 'thread/start') {
     startThread(request.id, request.params);
+    return;
+  }
+  if (request.method === 'thread/resume') {
+    resumeThread(request.id, request.params);
+    return;
+  }
+  if (request.method === 'thread/goal/get') {
+    write(request.id, { goal: null });
+    return;
+  }
+  if (request.method === 'thread/unsubscribe') {
+    write(request.id, {});
     return;
   }
   if (request.method === 'turn/start') {
@@ -182,6 +195,23 @@ function startThread(id: number, params: Record<string, unknown> | undefined): v
   });
 }
 
+function resumeThread(id: number, params: Record<string, unknown> | undefined): void {
+  const threadId = typeof params?.threadId === 'string' ? params.threadId : null;
+  const nativePath = typeof params?.path === 'string' ? params.path : null;
+  if (!threadId || !nativePath) {
+    writeError(id, -32602, 'thread not found without a rollout path');
+    return;
+  }
+  startedThreads.set(threadId, nativePath);
+  write(id, {
+    thread: { id: threadId, path: nativePath },
+    model: typeof params?.model === 'string' ? params.model : 'gpt',
+    modelProvider: 'openai',
+    serviceTier: null,
+    cwd: typeof params?.cwd === 'string' ? params.cwd : '/',
+  });
+}
+
 function startTurn(id: number, params: Record<string, unknown> | undefined): void {
   const threadId = typeof params?.threadId === 'string' ? params.threadId : null;
   const nativePath = threadId ? startedThreads.get(threadId) : null;
@@ -205,6 +235,10 @@ function startTurn(id: number, params: Record<string, unknown> | undefined): voi
     ? providerInput.slice(carriedContextEnd + '</carried-context>'.length).trim()
     : providerInput;
   const assistantContent = `codex-answer-${userContent}`;
+  if (process.env.INTEGRATION_CODEX_STREAMING_TURN === '1') {
+    startStreamingTurn(id, threadId, nativePath, userContent);
+    return;
+  }
   const timestamp = new Date().toISOString();
   appendFileSync(
     nativePath,
@@ -248,6 +282,97 @@ function startTurn(id: number, params: Record<string, unknown> | undefined): voi
     threadId,
     turn: codexTurn(turnId, 'completed', timestamp),
   });
+}
+
+// Mirrors how Codex runs a turn: items reach the event stream before the rollout records them,
+// and the rollout also records entries (reasoning) that the event stream renders differently.
+// The turn stays in progress until the release file appears so tests can observe that window.
+function streamedLiveAnswers(userContent: string): readonly string[] {
+  return [`codex-live-${userContent}`, `codex-live2-${userContent}`];
+}
+
+function startStreamingTurn(
+  id: number,
+  threadId: string,
+  nativePath: string,
+  userContent: string,
+): void {
+  const timestamp = new Date().toISOString();
+  appendFileSync(
+    nativePath,
+    [
+      JSON.stringify({
+        timestamp,
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: userContent }],
+        },
+      }),
+      JSON.stringify({
+        timestamp,
+        type: 'event_msg',
+        payload: { type: 'user_message', message: userContent },
+      }),
+      JSON.stringify({
+        timestamp,
+        type: 'response_item',
+        payload: {
+          type: 'reasoning',
+          summary: [{ type: 'summary_text', text: `codex-reasoning-${userContent}` }],
+        },
+      }),
+      '',
+    ].join('\n'),
+  );
+
+  const turnId = randomUUID();
+  write(id, { turn: codexTurn(turnId, 'inProgress', timestamp) });
+  notify('turn/started', { threadId, turn: codexTurn(turnId, 'inProgress', timestamp) });
+  streamedLiveAnswers(userContent).forEach((text, index) => {
+    notify('item/completed', {
+      threadId,
+      turnId,
+      item: {
+        type: 'agentMessage',
+        id: `${turnId}-live-${index}`,
+        text,
+        phase: null,
+        memoryCitation: null,
+      },
+    });
+  });
+
+  awaitTurnRelease(() => {
+    const completedAt = new Date().toISOString();
+    appendFileSync(
+      nativePath,
+      `${streamedLiveAnswers(userContent).map((text) => JSON.stringify({
+        timestamp: completedAt,
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text }],
+        },
+      })).join('\n')}\n`,
+    );
+    notify('turn/completed', { threadId, turn: codexTurn(turnId, 'completed', completedAt) });
+  });
+}
+
+function awaitTurnRelease(finish: () => void): void {
+  const releasePath = process.env.INTEGRATION_CODEX_TURN_RELEASE;
+  if (!releasePath) {
+    finish();
+    return;
+  }
+  const poll = setInterval(() => {
+    if (!existsSync(releasePath)) return;
+    clearInterval(poll);
+    finish();
+  }, 1_000);
 }
 
 function forkJsonlThread(id: number, params: Record<string, unknown> | undefined): void {

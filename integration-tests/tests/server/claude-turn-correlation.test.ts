@@ -6,7 +6,6 @@ import type {
   ChatMessagesMessage,
   PendingUserInputUpdatedMessage,
 } from '../../../common/ws-events.js';
-import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 function fakeClaudeSource(): string {
@@ -632,24 +631,12 @@ describe('Claude turn correlation', () => {
         (line) => JSON.parse(line).content,
       )).toEqual(['trigger background continuation']);
 
-      let busyFork: unknown;
-      try {
-        await fixture.client.forkChat({
-          sourceChatId: chatId,
-          chatId: fixture.newChatId(),
-        });
-      } catch (error) {
-        busyFork = error;
-      }
-      expect(busyFork).toBeInstanceOf(GarconApiError);
-      expect(busyFork).toMatchObject({
-        status: 409,
-        body: {
-          success: false,
-          errorCode: 'SESSION_BUSY',
-          retryable: true,
-        },
-      });
+      // Claude tolerates a live fork, so the background continuation does not block one; the
+      // source keeps its queue and its own turn.
+      const liveForkChatId = fixture.newChatId();
+      await fixture.client.forkChat({ sourceChatId: chatId, chatId: liveForkChatId });
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries
+        .map((entry) => entry.content)).toEqual(['after-background']);
 
       await writeFile(continuationReleasePath, 'release');
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {

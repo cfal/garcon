@@ -15,7 +15,6 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../../support/integration-fixture.js';
-import { GarconApiError } from '../../../support/garcon-client.js';
 import {
   exactReplyPrompt,
   expectAssistantMarker,
@@ -160,8 +159,8 @@ describe('live Claude lifecycle', () => {
         command: childPrompt,
         permissionMode: 'bypassPermissions',
       });
-      await expectBusyFork(fixture.client.forkRunChat(childRequest));
-
+      // The child inherits both parent turns, so it forks once the queue has drained;
+      // fork-while-running is covered by fork-while-running.test.ts.
       expectFinished((await fixture.client.waitForTurnTerminal(parentChatId, first.turnId, {
         afterIndex: firstCursor,
         timeoutMs: TURN_TIMEOUT_MS,
@@ -197,7 +196,7 @@ describe('live Claude lifecycle', () => {
         chatId: grandchildChatId,
         command: grandchildPrompt,
       });
-      await expectBusyFork(fixture.client.forkRunChat(grandchildRequest));
+      // Likewise the grandchild must inherit the child's completed turn.
       await waitForVisibleClaudeResponse({
         fixture,
         chatId: childChatId,
@@ -789,20 +788,6 @@ describe('live Claude lifecycle', () => {
     });
   });
 });
-
-async function expectBusyFork(promise: Promise<unknown>): Promise<void> {
-  let error: unknown;
-  try {
-    await promise;
-  } catch (cause) {
-    error = cause;
-  }
-  expect(error).toBeInstanceOf(GarconApiError);
-  expect(error).toMatchObject({
-    status: 409,
-    body: { errorCode: 'SESSION_BUSY', retryable: true },
-  });
-}
 
 async function waitForFile(path: string): Promise<void> {
   const deadline = Date.now() + 60_000;

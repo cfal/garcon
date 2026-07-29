@@ -160,6 +160,18 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
   const response = `echo:${prompt}`;
   const userTimestamp = new Date().toISOString();
   const assistantTimestamp = new Date(Date.now() + 1).toISOString();
+  if (process.env.CLAUDE_TEST_STREAM_PROMPT === prompt) {
+    streamActiveTurn({
+      sessionId,
+      nativePath,
+      uuid: input.uuid,
+      message: input.message,
+      prompt,
+      response,
+      userTimestamp,
+    });
+    return;
+  }
   if (process.env.CLAUDE_TEST_HOLD_ACTIVE === '1') {
     appendFileSync(nativePath, `${JSON.stringify({
       sessionId,
@@ -276,6 +288,100 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
     state: 'idle',
     session_id: sessionId,
   });
+}
+
+// Mirrors a turn whose assistant output reaches the stream before the CLI appends it to the
+// transcript. The turn stays active until the release file appears, so tests can observe forks
+// against a chat whose view has outrun native history.
+function streamActiveTurn(turn: {
+  sessionId: string;
+  nativePath: string;
+  uuid: string;
+  message: { role?: string; content?: unknown };
+  prompt: string;
+  response: string;
+  userTimestamp: string;
+}): void {
+  appendFileSync(turn.nativePath, `${JSON.stringify({
+    sessionId: turn.sessionId,
+    type: 'user',
+    uuid: turn.uuid,
+    timestamp: turn.userTimestamp,
+    cwd: process.cwd(),
+    message: { role: 'user', content: turn.prompt },
+  })}\n`);
+  writeOutput({
+    type: 'command_lifecycle',
+    command_uuid: turn.uuid,
+    state: 'queued',
+    session_id: turn.sessionId,
+  });
+  writeOutput({
+    type: 'system',
+    subtype: 'session_state_changed',
+    state: 'running',
+    session_id: turn.sessionId,
+  });
+  writeOutput({
+    type: 'command_lifecycle',
+    command_uuid: turn.uuid,
+    state: 'started',
+    session_id: turn.sessionId,
+  });
+  writeOutput({
+    type: 'user',
+    uuid: turn.uuid,
+    isReplay: true,
+    message: turn.message,
+    session_id: turn.sessionId,
+  });
+  writeOutput({
+    type: 'assistant',
+    session_id: turn.sessionId,
+    message: { role: 'assistant', content: [{ type: 'text', text: turn.response }] },
+  });
+
+  const releasePath = process.env.CLAUDE_TEST_RELEASE_PATH;
+  const settle = () => {
+    appendFileSync(turn.nativePath, `${JSON.stringify({
+      sessionId: turn.sessionId,
+      type: 'assistant',
+      uuid: randomUUID(),
+      timestamp: new Date().toISOString(),
+      cwd: process.cwd(),
+      message: { role: 'assistant', content: [{ type: 'text', text: turn.response }] },
+    })}\n`);
+    writeOutput({
+      type: 'result',
+      subtype: 'success',
+      session_id: turn.sessionId,
+      is_error: false,
+      duration_ms: 1,
+      num_turns: 1,
+      result: turn.response,
+    });
+    writeOutput({
+      type: 'command_lifecycle',
+      command_uuid: turn.uuid,
+      state: 'completed',
+      session_id: turn.sessionId,
+    });
+    writeOutput({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'idle',
+      session_id: turn.sessionId,
+    });
+  };
+  if (!releasePath) {
+    settle();
+    return;
+  }
+  const poll = setInterval(() => {
+    if (!existsSync(releasePath)) return;
+    clearInterval(poll);
+    settle();
+  }, 25);
 }
 
 function scheduleHeldAbortSettlement(): void {
