@@ -8,6 +8,7 @@ import type { ChatMessage } from '../../../common/chat-types.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import { createCodexRolloutFileName } from '../../support/codex-rollout-filename.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { reloadUntilNativeContains } from '../../support/live-agent.js';
 
 const timestamp = '2026-07-24T00:00:00.000Z';
 
@@ -57,7 +58,8 @@ describe('Codex native transcript path preservation', () => {
           fixture.dirs.workspace,
           sourceChatId,
         );
-        const source = await fixture.client.reloadChat(sourceChatId);
+        await reloadUntilNativeContains(fixture, sourceChatId, codexMarker);
+        const source = await fixture.client.getMessages(sourceChatId);
         expect(messageLabels(source.messages.map((entry) => entry.message))).toEqual([
           cursorMarker,
           `echo:${cursorMarker}`,
