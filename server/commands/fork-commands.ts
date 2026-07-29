@@ -218,6 +218,9 @@ export class ForkCommands {
       throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is materializing', 409, true);
     }
     if (upToSeq !== undefined) {
+      // Asks about the provider session specifically, not execution ownership: a provider that
+      // cannot tolerate a live copy only objects while its own turn runs, and widening this to
+      // ownsExecution would refuse forks during windows the provider never observes.
       if (
         this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
         && !this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)

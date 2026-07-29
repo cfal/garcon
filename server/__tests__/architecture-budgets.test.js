@@ -7,16 +7,15 @@ import { join } from 'node:path';
 // MAX_LINES or fewer, its entry must be removed, and no entry may grow past its
 // recorded ceiling. New files start under the budget.
 const MAX_LINES = 1000;
-// Includes queue staging, ordering, boundary parsing, transcript snapshots,
-// title-icon source injection, staged active-turn settlement ownership,
-// idempotent Stop outcomes with terminal-race and abortability settlement,
-// fork admission for running sources and event-stream fork points, and
-// direct-turn exclusivity enforced by the ownership record itself.
-// This is the ceiling for the execution-ownership unification: later steps in
-// that work offset each other rather than raising it, because the concepts it
+// Counts code lines only, across queue staging, ordering, boundary parsing,
+// transcript snapshots, title-icon source injection, staged active-turn
+// settlement ownership, idempotent Stop outcomes with terminal-race and
+// abortability settlement, fork admission, and execution ownership.
+// This is the ceiling for the execution-ownership unification: steps in that
+// work offset each other rather than raising it, because the concepts it
 // removes live outside the measured directories and would otherwise let the
 // footprint grow while the subsystem is supposedly getting simpler.
-const EXECUTION_FOOTPRINT_BUDGET = 7292;
+const EXECUTION_FOOTPRINT_BUDGET = 6615;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
@@ -52,6 +51,22 @@ function lineCount(file) {
   return source.endsWith('\n') ? lines - 1 : lines;
 }
 
+// The footprint ceiling constrains how much machinery this subsystem carries, not how well it
+// is explained. Counting comments would price documentation against implementation and push
+// authors toward the unexplained code that produced the ownership drift in the first place.
+function codeLineCount(file) {
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed !== ''
+        && !trimmed.startsWith('//')
+        && !trimmed.startsWith('*')
+        && !trimmed.startsWith('/*');
+    })
+    .length;
+}
+
 function isExecutionFootprintFile(file) {
   return file.startsWith('server/chat-execution/')
     || file.startsWith('server/commands/')
@@ -77,7 +92,7 @@ describe('server architecture budgets', () => {
   test('execution and pending-input footprint stays within its reviewed budget', () => {
     const executionFiles = files.filter(isExecutionFootprintFile);
     expect(executionFiles.length).toBeGreaterThan(20);
-    const lines = executionFiles.reduce((total, file) => total + lineCount(file), 0);
+    const lines = executionFiles.reduce((total, file) => total + codeLineCount(file), 0);
     expect(lines).toBeLessThanOrEqual(EXECUTION_FOOTPRINT_BUDGET);
   });
 

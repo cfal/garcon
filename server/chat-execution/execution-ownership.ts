@@ -65,6 +65,19 @@ function isIdle(state: ChatExecutionState): boolean {
     && state.drainStop === null;
 }
 
+// Tracks per-chat execution as one exclusive owner - idle, a direct turn, a queue drain, or a
+// transcript snapshot - alongside state that deliberately outlives it. Owner kinds exclude each
+// other, and the reserve methods enforce that rather than trusting callers. A finished turn's
+// attempt is retained past its reservation so the settlement window still counts as owned, which
+// is why admission asks the coordinator's ownsExecution rather than inspecting an owner field.
+// Handles that only apply to a drain are cleared together when it ends, except by clearChat,
+// which keeps the drain's ownership while its loop unwinds against a deleted chat.
+//
+// Execution state is deliberately ephemeral: a restart begins with every chat idle, and nothing
+// here is ever recovered from disk.
+//
+// Cross-region rules that no signature can express live at the reserve methods: a transcript
+// snapshot excludes a settling turn, and no owner kind may be reserved twice.
 export class ExecutionOwnership {
   readonly #chats = new Map<string, ChatExecutionState>();
   readonly #ownerWaiters = new Set<() => void>();

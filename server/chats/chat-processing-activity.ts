@@ -20,6 +20,10 @@ export class ChatProcessingActivity {
     private readonly reservations: TurnReservationSource,
   ) {}
 
+  // Answers whether the user should see a turn in progress, which is narrower than the
+  // coordinator's ownsExecution on purpose: a fork's transcript snapshot and a turn that has
+  // finished but not settled both own execution without being work the user started, and
+  // surfacing them here would light the processing indicator for a fork.
   phase(chatId: string): ChatProcessingPhase | null {
     if (!this.running.isChatRunning(chatId) && !this.reservations.isChatTurnReserved(chatId)) {
       return null;
