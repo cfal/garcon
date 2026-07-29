@@ -3,6 +3,7 @@ import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
   codexExecCommandCall,
+  type CodexScriptedFault,
 } from '../../support/fake-codex-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForVisibleResponse } from '../../support/live-agent.js';
@@ -73,4 +74,82 @@ describe('Codex against a scripted model', () => {
       prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   });
+
+  test('holds a model request while the chat remains processing', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    const reply = `SCRIPTED_HELD_${crypto.randomUUID().replaceAll('-', '')}`;
+    const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(reply)]);
+
+    await withIntegrationFixture('codex-scripted-held-model', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveCodexStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'Wait for the held scripted response.',
+        permissionMode: 'bypassPermissions',
+      }));
+      await held.requested;
+      expect((await fixture.client.ping()).processing).toEqual({
+        outcome: 'snapshot',
+        chats: [{ chatId, phase: 'running' }],
+      });
+
+      held.release();
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      prepareWorkspace: testEnvironment.prepareWorkspace,
+    });
+  });
+
+  for (const fault of [
+    { kind: 'http-error', status: 500, message: 'transient scripted HTTP failure' },
+    { kind: 'stream-error', message: 'transient scripted SSE failure' },
+    { kind: 'truncated-stream' },
+  ] satisfies CodexScriptedFault[]) {
+    test(`retries a transient ${fault.kind}`, async () => {
+      if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+      const testEnvironment = environment;
+      const reply = `SCRIPTED_FAULT_RECOVERY_${crypto.randomUUID().replaceAll('-', '')}`;
+      const prompt = `Recover from the ${fault.kind} response.`;
+      const requestStart = testEnvironment.model.requests().length;
+      testEnvironment.model.scriptFault(fault);
+      testEnvironment.model.scriptTurn([codexAssistantMessage(reply)]);
+
+      await withIntegrationFixture(`codex-scripted-${fault.kind}`, async (fixture) => {
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(liveCodexStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: prompt,
+          permissionMode: 'bypassPermissions',
+        }));
+        await waitForVisibleResponse({
+          fixture,
+          chatId,
+          turnId: turn.turnId,
+          marker: reply,
+          afterIndex: cursor,
+        });
+
+        const requests = testEnvironment.model.requests().slice(requestStart);
+        expect(requests).toHaveLength(2);
+        expect(requests.map((request) => request.lastUserText)).toEqual([prompt, prompt]);
+        testEnvironment.model.assertSettled();
+      }, {
+        serverEnvironment: testEnvironment.serverEnvironment,
+        prepareWorkspace: testEnvironment.prepareWorkspace,
+      });
+    });
+  }
 });

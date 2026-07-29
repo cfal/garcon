@@ -27,6 +27,35 @@ export function expectAssistantMarker(contents: readonly string[], value: string
   expect(contents.some((content) => content.includes(value))).toBe(true);
 }
 
+export function expectStoppedTurnEventOrder(
+  events: readonly ServerWsMessage[],
+  chatId: string,
+  turnId: string,
+): void {
+  const stopping = events.findIndex((event) =>
+    event.type === 'chat-processing-updated'
+    && event.chatId === chatId
+    && event.phase === 'stopping');
+  const stopped = events.findIndex((event) =>
+    event.type === 'chat-session-stopped'
+    && event.chatId === chatId
+    && event.intent === 'stop'
+    && event.outcome === 'interrupt-requested');
+  const idle = events.findIndex((event) =>
+    event.type === 'chat-processing-updated'
+    && event.chatId === chatId
+    && event.phase === null);
+
+  expect(stopping).toBeGreaterThanOrEqual(0);
+  expect(stopped).toBeGreaterThan(stopping);
+  expect(idle).toBeGreaterThan(stopped);
+  expect(events).not.toContainEqual(expect.objectContaining({
+    type: 'agent-run-failed',
+    chatId,
+    turnId,
+  }));
+}
+
 function expectVisibleResponseBeforeSettlement(input: {
   events: readonly ServerWsMessage[];
   chatId: string;

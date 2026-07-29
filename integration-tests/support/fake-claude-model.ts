@@ -16,7 +16,19 @@ export type ClaudeScriptedBlock =
 
 export type ClaudeScriptedTurn =
   | ClaudeScriptedBlock[]
-  | ((request: RecordedClaudeModelRequest) => ClaudeScriptedBlock[]);
+  | ((
+      request: RecordedClaudeModelRequest,
+    ) => ClaudeScriptedBlock[] | Promise<ClaudeScriptedBlock[]>);
+
+export type ClaudeScriptedFault =
+  | { readonly kind: 'http-error'; readonly status: number; readonly message: string }
+  | { readonly kind: 'stream-error'; readonly message: string }
+  | { readonly kind: 'truncated-stream' };
+
+export interface HeldClaudeTurn {
+  readonly requested: Promise<RecordedClaudeModelRequest>;
+  release(): void;
+}
 
 export interface RecordedClaudeModelRequest {
   readonly id: number;
@@ -199,10 +211,11 @@ function errorEvents(message: string): SseEvent[] {
 
 export class FakeClaudeModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: ClaudeScriptedTurn[] = [];
+  readonly #turns: Array<ClaudeScriptedTurn | ClaudeScriptedFault> = [];
   readonly #requests: RecordedClaudeModelRequest[] = [];
   readonly #issues: string[] = [];
   readonly #otherRequests: string[] = [];
+  readonly #pendingReleases = new Set<() => void>();
   #requestId = 0;
   #stopped = false;
 
@@ -225,6 +238,37 @@ export class FakeClaudeModel {
 
   scriptTurn(turn: ClaudeScriptedTurn): void {
     this.#turns.push(turn);
+  }
+
+  // Holds the response before its first SSE event. The CLI enforces request timeouts, so
+  // callers release the turn promptly.
+  scriptHeldTurn(turn: ClaudeScriptedTurn): HeldClaudeTurn {
+    let resolveRequested!: (request: RecordedClaudeModelRequest) => void;
+    const requested = new Promise<RecordedClaudeModelRequest>((resolve) => {
+      resolveRequested = resolve;
+    });
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.#pendingReleases.delete(release);
+      releaseGate();
+    };
+    this.#pendingReleases.add(release);
+    this.#turns.push(async (request) => {
+      resolveRequested(request);
+      await gate;
+      return typeof turn === 'function' ? turn(request) : turn;
+    });
+    return { requested, release };
+  }
+
+  scriptFault(fault: ClaudeScriptedFault): void {
+    this.#turns.push(fault);
   }
 
   requests(): readonly RecordedClaudeModelRequest[] {
@@ -256,6 +300,7 @@ export class FakeClaudeModel {
   stop(): void {
     if (this.#stopped) return;
     this.#stopped = true;
+    for (const release of [...this.#pendingReleases]) release();
     this.#server.stop(true);
   }
 
@@ -293,7 +338,18 @@ export class FakeClaudeModel {
       );
       return sseResponse(errorEvents('no scripted turn available'));
     }
-    const blocks = typeof turn === 'function' ? turn(recorded) : turn;
+    if (!Array.isArray(turn) && typeof turn !== 'function') {
+      if (turn.kind === 'http-error') {
+        return Response.json({
+          error: { type: 'api_error', message: turn.message },
+        }, { status: turn.status });
+      }
+      if (turn.kind === 'stream-error') {
+        return sseResponse(errorEvents(turn.message));
+      }
+      return sseResponse(turnEvents([], recorded).slice(0, 1));
+    }
+    const blocks = typeof turn === 'function' ? await turn(recorded) : turn;
     return sseResponse(turnEvents(blocks, recorded));
   }
 }

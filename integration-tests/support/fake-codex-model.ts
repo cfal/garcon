@@ -10,7 +10,19 @@ export type CodexScriptedItem = Record<string, unknown>;
 
 export type CodexScriptedTurn =
   | CodexScriptedItem[]
-  | ((request: RecordedCodexModelRequest) => CodexScriptedItem[]);
+  | ((
+      request: RecordedCodexModelRequest,
+    ) => CodexScriptedItem[] | Promise<CodexScriptedItem[]>);
+
+export type CodexScriptedFault =
+  | { readonly kind: 'http-error'; readonly status: number; readonly message: string }
+  | { readonly kind: 'stream-error'; readonly message: string }
+  | { readonly kind: 'truncated-stream' };
+
+export interface HeldCodexTurn {
+  readonly requested: Promise<RecordedCodexModelRequest>;
+  release(): void;
+}
 
 export interface RecordedCodexModelRequest {
   readonly id: number;
@@ -127,9 +139,10 @@ function failedEvents(message: string): Array<Record<string, unknown>> {
 
 export class FakeCodexModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: CodexScriptedTurn[] = [];
+  readonly #turns: Array<CodexScriptedTurn | CodexScriptedFault> = [];
   readonly #requests: RecordedCodexModelRequest[] = [];
   readonly #issues: string[] = [];
+  readonly #pendingReleases = new Set<() => void>();
   #requestId = 0;
   #stopped = false;
 
@@ -158,6 +171,37 @@ export class FakeCodexModel {
     this.#turns.push(turn);
   }
 
+  // Holds the response before its first SSE event. Codex enforces a stream idle timeout, so
+  // callers release the turn within tens of seconds.
+  scriptHeldTurn(turn: CodexScriptedTurn): HeldCodexTurn {
+    let resolveRequested!: (request: RecordedCodexModelRequest) => void;
+    const requested = new Promise<RecordedCodexModelRequest>((resolve) => {
+      resolveRequested = resolve;
+    });
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.#pendingReleases.delete(release);
+      releaseGate();
+    };
+    this.#pendingReleases.add(release);
+    this.#turns.push(async (request) => {
+      resolveRequested(request);
+      await gate;
+      return typeof turn === 'function' ? turn(request) : turn;
+    });
+    return { requested, release };
+  }
+
+  scriptFault(fault: CodexScriptedFault): void {
+    this.#turns.push(fault);
+  }
+
   requests(): readonly RecordedCodexModelRequest[] {
     return this.#requests.slice();
   }
@@ -183,6 +227,7 @@ export class FakeCodexModel {
   stop(): void {
     if (this.#stopped) return;
     this.#stopped = true;
+    for (const release of [...this.#pendingReleases]) release();
     this.#server.stop(true);
   }
 
@@ -218,7 +263,16 @@ export class FakeCodexModel {
       );
       return sseResponse(failedEvents('no scripted turn available'));
     }
-    const items = typeof turn === 'function' ? turn(recorded) : turn;
+    if (!Array.isArray(turn) && typeof turn !== 'function') {
+      if (turn.kind === 'http-error') {
+        return Response.json({ error: { message: turn.message } }, { status: turn.status });
+      }
+      if (turn.kind === 'stream-error') {
+        return sseResponse(failedEvents(turn.message));
+      }
+      return sseResponse([{ type: 'response.created', response: {} }]);
+    }
+    const items = typeof turn === 'function' ? await turn(recorded) : turn;
     return sseResponse(turnEvents(items, `resp_fake_${recorded.id}`));
   }
 }
