@@ -41,7 +41,10 @@ import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
-import { DomainError, TRANSCRIPT_UNAVAILABLE_MESSAGE } from '../../lib/domain-error.js';
+import {
+  DomainError,
+  TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
+} from '../../lib/domain-error.js';
 import {
   QueueEntryMutationError,
   QueuePauseChangedError,
@@ -1247,7 +1250,7 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(503);
     expect(body).toMatchObject({
       success: false,
-      error: TRANSCRIPT_UNAVAILABLE_MESSAGE,
+      error: TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
       errorCode: 'TRANSCRIPT_UNAVAILABLE',
       retryable: true,
     });

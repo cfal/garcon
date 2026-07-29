@@ -35,6 +35,7 @@ export type CommandErrorCode = Extract<
   | 'SOURCE_REVISION_CHANGED'
   | 'TRANSCRIPT_UNAVAILABLE'
   | 'MESSAGE_NOT_IN_NATIVE_HISTORY'
+  | 'STALE_VIEW_GENERATION'
   | 'PROJECT_PATH_UPDATE_UNSUPPORTED'
   | 'CHAT_NOT_IDLE'
   | 'PROJECT_PATH_OUTSIDE_BASE'
@@ -69,6 +70,7 @@ export interface ForkChatCommandRequest {
   sourceChatId: string;
   chatId: string;
   upToSeq?: number;
+  generationId?: string;
 }
 
 export interface DeleteChatCommandRequest {
@@ -406,6 +408,9 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
   const images = optionalImages(body.images);
   const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
   const model = optionalString(body, 'model');
+  if (optionalGenerationId(body) !== undefined) {
+    throw new CommandRequestValidationError('generationId requires upToSeq');
+  }
   return {
     clientRequestId: requiredString(body, 'clientRequestId'),
     clientMessageId: requiredString(body, 'clientMessageId'),
@@ -430,13 +435,18 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
 export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequest {
   const body = requestRecord(value);
   const upToSeq = body.upToSeq;
+  const generationId = optionalGenerationId(body);
   if (upToSeq !== undefined && (!Number.isSafeInteger(upToSeq) || Number(upToSeq) <= 0)) {
     throw new CommandRequestValidationError('upToSeq must be a positive integer');
+  }
+  if (generationId !== undefined && upToSeq === undefined) {
+    throw new CommandRequestValidationError('generationId requires upToSeq');
   }
   return {
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
     ...(upToSeq === undefined ? {} : { upToSeq: Number(upToSeq) }),
+    ...(generationId === undefined ? {} : { generationId }),
   };
 }
 
@@ -646,6 +656,14 @@ function optionalString(
     throw new CommandRequestValidationError(`${field} must be a string`);
   }
   return trim ? value.trim() : value;
+}
+
+function optionalGenerationId(body: Record<string, unknown>): string | undefined {
+  const generationId = optionalString(body, 'generationId');
+  if (generationId !== undefined && generationId.length === 0) {
+    throw new CommandRequestValidationError('generationId must not be empty');
+  }
+  return generationId;
 }
 
 function optionalNullableString(

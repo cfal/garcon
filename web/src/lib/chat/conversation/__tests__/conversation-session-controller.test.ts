@@ -25,6 +25,7 @@ import {
 } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
+import type { ChatViewMessage } from '$shared/chat-view';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type {
@@ -195,10 +196,15 @@ function createDeps(chat = createRunningChat()) {
 	const waitForConnection = vi.fn(() => new Promise<void>(() => {}));
 	const chatState = {
 		activeChatId: chat.id,
+		entries: [] as ChatViewMessage[],
 		chatMessages: [] as ChatMessage[],
 		localNotices: [] as LocalNoticeRow[],
 		pendingUserInputs: [] as PendingUserInput[],
 		isUserScrolledUp: false,
+		getCursor: vi.fn(() => ({
+			generationId: 'generation-1',
+			lastSeq: chatState.entries.at(-1)?.seq ?? 0,
+		})),
 		clearMessages: vi.fn(),
 		resetForNewChat: vi.fn(() => {
 			chatState.chatMessages = [];
@@ -1130,6 +1136,10 @@ describe('ConversationSessionController', () => {
 	it('submits in-chat fork actions with the clicked message sequence', async () => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);
+		deps.chatState.entries = [{
+			seq: 9,
+			message: new AssistantMessage('2026-07-17T00:00:00.000Z', 'Fork here'),
+		}];
 		mockForkChat.mockResolvedValue({
 			success: true,
 			chat: createServerEntry('456'),
@@ -1142,6 +1152,7 @@ describe('ConversationSessionController', () => {
 			sourceChatId: '123',
 			chatId: expect.stringMatching(/^\d+$/),
 			upToSeq: 9,
+			generationId: 'generation-1',
 		});
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 	});

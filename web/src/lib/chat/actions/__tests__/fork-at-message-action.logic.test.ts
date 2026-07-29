@@ -3,7 +3,10 @@ import {
 	canShowForkAtMessageAction,
 	canUseForkAction,
 	canUseForkAtMessageAction,
+	remapForkAtMessage,
+	selectForkAtMessage,
 } from '$lib/chat/actions/fork-at-message-action.js';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
 
 describe('canUseForkAction', () => {
 	it('disables whole-chat fork when the agent does not support forking', () => {
@@ -98,5 +101,46 @@ describe('canUseForkAtMessageAction', () => {
 				isProcessing: true,
 			}),
 		).toBe(true);
+	});
+});
+
+describe('fork-at-message generation recovery', () => {
+	it('remaps the selected message by identity and occurrence after renumbering', () => {
+		const duplicate = new AssistantMessage('2026-07-29T00:00:00.000Z', 'same reply');
+		const selection = selectForkAtMessage([
+			{ seq: 4, message: duplicate },
+			{ seq: 5, message: new AssistantMessage('2026-07-29T00:00:01.000Z', 'same reply') },
+		], 'generation-1', 5);
+
+		expect(selection).not.toBeNull();
+		expect(remapForkAtMessage([
+			{ seq: 8, message: new AssistantMessage('2026-07-29T01:00:00.000Z', 'same reply') },
+			{ seq: 9, message: new AssistantMessage('2026-07-29T01:00:01.000Z', 'same reply') },
+		], 'generation-2', selection!)).toMatchObject({
+			seq: 9,
+			generationId: 'generation-2',
+			occurrence: 2,
+		});
+	});
+
+	it('uses user delivery identity when presentation fields change', () => {
+		const selection = selectForkAtMessage([{
+			seq: 3,
+			message: new UserMessage('2026-07-29T00:00:00.000Z', 'before', undefined, {
+				clientRequestId: 'request-1',
+				deliveryStatus: 'accepted',
+			}),
+		}], 'generation-1', 3);
+
+		expect(remapForkAtMessage([{
+			seq: 7,
+			message: new UserMessage('2026-07-29T01:00:00.000Z', 'after', undefined, {
+				clientRequestId: 'request-1',
+				deliveryStatus: 'unconfirmed',
+			}),
+		}], 'generation-2', selection!)).toMatchObject({
+			seq: 7,
+			generationId: 'generation-2',
+		});
 	});
 });

@@ -165,7 +165,7 @@ describe('transformClaudeForkTranscript', () => {
         message: { role: 'assistant', content: [{ type: 'text', text: 'building' }] },
       },
       {
-        ...base, type: 'user', uuid: 'src-user', parentUuid: null,
+        ...base, type: 'user', uuid: 'src-user', parentUuid: 'src-assistant',
         timestamp: '2026-07-29T00:34:08.457Z', message: { role: 'user', content: 'run the build' },
       },
       {
@@ -210,6 +210,7 @@ describe('transformClaudeForkTranscript', () => {
     const forkedUser = emitted[0];
     const forkedSummary = emitted[5];
     expect(emitted[2].uuid).toBe(forkedUser.uuid);
+    expect(emitted[2].parentUuid).toBe(emitted[1].uuid);
     expect(forkedSummary.parentUuid).toBe(emitted[1].uuid);
     expect(result.expectedSemanticDigest).toStartWith('ordered-v1:');
   });

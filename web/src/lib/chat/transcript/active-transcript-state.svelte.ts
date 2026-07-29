@@ -63,6 +63,7 @@ function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): Pendi
 export interface ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
 	activeChatId: string | null;
+	readonly entries: readonly ChatViewMessage[];
 	readonly chatMessages: ChatMessage[];
 	isUserScrolledUp: boolean;
 	getCursor(): ChatCursor;

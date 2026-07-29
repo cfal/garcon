@@ -16,6 +16,7 @@ import type {
   AgentModelPatchRequest,
   AgentModelPatchResponse,
   CommandAcceptedResponse,
+  ForkChatCommandRequest,
   ForkChatResponse,
   ForkRunCommandRequest,
   ForkRunCommandResponse,
@@ -529,7 +530,7 @@ export class GarconTestClient {
     };
   }
 
-  forkChat(request: { sourceChatId: string; chatId: string; upToSeq?: number }): Promise<ForkChatResponse> {
+  forkChat(request: ForkChatCommandRequest): Promise<ForkChatResponse> {
     return this.post<ForkChatResponse>('/api/v1/chats/fork', request);
   }
 

@@ -120,6 +120,7 @@ export type ForkChatFileCopyDep = (args: {
 
 export interface ChatViewSeqDep {
   getNativeHistoryLastSeq(chatId: string): number | null;
+  getCursor(chatId: string): { generationId: string; lastSeq: number } | null;
 }
 
 

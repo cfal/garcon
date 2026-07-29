@@ -28,6 +28,12 @@ import {
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
+import {
+	remapForkAtMessage,
+	selectForkAtMessage,
+	type ForkAtMessageSelection,
+} from '$lib/chat/actions/fork-at-message-action.js';
+import type { ChatViewMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -41,7 +47,9 @@ interface SlashCommandSessions {
 
 interface SlashCommandChatState {
 	activeChatId: string | null;
+	entries: readonly ChatViewMessage[];
 	isUserScrolledUp: boolean;
+	getCursor(): { generationId: string; lastSeq: number };
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
 }
 
@@ -84,6 +92,7 @@ export interface ConversationSlashCommandDeps {
 	lifecycle: SlashCommandLifecycle;
 	modelCatalog: SlashCommandModelCatalog;
 	navigation: { navigateToChat?(chatId: string): void };
+	refetchTranscript?: (chatId: string) => Promise<void>;
 	scrollToBottom(): void;
 }
 
@@ -404,11 +413,45 @@ export class ConversationSlashCommandService {
 	}
 
 	async #performForkOnly(sourceChatId: string, upToSeq?: number): Promise<void> {
-		const result = await forkChat({
-			sourceChatId,
-			chatId: createClientChatId(),
-			...(upToSeq ? { upToSeq } : {}),
-		});
+		const chatId = createClientChatId();
+		const selection = upToSeq === undefined
+			? null
+			: selectForkAtMessage(
+				this.deps.chatState.entries,
+				this.deps.chatState.getCursor().generationId,
+				upToSeq,
+			);
+		if (upToSeq !== undefined && !selection) {
+			throw new Error(m.chat_notice_fork_message_no_longer_available());
+		}
+		let result: Awaited<ReturnType<typeof forkChat>>;
+		try {
+			result = await forkChat({
+				sourceChatId,
+				chatId,
+				...(selection ? forkPointParams(selection) : {}),
+			});
+		} catch (error) {
+			if (!selection || !isStaleForkPointError(error) || !this.deps.refetchTranscript) {
+				throw error;
+			}
+			try {
+				await this.deps.refetchTranscript(sourceChatId);
+			} catch {
+				throw error;
+			}
+			const remapped = remapForkAtMessage(
+				this.deps.chatState.entries,
+				this.deps.chatState.getCursor().generationId,
+				selection,
+			);
+			if (!remapped) throw error;
+			result = await forkChat({
+				sourceChatId,
+				chatId,
+				...forkPointParams(remapped),
+			});
+		}
 		this.deps.sessions.upsertServerChat(result.chat);
 		this.deps.lifecycle.setCurrentChatId(result.chat.id);
 		this.deps.sessions.setSelectedChatId(result.chat.id);
@@ -445,6 +488,21 @@ export class ConversationSlashCommandService {
 		this.deps.composerState.images = previousImages;
 		this.deps.composerState.saveDraft(chatId);
 	}
+}
+
+function forkPointParams(selection: ForkAtMessageSelection): {
+	upToSeq: number;
+	generationId: string;
+} {
+	return {
+		upToSeq: selection.seq,
+		generationId: selection.generationId,
+	};
+}
+
+function isStaleForkPointError(error: unknown): error is ApiError {
+	return error instanceof ApiError
+		&& error.errorCode === 'STALE_VIEW_GENERATION';
 }
 
 // A fork point the server could not resolve against native history is a recoverable state the

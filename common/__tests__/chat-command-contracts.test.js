@@ -3,6 +3,7 @@ import {
   CommandRequestValidationError,
   parseAgentRunCommandRequest,
   parseForkChatCommandRequest,
+  parseForkRunCommandRequest,
   parsePermissionDecisionCommandRequest,
   parseQueueEntryMoveCommandRequest,
   parseQueueEntryReplaceCommandRequest,
@@ -91,6 +92,21 @@ describe('chat command request parsers', () => {
       chatId: CHAT_ID,
       upToSeq: '2abc',
     })).toThrow('upToSeq must be a positive integer');
+
+    expect(() => parseForkChatCommandRequest({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: CHAT_ID,
+      generationId: 'generation-1',
+    })).toThrow('generationId requires upToSeq');
+
+    expect(() => parseForkRunCommandRequest({
+      clientRequestId: 'request-fork',
+      clientMessageId: 'message-fork',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: CHAT_ID,
+      generationId: 'generation-1',
+      command: 'continue',
+    })).toThrow('generationId requires upToSeq');
   });
 
   it('rejects malformed structured command fields', () => {

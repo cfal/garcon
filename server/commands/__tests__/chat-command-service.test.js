@@ -538,6 +538,7 @@ function makeService(overrides = {}) {
   };
   const chatViews = overrides.chatViews ?? {
     getNativeHistoryLastSeq: mock(() => null),
+    getCursor: mock(() => ({ generationId: 'generation-1', lastSeq: 0 })),
   };
   const idleReconciler = overrides.idleReconciler ?? {
     ensureReconciled: mock(async () => undefined),
@@ -1791,6 +1792,31 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
+  it('parses a fork point generation and rejects an empty generation', () => {
+    expect(parseForkChatCommandRequest({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 2,
+      generationId: 'generation-1',
+    })).toEqual({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 2,
+      generationId: 'generation-1',
+    });
+    expect(() => parseForkChatCommandRequest({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 2,
+      generationId: ' ',
+    })).toThrow('generationId must not be empty');
+    expect(() => parseForkChatCommandRequest({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      generationId: 'generation-1',
+    })).toThrow('generationId requires upToSeq');
+  });
+
   it('rejects message-point forks when the agent does not support them', async () => {
     const nativeMessages = {
       loadNativeMessages: mock(() => Promise.resolve([])),
@@ -1896,6 +1922,41 @@ describe('ChatCommandService', () => {
     );
   });
 
+  it('refuses a fork point bound to a stale view generation', async () => {
+    const { service, chatViews, idleReconciler, forkChatFileCopy } = makeService();
+    chatViews.getNativeHistoryLastSeq.mockReturnValue(2);
+    chatViews.getCursor.mockReturnValue({ generationId: 'generation-2', lastSeq: 2 });
+
+    await expect(service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      upToSeq: 2,
+      generationId: 'generation-1',
+    })).rejects.toMatchObject({
+      code: 'STALE_VIEW_GENERATION',
+      status: 409,
+      retryable: true,
+    });
+
+    expect(idleReconciler.ensureReconciled).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
+  it('rejects a generation binding without a message cutoff', async () => {
+    const { service, forkChatFileCopy } = makeService();
+
+    await expect(service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      generationId: 'generation-1',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+    });
+
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
   it('refuses an idle fork point that native history still does not cover', async () => {
     const { service, chatViews, forkChatFileCopy } = makeService();
     chatViews.getNativeHistoryLastSeq.mockReturnValue(1);
@@ -1924,8 +1985,10 @@ describe('ChatCommandService', () => {
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
       upToSeq: 2,
+      generationId: 'generation-1',
     });
 
+    expect(chatViews.getCursor).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(
       expect.objectContaining({ upToSequence: 2 }),
     );

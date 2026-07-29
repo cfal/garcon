@@ -65,7 +65,9 @@ import * as m from '$lib/paraglide/messages.js';
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
 	| 'activeChatId'
+	| 'entries'
 	| 'chatMessages'
+	| 'getCursor'
 	| 'isUserScrolledUp'
 	| 'activateChat'
 	| 'appendLocalNotice'
@@ -215,7 +217,10 @@ export class ConversationSessionController {
 
 	constructor(private deps: SessionControllerDeps) {
 		this.#acceptedInputs = new AcceptedInputSubmissionService();
-		this.#slashCommands = new ConversationSlashCommandService(deps, this.#acceptedInputs);
+		this.#slashCommands = new ConversationSlashCommandService({
+			...deps,
+			refetchTranscript: (chatId) => this.#loadChat(chatId),
+		}, this.#acceptedInputs);
 		this.#agentSwitch = new ConversationAgentSwitchService(deps);
 		const acceptedInputs = this.#acceptedInputs;
 		const agentSwitch = this.#agentSwitch;
@@ -397,6 +402,17 @@ export class ConversationSessionController {
 	}
 
 	async loadChat(chatId: string, options: { minimumMessageLimit?: number } = {}): Promise<void> {
+		try {
+			await this.#loadChat(chatId, options);
+		} catch {
+			// Leaves restored messages visible until reconnect or manual retry reloads them.
+		}
+	}
+
+	async #loadChat(
+		chatId: string,
+		options: { minimumMessageLimit?: number } = {},
+	): Promise<void> {
 		const { deps } = this;
 		let minimumMessageLimit =
 			options.minimumMessageLimit ??
@@ -413,25 +429,21 @@ export class ConversationSessionController {
 			this.#requestBottomRestore(chatId);
 		}
 
-		try {
-			await deps.chatState.loadMessages(chatId, {
-				minimumLimit: minimumMessageLimit,
-			});
-			if (deps.sessions.selectedChatId !== chatId) return;
+		await deps.chatState.loadMessages(chatId, {
+			minimumLimit: minimumMessageLimit,
+		});
+		if (deps.sessions.selectedChatId !== chatId) return;
 
-			deps.chatState.transcriptCache.markValidated(chatId);
-			this.#requestBottomRestore(chatId);
+		deps.chatState.transcriptCache.markValidated(chatId);
+		this.#requestBottomRestore(chatId);
 
-			const record = deps.sessions.byId[chatId];
-			if (
-				record?.lastActivityAt &&
-				(!record.lastReadAt || record.lastReadAt < record.lastActivityAt)
-			) {
-				deps.readReceiptOutbox.enqueue(chatId, record.lastActivityAt);
-				deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
-			}
-		} catch {
-			// Leaves restored messages visible until reconnect or manual retry reloads them.
+		const record = deps.sessions.byId[chatId];
+		if (
+			record?.lastActivityAt &&
+			(!record.lastReadAt || record.lastReadAt < record.lastActivityAt)
+		) {
+			deps.readReceiptOutbox.enqueue(chatId, record.lastActivityAt);
+			deps.sessions.patchLastReadAt(chatId, record.lastActivityAt);
 		}
 	}
 

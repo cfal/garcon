@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { compactChat, forkChat, forkRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
+import { ApiError } from '$lib/api/client.js';
+import { AssistantMessage } from '$shared/chat-types';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import {
 	ConversationSlashCommandService,
@@ -92,6 +94,7 @@ function createServerEntry(id: string) {
 }
 
 function createDeps(chat = createChat()) {
+	const cursor = { generationId: 'generation-1', lastSeq: 9 };
 	const composerState: ConversationSlashCommandDeps['composerState'] = {
 		inputText: 'original command',
 		images: [],
@@ -112,7 +115,12 @@ function createDeps(chat = createChat()) {
 		},
 		chatState: {
 			activeChatId: chat.id,
+			entries: [{
+				seq: 9,
+				message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'selected reply'),
+			}],
 			isUserScrolledUp: true,
+			getCursor: vi.fn(() => cursor),
 			appendLocalNotice,
 		},
 		composerState,
@@ -132,9 +140,10 @@ function createDeps(chat = createChat()) {
 			supportsForkWhileRunning: vi.fn(() => false),
 		},
 		navigation: { navigateToChat: vi.fn() },
+		refetchTranscript: vi.fn().mockResolvedValue(undefined),
 		scrollToBottom: vi.fn(),
 	} satisfies ConversationSlashCommandDeps;
-	return { deps, composerState, appendLocalNotice };
+	return { deps, composerState, appendLocalNotice, cursor };
 }
 
 describe('ConversationSlashCommandService', () => {
@@ -340,9 +349,95 @@ describe('ConversationSlashCommandService', () => {
 			sourceChatId: 'chat-1',
 			chatId: expect.stringMatching(/^\d+$/),
 			upToSeq: 9,
+			generationId: 'generation-1',
 		});
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('chat-2');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('refetches, remaps, and retries a stale fork point once', async () => {
+		const { deps, cursor, appendLocalNotice } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkChat
+			.mockRejectedValueOnce(new ApiError(
+				409,
+				'The view changed',
+				'STALE_VIEW_GENERATION',
+				undefined,
+				true,
+			))
+			.mockResolvedValueOnce({ success: true, chat: forked });
+		deps.refetchTranscript.mockImplementationOnce(async () => {
+			cursor.generationId = 'generation-2';
+			cursor.lastSeq = 12;
+			deps.chatState.entries = [{
+				seq: 12,
+				message: new AssistantMessage('2026-07-29T01:00:00.000Z', 'selected reply'),
+			}];
+		});
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(2);
+		expect(mockForkChat.mock.calls[0]?.[0]).toMatchObject({
+			upToSeq: 9,
+			generationId: 'generation-1',
+		});
+		expect(mockForkChat.mock.calls[1]?.[0]).toMatchObject({
+			chatId: mockForkChat.mock.calls[0]?.[0].chatId,
+			upToSeq: 12,
+			generationId: 'generation-2',
+		});
+		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('preserves the stale fork error when the view refetch fails', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		mockForkChat.mockRejectedValueOnce(new ApiError(
+			409,
+			'The original stale view',
+			'STALE_VIEW_GENERATION',
+			undefined,
+			true,
+		));
+		deps.refetchTranscript.mockRejectedValueOnce(new ApiError(
+			409,
+			'Chat is running',
+			'CHAT_RUNNING',
+			undefined,
+			true,
+		));
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(1);
+		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			'Failed to fork chat: The original stale view',
+		);
+	});
+
+	it('shows the native-history notice without attempting recovery', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		mockForkChat.mockRejectedValueOnce(new ApiError(
+			409,
+			'The message is not persisted',
+			'MESSAGE_NOT_IN_NATIVE_HISTORY',
+			undefined,
+			true,
+		));
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(1);
+		expect(deps.refetchTranscript).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			"This message hasn't been written to the provider's transcript yet. Wait for the turn to finish, then reload from native history and pick the message again.",
+		);
 	});
 });

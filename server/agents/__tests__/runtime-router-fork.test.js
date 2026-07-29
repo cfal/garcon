@@ -144,6 +144,11 @@ describe('AgentRuntimeRouter forks', () => {
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
       messageSequence: 1,
-    })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_UNAVAILABLE',
+      message: 'Chat transcript is unavailable.',
+      status: 422,
+      retryable: false,
+    });
   });
 });

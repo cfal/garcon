@@ -34,6 +34,7 @@ export interface JsonlForkingOptions {
   readonly forkWholeSession?: (request: AgentForkRequest) => Promise<AgentStartedSession | null>;
   readonly transformEntries?: ForkJsonlRequest['transformEntries'];
   readonly createTargetPath?: ForkJsonlRequest['createTargetPath'];
+  readonly allowMissingSourceForWholeSession?: boolean;
   readonly semanticDigest?: (messages: readonly ChatMessage[]) => string;
 }
 
@@ -146,6 +147,7 @@ async function forkJsonlAtPoint(
     sourcePath,
     sourceAgentSessionId,
     cutoffLine,
+    allowMissingSource: !request.point && options.allowMissingSourceForWholeSession === true,
     leadingLineCount,
     retainedMessageCounts,
     sourceSnapshot,

@@ -121,6 +121,26 @@ describe('forkJsonlTranscript', () => {
     expect(forked).not.toContain('"value":"appended"');
   });
 
+  it('materializes an empty whole-session fork before the source transcript exists', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'project', 'source.jsonl');
+
+    const result = await forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+      allowMissingSource: true,
+      transformEntries(input) {
+        expect(input.sourceEntries).toEqual([]);
+        return { entries: input.selectedEntries };
+      },
+    });
+
+    expect(await readFile(result.nativePath, 'utf8')).toBe('');
+    await expect(stat(sourcePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('preserves physical line positions and passes per-entry retained counts', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
     roots.push(root);

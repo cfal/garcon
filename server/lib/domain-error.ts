@@ -24,8 +24,15 @@ export class ValidationDomainError extends DomainError {
 export const ACTIVE_INPUT_NOT_DELIVERED_MESSAGE = 'Active input was not delivered. Retry the request.';
 export const ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE =
   'Active input delivery could not be confirmed after acceptance. Check the chat before sending it again.';
-export const TRANSCRIPT_UNAVAILABLE_MESSAGE =
+export const TRANSCRIPT_UNAVAILABLE_MESSAGE = 'Chat transcript is unavailable.';
+export const TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE =
   'Chat transcript is temporarily unavailable. Retry the request.';
+
+export function transcriptUnavailableMessage(retryable: boolean): string {
+  return retryable
+    ? TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE
+    : TRANSCRIPT_UNAVAILABLE_MESSAGE;
+}
 
 export class ActiveInputDeliveryError extends DomainError {
   readonly deliveryAccepted: boolean;

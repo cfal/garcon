@@ -32,6 +32,7 @@ export interface ForkJsonlRequest {
   readonly sourcePath: string;
   readonly sourceAgentSessionId: string;
   readonly cutoffLine: number | null;
+  readonly allowMissingSource?: boolean;
   readonly leadingLineCount?: number;
   readonly retainedMessageCounts?: ReadonlyMap<number, number>;
   readonly sourceSnapshot?: JsonlSourceSnapshot;
@@ -78,7 +79,7 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
   const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
   const snapshot =
     request.cutoffLine === null
-      ? await readStableSource(request.sourcePath)
+      ? await readStableSource(request.sourcePath, request.allowMissingSource === true)
       : (request.sourceSnapshot ?? (await snapshotJsonlSource(request.sourcePath)));
   const selected =
     request.cutoffLine === null
@@ -128,13 +129,14 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
   });
   const content = retained.length > 0 ? `${retained.join('\n')}\n` : '';
   try {
+    if (request.allowMissingSource) {
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    }
     await fs.writeFile(targetPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
     if (request.cutoffLine === null) {
-      const current = await snapshotJsonlSource(request.sourcePath).catch(
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(request.sourcePath);
-          throw error;
-        },
+      const current = await readCurrentSource(
+        request.sourcePath,
+        request.allowMissingSource === true,
       );
       // A whole-session fork of a working chat races the provider appending its next entry.
       // Transcripts only grow, so the copy stays a faithful snapshot as long as what was read is
@@ -243,14 +245,32 @@ function normalizeRetainedJsonl(
 // Reads a snapshot that is a faithful prefix of the transcript. A working chat appends while the
 // read runs, which only grows the file; the trailing partial line is discarded downstream. A
 // replaced file or one that lost bytes is not a prefix and cannot be forked.
-async function readStableSource(sourcePath: string): Promise<JsonlSourceSnapshot> {
-  const before = await fs.stat(sourcePath);
+async function readStableSource(
+  sourcePath: string,
+  allowMissing: boolean,
+): Promise<JsonlSourceSnapshot> {
+  const before = await fs.stat(sourcePath).catch((error: NodeJS.ErrnoException) => {
+    if (allowMissing && error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (before === null) return { content: Buffer.alloc(0) };
   const content = await fs.readFile(sourcePath);
   const after = await fs.stat(sourcePath);
   if (sourceChangedDuringRead(before, after)) {
     throw new JsonlSourcePrefixChangedError(sourcePath);
   }
   return { content };
+}
+
+async function readCurrentSource(
+  sourcePath: string,
+  allowMissing: boolean,
+): Promise<JsonlSourceSnapshot> {
+  return snapshotJsonlSource(sourcePath).catch((error: NodeJS.ErrnoException) => {
+    if (allowMissing && error.code === 'ENOENT') return { content: Buffer.alloc(0) };
+    if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(sourcePath);
+    throw error;
+  });
 }
 
 function normalizeJsonl(

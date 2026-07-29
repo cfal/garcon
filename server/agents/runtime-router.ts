@@ -21,7 +21,7 @@ import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolve
 import { getMaxSessions } from '../config.js';
 import { resolveFileMentionsInCommand } from '../chats/file-mentions.js';
 import { createLogger } from '../lib/log.js';
-import { DomainError, TRANSCRIPT_UNAVAILABLE_MESSAGE } from '../lib/domain-error.js';
+import { DomainError, transcriptUnavailableMessage } from '../lib/domain-error.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus } from './event-bus.js';
 import type {
@@ -446,7 +446,7 @@ export class AgentRuntimeRouter {
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
         throw new DomainError(
           'TRANSCRIPT_UNAVAILABLE',
-          TRANSCRIPT_UNAVAILABLE_MESSAGE,
+          transcriptUnavailableMessage(error.retryable),
           422,
           error.retryable,
         );

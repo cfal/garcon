@@ -186,6 +186,9 @@ export class ForkCommands {
     if (upToSeq !== undefined && (!Number.isSafeInteger(upToSeq) || upToSeq <= 0)) {
       throw new CommandValidationError('VALIDATION_FAILED', 'upToSeq must be a positive safe integer');
     }
+    if (input.generationId !== undefined && upToSeq === undefined) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'generationId requires upToSeq');
+    }
 
     if (sourceChatId === targetChatId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'sourceChatId and chatId must differ');
@@ -231,6 +234,17 @@ export class ForkCommands {
       // native history first rather than trusting a stale boundary. Reconciling is a no-op once
       // the view is native-backed, and it declines while a turn owns the chat.
       await this.deps.idleReconciler.ensureReconciled(sourceChatId);
+      if (input.generationId !== undefined) {
+        const cursor = this.deps.chatViews.getCursor(sourceChatId);
+        if (cursor === null || cursor.generationId !== input.generationId) {
+          throw new CommandValidationError(
+            'STALE_VIEW_GENERATION',
+            'The view changed since this fork point was chosen. Refetch and pick the message again.',
+            409,
+            true,
+          );
+        }
+      }
       this.assertSeqIsNativeBacked(sourceChatId, upToSeq);
     }
     if (!options.allowExistingTarget && this.deps.chats.getChat(targetChatId)) {
@@ -250,9 +264,6 @@ export class ForkCommands {
   // messages that the native transcript cannot resolve yet. Translating those seqs into native
   // positions silently forks at the wrong message, so they are refused until the turn settles.
   // Only executing sources are checked: an idle transcript has stopped moving underneath the view.
-  // The bound is the current generation's, and the request carries no generation, so a seq the
-  // client captured before a generation replacement is still trusted; binding forks to a
-  // generation would close that remaining window.
   private assertSeqIsNativeBacked(sourceChatId: string, upToSeq: number): void {
     const nativeLastSeq = this.deps.chatViews.getNativeHistoryLastSeq(sourceChatId);
     if (nativeLastSeq === null || upToSeq <= nativeLastSeq) return;

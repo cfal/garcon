@@ -451,6 +451,7 @@ export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
 	upToSeq?: number;
+	generationId?: string;
 }
 
 /** Forks (clones) an existing chat session into a new chat. */

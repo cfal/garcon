@@ -37,7 +37,7 @@ import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   ActiveInputDeliveryError,
   DomainError,
-  TRANSCRIPT_UNAVAILABLE_MESSAGE,
+  transcriptUnavailableMessage,
   ValidationDomainError,
 } from '../lib/domain-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
@@ -230,7 +230,12 @@ function chatSettingsPatchErrorResponse(error: unknown): Response {
     return jsonError(error.message, error.status, error.code, error.retryable);
   }
   if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-    return jsonError(TRANSCRIPT_UNAVAILABLE_MESSAGE, 503, error.code, error.retryable);
+    return jsonError(
+      transcriptUnavailableMessage(error.retryable),
+      503,
+      error.code,
+      error.retryable,
+    );
   }
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
@@ -561,7 +566,12 @@ export default function createChatRoutes({
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
       if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-        return jsonError(TRANSCRIPT_UNAVAILABLE_MESSAGE, 503, error.code, error.retryable);
+        return jsonError(
+          transcriptUnavailableMessage(error.retryable),
+          503,
+          error.code,
+          error.retryable,
+        );
       }
       return jsonErrorFromUnknown(error);
     }
