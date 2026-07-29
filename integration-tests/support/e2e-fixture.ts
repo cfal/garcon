@@ -57,6 +57,23 @@ export class E2eFixture {
       context = await browser.createBrowserContext();
       const page = await context.newPage();
       await page.evaluateOnNewDocument(() => {
+        const localSettingsKey = 'pref_local_settings';
+        try {
+          const stored = JSON.parse(globalThis.localStorage.getItem(localSettingsKey) ?? '{}');
+          const snapshot =
+            stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+          if (typeof snapshot.allowDirectChats !== 'boolean') {
+            globalThis.localStorage.setItem(
+              localSettingsKey,
+              JSON.stringify({ ...snapshot, allowDirectChats: true }),
+            );
+          }
+        } catch {
+          globalThis.localStorage.setItem(
+            localSettingsKey,
+            JSON.stringify({ allowDirectChats: true }),
+          );
+        }
         const scope = globalThis as typeof globalThis & {
           __garconSpaWsOpenCount?: number;
           __garconSpaWsEvents?: unknown[];

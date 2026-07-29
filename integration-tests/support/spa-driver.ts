@@ -44,7 +44,8 @@ export class SpaDriver {
   async startOpenAiDirectChat(content: string): Promise<RecordedCompletionRequest> {
     return this.#startDirectChat({
       content,
-      agentLabel: 'Direct (Chat Completions)',
+      selectedAgentLabel: 'Direct (Chat Completions)',
+      optionAgentLabel: 'Chat Completions',
       modelLabel: 'Integration Echo',
       waitForRequest: () => this.#integration.fakeProviders.openAi.waitForRequest(
         { lastUserText: content },
@@ -56,7 +57,8 @@ export class SpaDriver {
   async startAnthropicDirectChat(content: string): Promise<RecordedAnthropicRequest> {
     return this.#startDirectChat({
       content,
-      agentLabel: 'Direct (Anthropic)',
+      selectedAgentLabel: 'Direct (Anthropic)',
+      optionAgentLabel: 'Anthropic',
       modelLabel: 'Integration Anthropic Echo',
       waitForRequest: () => this.#integration.fakeProviders.anthropic.waitForRequest(
         { lastUserText: content },
@@ -67,7 +69,8 @@ export class SpaDriver {
 
   async #startDirectChat<TRequest>(input: {
     content: string;
-    agentLabel: string;
+    selectedAgentLabel: string;
+    optionAgentLabel: string;
     modelLabel: string;
     waitForRequest: () => Promise<TRequest>;
   }): Promise<TRequest> {
@@ -86,21 +89,24 @@ export class SpaDriver {
       ) === true,
       { timeout: 20_000 },
     );
-    const directProviderSelected = await this.#page.evaluate(({ agentLabel, modelLabel }) => {
-      const dialog = document.querySelector('[role="dialog"]');
-      return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
-        const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-        return name.includes(agentLabel) && name.includes(modelLabel);
-      });
-    }, { agentLabel: input.agentLabel, modelLabel: input.modelLabel });
+    const directProviderSelected = await this.#page.evaluate(
+      ({ selectedAgentLabel, modelLabel }) => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
+          const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+          return name.includes(selectedAgentLabel) && name.includes(modelLabel);
+        });
+      },
+      { selectedAgentLabel: input.selectedAgentLabel, modelLabel: input.modelLabel },
+    );
     if (!directProviderSelected) {
       await this.#clickNewChatModelSelector();
       await this.#page.waitForFunction(
         (agentLabel) => document.body.innerText.includes(agentLabel),
         { timeout: 30_000 },
-        input.agentLabel,
+        input.optionAgentLabel,
       );
-      await this.clickButton(input.agentLabel);
+      await this.clickButton(input.optionAgentLabel);
       await this.clickButton(input.modelLabel);
     }
 
