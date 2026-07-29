@@ -273,7 +273,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		}
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
 		if (applied.status === 'applied') {
-			const shouldCompact = !this.isUserScrolledUp;
+			const shouldCompact =
+				!this.isUserScrolledUp && this.visibleMessageCount <= INITIAL_VISIBLE_MESSAGES;
 			const nextEntries =
 				shouldCompact && applied.messages.length > ACTIVE_TRANSCRIPT_RETENTION_LIMIT
 					? applied.messages.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT)

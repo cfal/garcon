@@ -73,7 +73,6 @@ export class ConversationScrollController {
 		node.scrollTop = node.scrollHeight;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.setPinnedToBottom(true);
-		this.deps.chatState.compactToRecentMessages();
 	}
 
 	async scrollToLatest(): Promise<void> {
@@ -81,10 +80,12 @@ export class ConversationScrollController {
 		if (!chatId) return;
 		if (!this.deps.chatState.isViewingInitialMessages && !this.isScrollingToTop) {
 			this.scrollToBottom();
+			this.deps.chatState.compactToRecentMessages();
 			return;
 		}
 		if (!(await this.#navigateToWindow(chatId, 'latest'))) return;
 		this.scrollToBottom();
+		this.deps.chatState.compactToRecentMessages();
 	}
 
 	async restoreLatestWindow(chatId: string): Promise<boolean> {

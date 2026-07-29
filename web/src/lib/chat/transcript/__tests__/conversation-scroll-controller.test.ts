@@ -124,7 +124,7 @@ describe('ConversationScrollController', () => {
 		cleanup?.();
 	});
 
-	it('releases expanded transcript history when returning to the live edge', () => {
+	it('releases expanded transcript history when returning to the live edge', async () => {
 		const scroller = { scrollTop: 120, scrollHeight: 900, clientHeight: 400 } as HTMLDivElement;
 		const chatState = scrollState({
 			isUserScrolledUp: true,
@@ -138,6 +138,10 @@ describe('ConversationScrollController', () => {
 		});
 
 		controller.scrollToBottom();
+		expect(chatState.compactToRecentMessages).not.toHaveBeenCalled();
+
+		chatState.isUserScrolledUp = true;
+		await controller.scrollToLatest();
 
 		expect(scroller.scrollTop).toBe(900);
 		expect(chatState.isUserScrolledUp).toBe(false);

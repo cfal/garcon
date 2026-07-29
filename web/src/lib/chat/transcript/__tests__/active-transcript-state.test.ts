@@ -123,7 +123,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
 	});
 
-	it('preserves expanded history while scrolled up and compacts it at the live edge', () => {
+	it('preserves expanded history until it is explicitly compacted at the live edge', () => {
 		const chat = new ActiveTranscriptState();
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -133,7 +133,8 @@ describe('ActiveTranscriptState', () => {
 			pageOldestSeq: 1,
 			hasMore: false,
 		});
-		chat.isUserScrolledUp = true;
+		chat.visibleMessageCount = INITIAL_VISIBLE_MESSAGES + 50;
+		chat.isUserScrolledUp = false;
 
 		chat.applyMessages(
 			'chat-1',
@@ -147,6 +148,7 @@ describe('ActiveTranscriptState', () => {
 		);
 
 		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 50);
 		expect(chat.compactToRecentMessages()).toBe(true);
 		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		expect(contentOf(chat.chatMessages[0])).toBe('message-51');
