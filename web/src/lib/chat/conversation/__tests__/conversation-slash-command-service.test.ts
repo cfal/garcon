@@ -437,7 +437,7 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.refetchTranscript).not.toHaveBeenCalled();
 		expect(appendLocalNotice).toHaveBeenCalledWith(
 			'error',
-			"This message hasn't been written to the provider's transcript yet. Wait for the turn to finish, then reload from native history and pick the message again.",
+			"This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
 		);
 	});
 });

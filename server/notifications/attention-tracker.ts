@@ -53,6 +53,7 @@ function userMessageContent(message: ChatMessage): string | null {
 
 interface AgentRegistryDep {
   onMessages(cb: (chatId: string, messages: unknown[]) => void): void;
+  onProcessing(cb: (chatId: string, processing: boolean) => void): void;
   onFinished(cb: (chatId: string, exitCode: number) => void): void;
   onFailed(cb: (chatId: string, errorMessage: string) => void): void;
 }
@@ -110,6 +111,9 @@ export class AttentionTracker {
   // Tracks the last assistant response per chat from onMessages.
   #lastAssistantMessage = new Map<string, string>();
 
+  // Prevents repeated idle events for one settle from composing duplicate notifications.
+  #idleNotified = new Set<string>();
+
   constructor(
     agents: AgentRegistryDep,
     queue: QueueManagerDep,
@@ -132,16 +136,23 @@ export class AttentionTracker {
 
   #wire(): void {
     this.#agents.onMessages((chatId, messages) => this.#handleMessages(chatId, messages));
+    this.#agents.onProcessing((chatId, processing) => {
+      if (processing) this.#idleNotified.delete(chatId);
+    });
     this.#agents.onFinished((chatId, exitCode) => this.#handleFinished(chatId, exitCode));
     this.#agents.onFailed((chatId, errorMessage) => this.#handleFailed(chatId, errorMessage));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
     this.#queue.onSessionStopped((chatId, outcome) => {
       if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId);
     });
-    this.#registry.onChatRemoved?.((chatId) => this.#cleanupChat(chatId));
+    this.#registry.onChatRemoved?.((chatId) => {
+      this.#cleanupChat(chatId);
+      this.#idleNotified.delete(chatId);
+    });
   }
 
   #handleMessages(chatId: string, messages: unknown[]): void {
+    this.#idleNotified.delete(chatId);
     for (const msg of messages) {
       if (msg instanceof AssistantMessage) {
         this.#lastAssistantMessage.set(chatId, msg.content);
@@ -208,6 +219,9 @@ export class AttentionTracker {
     // If a permission request is already pending, the user was already
     // notified about that. Skip the idle notification.
     if (this.#pendingPermissions.has(chatId)) return;
+
+    if (this.#idleNotified.has(chatId)) return;
+    this.#idleNotified.add(chatId);
 
     const result = this.#lastTurnResult.get(chatId);
     this.#lastTurnResult.delete(chatId);

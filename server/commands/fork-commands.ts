@@ -269,7 +269,7 @@ export class ForkCommands {
     if (nativeLastSeq === null || upToSeq <= nativeLastSeq) return;
     throw new CommandValidationError(
       'MESSAGE_NOT_IN_NATIVE_HISTORY',
-      "This message hasn't been written to the provider's transcript yet. Wait for the turn to finish, then reload from native history and pick the message again.",
+      "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
       409,
       true,
     );
