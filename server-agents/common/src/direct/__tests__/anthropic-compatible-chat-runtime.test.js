@@ -146,15 +146,16 @@ describe('AnthropicCompatibleChatRuntime', () => {
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
       return streamResponse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: '<think>private</think>\n' } },
         { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello' } },
-        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world ' } },
       ]);
     });
 
     const runtime = makeRuntime(dir);
     const messagesPromise = waitForMessages(runtime);
 
-    await runtime.startSession({
+    const started = await runtime.startSession({
       chatId: 'chat-1',
       command: 'hello?',
       projectPath: '/tmp/project',
@@ -174,6 +175,9 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(requestBody).not.toHaveProperty('output_config');
     expect(requestBody).not.toHaveProperty('thinking');
     expect(messages[0].content).toBe('hello world');
+    const persisted = await fs.readFile(started.nativePath, 'utf8');
+    expect(persisted).toContain('"content":"hello world"');
+    expect(persisted).not.toContain('private');
   });
 
   it('accepts buffered JSON for an interactive Anthropic session', async () => {
@@ -303,8 +307,10 @@ describe('AnthropicCompatibleChatRuntime', () => {
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
       return streamResponse([
-        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'commit' } },
-        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' message' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: '<thi' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'nk>private</think>' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: '\n commit' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' message ' } },
       ]);
     });
 
@@ -387,7 +393,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
     globalThis.fetch = mock(async () => Response.json({
       content: [
         { type: 'thinking', thinking: 'hidden' },
-        { type: 'text', text: 'visible' },
+        { type: 'text', text: '<think>private</think>\n visible ' },
       ],
     }));
 

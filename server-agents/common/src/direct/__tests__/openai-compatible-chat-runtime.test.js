@@ -204,7 +204,13 @@ describe('OpenAiCompatibleChatRuntime', () => {
   });
 
   it('aggregates streamed one-shot response chunks before returning', async () => {
-    globalThis.fetch = mock(async () => streamResponse('generated', ' message'));
+    globalThis.fetch = mock(async () => streamResponse(
+      '<thi',
+      'nk>private reasoning',
+      '</think>',
+      '\n generated',
+      ' message ',
+    ));
 
     const result = await runOpenAiCompatibleSingleQuery(
       runtimeConfig('/tmp/unused'),
@@ -217,7 +223,7 @@ describe('OpenAiCompatibleChatRuntime', () => {
 
   it('accepts a buffered JSON response from providers that ignore streaming', async () => {
     globalThis.fetch = mock(async () => Response.json({
-      choices: [{ message: { content: 'generated message' } }],
+      choices: [{ message: { content: '<think>private</think>\n generated message ' } }],
     }));
 
     const result = await runOpenAiCompatibleSingleQuery(
@@ -227,6 +233,32 @@ describe('OpenAiCompatibleChatRuntime', () => {
     );
 
     expect(result).toBe('generated message');
+  });
+
+  it('strips think blocks before emitting and persisting interactive text', async () => {
+    const dir = await tempDir();
+    globalThis.fetch = mock(async () => streamResponse(
+      '<think>private',
+      ' reasoning</think>',
+      '\n visible response ',
+    ));
+    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig(dir));
+    const messages = waitForMessages(runtime);
+
+    const started = await runtime.startSession({
+      chatId: 'chat-think',
+      command: 'hello',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    await expect(messages).resolves.toMatchObject([{ content: 'visible response' }]);
+    const persisted = await fs.readFile(started.nativePath, 'utf8');
+    expect(persisted).toContain('"content":"visible response"');
+    expect(persisted).not.toContain('private reasoning');
   });
 
   it('accepts a buffered JSON response for an interactive session', async () => {

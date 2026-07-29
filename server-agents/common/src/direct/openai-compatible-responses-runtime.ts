@@ -17,6 +17,7 @@ import {
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
+import { stripThinkBlocks } from './strip-think-blocks.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -192,6 +193,7 @@ async function readOpenAiResponsesResponse(
   response: Response,
   runtimeLabel: string,
 ): Promise<string> {
+  let text: string;
   if (isJsonResponse(response)) {
     const data = await response.json() as {
       status?: unknown;
@@ -211,34 +213,35 @@ async function readOpenAiResponsesResponse(
           : `Responses API returned status ${data.status}.`);
       throw new Error(`${runtimeLabel} response error: ${detail}`);
     }
-    return extractResponsesOutputText(data);
-  }
-
-  if (!response.body) {
-    throw new Error(`${runtimeLabel} response did not include a stream body.`);
-  }
-
-  const state: ResponsesStreamState = {
-    text: '',
-    errorMessage: null,
-    terminal: null,
-  };
-  await readSseDataEvents(response.body, (data) => {
-    try {
-      consumeResponsesStreamEvent(state, JSON.parse(data));
-    } catch {
-      // Skips malformed chunks from partially-compatible providers.
+    text = extractResponsesOutputText(data);
+  } else {
+    if (!response.body) {
+      throw new Error(`${runtimeLabel} response did not include a stream body.`);
     }
-  });
 
-  if (state.errorMessage) {
-    throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
-  }
-  if (state.terminal !== 'completed') {
-    throw new Error(`${runtimeLabel} stream ended before response.completed.`);
+    const state: ResponsesStreamState = {
+      text: '',
+      errorMessage: null,
+      terminal: null,
+    };
+    await readSseDataEvents(response.body, (data) => {
+      try {
+        consumeResponsesStreamEvent(state, JSON.parse(data));
+      } catch {
+        // Skips malformed chunks from partially-compatible providers.
+      }
+    });
+
+    if (state.errorMessage) {
+      throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
+    }
+    if (state.terminal !== 'completed') {
+      throw new Error(`${runtimeLabel} stream ended before response.completed.`);
+    }
+    text = state.text;
   }
 
-  return state.text;
+  return stripThinkBlocks(text);
 }
 
 export async function runOpenAiResponsesSingleQuery(
@@ -274,7 +277,7 @@ export async function runOpenAiResponsesSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return (await readOpenAiResponsesResponse(response, config.runtimeLabel)).trim();
+    return await readOpenAiResponsesResponse(response, config.runtimeLabel);
   } finally {
     clearTimeout(timer);
   }

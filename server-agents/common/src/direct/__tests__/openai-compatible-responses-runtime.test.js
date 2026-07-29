@@ -120,8 +120,10 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
       requestBody = JSON.parse(init.body);
       return streamResponse([
         { type: 'response.reasoning_summary_text.delta', delta: 'hidden' },
-        { type: 'response.output_text.delta', delta: 'single' },
-        { type: 'response.output_text.delta', delta: ' response' },
+        { type: 'response.output_text.delta', delta: '<thi' },
+        { type: 'response.output_text.delta', delta: 'nk>private</think>' },
+        { type: 'response.output_text.delta', delta: '\n single' },
+        { type: 'response.output_text.delta', delta: ' response ' },
       ]);
     });
 
@@ -162,7 +164,10 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     globalThis.fetch = mock(async () => Response.json({
       output: [{
         type: 'message',
-        content: [{ type: 'output_text', text: 'buffered response' }],
+        content: [{
+          type: 'output_text',
+          text: '<think>private</think>\n buffered response ',
+        }],
       }],
     }));
 
@@ -336,8 +341,9 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
       return streamResponse([
+        { type: 'response.output_text.delta', delta: '<think>private</think>\n' },
         { type: 'response.output_text.delta', delta: 'hello' },
-        { type: 'response.output_text.delta', delta: ' world' },
+        { type: 'response.output_text.delta', delta: ' world ' },
       ]);
     });
 
@@ -371,6 +377,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     const persisted = await fs.readFile(path.join(dir, `${started.agentSessionId}.jsonl`), 'utf8');
     expect(persisted).toContain('"content":"hi"');
     expect(persisted).toContain('"content":"hello world"');
+    expect(persisted).not.toContain('private');
   });
 
   it('accepts a buffered JSON response for an interactive Responses session', async () => {

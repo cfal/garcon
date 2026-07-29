@@ -16,6 +16,7 @@ import {
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
+import { stripThinkBlocks } from './strip-think-blocks.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -158,36 +159,39 @@ async function readAnthropicCompatibleResponse(
   response: Response,
   runtimeLabel: string,
 ): Promise<string> {
+  let text: string;
   if (isJsonResponse(response)) {
     const data = await response.json() as {
       content?: Array<{ type?: string; text?: string }>;
     };
-    return (data.content ?? [])
+    text = (data.content ?? [])
       .filter((part) => part.type === 'text' && typeof part.text === 'string')
       .map((part) => part.text)
       .join('');
+  } else {
+    if (!response.body) {
+      throw new Error(`${runtimeLabel} response did not include a stream body.`);
+    }
+
+    const state: AnthropicStreamState = {
+      text: '',
+      errorMessage: null,
+      sawMessageStop: false,
+    };
+    await readSseDataEvents(response.body, (data) => {
+      consumeAnthropicEvent(state, data);
+    });
+
+    if (state.errorMessage) {
+      throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
+    }
+    if (!state.sawMessageStop) {
+      throw new Error(`${runtimeLabel} stream ended before message_stop.`);
+    }
+    text = state.text;
   }
 
-  if (!response.body) {
-    throw new Error(`${runtimeLabel} response did not include a stream body.`);
-  }
-
-  const state: AnthropicStreamState = {
-    text: '',
-    errorMessage: null,
-    sawMessageStop: false,
-  };
-  await readSseDataEvents(response.body, (data) => {
-    consumeAnthropicEvent(state, data);
-  });
-
-  if (state.errorMessage) {
-    throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
-  }
-  if (!state.sawMessageStop) {
-    throw new Error(`${runtimeLabel} stream ended before message_stop.`);
-  }
-  return state.text;
+  return stripThinkBlocks(text);
 }
 
 export async function runAnthropicCompatibleSingleQuery(
@@ -222,7 +226,7 @@ export async function runAnthropicCompatibleSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return (await readAnthropicCompatibleResponse(response, config.runtimeLabel)).trim();
+    return await readAnthropicCompatibleResponse(response, config.runtimeLabel);
   } finally {
     clearTimeout(timer);
   }

@@ -18,6 +18,7 @@ import {
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
+import { stripThinkBlocks } from './strip-think-blocks.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -163,18 +164,21 @@ async function readOpenAiCompatibleResponse(
   response: Response,
   runtimeLabel: string,
 ): Promise<string> {
+  let text: string;
   if (!isJsonResponse(response)) {
-    return readOpenAiCompatibleTextStream(response, runtimeLabel);
+    text = await readOpenAiCompatibleTextStream(response, runtimeLabel);
+  } else {
+    const parsed = await response.json() as {
+      choices?: Array<{ message?: { content?: unknown } }>;
+      error?: { message?: string };
+    };
+    if (parsed.error?.message) {
+      throw new Error(`${runtimeLabel} response error: ${parsed.error.message}`);
+    }
+    text = appendDeltaText('', parsed.choices?.[0]?.message?.content);
   }
 
-  const parsed = await response.json() as {
-    choices?: Array<{ message?: { content?: unknown } }>;
-    error?: { message?: string };
-  };
-  if (parsed.error?.message) {
-    throw new Error(`${runtimeLabel} response error: ${parsed.error.message}`);
-  }
-  return appendDeltaText('', parsed.choices?.[0]?.message?.content);
+  return stripThinkBlocks(text);
 }
 
 export async function runOpenAiCompatibleSingleQuery(
@@ -209,7 +213,7 @@ export async function runOpenAiCompatibleSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return (await readOpenAiCompatibleResponse(response, config.runtimeLabel)).trim();
+    return await readOpenAiCompatibleResponse(response, config.runtimeLabel);
   } finally {
     clearTimeout(timer);
   }
