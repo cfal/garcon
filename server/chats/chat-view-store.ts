@@ -153,6 +153,16 @@ export class ChatViewStore {
     return view.messages.map((entry) => entry.message);
   }
 
+  // Highest seq the current generation reads back from the provider-native transcript. Live
+  // messages appended during a turn sit above it and have no native counterpart yet, so callers
+  // that translate a client seq into a native transcript position must not cross this boundary.
+  getNativeHistoryLastSeq(chatId: string): number | null {
+    const view = this.#views.get(chatId);
+    if (!view) return null;
+    this.#touch(view);
+    return view.historyLastSeq;
+  }
+
   getRetainedHistoryMessages(chatId: string): ChatMessage[] | null {
     const view = this.#views.get(chatId);
     if (!view) return null;

@@ -434,6 +434,7 @@ export async function startServer(): Promise<void> {
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,
       queue,
+      chatViews,
       ledger: commandLedger,
       settings,
       recentTitleIcons,

@@ -88,7 +88,7 @@ export type AgentRegistryDep = Pick<
   | 'runSingleQuery'
   | 'supportsFork'
   | 'supportsForkAtMessage'
-  | 'supportsForkAtMessageWhileRunning'
+  | 'supportsForkWhileRunning'
   | 'supportsUpdateProjectPath'
   | 'requiresNativePathForProjectPathUpdate'
   | 'isAgentSessionRunning'
@@ -118,9 +118,14 @@ export type ForkChatFileCopyDep = (args: {
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
 }) => Promise<ForkChatFileCopyResult>;
 
+export interface ChatViewSeqDep {
+  getNativeHistoryLastSeq(chatId: string): number | null;
+}
+
 export interface ChatCommandServiceDeps {
   chats: IChatRegistry;
   queue: ChatExecutionCommands;
+  chatViews: ChatViewSeqDep;
   ledger: CommandLedger;
   settings: SettingsDep;
   recentTitleIcons: RecentTitleIconSource;
