@@ -117,7 +117,19 @@ export function handleClaudeProviderLifecycleMessage(
     handlers.retire();
     return true;
   }
-  if (protocol.backgroundContinuationPending && !protocol.abortRequested) {
+  // Waits for a continuation only while tasks are still outstanding. A task
+  // that completed before the input result was consumed mid-turn and produces
+  // no continuation, so idle with an empty task set is the run boundary even
+  // though the pending flag was never cleared by a continuation result. The
+  // Agent SDK reaches the same conclusion for its stdin-close decision: an
+  // empty in-flight set at a turn boundary must settle, because no bookkeeping
+  // can distinguish a consumed completion from one still owed. See
+  // https://github.com/anthropics/claude-agent-sdk-python/blob/f8b9ec92/src/claude_agent_sdk/_internal/query.py#L863-L894
+  if (
+    protocol.backgroundContinuationPending
+    && !protocol.abortRequested
+    && session.backgroundTaskCount > 0
+  ) {
     handlers.logger.info(
       'Claude CLI became idle while a background continuation remains pending',
       details,

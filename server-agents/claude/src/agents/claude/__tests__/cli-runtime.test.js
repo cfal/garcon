@@ -712,6 +712,152 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('settles at idle when a background task completed before the input result', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const logger = createLogger();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime(logger);
+      const finishes = [];
+      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      const input = await enqueueInputStarted(fake);
+      enqueueProviderState(fake, 'running');
+      fake.stdout.enqueue(encoder.encode([
+        JSON.stringify({
+          type: 'system',
+          subtype: 'background_tasks_changed',
+          tasks: [{ task_id: 'timed-out-watch', task_type: 'local_bash' }],
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Watch moved to the background.' }],
+        }),
+        JSON.stringify({
+          type: 'system',
+          subtype: 'background_tasks_changed',
+          tasks: [],
+        }),
+        JSON.stringify({
+          type: 'system',
+          subtype: 'task_notification',
+          task_id: 'timed-out-watch',
+          status: 'completed',
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Checks passed; merged.' }],
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          user_message_uuid: input.uuid,
+          result: 'Checks passed; merged.',
+        }),
+      ].join('\n') + '\n'));
+      await Promise.resolve();
+      enqueueProviderState(fake, 'idle');
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      expect(logger.info).not.toHaveBeenCalledWith(
+        'Claude CLI became idle while a background continuation remains pending',
+        expect.anything(),
+      );
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('keeps waiting at idle while a background task is still running', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const logger = createLogger();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime(logger);
+      const finishes = [];
+      runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+
+      const start = runtime.startClaudeCliSession(startOptions());
+      const input = await enqueueInputStarted(fake);
+      enqueueProviderState(fake, 'running');
+      fake.stdout.enqueue(encoder.encode([
+        JSON.stringify({
+          type: 'system',
+          subtype: 'background_tasks_changed',
+          tasks: [{ task_id: 'long-build', task_type: 'local_bash' }],
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Build launched in the background.' }],
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          user_message_uuid: input.uuid,
+          result: 'Build launched in the background.',
+        }),
+      ].join('\n') + '\n'));
+      await Promise.resolve();
+      enqueueProviderState(fake, 'idle');
+      const sawPendingLog = () => logger.info.mock.calls.some(
+        ([message]) => message === 'Claude CLI became idle while a background continuation remains pending',
+      );
+      for (let attempt = 0; attempt < 50 && !sawPendingLog(); attempt += 1) {
+        await Promise.resolve();
+      }
+
+      expect(finishes).toEqual([]);
+      expect(runtime.isClaudeInternalSessionRunning('expected-session')).toBe(true);
+      expect(logger.info).toHaveBeenCalledWith(
+        'Claude CLI became idle while a background continuation remains pending',
+        expect.objectContaining({ backgroundTaskCount: 1 }),
+      );
+
+      fake.stdout.enqueue(encoder.encode([
+        JSON.stringify({
+          type: 'system',
+          subtype: 'background_tasks_changed',
+          tasks: [],
+        }),
+        JSON.stringify({
+          type: 'system',
+          subtype: 'session_state_changed',
+          state: 'running',
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Build finished.' }],
+        }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Build finished.',
+        }),
+        JSON.stringify({
+          type: 'system',
+          subtype: 'session_state_changed',
+          state: 'idle',
+        }),
+      ].join('\n') + '\n'));
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('logs and retires provider activity without an active Garcon turn', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
