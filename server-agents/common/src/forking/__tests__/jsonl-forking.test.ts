@@ -333,6 +333,30 @@ describe('createJsonlForking empty native prefixes', () => {
     expect(await readdir(fixture.root)).toEqual(['source.jsonl']);
   });
 
+  it('rejects a whole-session fork whose recorded session has no transcript path', async () => {
+    const fixture = await createFixture();
+    const forking = createJsonlForking({
+      ...fixture.options,
+      allowUnmaterializedWholeSession: true,
+    });
+    const nativeSession = fixture.nativeSessions.encode({
+      path: null,
+      agentSessionId: sourceAgentSessionId,
+      modelEndpointId: null,
+    });
+
+    await expect(forking.fork({
+      ...fixture.request,
+      point: null,
+      source: {
+        ...fixture.request.source,
+        nativeSession,
+      },
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_UNAVAILABLE',
+    });
+  });
+
   it('preserves provider metadata without adding rendered messages', async () => {
     const fixture = await createFixture();
     await writeFile(

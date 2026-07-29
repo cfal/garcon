@@ -107,6 +107,7 @@ export interface AgentStartedSession {
 
 export interface AgentRunningSession {
   readonly agentSessionId: string;
+  // Provider-worded status for diagnostics surfaces only; never branch on it.
   readonly status: string | null;
   readonly startedAt: string | null;
 }

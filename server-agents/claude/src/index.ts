@@ -194,7 +194,6 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       rewriteEntry: projectClaudeForkEntry,
       transformEntries: transformClaudeForkTranscript,
       semanticDigest: claudeForkSemanticDigest,
-      allowMissingSourceForWholeSession: true,
       allowUnmaterializedWholeSession: true,
     });
     this.endpoints = {

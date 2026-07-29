@@ -124,7 +124,6 @@ describe('Claude JSONL forking', () => {
       rewriteEntry: projectClaudeForkEntry,
       transformEntries: transformClaudeForkTranscript,
       semanticDigest: claudeForkSemanticDigest,
-      allowMissingSourceForWholeSession: true,
       allowUnmaterializedWholeSession: true,
     });
 
@@ -197,7 +196,6 @@ describe('Claude JSONL forking', () => {
       rewriteEntry: projectClaudeForkEntry,
       transformEntries: transformClaudeForkTranscript,
       semanticDigest: claudeForkSemanticDigest,
-      allowMissingSourceForWholeSession: true,
       allowUnmaterializedWholeSession: true,
     });
 

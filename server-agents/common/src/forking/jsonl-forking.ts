@@ -35,7 +35,8 @@ export interface JsonlForkingOptions {
   readonly forkWholeSession?: (request: AgentForkRequest) => Promise<AgentStartedSession | null>;
   readonly transformEntries?: ForkJsonlRequest['transformEntries'];
   readonly createTargetPath?: ForkJsonlRequest['createTargetPath'];
-  readonly allowMissingSourceForWholeSession?: boolean;
+  // Whole-session forks without persisted output remain unmaterialized. This also tolerates
+  // a missing source file; message-point forks always require materialized native history.
   readonly allowUnmaterializedWholeSession?: boolean;
   readonly semanticDigest?: (messages: readonly ChatMessage[]) => string;
 }
@@ -70,7 +71,11 @@ async function forkJsonlAtPoint(
   const sourceAgentSessionId = request.source.agentSessionId ?? sourceNative.agentSessionId;
   const sourcePath = sourceNative.path;
   if (!sourceAgentSessionId || !sourcePath) {
-    if (!request.point && options.allowUnmaterializedWholeSession && !sourceAgentSessionId) {
+    if (
+      !request.point
+      && options.allowUnmaterializedWholeSession
+      && !sourceAgentSessionId
+    ) {
       return { kind: 'unmaterialized' };
     }
     throw new AgentIntegrationError(
@@ -152,7 +157,6 @@ async function forkJsonlAtPoint(
     sourcePath,
     sourceAgentSessionId,
     cutoffLine,
-    allowMissingSource: !request.point && options.allowMissingSourceForWholeSession === true,
     allowUnmaterializedWholeSession:
       !request.point && options.allowUnmaterializedWholeSession === true,
     leadingLineCount,
