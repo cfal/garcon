@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { ChatMessage } from '../../common/chat-types.js';
 import { createLogger } from '../lib/log.js';
 import { ChatRunningError } from './errors.js';
@@ -5,6 +6,7 @@ import { ChatRunningError } from './errors.js';
 const logger = createLogger('chat-idle-reconcile');
 
 const DEFAULT_DEBOUNCE_MS = 5_000;
+const DEFAULT_SETTLE_MS = 250;
 
 interface NativeHistorySource {
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
@@ -22,6 +24,7 @@ export interface IdleNativeReconcilerOptions {
   ownsExecution(chatId: string): boolean;
   onGenerationReset(chatId: string, generationId: string, lastSeq: number): void;
   debounceMs?: number;
+  settleMs?: number;
 }
 
 // Rebuilds a settled chat's view from native history so its sequence numbers address transcript
@@ -35,6 +38,7 @@ export class IdleNativeReconciler {
   readonly #ownsExecution: (chatId: string) => boolean;
   readonly #onGenerationReset: (chatId: string, generationId: string, lastSeq: number) => void;
   readonly #debounceMs: number;
+  readonly #settleMs: number;
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #inFlight = new Map<string, Promise<void>>();
   #stopped = false;
@@ -45,6 +49,7 @@ export class IdleNativeReconciler {
     this.#ownsExecution = options.ownsExecution;
     this.#onGenerationReset = options.onGenerationReset;
     this.#debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.#settleMs = options.settleMs ?? DEFAULT_SETTLE_MS;
   }
 
   // Chats can report idle several times per settle, and a new turn can start during the wait, so
@@ -82,23 +87,36 @@ export class IdleNativeReconciler {
     return run;
   }
 
+  // Contains every failure: this runs from a fire-and-forget timer, so anything it lets escape
+  // becomes an unhandled rejection instead of a skipped reconcile.
   async #reconcile(chatId: string): Promise<void> {
-    if (this.#stopped || this.#ownsExecution(chatId)) return;
-    const before = this.#views.getCursor(chatId);
-    // Nothing above the seqs read from the transcript means every client seq already addresses
-    // a native position, so there is nothing to rebuild.
-    if (before === null || before.lastSeq === this.#views.getNativeHistoryLastSeq(chatId)) return;
     try {
+      if (this.#stopped || this.#ownsExecution(chatId)) return;
+      const before = this.#views.getCursor(chatId);
+      // Nothing above the seqs read from the transcript means every client seq already addresses
+      // a native position, so there is nothing to rebuild.
+      if (before === null || before.lastSeq === this.#views.getNativeHistoryLastSeq(chatId)) return;
+      // Providers persist a settled turn after its live events, so a single read can catch the
+      // transcript mid-flush and rebuild the view from a rendering that is about to change,
+      // surrendering messages the user already saw. Acting only when two spaced reads agree
+      // defers to the flush; the next idle signal retries once the transcript stops moving.
+      const first = await this.#source.loadNativeMessages(chatId);
+      await sleep(this.#settleMs);
+      if (this.#stopped) return;
       const messages = await this.#source.loadNativeMessages(chatId);
+      if (this.#stopped || !sameRendering(first, messages)) return;
       await this.#views.reconcileNativeSnapshot(chatId, messages);
+      const after = this.#views.getCursor(chatId);
+      if (this.#stopped || !after || before.generationId === after.generationId) return;
+      this.#onGenerationReset(chatId, after.generationId, after.lastSeq);
     } catch (error) {
       // A turn that started during the load owns the view again; the next idle signal retries.
       if (error instanceof ChatRunningError) return;
       logger.warn(`reconcile failed chat=${chatId}:`, error);
-      return;
     }
-    const after = this.#views.getCursor(chatId);
-    if (!after || (before && before.generationId === after.generationId)) return;
-    this.#onGenerationReset(chatId, after.generationId, after.lastSeq);
   }
+}
+
+function sameRendering(a: ChatMessage[], b: ChatMessage[]): boolean {
+  return a.length === b.length && JSON.stringify(a) === JSON.stringify(b);
 }
