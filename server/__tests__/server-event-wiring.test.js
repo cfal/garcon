@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { UserMessage } from '../../common/chat-types.js';
+import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
 import { wireServerEvents } from '../server-event-wiring.js';
 
@@ -43,6 +43,7 @@ function createWiringFixture(overrides = {}) {
     getQueuedTurnFinalization: mock(() => null),
     onAgentTurnTerminal: mock(() => undefined),
     checkChatIdle: mock(async () => undefined),
+    ...overrides.queue,
   };
   const metadata = {
     updateFromAppendedMessages: mock(() => undefined),
@@ -207,6 +208,46 @@ describe('server event wiring', () => {
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
       { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running' },
     ]);
+  });
+
+  it('broadcasts a turn\'s final message before its terminal processing transition', async () => {
+    const published = [];
+    const append = deferred();
+    const finalReply = new AssistantMessage('2026-06-01T00:00:00.000Z', 'final reply');
+    let phase = 'running';
+    let invalidate;
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+      processing: { phase: mock(() => phase) },
+      chatViews: {
+        appendAfterEnsuringGeneration: mock(() => append.promise),
+      },
+      queue: {
+        onProcessingInvalidated: mock((callback) => { invalidate = callback; }),
+        onAgentTurnTerminal: mock(() => {
+          phase = null;
+          invalidate('chat-1');
+        }),
+      },
+    });
+
+    fixture.agentListeners.messages('chat-1', [finalReply], { turnId: 'turn-1' });
+    fixture.agentListeners.finished('chat-1', 0, { turnId: 'turn-1' });
+    append.resolve({
+      generationId: 'generation-1',
+      messages: [{ seq: 1, message: finalReply }],
+      lastSeq: 1,
+    });
+    await fixture.wiring.waitForIdle();
+
+    const types = published.map((message) => message.type);
+    expect(types.indexOf('chat-messages')).toBeGreaterThanOrEqual(0);
+    expect(types.indexOf('chat-messages'))
+      .toBeLessThan(types.indexOf('chat-processing-updated'));
+    expect(types.indexOf('chat-processing-updated'))
+      .toBeLessThan(types.indexOf('agent-run-finished'));
   });
 
   it('clears optimistic processing before publishing a queued launch failure', async () => {
