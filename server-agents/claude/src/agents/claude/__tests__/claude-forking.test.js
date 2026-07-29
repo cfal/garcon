@@ -118,7 +118,7 @@ describe('Claude JSONL forking', () => {
     };
     const forking = createJsonlForking({
       host,
-      supportsAtMessageWhileRunning: true,
+      supportsWhileRunning: true,
       transcript,
       nativeSessions,
       rewriteEntry: projectClaudeForkEntry,

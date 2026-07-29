@@ -78,8 +78,8 @@ export class AgentCatalogService {
       kind: "agent",
       supportsFork: integration.forking !== null,
       supportsForkAtMessage: integration.forking?.supportsAtMessage ?? false,
-      supportsForkAtMessageWhileRunning:
-        integration.forking?.supportsAtMessageWhileRunning ?? false,
+      supportsForkWhileRunning:
+        integration.forking?.supportsWhileRunning ?? false,
       supportsUpdateProjectPath:
         integration.descriptor.supportsProjectPathUpdate,
       supportsImages: integration.descriptor.supportsImages,

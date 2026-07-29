@@ -35,7 +35,7 @@ describe('OpenCodeAgentIntegration', () => {
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: false,
-      supportsAtMessageWhileRunning: false,
+      supportsWhileRunning: false,
     });
     expect(integration.auth).toBeDefined();
     expect(integration.singleQuery).toBeDefined();

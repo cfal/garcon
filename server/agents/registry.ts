@@ -45,7 +45,7 @@ export interface AgentRegistryServiceContract {
   supportsAuthLoginCompletion(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
   supportsForkAtMessage(agentId: string): boolean;
-  supportsForkAtMessageWhileRunning(agentId: string): boolean;
+  supportsForkWhileRunning(agentId: string): boolean;
   supportsUpdateProjectPath(agentId: string): boolean;
   requiresNativePathForProjectPathUpdate(agentId: string): boolean;
   supportsImages(agentId: string): boolean;
@@ -166,7 +166,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
   supportsFork(agentId: string): boolean { return this.#directory.get(agentId)?.forking !== null; }
   supportsForkAtMessage(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessage ?? false; }
-  supportsForkAtMessageWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsAtMessageWhileRunning ?? false; }
+  supportsForkWhileRunning(agentId: string): boolean { return this.#directory.get(agentId)?.forking?.supportsWhileRunning ?? false; }
   supportsUpdateProjectPath(agentId: string): boolean { return this.#directory.get(agentId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string): boolean {
     return this.#directory.get(agentId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;

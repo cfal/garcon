@@ -18,7 +18,7 @@ export interface CodexForkingOptions {
 export function createCodexForking(options: CodexForkingOptions): AgentForking {
   return {
     supportsAtMessage: true,
-    supportsAtMessageWhileRunning: options.legacy.supportsAtMessageWhileRunning,
+    supportsWhileRunning: options.legacy.supportsWhileRunning,
     async fork(request) {
       request.admission.signal.throwIfAborted();
       const profile = await options.resolveProfile(request);

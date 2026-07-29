@@ -121,7 +121,7 @@ export default class CursorAgentIntegration implements AgentIntegration {
     };
     this.forking = {
       supportsAtMessage: false,
-      supportsAtMessageWhileRunning: false,
+      supportsWhileRunning: false,
       async fork(request) {
         request.admission.signal.throwIfAborted();
         if (request.point) {

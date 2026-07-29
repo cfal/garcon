@@ -26,7 +26,7 @@ function agentEntry(id: string, overrides: Record<string, unknown> = {}): Record
 		kind: 'agent',
 		supportsFork: false,
 		supportsForkAtMessage: false,
-		supportsForkAtMessageWhileRunning: false,
+		supportsForkWhileRunning: false,
 		supportsUpdateProjectPath: false,
 		supportsImages: false,
 		acceptsApiProviderEndpoints: false,

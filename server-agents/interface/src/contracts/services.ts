@@ -56,7 +56,9 @@ export interface AgentCommands {
 
 export interface AgentForking {
   readonly supportsAtMessage: boolean;
-  readonly supportsAtMessageWhileRunning: boolean;
+  // Gates both whole-session and at-message forks: a running provider session must tolerate
+  // having its transcript read and copied while it is still appending to it.
+  readonly supportsWhileRunning: boolean;
   fork(request: AgentForkRequest): Promise<AgentStartedSession>;
   discard(session: AgentStartedSession, signal: AbortSignal): Promise<void>;
 }

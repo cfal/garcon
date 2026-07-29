@@ -53,7 +53,7 @@ function createIntegration() {
       }),
     },
     auth: { launchLogin: async () => ({}) },
-    forking: { supportsAtMessage: true, supportsAtMessageWhileRunning: false },
+    forking: { supportsAtMessage: true, supportsWhileRunning: false },
     endpoints: {},
   };
 }
@@ -84,7 +84,7 @@ describe("AgentCatalogService", () => {
       label: "Sample Agent",
       supportsFork: true,
       supportsForkAtMessage: true,
-      supportsForkAtMessageWhileRunning: false,
+      supportsForkWhileRunning: false,
       supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,

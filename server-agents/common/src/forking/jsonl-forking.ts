@@ -23,7 +23,7 @@ import {
 
 export interface JsonlForkingOptions {
   readonly host: Pick<AgentHost, 'carryOver'>;
-  readonly supportsAtMessageWhileRunning: boolean;
+  readonly supportsWhileRunning: boolean;
   readonly transcript: Pick<AgentTranscript, 'load' | 'resolveNativeSession'>;
   readonly nativeSessions: PathNativeSessionCodec;
   readonly rewriteEntry?: (entry: unknown, context: ForkTranscriptEntryContext) => unknown;
@@ -40,7 +40,7 @@ export interface JsonlForkingOptions {
 export function createJsonlForking(options: JsonlForkingOptions): AgentForking {
   return {
     supportsAtMessage: true,
-    supportsAtMessageWhileRunning: options.supportsAtMessageWhileRunning,
+    supportsWhileRunning: options.supportsWhileRunning,
     async fork(request) {
       request.admission.signal.throwIfAborted();
       if (!request.point && options.forkWholeSession) {

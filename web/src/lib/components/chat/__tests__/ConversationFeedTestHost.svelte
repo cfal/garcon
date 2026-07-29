@@ -82,7 +82,7 @@
 		supportsForkAtMessage() {
 			return false;
 		},
-		supportsForkAtMessageWhileRunning() {
+		supportsForkWhileRunning() {
 			return false;
 		},
 	} as never);

@@ -37,7 +37,7 @@ describe('CodexAgentIntegration', () => {
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       supportsAtMessage: true,
-      supportsAtMessageWhileRunning: true,
+      supportsWhileRunning: true,
     });
     expect(integration.auth).toBeDefined();
     expect(integration.commands).toBeDefined();

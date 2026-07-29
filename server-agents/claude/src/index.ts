@@ -188,7 +188,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
     };
     this.forking = createJsonlForking({
       host,
-      supportsAtMessageWhileRunning: true,
+      supportsWhileRunning: true,
       transcript: this.transcript,
       nativeSessions,
       rewriteEntry: projectClaudeForkEntry,

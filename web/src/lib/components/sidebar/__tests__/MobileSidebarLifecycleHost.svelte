@@ -143,7 +143,7 @@
 		supportsFork() {
 			return true;
 		},
-		supportsForkAtMessageWhileRunning() {
+		supportsForkWhileRunning() {
 			return false;
 		},
 		supportsUpdateProjectPath() {
