@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { CodexAppServerRpcError } from '../app-server/client.ts';
-import { createCodexForking } from '../codex-forking.ts';
+import { createCodexForking, isCodexThreadNotFound } from '../codex-forking.ts';
 
 const legacyProfile = {
   mode: 'legacy', nativePath: '/tmp/legacy.jsonl', threadId: 'source',
@@ -93,5 +93,27 @@ describe('createCodexForking', () => {
       details: { operation: 'fork', historyMode: 'paginated', provider: 'codex' },
     });
     expect(values.legacyFork).not.toHaveBeenCalled();
+  });
+});
+
+describe('isCodexThreadNotFound', () => {
+  it('matches only the pinned app-server missing-rollout error', () => {
+    const threadId = '00000000-0000-4000-8000-000000000001';
+    expect(isCodexThreadNotFound(new CodexAppServerRpcError(
+      `no rollout found for thread id ${threadId}`,
+      -32600,
+    ))).toBe(true);
+    expect(isCodexThreadNotFound(new CodexAppServerRpcError(
+      `no rollout found for thread id ${threadId}`,
+      -32602,
+    ))).toBe(false);
+    expect(isCodexThreadNotFound(new CodexAppServerRpcError(
+      `thread not found: ${threadId}`,
+      -32600,
+    ))).toBe(false);
+    expect(isCodexThreadNotFound(new CodexAppServerRpcError(
+      'failed to resolve rollout path `/tmp/missing.jsonl`: file does not exist',
+      -32600,
+    ))).toBe(true);
   });
 });

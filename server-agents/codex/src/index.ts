@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { CODEX_MODELS } from '@garcon/common/models';
 import {
@@ -22,7 +23,10 @@ import { createCodexConfig, type CodexConfig } from './config.js';
 import { getCodexAuthStatus } from './agents/codex/codex-auth.js';
 import { CodexExecution } from './agents/codex/execution.js';
 import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
-import { createCodexForking } from './agents/codex/codex-forking.js';
+import {
+  createCodexForking,
+  isCodexThreadNotFound,
+} from './agents/codex/codex-forking.js';
 import { createCodexForkTargetPath } from './agents/codex/fork-target-path.js';
 import { inspectCodexHistoryProfile } from './agents/codex/history-profile.js';
 import { createCodexTranscript } from './agents/codex/transcript.js';
@@ -150,6 +154,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       nativeSessions,
       createTargetPath: createCodexForkTargetPath,
       createRewriteEntry: createCodexForkTranscriptRewriter,
+      allowUnmaterializedWholeSession: true,
       forkWholeSession: (request) => forkWholeCodexSession(
         request,
         host,
@@ -171,11 +176,12 @@ export default class CodexAgentIntegration implements AgentIntegration {
           source = nativeSessions.decode(reference);
         }
         if (!source.path) {
-          throw new AgentIntegrationError(
-            'TRANSCRIPT_UNAVAILABLE',
-            'Source native transcript is unavailable',
-            false,
-          );
+          if (!request.point) return null;
+          throw transcriptUnavailableForFork();
+        }
+        if (!await codexRolloutHasContent(source.path)) {
+          if (!request.point) return null;
+          throw transcriptUnavailableForFork();
         }
         return inspectCodexHistoryProfile({
           nativePath: source.path,
@@ -264,16 +270,25 @@ async function forkWholeCodexSession(
       false,
     );
   }
-  const result = await runtime.forkSession({
-    sourceSession: {
-      projectPath: request.source.projectPath,
-      model: request.source.model,
-      agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
-      nativePath: source.path,
-    },
-    envOverrides: buildCodexHostEnvironment(config),
-    codexConfig: endpointRuntime?.codexConfig,
-  });
+  if (source.path && !await codexRolloutHasContent(source.path)) return null;
+  let result;
+  try {
+    result = await runtime.forkSession({
+      sourceSession: {
+        projectPath: request.source.projectPath,
+        model: request.source.model,
+        agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
+        nativePath: source.path,
+      },
+      envOverrides: buildCodexHostEnvironment(config),
+      codexConfig: endpointRuntime?.codexConfig,
+    });
+  } catch (error) {
+    // A never-persisted thread cannot fork natively; the JSONL path resolves it
+    // to an unmaterialized child without weakening any other app-server failure.
+    if (isCodexThreadNotFound(error)) return null;
+    throw error;
+  }
   if (!result) return null;
   return {
     agentSessionId: result.agentSessionId,
@@ -283,6 +298,23 @@ async function forkWholeCodexSession(
       modelEndpointId: request.endpoint?.endpointId ?? source.modelEndpointId,
     }),
   };
+}
+
+async function codexRolloutHasContent(nativePath: string): Promise<boolean> {
+  try {
+    return (await stat(nativePath)).size > 0;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function transcriptUnavailableForFork(): AgentIntegrationError {
+  return new AgentIntegrationError(
+    'TRANSCRIPT_UNAVAILABLE',
+    'Source native transcript is unavailable',
+    false,
+  );
 }
 
 async function spawnCodexLoginPty(

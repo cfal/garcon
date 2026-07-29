@@ -9,7 +9,7 @@ import type { CodexHistoryProfile } from './history-profile.js';
 
 export interface CodexForkingOptions {
   readonly legacy: AgentForking;
-  readonly resolveProfile: (request: AgentForkRequest) => Promise<CodexHistoryProfile>;
+  readonly resolveProfile: (request: AgentForkRequest) => Promise<CodexHistoryProfile | null>;
   readonly forkPaginatedWhole: (
     request: AgentForkRequest,
   ) => Promise<AgentStartedSession | null>;
@@ -22,6 +22,7 @@ export function createCodexForking(options: CodexForkingOptions): AgentForking {
     async fork(request) {
       request.admission.signal.throwIfAborted();
       const profile = await options.resolveProfile(request);
+      if (!profile) return options.legacy.fork(request);
       if (profile.mode === 'legacy') return options.legacy.fork(request);
       if (request.point) throw paginatedForkUnsupported('fork-at-message');
 
@@ -38,6 +39,17 @@ export function createCodexForking(options: CodexForkingOptions): AgentForking {
       return options.legacy.discard(session, signal);
     },
   };
+}
+
+export function isCodexThreadNotFound(error: unknown): boolean {
+  // Codex 0.144.6 maps absent stored threads and rollout paths to INVALID_REQUEST.
+  // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server/src/request_processors/thread_processor.rs#L4174-L4184
+  return error instanceof CodexAppServerRpcError
+    && error.code === -32600
+    && (
+      /^no rollout found for thread id [0-9a-f-]{36}$/i.test(error.message)
+      || /^failed to resolve rollout path `[^`]+`: file does not exist$/.test(error.message)
+    );
 }
 
 function isUnsupportedPaginatedFork(error: unknown): boolean {
