@@ -239,9 +239,9 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
       stop: async () => {
-        runtime.shutdown();
+        await runtime.shutdown();
         login.stop();
-        skillDiscovery.clear();
+        await skillDiscovery.clear();
       },
     });
   }

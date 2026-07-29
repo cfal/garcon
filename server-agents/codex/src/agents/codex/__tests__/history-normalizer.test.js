@@ -581,7 +581,7 @@ describe('normalizeCodexJsonlEntry', () => {
   });
 
   describe('response_item function_call_output', () => {
-    it('produces tool-result with call_id pairing', () => {
+    it('passes through non-wrapper output with call_id pairing', () => {
       const entry = {
         type: 'response_item',
         timestamp: ts,
@@ -598,6 +598,63 @@ describe('normalizeCodexJsonlEntry', () => {
         toolId: 'call_abc',
         content: { raw: 'command output here' },
         isError: false,
+      }]);
+    });
+
+    it('strips a successful exec wrapper from restored output', () => {
+      const output = [
+        'Chunk ID: 8f01bd',
+        'Wall time: 0.0001 seconds',
+        'Process exited with code 0',
+        'Original token count: 16',
+        'Output:',
+        'GARCON_LIVE_CODEX_MANUAL_BYPASS_OUTPUT',
+      ].join('\n');
+
+      const result = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'function_call_output',
+          call_id: 'call_success',
+          output,
+        },
+      });
+
+      expect(result.canonical).toEqual([{
+        type: 'tool-result',
+        timestamp: ts,
+        toolId: 'call_success',
+        content: { raw: 'GARCON_LIVE_CODEX_MANUAL_BYPASS_OUTPUT' },
+        isError: false,
+      }]);
+    });
+
+    it('marks failed wrapped exec output as an error', () => {
+      const output = [
+        'Chunk ID: failed1',
+        'Wall time: 0.25 seconds',
+        'Process exited with code 1',
+        'Output:',
+        'permission denied',
+      ].join('\n');
+
+      const result = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'function_call_output',
+          call_id: 'call_failure',
+          output,
+        },
+      });
+
+      expect(result.canonical).toEqual([{
+        type: 'tool-result',
+        timestamp: ts,
+        toolId: 'call_failure',
+        content: { raw: 'permission denied' },
+        isError: true,
       }]);
     });
 

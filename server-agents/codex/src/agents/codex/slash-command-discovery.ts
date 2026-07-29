@@ -43,12 +43,20 @@ export class CodexSkillDiscovery {
     return (await this.#ensure(projectPath)).skills;
   }
 
-  clear(): void {
+  async clear(): Promise<void> {
     this.#cache.clear();
     this.#inFlight.clear();
     this.#generation += 1;
-    for (const client of this.#activeClients) client.shutdown();
+    const clients = [...this.#activeClients];
     this.#activeClients.clear();
+    const results = await Promise.allSettled(clients.map((client) => client.shutdown()));
+    for (const result of results) {
+      if (result.status === 'fulfilled') continue;
+      this.options.logger.warn('Codex app-server shutdown failed', {
+        operation: 'skills-discovery-clear',
+        error: errorMessage(result.reason),
+      });
+    }
   }
 
   #ensure(projectPath: string): Promise<CacheEntry> {
@@ -102,7 +110,7 @@ export class CodexSkillDiscovery {
     } finally {
       if (timer) clearTimeout(timer);
       this.#activeClients.delete(client);
-      client.shutdown();
+      await client.shutdown();
     }
   }
 }

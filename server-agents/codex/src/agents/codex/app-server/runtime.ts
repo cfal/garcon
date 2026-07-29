@@ -28,7 +28,6 @@ import type {
   JsonRpcServerRequest,
   CodexThread,
   CodexThreadGoal,
-  CodexThreadGoalStatus,
   ThreadGoalClearedNotification,
   ThreadGoalUpdatedNotification,
   ThreadGoalSetResponse,
@@ -52,6 +51,7 @@ import {
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
 import type { CodexGoalCommand } from '../goal-command.js';
 import { cleanupMaterializedGoalDraft, materializeGoalDraft } from './goal-files.js';
+import { editedGoalStatus, formatGoalStatusMessage, formatGoalUpdatedMessage, goalStatusLabel } from './goal-display.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 
 type RunningStatus = 'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted';
@@ -127,6 +127,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #pendingApprovals = new Map<string, CodexPendingApproval & { client: CodexAppServerClient }>();
   #bufferingClients = new Set<CodexAppServerClient>();
   #bufferedClientEvents = new Map<CodexAppServerClient, BufferedClientEvent[]>();
+  #clientShutdowns = new Set<Promise<void>>();
   #utilityClient: CodexAppServerClient | null = null;
   #utilityQueue: Promise<unknown> = Promise.resolve();
   #threadListCaches = new Map<boolean, Promise<Map<string, CodexThread>>>();
@@ -145,7 +146,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     purge: (threadId, session) => {
       this.#sessions.delete(threadId);
       void session.cleanupAttachments?.();
-      session.client.shutdown();
+      void this.#shutdownClient(session.client);
     },
   }, { maxIdleMs: 0 });
 
@@ -608,11 +609,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#finishSession(activeSession, admissionClosed ? { aborted: true } : { failedMessage: message });
       } else {
         this.#discardBufferedClientEvents(client);
-        client.shutdown();
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
           this.emitFailed(request.chatId, message, codexEventMetadata(request, 'chat-start'));
         }
+        await this.#shutdownClient(client);
       }
       throw error;
     }
@@ -690,11 +691,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#finishSession(activeSession, admissionClosed ? { aborted: true } : { failedMessage: message });
       } else {
         this.#discardBufferedClientEvents(client);
-        client.shutdown();
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
           this.emitFailed(request.chatId, message, codexEventMetadata(request));
         }
+        await this.#shutdownClient(client);
       }
       throw error;
     }
@@ -742,11 +743,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#finishSession(activeSession, admissionClosed ? { aborted: true } : { failedMessage: message });
       } else {
         this.#discardBufferedClientEvents(client);
-        client.shutdown();
         if (!admissionClosed) {
           this.emitProcessing(request.chatId, false);
           this.emitFailed(request.chatId, message, codexEventMetadata(request));
         }
+        await this.#shutdownClient(client);
       }
       throw error;
     }
@@ -866,21 +867,24 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#idlePurger.start();
   }
 
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     this.#idlePurger.stop();
-    for (const session of this.#sessions.values()) {
+    const sessions = [...this.#sessions.values()];
+    for (const session of sessions) {
       this.#cancelTurnStartWaiters(session, 'Codex runtime shut down');
       void session.cleanupAttachments?.();
-      session.client.shutdown();
     }
     this.#sessions.clear();
-    this.#utilityClient?.shutdown();
+    const utilityClient = this.#utilityClient;
     this.#utilityClient = null;
     this.#utilityQueue = Promise.resolve();
     this.#threadListCaches.clear();
     this.#bufferingClients.clear();
     this.#bufferedClientEvents.clear();
-    this.#skillDiscovery.clear();
+    const shutdowns = sessions.map((session) => this.#shutdownClient(session.client));
+    if (utilityClient) shutdowns.push(this.#shutdownClient(utilityClient));
+    shutdowns.push(this.#skillDiscovery.clear());
+    await Promise.all([...this.#clientShutdowns, ...shutdowns]);
   }
 
   #newClient(
@@ -901,8 +905,21 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     try {
       return await operation(client);
     } finally {
-      client.shutdown();
+      await this.#shutdownClient(client);
     }
+  }
+
+  #shutdownClient(client: CodexAppServerClient): Promise<void> {
+    const shutdown = Promise.resolve(client.shutdown()).catch((error) => {
+      this.#logger.warn('Codex app-server shutdown failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    this.#clientShutdowns.add(shutdown);
+    void shutdown.finally(() => {
+      this.#clientShutdowns.delete(shutdown);
+    });
+    return shutdown;
   }
 
   async #utility(): Promise<CodexAppServerClient> {
@@ -1475,7 +1492,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       this.emitFinished(session.chatId, 0, session.eventMetadata);
     }
 
-    session.client.shutdown();
+    void this.#shutdownClient(session.client);
   }
 
   #flushPendingFinish(session: RunningCodexSession): void {
@@ -1601,81 +1618,6 @@ function humanizeCodexAppServerError(error: unknown): string {
     return 'Codex could not connect to the API. Check your network connection.';
   }
   return `Codex error: ${raw}`;
-}
-
-function goalStatusLabel(status: CodexThreadGoalStatus): string {
-  switch (status) {
-    case 'active': return 'active';
-    case 'paused': return 'paused';
-    case 'blocked': return 'blocked';
-    case 'usageLimited': return 'usage limited';
-    case 'budgetLimited': return 'limited by budget';
-    case 'complete': return 'complete';
-  }
-}
-
-function formatGoalStatusMessage(goal: CodexThreadGoal | null): string {
-  if (!goal) return 'No Codex goal is set.';
-  const lines = [
-    'Goal',
-    `Status: ${goalStatusLabel(goal.status)}`,
-    `Objective: ${goal.objective}`,
-    `Time used: ${formatGoalElapsedSeconds(goal.timeUsedSeconds)}`,
-    `Tokens used: ${formatGoalTokens(goal.tokensUsed)}`,
-  ];
-  if (goal.tokenBudget !== null) lines.push(`Token budget: ${formatGoalTokens(goal.tokenBudget)}`);
-  lines.push('', goalCommandHint(goal.status));
-  return lines.join('\n');
-}
-
-function formatGoalUpdatedMessage(action: string, goal: CodexThreadGoal): string {
-  return [
-    `Codex goal ${action}.`,
-    `Objective: ${goal.objective}`,
-    formatGoalUsageMessage(goal),
-  ].filter(Boolean).join('\n');
-}
-
-function formatGoalUsageMessage(goal: CodexThreadGoal): string {
-  const budget = goal.tokenBudget === null ? '' : `/${formatGoalTokens(goal.tokenBudget)}`;
-  return `Usage: time ${formatGoalElapsedSeconds(goal.timeUsedSeconds)}, tokens ${formatGoalTokens(goal.tokensUsed)}${budget}.`;
-}
-
-function formatGoalElapsedSeconds(seconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(seconds));
-  if (safeSeconds < 60) return `${safeSeconds}s`;
-  const minutes = Math.floor(safeSeconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
-}
-
-function formatGoalTokens(tokens: number): string {
-  const safeTokens = Math.max(0, Math.floor(tokens));
-  if (safeTokens < 1_000) return String(safeTokens);
-  const divisor = safeTokens >= 1_000_000 ? 1_000_000 : 1_000;
-  const suffix = divisor === 1_000_000 ? 'M' : 'K';
-  const compact = safeTokens / divisor;
-  return `${Number.isInteger(compact) ? compact : compact.toFixed(1)}${suffix}`;
-}
-
-function goalCommandHint(status: CodexThreadGoalStatus): string {
-  switch (status) {
-    case 'active':
-      return 'Commands: /goal edit <objective>, /goal pause, /goal clear';
-    case 'paused':
-    case 'blocked':
-    case 'usageLimited':
-      return 'Commands: /goal edit <objective>, /goal resume, /goal clear';
-    case 'budgetLimited':
-    case 'complete':
-      return 'Commands: /goal edit <objective>, /goal clear';
-  }
-}
-
-function editedGoalStatus(status: CodexThreadGoalStatus): CodexThreadGoalStatus {
-  return status === 'budgetLimited' || status === 'complete' ? 'active' : status;
 }
 
 function isUtilityOverload(error: unknown): boolean {

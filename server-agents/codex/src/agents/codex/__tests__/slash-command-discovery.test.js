@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 
-import { parseSkillsListResponse } from '../slash-command-discovery.js';
+import { CodexSkillDiscovery, parseSkillsListResponse } from '../slash-command-discovery.js';
+
+const logger = { debug() {}, info() {}, warn() {}, error() {} };
 
 describe('parseSkillsListResponse', () => {
   it('flattens skills across cwd entries into name+path refs', () => {
@@ -48,5 +50,30 @@ describe('parseSkillsListResponse', () => {
       data: [{ skills: [{ name: 'dup', path: '/a' }, { name: 'dup', path: '/b' }] }],
     });
     expect(refs).toEqual([{ name: 'dup', path: '/a' }]);
+  });
+
+  it('logs rejected client shutdowns while clearing active discovery', async () => {
+    let rejectRequest;
+    const request = mock(() => new Promise((_, reject) => {
+      rejectRequest = reject;
+    }));
+    const shutdown = mock(async () => {
+      rejectRequest?.(new Error('request stopped'));
+      throw new Error('shutdown failed');
+    });
+    const warn = mock();
+    const discovery = new CodexSkillDiscovery({
+      createClient: () => ({ request, shutdown }),
+      logger: { ...logger, warn },
+    });
+    const pending = discovery.commands('/repo');
+    await Promise.resolve();
+
+    await discovery.clear();
+    await expect(pending).rejects.toThrow('shutdown failed');
+    expect(warn).toHaveBeenCalledWith('Codex app-server shutdown failed', {
+      operation: 'skills-discovery-clear',
+      error: 'shutdown failed',
+    });
   });
 });

@@ -23,7 +23,7 @@ describe('bundled Codex history API compatibility', () => {
       expect(failure).toBeInstanceOf(CodexAppServerRpcError);
       expect(failure.code).not.toBe(-32601);
     } finally {
-      client.shutdown();
+      await client.shutdown();
     }
   });
 });

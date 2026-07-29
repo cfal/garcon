@@ -185,11 +185,11 @@ class FakeClient extends EventEmitter {
     this.connect = mock(script.connect ?? (async () => ({ userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
     this.respond = mock();
     this.reject = mock();
-    this.shutdown = mock();
+    this.shutdown = mock(script.shutdown ?? (() => undefined));
   }
 }
 
-function createRpcClientFixture(responder) {
+function createRpcClientFixture(responder, options = {}) {
   const encoder = new TextEncoder();
   let controller;
   let resolveExit;
@@ -202,6 +202,14 @@ function createRpcClientFixture(responder) {
   const exited = new Promise((resolve) => {
     resolveExit = resolve;
   });
+  const finishExit = () => {
+    try {
+      controller.close();
+    } catch {
+      // The stream may already be closed by the test.
+    }
+    resolveExit(0);
+  };
   const proc = {
     stdin: {
       write(data) {
@@ -217,25 +225,22 @@ function createRpcClientFixture(responder) {
         }
         controller.enqueue(encoder.encode(`${JSON.stringify({ id: message.id, result: response })}\n`));
       },
+      end: mock(() => {
+        if (options.exitOnEnd !== false) finishExit();
+      }),
     },
     stdout,
     stderr: null,
     exited,
-    kill: mock(() => {
-      try {
-        controller.close();
-      } catch {
-        // The stream may already be closed by the test.
-      }
-      resolveExit(0);
-    }),
+    kill: mock(finishExit),
   };
   const spawn = mock(() => proc);
   const client = new CodexAppServerClient({
     spawn,
     resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
+    shutdownGraceMs: options.shutdownGraceMs,
   });
-  return { client, writes, spawn, proc };
+  return { client, writes, spawn, proc, finishExit };
 }
 
 const initializeResponse = {
@@ -246,6 +251,35 @@ const initializeResponse = {
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('closes stdin and waits for a clean app-server exit before the fallback kill', async () => {
+    const { client, proc, finishExit } = createRpcClientFixture(
+      () => initializeResponse,
+      { exitOnEnd: false, shutdownGraceMs: 100 },
+    );
+    await client.connect();
+
+    const shutdown = client.shutdown();
+    expect(proc.stdin.end).toHaveBeenCalledTimes(1);
+    expect(proc.kill).not.toHaveBeenCalled();
+
+    finishExit();
+    await shutdown;
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('kills the app-server when graceful shutdown exceeds its bound', async () => {
+    const { client, proc } = createRpcClientFixture(
+      () => initializeResponse,
+      { exitOnEnd: false, shutdownGraceMs: 1 },
+    );
+    await client.connect();
+
+    await client.shutdown();
+
+    expect(proc.stdin.end).toHaveBeenCalledTimes(1);
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
   it('requests full paginated turns with the typed app-server contract', async () => {
     const { client, writes } = createRpcClientFixture((message) => {
       if (message.method === 'initialize') return initializeResponse;
@@ -268,7 +302,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       sortDirection: 'asc',
       itemsView: 'full',
     })).resolves.toMatchObject({ data: [{ id: 'turn-history', itemsView: 'full' }] });
-    client.shutdown();
+    await client.shutdown();
 
     expect(writes).toContainEqual(expect.objectContaining({
       method: 'thread/turns/list',
@@ -297,7 +331,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       sortDirection: 'asc',
       itemsView: 'full',
     })).rejects.toThrow('Unsupported Codex thread item type: futureItem');
-      client.shutdown();
+      await client.shutdown();
     });
 
     it('accepts canonical sleep items and validates their duration', async () => {
@@ -314,7 +348,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
         sortDirection: 'asc',
         itemsView: 'full',
       })).resolves.toMatchObject({ data: [{ items: [{ type: 'sleep', durationMs: 250 }] }] });
-      valid.client.shutdown();
+      await valid.client.shutdown();
 
       const invalid = createRpcClientFixture((message) => {
         if (message.method === 'initialize') return initializeResponse;
@@ -329,7 +363,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
         sortDirection: 'asc',
         itemsView: 'full',
       })).rejects.toThrow('durationMs');
-      invalid.client.shutdown();
+      await invalid.client.shutdown();
     });
 
   it('sends loaded-list and unsubscribe requests with metrics', async () => {
@@ -344,7 +378,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
 
     await expect(client.loadedThreads()).resolves.toEqual({ data: ['thread-1'] });
     await expect(client.unsubscribeThread('thread-1')).resolves.toEqual({ status: 'notSubscribed' });
-    client.shutdown();
+    await client.shutdown();
 
     expect(spawn).toHaveBeenCalledWith('/tmp/codex', ['app-server', '--listen', 'stdio://'], expect.any(Object));
     expect(writes).toContainEqual(expect.objectContaining({ method: 'thread/loaded/list', params: {} }));
@@ -396,7 +430,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       clientUserMessageId: 'message-1',
       input: [{ type: 'text', text: 'Steer now' }],
     })).resolves.toEqual({ turnId: 'turn-1' });
-    client.shutdown();
+    await client.shutdown();
 
     expect(writes).toContainEqual(expect.objectContaining({
       method: 'thread/goal/set',
@@ -448,7 +482,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
     client.on('metric', (metric) => metrics.push(metric));
 
     await expect(client.loadedThreads()).rejects.toThrow('Server overloaded');
-    client.shutdown();
+    await client.shutdown();
 
     expect(metrics).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: false }),
@@ -1416,6 +1450,38 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).not.toHaveBeenCalled();
     expect(markStarted).not.toHaveBeenCalled();
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits pre-session failures before waiting for graceful shutdown', async () => {
+    const operations = [
+      (provider) => provider.startSession(makeRequest()),
+      (provider) => provider.runTurn(makeRequest({
+        agentSessionId: 'thread-1',
+        nativePath: null,
+      })),
+      (provider) => provider.compact(makeRequest({
+        agentSessionId: 'thread-1',
+        nativePath: null,
+      })),
+    ];
+
+    for (const operate of operations) {
+      const shutdown = createDeferred();
+      const fake = new FakeClient({
+        connect: async () => {
+          throw new Error('app-server startup failed');
+        },
+        shutdown: () => shutdown.promise,
+      });
+      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const failed = new Promise((resolve) => provider.onFailed((_chatId, message) => resolve(message)));
+
+      const operation = operate(provider);
+      await expect(failed).resolves.toBe('Codex error: app-server startup failed');
+      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      shutdown.resolve();
+      await expect(operation).rejects.toThrow('app-server startup failed');
+    }
   });
 
   it('reports abortability only after the provider turn id is available', async () => {

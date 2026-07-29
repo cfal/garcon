@@ -12,6 +12,7 @@ import {
   sourceFailure,
   yieldBoundedMessageBatches,
 } from '@garcon/server-agent-common/search/index-source-helpers';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { loadCodexChatMessages } from './agents/codex/history-loader.js';
 import {
   assertCodexPaginatedHistoryMaterializable,
@@ -43,6 +44,7 @@ class CodexIndexClientPool {
 
   constructor(
     private readonly createClient: (codexHome: string) => CodexPaginatedHistoryClient,
+    private readonly logger: AgentTranscriptIndexerHost['logger'],
   ) {}
 
   run<T>(
@@ -61,7 +63,16 @@ class CodexIndexClientPool {
 
   async close(): Promise<void> {
     await Promise.allSettled(this.#queues.values());
-    for (const client of this.#clients.values()) client.shutdown();
+    const shutdowns = await Promise.allSettled(
+      [...this.#clients.values()].map((client) => client.shutdown()),
+    );
+    for (const result of shutdowns) {
+      if (result.status === 'fulfilled') continue;
+      this.logger.warn('Codex app-server shutdown failed', {
+        operation: 'transcript-index-close',
+        error: errorMessage(result.reason),
+      });
+    }
     this.#clients.clear();
     this.#queues.clear();
   }
@@ -82,7 +93,7 @@ export function createCodexTranscriptIndexSource(
 ): AgentTranscriptIndexSource {
   const clients = new CodexIndexClientPool(options.createClient ?? ((codexHome) => (
     new CodexAppServerClient({ env: { CODEX_HOME: codexHome } })
-  )));
+  )), host.logger);
 
   const probe = async (
     source: AgentTranscriptIndexSourceRef,

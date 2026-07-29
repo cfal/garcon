@@ -65,6 +65,7 @@ export interface CodexAppServerClientOptions {
   resolveCli?: () => Promise<ResolvedCodexCli>;
   resolveCommand?: () => Promise<string>;
   clientVersion?: () => string;
+  shutdownGraceMs?: number;
 }
 
 export interface CodexAppServerMetric {
@@ -113,6 +114,8 @@ export class CodexAppServerClient extends EventEmitter {
   #resolveCli: () => Promise<ResolvedCodexCli>;
   #env: Record<string, string>;
   #clientVersion: () => string;
+  #shutdownGraceMs: number;
+  #shutdownPromise: Promise<void> | null = null;
 
   constructor(options: CodexAppServerClientOptions = {}) {
     super();
@@ -124,6 +127,7 @@ export class CodexAppServerClient extends EventEmitter {
         : resolveCodexCli);
     this.#env = mergedEnv(options.env);
     this.#clientVersion = options.clientVersion ?? (() => '0.1.0');
+    this.#shutdownGraceMs = options.shutdownGraceMs ?? 2_000;
   }
 
   async connect(): Promise<InitializeResponse> {
@@ -394,9 +398,34 @@ export class CodexAppServerClient extends EventEmitter {
     this.emit('exit', code);
   }
 
-  shutdown(): void {
-    this.#proc?.kill();
+  async shutdown(): Promise<void> {
+    if (this.#shutdownPromise) return this.#shutdownPromise;
+    const proc = this.#proc;
     this.#proc = null;
     this.#ready = null;
+    if (!proc) return;
+
+    const shutdown = (async () => {
+      try {
+        // Codex closes its sole stdio connection on EOF, then shuts down loaded
+        // threads and their persistence writers before exiting.
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server-transport/src/transport/stdio.rs#L43-L79
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/app-server/src/lib.rs#L1156-L1165
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/core/src/session/handlers.rs#L648-L667
+        proc.stdin?.end?.();
+        await Promise.race([
+          proc.exited.then(() => undefined),
+          Bun.sleep(this.#shutdownGraceMs),
+        ]);
+      } finally {
+        proc.kill();
+      }
+    })();
+    this.#shutdownPromise = shutdown;
+    try {
+      await shutdown;
+    } finally {
+      if (this.#shutdownPromise === shutdown) this.#shutdownPromise = null;
+    }
   }
 }

@@ -112,6 +112,31 @@ describe('Codex transcript index source', () => {
     });
   });
 
+  it('logs rejected pooled-client shutdowns while closing', async () => {
+    await withRollout({ id: 'thread-1', history_mode: 'paginated', history_base: null }, [], async ({ nativePath }) => {
+      const warn = mock();
+      const source = createCodexTranscriptIndexSource(
+        { agentId: 'codex', logger: { ...logger, warn } },
+        {
+          createClient: () => ({
+            listThreadTurns: async () => ({ data: [], nextCursor: null, backwardsCursor: null }),
+            shutdown: async () => {
+              throw new Error('shutdown failed');
+            },
+          }),
+        },
+      );
+      await source.probe(descriptor(nativePath, 'paginated'), new AbortController().signal);
+
+      await source.close();
+
+      expect(warn).toHaveBeenCalledWith('Codex app-server shutdown failed', {
+        operation: 'transcript-index-close',
+        error: 'shutdown failed',
+      });
+    });
+  });
+
   it('requests descriptor refresh for schema one and rejects inherited paginated history', async () => {
     const source = createCodexTranscriptIndexSource({ agentId: 'codex', logger });
     await expect(source.probe({

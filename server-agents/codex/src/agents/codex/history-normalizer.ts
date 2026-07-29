@@ -104,6 +104,17 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const EXEC_OUTPUT_WRAPPER = /^Chunk ID: \S+\nWall time: [\d.]+ seconds\nProcess exited with code (\d+)\n(?:Original token count: \d+\n)?Output:\n/;
+
+function normalizeExecOutput(raw: string): { content: string; isError: boolean } | null {
+  const match = EXEC_OUTPUT_WRAPPER.exec(raw);
+  if (!match) return null;
+  return {
+    content: raw.slice(match[0].length),
+    isError: match[1] !== '0',
+  };
+}
+
 function createNormalizationResult(): CodexJsonlNormalizationResult {
   return {
     canonical: [],
@@ -354,7 +365,14 @@ function normalizeResponseItem(
     }
 
     case 'function_call_output': {
-      result.canonical.push(new ToolResultMessage(ts, asString(rawPayload.call_id) || '', normalizeToolResultContent(rawPayload.output), false));
+      const normalized = asString(rawPayload.output);
+      const execution = normalized === undefined ? null : normalizeExecOutput(normalized);
+      result.canonical.push(new ToolResultMessage(
+        ts,
+        asString(rawPayload.call_id) || '',
+        normalizeToolResultContent(execution?.content ?? rawPayload.output),
+        execution?.isError ?? false,
+      ));
       return result;
     }
 

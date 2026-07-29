@@ -14,7 +14,7 @@ type PaginatedProfile = Extract<CodexHistoryProfile, { mode: 'paginated' }>;
 
 export interface CodexPaginatedHistoryClient {
   listThreadTurns: CodexAppServerClient['listThreadTurns'];
-  shutdown(): void;
+  shutdown(): void | Promise<void>;
 }
 
 export class PaginatedCodexHistorySource {
@@ -81,7 +81,7 @@ export class PaginatedCodexHistorySource {
         },
       );
     } finally {
-      client.shutdown();
+      await client.shutdown();
     }
   }
 
