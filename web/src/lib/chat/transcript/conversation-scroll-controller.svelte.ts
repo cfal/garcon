@@ -7,6 +7,7 @@ import { reconcileScrollAfterHeightDelta } from '$lib/chat/transcript/scroll-anc
 import type {
 	ActiveTranscriptState,
 	OlderMessagesLoadResult,
+	TranscriptWindowTarget,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { UserMessageNavigatorTarget } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
@@ -14,6 +15,7 @@ const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
+	| 'compactToRecentMessages'
 	| 'displayMessageCount'
 	| 'completeInitialMessagesReveal'
 	| 'generationId'
@@ -21,10 +23,11 @@ export type ConversationScrollState = Pick<
 	| 'hasMoreMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
+	| 'isViewingInitialMessages'
 	| 'invalidatePendingHistoryLoad'
-	| 'loadAllMessages'
 	| 'loadMoreMessages'
 	| 'loadStatus'
+	| 'navigateToWindow'
 >;
 
 export interface ScrollControllerDeps {
@@ -72,6 +75,25 @@ export class ConversationScrollController {
 		this.setPinnedToBottom(true);
 	}
 
+	async scrollToLatest(): Promise<void> {
+		const chatId = this.deps.sessions.selectedChatId;
+		if (!chatId) return;
+		if (!this.deps.chatState.isViewingInitialMessages && !this.isScrollingToTop) {
+			this.scrollToBottom();
+			this.deps.chatState.compactToRecentMessages();
+			return;
+		}
+		if (!(await this.#navigateToWindow(chatId, 'latest'))) return;
+		this.scrollToBottom();
+		this.deps.chatState.compactToRecentMessages();
+	}
+
+	async restoreLatestWindow(chatId: string): Promise<boolean> {
+		if (!(await this.#navigateToWindow(chatId, 'latest'))) return false;
+		this.#preserveDetachedWindowSemantics();
+		return true;
+	}
+
 	setPinnedToBottom(isPinned: boolean): void {
 		this.isPinnedToBottom = isPinned;
 		if (isPinned) this.#lastUserScrollIntentAt = 0;
@@ -107,27 +129,19 @@ export class ConversationScrollController {
 		}
 	}
 
-	/** Loads all paginated messages and scrolls to the very top instantly. */
+	/** Loads the bounded initial transcript window and scrolls to its first row. */
 	async scrollToTop(): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId) return;
 
-		const operationEpoch = ++this.#anchorOperationEpoch;
 		this.isScrollingToTop = true;
 		try {
-			this.deps.chatState.completeInitialMessagesReveal();
-			await tick();
-			if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
-			if (this.deps.chatState.hasMoreMessages) {
-				await this.deps.chatState.loadAllMessages(chatId);
-			}
-			if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
+			if (!(await this.#navigateToWindow(chatId, 'initial'))) return;
+			this.#preserveDetachedWindowSemantics();
 			const node = this.deps.getScrollContainer();
 			if (node) {
 				this.noteUserScrollIntent();
 				node.scrollTop = 0;
-				this.deps.chatState.isUserScrolledUp = true;
-				this.setPinnedToBottom(false);
 			}
 		} finally {
 			this.isScrollingToTop = false;
@@ -137,6 +151,10 @@ export class ConversationScrollController {
 	handleScroll(): void {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
+		if (this.deps.chatState.isViewingInitialMessages) {
+			this.#preserveDetachedWindowSemantics();
+			return;
+		}
 		const nearBottom = this.isNearBottom();
 		const shouldRemainPinned =
 			!nearBottom &&
@@ -297,6 +315,10 @@ export class ConversationScrollController {
 
 	async fillUnderfilledViewport(): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
+		if (this.deps.chatState.isViewingInitialMessages) {
+			this.#preserveDetachedWindowSemantics();
+			return;
+		}
 		if (
 			!chatId ||
 			!this.#isViewportVisible ||
@@ -432,6 +454,10 @@ export class ConversationScrollController {
 
 	#restoreBottomNow(): void {
 		this.#cancelBottomRestoreFrame();
+		if (this.deps.chatState.isViewingInitialMessages) {
+			this.#preserveDetachedWindowSemantics();
+			return;
+		}
 		if (!this.#isViewportVisible || this.deps.chatState.isUserScrolledUp) return;
 		const node = this.deps.getScrollContainer();
 		if (!node || node.clientHeight <= 0) return;
@@ -450,6 +476,25 @@ export class ConversationScrollController {
 			this.#lastUserScrollIntentAt > 0 &&
 			performance.now() - this.#lastUserScrollIntentAt <= USER_SCROLL_INTENT_WINDOW_MS
 		);
+	}
+
+	async #navigateToWindow(
+		chatId: string,
+		target: TranscriptWindowTarget,
+	): Promise<boolean> {
+		if (this.deps.sessions.selectedChatId !== chatId) return false;
+		const operationEpoch = ++this.#anchorOperationEpoch;
+		const result = await this.deps.chatState.navigateToWindow(chatId, target);
+		if (result !== 'loaded' || !this.#isCurrentAnchorOperation(chatId, operationEpoch)) {
+			return false;
+		}
+		await tick();
+		return this.#isCurrentAnchorOperation(chatId, operationEpoch);
+	}
+
+	#preserveDetachedWindowSemantics(): void {
+		this.deps.chatState.isUserScrolledUp = true;
+		this.setPinnedToBottom(false);
 	}
 
 	handleHalfPageScroll(event: KeyboardEvent): void {

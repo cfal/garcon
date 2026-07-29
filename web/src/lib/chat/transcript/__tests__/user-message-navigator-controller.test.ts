@@ -43,6 +43,7 @@ function setup(messages: ChatViewMessage[] = [entry(1, user('first'))]) {
 	});
 	let selectedChatId: string | null = 'chat-1';
 	const reloadTranscript = vi.fn(async () => undefined);
+	const restoreLatestTranscript = vi.fn(async () => true);
 	const loadOlderMessages = vi.fn<UserMessageNavigatorOptions['loadOlderMessages']>(
 		async () => 'loaded',
 	);
@@ -51,6 +52,7 @@ function setup(messages: ChatViewMessage[] = [entry(1, user('first'))]) {
 		transcript,
 		getSelectedChatId: () => selectedChatId,
 		reloadTranscript,
+		restoreLatestTranscript,
 		loadOlderMessages,
 		jumpToRow,
 	});
@@ -58,6 +60,7 @@ function setup(messages: ChatViewMessage[] = [entry(1, user('first'))]) {
 		controller,
 		transcript,
 		reloadTranscript,
+		restoreLatestTranscript,
 		loadOlderMessages,
 		jumpToRow,
 		selectChat(chatId: string | null) {
@@ -84,6 +87,37 @@ describe('UserMessageNavigatorController', () => {
 			expect.objectContaining({ id: 'generation-1:3', seq: 3, content: 'second' }),
 			expect.objectContaining({ id: 'generation-1:1', seq: 1, content: 'first' }),
 		]);
+	});
+
+	it('restores the latest bounded suffix before opening from the detached initial window', async () => {
+		const pendingRestore = deferred<boolean>();
+		const { controller, transcript, restoreLatestTranscript } = setup([
+			entry(1, user('early prompt')),
+		]);
+		transcript.lastSeq = 100;
+		transcript.isViewingInitialMessages = true;
+		restoreLatestTranscript.mockImplementationOnce(async () => {
+			const restored = await pendingRestore.promise;
+			if (restored) {
+				transcript.entries = [
+					entry(99, user('recent prompt')),
+					entry(100, assistant('recent response')),
+				];
+				transcript.oldestSeq = 99;
+				transcript.hasMoreMessages = true;
+				transcript.isViewingInitialMessages = false;
+			}
+			return restored;
+		});
+
+		const open = controller.openForActiveChat();
+		expect(controller.open).toBe(false);
+		pendingRestore.resolve(true);
+		await open;
+
+		expect(restoreLatestTranscript).toHaveBeenCalledWith('chat-1');
+		expect(controller.open).toBe(true);
+		expect(controller.items.map((item) => item.content)).toEqual(['recent prompt']);
 	});
 
 	it('includes pending and failed user rows with attachment metadata', () => {
@@ -181,6 +215,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript: vi.fn(async () => undefined),
+			restoreLatestTranscript: vi.fn(async () => true),
 			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow: vi.fn(async () => false),
 		});
@@ -205,6 +240,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript: vi.fn(async () => undefined),
+			restoreLatestTranscript: vi.fn(async () => true),
 			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow: vi.fn(async () => false),
 		});
@@ -232,6 +268,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript: vi.fn(async () => undefined),
+			restoreLatestTranscript: vi.fn(async () => true),
 			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow,
 		});
@@ -256,6 +293,7 @@ describe('UserMessageNavigatorController', () => {
 			transcript,
 			getSelectedChatId: () => 'chat-1',
 			reloadTranscript,
+			restoreLatestTranscript: vi.fn(async () => true),
 			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
 			jumpToRow: vi.fn(async () => false),
 		});

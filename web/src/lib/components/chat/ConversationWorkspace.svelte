@@ -329,6 +329,9 @@
 		sessions,
 	});
 	function scrollToBottomAndFill(): void {
+		void scroll.scrollToLatest().then(() => scroll.fillUnderfilledViewport());
+	}
+	function reconcilePinnedBottom(): void {
 		scroll.scrollToBottom();
 		void scroll.fillUnderfilledViewport();
 	}
@@ -363,6 +366,7 @@
 		transcript: chatState,
 		getSelectedChatId: () => sessions.selectedChatId,
 		reloadTranscript: (chatId) => controller.loadChat(chatId),
+		restoreLatestTranscript: (chatId) => scroll.restoreLatestWindow(chatId),
 		loadOlderMessages: (chatId) => scroll.loadMoreMessagesForNavigator(chatId),
 		jumpToRow: (target) => scroll.jumpToMessageRow(target),
 	});
@@ -372,7 +376,7 @@
 		onRegisterSubmit?.(submitToActiveChat);
 		onRegisterAppendToDraft?.(appendToActiveDraft);
 		onRegisterReload?.(reloadSelectedChat);
-		onRegisterUserMessageNavigator?.(() => userMessageNavigator.openForActiveChat());
+		onRegisterUserMessageNavigator?.(() => void userMessageNavigator.openForActiveChat());
 		const unregisterSubagentToolbar = subagentToolbar.register({
 			get model() {
 				return subagentModel;
@@ -425,7 +429,7 @@
 		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _reserveComposerTraySpace = reserveComposerTraySpace;
 		if (_isVisible && !chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			scrollToBottomAndFill();
+			reconcilePinnedBottom();
 			scroll.completeInitialBottomRestore();
 		}
 	});
@@ -669,7 +673,7 @@
 				variant="outline"
 				size="icon"
 				class="absolute bottom-14 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
-				onclick={() => scroll.scrollToBottom()}
+				onclick={scrollToBottomAndFill}
 				title={m.workspace_scroll_to_bottom()}
 			>
 				<ArrowDown class="w-5 h-5" />

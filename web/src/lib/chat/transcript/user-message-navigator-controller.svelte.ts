@@ -31,6 +31,7 @@ export interface UserMessageNavigatorTranscriptPort {
 	readonly displayRows: readonly ChatDisplayRow[];
 	readonly hasMoreMessages: boolean;
 	readonly isLoadingMessages: boolean;
+	readonly isViewingInitialMessages: boolean;
 	readonly loadStatus: ChatLoadStatus;
 	revealAllLoadedMessages(): void;
 }
@@ -39,6 +40,7 @@ export interface UserMessageNavigatorOptions {
 	transcript: UserMessageNavigatorTranscriptPort;
 	getSelectedChatId: () => string | null;
 	reloadTranscript: (chatId: string) => Promise<void>;
+	restoreLatestTranscript: (chatId: string) => Promise<boolean>;
 	loadOlderMessages: (chatId: string) => Promise<OlderMessagesLoadResult>;
 	jumpToRow: (target: UserMessageNavigatorTarget) => Promise<boolean>;
 }
@@ -110,12 +112,24 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 			: null;
 	}
 
-	openForActiveChat(): void {
+	async openForActiveChat(): Promise<void> {
 		const chatId = this.options.getSelectedChatId();
-		const generationId = this.options.transcript.generationId;
 		if (!chatId || this.options.transcript.activeChatId !== chatId) return;
 
-		this.#lifecycleEpoch += 1;
+		const lifecycleEpoch = ++this.#lifecycleEpoch;
+		if (this.options.transcript.isViewingInitialMessages) {
+			const restored = await this.options.restoreLatestTranscript(chatId);
+			if (
+				!restored ||
+				lifecycleEpoch !== this.#lifecycleEpoch ||
+				this.options.getSelectedChatId() !== chatId ||
+				this.options.transcript.activeChatId !== chatId
+			) {
+				return;
+			}
+		}
+
+		const generationId = this.options.transcript.generationId;
 		this.openedChatId = chatId;
 		this.openedGenerationId = generationId || null;
 		this.isLoadingOlder = false;
