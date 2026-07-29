@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -95,6 +95,30 @@ describe('forkJsonlTranscript', () => {
     })).rejects.toBeInstanceOf(JsonlSourcePrefixChangedError);
 
     expect((await readdir(root)).filter((name) => name !== 'source.jsonl')).toEqual([]);
+  });
+
+  it('copies a whole source that grows during transformation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    await writeFile(sourcePath, `${JSON.stringify({ type: 'message', value: 'copied' })}\n`);
+
+    const result = await forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+      transformEntries(input) {
+        appendFileSync(sourcePath, `${JSON.stringify({ type: 'message', value: 'appended' })}\n`);
+        return { entries: input.selectedEntries };
+      },
+      createTargetPath(input) {
+        return path.join(root, `custom-${input.targetAgentSessionId}.jsonl`);
+      },
+    });
+
+    const forked = await readFile(result.nativePath, 'utf8');
+    expect(forked).toContain('"value":"copied"');
+    expect(forked).not.toContain('"value":"appended"');
   });
 
   it('preserves physical line positions and passes per-entry retained counts', async () => {

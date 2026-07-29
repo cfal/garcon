@@ -136,7 +136,10 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
           throw error;
         },
       );
-      if (!current.content.equals(snapshot.content)) {
+      // A whole-session fork of a working chat races the provider appending its next entry.
+      // Transcripts only grow, so the copy stays a faithful snapshot as long as what was read is
+      // still a prefix; only a rewrite of already-copied bytes invalidates it.
+      if (!current.content.subarray(0, snapshot.content.length).equals(snapshot.content)) {
         throw new JsonlSourcePrefixChangedError(request.sourcePath);
       }
     } else {
@@ -237,11 +240,14 @@ function normalizeRetainedJsonl(
   return { entries, lineCount: lines.length, prefix };
 }
 
+// Reads a snapshot that is a faithful prefix of the transcript. A working chat appends while the
+// read runs, which only grows the file; the trailing partial line is discarded downstream. A
+// replaced file or one that lost bytes is not a prefix and cannot be forked.
 async function readStableSource(sourcePath: string): Promise<JsonlSourceSnapshot> {
   const before = await fs.stat(sourcePath);
   const content = await fs.readFile(sourcePath);
   const after = await fs.stat(sourcePath);
-  if (fileChanged(before, after)) {
+  if (sourceChangedDuringRead(before, after)) {
     throw new JsonlSourcePrefixChangedError(sourcePath);
   }
   return { content };
@@ -289,11 +295,10 @@ function normalizeJsonl(
   };
 }
 
-function fileChanged(before: Stats, after: Stats): boolean {
-  return (
-    before.dev !== after.dev ||
-    before.ino !== after.ino ||
-    before.size !== after.size ||
-    before.mtimeMs !== after.mtimeMs
-  );
+function sourceChangedDuringRead(before: Stats, after: Stats): boolean {
+  if (before.dev !== after.dev || before.ino !== after.ino) return true;
+  // A working chat appends while the read runs. Growth of the same file leaves what was read a
+  // prefix of it, which the post-write check confirms; anything else is a rewrite.
+  if (after.size > before.size) return false;
+  return before.size !== after.size || before.mtimeMs !== after.mtimeMs;
 }
