@@ -67,33 +67,39 @@
 					</span>
 				</button>
 			{/if}
-			<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-				{m.model_selector_agent()}
-			</div>
-			<div class="space-y-1">
-				{#each selector.agentOptions as option (option.value)}
-					<button
-						type="button"
-						class={cn(
-							'flex w-full touch-pan-y items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-							!selector.isRecentsPaneActive &&
-								option.value === selector.agentId &&
-								'bg-accent text-accent-foreground',
-						)}
-						aria-pressed={!selector.isRecentsPaneActive && option.value === selector.agentId}
-						onclick={() => selector.selectAgent(option.value)}
-					>
-						<span class="min-w-0 flex-1">
-							<span class="block truncate font-medium">{option.label}</span>
-							{#if option.description}
-								<span class="block truncate text-xs text-muted-foreground"
-									>{option.description}</span
-								>
-							{/if}
-						</span>
-					</button>
-				{/each}
-			</div>
+			{#each selector.agentGroups as group (group.id)}
+				<div
+					data-slot="model-selector-agent-group"
+					data-group={group.id}
+					class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+				>
+					{group.label}
+				</div>
+				<div class="space-y-1">
+					{#each group.options as option (option.value)}
+						<button
+							type="button"
+							class={cn(
+								'flex w-full touch-pan-y items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+								!selector.isRecentsPaneActive &&
+									option.value === selector.agentId &&
+									'bg-accent text-accent-foreground',
+							)}
+							aria-pressed={!selector.isRecentsPaneActive && option.value === selector.agentId}
+							onclick={() => selector.selectAgent(option.value)}
+						>
+							<span class="min-w-0 flex-1">
+								<span class="block truncate font-medium">{option.label}</span>
+								{#if option.description}
+									<span class="block truncate text-xs text-muted-foreground"
+										>{option.description}</span
+									>
+								{/if}
+							</span>
+						</button>
+					{/each}
+				</div>
+			{/each}
 		</section>
 	{/if}
 

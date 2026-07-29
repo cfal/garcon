@@ -48,6 +48,14 @@ export interface AgentSelectorOption {
 	description: string;
 }
 
+export type AgentSelectorGroupId = 'direct' | 'agents';
+
+export interface AgentSelectorGroup {
+	id: AgentSelectorGroupId;
+	label: string;
+	options: AgentSelectorOption[];
+}
+
 export interface ModelSourceOption {
 	key: string;
 	label: string;

@@ -3,48 +3,68 @@
 	import { setGhCapability, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestGhCapability } from './gh-capability-test-context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
+	import {
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+	} from '$shared/agents';
 
 	setRemoteSettings(getTestRemoteSettingsStore());
 	setGhCapability(getTestGhCapability());
+
+	const selectableAgentIds = [
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		'claude',
+		'codex',
+	];
+
+	function modelForAgent(agentId: string): { value: string; label: string } {
+		if (agentId === 'codex') return { value: 'gpt-5.4', label: 'GPT-5.4' };
+		if (agentId === 'claude') return { value: 'opus', label: 'Opus' };
+		if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
+			return { value: 'chat-model', label: 'Chat Model' };
+		}
+		if (agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID) {
+			return { value: 'responses-model', label: 'Responses Model' };
+		}
+		return { value: 'anthropic-model', label: 'Anthropic Model' };
+	}
+
 	setModelCatalog({
 		version: 0,
 		getModels(agentId: string) {
-			if (agentId === 'codex') {
-				return [{ value: 'gpt-5.4', label: 'GPT-5.4' }];
-			}
-			return [{ value: 'opus', label: 'Opus' }];
+			return [modelForAgent(agentId)];
 		},
 		getAgents() {
-			return ['claude', 'codex'];
+			return selectableAgentIds;
 		},
 		getSelectableAgents() {
-			return ['claude', 'codex'];
+			return selectableAgentIds;
 		},
 		getAgent(agentId: string) {
 			return {
 				id: agentId,
-				label: agentId === 'codex' ? 'Codex' : 'Claude',
-					description: '',
-					supportsFork: true,
-					supportsUpdateProjectPath: true,
-					supportsImages: true,
+				label: agentLabelFor(agentId),
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: true,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
-				defaultModel: agentId === 'codex' ? 'gpt-5.4' : 'opus',
+				defaultModel: modelForAgent(agentId).value,
 			};
 		},
 		getAgentLabel(agentId: string) {
-			return agentId === 'codex' ? 'Codex' : 'Claude';
+			return agentLabelFor(agentId);
 		},
 		getDefaultModel(agentId: string) {
-			if (agentId === 'codex') return 'gpt-5.4';
-			return 'opus';
+			return modelForAgent(agentId).value;
 		},
 		getModelForSelection(agentId: string, model: string) {
-			const models =
-				agentId === 'codex'
-					? [{ value: 'gpt-5.4', label: 'GPT-5.4' }]
-					: [{ value: 'opus', label: 'Opus' }];
+			const models = [modelForAgent(agentId)];
 			return models.find((entry) => entry.value === model) ?? null;
 		},
 		selectionFor(_provider: string, model: string) {

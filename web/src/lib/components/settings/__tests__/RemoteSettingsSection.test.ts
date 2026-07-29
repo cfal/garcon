@@ -289,6 +289,46 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.getAllByRole('button', { name: 'Test model' })).toHaveLength(2);
 	});
 
+	it('keeps direct agents available in title and commit generation selectors', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				uiEffective: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						thinkingMode: 'none',
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		const titleTrigger = screen.getByRole('button', { name: /Claude .* Opus .* Default/ });
+		await fireEvent.click(titleTrigger);
+		let groupHeaders = Array.from(
+			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
+		);
+		expect(groupHeaders.map((header) => header.textContent?.trim())).toEqual(['Direct', 'Agents']);
+		expect(screen.getByRole('button', { name: 'Chat Completions' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Responses' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Anthropic' })).toBeTruthy();
+
+		await fireEvent.click(titleTrigger);
+		await waitFor(() => {
+			expect(document.querySelectorAll('[data-slot="model-selector-agent-group"]')).toHaveLength(0);
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Codex .* GPT-5.4 .* Default/ }));
+		groupHeaders = Array.from(
+			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
+		);
+		expect(groupHeaders.map((header) => header.textContent?.trim())).toEqual(['Direct', 'Agents']);
+	});
+
 	it('tests title and commit generation models independently', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
@@ -382,11 +422,7 @@ describe('RemoteSettingsSection', () => {
 			}),
 		);
 		setTestRemoteSettingsStore(store);
-		let resolveTest!: (value: {
-			success: true;
-			target: 'chatTitle';
-			durationMs: number;
-		}) => void;
+		let resolveTest!: (value: { success: true; target: 'chatTitle'; durationMs: number }) => void;
 		vi.mocked(testGenerationModel).mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {

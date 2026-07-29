@@ -1,11 +1,14 @@
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import { nativeSourceLabelFor } from '$lib/agents/agent-labels';
+import { DIRECT_AGENT_PRESENTATIONS, isDirectAgentId } from '$lib/agents/direct-agents.js';
+import * as m from '$lib/paraglide/messages.js';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {
 	FilteredModelResult,
 	FilteredModelRowsResult,
 	AgentSelectorOption,
+	AgentSelectorGroup,
 	ModelSelectorChange,
 	ModelSelectorRow,
 	ModelSelectorValue,
@@ -25,15 +28,38 @@ export function modelSourceKeyFor(agentId: SessionAgentId, model: ModelOption): 
 	return nativeSourceKey(agentId);
 }
 
-export function buildAgentOptions(modelCatalog: ModelCatalogStore): AgentSelectorOption[] {
-	return modelCatalog.getSelectableAgents().map((agentId) => {
-		const metadata = modelCatalog.getAgent(agentId);
-		return {
-			value: agentId,
-			label: modelCatalog.getAgentLabel(agentId),
-			description: metadata?.description ?? '',
-		};
-	});
+export function buildAgentGroups(
+	modelCatalog: ModelCatalogStore,
+	selectableAgentIds: readonly SessionAgentId[] = modelCatalog.getSelectableAgents(),
+): AgentSelectorGroup[] {
+	const selectable = new Set(selectableAgentIds);
+	const directOptions = DIRECT_AGENT_PRESENTATIONS.filter((presentation) =>
+		selectable.has(presentation.id),
+	).map((presentation) => buildAgentOption(modelCatalog, presentation.id, presentation.label()));
+	const agentOptions = selectableAgentIds
+		.filter((agentId) => !isDirectAgentId(agentId))
+		.map((agentId) => buildAgentOption(modelCatalog, agentId, modelCatalog.getAgentLabel(agentId)));
+
+	return [
+		...(directOptions.length > 0
+			? [{ id: 'direct' as const, label: m.model_selector_direct(), options: directOptions }]
+			: []),
+		...(agentOptions.length > 0
+			? [{ id: 'agents' as const, label: m.model_selector_agents(), options: agentOptions }]
+			: []),
+	];
+}
+
+function buildAgentOption(
+	modelCatalog: ModelCatalogStore,
+	agentId: SessionAgentId,
+	label: string,
+): AgentSelectorOption {
+	return {
+		value: agentId,
+		label,
+		description: modelCatalog.getAgent(agentId)?.description ?? '',
+	};
 }
 
 export function nativeSourceLabel(

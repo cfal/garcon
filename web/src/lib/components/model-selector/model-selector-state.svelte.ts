@@ -5,7 +5,7 @@ import { buildThinkingModeOptions } from '$lib/agents/thinking-mode-options';
 import { normalizeThinkingMode, type ThinkingMode } from '$shared/chat-modes';
 import type {
 	FilteredModelRowsResult,
-	AgentSelectorOption,
+	AgentSelectorGroup,
 	ModelSelectorChange,
 	ModelSelectorMode,
 	ModelSelectorRecentOption,
@@ -14,7 +14,7 @@ import type {
 	ModelSourceOption,
 } from './model-selector-types';
 import {
-	buildAgentOptions,
+	buildAgentGroups,
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
@@ -32,6 +32,7 @@ interface ModelSelectorStateOptions {
 	get mode(): ModelSelectorMode;
 	get recents(): ModelSelectorRecentOption[];
 	get preferRecentsOnOpen(): boolean;
+	get selectableAgentIds(): readonly SessionAgentId[] | undefined;
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
 }
 
@@ -113,13 +114,18 @@ export class ModelSelectorState {
 		return this.#options.modelCatalog;
 	}
 
-	get agentOptions(): AgentSelectorOption[] {
-		return buildAgentOptions(this.modelCatalog);
+	get selectableAgentIds(): readonly SessionAgentId[] {
+		return this.#options.selectableAgentIds ?? this.modelCatalog.getSelectableAgents();
+	}
+
+	get agentGroups(): AgentSelectorGroup[] {
+		return buildAgentGroups(this.modelCatalog, this.selectableAgentIds);
 	}
 
 	get recentOptions(): ModelSelectorRecentOption[] {
 		if (this.mode.surface !== 'composer' || this.mode.agent !== 'select') return [];
-		return this.#options.recents;
+		const selectable = new Set(this.selectableAgentIds);
+		return this.#options.recents.filter((recent) => selectable.has(recent.agentId));
 	}
 
 	get isRecentsPaneActive(): boolean {
@@ -458,6 +464,7 @@ export class ModelSelectorState {
 	}
 
 	selectAgent(agentId: SessionAgentId): void {
+		if (!this.isAgentSelectable(agentId)) return;
 		this.showBrowsePane();
 		if (agentId === this.agentId) return;
 		const sources = this.sourcesFor(agentId);
@@ -497,6 +504,7 @@ export class ModelSelectorState {
 	}
 
 	selectRecent(recent: ModelSelectorRecentOption): void {
+		if (!this.isAgentSelectable(recent.agentId)) return;
 		if (this.effortSelectionEnabled) {
 			this.#setDraftSelection(
 				recent.agentId,
@@ -518,6 +526,7 @@ export class ModelSelectorState {
 	}
 
 	emit(agentId: SessionAgentId, modelValue: string, thinkingMode?: ThinkingMode): void {
+		if (!this.isAgentSelectable(agentId)) return;
 		let next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
 		if (!next) return;
 		const effortOnlyChange =
@@ -536,6 +545,10 @@ export class ModelSelectorState {
 			...next,
 			...(this.effortSelectionEnabled ? { thinkingMode: normalizeThinkingMode(thinkingMode) } : {}),
 		});
+	}
+
+	isAgentSelectable(agentId: SessionAgentId): boolean {
+		return this.selectableAgentIds.includes(agentId);
 	}
 
 	#commitDraftSelection(): void {
