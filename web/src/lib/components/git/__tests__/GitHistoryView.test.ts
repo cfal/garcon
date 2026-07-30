@@ -7,6 +7,10 @@ import {
 	type GitDiffFileRequest,
 } from '$lib/api/git.js';
 import {
+	getGitComparisonSnapshot,
+	type GitComparisonSnapshotReady,
+} from '$lib/api/git-comparison.js';
+import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness';
@@ -14,7 +18,6 @@ import {
 	GitHistoryController,
 	type GitHistoryRevertTarget,
 } from '$lib/git/history/git-history.svelte.js';
-import { GIT_EMPTY_TREE_REVISION } from '$lib/git/review/git-comparison.svelte.js';
 import { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
@@ -25,6 +28,16 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitCommitSnapshot: vi.fn(),
 	getGitCommitFileBodies: vi.fn(),
 }));
+
+vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
+	return {
+		...actual,
+		getGitComparisonFreshness: vi.fn(),
+		getGitComparisonSnapshot: vi.fn(),
+		getGitComparisonFileBodies: vi.fn(),
+	};
+});
 
 const limits = {
 	maxSummaryFiles: 1000,
@@ -96,6 +109,34 @@ function snapshot() {
 		files: commitFiles(),
 		limits,
 		firstBodyCandidates: ['a.ts'],
+	};
+}
+
+function comparisonSnapshot(): GitComparisonSnapshotReady {
+	return {
+		status: 'ready',
+		project: '/project',
+		repoRoot: '/repo',
+		documentId: 'comparison-doc',
+		mode: 'direct',
+		from: {
+			kind: 'revision',
+			requestedRevision: 'older',
+			label: 'older',
+			hash: 'a'.repeat(40),
+			shortHash: 'aaaaaaa',
+		},
+		to: {
+			kind: 'revision',
+			requestedRevision: 'newer',
+			label: 'newer',
+			hash: 'b'.repeat(40),
+			shortHash: 'bbbbbbb',
+		},
+		effectiveFromHash: 'a'.repeat(40),
+		files: [],
+		limits,
+		firstBodyCandidates: [],
 	};
 }
 
@@ -174,6 +215,7 @@ describe('GitHistoryView', () => {
 		vi.mocked(getGitCommitFileBodies).mockImplementation(
 			async (_project, _documentId, _commit, files) => bodiesForPaths(requestedPaths(files)),
 		);
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(comparisonSnapshot());
 	});
 
 	afterEach(() => {
@@ -188,7 +230,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history,
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -233,7 +275,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history: createHistory(),
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -282,7 +324,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history: createHistory(),
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: true,
@@ -339,7 +381,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history: createHistory(),
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -412,7 +454,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history: createHistory(),
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -462,7 +504,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history: createHistory(),
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -522,7 +564,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history,
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -576,7 +618,7 @@ describe('GitHistoryView', () => {
 			props: {
 				history: createHistory(),
 				comparisonSelection,
-				onOpenComparison: vi.fn(),
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -598,17 +640,13 @@ describe('GitHistoryView', () => {
 		expect(getGitCommitSnapshot).not.toHaveBeenCalled();
 	});
 
-	it('routes History and commit comparison intents through the parent opener', async () => {
+	it('removes generic comparison launchers from the list and commit details', async () => {
 		const history = createHistory();
-		const onOpenComparison = vi.fn();
-		comparisonSelection.begin();
-		comparisonSelection.select('older');
-		comparisonSelection.select('newer');
 		render(GitHistoryView, {
 			props: {
 				history,
 				comparisonSelection,
-				onOpenComparison,
+				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -620,31 +658,21 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
-		await fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
-		expect(onOpenComparison).toHaveBeenLastCalledWith({
-			fromRevision: 'older',
-			toKind: 'revision',
-			toRevision: 'newer',
-		});
+		expect(screen.queryByRole('button', { name: 'Compare revisions' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Select commits' })).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
 		await screen.findByText('Commit detail');
-		await fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
-		expect(onOpenComparison).toHaveBeenLastCalledWith({
-			fromRevision: 'parent',
-			toKind: 'revision',
-			toRevision: 'abcdef1234567890',
-		});
+		expect(screen.queryByRole('button', { name: 'Compare' })).toBeNull();
 	});
 
-	it('opens editable revision endpoints or explicit commit selection from History', async () => {
-		const history = createHistory();
-		const onOpenComparison = vi.fn();
+	it('collects explicit commit endpoints before enabling the local comparison', async () => {
+		const onOpenSelectedComparison = vi.fn();
 		render(GitHistoryView, {
 			props: {
-				history,
+				history: createHistory(),
 				comparisonSelection,
-				onOpenComparison,
+				onOpenSelectedComparison,
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -656,36 +684,44 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
-		await fireEvent.click(screen.getByRole('button', { name: 'Compare revisions' }));
-		expect(onOpenComparison).toHaveBeenCalledWith({
-			fromRevision: 'parent',
-			toKind: 'revision',
-			toRevision: 'abcdef1234567890',
-		});
-
 		await fireEvent.click(screen.getByRole('button', { name: 'Select commits' }));
 		expect(comparisonSelection.active).toBe(true);
+		expect((screen.getByRole('button', { name: 'Compare' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
 		const commitButton = screen.getByRole('button', { name: 'Select List commit as From' });
 		expect(commitButton.getAttribute('aria-pressed')).toBe('false');
 		await fireEvent.click(commitButton);
 		expect(
 			screen.getByRole('button', { name: 'Select List commit as To', pressed: true }),
 		).toBeTruthy();
+		await fireEvent.click(
+			screen.getByRole('button', { name: 'Select List commit as To', pressed: true }),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+		expect(onOpenSelectedComparison).toHaveBeenCalledOnce();
 	});
 
-	it('defaults an empty History comparison to the empty tree', async () => {
-		vi.mocked(getGitHistoryCommits).mockResolvedValue({
-			project: '/project',
-			ref: 'HEAD',
-			commits: [],
-			nextOffset: null,
+	it('renders selected revisions inside History and returns to the preserved selection', async () => {
+		const history = createHistory();
+		history.listScrollTop = 240;
+		comparisonSelection.begin();
+		comparisonSelection.select('older');
+		comparisonSelection.select('newer');
+		const onOpenSelectedComparison = vi.fn(() => {
+			const comparison = comparisonSelection.comparison();
+			if (comparison) {
+				history.openComparison('/project', comparison, {
+					diffMode: 'unified',
+					contextLines: 5,
+				});
+			}
 		});
-		const onOpenComparison = vi.fn();
 		render(GitHistoryView, {
 			props: {
-				history: createHistory(),
+				history,
 				comparisonSelection,
-				onOpenComparison,
+				onOpenSelectedComparison,
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
 				isMobile: false,
@@ -696,13 +732,28 @@ describe('GitHistoryView', () => {
 			},
 		});
 
-		await screen.findByText('No commits found');
-		await fireEvent.click(screen.getByRole('button', { name: 'Compare revisions' }));
+		await screen.findByText('List commit');
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
 
-		expect(onOpenComparison).toHaveBeenCalledWith({
-			fromRevision: GIT_EMPTY_TREE_REVISION,
-			toKind: 'revision',
-			toRevision: 'HEAD',
+		expect(onOpenSelectedComparison).toHaveBeenCalledOnce();
+		expect(await screen.findByText('Compare revisions')).toBeTruthy();
+		expect(getGitComparisonSnapshot).toHaveBeenCalledWith(
+			'/project',
+			{ kind: 'revision', revision: 'older' },
+			{ kind: 'revision', revision: 'newer' },
+			'direct',
+			expect.objectContaining({ context: 5 }),
+		);
+		expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
+
+		expect(await screen.findByText('List commit')).toBeTruthy();
+		expect(history.listScrollTop).toBe(240);
+		expect(comparisonSelection).toMatchObject({
+			active: true,
+			from: 'older',
+			to: 'newer',
 		});
 	});
 });

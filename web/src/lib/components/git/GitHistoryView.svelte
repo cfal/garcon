@@ -6,14 +6,10 @@
 		type GitHistoryRevertTarget,
 		type GitHistoryController,
 	} from '$lib/git/history/git-history.svelte.js';
-	import {
-		GIT_EMPTY_TREE_REVISION,
-		recentCommitComparisonDefaults,
-		type GitComparisonDialogDefaults,
-	} from '$lib/git/review/git-comparison.svelte.js';
 	import type { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
+	import GitComparisonScreen from './GitComparisonScreen.svelte';
 
 	interface GitHistoryViewProps {
 		history: GitHistoryController;
@@ -26,7 +22,7 @@
 		diffFontSize: number;
 		onRevertCommit: (commit: GitHistoryRevertTarget) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
-		onOpenComparison: (defaults: GitComparisonDialogDefaults) => void;
+		onOpenSelectedComparison: () => void;
 		onAppendToChatDraft?: ChatDraftAppend;
 		onOpenChat: () => void;
 		onSetDiffMode?: (mode: DiffMode) => void;
@@ -45,7 +41,7 @@
 		diffFontSize,
 		onRevertCommit,
 		onOpenInEditor,
-		onOpenComparison,
+		onOpenSelectedComparison,
 		onAppendToChatDraft,
 		onOpenChat,
 		onSetDiffMode = () => undefined,
@@ -59,15 +55,6 @@
 			shortHash: commit.shortHash,
 			subject: commit.subject,
 		});
-	}
-
-	function openSelectedHistoryRange(): void {
-		const defaults = comparisonSelection.take();
-		if (defaults) onOpenComparison(defaults);
-	}
-
-	function openHistoryComparison(): void {
-		onOpenComparison(recentCommitComparisonDefaults(history.commits));
 	}
 </script>
 
@@ -96,10 +83,9 @@
 		onCancelComparison={() => comparisonSelection.cancel()}
 		onSelectComparisonCommit={(hash) => comparisonSelection.select(hash)}
 		onSelectComparisonSlot={(slot) => comparisonSelection.setSlot(slot)}
-		onOpenComparison={openHistoryComparison}
-		onOpenSelectedComparison={openSelectedHistoryRange}
+		{onOpenSelectedComparison}
 	/>
-{:else}
+{:else if history.screen === 'commit'}
 	<GitCommitDetailsScreen
 		snapshot={history.commitSnapshot}
 		files={history.visibleFiles}
@@ -121,15 +107,6 @@
 		onRevertCommit={() => {
 			if (history.commitSnapshot) revertListCommit(history.commitSnapshot.commit);
 		}}
-		onCompare={() => {
-			const snapshot = history.commitSnapshot;
-			if (!snapshot) return;
-			onOpenComparison({
-				fromRevision: snapshot.selectedParent ?? GIT_EMPTY_TREE_REVISION,
-				toKind: 'revision',
-				toRevision: snapshot.commit.hash,
-			});
-		}}
 		{onSetDiffMode}
 		{onSetContextLines}
 		{onSetDiffFontSize}
@@ -148,6 +125,21 @@
 		onComposerSubmit={() => history.document.submitComment(onAppendToChatDraft)}
 		onComposerClose={() => history.document.closeCommentComposer()}
 		onComposerFocusHandled={() => history.document.markCommentComposerFocused()}
+		{onOpenChat}
+	/>
+{:else}
+	<GitComparisonScreen
+		comparison={history.comparison}
+		isLoading={history.comparison.isLoading}
+		{isMobile}
+		{active}
+		fontSize={Number(diffFontSize) || 12}
+		onBack={() => history.backToList()}
+		onRefresh={() => {
+			if (projectPath) void history.comparison.refresh(projectPath);
+		}}
+		{onOpenInEditor}
+		{onAppendToChatDraft}
 		{onOpenChat}
 	/>
 {/if}

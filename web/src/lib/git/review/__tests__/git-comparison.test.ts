@@ -5,11 +5,7 @@ import {
 	getGitComparisonSnapshot,
 	type GitComparisonSnapshotReady,
 } from '$lib/api/git-comparison.js';
-import {
-	GIT_EMPTY_TREE_REVISION,
-	GitComparisonController,
-	recentCommitComparisonDefaults,
-} from '../git-comparison.svelte.js';
+import { GitComparisonController } from '../git-comparison.svelte.js';
 
 vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
@@ -408,6 +404,35 @@ describe('GitComparisonController', () => {
 		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]).toMatchObject({ context: 12 });
 	});
 
+	it('restarts an in-flight snapshot when the context setting changes', async () => {
+		const first = deferred<GitComparisonSnapshotReady>();
+		const second = {
+			...workingTreeSnapshot(),
+			documentId: 'comparison-doc-new-context',
+		};
+		vi.mocked(getGitComparisonSnapshot)
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce(second);
+		const comparison = new GitComparisonController();
+		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
+		const firstRequest = comparison.compare('/project');
+		const firstSignal = vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]?.signal;
+
+		comparison.setDisplayOptions('/project', 'unified', 12);
+
+		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() =>
+			expect(comparison.snapshot?.documentId).toBe('comparison-doc-new-context'),
+		);
+		expect(firstSignal?.aborted).toBe(true);
+		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[1]?.[4]).toMatchObject({
+			context: 12,
+		});
+		first.resolve(workingTreeSnapshot());
+		expect(await firstRequest).toBe(false);
+		expect(comparison.snapshot?.documentId).toBe('comparison-doc-new-context');
+	});
+
 	it('refreshes an expired comparison document once without retrying indefinitely', async () => {
 		const first = {
 			...workingTreeSnapshotWithFile(),
@@ -417,9 +442,7 @@ describe('GitComparisonController', () => {
 			...first,
 			documentId: 'comparison-doc-recovered',
 		};
-		vi.mocked(getGitComparisonSnapshot)
-			.mockResolvedValueOnce(first)
-			.mockResolvedValueOnce(second);
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
 		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
 			status: 'document-expired',
 			documentId: 'expired-doc',
@@ -534,24 +557,5 @@ describe('GitComparisonController', () => {
 
 		expect(comparison.document.isStale).toBe(true);
 		expect(comparison.staleMessage).toContain('Working Tree changed');
-	});
-});
-
-describe('recentCommitComparisonDefaults', () => {
-	it('compares adjacent commits when both are available', () => {
-		expect(
-			recentCommitComparisonDefaults([
-				{ hash: 'new', parents: ['parent'] },
-				{ hash: 'old', parents: ['older'] },
-			]),
-		).toEqual({ fromRevision: 'old', toKind: 'revision', toRevision: 'new' });
-	});
-
-	it('compares a root commit to the empty tree', () => {
-		expect(recentCommitComparisonDefaults([{ hash: 'root', parents: [] }])).toEqual({
-			fromRevision: GIT_EMPTY_TREE_REVISION,
-			toKind: 'revision',
-			toRevision: 'root',
-		});
 	});
 });

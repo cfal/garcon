@@ -638,14 +638,12 @@ describe('CommitController', () => {
 		await vi.waitFor(() =>
 			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']),
 		);
-		await controller.target.applyExternalTarget('chat', {
-			projectPath: '/repo/worktree',
-			repoRoot: '/repo',
-			worktreePath: '/repo/worktree',
-			label: 'worktree',
-			branch: 'feature',
-			source: 'worktree',
-		});
+		await controller.target.selectTarget(
+			targetCandidate('/repo/worktree', {
+				branch: 'feature',
+				isCurrent: false,
+			}),
+		);
 		generation.resolve({ message: 'Stale project message' });
 		await pending;
 

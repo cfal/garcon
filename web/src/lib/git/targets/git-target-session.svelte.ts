@@ -183,22 +183,6 @@ export class GitTargetSessionController implements PortableSingletonController {
 		return true;
 	}
 
-	async applyExternalTarget(
-		effectiveProjectKey: string,
-		target: GitTarget,
-	): Promise<boolean> {
-		if (
-			this.projectIdentityPending ||
-			effectiveProjectKey !== this.effectiveProjectKey
-		) {
-			return false;
-		}
-		this.activeTarget = { ...target };
-		this.#rememberTarget();
-		await this.#applyTarget('selection');
-		return true;
-	}
-
 	async switchBranch(
 		branch: string,
 		refKind: GitRefKind | undefined,

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
 import GitComparisonScreen from '../GitComparisonScreen.svelte';
@@ -33,5 +33,27 @@ describe('GitComparisonScreen', () => {
 
 		expect(screen.getByText('Revision HEAD was not found.')).toBeTruthy();
 		expect(screen.queryByText('Loading comparison')).toBeNull();
+	});
+
+	it('offers local back navigation without exposing the standalone Edit action', async () => {
+		const comparison = new GitComparisonController();
+		comparison.error = 'Revision older was not found.';
+		const onBack = vi.fn();
+
+		render(GitComparisonScreen, {
+			comparison,
+			isLoading: false,
+			isMobile: false,
+			fontSize: 12,
+			onBack,
+			onRefresh: vi.fn(),
+			onOpenChat: vi.fn(),
+		});
+
+		expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+		await fireEvent.click(
+			screen.getByRole('button', { name: 'Back to commit selection' }),
+		);
+		expect(onBack).toHaveBeenCalledOnce();
 	});
 });

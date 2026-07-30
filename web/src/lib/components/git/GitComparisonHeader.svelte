@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import type { GitComparisonSnapshotReady } from '$lib/api/git-comparison.js';
 	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
@@ -9,6 +10,7 @@
 		showFileTreeToggle: boolean;
 		fileTreeVisible: boolean;
 		onToggleFileTree: () => void;
+		onBack?: () => void;
 	}
 
 	let {
@@ -16,6 +18,7 @@
 		showFileTreeToggle,
 		fileTreeVisible,
 		onToggleFileTree,
+		onBack,
 	}: GitComparisonHeaderProps = $props();
 	let additions = $derived(snapshot.files.reduce((sum, file) => sum + file.additions, 0));
 	let additionsKnown = $derived(snapshot.files.every((file) => file.statsKnown !== false));
@@ -30,6 +33,17 @@
 
 <header class="border-b border-border bg-background px-3 py-2">
 	<div class="flex min-w-0 items-center gap-2">
+		{#if onBack}
+			<button
+				type="button"
+				class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				aria-label={m.git_history_back_to_comparison_selection()}
+				title={m.git_history_back_to_comparison_selection()}
+				onclick={onBack}
+			>
+				<ArrowLeft class="h-4 w-4" />
+			</button>
+		{/if}
 		<div class="min-w-0 flex-1">
 			<h3 class="text-sm font-semibold text-foreground">{m.git_compare_title()}</h3>
 			<div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">

@@ -114,65 +114,6 @@ describe('GitCompareSurfaceController', () => {
 		expect(controller.comparison.toRevision).toBe('feature');
 	});
 
-	it('applies a History launch target and endpoints without an intermediate default request', async () => {
-		const controller = new GitCompareSurfaceController(createGitSurfaceTestDeps());
-		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
-		setProject(controller);
-		controller.prepareLaunch({
-			source: {
-				effectiveProjectKey: 'chat',
-				target: {
-					projectPath: '/repo/worktree',
-					repoRoot: '/repo',
-					worktreePath: '/repo/worktree',
-					label: 'worktree',
-					branch: 'feature',
-					source: 'worktree',
-				},
-			},
-			comparison: {
-				fromRevision: 'parent',
-				toKind: 'revision',
-				toRevision: 'commit',
-			},
-		});
-
-		controller.setPresentationVisible(true);
-		await controller.target.activate();
-		await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
-
-		expect(compare).toHaveBeenCalledWith('/repo/worktree');
-		expect(controller.comparison.fromRevision).toBe('parent');
-		expect(controller.comparison.toRevision).toBe('commit');
-	});
-
-	it('keeps the latest explicit launch during rapid requests', async () => {
-		const controller = new GitCompareSurfaceController(createGitSurfaceTestDeps());
-		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
-		setProject(controller);
-		controller.prepareLaunch({
-			comparison: {
-				fromRevision: 'old',
-				toKind: 'revision',
-				toRevision: 'older',
-			},
-		});
-		controller.prepareLaunch({
-			comparison: {
-				fromRevision: 'new',
-				toKind: 'revision',
-				toRevision: 'newer',
-			},
-		});
-
-		controller.setPresentationVisible(true);
-		await controller.target.activate();
-		await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
-
-		expect(controller.comparison.fromRevision).toBe('new');
-		expect(controller.comparison.toRevision).toBe('newer');
-	});
-
 	it('checks freshness once for a same-target invalidation and preserves the specification', async () => {
 		const controller = new GitCompareSurfaceController(createGitSurfaceTestDeps());
 		vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);

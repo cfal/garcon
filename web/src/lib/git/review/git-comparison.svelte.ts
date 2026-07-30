@@ -12,29 +12,12 @@ import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 
 export type GitComparisonToKind = 'revision' | 'working-tree';
-export const GIT_EMPTY_TREE_REVISION = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 export interface GitComparisonDialogDefaults {
 	fromRevision: string;
 	toKind: GitComparisonToKind;
 	toRevision?: string;
 	mode?: GitComparisonMode;
-}
-
-interface GitComparisonCommitCandidate {
-	hash: string;
-	parents: string[];
-}
-
-export function recentCommitComparisonDefaults(
-	commits: GitComparisonCommitCandidate[],
-): GitComparisonDialogDefaults {
-	const toCommit = commits[0];
-	return {
-		fromRevision: commits[1]?.hash ?? toCommit?.parents[0] ?? GIT_EMPTY_TREE_REVISION,
-		toKind: 'revision',
-		toRevision: toCommit?.hash ?? 'HEAD',
-	};
 }
 
 export interface GitComparisonDisplayOptions {
@@ -147,7 +130,12 @@ export class GitComparisonController {
 			diffMode,
 			this.snapshot ? this.loadedContextLines : contextLines,
 		);
-		if (!contextChanged || !this.snapshot) return;
+		if (!contextChanged) return;
+		if (this.isLoading) {
+			void this.compare(projectPath);
+			return;
+		}
+		if (!this.snapshot) return;
 		if (this.snapshot.to.kind === 'working-tree') {
 			if (contextLines !== this.loadedContextLines) {
 				if (!this.document.isStale) {

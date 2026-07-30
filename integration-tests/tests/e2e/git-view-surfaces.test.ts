@@ -52,7 +52,7 @@ describe('Lightpanda standalone Git views', () => {
     });
   });
 
-  test('opens, hands off, and persists History and Compare in independent desktop hosts', async () => {
+  test('compares selected commits inside History while standalone Compare remains independent', async () => {
     await withE2eFixture('git-view-desktop-surfaces', async (fixture) => {
       const project = fixture.integration.dirs.project;
       await createHistoryFixture(project);
@@ -104,14 +104,18 @@ describe('Lightpanda standalone Git views', () => {
       )).not.toBeNull();
 
       await app.selectMainWorkspaceSurface('History');
-      await app.clickButton('Compare revisions');
+      await app.clickButton('Select commits');
+      await app.clickButton('Select first revision as From');
+      await app.clickButton('Select second revision as To');
+      await app.clickButton('Compare');
       await fixture.page.waitForSelector(
-        '[id="sidebar-panel-singleton:git-compare"][aria-hidden="false"]',
+        '[id="main-panel-singleton:git-history"][aria-hidden="false"]'
+          + ' [data-git-diff-document]',
       );
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]'
               + '[aria-hidden="false"]',
           );
           return panel?.textContent?.includes('first revision') === true
@@ -119,6 +123,13 @@ describe('Lightpanda standalone Git views', () => {
         },
         { timeout: 20_000 },
       );
+      expect(await fixture.page.$eval(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+          + '[aria-hidden="false"]',
+        (element) => element.textContent,
+      )).toContain('Working Tree');
+      await app.clickButton('Back to commit selection');
+      await app.waitForText('second revision');
 
       await fixture.page.waitForFunction(
         () => {
@@ -251,6 +262,16 @@ describe('Lightpanda standalone Git views', () => {
       expect(await fixture.page.$('nav[aria-label="Workspace navigation"]')).toBeNull();
       expect(await app.hasButton('Close view')).toBe(true);
       expect(await app.hasButton('Back')).toBe(false);
+
+      await app.waitForText('second revision');
+      await app.clickButton('Select commits');
+      await app.clickButton('Select first revision as From');
+      await app.clickButton('Select second revision as To');
+      await app.clickButton('Compare');
+      await app.waitForButton('Back to commit selection');
+      expect(await app.hasButton('Close view')).toBe(true);
+      await app.clickButton('Back to commit selection');
+      await app.waitForText('second revision');
 
       await app.clickButton('Close view');
       await fixture.page.waitForSelector(

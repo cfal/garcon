@@ -36,14 +36,12 @@ export class GitHistoryComparisonSelectionState {
 		if (this.active) this.slot = slot;
 	}
 
-	take(): GitComparisonDialogDefaults | null {
+	comparison(): GitComparisonDialogDefaults | null {
 		if (!this.from || !this.to) return null;
-		const comparison: GitComparisonDialogDefaults = {
+		return {
 			fromRevision: this.from,
 			toKind: 'revision',
 			toRevision: this.to,
 		};
-		this.cancel();
-		return comparison;
 	}
 }

@@ -73,6 +73,66 @@ describe('GitHistorySurfaceController', () => {
 		);
 	});
 
+	it('opens a complete commit selection inside History with shared review settings', async () => {
+		const deps = createGitSurfaceTestDeps();
+		deps.reviewDisplay.setDiffMode('split');
+		deps.reviewDisplay.setContextLines(9);
+		const controller = new GitHistorySurfaceController(deps);
+		const openComparison = vi
+			.spyOn(controller.history, 'openComparison')
+			.mockImplementation(() => undefined);
+		setProject(controller);
+		controller.setPresentationVisible(true);
+		await controller.target.activate();
+		controller.comparisonSelection.begin();
+		controller.comparisonSelection.select('older');
+		controller.comparisonSelection.select('newer');
+
+		expect(controller.openSelectedComparison()).toBe(true);
+		expect(openComparison).toHaveBeenCalledWith(
+			'/project',
+			{
+				fromRevision: 'older',
+				toKind: 'revision',
+				toRevision: 'newer',
+			},
+			{ diffMode: 'split', contextLines: 9 },
+		);
+		expect(controller.comparisonSelection).toMatchObject({
+			active: true,
+			from: 'older',
+			to: 'newer',
+		});
+	});
+
+	it('rejects incomplete local comparison selections', async () => {
+		const controller = new GitHistorySurfaceController(createGitSurfaceTestDeps());
+		const openComparison = vi.spyOn(controller.history, 'openComparison');
+		setProject(controller);
+		controller.setPresentationVisible(true);
+		await controller.target.activate();
+		controller.comparisonSelection.begin();
+		controller.comparisonSelection.select('older');
+
+		expect(controller.openSelectedComparison()).toBe(false);
+		expect(openComparison).not.toHaveBeenCalled();
+	});
+
+	it('uses the active local comparison document for context-change guards', () => {
+		const deps = createGitSurfaceTestDeps();
+		const controller = new GitHistorySurfaceController(deps);
+		controller.setPresentationVisible(true);
+		controller.history.screen = 'comparison';
+		controller.history.comparison.document.openCommentComposer('src/a.ts', 'after', 12);
+		controller.history.comparison.document.setCommentBody('Keep this comment');
+
+		expect(deps.reviewDisplay.setContextLines(12)).toBe(false);
+		expect(controller.history.comparison.document.commentComposer.body).toBe('Keep this comment');
+		expect(controller.history.comparison.document.commentError).toBe(
+			'Add or close this comment before changing context lines.',
+		);
+	});
+
 	it('reloads once for an invalidation and does not consume it twice', async () => {
 		const controller = new GitHistorySurfaceController(createGitSurfaceTestDeps());
 		setProject(controller);
@@ -123,21 +183,14 @@ describe('GitHistorySurfaceController', () => {
 		await controller.target.activate();
 		await vi.waitFor(() => expect(api.getGitHistoryCommits).toHaveBeenCalledOnce());
 
-		await expect(
-			controller.target.switchBranch('feature', 'local-branch'),
-		).resolves.toBe(true);
+		await expect(controller.target.switchBranch('feature', 'local-branch')).resolves.toBe(true);
 		await vi.waitFor(() => expect(api.getGitHistoryCommits).toHaveBeenCalledTimes(2));
 
 		expect(api.getGitHistoryCommits).toHaveBeenCalledTimes(2);
 	});
 
 	it('pauses an initial list request while hidden and resumes it once', async () => {
-		let resolve!: (value: {
-			project: string;
-			ref: string;
-			commits: [];
-			nextOffset: null;
-		}) => void;
+		let resolve!: (value: { project: string; ref: string; commits: []; nextOffset: null }) => void;
 		const pending = new Promise<{
 			project: string;
 			ref: string;
@@ -219,5 +272,27 @@ describe('GitHistorySurfaceController', () => {
 		controller.dispose();
 		expect(controller.comparisonSelection.active).toBe(false);
 		expect(controller.pendingRevertCommit).toBeNull();
+	});
+
+	it('clears a local comparison and its selection when the target changes', async () => {
+		const controller = new GitHistorySurfaceController(createGitSurfaceTestDeps());
+		setProject(controller);
+		controller.setPresentationVisible(true);
+		await controller.target.activate();
+		controller.comparisonSelection.begin();
+		controller.comparisonSelection.select('older');
+		controller.comparisonSelection.select('newer');
+		controller.history.screen = 'comparison';
+
+		await controller.target.selectTarget(
+			candidate('/other', {
+				worktreePath: '/other',
+				label: 'other',
+				isCurrent: false,
+			}),
+		);
+
+		expect(controller.history.screen).toBe('list');
+		expect(controller.comparisonSelection.active).toBe(false);
 	});
 });

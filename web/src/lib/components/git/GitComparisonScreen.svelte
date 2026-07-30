@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import type { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -12,7 +13,8 @@
 		isMobile: boolean;
 		active?: boolean;
 		fontSize: number;
-		onEdit: () => void;
+		onBack?: () => void;
+		onEdit?: () => void;
 		onRefresh: () => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 		onAppendToChatDraft?: ChatDraftAppend;
@@ -25,6 +27,7 @@
 		isMobile,
 		active = true,
 		fontSize,
+		onBack,
 		onEdit,
 		onRefresh,
 		onOpenInEditor,
@@ -44,6 +47,7 @@
 			{showFileTreeToggle}
 			{fileTreeVisible}
 			{onToggleFileTree}
+			{onBack}
 		/>
 		{#if comparison.staleMessage}
 			<div
@@ -64,14 +68,31 @@
 {/snippet}
 
 {#snippet fallbackActions()}
-	<button
-		type="button"
-		class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-		onclick={onEdit}
-	>
-		{m.git_compare_edit()}
-	</button>
+	{#if onEdit}
+		<button
+			type="button"
+			class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+			onclick={onEdit}
+		>
+			{m.git_compare_edit()}
+		</button>
+	{/if}
 {/snippet}
+
+{#if onBack && !comparison.snapshot}
+	<header class="flex items-center gap-2 border-b border-border bg-background px-3 py-2">
+		<button
+			type="button"
+			class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+			aria-label={m.git_history_back_to_comparison_selection()}
+			title={m.git_history_back_to_comparison_selection()}
+			onclick={onBack}
+		>
+			<ArrowLeft class="h-4 w-4" />
+		</button>
+		<h3 class="text-sm font-semibold text-foreground">{m.git_compare_title()}</h3>
+	</header>
+{/if}
 
 <GitDiffDocumentScreen
 	{header}

@@ -30,7 +30,6 @@
 		onRetry: () => void;
 		onSelectParent: (parent: string | null) => void;
 		onRevertCommit: () => void;
-		onCompare: () => void;
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
@@ -70,7 +69,6 @@
 			onBack={props.onBack}
 			onSelectParent={props.onSelectParent}
 			onRevertCommit={props.onRevertCommit}
-			onCompare={props.onCompare}
 			diffMode={props.diffMode}
 			contextLines={props.contextLines}
 			diffFontSize={props.diffFontSize}

@@ -51,9 +51,9 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 			singletonSurfaceId('git-history'),
 			{
 				isVisible: () => this.presentationVisible,
-				hasOpenCommentComposer: () => this.history.document.commentComposer.open,
+				hasOpenCommentComposer: () => this.history.activeDocument.commentComposer.open,
 				markContextChangeBlocked: () =>
-					this.history.document.markContextChangeBlocked(),
+					this.history.activeDocument.markContextChangeBlocked(),
 				apply: (diffMode, contextLines) =>
 					this.history.setDisplayOptions(
 						this.target.activeProjectPath,
@@ -62,6 +62,17 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 					),
 			},
 		);
+	}
+
+	openSelectedComparison(): boolean {
+		const projectPath = this.target.activeProjectPath;
+		const comparison = this.comparisonSelection.comparison();
+		if (!projectPath || !comparison) return false;
+		this.history.openComparison(projectPath, comparison, {
+			diffMode: this.deps.reviewDisplay.diffMode,
+			contextLines: this.deps.reviewDisplay.contextLines,
+		});
+		return true;
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {

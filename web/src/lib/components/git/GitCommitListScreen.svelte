@@ -3,7 +3,6 @@
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
-	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import History from '@lucide/svelte/icons/history';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -30,7 +29,6 @@
 		onCancelComparison: () => void;
 		onSelectComparisonCommit: (hash: string) => void;
 		onSelectComparisonSlot: (slot: 'from' | 'to') => void;
-		onOpenComparison: () => void;
 		onOpenSelectedComparison: () => void;
 	}
 
@@ -53,7 +51,6 @@
 		onCancelComparison,
 		onSelectComparisonCommit,
 		onSelectComparisonSlot,
-		onOpenComparison,
 		onOpenSelectedComparison,
 	}: GitCommitListScreenProps = $props();
 
@@ -144,15 +141,7 @@
 			<div class="flex flex-wrap items-center gap-2">
 				<button
 					type="button"
-					class="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					onclick={onOpenComparison}
-				>
-					<GitCompareArrows class="h-3.5 w-3.5" />
-					{m.git_compare_title()}
-				</button>
-				<button
-					type="button"
-					class="rounded px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+					class="rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 					onclick={onBeginComparison}
 				>
 					{m.git_compare_select_commits()}

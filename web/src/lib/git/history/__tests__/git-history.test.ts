@@ -5,6 +5,11 @@ import {
 	getGitHistoryCommits,
 	type GitCommitFileSummary,
 } from '$lib/api/git.js';
+import {
+	getGitComparisonFileBodies,
+	getGitComparisonSnapshot,
+	type GitComparisonSnapshotReady,
+} from '$lib/api/git-comparison.js';
 import { GitHistoryController } from '$lib/git/history/git-history.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 
@@ -13,6 +18,16 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitCommitSnapshot: vi.fn(),
 	getGitCommitFileBodies: vi.fn(),
 }));
+
+vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
+	return {
+		...actual,
+		getGitComparisonFreshness: vi.fn(),
+		getGitComparisonSnapshot: vi.fn(),
+		getGitComparisonFileBodies: vi.fn(),
+	};
+});
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -129,10 +144,54 @@ function body(fingerprint = 'fp-a') {
 	return bodiesForPaths(['a.ts'], () => fingerprint);
 }
 
+function comparisonSnapshot(): GitComparisonSnapshotReady {
+	return {
+		status: 'ready',
+		project: '/project',
+		repoRoot: '/repo',
+		documentId: 'comparison-doc',
+		mode: 'direct',
+		from: {
+			kind: 'revision',
+			requestedRevision: 'older',
+			label: 'older',
+			hash: 'a'.repeat(40),
+			shortHash: 'aaaaaaa',
+		},
+		to: {
+			kind: 'revision',
+			requestedRevision: 'newer',
+			label: 'newer',
+			hash: 'b'.repeat(40),
+			shortHash: 'bbbbbbb',
+		},
+		effectiveFromHash: 'a'.repeat(40),
+		files: [],
+		limits: {
+			maxSummaryFiles: 1000,
+			maxBodyBatchFiles: 24,
+			maxLoadedRows: 10_000,
+			maxLoadedPatchBytes: 1024 * 1024,
+			maxFileRows: 10_000,
+			maxFilePatchBytes: 1024 * 1024,
+			maxLineBytes: 20_000,
+			maxContextLines: 50,
+			bodyConcurrency: 4,
+		},
+		firstBodyCandidates: [],
+	};
+}
+
 describe('GitHistoryController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(getGitCommitFileBodies).mockResolvedValue(body());
+		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
+			status: 'ready',
+			documentId: 'comparison-doc',
+			files: {},
+			errors: {},
+		});
 	});
 
 	it('loads the initial commit list', async () => {
@@ -307,6 +366,67 @@ describe('GitHistoryController', () => {
 		pendingBody.resolve(body());
 		await flushPromises();
 		expect(history.fileBodies).toEqual({});
+	});
+
+	it('opens a selected revision comparison locally and preserves list state on back', async () => {
+		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(comparisonSnapshot());
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+		history.listScrollTop = 320;
+
+		history.openComparison(
+			'/project',
+			{
+				fromRevision: 'older',
+				toKind: 'revision',
+				toRevision: 'newer',
+			},
+			{ diffMode: 'split', contextLines: 8 },
+		);
+
+		expect(history.screen).toBe('comparison');
+		await vi.waitFor(() => expect(history.comparison.snapshot).not.toBeNull());
+		expect(getGitComparisonSnapshot).toHaveBeenCalledWith(
+			'/project',
+			{ kind: 'revision', revision: 'older' },
+			{ kind: 'revision', revision: 'newer' },
+			'direct',
+			expect.objectContaining({ context: 8 }),
+		);
+		expect(history.activeDocument).toBe(history.comparison.document);
+		expect(history.comparison.document.diffMode).toBe('split');
+
+		history.backToList();
+
+		expect(history.screen).toBe('list');
+		expect(history.listScrollTop).toBe(320);
+		expect(history.comparison.snapshot).toBeNull();
+		expect(history.activeDocument).toBe(history.document);
+	});
+
+	it('aborts a local comparison when returning to the commit list', async () => {
+		const pending = deferred<GitComparisonSnapshotReady>();
+		vi.mocked(getGitComparisonSnapshot).mockReturnValueOnce(pending.promise);
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+		history.openComparison(
+			'/project',
+			{
+				fromRevision: 'older',
+				toKind: 'revision',
+				toRevision: 'newer',
+			},
+			{ diffMode: 'unified', contextLines: 5 },
+		);
+		const signal = vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]?.signal;
+
+		history.backToList();
+		pending.resolve(comparisonSnapshot());
+		await flushPromises();
+
+		expect(signal?.aborted).toBe(true);
+		expect(history.screen).toBe('list');
+		expect(history.comparison.snapshot).toBeNull();
 	});
 
 	it('ignores stale commit snapshots after selecting another commit', async () => {

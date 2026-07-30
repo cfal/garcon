@@ -3,14 +3,12 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
 	import type { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
-	import type { GitComparisonDialogDefaults } from '$lib/git/review/git-comparison.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 	import { resolveGitEditorRoot } from '$lib/git/surface/git-editor-root.js';
 	import {
 		getFileSessions,
 		getGitReviewDisplay,
-		getGitViewLauncher,
 		getLocalSettings,
 		getTransientLayers,
 		getWorkspaceCoordinator,
@@ -36,7 +34,6 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const shortcuts = getWorkspaceShortcuts();
-	const gitViews = getGitViewLauncher();
 	const reviewDisplay = getGitReviewDisplay();
 	const localSettings = getLocalSettings();
 	const fileSessions = getFileSessions();
@@ -59,7 +56,13 @@
 
 	$effect(() =>
 		shortcuts.registerSurface(singletonSurfaceId('git-history'), (event) => {
-			if (!controller.comparisonSelection.active || event.key !== 'Escape') return false;
+			if (
+				controller.history.screen !== 'list' ||
+				!controller.comparisonSelection.active ||
+				event.key !== 'Escape'
+			) {
+				return false;
+			}
 			event.preventDefault();
 			controller.comparisonSelection.cancel();
 			return true;
@@ -74,25 +77,20 @@
 		untrack(() => void controller.refreshForInvalidation(key, version));
 	});
 
-	function openComparison(comparison: GitComparisonDialogDefaults): void {
-		const effectiveProjectKey = controller.target.effectiveProjectKey;
-		const target = activeTarget;
-		if (!effectiveProjectKey || !target) return;
-		void gitViews.openCompare(
-			{
-				presentation,
-				source: { effectiveProjectKey, target: { ...target } },
-			},
-			comparison,
-		);
-	}
-
 	function requestRevert(
 		commit: NonNullable<GitHistorySurfaceController['pendingRevertCommit']>,
 	): void {
 		transientLayers.open('main-inert', () => {
 			controller.pendingRevertCommit = commit;
 		});
+	}
+
+	function refreshHistory(): void {
+		if (controller.history.screen === 'comparison' && projectPath) {
+			void controller.history.comparison.refresh(projectPath);
+			return;
+		}
+		void controller.target.refreshTargets();
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
@@ -115,7 +113,7 @@
 	<GitHistoryToolbar
 		{controller}
 		{presentation}
-		onRefresh={() => void controller.target.refreshTargets()}
+		onRefresh={refreshHistory}
 		onClose={() => void workspace.closeSurface(singletonSurfaceId('git-history'))}
 		{closeDisabled}
 	/>
@@ -153,7 +151,7 @@
 		{diffFontSize}
 		onRevertCommit={requestRevert}
 		onOpenInEditor={openInEditor}
-		onOpenComparison={openComparison}
+		onOpenSelectedComparison={() => controller.openSelectedComparison()}
 		{onAppendToChatDraft}
 		onOpenChat={() => void workspace.focusChat()}
 		onSetDiffMode={(mode) => reviewDisplay.setDiffMode(mode)}

@@ -9,11 +9,16 @@ import {
 } from '$lib/api/git.js';
 import { GitDiffDocumentController } from '$lib/git/review/git-diff-document.svelte.js';
 import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
+import {
+	GitComparisonController,
+	type GitComparisonDialogDefaults,
+	type GitComparisonDisplayOptions,
+} from '$lib/git/review/git-comparison.svelte.js';
 import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 
-export type GitHistoryScreen = 'list' | 'commit';
+export type GitHistoryScreen = 'list' | 'commit' | 'comparison';
 
 export interface GitHistoryRevertTarget {
 	hash: string;
@@ -35,6 +40,7 @@ const BODY_CANDIDATE_COUNT = 8;
 
 export class GitHistoryController {
 	readonly document = new GitDiffDocumentController();
+	readonly comparison = new GitComparisonController();
 	screen = $state<GitHistoryScreen>('list');
 	commits = $state<GitHistoryCommitListItem[]>([]);
 	nextOffset = $state<number | null>(0);
@@ -57,6 +63,10 @@ export class GitHistoryController {
 
 	get visibleFiles(): GitCommitFileSummary[] {
 		return this.document.visibleFiles;
+	}
+
+	get activeDocument(): GitDiffDocumentController {
+		return this.screen === 'comparison' ? this.comparison.document : this.document;
 	}
 
 	get rowSource() {
@@ -91,12 +101,17 @@ export class GitHistoryController {
 		const normalizedContext = Number.isFinite(contextLines)
 			? Math.max(0, Math.round(contextLines))
 			: DEFAULT_CONTEXT_LINES;
-		const contextChanged = this.document.contextLines !== normalizedContext;
-		if (contextChanged && this.document.commentComposer.open) {
-			this.document.markContextChangeBlocked();
+		const activeDocument = this.activeDocument;
+		const contextChanged = activeDocument.contextLines !== normalizedContext;
+		if (contextChanged && activeDocument.commentComposer.open) {
+			activeDocument.markContextChangeBlocked();
 			return;
 		}
 		this.document.setDisplayOptions(diffMode, normalizedContext);
+		if (projectPath && this.screen === 'comparison') {
+			this.comparison.setDisplayOptions(projectPath, diffMode, normalizedContext);
+			return;
+		}
 		if (contextChanged && projectPath && this.screen === 'commit' && this.selectedCommitHash) {
 			this.loadCommitSnapshot(projectPath, this.selectedCommitHash, this.selectedParentHash);
 		}
@@ -203,16 +218,34 @@ export class GitHistoryController {
 	}
 
 	openCommit(projectPath: string, commitHash: string): void {
+		this.comparison.reset();
 		this.screen = 'commit';
 		this.selectedCommitHash = commitHash;
 		this.selectedParentHash = null;
 		this.loadCommitSnapshot(projectPath, commitHash, null);
 	}
 
+	openComparison(
+		projectPath: string,
+		defaults: GitComparisonDialogDefaults,
+		displayOptions: GitComparisonDisplayOptions,
+	): void {
+		this.commitAbort?.abort();
+		this.commitAbort = null;
+		this.commitGeneration += 1;
+		this.document.clear({ preserveCache: true });
+		this.commitLoading = false;
+		this.screen = 'comparison';
+		this.comparison.setSpecification(defaults, displayOptions);
+		void this.comparison.compare(projectPath);
+	}
+
 	backToList(): void {
 		this.screen = 'list';
 		this.commitAbort?.abort();
+		this.commitAbort = null;
 		this.document.clear({ preserveCache: true });
+		this.comparison.reset();
 		this.commitLoading = false;
 		this.documentRecoveryAttempted = false;
 	}
@@ -250,6 +283,7 @@ export class GitHistoryController {
 		this.listAbort = null;
 		this.commitAbort = null;
 		this.document.clear();
+		this.comparison.reset();
 		this.listGeneration += 1;
 		this.commitGeneration += 1;
 		this.loadedProjectPath = projectPath;
