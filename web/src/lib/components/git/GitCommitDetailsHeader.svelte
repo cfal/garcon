@@ -79,7 +79,7 @@
 </script>
 
 <div class="border-b border-border bg-background px-3 py-2">
-	<div class="flex min-w-0 items-start gap-2">
+	<div class="flex min-w-0 items-start gap-2" data-git-commit-details-primary>
 		<button
 			type="button"
 			class="mt-0.5 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
@@ -129,6 +129,9 @@
 				</details>
 			{/if}
 		</div>
+		{#if showFileTreeToggle}
+			<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
+		{/if}
 	</div>
 
 	<div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -152,9 +155,6 @@
 			{/if}
 		</div>
 		<div class="flex items-center gap-2">
-			{#if showFileTreeToggle}
-				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
-			{/if}
 			<GitDiffSettingsMenu
 				{diffMode}
 				{contextLines}

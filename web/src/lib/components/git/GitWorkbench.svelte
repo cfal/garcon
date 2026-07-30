@@ -14,6 +14,7 @@
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import GitFileTree from './GitFileTree.svelte';
 	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
+	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
@@ -38,6 +39,10 @@
 		observeContainerWidth,
 	} from '$lib/components/shared/container-presentation.js';
 	import { gitContainerBreakpoints } from './git-container-presentation.js';
+	import {
+		persistGitDiffDocumentFileTreeVisible,
+		readGitDiffDocumentFileTreeVisible,
+	} from '$lib/git/surface/git-file-tree-preferences.js';
 
 	interface GitWorkbenchProps {
 		projectPath?: string | null;
@@ -103,6 +108,7 @@
 	type SinglePane = 'files' | 'diff';
 	let containerWidth = $state(0);
 	let singlePane = $state<SinglePane>('files');
+	let fileTreeVisible = $state(readGitDiffDocumentFileTreeVisible());
 	const observeWorkbenchWidth = observeContainerWidth((width) => {
 		containerWidth = width;
 	});
@@ -111,9 +117,17 @@
 			? 'narrow'
 			: 'wide',
 	);
+	let filePaneHidden = $derived(
+		containerPresentation === 'wide' ? !fileTreeVisible : singlePane !== 'files',
+	);
 	let diffViewportActive = $derived(
 		active && (containerPresentation === 'wide' || singlePane === 'diff'),
 	);
+
+	function toggleFileTree(): void {
+		fileTreeVisible = !fileTreeVisible;
+		persistGitDiffDocumentFileTreeVisible(fileTreeVisible);
+	}
 
 	function handleBodyDemand(demand: GitReviewBodyDemand): void {
 		wb.handleReviewBodyDemand(demand);
@@ -397,6 +411,7 @@
 			<div class="flex items-center gap-1">
 				{@render diffNavigation()}
 				{@render inspectorButtons()}
+				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={toggleFileTree} />
 			</div>
 		</div>
 	{/if}
@@ -571,28 +586,26 @@
 					containerPresentation === 'wide' ? 'grid' : 'flex',
 				)}
 				style={containerPresentation === 'wide'
-					? `grid-template-columns: ${files.treePaneWidthPx}px 6px minmax(0,1fr); grid-template-rows: minmax(0,1fr);`
+					? `grid-template-columns: ${fileTreeVisible ? `${files.treePaneWidthPx}px 6px minmax(0,1fr)` : '0px minmax(0,1fr)'}; grid-template-rows: minmax(0,1fr);`
 					: undefined}
 				data-git-wide-layout={containerPresentation === 'wide' ? '' : undefined}
 			>
 				<div
 					class={cn(
 						'flex min-h-0 flex-col overflow-hidden bg-background',
-						containerPresentation === 'wide' && 'border-r border-border',
+						containerPresentation === 'wide' && fileTreeVisible && 'border-r border-border',
 						containerPresentation === 'narrow' && 'absolute inset-0',
-						containerPresentation === 'narrow' &&
-							singlePane !== 'files' &&
-							'invisible pointer-events-none',
+						filePaneHidden && 'invisible pointer-events-none',
 					)}
-					aria-hidden={containerPresentation === 'narrow' && singlePane !== 'files'}
-					inert={containerPresentation === 'narrow' && singlePane !== 'files'}
+					aria-hidden={filePaneHidden}
+					inert={filePaneHidden}
 					data-git-files-pane
 				>
 					<div class="min-h-0 flex-1 overflow-hidden">
 						{@render fileTree(containerPresentation !== 'wide')}
 					</div>
 				</div>
-				{#if containerPresentation === 'wide'}
+				{#if containerPresentation === 'wide' && fileTreeVisible}
 					<GitFileTreeResizeHandle
 						width={files.treePaneWidthPx}
 						onResize={(width) => files.previewTreePaneWidth(width)}

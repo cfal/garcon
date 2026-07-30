@@ -255,8 +255,10 @@ describe('GitHistoryView', () => {
 
 		const panes = container.querySelector<HTMLElement>('[data-git-diff-document-panes]');
 		const filesPane = container.querySelector<HTMLElement>('[data-git-history-files-pane]');
+		const primaryHeader = container.querySelector('[data-git-commit-details-primary]');
 		const fileTreeToggle = screen.getByRole('button', { name: 'Hide file tree' });
 		const resizer = screen.getByRole('slider', { name: 'Resize file tree, 300 pixels' });
+		expect(primaryHeader?.contains(fileTreeToggle)).toBe(true);
 		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
 
 		await fireEvent.keyDown(resizer, { key: 'ArrowRight' });

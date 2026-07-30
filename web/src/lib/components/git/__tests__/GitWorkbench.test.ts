@@ -8,6 +8,7 @@ import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 function makeTarget(): GitWorkbenchTarget {
 	return {
@@ -136,10 +137,12 @@ describe('GitWorkbench', () => {
 
 	beforeEach(() => {
 		restoreResizeObserver = installResizeObserverHarness();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
 
 	afterEach(() => {
 		restoreResizeObserver();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
 
 	it('shows an initial loading state before the store adopts the rendered target', () => {
@@ -203,5 +206,42 @@ describe('GitWorkbench', () => {
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(diffPane?.getAttribute('aria-hidden')).toBe('true');
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
+	});
+
+	it('hides and restores the file tree in the wide layout', async () => {
+		const target = makeTarget();
+		const { container } = render(GitWorkbenchTestHost, {
+			props: {
+				target,
+				isMobile: false,
+				wb: makeWorkbenchStub(target),
+				diffFontSize: 12,
+			},
+		});
+		const workbench = container.querySelector<HTMLElement>('[data-git-workbench]');
+		expect(workbench).toBeTruthy();
+		if (!workbench) return;
+
+		ResizeObserverHarness.emit(workbench, 1_100);
+		await waitFor(() => expect(workbench.dataset.gitLayout).toBe('wide'));
+
+		const panes = container.querySelector<HTMLElement>('[data-git-wide-layout]');
+		const filesPane = container.querySelector<HTMLElement>('[data-git-files-pane]');
+		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }));
+
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(filesPane?.hasAttribute('inert')).toBe(true);
+		expect(panes?.style.gridTemplateColumns).toBe('0px minmax(0,1fr)');
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeNull();
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible)).toBe('false');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show file tree' }));
+
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
 	});
 });
