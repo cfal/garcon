@@ -123,9 +123,43 @@ describe('GitHistorySurfaceController', () => {
 		const controller = new GitHistorySurfaceController(deps);
 		controller.setPresentationVisible(true);
 		controller.history.screen = 'comparison';
+		controller.history.comparison.document.open(
+			{
+				project: '/project',
+				documentId: 'comparison',
+				files: [],
+				limits: {
+					maxSummaryFiles: 100,
+					maxBodyBatchFiles: 24,
+					maxLoadedRows: 10_000,
+					maxLoadedPatchBytes: 1_000_000,
+					maxFileRows: 5_000,
+					maxFilePatchBytes: 500_000,
+					maxLineBytes: 20_000,
+					maxContextLines: 50,
+					bodyConcurrency: 4,
+				},
+				firstBodyCandidates: [],
+			},
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies: vi.fn(),
+				onError: vi.fn(),
+				commentSource: {
+					kind: 'comparison',
+					fromLabel: 'older',
+					fromIdentity: 'abc1234',
+					toLabel: 'newer',
+					toIdentity: 'def5678',
+					mode: 'direct',
+				},
+			},
+		);
 		controller.history.comparison.document.openCommentComposer('src/a.ts', 'after', 12);
 		controller.history.comparison.document.setCommentBody('Keep this comment');
 
+		expect(controller.history.comparison.document.commentComposer.open).toBe(true);
 		expect(deps.reviewDisplay.setContextLines(12)).toBe(false);
 		expect(controller.history.comparison.document.commentComposer.body).toBe('Keep this comment');
 		expect(controller.history.comparison.document.commentError).toBe(

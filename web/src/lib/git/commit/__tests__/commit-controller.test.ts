@@ -627,27 +627,35 @@ describe('CommitController', () => {
 		expect(controller.retainedDraftCount).toBe(2);
 	});
 
-	it('does not publish a generated message after a programmatic same-chat target change', async () => {
+	it('does not publish a generated message after invalidation retargets the same chat', async () => {
 		const generation = deferred<{ message: string }>();
 		mockedApi.generateCommitMessage.mockReturnValueOnce(generation.promise);
+		const project = targetCandidate('/project');
+		const worktree = targetCandidate('/repo/worktree', {
+			branch: 'feature',
+			isCurrent: false,
+		});
+		mockedApi.getGitTargetCandidates.mockResolvedValue({
+			targets: [project, worktree],
+		});
 		const controller = makeController();
 		await controller.setContext('chat', '/project');
 		await controller.setPresentationVisible(true);
+		await controller.target.selectTarget(worktree);
+		await vi.waitFor(() => expect(controller.target.isLoadingTargets).toBe(false));
 
 		const pending = controller.generateMessage();
 		await vi.waitFor(() =>
-			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']),
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/repo/worktree', ['staged.ts']),
 		);
-		await controller.target.selectTarget(
-			targetCandidate('/repo/worktree', {
-				branch: 'feature',
-				isCurrent: false,
-			}),
-		);
+		mockedApi.getGitTargetCandidates.mockResolvedValueOnce({
+			targets: [project],
+		});
+		await controller.target.refreshForInvalidation('chat', 1);
 		generation.resolve({ message: 'Stale project message' });
 		await pending;
 
-		expect(controller.projectPath).toBe('/repo/worktree');
+		expect(controller.projectPath).toBe('/project');
 		expect(controller.message).toBe('');
 	});
 });
