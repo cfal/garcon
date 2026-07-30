@@ -149,7 +149,7 @@ describe('transformClaudeForkTranscript', () => {
       expect(copied.toolUseResult).not.toBe(sourceEntries[0].toolUseResult);
       expect(sourceEntries).toEqual(original);
       expect(convertClaudeEntries([copied])).toEqual(
-        renderedWithoutTaskActivation(original),
+        renderedWithoutTaskActivation(original, copied.timestamp),
       );
     },
   );
@@ -316,8 +316,10 @@ function withoutTaskActivationFields(toolUseResult) {
   return projected;
 }
 
-function renderedWithoutTaskActivation(entries) {
-  const rendered = convertClaudeEntries(entries);
+function renderedWithoutTaskActivation(entries, forkTimestamp) {
+  const projected = structuredClone(entries);
+  projected[projected.length - 1].timestamp = forkTimestamp;
+  const rendered = convertClaudeEntries(projected);
   for (const message of rendered) {
     const toolUseResult = message.content?.toolUseResult;
     if (typeof toolUseResult !== 'object' || toolUseResult === null) continue;
