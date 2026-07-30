@@ -143,6 +143,9 @@ export function wireServerEvents({
     },
   });
 
+  // Serializes per-chat view work and lifecycle broadcasts so turn messages precede
+  // terminal-driven processing, stop, and run-terminal events. Synchronous lifecycle
+  // broadcasts would reintroduce the spinner-before-message race.
   function scheduleChatTask(
     chatId: string,
     label: string,
@@ -439,7 +442,13 @@ export function wireServerEvents({
 
   const publishProcessing = (chatId: string) => {
     if (!chatExists(chatId)) return;
-    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
+    // Captures the phase before scheduling so rapid stop and terminal transitions
+    // preserve the intermediate stopping state.
+    const phase = processing.phase(chatId);
+    scheduleChatTask(chatId, 'server-events: processing broadcast failed', () => {
+      if (!chatExists(chatId)) return;
+      broadcast(new ChatProcessingUpdatedMessage(chatId, phase));
+    });
   };
   agentRegistry.onProcessing((chatId) => {
     publishProcessing(chatId);
@@ -650,7 +659,10 @@ export function wireServerEvents({
       else reconcilePendingAfterTerminal(chatId, 'rejected stop');
     }
     publishProcessing(chatId);
-    broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
+    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', () => {
+      if (!chatExists(chatId)) return;
+      broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
+    });
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
     const expectedAbort = userAbortLifecycle.onTurnTerminal(chatId, options);
