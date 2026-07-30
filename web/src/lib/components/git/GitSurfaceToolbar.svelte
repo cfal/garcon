@@ -11,7 +11,6 @@
 	let {
 		target,
 		presentation,
-		leading,
 		actions,
 		fixed,
 		onClose,
@@ -19,7 +18,6 @@
 	}: {
 		target: GitTargetSessionController;
 		presentation: 'main' | 'sidebar' | 'mobile';
-		leading?: Snippet;
 		actions: readonly ResponsiveSurfaceAction[];
 		fixed?: Snippet;
 		onClose?: () => void;
@@ -35,17 +33,12 @@
 	class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border bg-background px-2"
 	data-git-surface-toolbar
 >
-	{@render leading?.()}
 	<GitTargetSelector
 		{target}
 		isMobile={presentation === 'mobile'}
 		disabled={!target.canChangeTarget}
 	/>
-	<ResponsiveSurfaceActions
-		{actions}
-		menuLabel={m.git_more_actions()}
-		fixed={fixedControls}
-	/>
+	<ResponsiveSurfaceActions {actions} menuLabel={m.git_more_actions()} fixed={fixedControls} />
 	{#if presentation === 'mobile' && onClose}
 		<button
 			type="button"

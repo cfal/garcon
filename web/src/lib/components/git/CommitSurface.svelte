@@ -30,8 +30,8 @@
 
 	const dialogBodyGridStyle = $derived(
 		isMobile
-			? 'grid-template-rows: minmax(0, 1fr) auto;'
-			: `grid-template-rows: minmax(260px, ${100 - messagePanePercent}fr) auto minmax(150px, ${messagePanePercent}fr);`,
+			? 'grid-template-rows: minmax(0, 1fr) auto auto;'
+			: `grid-template-rows: minmax(260px, ${100 - messagePanePercent}fr) auto auto minmax(150px, ${messagePanePercent}fr);`,
 	);
 	const messagePaneStyle = $derived(
 		isMobile
@@ -142,29 +142,10 @@
 
 <div class="flex h-full min-h-0 min-w-0 overflow-hidden bg-background">
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
-		<GitSurfaceToolbar target={controller.target} {presentation} actions={toolbarActions}>
-			{#snippet leading()}
-			<div class="flex min-w-0 max-w-64 shrink items-center gap-2">
-				<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
-				<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
-					{controller.selectedFileCount === 0
-						? m.git_quick_commit_select_files()
-						: m.git_changes_commit_files({ count: controller.selectedFileCount })}
-				</h2>
-				<div class="flex shrink-0 gap-1.5 text-xs tabular-nums">
-					{#if controller.totalAdditions > 0}
-						<span class="text-git-added">+{controller.totalAdditions}</span>
-					{/if}
-					{#if controller.totalDeletions > 0}
-						<span class="text-git-deleted">-{controller.totalDeletions}</span>
-					{/if}
-				</div>
-			</div>
-			{/snippet}
-		</GitSurfaceToolbar>
+		<GitSurfaceToolbar target={controller.target} {presentation} actions={toolbarActions} />
 
 		<div bind:this={dialogBodyEl} class="grid min-h-0 min-w-0 flex-1" style={dialogBodyGridStyle}>
-			<section class="min-h-0 min-w-0 overflow-hidden">
+			<section class="min-h-0 min-w-0 overflow-hidden" data-commit-file-tree>
 				<div class="relative flex h-full min-w-0 flex-col overflow-hidden">
 					<div
 						class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden py-1 {controller.treeErrorMessage
@@ -214,11 +195,33 @@
 				</button>
 			{/if}
 
+			<div
+				class={cn(
+					'flex min-w-0 items-center gap-2 bg-background py-2',
+					isMobile ? 'border-y border-border px-3' : 'border-b border-border px-4',
+				)}
+				data-commit-selection-summary
+			>
+				<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
+				<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
+					{controller.selectedFileCount === 0
+						? m.git_quick_commit_select_files()
+						: m.git_changes_commit_files({ count: controller.selectedFileCount })}
+				</h2>
+				<div class="flex shrink-0 gap-1.5 text-xs tabular-nums">
+					{#if controller.totalAdditions > 0}
+						<span class="text-git-added">+{controller.totalAdditions}</span>
+					{/if}
+					{#if controller.totalDeletions > 0}
+						<span class="text-git-deleted">-{controller.totalDeletions}</span>
+					{/if}
+				</div>
+			</div>
+
 			<section
-				class="flex min-h-0 min-w-0 flex-col border-t border-border {isMobile
-					? 'gap-2'
-					: 'gap-3 p-4'}"
+				class="flex min-h-0 min-w-0 flex-col {isMobile ? 'gap-2' : 'gap-3 p-4'}"
 				style={messagePaneStyle}
+				data-commit-message-pane
 			>
 				<textarea
 					data-surface-primary

@@ -42,13 +42,36 @@ describe('CommitSurface', () => {
 	});
 
 	it('uses the shared folder and branch target controls', () => {
-		render(CommitSurfaceTestHost, {
+		const { container } = render(CommitSurfaceTestHost, {
 			controller: makeController(),
 			presentation: 'main',
 		});
 
-		expect(screen.getByRole('button', { name: '/project' })).toBeTruthy();
+		const folder = screen.getByRole('button', { name: '/project' });
+		const toolbar = container.querySelector('[data-git-surface-toolbar]');
+		expect(toolbar?.querySelector('button')).toBe(folder);
 		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();
+	});
+
+	it('places the selected-file summary between the file tree and commit message', () => {
+		const { container } = render(CommitSurfaceTestHost, {
+			controller: makeController(),
+			presentation: 'main',
+		});
+
+		const toolbar = container.querySelector('[data-git-surface-toolbar]');
+		const tree = container.querySelector('[data-commit-file-tree]');
+		const summary = container.querySelector('[data-commit-selection-summary]');
+		const message = screen.getByRole('textbox');
+		expect(summary?.textContent).toContain(m.git_quick_commit_select_files());
+		expect(toolbar?.contains(summary)).toBe(false);
+		expect(tree).toBeTruthy();
+		expect(summary).toBeTruthy();
+		if (!tree || !summary) return;
+		expect(tree.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(
+			summary.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 	});
 
 	it('owns branch state independently from another Commit controller', () => {
