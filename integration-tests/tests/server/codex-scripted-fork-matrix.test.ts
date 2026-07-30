@@ -1,11 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import {
   access,
   readFile,
-  readdir,
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import {
   assistantContents,
   userContents,
@@ -14,7 +14,15 @@ import {
   codexAssistantMessage,
   codexExecCommandCall,
 } from '../../support/fake-codex-model.js';
-import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import {
+  type IntegrationDirectories,
+  withIntegrationFixture,
+} from '../../support/integration-fixture.js';
+import {
+  expectTranscriptNotYetPersisted,
+  forkAfterSourceSettles,
+  forkWhenTranscriptPersists,
+} from '../../support/fork-test-support.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
   reloadUntilNativeContains,
@@ -50,6 +58,10 @@ describe('scripted Codex fork lifecycle matrix', () => {
     await environment?.dispose();
   });
 
+  afterEach(() => {
+    environment?.model.reset();
+  });
+
   test('forks immediately after start while the first model request is held', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
@@ -72,20 +84,16 @@ describe('scripted Codex fork lifecycle matrix', () => {
       const sourceRecord = await readCodexChatRecord(fixture.dirs.workspace, sourceChatId);
       const sourcePath = sourceRecord.nativeSession?.value.path;
       if (!sourcePath) throw new Error('Codex source did not persist its first rollout path.');
+      const sourceSnapshot = await readFile(sourcePath, 'utf8');
       await writeFile(sourcePath, '');
       const forkChatId = fixture.newChatId();
       try {
-        await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
-        const forkRecord = await readCodexChatRecord(fixture.dirs.workspace, forkChatId);
-        expect(sourceRecord.agentSessionId).toEqual(expect.any(String));
-        expect(forkRecord).toMatchObject({
-          agentSessionId: null,
-          nativeSession: null,
-        });
-        const unexpectedRollouts = (await codexJsonlFileNames(fixture.dirs.home))
-          .filter((file) => !file.includes(sourceRecord.agentSessionId!));
-        expect(unexpectedRollouts).toEqual([]);
+        await expectTranscriptNotYetPersisted(fixture.client.forkChat({
+          sourceChatId,
+          chatId: forkChatId,
+        }));
       } finally {
+        await writeFile(sourcePath, sourceSnapshot);
         held.release();
       }
       await waitForVisibleResponse({
@@ -95,11 +103,15 @@ describe('scripted Codex fork lifecycle matrix', () => {
         marker: reply,
         afterIndex: cursor,
       });
+      await forkAfterSourceSettles(fixture, sourceChatId, forkChatId);
+      expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
+        prompt,
+      ]);
 
       testEnvironment.model.scriptTurn((request) => {
         expect(request.lastUserText).toContain(childPrompt);
-        expect(JSON.stringify(request.body)).not.toContain(prompt);
-        expect(JSON.stringify(request.body)).not.toContain(reply);
+        expect(JSON.stringify(request.body)).toContain(prompt);
+        expect(JSON.stringify(request.body)).toContain(reply);
         return [codexAssistantMessage(childReply)];
       });
       const childCursor = fixture.client.markEvents();
@@ -117,7 +129,8 @@ describe('scripted Codex fork lifecycle matrix', () => {
       });
 
       const fork = await fixture.client.getMessages(forkChatId);
-      expect(userContents(fork.messages)).toEqual([childPrompt]);
+      expect(userContents(fork.messages)).toEqual([prompt, childPrompt]);
+      expect(assistantContents(fork.messages)).toContain(reply);
       expect(assistantContents(fork.messages)).toContain(childReply);
       const materialized = await readCodexChatRecord(fixture.dirs.workspace, forkChatId);
       expect(materialized.agentSessionId).toEqual(expect.any(String));
@@ -159,7 +172,7 @@ describe('scripted Codex fork lifecycle matrix', () => {
       await waitForFile(join(fixture.dirs.project, startedFile));
 
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await forkWhenTranscriptPersists(fixture, sourceChatId, forkChatId);
       expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
         prompt,
       ]);
@@ -174,6 +187,62 @@ describe('scripted Codex fork lifecycle matrix', () => {
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
       prepareWorkspace: testEnvironment.prepareWorkspace,
+    });
+  }, 120_000);
+
+  test('forks a never-run chat as an unmaterialized child that starts fresh', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    const sourceChatId = String(Date.now() * 1_000 + 902);
+    const childPrompt = marker('EMPTY_CHILD_PROMPT');
+    const childReply = marker('EMPTY_CHILD_REPLY');
+
+    await withIntegrationFixture('codex-scripted-fork-empty', async (fixture) => {
+      const forkChatId = fixture.newChatId();
+      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
+      expect(await readCodexChatRecord(fixture.dirs.workspace, forkChatId)).toMatchObject({
+        agentSessionId: null,
+        nativeSession: null,
+      });
+
+      testEnvironment.model.scriptTurn((request) => {
+        expect(request.lastUserText).toBe(childPrompt);
+        const scriptedMarkers = JSON.stringify(request.body)
+          .match(/SCRIPTED_CODEX_[A-Z_]+_[0-9a-f]{32}/g) ?? [];
+        expect([...new Set(scriptedMarkers)]).toEqual([childPrompt]);
+        return [codexAssistantMessage(childReply)];
+      });
+      const childCursor = fixture.client.markEvents();
+      const child = await fixture.client.runChat(liveCodexRunRequest({
+        chatId: forkChatId,
+        command: childPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: forkChatId,
+        turnId: child.turnId,
+        marker: childReply,
+        afterIndex: childCursor,
+      });
+
+      const fork = await fixture.client.getMessages(forkChatId);
+      expect(userContents(fork.messages)).toEqual([childPrompt]);
+      expect(assistantContents(fork.messages)).toContain(childReply);
+      const materialized = await readCodexChatRecord(fixture.dirs.workspace, forkChatId);
+      expect(materialized.agentSessionId).toEqual(expect.any(String));
+      if (!materialized.agentSessionId) {
+        throw new Error('Codex child did not persist its materialized session id.');
+      }
+      expect(materialized.nativeSession?.value.agentSessionId).toBe(materialized.agentSessionId);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      prepareWorkspace: async (directories) => {
+        await testEnvironment.prepareWorkspace(directories);
+        await prepareEmptyChat(directories, sourceChatId, 'codex', 'gpt-5.4-nano');
+      },
     });
   }, 120_000);
 
@@ -280,6 +349,40 @@ function marker(label: string): string {
   return `SCRIPTED_CODEX_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
+async function prepareEmptyChat(
+  directories: IntegrationDirectories,
+  chatId: string,
+  agentId: string,
+  model: string,
+): Promise<void> {
+  await writeFile(
+    join(directories.workspace, 'workspace-version.json'),
+    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
+  );
+  await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
+    version: 3,
+    sessions: {
+      [chatId]: {
+        agentId,
+        nativeSession: null,
+        agentOwnershipEpoch: crypto.randomUUID(),
+        agentSettingsById: {},
+        projectPath: directories.project,
+        tags: [],
+        agentSessionId: null,
+        nextForkOrdinal: 1,
+        model,
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+        lastReadAt: null,
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'low',
+      },
+    },
+  }));
+}
+
 async function waitForFile(path: string): Promise<void> {
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -303,26 +406,4 @@ async function readCodexChatRecord(
   const chat = registry.sessions[chatId];
   if (!chat) throw new Error(`Codex chat ${chatId} was not persisted.`);
   return chat;
-}
-
-async function codexJsonlFileNames(home: string): Promise<string[]> {
-  const files: string[] = [];
-  await collectJsonlFileNames(join(home, '.codex', 'sessions'), files);
-  return files.sort();
-}
-
-async function collectJsonlFileNames(directory: string, files: string[]): Promise<void> {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return [];
-      throw error;
-    },
-  );
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      await collectJsonlFileNames(join(directory, entry.name), files);
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-      files.push(entry.name);
-    }
-  }
 }

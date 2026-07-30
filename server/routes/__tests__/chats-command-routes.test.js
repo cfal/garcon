@@ -39,6 +39,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { CommandValidationError } from '../../lib/command-validation-error.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
 import {
@@ -695,6 +696,29 @@ describe('REST chat command routes', () => {
     expect(body.errorCode).toBe('SESSION_BUSY');
     expect(forkChatFileCopy).not.toHaveBeenCalled();
     expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
+  it('POST /fork preserves retryable transcript-persistence refusals', async () => {
+    const agent = createRouteAgent();
+    forkChatFileCopy.mockRejectedValueOnce(new CommandValidationError(
+      'TRANSCRIPT_NOT_YET_PERSISTED',
+      "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+      409,
+      true,
+    ));
+
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
+      sourceChatId: CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+    });
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({
+      success: false,
+      error: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+      errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      retryable: true,
+    });
   });
 
   it('POST /queue/entries creates, deduplicates, and preserves queue state', async () => {

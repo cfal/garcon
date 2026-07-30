@@ -1,11 +1,13 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import {
   access,
   appendFile,
   readFile,
+  writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import {
   assistantContents,
   countUserContent,
@@ -15,11 +17,15 @@ import {
   claudeText,
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
-import { GarconApiError } from '../../support/garcon-client.js';
 import {
-  type IntegrationFixture,
+  type IntegrationDirectories,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import {
+  expectTranscriptNotYetPersisted,
+  forkAfterSourceSettles,
+  forkWhenTranscriptPersists,
+} from '../../support/fork-test-support.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
   reloadUntilNativeContains,
@@ -65,6 +71,10 @@ describe('scripted Claude fork lifecycle matrix', () => {
     environment?.dispose();
   });
 
+  afterEach(() => {
+    environment?.model.reset();
+  });
+
   test('forks immediately after start while the first model request is held', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
@@ -100,7 +110,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
         marker: reply,
         afterIndex: cursor,
       });
-      await forkChatWhenPersisted(fixture, sourceChatId, forkChatId);
+      await forkAfterSourceSettles(fixture, sourceChatId, forkChatId);
       expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
         prompt,
       ]);
@@ -165,7 +175,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await waitForFile(join(fixture.dirs.project, startedFile));
 
       const forkChatId = fixture.newChatId();
-      await forkChatWhenPersisted(fixture, sourceChatId, forkChatId);
+      await forkWhenTranscriptPersists(fixture, sourceChatId, forkChatId);
       expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
         prompt,
       ]);
@@ -317,6 +327,58 @@ describe('scripted Claude fork lifecycle matrix', () => {
     });
   });
 
+  test('forks a never-run chat as an unmaterialized child that starts fresh', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const sourceChatId = String(Date.now() * 1_000 + 901);
+    const childPrompt = marker('EMPTY_CHILD_PROMPT');
+    const childReply = marker('EMPTY_CHILD_REPLY');
+
+    await withIntegrationFixture('claude-scripted-fork-empty', async (fixture) => {
+      const forkChatId = fixture.newChatId();
+      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
+      expect(await readClaudeChatRecord(fixture.dirs.workspace, forkChatId)).toMatchObject({
+        agentSessionId: null,
+        nativeSession: null,
+      });
+
+      testEnvironment.model.scriptTurn((request) => {
+        expect(request.lastUserText).toContain(childPrompt);
+        expect(request.body.messages).toHaveLength(1);
+        return [claudeText(childReply)];
+      });
+      const childCursor = fixture.client.markEvents();
+      const child = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId: forkChatId,
+        command: childPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: forkChatId,
+        turnId: child.turnId,
+        marker: childReply,
+        afterIndex: childCursor,
+      });
+
+      const fork = await fixture.client.getMessages(forkChatId);
+      expect(userContents(fork.messages)).toEqual([childPrompt]);
+      expect(assistantContents(fork.messages)).toContain(childReply);
+      const materialized = await readClaudeChat(fixture.dirs.workspace, forkChatId);
+      expect(materialized.agentSessionId).toEqual(expect.any(String));
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      prepareWorkspace: (directories) => prepareEmptyChat(
+        directories,
+        sourceChatId,
+        'claude',
+        'haiku',
+      ),
+    });
+  });
+
   test('does not inherit task notification state when forking an outstanding background task', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
@@ -404,51 +466,38 @@ function marker(label: string): string {
   return `SCRIPTED_CLAUDE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
-async function expectTranscriptNotYetPersisted(promise: Promise<unknown>): Promise<void> {
-  let failure: unknown;
-  try {
-    await promise;
-  } catch (error) {
-    failure = error;
-  }
-  expect(failure).toBeInstanceOf(GarconApiError);
-  expect(failure).toMatchObject({
-    status: 409,
-    body: {
-      errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED',
-      retryable: true,
-    },
-  });
-}
-
-async function forkChatWhenPersisted(
-  fixture: IntegrationFixture,
-  sourceChatId: string,
+async function prepareEmptyChat(
+  directories: IntegrationDirectories,
   chatId: string,
+  agentId: string,
+  model: string,
 ): Promise<void> {
-  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      await fixture.client.forkChat({ sourceChatId, chatId });
-      return;
-    } catch (error) {
-      if (
-        !(error instanceof GarconApiError)
-        || error.status !== 409
-        || !isRecord(error.body)
-        || error.body.errorCode !== 'TRANSCRIPT_NOT_YET_PERSISTED'
-        || error.body.retryable !== true
-      ) {
-        throw error;
-      }
-      await Bun.sleep(25);
-    }
-  }
-  throw new Error(`Claude transcript for ${sourceChatId} did not become forkable.`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  await writeFile(
+    join(directories.workspace, 'workspace-version.json'),
+    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
+  );
+  await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
+    version: 3,
+    sessions: {
+      [chatId]: {
+        agentId,
+        nativeSession: null,
+        agentOwnershipEpoch: crypto.randomUUID(),
+        agentSettingsById: {},
+        projectPath: directories.project,
+        tags: [],
+        agentSessionId: null,
+        nextForkOrdinal: 1,
+        model,
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+        lastReadAt: null,
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'low',
+      },
+    },
+  }));
 }
 
 async function waitForFile(path: string): Promise<void> {
