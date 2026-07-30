@@ -1894,6 +1894,7 @@ describe('ChatCommandService', () => {
       upToSeq: 3,
     })).rejects.toMatchObject({
       code: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
+      message: "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
       status: 409,
       retryable: true,
     });
@@ -1967,6 +1968,7 @@ describe('ChatCommandService', () => {
       upToSeq: 2,
     })).rejects.toMatchObject({
       code: 'MESSAGE_NOT_IN_NATIVE_HISTORY',
+      message: "This message hasn't been written to the provider's transcript yet. It becomes forkable once the turn finishes.",
       status: 409,
       retryable: true,
     });

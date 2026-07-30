@@ -32,7 +32,6 @@ export interface ForkJsonlRequest {
   readonly sourcePath: string;
   readonly sourceAgentSessionId: string;
   readonly cutoffLine: number | null;
-  readonly allowMissingSource?: boolean;
   readonly allowUnmaterializedWholeSession?: boolean;
   readonly leadingLineCount?: number;
   readonly retainedMessageCounts?: ReadonlyMap<number, number>;
@@ -77,7 +76,10 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
   const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
   const snapshot =
     request.cutoffLine === null
-      ? await readStableSource(request.sourcePath, request.allowMissingSource === true)
+      ? await readStableSource(
+          request.sourcePath,
+          request.allowUnmaterializedWholeSession === true,
+        )
       : (request.sourceSnapshot ?? (await snapshotJsonlSource(request.sourcePath)));
   const selected =
     request.cutoffLine === null
@@ -102,6 +104,7 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
   const projectedByLine = new Map(
     selected.entries.map((entry, index) => [entry.lineNumber, projectedEntries[index]]),
   );
+  // Registered transformers do not fabricate entries when the selected source is empty.
   const transformed = request.transformEntries?.({
     selectedEntries: projectedEntries,
     sourceEntries: normalizeJsonl(snapshot.content.toString('utf8'), request.sourcePath)
@@ -144,9 +147,6 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     }) ?? path.join(path.dirname(request.sourcePath), `${targetAgentSessionId}.jsonl`);
   const content = retained.length > 0 ? `${retained.join('\n')}\n` : '';
   try {
-    if (request.allowMissingSource) {
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    }
     await fs.writeFile(targetPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
     if (request.cutoffLine === null) {
       await assertWholeSessionSnapshotUnchanged(request, snapshot);
@@ -177,12 +177,12 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
 }
 
 async function assertWholeSessionSnapshotUnchanged(
-  request: Pick<ForkJsonlRequest, 'sourcePath' | 'allowMissingSource'>,
+  request: Pick<ForkJsonlRequest, 'sourcePath' | 'allowUnmaterializedWholeSession'>,
   snapshot: JsonlSourceSnapshot,
 ): Promise<void> {
   const current = await readCurrentSource(
     request.sourcePath,
-    request.allowMissingSource === true,
+    request.allowUnmaterializedWholeSession === true,
   );
   // A whole-session fork of a working chat races the provider appending its next entry.
   // Transcripts only grow, so the snapshot stays faithful as long as the read bytes remain

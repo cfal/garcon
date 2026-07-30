@@ -130,7 +130,6 @@ describe('forkJsonlTranscript', () => {
       sourcePath,
       sourceAgentSessionId: 'source',
       cutoffLine: null,
-      allowMissingSource: true,
       allowUnmaterializedWholeSession: true,
       transformEntries(input) {
         expect(input.sourceEntries).toEqual([]);
@@ -141,6 +140,19 @@ describe('forkJsonlTranscript', () => {
     expect(result).toEqual({ kind: 'unmaterialized' });
     expect(await readdir(root)).toEqual([]);
     await expect(stat(sourcePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a missing whole-session source when unmaterialized forks are not allowed', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+
+    await expect(forkJsonlTranscript({
+      sourcePath: path.join(root, 'absent.jsonl'),
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+    })).rejects.toMatchObject({ code: 'ENOENT' });
+
+    expect(await readdir(root)).toEqual([]);
   });
 
   it('leaves an empty whole-session source unmaterialized without creating a target', async () => {

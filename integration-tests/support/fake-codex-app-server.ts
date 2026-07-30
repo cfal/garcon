@@ -376,11 +376,15 @@ function awaitTurnRelease(finish: () => void): void {
 }
 
 function forkJsonlThread(id: number, params: Record<string, unknown> | undefined): void {
+  const threadId = typeof params?.threadId === 'string' ? params.threadId : null;
   const sourcePath = typeof params?.path === 'string' ? params.path : null;
-  if (!sourcePath) {
+  if (!threadId || !sourcePath) {
     process.stdout.write(`${JSON.stringify({
       id,
-      error: { code: -32602, message: 'thread not found without rollout path' },
+      error: {
+        code: -32600,
+        message: `no rollout found for thread id ${threadId ?? 'unknown'}`,
+      },
     })}\n`);
     return;
   }

@@ -63,6 +63,9 @@ export interface StartedAgentSession {
   nativeSession: AgentNativeSessionRef | null;
 }
 
+// Deliberate mirror of AgentForkOutcome: server core types depend only on
+// common, never on the interface package; the runtime router is the sole
+// translation point between the two shapes.
 export type ForkedAgentSessionOutcome =
   | { readonly kind: 'materialized'; readonly session: StartedAgentSession }
   | { readonly kind: 'unmaterialized' };

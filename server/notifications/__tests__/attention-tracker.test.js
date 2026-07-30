@@ -7,9 +7,11 @@ function createMockAgentRegistry() {
   const emitter = new EventEmitter();
   return {
     onMessages: (cb) => emitter.on('messages', cb),
+    onProcessing: (cb) => emitter.on('processing', cb),
     onFinished: (cb) => emitter.on('finished', cb),
     onFailed: (cb) => emitter.on('failed', cb),
     emitMessages: (chatId, msgs) => emitter.emit('messages', chatId, msgs),
+    emitProcessing: (chatId, processing) => emitter.emit('processing', chatId, processing),
     emitFinished: (chatId, exitCode) => emitter.emit('finished', chatId, exitCode),
     emitFailed: (chatId, msg) => emitter.emit('failed', chatId, msg),
   };
@@ -230,6 +232,28 @@ describe('AttentionTracker', () => {
       await new Promise(r => setTimeout(r, 10));
       const [, html] = telegram.send.mock.calls[0];
       expect(html).toContain('Failed');
+    });
+
+    it('sends one notification for repeated idle events from one settle', async () => {
+      createTracker();
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      queue.emitChatIdle('c1');
+
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-arms idle notification delivery when new messages arrive', async () => {
+      createTracker();
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      simulateConversation('c1', 'continue', 'Continued');
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).toHaveBeenCalledTimes(2);
     });
 
     it('does NOT send idle notification when permission is pending', async () => {
