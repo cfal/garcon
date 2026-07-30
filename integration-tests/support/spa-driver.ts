@@ -101,12 +101,9 @@ export class SpaDriver {
     );
     if (!directProviderSelected) {
       await this.#clickNewChatModelSelector();
-      await this.#page.waitForFunction(
-        (agentLabel) => document.body.innerText.includes(agentLabel),
-        { timeout: 30_000 },
-        input.optionAgentLabel,
-      );
+      await this.waitForButton(input.optionAgentLabel, { timeout: 30_000 });
       await this.clickButton(input.optionAgentLabel);
+      await this.waitForButton(input.modelLabel, { timeout: 30_000 });
       await this.clickButton(input.modelLabel);
     }
 
