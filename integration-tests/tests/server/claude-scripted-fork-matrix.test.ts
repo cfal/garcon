@@ -417,6 +417,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
         outcome: 'snapshot',
         chats: [{ chatId: sourceChatId, phase: 'running' }],
       });
+      await waitForNativeFileContains(
+        fixture.dirs.workspace,
+        sourceChatId,
+        'backgroundTaskId',
+      );
       const forkChatId = fixture.newChatId();
       await forkWhenTranscriptPersists(fixture, sourceChatId, forkChatId);
       expect(JSON.stringify((await fixture.client.getMessages(forkChatId)).messages))
