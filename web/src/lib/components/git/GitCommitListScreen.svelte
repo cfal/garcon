@@ -181,32 +181,34 @@
 		<div class="divide-y divide-border">
 			{#each commits as commit (commit.hash)}
 				<div
-					class="group px-3 py-2 hover:bg-muted/40 {comparisonFrom === commit.hash ||
-					comparisonTo === commit.hash
+					class="group relative cursor-pointer select-none px-3 py-2 hover:bg-muted/40 {comparisonFrom ===
+						commit.hash || comparisonTo === commit.hash
 						? 'bg-interactive-accent/10'
 						: ''}"
 				>
-					<div class="flex items-stretch gap-2">
-						<button
-							type="button"
-							class="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-							aria-pressed={comparisonSelectionActive
-								? comparisonFrom === commit.hash || comparisonTo === commit.hash
-								: undefined}
-							aria-label={comparisonSelectionActive
-								? m.git_compare_select_commit_for({
-										commit: commit.subject || commit.shortHash,
-										endpoint:
-											comparisonSelectionSlot === 'from'
-												? m.git_compare_from()
-												: m.git_compare_to(),
-									})
-								: undefined}
-							onclick={() =>
-								comparisonSelectionActive
-									? onSelectComparisonCommit(commit.hash)
-									: onOpenCommit(commit.hash)}
-						>
+					<button
+						type="button"
+						class="absolute inset-0 z-0 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+						aria-pressed={comparisonSelectionActive
+							? comparisonFrom === commit.hash || comparisonTo === commit.hash
+							: undefined}
+						aria-label={comparisonSelectionActive
+							? m.git_compare_select_commit_for({
+									commit: commit.subject || commit.shortHash,
+									endpoint:
+										comparisonSelectionSlot === 'from' ? m.git_compare_from() : m.git_compare_to(),
+								})
+							: m.git_history_open_commit({
+									commit: commit.subject || commit.shortHash,
+								})}
+						data-git-history-commit-row
+						onclick={() =>
+							comparisonSelectionActive
+								? onSelectComparisonCommit(commit.hash)
+								: onOpenCommit(commit.hash)}
+					></button>
+					<div class="pointer-events-none relative z-[1] flex items-stretch gap-2">
+						<div class="min-w-0 flex-1 text-left">
 							<div class="flex min-w-0 items-center gap-2">
 								<span class="min-w-0 truncate text-sm font-medium text-foreground">
 									{commit.subject || commit.shortHash}
@@ -232,10 +234,10 @@
 									</span>
 								{/if}
 							</div>
-						</button>
+						</div>
 						<button
 							type="button"
-							class="self-center rounded p-1 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+							class="pointer-events-auto self-center rounded p-1 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 							title={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
 							aria-label={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
 							onclick={(event) => copyCommitHash(event, commit.hash)}
@@ -244,10 +246,12 @@
 						</button>
 						<ChevronRight class="self-center h-4 w-4 shrink-0 text-muted-foreground" />
 					</div>
-					{#if !comparisonSelectionActive}<div class="mt-2 flex justify-end">
+					{#if !comparisonSelectionActive}<div
+							class="pointer-events-none relative z-[1] mt-2 flex justify-end"
+						>
 							<button
 								type="button"
-								class="inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+								class="pointer-events-auto inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 								onclick={() => onRevertCommit(commit)}
 							>
 								<Undo2 class="h-3.5 w-3.5" />

@@ -200,7 +200,10 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
-		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
+		const commitRow = screen.getByRole('button', { name: 'Open commit List commit' });
+		expect(commitRow.hasAttribute('data-git-history-commit-row')).toBe(true);
+		expect(commitRow.parentElement?.classList.contains('select-none')).toBe(true);
+		await fireEvent.click(commitRow);
 
 		await screen.findByText('Commit detail');
 		await waitFor(() => {
@@ -252,6 +255,7 @@ describe('GitHistoryView', () => {
 
 		const panes = container.querySelector<HTMLElement>('[data-git-diff-document-panes]');
 		const filesPane = container.querySelector<HTMLElement>('[data-git-history-files-pane]');
+		const fileTreeToggle = screen.getByRole('button', { name: 'Hide file tree' });
 		const resizer = screen.getByRole('slider', { name: 'Resize file tree, 300 pixels' });
 		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
 
@@ -259,7 +263,7 @@ describe('GitHistoryView', () => {
 		expect(panes?.style.gridTemplateColumns).toContain('316px 6px');
 		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx)).toBe('316');
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }));
+		await fireEvent.click(fileTreeToggle);
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('true');
 		expect(filesPane?.hasAttribute('inert')).toBe(true);
 		expect(panes?.style.gridTemplateColumns).toBe('0px minmax(0,1fr)');
