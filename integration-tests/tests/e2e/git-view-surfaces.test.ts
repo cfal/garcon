@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
@@ -149,6 +149,79 @@ describe('Lightpanda standalone Git views', () => {
       );
       await app.openWorkspaceActions('sidebar');
       await app.waitForMenuItemEnabled('Open Git Compare');
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('keeps Compare on a repository selected independently from the active chat', async () => {
+    await withE2eFixture('git-view-compare-target', async (fixture) => {
+      const chatProject = fixture.integration.dirs.project;
+      const selectedProject = join(chatProject, 'selected-project');
+      await createHistoryFixture(chatProject);
+      await mkdir(selectedProject);
+      await createHistoryFixture(selectedProject);
+      await writeFile(
+        join(selectedProject, 'review.txt'),
+        'selected repository working tree\n',
+        'utf8',
+      );
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-view-compare-target-seed');
+      await app.waitForText('echo:git-view-compare-target-seed');
+
+      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await fixture.page.waitForSelector(
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+          + '[aria-hidden="false"]',
+      );
+      await app.waitForButton(chatProject);
+      await app.clickButton(chatProject);
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Git target"]');
+      await app.fill('#git-target-path-input', selectedProject);
+      await fixture.page.waitForFunction(
+        () => {
+          const dialog = document.querySelector('[role="dialog"][aria-label="Git target"]');
+          const button = [...(dialog?.querySelectorAll('button') ?? [])].find(
+            (element) => element.textContent?.trim() === 'OK',
+          );
+          return button instanceof HTMLButtonElement && !button.disabled;
+        },
+        { timeout: 20_000 },
+      );
+      await app.clickButton('OK');
+
+      await fixture.page.waitForFunction(
+        (expectedPath) => {
+          const panel = document.querySelector(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"]',
+          );
+          const hasSelectedTarget = [...(panel?.querySelectorAll('button') ?? [])].some(
+            (element) => element.getAttribute('aria-label') === expectedPath,
+          );
+          return hasSelectedTarget
+            && panel?.textContent?.includes('selected repository working tree') === true
+            && !panel.textContent.includes('Loading comparison');
+        },
+        { timeout: 20_000 },
+        selectedProject,
+      );
+      expect(await fixture.page.evaluate(
+        (expectedPath) => {
+          const panel = document.querySelector(
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+              + '[aria-hidden="false"]',
+          );
+          return [...(panel?.querySelectorAll('button') ?? [])].some(
+            (element) => element.getAttribute('aria-label') === expectedPath,
+          );
+        },
+        selectedProject,
+      )).toBe(true);
       fixture.assertNoBrowserErrors();
     });
   });

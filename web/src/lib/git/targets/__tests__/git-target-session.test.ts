@@ -184,6 +184,37 @@ describe('GitTargetSessionController', () => {
 		expect(session.activeProjectPath).toBe('/repo/worktree-a');
 	});
 
+	it('keeps an explicitly selected repository as the discovery anchor', async () => {
+		const chatTarget = candidate('/chat', { repoRoot: '/chat' });
+		const selectedTarget = candidate('/selected', { repoRoot: '/selected' });
+		api.getGitTargetCandidates.mockImplementation(async (projectPath) => ({
+			targets: projectPath === '/selected' ? [selectedTarget] : [chatTarget],
+		}));
+		const { session } = createSession({});
+		setProject(session, '/chat', 'chat');
+		session.setPresentationVisible(true);
+		await session.activate();
+
+		await session.selectTarget(selectedTarget);
+		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(session.isLoadingTargets).toBe(false));
+
+		expect(api.getGitTargetCandidates.mock.calls.map(([projectPath]) => projectPath)).toEqual([
+			'/chat',
+			'/selected',
+		]);
+		expect(session.activeProjectPath).toBe('/selected');
+
+		await session.refreshForInvalidation('chat', 1);
+
+		expect(api.getGitTargetCandidates.mock.calls.map(([projectPath]) => projectPath)).toEqual([
+			'/chat',
+			'/selected',
+			'/selected',
+		]);
+		expect(session.activeProjectPath).toBe('/selected');
+	});
+
 	it('reconciles fresh branch metadata and consumes each invalidation once', async () => {
 		api.getGitTargetCandidates
 			.mockResolvedValueOnce({ targets: [candidate('/chat')] })

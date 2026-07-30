@@ -233,7 +233,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	async ensureTargets(force = false): Promise<boolean> {
-		const projectPath = this.baseProjectPath;
+		const projectPath = this.activeProjectPath;
 		const projectKey = this.effectiveProjectKey;
 		if (
 			this.projectIdentityPending ||
@@ -243,14 +243,15 @@ export class GitTargetSessionController implements PortableSingletonController {
 		) {
 			return false;
 		}
-		if (!force && this.#lastTargetFetchKey === projectKey) return false;
+		const targetFetchKey = JSON.stringify([projectKey, projectPath]);
+		if (!force && this.#lastTargetFetchKey === targetFetchKey) return false;
 		this.#requestAbort?.abort();
 		const controller = new AbortController();
 		this.#requestAbort = controller;
 		const generation = ++this.#requestGeneration;
 		const contextGeneration = this.#contextGeneration;
 		const previousIdentity = this.identity;
-		this.#lastTargetFetchKey = projectKey;
+		this.#lastTargetFetchKey = targetFetchKey;
 		this.isLoadingTargets = true;
 		try {
 			const result = await getGitTargetCandidates(projectPath, {
