@@ -69,6 +69,12 @@ export class GitHistoryController {
 		return this.screen === 'comparison' ? this.comparison.document : this.document;
 	}
 
+	get activeScreenLoading(): boolean {
+		if (this.screen === 'comparison') return this.comparison.isLoading;
+		if (this.screen === 'commit') return this.commitLoading;
+		return this.listLoading;
+	}
+
 	get rowSource() {
 		return this.document.rowSource;
 	}

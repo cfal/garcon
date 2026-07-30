@@ -404,6 +404,28 @@ describe('GitHistoryController', () => {
 		expect(history.activeDocument).toBe(history.document);
 	});
 
+	it('reports loading only for the active History screen', () => {
+		const history = new GitHistoryController();
+
+		history.screen = 'list';
+		history.listLoading = true;
+		history.commitLoading = false;
+		history.comparison.isLoading = false;
+		expect(history.activeScreenLoading).toBe(true);
+
+		history.screen = 'commit';
+		history.listLoading = true;
+		expect(history.activeScreenLoading).toBe(false);
+		history.commitLoading = true;
+		expect(history.activeScreenLoading).toBe(true);
+
+		history.screen = 'comparison';
+		history.commitLoading = true;
+		expect(history.activeScreenLoading).toBe(false);
+		history.comparison.isLoading = true;
+		expect(history.activeScreenLoading).toBe(true);
+	});
+
 	it('aborts a local comparison when returning to the commit list', async () => {
 		const pending = deferred<GitComparisonSnapshotReady>();
 		vi.mocked(getGitComparisonSnapshot).mockReturnValueOnce(pending.promise);
