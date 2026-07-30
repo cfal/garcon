@@ -285,6 +285,12 @@ export class FakeClaudeModel {
     return this.#issues.slice();
   }
 
+  reset(): void {
+    this.#turns.length = 0;
+    this.#issues.length = 0;
+    for (const release of [...this.#pendingReleases]) release();
+  }
+
   assertSettled(): void {
     const problems = [
       ...this.#issues,

@@ -3,7 +3,9 @@ import crypto from 'node:crypto';
 import {
   createClaudeForkTranscriptTransformer,
   projectClaudeForkEntry,
+  transformClaudeForkTranscript,
 } from '../fork-transcript.js';
+import { convertClaudeEntries } from '../history-loader.js';
 
 const context = {
   sourceAgentSessionId: '11111111-1111-1111-1111-111111111111',
@@ -73,6 +75,85 @@ describe('projectClaudeForkEntry', () => {
 });
 
 describe('transformClaudeForkTranscript', () => {
+  const taskActivationShapes = [
+    [
+      'an explicitly backgrounded shell',
+      {
+        backgroundTaskId: 'task-explicit',
+        stdout: 'Command running in background.',
+        stderr: '',
+        interrupted: false,
+        isImage: false,
+        noOutputExpected: false,
+      },
+    ],
+    [
+      'an auto-backgrounded shell',
+      {
+        backgroundTaskId: 'task-timeout',
+        stdout: 'Command timed out and continues in background.',
+        stderr: '',
+        interrupted: false,
+        isImage: false,
+        noOutputExpected: false,
+        timedOutAfterMs: 120_000,
+        backgroundCwdHint: '/repo',
+      },
+    ],
+    [
+      'a background shell with persisted output',
+      {
+        backgroundTaskId: 'task-persisted',
+        stdout: 'Output is available on disk.',
+        stderr: '',
+        interrupted: false,
+        isImage: false,
+        noOutputExpected: false,
+        outputFilePath: '/tmp/task-persisted.output',
+        outputFileSize: 4096,
+        outputTaskId: 'task-output',
+      },
+    ],
+  ];
+
+  it.each(taskActivationShapes)(
+    'strips source task identity from %s without changing rendered output',
+    (_name, toolUseResult) => {
+      const sourceEntries = [{
+        type: 'user',
+        uuid: 'source-result',
+        parentUuid: null,
+        sessionId: context.sourceAgentSessionId,
+        timestamp: '2026-07-30T00:00:00.000Z',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'tool-background',
+            content: 'Command running in background.',
+          }],
+        },
+        toolUseResult,
+      }];
+      const original = structuredClone(sourceEntries);
+
+      const result = transformClaudeForkTranscript({
+        selectedEntries: sourceEntries,
+        sourceEntries,
+        ...context,
+      });
+      const copied = result.entries[0];
+      const expectedToolUseResult = withoutTaskActivationFields(toolUseResult);
+
+      expect(copied.toolUseResult).toEqual(expectedToolUseResult);
+      expect(copied.toolUseResult).not.toBe(sourceEntries[0].toolUseResult);
+      expect(sourceEntries).toEqual(original);
+      expect(convertClaudeEntries([copied])).toEqual(
+        renderedWithoutTaskActivation(original, copied.timestamp),
+      );
+    },
+  );
+
   it('creates an independent graph and preserves provider replacement metadata', () => {
     const uuids = [
       '10000000-0000-4000-8000-000000000001',
@@ -227,3 +308,23 @@ describe('transformClaudeForkTranscript', () => {
     })).toThrow('parent appears after its child');
   });
 });
+
+function withoutTaskActivationFields(toolUseResult) {
+  const projected = structuredClone(toolUseResult);
+  delete projected.backgroundTaskId;
+  delete projected.outputTaskId;
+  return projected;
+}
+
+function renderedWithoutTaskActivation(entries, forkTimestamp) {
+  const projected = structuredClone(entries);
+  projected[projected.length - 1].timestamp = forkTimestamp;
+  const rendered = convertClaudeEntries(projected);
+  for (const message of rendered) {
+    const toolUseResult = message.content?.toolUseResult;
+    if (typeof toolUseResult !== 'object' || toolUseResult === null) continue;
+    delete toolUseResult.backgroundTaskId;
+    delete toolUseResult.outputTaskId;
+  }
+  return rendered;
+}

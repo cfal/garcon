@@ -72,6 +72,7 @@ function makeDeps(overrides = {}) {
       sessions.delete(chatId);
     }),
   };
+  const getViewCursor = overrides.getViewCursor ?? mock(() => null);
   const forkAgentSession = overrides.forkAgentSession ?? mock(async () => ({
     kind: 'materialized',
     session: {
@@ -87,6 +88,7 @@ function makeDeps(overrides = {}) {
     metadata,
     carryOver,
     ownership,
+    getViewCursor,
     forkAgentSession,
     discardForkedAgentSession,
     sessions,
@@ -146,8 +148,16 @@ describe('forkChatFileCopy', () => {
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
   });
 
-  it('creates a lazy child when the provider fork remains unmaterialized', async () => {
+  it('creates a lazy child when an unmaterialized provider fork would lose no visible messages', async () => {
     const deps = makeDeps({
+      carryOver: {
+        stageFork: mock(async () => ({
+          sourceRenderedMessageCount: 2,
+          selectedRenderedMessageCount: 2,
+          staged: true,
+        })),
+      },
+      getViewCursor: mock(() => ({ lastSeq: 2 })),
       forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
     });
 
@@ -168,6 +178,31 @@ describe('forkChatFileCopy', () => {
       expect.any(String),
     );
     expect(deps.discardForkedAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unmaterialized provider fork when the source view has native messages', async () => {
+    const deps = makeDeps({
+      getViewCursor: mock(() => ({ lastSeq: 1 })),
+      forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      message: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+      status: 409,
+      retryable: true,
+    });
+
+    expect(deps.carryOver.discardStaged).toHaveBeenCalledWith(
+      'target-chat',
+      expect.any(String),
+    );
+    expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
   it('rejects a point beyond lazy carry-over without leaving staged state', async () => {

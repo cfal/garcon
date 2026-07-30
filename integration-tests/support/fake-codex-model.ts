@@ -210,6 +210,12 @@ export class FakeCodexModel {
     return this.#issues.slice();
   }
 
+  reset(): void {
+    this.#turns.length = 0;
+    this.#issues.length = 0;
+    for (const release of [...this.#pendingReleases]) release();
+  }
+
   // Every scripted turn must have been consumed and every request must have been scripted;
   // anything else means the test and the binary disagreed about the conversation shape.
   assertSettled(): void {

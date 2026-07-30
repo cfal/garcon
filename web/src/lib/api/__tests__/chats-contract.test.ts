@@ -33,7 +33,9 @@ import {
 	setLastSelectedChat,
 } from '../chats';
 import type { ChatListResponse } from '$shared/chat-list';
+import type { CommandErrorCode } from '$shared/chat-command-contracts';
 import { CHAT_STOP_OUTCOMES } from '$shared/chat-types';
+import { ApiError } from '../client';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -779,25 +781,55 @@ describe('chats API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2' });
 	});
 
-it('forkChat sends an optional generation-bound message cutoff', async () => {
+	it('forkChat surfaces retryable transcript-persistence refusals', async () => {
+		const errorCode = 'TRANSCRIPT_NOT_YET_PERSISTED' satisfies CommandErrorCode;
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					success: false,
+					error: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+					errorCode,
+					retryable: true,
+				},
+				409,
+			),
+		);
+
+		let failure: unknown;
+		try {
+			await forkChat({ sourceChatId: '1', chatId: '2' });
+		} catch (error) {
+			failure = error;
+		}
+
+		expect(failure).toBeInstanceOf(ApiError);
+		expect(failure).toMatchObject({
+			status: 409,
+			message: "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+			errorCode,
+			retryable: true,
+		});
+	});
+
+	it('forkChat sends an optional generation-bound message cutoff', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'codex' }),
 		);
 
-	await forkChat({
-		sourceChatId: '1',
-		chatId: '2',
-		upToSeq: 7,
-		generationId: 'generation-1',
-	});
+		await forkChat({
+			sourceChatId: '1',
+			chatId: '2',
+			upToSeq: 7,
+			generationId: 'generation-1',
+		});
 
 		const [, opts] = fetchMock.mock.calls[0];
-	expect(JSON.parse(opts.body)).toEqual({
-		sourceChatId: '1',
-		chatId: '2',
-		upToSeq: 7,
-		generationId: 'generation-1',
-	});
+		expect(JSON.parse(opts.body)).toEqual({
+			sourceChatId: '1',
+			chatId: '2',
+			upToSeq: 7,
+			generationId: 'generation-1',
+		});
 	});
 
 	it('validateStart calls GET /api/v1/chats/validate-start', async () => {

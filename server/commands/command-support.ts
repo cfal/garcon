@@ -110,6 +110,7 @@ export type ForkChatFileCopyDep = (args: {
   metadata: MetadataDep;
   carryOver?: CarryOverDep;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
+  getViewCursor(chatId: string): { lastSeq: number } | null;
   forkAgentSession: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;

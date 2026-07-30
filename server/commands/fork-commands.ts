@@ -385,6 +385,7 @@ export class ForkCommands {
       metadata: this.deps.metadata,
       carryOver: this.deps.carryOver,
       ownership: this.deps.ownership,
+      getViewCursor: this.deps.chatViews.getCursor.bind(this.deps.chatViews),
       forkAgentSession: this.deps.agents.forkAgentSession.bind(this.deps.agents),
       discardForkedAgentSession: this.deps.agents.discardForkedAgentSession.bind(this.deps.agents),
     });

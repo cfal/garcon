@@ -9,6 +9,7 @@ import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
 import type { CarryOverForkStage } from './chat-carryover-store.js';
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
+import { CommandValidationError } from '../lib/command-validation-error.js';
 
 const logger = createLogger('chats:fork');
 
@@ -48,6 +49,7 @@ interface ForkChatInput {
   metadata: ForkChatMetadata;
   carryOver?: ForkChatCarryOver;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
+  getViewCursor(chatId: string): { lastSeq: number } | null;
   forkAgentSession: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
@@ -106,6 +108,7 @@ export async function forkChatFileCopy({
   metadata,
   carryOver,
   ownership,
+  getViewCursor,
   forkAgentSession,
   discardForkedAgentSession,
 }: ForkChatInput): Promise<ForkChatFileCopyResult> {
@@ -154,6 +157,21 @@ export async function forkChatFileCopy({
   if (needsNativeFork && !forkOutcome) {
     await carryOver?.discardStaged(targetChatId, targetEpoch);
     throw new Error(`Failed to create fork target for chat ${targetChatId}`);
+  }
+  if (
+    forkOutcome?.kind === 'unmaterialized'
+    && (getViewCursor(sourceChatId)?.lastSeq ?? 0)
+      > carryOverStage.selectedRenderedMessageCount
+  ) {
+    await carryOver?.discardStaged(targetChatId, targetEpoch);
+    // Empty-snapshot forks succeed only when the user cannot see anything the child would lose;
+    // otherwise the provider transcript is still flushing and the fork is retryable.
+    throw new CommandValidationError(
+      'TRANSCRIPT_NOT_YET_PERSISTED',
+      "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
+      409,
+      true,
+    );
   }
   const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
 

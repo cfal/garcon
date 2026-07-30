@@ -52,6 +52,7 @@ Required for every WS/API contract change:
 - Update sender and receiver logic.
 - Add or update tests.
 - Add migration note in PR description if behavior changed.
+- Within a chat, `chat-messages` precede the emitting turn's terminal-driven `chat-processing-updated`, `chat-session-stopped`, and `agent-run-finished`/`agent-run-failed`; the server-event-wiring task queue enforces this, and new per-chat lifecycle broadcasts must be scheduled through it, not emitted synchronously.
 
 ## Tool Use Contract Discipline
 
