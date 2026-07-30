@@ -418,7 +418,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
         chats: [{ chatId: sourceChatId, phase: 'running' }],
       });
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await forkWhenTranscriptPersists(fixture, sourceChatId, forkChatId);
       expect(JSON.stringify((await fixture.client.getMessages(forkChatId)).messages))
         .not.toContain('task-notification');
 
