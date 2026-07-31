@@ -2,6 +2,7 @@
 	import FolderRoot from '@lucide/svelte/icons/folder-root';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Search from '@lucide/svelte/icons/search';
+	import Settings from '@lucide/svelte/icons/settings';
 	import X from '@lucide/svelte/icons/x';
 	import Input from '$lib/components/ui/input/input.svelte';
 	import ResponsiveSurfaceActions, {
@@ -78,13 +79,18 @@
 	<FileTreeMenuContent {overflowActions} {store} {viewMode} />
 {/snippet}
 
-<div bind:this={root} class="shrink-0 border-b border-border bg-card" data-file-tree-toolbar>
+<div bind:this={root} class="shrink-0 border-b border-border bg-background" data-file-tree-toolbar>
 	<div
 		role="toolbar"
 		aria-label={m.filetree_actions()}
 		class="flex min-h-11 min-w-0 items-center px-2 py-1.5"
 	>
-		<ResponsiveSurfaceActions {actions} menuLabel={m.filetree_actions()} menuContent={fileMenu} />
+		<ResponsiveSurfaceActions
+			{actions}
+			menuLabel={m.filetree_actions()}
+			menuContent={fileMenu}
+			menuIcon={Settings}
+		/>
 	</div>
 
 	{#if store.filterOpen}

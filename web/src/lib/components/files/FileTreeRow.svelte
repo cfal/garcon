@@ -114,22 +114,26 @@
 						<ChevronRight class="h-3.5 w-3.5" />
 					{/if}
 				</button>
-				{#if expanded}
-					<FolderOpen class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
-				{:else}
-					<Folder class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
+				{#if store.showIcons}
+					{#if expanded}
+						<FolderOpen class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
+					{:else}
+						<Folder class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
+					{/if}
 				{/if}
 			{:else}
 				<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
-				{@const kind = iconType()}
-				{#if kind === 'code'}
-					<FileCode2 class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-code" />
-				{:else if kind === 'document'}
-					<FileText class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-doc" />
-				{:else if kind === 'image'}
-					<FileImage class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-image" />
-				{:else}
-					<File class="file-tree-entry-icon mr-2 shrink-0 text-muted-foreground" />
+				{#if store.showIcons}
+					{@const kind = iconType()}
+					{#if kind === 'code'}
+						<FileCode2 class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-code" />
+					{:else if kind === 'document'}
+						<FileText class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-doc" />
+					{:else if kind === 'image'}
+						<FileImage class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-image" />
+					{:else}
+						<File class="file-tree-entry-icon mr-2 shrink-0 text-muted-foreground" />
+					{/if}
 				{/if}
 			{/if}
 			<div

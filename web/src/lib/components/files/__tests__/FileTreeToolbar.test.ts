@@ -80,6 +80,13 @@ describe('FileTreeToolbar', () => {
 		restoreResizeObserver();
 	});
 
+	it('uses a settings icon for its persistent view menu', async () => {
+		await renderMeasuredToolbar();
+		const trigger = screen.getByRole('button', { name: 'File browser actions' });
+
+		expect(trigger.querySelector('svg')?.classList.contains('lucide-settings')).toBe(true);
+	});
+
 	it('moves Refresh from its toolbar button into the persistent menu when space runs out', async () => {
 		const { setWidth } = await renderMeasuredToolbar();
 		expect(screen.getByRole('button', { name: 'Refresh files' })).toBeTruthy();

@@ -380,16 +380,19 @@ describe('FileTreeStore', () => {
 		expect(sortEntries).toHaveBeenCalledTimes(callsAfterMaterialization);
 	});
 
-	it('persists breadcrumb and optional-column defaults and changes', () => {
+	it('persists breadcrumb, icon, view, and optional-column preferences', () => {
 		expect(store.showBreadcrumbs).toBe(true);
+		expect(store.showIcons).toBe(true);
 		expect(store.viewPreference).toBe('responsive');
 		expect(store.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 
 		store.setShowBreadcrumbs(false);
+		store.setShowIcons(false);
 		store.setAlwaysUseDetailedRows(true);
 		store.setColumnVisible('permissions', true);
 
 		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs)).toBe('false');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowIcons)).toBe('false');
 		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeViewPreference)).toBe('always-details');
 		expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility) ?? '')).toEqual({
 			size: true,
@@ -400,6 +403,7 @@ describe('FileTreeStore', () => {
 
 	it('loads valid preferences and ignores malformed values', () => {
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs, 'false');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowIcons, 'false');
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewPreference, 'always-details');
 		mockStorage.set(
 			LOCAL_STORAGE_KEYS.fileTreeColumnVisibility,
@@ -407,13 +411,16 @@ describe('FileTreeStore', () => {
 		);
 		const loaded = new FileTreeStore();
 		expect(loaded.showBreadcrumbs).toBe(false);
+		expect(loaded.showIcons).toBe(false);
 		expect(loaded.viewPreference).toBe('always-details');
 		expect(loaded.visibleColumnKeys).toEqual(['name', 'modified', 'permissions']);
 
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility, '{bad');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowIcons, 'sometimes');
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewPreference, 'tiles');
 		const malformed = new FileTreeStore();
 		expect(malformed.viewPreference).toBe('responsive');
+		expect(malformed.showIcons).toBe(true);
 		expect(malformed.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 	});
 

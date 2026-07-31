@@ -62,8 +62,13 @@
 	{m.filetree_show_breadcrumbs()}
 </DropdownMenuCheckboxItem>
 <DropdownMenuCheckboxItem
+	checked={store.showIcons}
+	onCheckedChange={(checked) => store.setShowIcons(Boolean(checked))}
+>
+	{m.filetree_show_icons()}
+</DropdownMenuCheckboxItem>
+<DropdownMenuCheckboxItem
 	checked={store.viewPreference === 'always-details'}
-	closeOnSelect={false}
 	onCheckedChange={(checked) => store.setAlwaysUseDetailedRows(Boolean(checked))}
 >
 	{m.filetree_always_use_detailed_rows()}

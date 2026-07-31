@@ -249,7 +249,7 @@ This biases the unmeasured first frame toward the safe narrow presentation and a
 </script>
 
 <div
-	class="flex h-full min-h-0 min-w-0 flex-col bg-card"
+	class="flex h-full min-h-0 min-w-0 flex-col bg-background"
 	data-file-tree-root
 	data-file-tree-layout={viewMode}
 	{@attach observeFileTreeWidth}
@@ -291,7 +291,6 @@ The checkbox reflects only the override:
 ```svelte
 <DropdownMenuCheckboxItem
 	checked={store.viewPreference === 'always-details'}
-	closeOnSelect={false}
 	onCheckedChange={(checked) => store.setAlwaysUseDetailedRows(Boolean(checked))}
 >
 	{m.filetree_always_use_detailed_rows()}
@@ -619,7 +618,7 @@ Work:
 - Replace the old message with `Always use detailed rows`.
 - Bind checkbox state to preference.
 - Bind section labels, reset action, and sort groups to resolved mode.
-- Keep `closeOnSelect={false}`.
+- Use the dropdown primitive's default close behavior for this top-level preference.
 
 Validation:
 
@@ -845,6 +844,26 @@ Both original reviewer sessions were resumed once more against `6e91a7e`. Kimi K
 independently verified the flex shrink/truncation behavior, stable component identity, details grid
 placement, and directory path, and reported no remaining admissible finding.
 
+### Post-merge Files polish
+
+The Files tree root, toolbar, breadcrumbs, and sticky column header use `background` rather than
+`card`, matching the workspace frame, floating tab bar, Git surfaces, and Commit surface. Popup
+surfaces continue to use `card` as intended.
+
+The persistent Files popup trigger uses the standard Settings icon while retaining its existing
+accessible `File browser actions` name and responsive overflow behavior. `ResponsiveSurfaceActions`
+accepts a typed optional menu icon so this presentation choice does not fork its measurement or menu
+implementation.
+
+`Show icons` is a persisted, default-on binary preference immediately below `Show breadcrumbs`. It
+removes file, folder, and parent-directory glyphs and their spacing without changing disclosure rails,
+status glyphs, row heights, virtual geometry, or accessible names. The binary preference is an
+ordinary boolean; the responsive view policy remains the separate exhaustive discriminator.
+
+`Always use detailed rows` now uses the dropdown primitive's default select behavior and closes after
+selection, consistent with the other top-level Files preferences. The detail sort key and direction
+radio items deliberately remain open for multi-step sorting changes.
+
 ## Acceptance Criteria
 
 - The popup label is `Always use detailed rows`.
@@ -860,8 +879,11 @@ placement, and directory path, and reported no remaining admissible finding.
 - Responsive transitions preserve selection, expansion, focus, visible anchor, and physical end.
 - A later user scroll cancels deferred restoration.
 - Responsive width changes do not sort or rebuild the logical tree.
-- Details-mode file and folder icons are 32 px and span the two-line text block.
-- Column-mode icons remain 16 px.
+- When icons are enabled, details-mode file and folder icons are 32 px and span the two-line text block.
+- When icons are enabled, column-mode icons remain 16 px.
+- `Show icons` defaults on, persists locally, and removes entry and parent glyphs without changing row geometry.
+- The Files surface uses the same `background` token as its workspace frame and sibling Git views.
+- The Files view popup uses a Settings trigger and closes after toggling `Always use detailed rows`.
 - Title and subtitle share one structurally aligned text stack without compensating subtitle padding.
 - A focused copy-path action preserves its DOM identity, focus, and transient state across responsive transitions.
 - All focused tests, `bun run check`, `bun run test`, and fresh startup validation pass.

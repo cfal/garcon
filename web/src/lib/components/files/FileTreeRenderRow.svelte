@@ -35,6 +35,7 @@
 		path={row.path}
 		gridTemplate={profile.gridTemplate}
 		fillerColumnKeys={profile.fillerColumnKeys}
+		showIcons={store.showIcons}
 		{ariaRowIndex}
 		{focused}
 		{onActivate}

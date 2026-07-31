@@ -94,6 +94,22 @@ describe('FileTree', () => {
 		restoreResizeObserver();
 	});
 
+	it('uses the workspace background across the Files surface', async () => {
+		const { container } = renderReady([entry('README.md', 'file')]);
+		await setFileTreeWidth(container, 700);
+
+		for (const selector of [
+			'[data-file-tree-root]',
+			'[data-file-tree-toolbar]',
+			'[data-file-tree-breadcrumbs]',
+			'[data-file-tree-column-grid]',
+		]) {
+			const element = container.querySelector(selector);
+			expect(element?.classList.contains('bg-background')).toBe(true);
+			expect(element?.classList.contains('bg-card')).toBe(false);
+		}
+	});
+
 	it('expands only from disclosure and enters from the rest of the directory row', async () => {
 		const src = entry('src', 'directory');
 		const { container, store } = renderReady([src]);
@@ -276,7 +292,45 @@ describe('FileTree', () => {
 		expect(screen.queryByRole('navigation', { name: 'File location' })).toBeNull();
 	});
 
-	it('pins detailed rows and sorts without reopening the actions menu', async () => {
+	it('shows entry icons by default and toggles them from the settings menu', async () => {
+		const readme = entry('README.md', 'file');
+		const src = entry('src', 'directory');
+		const { container, store } = renderReady([readme, src]);
+		const readmeRow = container.querySelector<HTMLElement>(
+			`[data-file-tree-row-key="${readme.path}"]`,
+		);
+		const srcRow = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${src.path}"]`);
+		const parentRow = container.querySelector<HTMLElement>('[data-file-tree-parent-row]');
+		if (!readmeRow || !srcRow || !parentRow) throw new Error('Expected file tree rows');
+
+		expect(store.showIcons).toBe(true);
+		expect(readmeRow.querySelector('.file-tree-entry-icon')).toBeTruthy();
+		expect(srcRow.querySelector('.file-tree-entry-icon')).toBeTruthy();
+		expect(parentRow.querySelector('.file-tree-entry-icon')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const showIcons = screen.getByRole('menuitemcheckbox', { name: 'Show icons' });
+		expect(showIcons.getAttribute('aria-checked')).toBe('true');
+		await fireEvent.click(showIcons);
+
+		expect(store.showIcons).toBe(false);
+		expect(readmeRow.querySelector('.file-tree-entry-icon')).toBeNull();
+		expect(srcRow.querySelector('.file-tree-entry-icon')).toBeNull();
+		expect(parentRow.querySelector('.file-tree-entry-icon')).toBeNull();
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const hiddenIcons = screen.getByRole('menuitemcheckbox', { name: 'Show icons' });
+		expect(hiddenIcons.getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(hiddenIcons);
+
+		expect(store.showIcons).toBe(true);
+		expect(readmeRow.querySelector('.file-tree-entry-icon')).toBeTruthy();
+		expect(srcRow.querySelector('.file-tree-entry-icon')).toBeTruthy();
+		expect(parentRow.querySelector('.file-tree-entry-icon')).toBeTruthy();
+	});
+
+	it('pins detailed rows, closes the menu, and exposes detail sorting when reopened', async () => {
 		const { container, store } = renderReady([entry('README.md', 'file')]);
 		await setFileTreeWidth(container, 700);
 		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
@@ -287,22 +341,26 @@ describe('FileTree', () => {
 
 		await fireEvent.click(detailsMode);
 		expect(store.viewPreference).toBe('always-details');
-		expect(detailsMode.getAttribute('aria-checked')).toBe('true');
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 		expect(
 			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
 		).toBe('details');
-		expect(screen.getByText('Details')).toBeTruthy();
-		expect(screen.queryByRole('menuitem', { name: 'Reset column widths' })).toBeNull();
 		await setFileTreeWidth(container, 480);
-		expect(detailsMode.getAttribute('aria-checked')).toBe('true');
 		expect(
 			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
 		).toBe('details');
 		await setFileTreeWidth(container, 700, 'details');
-		expect(detailsMode.getAttribute('aria-checked')).toBe('true');
 		expect(
 			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
 		).toBe('details');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const pinnedDetailsMode = screen.getByRole('menuitemcheckbox', {
+			name: 'Always use detailed rows',
+		});
+		expect(pinnedDetailsMode.getAttribute('aria-checked')).toBe('true');
+		expect(screen.getByText('Details')).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: 'Reset column widths' })).toBeNull();
 		expect(screen.getAllByRole('menuitemradio').map((item) => item.textContent?.trim())).toEqual([
 			'Name',
 			'Size',
@@ -323,11 +381,13 @@ describe('FileTree', () => {
 			screen.getByRole('menuitemradio', { name: 'Descending' }).getAttribute('aria-checked'),
 		).toBe('true');
 
-		await fireEvent.click(detailsMode);
+		await fireEvent.click(pinnedDetailsMode);
 		expect(store.viewPreference).toBe('responsive');
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 		expect(
 			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
 		).toBe('columns');
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
 		expect(screen.getByText('Columns')).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: 'Reset column widths' })).toBeTruthy();
 		expect(screen.queryByRole('menuitemradio')).toBeNull();
@@ -356,9 +416,16 @@ describe('FileTree', () => {
 		await fireEvent.click(alwaysDetails);
 		expect(store.viewPreference).toBe('always-details');
 		expect(root.dataset.fileTreeLayout).toBe('details');
-		await fireEvent.click(alwaysDetails);
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const pinnedAlwaysDetails = screen.getByRole('menuitemcheckbox', {
+			name: 'Always use detailed rows',
+		});
+		expect(pinnedAlwaysDetails.getAttribute('aria-checked')).toBe('true');
+		await fireEvent.click(pinnedAlwaysDetails);
 		expect(store.viewPreference).toBe('responsive');
 		expect(root.dataset.fileTreeLayout).toBe('details');
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 
 		await setFileTreeWidth(container, 520);
 		expect(screen.getByRole('treegrid')).toBe(treegrid);

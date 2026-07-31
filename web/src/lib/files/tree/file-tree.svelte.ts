@@ -193,6 +193,7 @@ export class FileTreeStore {
 	foldersFirst = $state(true);
 	showHiddenFiles = $state(true);
 	showBreadcrumbs = $state(true);
+	showIcons = $state(true);
 	viewPreference = $state<FileTreeViewPreference>('responsive');
 	visibleColumns = $state.raw<FileTreeColumnVisibility>(
 		copyColumnVisibility(DEFAULT_FILE_TREE_COLUMN_VISIBILITY),
@@ -585,6 +586,11 @@ export class FileTreeStore {
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs, String(value));
 	}
 
+	setShowIcons(value: boolean): void {
+		this.showIcons = value;
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowIcons, String(value));
+	}
+
 	setColumnVisible(column: OptionalFileTreeColumnKey, visible: boolean): void {
 		this.visibleColumns = { ...this.visibleColumns, [column]: visible };
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility, JSON.stringify(this.visibleColumns));
@@ -784,6 +790,10 @@ export class FileTreeStore {
 		const showBreadcrumbs = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs);
 		if (showBreadcrumbs === 'true' || showBreadcrumbs === 'false') {
 			this.showBreadcrumbs = showBreadcrumbs === 'true';
+		}
+		const showIcons = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeShowIcons);
+		if (showIcons === 'true' || showIcons === 'false') {
+			this.showIcons = showIcons === 'true';
 		}
 		const viewPreference = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeViewPreference);
 		if (isFileTreeViewPreference(viewPreference)) this.viewPreference = viewPreference;

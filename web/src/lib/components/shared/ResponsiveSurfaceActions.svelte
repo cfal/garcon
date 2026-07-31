@@ -29,12 +29,14 @@
 		actions,
 		menuLabel,
 		menuContent,
+		menuIcon: MenuIcon = Ellipsis,
 		fixed,
 		class: className,
 	}: {
 		actions: readonly ResponsiveSurfaceAction[];
 		menuLabel: string;
 		menuContent?: Snippet<[readonly ResponsiveSurfaceAction[]]>;
+		menuIcon?: Component<{ class?: string }>;
 		fixed?: Snippet;
 		class?: string;
 	} = $props();
@@ -176,7 +178,7 @@
 				title={menuLabel}
 				data-responsive-surface-menu-trigger
 			>
-				<Ellipsis class="h-4 w-4" />
+				<MenuIcon class="h-4 w-4" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" class={menuContent ? 'w-64' : 'w-56'}>
 				{#if menuContent}
@@ -213,7 +215,7 @@
 			class="inline-flex h-8 w-8 items-center justify-center rounded-md"
 			data-surface-action-overflow-measure
 		>
-			<Ellipsis class="h-4 w-4" />
+			<MenuIcon class="h-4 w-4" />
 		</button>
 	</div>
 </div>

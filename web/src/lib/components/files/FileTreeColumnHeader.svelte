@@ -118,7 +118,7 @@
 	role="row"
 	aria-rowindex={ariaRowIndex}
 	data-file-tree-column-grid
-	class="sticky top-0 z-20 grid h-8 min-h-8 gap-2 border-b border-border bg-card px-2 text-xs font-medium text-muted-foreground"
+	class="sticky top-0 z-20 grid h-8 min-h-8 gap-2 border-b border-border bg-background px-2 text-xs font-medium text-muted-foreground"
 	style={`grid-template-columns: ${store.columnGridTemplate}`}
 >
 	{#each visibleColumns as column, columnIndex (column)}

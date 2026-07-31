@@ -10,6 +10,7 @@ export const LOCAL_STORAGE_KEYS = {
 	fileTreeColumnWidths: 'file-tree-column-widths',
 	fileTreeShowBreadcrumbs: 'file-tree-show-breadcrumbs',
 	fileTreeShowHiddenFiles: 'file-tree-show-hidden-files',
+	fileTreeShowIcons: 'file-tree-show-icons',
 	fileTreeSortDirection: 'file-tree-sort-direction',
 	fileTreeSortKey: 'file-tree-sort-key',
 	fileTreeViewPreference: 'file-tree-view-preference',

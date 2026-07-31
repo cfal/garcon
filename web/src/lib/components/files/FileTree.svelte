@@ -45,7 +45,7 @@
 </script>
 
 <div
-	class="flex h-full min-h-0 min-w-0 flex-col bg-card"
+	class="flex h-full min-h-0 min-w-0 flex-col bg-background"
 	data-file-tree-root
 	data-file-tree-layout={viewMode}
 	{@attach observeFileTreeWidth}

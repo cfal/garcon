@@ -87,7 +87,7 @@
 
 <nav
 	aria-label={m.filetree_location()}
-	class="relative flex h-8 min-w-0 shrink-0 items-center overflow-hidden border-b border-border bg-card px-2 text-xs"
+	class="relative flex h-8 min-w-0 shrink-0 items-center overflow-hidden border-b border-border bg-background px-2 text-xs"
 	data-file-tree-breadcrumbs
 >
 	<Folder class="mr-1.5 h-3.5 w-3.5 shrink-0 text-file-icon-folder" aria-hidden="true" />

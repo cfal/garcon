@@ -8,6 +8,7 @@
 		path,
 		gridTemplate,
 		fillerColumnKeys,
+		showIcons,
 		ariaRowIndex,
 		focused,
 		onActivate,
@@ -18,6 +19,7 @@
 		path: string;
 		gridTemplate: string;
 		fillerColumnKeys: readonly FileTreeColumnKey[];
+		showIcons: boolean;
 		ariaRowIndex: number;
 		focused: boolean;
 		onActivate: () => void;
@@ -42,7 +44,9 @@
 >
 	<div role="rowheader" class="flex min-w-0 items-center" title={path}>
 		<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
-		<FolderUp class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
+		{#if showIcons}
+			<FolderUp class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
+		{/if}
 		<span class="truncate">..</span>
 		<span class="sr-only">{m.filetree_parent_directory()}</span>
 	</div>
