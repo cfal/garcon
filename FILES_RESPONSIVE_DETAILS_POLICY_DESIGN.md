@@ -15,7 +15,7 @@ The implemented Files details-row presentation will become the automatic narrow-
 The persisted value will describe user policy, not the currently rendered layout:
 
 - `responsive`: render columns when the configured metadata columns fit and detailed rows when they do not.
-- `always-details`: render detailed rows at every container width.
+- `always-details`: render detailed rows at every container width when at least one metadata field is enabled.
 
 The active `columns | details` mode will be derived in `FileTree.svelte` from that preference, the Files container width, and the configured metadata fields. Width observation will reuse the same Svelte attachment and component-local derivation pattern used by Git Workbench. The store will not own container width or resolved presentation state.
 
@@ -198,16 +198,16 @@ export function resolveFileTreeViewMode({
 	containerWidth,
 	visibleColumnKeys,
 }: ResolveFileTreeViewModeOptions): FileTreeViewMode {
-	if (preference === 'always-details') return 'details';
 	const hasMetadata = visibleColumnKeys.some((key) => key !== 'name');
 	if (!hasMetadata) return 'columns';
+	if (preference === 'always-details') return 'details';
 	return containerWidth < FILE_TREE_MULTI_COLUMN_MINIMUM_WIDTH_PX ? 'details' : 'columns';
 }
 ```
 
 The comparison is strict. At 520 px, columns fit their declared minimum and remain active. At 519.5 px, detailed rows activate.
 
-When all optional metadata fields are disabled, responsive mode stays in columns at every width. The details layout would otherwise spend vertical space on `No details available` without recovering useful information. The single name column will be allowed to shrink with the container.
+When all optional metadata fields are disabled, every preference resolves to columns at every width. The details layout would otherwise spend vertical space on `No details available` without recovering useful information. The persisted preference remains unchanged, so enabling any metadata field restores always-details behavior when requested. The single name column will be allowed to shrink with the container.
 
 ### No hysteresis or debounce
 
@@ -305,6 +305,7 @@ The rest of the menu follows `viewMode`:
 - Checking the override while narrow does not change the current layout but pins it for later widening.
 - Unchecking the override while narrow also does not change the current layout; widening later restores columns.
 - Unchecking the override while wide changes details to columns immediately.
+- With no metadata enabled, the active layout is columns while the checkbox continues to reflect the persisted override.
 
 The old `filetree_show_details_in_row` message is replaced by:
 
@@ -571,7 +572,8 @@ Assertions:
 
 - Responsive with metadata resolves details at 0, 480, and 519.5 px.
 - Responsive with metadata resolves columns at 520 and 900 px.
-- Always-details resolves details at every width.
+- Always-details with metadata resolves details at every width.
+- Always-details without metadata resolves name-only columns at every width.
 - Responsive name-only resolves columns at 0, 200, and 900 px.
 - Column and details profiles expose 16 px and 32 px icons.
 - Minimum widths remain 240/520/240 px.
@@ -739,7 +741,7 @@ Manual verification:
 - Verify the same focused and selected entry remains stable in both directions.
 - Verify a scrolled-to-end directory remains at the end.
 - Verify the override at narrow and wide widths.
-- Verify name-only responsive behavior.
+- Verify name-only behavior under both responsive and always-details preferences.
 - Verify the menu controls match the active presentation while the checkbox reflects only the override.
 - Verify file, folder, expanded folder, image, document, code, and generic icons are 32 px beside the full two-line details block.
 - Verify column icons remain 16 px.
@@ -796,7 +798,7 @@ Default behavior changes from explicit columns to responsive selection. Wide con
 Rollback is client-only:
 
 - Resolve `responsive` to columns unconditionally.
-- Keep `always-details` as the explicit details override.
+- Keep `always-details` as the explicit details override when metadata is enabled.
 - Remove the width attachment and responsive tests if the behavior is withdrawn.
 - The existing details renderer and virtual geometry remain valid.
 
@@ -864,13 +866,21 @@ ordinary boolean; the responsive view policy remains the separate exhaustive dis
 selection, consistent with the other top-level Files preferences. The detail sort key and direction
 radio items deliberately remain open for multi-step sorting changes.
 
+### Name-only details follow-up
+
+The name-only exception takes precedence over the always-details preference. With no metadata fields
+enabled, Files uses the existing compact column geometry and Name header instead of rendering empty
+subtitle rows. The persisted override remains checked and becomes active again as soon as any metadata
+field is enabled.
+
 ## Acceptance Criteria
 
 - The popup label is `Always use detailed rows`.
 - The persisted state is `responsive | always-details`, not the active mode.
 - With metadata enabled, responsive Files uses details below 520 px and columns at or above 520 px.
 - With no metadata enabled, responsive Files keeps a shrinkable name-only column layout.
-- Always-details uses detailed rows at every width.
+- Always-details uses detailed rows at every width when metadata is enabled.
+- With no metadata enabled, every preference uses compact name-only columns without subtitles.
 - Menu section labels and sort/reset controls follow the resolved mode.
 - The checkbox follows only the persisted override.
 - Width is observed through the existing shared attachment on a `min-w-0` Files root.

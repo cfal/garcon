@@ -446,6 +446,38 @@ describe('FileTree', () => {
 		await waitFor(() => expect(root.dataset.fileTreeLayout).toBe('details'));
 	});
 
+	it('uses compact name-only columns while preserving the detailed-row preference', async () => {
+		const { container, store } = renderReady([entry('README.md', 'file')]);
+		const root = container.querySelector<HTMLElement>('[data-file-tree-root]');
+		const grid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!root || !grid) throw new Error('Expected file tree root and grid');
+
+		store.setAlwaysUseDetailedRows(true);
+		store.setColumnVisible('size', false);
+		store.setColumnVisible('modified', false);
+		await waitFor(() => expect(root.dataset.fileTreeLayout).toBe('columns'));
+
+		expect(store.viewPreference).toBe('always-details');
+		expect(screen.getByRole('columnheader', { name: 'Name' })).toBeTruthy();
+		expect(container.querySelector('[data-file-tree-subtitle]')).toBeNull();
+		expect(grid.style.getPropertyValue('--file-tree-row-height')).toBe('28px');
+		expect(grid.style.getPropertyValue('--file-tree-entry-icon-size')).toBe('16px');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		expect(
+			screen
+				.getByRole('menuitemcheckbox', { name: 'Always use detailed rows' })
+				.getAttribute('aria-checked'),
+		).toBe('true');
+		expect(screen.getByText('Columns')).toBeTruthy();
+
+		store.setColumnVisible('modified', true);
+		await waitFor(() => expect(root.dataset.fileTreeLayout).toBe('details'));
+		expect(container.querySelector('[data-file-tree-subtitle]')).toBeTruthy();
+		expect(grid.style.getPropertyValue('--file-tree-row-height')).toBe('44px');
+		expect(grid.style.getPropertyValue('--file-tree-entry-icon-size')).toBe('32px');
+	});
+
 	it('renders configured details as an accessible one-line subtitle', async () => {
 		const readme = entry('README.md', 'file', '/workspace/project', {
 			modified: new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString(),

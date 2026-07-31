@@ -73,6 +73,13 @@ describe('file tree view profile', () => {
 				containerWidth: 900,
 				visibleColumnKeys: ['name'],
 			}),
+		).toBe('columns');
+		expect(
+			resolveFileTreeViewMode({
+				preference: 'always-details',
+				containerWidth: 900,
+				visibleColumnKeys: ['name', 'modified'],
+			}),
 		).toBe('details');
 	});
 

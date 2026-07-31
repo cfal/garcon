@@ -79,8 +79,8 @@ export function resolveFileTreeViewMode({
 	containerWidth,
 	visibleColumnKeys,
 }: ResolveFileTreeViewModeOptions): FileTreeViewMode {
-	if (preference === 'always-details') return 'details';
 	if (!visibleColumnKeys.some((key) => key !== 'name')) return 'columns';
+	if (preference === 'always-details') return 'details';
 	return containerWidth < FILE_TREE_MULTI_COLUMN_MINIMUM_WIDTH_PX ? 'details' : 'columns';
 }
 
