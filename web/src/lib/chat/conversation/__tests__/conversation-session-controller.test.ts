@@ -1095,6 +1095,7 @@ describe('ConversationSessionController', () => {
 			commandType: 'fork-run',
 			clientRequestId: 'req-1',
 			chatId: '456',
+			turnId: 'turn-1',
 			status: 'accepted',
 			acceptedAt: '2026-03-27T08:00:00.000Z',
 			chat: createServerEntry('456'),
