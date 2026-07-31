@@ -9,9 +9,21 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const distDir = path.resolve(repoRoot, 'web', 'build');
 const executableDir = path.resolve(repoRoot, 'dist');
 const executableTargets = {
-  'linux-x64': { bunTarget: 'bun-linux-x64-baseline', outputName: 'garcon-linux-x64' },
-  'darwin-arm64': { bunTarget: 'bun-darwin-arm64', outputName: 'garcon-darwin-arm64' },
-  'windows-x64': { bunTarget: 'bun-windows-x64-baseline', outputName: 'garcon-windows-x64.exe' },
+  'linux-x64': {
+    bunTarget: 'bun-linux-x64-baseline',
+    outputName: 'garcon-linux-x64',
+    cliOutputName: 'garcon-cli-linux-x64',
+  },
+  'darwin-arm64': {
+    bunTarget: 'bun-darwin-arm64',
+    outputName: 'garcon-darwin-arm64',
+    cliOutputName: 'garcon-cli-darwin-arm64',
+  },
+  'windows-x64': {
+    bunTarget: 'bun-windows-x64-baseline',
+    outputName: 'garcon-windows-x64.exe',
+    cliOutputName: 'garcon-cli-windows-x64.exe',
+  },
 };
 
 async function listFilesRecursive(directory) {
@@ -194,6 +206,20 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
   console.log(`Compiled ${target.outputName} with ${embeddedFiles.length} embedded assets.`);
 }
 
+async function buildCliExecutable(targetId) {
+  const target = executableTargets[targetId];
+  const outFile = path.resolve(executableDir, target.cliOutputName);
+  const result = await Bun.build({
+    entrypoints: [path.join(repoRoot, 'cli', 'main.ts')],
+    compile: { target: target.bunTarget, outfile: outFile },
+  });
+  if (!result.success) {
+    for (const log of result.logs) console.error(log);
+    throw new Error('CLI executable build failed.');
+  }
+  console.log(`Compiled ${target.cliOutputName}.`);
+}
+
 async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
   const embeddedFiles = await collectEmbeddedAssetInputs();
@@ -202,6 +228,7 @@ async function run() {
   try {
     for (const targetId of targetIds) {
       await buildExecutable(targetId, embeddedFiles, contributions, agentAssets);
+      await buildCliExecutable(targetId);
     }
   } finally {
     await fs.rm(agentAssets.directory, { recursive: true, force: true });

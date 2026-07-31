@@ -58,6 +58,7 @@ export interface IntegrationFixtureOptions {
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
   redactSensitiveDiagnostics?: boolean;
   serverEnvironment?: Record<string, string>;
+  namedWorkspace?: string;
 }
 
 const SENSITIVE_ENVIRONMENT_NAME =
@@ -175,6 +176,7 @@ export class IntegrationFixture {
   readonly #forbiddenPersistedValues: readonly string[];
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #serverEnvironment: Record<string, string>;
+  readonly #workspaceName: string | undefined;
   garcon: GarconProcess;
   client: GarconTestClient;
   readonly #clients = new Map<string, GarconTestClient>();
@@ -190,6 +192,7 @@ export class IntegrationFixture {
     forbiddenPersistedValues?: readonly string[];
     redactSensitiveDiagnostics?: boolean;
     serverEnvironment?: Record<string, string>;
+    workspaceName?: string;
   }) {
     this.dirs = input.dirs;
     this.fakeProviders = input.fakeProviders;
@@ -200,14 +203,18 @@ export class IntegrationFixture {
     this.#forbiddenPersistedValues = [...(input.forbiddenPersistedValues ?? [])];
     this.#redactSensitiveDiagnostics = input.redactSensitiveDiagnostics === true;
     this.#serverEnvironment = { ...(input.serverEnvironment ?? {}) };
+    this.#workspaceName = input.workspaceName;
   }
 
   static async create(options: IntegrationFixtureOptions = {}): Promise<IntegrationFixture> {
     const root = await mkdtemp(join(tmpdir(), 'garcon-integration-'));
+    const configDir = join(root, 'config');
     const dirs: IntegrationDirectories = {
       root,
-      config: join(root, 'config'),
-      workspace: join(root, 'workspace'),
+      config: configDir,
+      workspace: options.namedWorkspace
+        ? join(configDir, `workspace-${options.namedWorkspace}`)
+        : join(root, 'workspace'),
       project: join(root, 'project'),
       home: join(root, 'home'),
     };
@@ -226,6 +233,7 @@ export class IntegrationFixture {
         repoRoot: REPO_ROOT,
         configDir: dirs.config,
         workspaceDir: dirs.workspace,
+        workspaceName: options.namedWorkspace,
         projectDir: dirs.project,
         homeDir: dirs.home,
         environment: options.serverEnvironment,
@@ -278,6 +286,7 @@ export class IntegrationFixture {
         forbiddenPersistedValues: options.forbiddenPersistedValues,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
         serverEnvironment: options.serverEnvironment,
+        workspaceName: options.namedWorkspace,
       });
     } catch (error) {
       await client?.close().catch(() => undefined);
@@ -551,6 +560,7 @@ export class IntegrationFixture {
       repoRoot: REPO_ROOT,
       configDir: this.dirs.config,
       workspaceDir: this.dirs.workspace,
+      workspaceName: this.#workspaceName,
       projectDir: this.dirs.project,
       homeDir: this.dirs.home,
       environment: this.#serverEnvironment,

@@ -36,11 +36,13 @@
     "build-exe:smoke:darwin-arm64": "bun scripts/smoke-exe.js --target=darwin-arm64",
     "build-exe:smoke:windows-x64": "bun scripts/smoke-exe.js --target=windows-x64",
     "build-exe": "bun run check && bun run test && bun run build && bun run build-exe:compile && bun run build-exe:smoke",
+    "cli": "bun cli/main.ts",
     "server": "bun server/main.ts",
     "start": "bun scripts/start.js",
     "bench:chat-ingestion": "bun run --cwd web profile:chat-ingestion",
     "bench:search": "bun scripts/benchmark-chat-search.js",
-    "test": "bun run test:server && bun run --cwd web test",
+    "test": "bun run test:server && bun run test:cli && bun run --cwd web test",
+    "test:cli": "bun run --cwd cli test",
     "test:server": "bun test common/__tests__/*.test.js && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.test.js'",
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
@@ -50,7 +52,7 @@
     "test:live:codex": "bun run --cwd integration-tests test:live:codex",
     "lint": "bun run --cwd web lint",
     "check": "bun run lint && bun run --cwd web check",
-    "typecheck": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck && bun run --cwd web check && bun run --cwd integration-tests typecheck",
+    "typecheck": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck && bun run --cwd cli typecheck && bun run --cwd web check && bun run --cwd integration-tests typecheck",
     "help": "bun run server --help"
   },
   "keywords": [

@@ -8,6 +8,7 @@ export interface GarconProcessOptions {
   repoRoot: string;
   configDir: string;
   workspaceDir: string;
+  workspaceName?: string;
   projectDir: string;
   homeDir: string;
   startupTimeoutMs?: number;
@@ -120,6 +121,9 @@ export class GarconProcess {
 
   static async start(options: GarconProcessOptions): Promise<GarconProcess> {
     const ready = new Deferred<string>();
+    const workspaceArguments = options.workspaceName
+      ? ['--workspace', options.workspaceName]
+      : ['--workspace-dir', options.workspaceDir];
     const child = Bun.spawn({
       cmd: [
         process.execPath,
@@ -131,8 +135,7 @@ export class GarconProcess {
         '--disable-auth',
         '--config-dir',
         options.configDir,
-        '--workspace-dir',
-        options.workspaceDir,
+        ...workspaceArguments,
         '--project-base-dir',
         options.projectDir,
       ],

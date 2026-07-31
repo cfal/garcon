@@ -21,9 +21,9 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_EMBEDDED_PI_PACKAGE_DIR',
 ]);
 const executableNamesByHost = {
-  'linux-x64': 'garcon-linux-x64',
-  'darwin-arm64': 'garcon-darwin-arm64',
-  'windows-x64': 'garcon-windows-x64.exe',
+  'linux-x64': { server: 'garcon-linux-x64', cli: 'garcon-cli-linux-x64' },
+  'darwin-arm64': { server: 'garcon-darwin-arm64', cli: 'garcon-cli-darwin-arm64' },
+  'windows-x64': { server: 'garcon-windows-x64.exe', cli: 'garcon-cli-windows-x64.exe' },
 };
 
 function delay(ms) {
@@ -135,36 +135,59 @@ function getHostTarget() {
   return `${process.platform}-${process.arch}`;
 }
 
-function parseExecutablePath(argv) {
+function parseExecutablePaths(argv) {
   const explicitPath = argv.find((argument) => argument.startsWith('--path='));
+  const explicitCliPath = argv.find((argument) => argument.startsWith('--cli-path='));
   if (explicitPath) {
-    return path.resolve(process.cwd(), explicitPath.slice('--path='.length));
+    const names = executableNamesByHost[getHostTarget()];
+    if (!names && !explicitCliPath) {
+      throw new Error(`--cli-path is required on unsupported host ${getHostTarget()}.`);
+    }
+    const server = path.resolve(process.cwd(), explicitPath.slice('--path='.length));
+    const cli = explicitCliPath
+      ? path.resolve(process.cwd(), explicitCliPath.slice('--cli-path='.length))
+      : path.resolve(path.dirname(server), names.cli);
+    return { server, cli };
   }
 
   const explicitTarget = argv.find((argument) => argument.startsWith('--target='));
   if (explicitTarget) {
     const target = explicitTarget.slice('--target='.length).trim();
-    const executableName = executableNamesByHost[target];
-    if (!executableName) {
+    const names = executableNamesByHost[target];
+    if (!names) {
       const supportedTargets = Object.keys(executableNamesByHost).join(', ');
       throw new Error(`Unsupported smoke target "${target}". Supported targets: ${supportedTargets}.`);
     }
-    return path.resolve(process.cwd(), 'dist', executableName);
+    return {
+      server: path.resolve(process.cwd(), 'dist', names.server),
+      cli: path.resolve(process.cwd(), 'dist', names.cli),
+    };
   }
 
-  const executableName = executableNamesByHost[getHostTarget()];
-  if (!executableName) {
+  const names = executableNamesByHost[getHostTarget()];
+  if (!names) {
     const supportedTargets = Object.keys(executableNamesByHost).join(', ');
     throw new Error(`Unsupported host target "${getHostTarget()}". Supported targets: ${supportedTargets}.`);
   }
 
-  return path.resolve(process.cwd(), 'dist', executableName);
+  return {
+    server: path.resolve(process.cwd(), 'dist', names.server),
+    cli: path.resolve(process.cwd(), 'dist', names.cli),
+  };
 }
 
 async function run() {
-  const executablePath = parseExecutablePath(Bun.argv.slice(2));
+  const executablePaths = parseExecutablePaths(Bun.argv.slice(2));
+  const executablePath = executablePaths.server;
   if (!(await Bun.file(executablePath).exists())) {
     throw new Error(`Missing executable at ${executablePath}. Run "bun run build-exe:compile" first.`);
+  }
+  if (!(await Bun.file(executablePaths.cli).exists())) {
+    throw new Error(`Missing CLI executable at ${executablePaths.cli}. Run "bun run build-exe:compile" first.`);
+  }
+  const cliHelp = Bun.spawnSync([executablePaths.cli, '--help']);
+  if (cliHelp.exitCode !== 0 || !cliHelp.stdout.toString().startsWith('Usage:\n  garcon-cli')) {
+    throw new Error(`CLI executable help smoke check failed for ${executablePaths.cli}.`);
   }
 
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-exe-smoke-'));
@@ -282,7 +305,7 @@ async function run() {
     await rm(workspaceDir, { recursive: true, force: true });
   }
 
-  console.log(`Smoke check passed for ${executablePath}`);
+  console.log(`Smoke check passed for ${executablePath} and ${executablePaths.cli}`);
 }
 
 run().catch((error) => {
