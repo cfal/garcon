@@ -165,6 +165,29 @@ describe('LocalSettingsStore', () => {
 		malformed.destroy();
 	});
 
+	it('persists the browser link-capture opt-in and rejects malformed values', () => {
+		const store = createLocalSettingsStore();
+		expect(store.openLinksInBrowserSurface).toBe(false);
+		store.toggle('openLinksInBrowserSurface');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ openLinksInBrowserSurface: true });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.openLinksInBrowserSurface).toBe(true);
+		restored.destroy();
+		store.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ openLinksInBrowserSurface: 'yes' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.openLinksInBrowserSurface).toBe(false);
+		malformed.destroy();
+	});
+
 	it('persists the terminal font size', () => {
 		const store = createLocalSettingsStore();
 		store.set('terminalFontSize', '18');

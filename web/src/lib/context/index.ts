@@ -39,6 +39,7 @@ import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svel
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import type { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
 import type { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
+import type { ExternalLinkPolicy } from '$lib/browser/external-link-policy.js';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -89,6 +90,18 @@ export const [getGitReviewDisplay, setGitReviewDisplay] =
 export const [getGitViewLauncher, setGitViewLauncher] = createContext<GitViewLauncher>();
 export const [getSingletonSurfaces, setSingletonSurfaces] =
 	createContext<SingletonSurfaceRegistry>();
+const [getRequiredExternalLinkPolicy, setExternalLinkPolicyContext] =
+	createContext<ExternalLinkPolicy>();
+export const setExternalLinkPolicy = setExternalLinkPolicyContext;
+// Optional so markdown renders unchanged where the workspace is absent
+// (e.g. the shared-transcript page).
+export function getOptionalExternalLinkPolicy(): ExternalLinkPolicy | null {
+	try {
+		return getRequiredExternalLinkPolicy();
+	} catch {
+		return null;
+	}
+}
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();
