@@ -24,7 +24,6 @@
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { getSplitPaneTextScale } from '$lib/chat/split/split-pane-text-scale.js';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
-	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
 	import { cn } from '$lib/utils/cn';
 	import CurrentChatMenu from '$lib/components/layout/CurrentChatMenu.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -62,8 +61,6 @@
 		isVisible: boolean;
 		isInteractive: boolean;
 		onMenuClick?: () => void;
-		isDesktopFullscreen?: boolean;
-		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
@@ -78,8 +75,6 @@
 		isVisible,
 		isInteractive,
 		onMenuClick,
-		isDesktopFullscreen = false,
-		onToggleDesktopFullscreen,
 		onRegisterReload,
 		onRegisterSubmit,
 		onRegisterUserMessageNavigator,
@@ -116,7 +111,6 @@
 	const reserveConversationTopFloatingToolbar = $derived(
 		reserveTopFloatingToolbar || (isMobileLayout && hasUsableChatContext),
 	);
-	const canToggleDesktopFullscreen = $derived(!isMobileLayout && !!onToggleDesktopFullscreen);
 	const canUpdateSelectedProjectPath = $derived(
 		selectedChat
 			? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false)
@@ -154,10 +148,6 @@
 
 	function handleRegisterAppendToDraft(fn: ChatDraftAppend): void {
 		onRegisterAppendToDraft?.(fn);
-	}
-
-	function toggleSplitMode() {
-		toggleChatSplitMode(splitLayout, sessions, selectedChat);
 	}
 
 	function handleSplitFocusPane(paneId: string) {
@@ -330,17 +320,11 @@
 		<CurrentChatMenu
 			{selectedChat}
 			{isMobileLayout}
-			splitEnabled={splitLayout.isEnabled}
-			canToggleSplitView
-			{isDesktopFullscreen}
-			{canToggleDesktopFullscreen}
 			canReload
 			canUpdateProjectPath={canUpdateSelectedProjectPath}
 			canFork={canForkSelectedChat}
 			canForkNow={canForkSelectedChatNow}
 			{shadow}
-			onToggleSplitMode={toggleSplitMode}
-			{onToggleDesktopFullscreen}
 			onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
 			onOpenGitHistory={isMobileLayout
 				? () => void gitViews.openHistory({ presentation: 'mobile' })

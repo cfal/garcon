@@ -21,9 +21,12 @@ export class AppShellBreakpointWorkspace {
 		this.isMobile = false;
 	}
 
-	async setManualFullscreen(enabled: boolean): Promise<void> {
+	async toggleFullscreen(host: 'main' | 'sidebar'): Promise<void> {
 		const next = reduceWorkspaceLayout(this.layout.snapshot, [
-			{ type: 'set-manual-fullscreen', enabled },
+			{
+				type: 'set-fullscreen-host',
+				host: this.layout.snapshot.fullscreenHost === host ? null : host,
+			},
 		]);
 		this.layout.publish(this.layout.revision, next);
 	}

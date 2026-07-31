@@ -34,15 +34,10 @@ function props(onOpenUserMessageNavigator?: () => void) {
 	return {
 		selectedChat: chat(),
 		isMobileLayout: true,
-		splitEnabled: false,
-		canToggleSplitView: true,
-		isDesktopFullscreen: false,
-		canToggleDesktopFullscreen: false,
 		canReload: true,
 		canUpdateProjectPath: true,
 		canFork: true,
 		canForkNow: true,
-		onToggleSplitMode: vi.fn(),
 		onRename: vi.fn(),
 		onDetails: vi.fn(),
 		onReload: vi.fn(),
@@ -121,13 +116,13 @@ describe('CurrentChatMenu', () => {
 
 		expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));
 		expect(items.indexOf(compare)).toBeLessThan(items.indexOf(share));
+		expect(screen.queryByRole('menuitem', { name: m.workspace_split_view() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_fullscreen() })).toBeNull();
 		await fireEvent.click(history);
 		expect(openHistory).toHaveBeenCalledOnce();
 
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
-		await fireEvent.click(
-			screen.getByRole('menuitem', { name: m.workspace_open_git_compare() }),
-		);
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_compare() }));
 		expect(openCompare).toHaveBeenCalledOnce();
 	});
 
@@ -135,11 +130,7 @@ describe('CurrentChatMenu', () => {
 		render(CurrentChatMenu, { ...props(), isMobileLayout: false });
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_chat_more_actions() }));
 
-		expect(
-			screen.queryByRole('menuitem', { name: m.workspace_open_git_history() }),
-		).toBeNull();
-		expect(
-			screen.queryByRole('menuitem', { name: m.workspace_open_git_compare() }),
-		).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_compare() })).toBeNull();
 	});
 });

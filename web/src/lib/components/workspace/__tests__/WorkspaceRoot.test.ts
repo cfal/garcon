@@ -189,7 +189,7 @@ function minimalGitSnapshot(): WorkspaceLayoutSnapshot {
 		sidebarOpen: false,
 		desiredSidebarWidth: 480,
 		dialogFileSurfaceId: null,
-		manualFullscreen: false,
+		fullscreenHost: null,
 		mobileActiveSurfaceId: 'singleton:git',
 		mobileOnlySurfaceIds: [],
 		mobileReturnStack: [],
@@ -266,8 +266,7 @@ function createWorkspace(initial: WorkspaceLayoutSnapshot) {
 		},
 		get isChatPresented() {
 			return (
-				layout.snapshot.mobileActiveSurfaceId === CHAT_SURFACE_ID ||
-				layout.activeMainId === CHAT_SURFACE_ID
+				layout.snapshot.fullscreenHost !== 'sidebar' && layout.activeMainId === CHAT_SURFACE_ID
 			);
 		},
 		get isChatInteractive() {
@@ -282,6 +281,14 @@ function createWorkspace(initial: WorkspaceLayoutSnapshot) {
 		setSidebarWidth: vi.fn(async (width: number) => commit([{ type: 'set-sidebar-width', width }])),
 		openSidebar: vi.fn(async () => commit([{ type: 'set-sidebar-open', open: true }])),
 		closeSidebar: vi.fn(async () => commit([{ type: 'set-sidebar-open', open: false }])),
+		toggleFullscreen: vi.fn(async (host: HostId) =>
+			commit([
+				{
+					type: 'set-fullscreen-host',
+					host: layout.snapshot.fullscreenHost === host ? null : host,
+				},
+			]),
+		),
 		focusSurface: vi.fn(async (surfaceId: string) => {
 			const host = hostFor(surfaceId);
 			if (host) commit([{ type: 'focus-host', host, surfaceId }]);
@@ -411,6 +418,8 @@ const portableSurfaces: Array<{ name: string; descriptor: SurfaceDescriptor }> =
 beforeEach(() => {
 	surfaceRendererTestProbe.reset();
 	TestResizeObserver.instances = [];
+	document.body.style.overflow = '';
+	document.body.style.touchAction = '';
 	vi.stubGlobal('ResizeObserver', TestResizeObserver);
 	vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_400);
 });
@@ -420,6 +429,8 @@ afterEach(() => {
 	(testContext.current?.surfaceFrames as SurfaceFrameRegistry | undefined)?.destroy();
 	(testContext.current?.singletonSurfaces as SingletonSurfaceRegistry | undefined)?.destroy();
 	testContext.current = null;
+	document.body.style.overflow = '';
+	document.body.style.touchAction = '';
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -527,6 +538,23 @@ describe('WorkspaceRoot', () => {
 		expect(
 			screen.queryByRole('menuitem', { name: m.chat_user_message_navigator_menu() }),
 		).toBeNull();
+	});
+
+	it('places Chat split view immediately before the shared fullscreen command', async () => {
+		installContext(canonicalWorkspaceSnapshot());
+		testContext.current!.workspaceContext = {
+			currentProject: '/workspace/project',
+			canUpdateProjectPath: true,
+		};
+		testContext.current!.sessions = { selectedChat: selectedChat() };
+		render(WorkspaceRoot, { isMobile: false, chatActions });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+		const items = screen.getAllByRole('menuitem');
+		const split = screen.getByRole('menuitem', { name: m.workspace_split_view() });
+		const fullscreen = screen.getByRole('menuitem', { name: m.workspace_fullscreen() });
+
+		expect(items.indexOf(fullscreen)).toBe(items.indexOf(split) + 1);
 	});
 
 	it.each([
@@ -929,6 +957,142 @@ describe('WorkspaceRoot', () => {
 			chatNode,
 		);
 		expect(screen.queryByText(/unsafe state mutation/i)).toBeNull();
+	});
+
+	it('releases overlay modality while the sidebar is fullscreen and restores it once', async () => {
+		const { workspace } = installContext();
+		const register = testContext.current!.transientLayers as {
+			register: ReturnType<typeof vi.fn>;
+		};
+		const onOverlayModalChange = vi.fn();
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+			onOverlayModalChange,
+		});
+		const hostRegion = container.querySelector<HTMLElement>('.workspace-host-region');
+		expect(hostRegion).toBeTruthy();
+		if (!hostRegion) return;
+		const rootObserver = TestResizeObserver.instances.find((observer) =>
+			observer.observed.has(hostRegion),
+		);
+		expect(rootObserver).toBeTruthy();
+		if (!rootObserver) return;
+
+		rootObserver.emit(hostRegion, 700);
+		await screen.findByRole('dialog', { name: 'Workspace sidebar' });
+		expect(document.body.style.overflow).toBe('hidden');
+		expect(document.body.style.touchAction).toBe('none');
+		expect(register.register).toHaveBeenCalledTimes(1);
+		const unregisterFirst = register.register.mock.results[0]?.value as ReturnType<typeof vi.fn>;
+
+		await workspace.toggleFullscreen('sidebar');
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		const sidebar = container.querySelector<HTMLElement>(
+			'[data-desktop-layout-pane="workspace-sidebar"]',
+		);
+		expect(sidebar?.getAttribute('data-workspace-host-fullscreen')).toBe('sidebar');
+		expect(sidebar?.style.width).toBe('100%');
+		expect(sidebar?.classList).toContain('relative');
+		expect(sidebar?.classList).not.toContain('absolute');
+		expect(container.querySelector('[data-workspace-sidebar-backdrop]')).toBeNull();
+		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeNull();
+		await waitFor(() => expect(document.body.style.overflow).toBe(''));
+		expect(document.body.style.touchAction).toBe('');
+		expect(unregisterFirst).toHaveBeenCalledOnce();
+		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(false));
+
+		rootObserver.emit(hostRegion, 1_400);
+		rootObserver.emit(hostRegion, 700);
+		expect(register.register).toHaveBeenCalledTimes(1);
+
+		await workspace.toggleFullscreen('sidebar');
+		await screen.findByRole('dialog', { name: 'Workspace sidebar' });
+		expect(register.register).toHaveBeenCalledTimes(2);
+	});
+
+	it('retains the hidden sidebar host while main is fullscreen', async () => {
+		const { workspace } = installContext();
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const sidebar = container.querySelector<HTMLElement>(
+			'[data-desktop-layout-pane="workspace-sidebar"]',
+		);
+		expect(sidebar).toBeTruthy();
+		if (!sidebar) return;
+
+		await workspace.toggleFullscreen('main');
+		await tick();
+
+		expect(container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')).toBe(sidebar);
+		expect(sidebar.hasAttribute('inert')).toBe(true);
+		expect(sidebar.getAttribute('aria-hidden')).toBe('true');
+		expect(sidebar.classList).toContain('invisible');
+
+		await workspace.toggleFullscreen('main');
+		await tick();
+		expect(container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')).toBe(sidebar);
+		expect(sidebar.hasAttribute('inert')).toBe(false);
+		expect(sidebar.getAttribute('aria-hidden')).toBe('false');
+	});
+
+	it('keeps Chat mounted, inert, and draft-capable during sidebar fullscreen', async () => {
+		const initial = reduceWorkspaceLayout(withAdditionalSurfaces(), [
+			{ type: 'move-to-host', surfaceId: 'singleton:git', destination: 'sidebar' },
+		]);
+		const { workspace } = installContext(initial);
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const mainPane = container.querySelector<HTMLElement>('[data-desktop-layout-pane="main"]');
+		const chatPanel = container.querySelector<HTMLElement>(
+			`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`,
+		);
+		const chatSurface = screen.getByTestId('chat-surface-stub');
+		const chatInput = screen.getByRole('textbox', {
+			name: 'Chat focus target',
+		}) as HTMLTextAreaElement;
+		expect(mainPane && chatPanel).toBeTruthy();
+		if (!mainPane || !chatPanel) return;
+
+		await fireEvent.input(chatInput, { target: { value: 'Retain this draft' } });
+		await workspace.toggleFullscreen('sidebar');
+		await tick();
+
+		expect(container.querySelector('[data-desktop-layout-pane="main"]')).toBe(mainPane);
+		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
+			chatPanel,
+		);
+		expect(screen.getByTestId('chat-surface-stub')).toBe(chatSurface);
+		expect(chatInput.value).toBe('Retain this draft');
+		expect(mainPane.classList).toContain('hidden');
+		expect(mainPane.hasAttribute('inert')).toBe(true);
+		expect(mainPane.getAttribute('aria-hidden')).toBe('true');
+		expect(chatSurface.getAttribute('data-visible')).toBe('false');
+		expect(chatSurface.getAttribute('data-interactive')).toBe('false');
+		expect(
+			container
+				.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')
+				?.getAttribute('data-workspace-host-fullscreen'),
+		).toBe('sidebar');
+		expect(screen.queryByRole('dialog', { name: 'Workspace sidebar' })).toBeNull();
+		expect(container.querySelector('[data-workspace-sidebar-backdrop]')).toBeNull();
+		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Append review comment' }));
+		expect(chatInput.value).toContain('Retain this draft');
+		expect(chatInput.value).toContain('Git review comment');
+
+		await workspace.toggleFullscreen('sidebar');
+		await tick();
+		expect(mainPane.classList).not.toContain('hidden');
+		expect(mainPane.hasAttribute('inert')).toBe(false);
+		expect(mainPane.getAttribute('aria-hidden')).toBe('false');
+		expect(screen.getByTestId('chat-surface-stub')).toBe(chatSurface);
+		expect(chatInput.value).toContain('Git review comment');
 	});
 
 	it('hands a retained renderer across desktop and mobile without duplicate attachment', async () => {

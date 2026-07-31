@@ -17,17 +17,11 @@
 	interface CurrentChatMenuProps {
 		selectedChat: ChatSessionRecord;
 		isMobileLayout: boolean;
-		splitEnabled: boolean;
-		canToggleSplitView: boolean;
-		isDesktopFullscreen: boolean;
-		canToggleDesktopFullscreen: boolean;
 		canReload: boolean;
 		canUpdateProjectPath: boolean;
 		canFork: boolean;
 		canForkNow: boolean;
 		shadow?: boolean;
-		onToggleSplitMode: () => void;
-		onToggleDesktopFullscreen?: () => void;
 		onOpenUserMessageNavigator?: () => void;
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
@@ -43,17 +37,11 @@
 	let {
 		selectedChat,
 		isMobileLayout,
-		splitEnabled,
-		canToggleSplitView,
-		isDesktopFullscreen,
-		canToggleDesktopFullscreen,
 		canReload,
 		canUpdateProjectPath,
 		canFork,
 		canForkNow,
 		shadow = false,
-		onToggleSplitMode,
-		onToggleDesktopFullscreen,
 		onOpenUserMessageNavigator,
 		onOpenGitHistory,
 		onOpenGitCompare,
@@ -81,16 +69,10 @@
 	<DropdownMenuContent align="end">
 		<CurrentChatMenuItems
 			{selectedChat}
-			showSplitViewAction={!isMobileLayout && canToggleSplitView}
-			showFullscreenAction={!isMobileLayout && canToggleDesktopFullscreen}
-			{splitEnabled}
-			{isDesktopFullscreen}
 			{canReload}
 			{canUpdateProjectPath}
 			{canFork}
 			{canForkNow}
-			{onToggleSplitMode}
-			{onToggleDesktopFullscreen}
 			{onOpenUserMessageNavigator}
 			{onOpenGitHistory}
 			{onOpenGitCompare}

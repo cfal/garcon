@@ -10,16 +10,22 @@
 	let {
 		isMobile,
 		desktopLayoutOrder = [...DEFAULT_DESKTOP_LAYOUT_ORDER],
+		desktopChatListHidden = false,
 		desktopChatList,
 	}: {
 		isMobile: boolean;
 		desktopLayoutOrder?: DesktopLayoutOrder;
+		desktopChatListHidden?: boolean;
 		desktopChatList?: Snippet<[{ dividerEdge: DesktopLayoutEdge }]>;
 	} = $props();
 	const desktopLayout = $derived(resolveDesktopLayout(desktopLayoutOrder));
 </script>
 
-<div data-testid="workspace-root-stub" data-mobile={isMobile}>
+<div
+	data-testid="workspace-root-stub"
+	data-mobile={isMobile}
+	data-desktop-chat-list-hidden={desktopChatListHidden}
+>
 	{#if !isMobile && desktopChatList}
 		{@render desktopChatList({
 			dividerEdge: desktopLayout.chatListEdge,

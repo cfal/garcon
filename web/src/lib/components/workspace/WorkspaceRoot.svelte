@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { onDestroy, untrack, type Snippet } from 'svelte';
+	import Columns2 from '@lucide/svelte/icons/columns-2';
 	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
 	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import SubagentManagementControl from '$lib/components/chat/SubagentManagementControl.svelte';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
@@ -72,8 +71,6 @@
 	let {
 		isMobile,
 		onMenuClick,
-		isDesktopFullscreen = false,
-		onToggleDesktopFullscreen,
 		onRegisterReload,
 		onOverlayModalChange,
 		desktopLayoutOrder = [...DEFAULT_DESKTOP_LAYOUT_ORDER],
@@ -85,8 +82,6 @@
 	}: {
 		isMobile: boolean;
 		onMenuClick?: () => void;
-		isDesktopFullscreen?: boolean;
-		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onOverlayModalChange?: (open: boolean) => void;
 		desktopLayoutOrder?: DesktopLayoutOrder;
@@ -128,8 +123,9 @@
 				})
 			: false,
 	);
+	const sidebarFullscreen = $derived(!isMobile && snapshot.fullscreenHost === 'sidebar');
 	const sidebarPresented = $derived(
-		!isMobile && snapshot.sidebarOpen && !snapshot.manualFullscreen,
+		!isMobile && snapshot.sidebarOpen && snapshot.fullscreenHost !== 'main',
 	);
 	const effectiveDesktopChatListWidth = $derived(
 		!isMobile && !desktopChatListHidden ? desktopChatListWidth : 0,
@@ -148,6 +144,9 @@
 		get sidebarPresented() {
 			return sidebarPresented;
 		},
+		get sidebarFullscreen() {
+			return sidebarFullscreen;
+		},
 		get portablePresentations() {
 			return portablePresentations;
 		},
@@ -160,6 +159,9 @@
 	});
 	const sidebarMetrics = $derived(rootState.sidebarMetrics);
 	const sidebarPushMaximum = $derived(rootState.sidebarPushMaximum);
+	const sidebarOverlayInert = $derived(
+		sidebarPresented && !sidebarFullscreen && sidebarMetrics.mode === 'overlay',
+	);
 	const renderedPresentations = $derived(
 		renderedPortablePresentations(
 			snapshot,
@@ -217,7 +219,7 @@
 	});
 
 	$effect(() => {
-		workspace.setSidebarOverlayMode(sidebarMetrics.mode === 'overlay');
+		workspace.setSidebarOverlayMode(!sidebarFullscreen && sidebarMetrics.mode === 'overlay');
 	});
 
 	$effect(() => {
@@ -275,20 +277,23 @@
 	}
 </script>
 
-{#snippet mainMenuItems()}
+{#snippet chatLayoutMenuItems()}
+	{#if selectedChat}
+		<DropdownMenuItem onclick={() => toggleChatSplitMode(splitLayout, sessions, selectedChat)}>
+			<Columns2 />
+			{splitLayout.isEnabled ? m.workspace_exit_split_view() : m.workspace_split_view()}
+		</DropdownMenuItem>
+	{/if}
+{/snippet}
+
+{#snippet mainChatMenuItems()}
 	{#if activeMain === CHAT_SURFACE_ID && selectedChat && workspaceContext.currentProject}
 		<CurrentChatMenuItems
 			{selectedChat}
-			showSplitViewAction
-			showFullscreenAction={Boolean(onToggleDesktopFullscreen)}
-			splitEnabled={splitLayout.isEnabled}
-			{isDesktopFullscreen}
 			canReload
 			canUpdateProjectPath={workspaceContext.canUpdateProjectPath}
 			canFork={canForkSelectedChat}
 			canForkNow={canForkSelectedChatNow}
-			onToggleSplitMode={() => toggleChatSplitMode(splitLayout, sessions, selectedChat)}
-			{onToggleDesktopFullscreen}
 			onOpenUserMessageNavigator={openUserMessageNavigator ?? undefined}
 			onRename={() => chatActions.requestRename(selectedChat)}
 			onDetails={() => chatActions.requestDetails(selectedChat)}
@@ -298,11 +303,6 @@
 			onFork={() => chatActions.fork(selectedChat)}
 			onDelete={() => chatActions.requestDelete(selectedChat)}
 		/>
-	{:else if onToggleDesktopFullscreen}
-		<DropdownMenuItem onclick={onToggleDesktopFullscreen}>
-			{#if isDesktopFullscreen}<Minimize2 />{:else}<Maximize2 />{/if}
-			{isDesktopFullscreen ? m.workspace_exit_fullscreen() : m.workspace_enter_fullscreen()}
-		</DropdownMenuItem>
 	{/if}
 {/snippet}
 
@@ -314,7 +314,7 @@
 				{surface}
 				{presentation}
 				{visible}
-				mainInert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
+				mainInert={sidebarOverlayInert}
 				style={rootState.surfaceStyle(presentation)}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
@@ -343,7 +343,9 @@
 			<div
 				data-desktop-layout-pane="main"
 				class="relative flex min-h-0 min-w-0 flex-1 flex-col"
-				inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
+				class:hidden={sidebarFullscreen}
+				inert={sidebarFullscreen || sidebarOverlayInert}
+				aria-hidden={sidebarFullscreen}
 			>
 				{#if !isMobile}
 					<div
@@ -357,6 +359,16 @@
 							labelFor={label}
 							onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
 							onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
+							layoutMenuItems={activeMain === CHAT_SURFACE_ID &&
+							selectedChat &&
+							workspaceContext.currentProject
+								? chatLayoutMenuItems
+								: undefined}
+							menuItems={activeMain === CHAT_SURFACE_ID &&
+							selectedChat &&
+							workspaceContext.currentProject
+								? mainChatMenuItems
+								: undefined}
 						>
 							{#snippet startActions()}
 								{#if activeMain === CHAT_SURFACE_ID}
@@ -369,9 +381,8 @@
 									{/if}
 								{/if}
 							{/snippet}
-							{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
 							{#snippet endActions()}
-								{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
+								{#if !snapshot.sidebarOpen && snapshot.fullscreenHost === null && workspace.canOpenSidebar}
 									<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
 										<button
 											bind:this={openSidebarButton}
@@ -428,8 +439,6 @@
 							isVisible={workspace.isChatPresented}
 							isInteractive={workspace.isChatInteractive}
 							onMenuClick={isMobile ? onMenuClick : undefined}
-							{isDesktopFullscreen}
-							{onToggleDesktopFullscreen}
 							{onRegisterReload}
 							onRegisterSubmit={(submit) => (chatSubmit = submit)}
 							onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
@@ -446,6 +455,8 @@
 		{:else}
 			<WorkspaceSidebarHost
 				presented={sidebarPresented}
+				retainHiddenHost={!isMobile && snapshot.sidebar.order.length > 0}
+				fullscreen={sidebarFullscreen}
 				edge={desktopLayout.workspaceSidebarEdge}
 				beforeMain={desktopLayout.workspaceSidebarBeforeMain}
 				overlayInsets={rootState.sidebarOverlayInsets}

@@ -286,8 +286,9 @@ describe('AppShell responsive workspace binding', () => {
 		'hides the desktop chat list when %s is active and the Git setting is enabled',
 		async (kind) => {
 			const workspace = installContext();
-			(testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean })
-				.hideChatListWhenGitInMain = true;
+			(
+				testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean }
+			).hideChatListWhenGitInMain = true;
 			const surfaceId = `singleton:${kind}`;
 			if (!workspace.layout.surface(surfaceId)) {
 				const registered = reduceWorkspaceLayout(workspace.layout.snapshot, [
@@ -307,11 +308,43 @@ describe('AppShell responsive workspace binding', () => {
 			render(AppShell);
 			await waitFor(() =>
 				expect(
-					document
-						.querySelector('[data-workspace-chat-list]')
-						?.getAttribute('aria-hidden'),
+					document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
 				).toBe('true'),
 			);
+		},
+	);
+
+	it.each(['main', 'sidebar'] as const)(
+		'hides and restores the desktop chat list for %s fullscreen',
+		async (host) => {
+			const workspace = installContext();
+			if (host === 'sidebar') {
+				const open = reduceWorkspaceLayout(workspace.layout.snapshot, [
+					{ type: 'set-sidebar-open', open: true },
+				]);
+				workspace.layout.publish(workspace.layout.revision, open);
+			}
+			await workspace.toggleFullscreen(host);
+			render(AppShell);
+
+			await waitFor(() =>
+				expect(
+					screen.getByTestId('workspace-root-stub').getAttribute('data-desktop-chat-list-hidden'),
+				).toBe('true'),
+			);
+			expect(
+				document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
+			).toBe('true');
+
+			await workspace.toggleFullscreen(host);
+			await waitFor(() =>
+				expect(
+					screen.getByTestId('workspace-root-stub').getAttribute('data-desktop-chat-list-hidden'),
+				).toBe('false'),
+			);
+			expect(
+				document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
+			).toBe('false');
 		},
 	);
 
@@ -319,8 +352,9 @@ describe('AppShell responsive workspace binding', () => {
 		'keeps the desktop chat list visible when %s is active',
 		async (kind) => {
 			const workspace = installContext();
-			(testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean })
-				.hideChatListWhenGitInMain = true;
+			(
+				testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean }
+			).hideChatListWhenGitInMain = true;
 			const surfaceId = `singleton:${kind}`;
 			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
 				{ type: 'focus-host', host: kind === 'pull-requests' ? 'main' : 'sidebar', surfaceId },
@@ -330,9 +364,7 @@ describe('AppShell responsive workspace binding', () => {
 			render(AppShell);
 			await waitFor(() =>
 				expect(
-					document
-						.querySelector('[data-workspace-chat-list]')
-						?.getAttribute('aria-hidden'),
+					document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
 				).toBe('false'),
 			);
 		},

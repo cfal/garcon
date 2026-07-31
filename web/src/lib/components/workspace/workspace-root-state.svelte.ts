@@ -31,6 +31,7 @@ interface WorkspaceRootStateOptions {
 	get snapshot(): WorkspaceLayoutSnapshot;
 	get isMobile(): boolean;
 	get sidebarPresented(): boolean;
+	get sidebarFullscreen(): boolean;
 	get portablePresentations(): readonly PortablePresentation[];
 	get desktopLayoutOrder(): DesktopLayoutOrder;
 	get chatListWidth(): number;
@@ -74,7 +75,9 @@ export class WorkspaceRootState {
 		return resolveMainInlineInsets(this.options.desktopLayoutOrder, {
 			chatList: this.options.chatListWidth,
 			workspaceSidebar:
-				this.options.sidebarPresented && this.sidebarMetrics.mode === 'push'
+				this.options.sidebarPresented &&
+				!this.options.sidebarFullscreen &&
+				this.sidebarMetrics.mode === 'push'
 					? this.sidebarMetrics.width
 					: 0,
 		});
@@ -167,6 +170,7 @@ export class WorkspaceRootState {
 		if (
 			this.workspaceWidth !== null &&
 			this.options.sidebarPresented &&
+			!this.options.sidebarFullscreen &&
 			this.sidebarMetrics.mode === 'push' &&
 			nextMetrics.mode === 'overlay'
 		) {

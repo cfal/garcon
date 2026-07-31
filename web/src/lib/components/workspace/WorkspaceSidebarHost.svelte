@@ -27,6 +27,8 @@
 
 	let {
 		presented,
+		retainHiddenHost,
+		fullscreen,
 		edge,
 		beforeMain,
 		overlayInsets,
@@ -46,6 +48,8 @@
 		onOverlayModalChange,
 	}: {
 		presented: boolean;
+		retainHiddenHost: boolean;
+		fullscreen: boolean;
 		edge: DesktopLayoutEdge;
 		beforeMain: boolean;
 		overlayInsets: MainInlineInsets;
@@ -71,7 +75,7 @@
 	let backdropElement: HTMLButtonElement | null = $state(null);
 	let unregisterOverlayLayer: (() => void) | null = null;
 	let reportedOverlayOpen = false;
-	const overlayOpen = $derived(presented && metrics.mode === 'overlay');
+	const overlayOpen = $derived(presented && !fullscreen && metrics.mode === 'overlay');
 
 	$effect(() => {
 		const open = overlayOpen;
@@ -111,7 +115,9 @@
 			unregisterOverlayLayer?.();
 			unregisterOverlayLayer = null;
 			queueMicrotask(() => {
-				if (!hadOverlayFocus || (presented && metrics.mode === 'push')) return;
+				if (!hadOverlayFocus || (presented && (fullscreen || metrics.mode === 'push'))) {
+					return;
+				}
 				const mainTab = document.getElementById(`main-tab-${workspace.activeMainId}`);
 				(mainTab ?? getOpenSidebarButton())?.focus();
 			});
@@ -175,7 +181,7 @@
 	></button>
 {/if}
 
-{#if presented || presentations.length > 0}
+{#if retainHiddenHost || presented || presentations.length > 0}
 	<aside
 		bind:this={sidebarElement}
 		onkeydown={handleKeydown}
@@ -186,29 +192,33 @@
 		aria-hidden={!presented}
 		inert={!presented}
 		data-desktop-layout-pane="workspace-sidebar"
-		class="flex h-full min-h-0 shrink-0 flex-col border-border bg-background"
+		data-workspace-host-fullscreen={fullscreen ? 'sidebar' : undefined}
+		class="flex h-full min-h-0 flex-col border-border bg-background"
+		class:min-w-0={fullscreen}
+		class:flex-1={fullscreen}
+		class:shrink-0={!fullscreen}
 		class:z-40={!overlayOpen}
 		class:z-50={overlayOpen}
-		class:border-s={edge === 'start'}
-		class:border-e={edge === 'end'}
-		class:relative={presented && metrics.mode === 'push'}
-		class:absolute={!presented || metrics.mode === 'overlay'}
-		class:inset-y-0={!presented || metrics.mode === 'overlay'}
+		class:border-s={!fullscreen && edge === 'start'}
+		class:border-e={!fullscreen && edge === 'end'}
+		class:relative={fullscreen || (presented && metrics.mode === 'push')}
+		class:absolute={!fullscreen && (!presented || metrics.mode === 'overlay')}
+		class:inset-y-0={!fullscreen && (!presented || metrics.mode === 'overlay')}
 		class:invisible={!presented}
 		class:pointer-events-none={!presented}
-		style:inset-inline-start={!presented || metrics.mode === 'overlay'
+		style:inset-inline-start={!fullscreen && (!presented || metrics.mode === 'overlay')
 			? beforeMain
 				? `${overlayInsets.start}px`
 				: undefined
 			: undefined}
-		style:inset-inline-end={!presented || metrics.mode === 'overlay'
+		style:inset-inline-end={!fullscreen && (!presented || metrics.mode === 'overlay')
 			? beforeMain
 				? undefined
 				: `${overlayInsets.end}px`
 			: undefined}
-		style:width={`${metrics.width}px`}
+		style:width={fullscreen ? '100%' : `${metrics.width}px`}
 	>
-		{#if presented && metrics.mode === 'push'}
+		{#if presented && !fullscreen && metrics.mode === 'push'}
 			<div data-workspace-sidebar-resize-boundary>
 				<WorkspaceSidebarResizeHandle
 					value={metrics.width}

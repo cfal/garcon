@@ -2,13 +2,16 @@
 	import { onDestroy } from 'svelte';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	let {
 		onClose,
 		closeDisabled = false,
+		onAppendToChatDraft,
 	}: {
 		onClose?: () => void;
 		closeDisabled?: boolean;
+		onAppendToChatDraft?: ChatDraftAppend;
 	} = $props();
 
 	const unregister = getSurfaceFrameBridge().provideRenderer({
@@ -23,4 +26,9 @@
 <div data-testid="surface-renderer-stub">Surface renderer</div>
 {#if onClose}
 	<button type="button" onclick={onClose} disabled={closeDisabled}>Close file</button>
+{/if}
+{#if onAppendToChatDraft}
+	<button type="button" onclick={() => onAppendToChatDraft('Git review comment')}>
+		Append review comment
+	</button>
 {/if}

@@ -1,13 +1,10 @@
 <script lang="ts">
-	import Columns2 from '@lucide/svelte/icons/columns-2';
 	import Edit2 from '@lucide/svelte/icons/pencil';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import History from '@lucide/svelte/icons/history';
 	import Info from '@lucide/svelte/icons/info';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Share2 from '@lucide/svelte/icons/share-2';
@@ -18,16 +15,10 @@
 
 	let {
 		selectedChat,
-		showSplitViewAction,
-		showFullscreenAction,
-		splitEnabled,
-		isDesktopFullscreen,
 		canReload,
 		canUpdateProjectPath,
 		canFork,
 		canForkNow,
-		onToggleSplitMode,
-		onToggleDesktopFullscreen,
 		onOpenUserMessageNavigator,
 		onOpenGitHistory,
 		onOpenGitCompare,
@@ -40,16 +31,10 @@
 		onDelete,
 	}: {
 		selectedChat: ChatSessionRecord;
-		showSplitViewAction: boolean;
-		showFullscreenAction: boolean;
-		splitEnabled: boolean;
-		isDesktopFullscreen: boolean;
 		canReload: boolean;
 		canUpdateProjectPath: boolean;
 		canFork: boolean;
 		canForkNow: boolean;
-		onToggleSplitMode: () => void;
-		onToggleDesktopFullscreen?: () => void;
 		onOpenUserMessageNavigator?: () => void;
 		onOpenGitHistory?: () => void;
 		onOpenGitCompare?: () => void;
@@ -61,13 +46,6 @@
 		onFork: () => void;
 		onDelete: () => void;
 	} = $props();
-
-	const splitLabel = $derived(
-		splitEnabled ? m.workspace_exit_split_view() : m.workspace_split_view(),
-	);
-	const fullscreenLabel = $derived(
-		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
-	);
 </script>
 
 {#if onOpenGitHistory || onOpenGitCompare}
@@ -81,22 +59,6 @@
 		<DropdownMenuItem onclick={onOpenGitCompare}>
 			<GitCompareArrows />
 			{m.workspace_open_git_compare()}
-		</DropdownMenuItem>
-	{/if}
-	<DropdownMenuSeparator />
-{/if}
-
-{#if showSplitViewAction || showFullscreenAction}
-	{#if showSplitViewAction}
-		<DropdownMenuItem onclick={onToggleSplitMode}>
-			<Columns2 />
-			{splitLabel}
-		</DropdownMenuItem>
-	{/if}
-	{#if showFullscreenAction}
-		<DropdownMenuItem onclick={onToggleDesktopFullscreen}>
-			{#if isDesktopFullscreen}<Minimize2 />{:else}<Maximize2 />{/if}
-			{fullscreenLabel}
 		</DropdownMenuItem>
 	{/if}
 	<DropdownMenuSeparator />

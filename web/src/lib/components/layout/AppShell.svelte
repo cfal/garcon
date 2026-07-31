@@ -90,8 +90,8 @@
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
 	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
-	const effectiveWorkspaceFullscreen = $derived(
-		!isMobile && workspace.layout.snapshot.manualFullscreen,
+	const workspaceFullscreen = $derived(
+		!isMobile && workspace.layout.snapshot.fullscreenHost !== null,
 	);
 	const hideLeftForGit = $derived(
 		!isMobile &&
@@ -100,7 +100,7 @@
 				workspace.layout.activeMainKind === 'git-history' ||
 				workspace.layout.activeMainKind === 'git-compare'),
 	);
-	const hideLeftSidebar = $derived(effectiveWorkspaceFullscreen || hideLeftForGit);
+	const hideLeftSidebar = $derived(workspaceFullscreen || hideLeftForGit);
 	const mobileActiveDescriptor = $derived(
 		workspace.layout.surface(workspace.layout.snapshot.mobileActiveSurfaceId),
 	);
@@ -507,9 +507,6 @@
 				{desktopChatList}
 				onMainInlineStartChange={(pixels) => (notificationDesktopInlineStartPx = pixels + 16)}
 				onMenuClick={isMobile ? toggleMobileSidebar : undefined}
-				isDesktopFullscreen={effectiveWorkspaceFullscreen}
-				onToggleDesktopFullscreen={() =>
-					void workspace.setManualFullscreen(!effectiveWorkspaceFullscreen)}
 				onRegisterReload={handleRegisterReload}
 				onOverlayModalChange={(open) => (workspaceOverlayOpen = open)}
 				chatActions={workspaceChatActions}
