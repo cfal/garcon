@@ -145,7 +145,6 @@
 				<div
 					class={cn(
 						'flex min-h-0 min-w-0 items-center overflow-hidden',
-						profile.mode === 'columns' && 'flex-1',
 						profile.mode === 'details' && 'col-start-1 row-start-1 leading-4',
 					)}
 				>

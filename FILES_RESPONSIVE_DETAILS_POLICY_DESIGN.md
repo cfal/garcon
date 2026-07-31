@@ -833,6 +833,14 @@ copy behavior, and row activation isolation across the responsive transition. It
 informational matrix gaps by testing that an always-details override remains pinned across later width
 changes and that enabling metadata at 480 px changes a name-only column view to details.
 
+The next verification pass confirmed that the shared copy action survives Svelte reconciliation and
+that its identity, focus, state, and placement tests discriminate the old behavior. It found no
+remaining correctness defect. Both reviewers did identify one visible columns-mode change from the
+temporary fix: making the title cell grow moved the copy action from immediately after a short name
+to the far edge of the name column. That growth class was unnecessary for truncation because the
+title cell already shrinks with `min-w-0` and `overflow-hidden`, so it was removed to preserve the
+existing name-adjacent placement without reintroducing the focus defect.
+
 ## Acceptance Criteria
 
 - The popup label is `Always use detailed rows`.
