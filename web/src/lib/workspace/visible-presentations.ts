@@ -14,6 +14,13 @@ export function portablePresentationKey(presentation: HostId, surfaceId: string)
 	return `${presentation}:${surfaceId}`;
 }
 
+export function isDesktopHostPresented(snapshot: WorkspaceLayoutSnapshot, host: HostId): boolean {
+	if (host === 'main') return snapshot.fullscreenHost !== 'sidebar';
+	return (
+		snapshot.sidebarOpen && snapshot.fullscreenHost !== 'main' && Boolean(snapshot.sidebar.activeId)
+	);
+}
+
 export function visiblePresentationMap(
 	snapshot: WorkspaceLayoutSnapshot,
 	mode: 'desktop' | 'mobile',
@@ -24,8 +31,10 @@ export function visiblePresentationMap(
 		visible.set('mobile', snapshot.mobileActiveSurfaceId);
 		return visible;
 	}
-	visible.set('main', snapshot.main.activeId ?? CHAT_SURFACE_ID);
-	if (snapshot.sidebarOpen && !snapshot.manualFullscreen && snapshot.sidebar.activeId) {
+	if (isDesktopHostPresented(snapshot, 'main')) {
+		visible.set('main', snapshot.main.activeId ?? CHAT_SURFACE_ID);
+	}
+	if (isDesktopHostPresented(snapshot, 'sidebar') && snapshot.sidebar.activeId) {
 		visible.set('sidebar', snapshot.sidebar.activeId);
 	}
 	if (includeDialog && snapshot.dialogFileSurfaceId) {
@@ -69,8 +78,8 @@ export function nextRetainedSingletonPresentationKeys(
 		}
 	};
 
-	retainHost('main');
-	if (snapshot.sidebarOpen && !snapshot.manualFullscreen) retainHost('sidebar');
+	if (isDesktopHostPresented(snapshot, 'main')) retainHost('main');
+	if (isDesktopHostPresented(snapshot, 'sidebar')) retainHost('sidebar');
 	return next;
 }
 
@@ -98,7 +107,7 @@ export function renderedPortablePresentations(
 		}
 	};
 
-	appendHost('main');
-	if (snapshot.sidebarOpen && !snapshot.manualFullscreen) appendHost('sidebar');
+	if (isDesktopHostPresented(snapshot, 'main')) appendHost('main');
+	if (isDesktopHostPresented(snapshot, 'sidebar')) appendHost('sidebar');
 	return rendered;
 }

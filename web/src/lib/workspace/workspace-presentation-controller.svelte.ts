@@ -25,7 +25,7 @@ import {
 } from './surface-types.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
-import { visiblePresentationMap } from './visible-presentations.js';
+import { isDesktopHostPresented, visiblePresentationMap } from './visible-presentations.js';
 import { WorkspacePresentationFrames } from './workspace-presentation-frames.svelte.js';
 
 type PresentationMode = 'desktop' | 'mobile';
@@ -54,14 +54,11 @@ class WorkspacePublicationInvariantError extends Error {
 }
 
 function isSidebarHidden(snapshot: WorkspaceLayoutSnapshot): boolean {
-	return !snapshot.sidebarOpen || snapshot.manualFullscreen;
+	return !snapshot.sidebarOpen || snapshot.fullscreenHost === 'main';
 }
 
 function revealSidebarMutations(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] {
 	const mutations: WorkspaceLayoutMutation[] = [];
-	if (snapshot.manualFullscreen) {
-		mutations.push({ type: 'set-manual-fullscreen', enabled: false });
-	}
 	if (!snapshot.sidebarOpen) mutations.push({ type: 'set-sidebar-open', open: true });
 	return mutations;
 }
@@ -134,9 +131,7 @@ export class WorkspacePresentationController {
 	}
 
 	get isChatPresented(): boolean {
-		return this.isMobile
-			? this.layout.snapshot.mobileActiveSurfaceId === CHAT_SURFACE_ID
-			: this.activeMainId === CHAT_SURFACE_ID;
+		return this.#isChatPresentedInSnapshot(this.layout.snapshot);
 	}
 
 	get isChatInteractive(): boolean {
@@ -176,8 +171,12 @@ export class WorkspacePresentationController {
 	eligibleDesktopReturn(surfaceId: string | null): string | null {
 		if (!surfaceId || !this.layout.surface(surfaceId)) return null;
 		const snapshot = this.layout.snapshot;
-		if (snapshot.main.order.includes(surfaceId)) return surfaceId;
-		if (snapshot.sidebarOpen && snapshot.sidebar.order.includes(surfaceId)) return surfaceId;
+		if (snapshot.main.order.includes(surfaceId) && isDesktopHostPresented(snapshot, 'main')) {
+			return surfaceId;
+		}
+		if (snapshot.sidebar.order.includes(surfaceId) && isDesktopHostPresented(snapshot, 'sidebar')) {
+			return surfaceId;
+		}
 		return null;
 	}
 
@@ -272,7 +271,7 @@ export class WorkspacePresentationController {
 			this.isMobile ||
 			this.#sidebarOverlayMode ||
 			!snapshot.sidebarOpen ||
-			snapshot.manualFullscreen ||
+			snapshot.fullscreenHost !== null ||
 			!sidebarSurfaceId
 		) {
 			return;
@@ -348,17 +347,11 @@ export class WorkspacePresentationController {
 				responsiveGeneration === this.#responsiveGeneration &&
 				this.#presentationMode === 'desktop'
 			) {
-				await this.#reconcileTransientMobileGitViews(
-					plannedTransientKinds,
-					responsiveGeneration,
-				);
+				await this.#reconcileTransientMobileGitViews(plannedTransientKinds, responsiveGeneration);
 			}
 			throw error;
 		}
-		await this.#reconcileTransientMobileGitViews(
-			plannedTransientKinds,
-			responsiveGeneration,
-		);
+		await this.#reconcileTransientMobileGitViews(plannedTransientKinds, responsiveGeneration);
 		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
 		this.focusPresentedSurface(this.lastFocusedSurfaceId);
 	}
@@ -460,19 +453,16 @@ export class WorkspacePresentationController {
 			const removed = await this.deps.arbiter.commit(
 				(latest) =>
 					remaining.flatMap((surfaceId) =>
-						latest.surfaces[surfaceId]
-							? [{ type: 'remove-surface' as const, surfaceId }]
-							: [],
+						latest.surfaces[surfaceId] ? [{ type: 'remove-surface' as const, surfaceId }] : [],
 					),
 				{},
 				{ retryPublishFailure: true },
 			);
 			const survivors = remaining.filter((surfaceId) => this.layout.surface(surfaceId));
 			if (!removed || survivors.length > 0) {
-				throw new Error(
-					`Required workspace removal failed for ${survivors.join(', ')}`,
-					{ cause: error },
-				);
+				throw new Error(`Required workspace removal failed for ${survivors.join(', ')}`, {
+					cause: error,
+				});
 			}
 			return true;
 		}
@@ -491,9 +481,7 @@ export class WorkspacePresentationController {
 		}
 		let reconciledKinds: TransientMobileSingletonKind[] = [];
 		await this.commitDestroyedRemovals(
-			(['git-history', 'git-compare'] as const).map((kind) =>
-				singletonSurfaceId(kind),
-			),
+			(['git-history', 'git-compare'] as const).map((kind) => singletonSurfaceId(kind)),
 			(latest) => {
 				reconciledKinds = transientMobileGitViewKinds(latest);
 				return removeTransientMobileGitViews(latest);
@@ -502,9 +490,7 @@ export class WorkspacePresentationController {
 		this.#disposeAbsentTransientMobileGitViews([...plannedKinds, ...reconciledKinds]);
 	}
 
-	#disposeAbsentTransientMobileGitViews(
-		kinds: readonly TransientMobileSingletonKind[],
-	): void {
+	#disposeAbsentTransientMobileGitViews(kinds: readonly TransientMobileSingletonKind[]): void {
 		for (const kind of new Set(kinds)) {
 			if (!this.layout.surface(singletonSurfaceId(kind))) {
 				this.deps.singletons.disposeSurface(kind);
@@ -534,7 +520,7 @@ export class WorkspacePresentationController {
 		const snapshot = this.layout.snapshot;
 		const host =
 			owner.kind === 'host-chrome' ? owner.host : this.hostOfSnapshot(snapshot, owner.surfaceId);
-		if (!host || (host === 'sidebar' && (!snapshot.sidebarOpen || snapshot.manualFullscreen))) {
+		if (!host || !isDesktopHostPresented(snapshot, host)) {
 			return false;
 		}
 		const hostState = snapshot[host];
@@ -552,12 +538,10 @@ export class WorkspacePresentationController {
 			return snapshot.mobileActiveSurfaceId === surfaceId ? 'mobile' : null;
 		}
 		if (snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
-		if (snapshot.main.activeId === surfaceId) return 'main';
-		if (
-			snapshot.sidebarOpen &&
-			!snapshot.manualFullscreen &&
-			snapshot.sidebar.activeId === surfaceId
-		) {
+		if (isDesktopHostPresented(snapshot, 'main') && snapshot.main.activeId === surfaceId) {
+			return 'main';
+		}
+		if (isDesktopHostPresented(snapshot, 'sidebar') && snapshot.sidebar.activeId === surfaceId) {
 			return 'sidebar';
 		}
 		return null;
@@ -656,9 +640,8 @@ export class WorkspacePresentationController {
 		if (visible.has(this.focusOwner.surfaceId)) return;
 		const fallback =
 			(visible.has(this.lastFocusedSurfaceId) ? this.lastFocusedSurfaceId : null) ??
-			(mode === 'mobile'
-				? snapshot.mobileActiveSurfaceId
-				: (snapshot.main.activeId ?? CHAT_SURFACE_ID));
+			visible.values().next().value ??
+			CHAT_SURFACE_ID;
 		this.focusOwner = { kind: 'surface', surfaceId: fallback };
 		this.lastFocusedSurfaceId = fallback;
 	}
@@ -667,9 +650,8 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): boolean {
-		return mode === 'mobile'
-			? snapshot.mobileActiveSurfaceId === CHAT_SURFACE_ID
-			: snapshot.main.activeId === CHAT_SURFACE_ID;
+		const host = mode === 'mobile' ? 'mobile' : 'main';
+		return visiblePresentationMap(snapshot, mode).get(host) === CHAT_SURFACE_ID;
 	}
 
 	#syncSingletonVisibility(

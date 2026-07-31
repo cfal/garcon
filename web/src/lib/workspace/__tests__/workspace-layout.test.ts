@@ -36,8 +36,114 @@ describe('workspace layout reducers', () => {
 		]);
 		expect(snapshot.sidebar.order).toEqual(['singleton:files', 'singleton:commit']);
 		expect(snapshot.sidebarOpen).toBe(false);
+		expect(snapshot.fullscreenHost).toBeNull();
 		expect(snapshot.desiredSidebarWidth).toBe(480);
 		expect(() => assertWorkspaceLayoutInvariants(snapshot)).not.toThrow();
+	});
+
+	it('toggles host fullscreen through explicit layout mutations', () => {
+		const mainFullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-fullscreen-host', host: 'main' },
+		]);
+		expect(mainFullscreen.fullscreenHost).toBe('main');
+		expect(
+			reduceWorkspaceLayout(mainFullscreen, [{ type: 'set-fullscreen-host', host: null }])
+				.fullscreenHost,
+		).toBeNull();
+
+		const openSidebar = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-sidebar-open', open: true },
+		]);
+		expect(
+			reduceWorkspaceLayout(openSidebar, [{ type: 'set-fullscreen-host', host: 'sidebar' }])
+				.fullscreenHost,
+		).toBe('sidebar');
+		expect(() =>
+			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+				{ type: 'set-fullscreen-host', host: 'sidebar' },
+			]),
+		).toThrow('Sidebar must be open and active before entering fullscreen');
+	});
+
+	it('preserves fullscreen within a host and clears it when focus crosses hosts', () => {
+		const mainFullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-sidebar-open', open: true },
+			{ type: 'set-fullscreen-host', host: 'main' },
+			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
+		]);
+		expect(mainFullscreen.fullscreenHost).toBe('main');
+
+		const sidebarFocused = reduceWorkspaceLayout(mainFullscreen, [
+			{ type: 'focus-host', host: 'sidebar', surfaceId: 'singleton:files' },
+		]);
+		expect(sidebarFocused.fullscreenHost).toBeNull();
+
+		const sidebarFullscreen = reduceWorkspaceLayout(sidebarFocused, [
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+			{ type: 'focus-host', host: 'sidebar', surfaceId: 'singleton:commit' },
+		]);
+		expect(sidebarFullscreen.fullscreenHost).toBe('sidebar');
+		expect(
+			reduceWorkspaceLayout(sidebarFullscreen, [
+				{ type: 'focus-host', host: 'main', surfaceId: 'singleton:chat' },
+			]).fullscreenHost,
+		).toBeNull();
+	});
+
+	it('normalizes fullscreen for active and background membership changes', () => {
+		const sidebarFullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-sidebar-open', open: true },
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+		]);
+		const movedActive = reduceWorkspaceLayout(sidebarFullscreen, [
+			{ type: 'move-to-host', surfaceId: 'singleton:files', destination: 'main' },
+		]);
+		expect(movedActive.fullscreenHost).toBeNull();
+		expect(movedActive.main.activeId).toBe('singleton:files');
+
+		const backgroundOnly = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'remove-surface', surfaceId: 'singleton:files' },
+			{ type: 'set-sidebar-open', open: true },
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+			{
+				type: 'assign-to-host',
+				surfaceId: 'singleton:commit',
+				destination: 'main',
+			},
+		]);
+		expect(backgroundOnly.sidebar.order).toEqual([]);
+		expect(backgroundOnly.sidebarOpen).toBe(false);
+		expect(backgroundOnly.fullscreenHost).toBeNull();
+	});
+
+	it('normalizes fullscreen when the sidebar closes or loses its last terminal', () => {
+		const closed = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-sidebar-open', open: true },
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+			{ type: 'set-sidebar-open', open: false },
+		]);
+		expect(closed.fullscreenHost).toBeNull();
+
+		const terminalOnly = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'remove-surface', surfaceId: 'singleton:files' },
+			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
+			{ type: 'register-surface', surface: TERMINAL_A, host: 'sidebar' },
+			{ type: 'set-sidebar-open', open: true },
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+			{ type: 'unplace-terminal', terminalId: TERMINAL_A.terminalId },
+		]);
+		expect(terminalOnly.sidebar.order).toEqual([]);
+		expect(terminalOnly.sidebarOpen).toBe(false);
+		expect(terminalOnly.fullscreenHost).toBeNull();
+	});
+
+	it('rejects an externally constructed invalid sidebar fullscreen snapshot', () => {
+		expect(() =>
+			assertWorkspaceLayoutInvariants({
+				...canonicalWorkspaceSnapshot(),
+				fullscreenHost: 'sidebar',
+			}),
+		).toThrow('Sidebar fullscreen requires an open active sidebar');
 	});
 
 	it('focuses host surfaces and preserves MRU fallback order', () => {

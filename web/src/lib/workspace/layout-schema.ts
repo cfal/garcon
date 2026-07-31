@@ -129,7 +129,7 @@ export function parsePersistedWorkspaceLayout(raw: string | null): WorkspaceLayo
 					: mainBase.desiredSidebarWidth,
 			),
 			dialogFileSurfaceId: null,
-			manualFullscreen: false,
+			fullscreenHost: null,
 			mobileActiveSurfaceId: CHAT_SURFACE_ID,
 			mobileOnlySurfaceIds: [],
 			mobileReturnStack: [],

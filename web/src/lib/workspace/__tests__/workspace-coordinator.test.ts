@@ -200,12 +200,12 @@ describe('WorkspaceCoordinator', () => {
 			.spyOn(transientLayers, 'open')
 			.mockImplementation((_modality, commitOpen) => commitOpen());
 
-		const fullscreen = coordinator.setManualFullscreen(true);
+		const fullscreen = coordinator.toggleFullscreen('main');
 		const placement = coordinator.placeFileSession('fullscreen-file', 'sidebar');
 		await Promise.all([fullscreen, placement]);
 
 		expect(open).toHaveBeenCalledWith('main-inert', expect.any(Function));
-		expect(layout.snapshot.manualFullscreen).toBe(false);
+		expect(layout.snapshot.fullscreenHost).toBeNull();
 		expect(layout.snapshot.sidebarOpen).toBe(true);
 		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('fullscreen-file'));
 	});
@@ -218,12 +218,12 @@ describe('WorkspaceCoordinator', () => {
 			.spyOn(transientLayers, 'open')
 			.mockImplementation((_modality, commitOpen) => commitOpen());
 
-		const fullscreen = coordinator.setManualFullscreen(true);
+		const fullscreen = coordinator.toggleFullscreen('main');
 		const focus = coordinator.focusFileSession('existing-file');
 		await Promise.all([fullscreen, focus]);
 
 		expect(open).toHaveBeenCalledWith('main-inert', expect.any(Function));
-		expect(layout.snapshot.manualFullscreen).toBe(false);
+		expect(layout.snapshot.fullscreenHost).toBeNull();
 		expect(layout.snapshot.sidebarOpen).toBe(true);
 		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('existing-file'));
 		expect(
@@ -231,6 +231,83 @@ describe('WorkspaceCoordinator', () => {
 				(surfaceId) => surfaceId === fileSurfaceId('existing-file'),
 			),
 		).toHaveLength(1);
+	});
+
+	it('toggles fullscreen for either presented desktop host', async () => {
+		const { coordinator, layout } = createHarness();
+
+		await coordinator.toggleFullscreen('main');
+		expect(layout.snapshot.fullscreenHost).toBe('main');
+		await coordinator.toggleFullscreen('main');
+		expect(layout.snapshot.fullscreenHost).toBeNull();
+
+		await coordinator.toggleFullscreen('sidebar');
+		expect(layout.snapshot.fullscreenHost).toBeNull();
+		await coordinator.openSidebar();
+		await coordinator.toggleFullscreen('sidebar');
+		expect(layout.snapshot.fullscreenHost).toBe('sidebar');
+		await coordinator.toggleFullscreen('sidebar');
+		expect(layout.snapshot.fullscreenHost).toBeNull();
+	});
+
+	it('preserves same-host fullscreen and exits when focus crosses hosts', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSidebar();
+		await coordinator.focusSurface('singleton:git');
+		await coordinator.toggleFullscreen('main');
+
+		await coordinator.focusSurface('singleton:pull-requests');
+		expect(layout.snapshot.fullscreenHost).toBe('main');
+		await coordinator.focusSurface('singleton:files');
+		expect(layout.snapshot.fullscreenHost).toBeNull();
+
+		await coordinator.toggleFullscreen('sidebar');
+		await coordinator.focusSurface('singleton:commit');
+		expect(layout.snapshot.fullscreenHost).toBe('sidebar');
+		await coordinator.focusChat();
+		expect(layout.snapshot.fullscreenHost).toBeNull();
+		expect(layout.snapshot.main.activeId).toBe(CHAT_SURFACE_ID);
+	});
+
+	it('exits sidebar fullscreen when the sidebar closes or its active surface moves', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSidebar();
+		await coordinator.toggleFullscreen('sidebar');
+		await coordinator.closeSidebar();
+		expect(layout.snapshot.fullscreenHost).toBeNull();
+		expect(layout.snapshot.sidebarOpen).toBe(false);
+
+		await coordinator.openSidebar();
+		await coordinator.toggleFullscreen('sidebar');
+		await coordinator.moveSurface('singleton:files', 'main');
+		expect(layout.snapshot.fullscreenHost).toBeNull();
+		expect(layout.snapshot.main.activeId).toBe('singleton:files');
+	});
+
+	it('cancels Chat interaction before sidebar fullscreen and restores state on publish failure', async () => {
+		const successful = createHarness();
+		await successful.coordinator.openSidebar();
+		const cancel = vi.spyOn(successful.chatInteractionGate, 'cancelBeforeInertTransition');
+		await successful.coordinator.toggleFullscreen('sidebar');
+		expect(cancel).toHaveBeenCalledOnce();
+		expect(successful.coordinator.isChatPresented).toBe(false);
+
+		const failed = createHarness({ failLayoutPublishAt: 2 });
+		await failed.coordinator.openSidebar();
+		await expect(failed.coordinator.toggleFullscreen('sidebar')).rejects.toThrow(
+			'layout publication failed',
+		);
+		expect(failed.layout.snapshot.fullscreenHost).toBeNull();
+		expect(failed.coordinator.isChatPresented).toBe(true);
+		expect(failed.chatInteractionGate.isChatDropEligible).toBe(true);
+	});
+
+	it('computes rapid fullscreen toggles from the latest committed snapshot', async () => {
+		const { coordinator, layout } = createHarness();
+
+		await Promise.all([coordinator.toggleFullscreen('main'), coordinator.toggleFullscreen('main')]);
+
+		expect(layout.snapshot.fullscreenHost).toBeNull();
 	});
 
 	it('places files in the mobile-only presentation regardless of a desktop target', async () => {
@@ -438,11 +515,11 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.focusSurface('singleton:git');
 
-		const enableFullscreen = coordinator.setManualFullscreen(true);
+		const enableFullscreen = coordinator.toggleFullscreen('main');
 		const moveToSidebar = coordinator.moveSurface('singleton:git', 'sidebar');
 		await Promise.all([enableFullscreen, moveToSidebar]);
 
-		expect(layout.snapshot.manualFullscreen).toBe(false);
+		expect(layout.snapshot.fullscreenHost).toBeNull();
 		expect(layout.snapshot.sidebar.order).toContain('singleton:git');
 		expect(layout.snapshot.sidebar.activeId).toBe('singleton:git');
 	});
@@ -625,11 +702,7 @@ describe('WorkspaceCoordinator', () => {
 		let triggerReentry = false;
 		const harness = createHarness({
 			onLayoutChanged: () => {
-				if (
-					triggerReentry &&
-					!context.layout?.surface('singleton:git-compare') &&
-					!reentry
-				) {
+				if (triggerReentry && !context.layout?.surface('singleton:git-compare') && !reentry) {
 					reentry = context.coordinator?.enterMobilePresentation() ?? null;
 				}
 			},
@@ -666,9 +739,7 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.enterMobilePresentation();
 		await coordinator.focusMobileSingleton('git-history');
 
-		await expect(coordinator.exitMobilePresentation()).rejects.toThrow(
-			'layout publication failed',
-		);
+		await expect(coordinator.exitMobilePresentation()).rejects.toThrow('layout publication failed');
 		expect(coordinator.isMobile).toBe(true);
 		expect(layout.surface('singleton:git-history')).not.toBeNull();
 

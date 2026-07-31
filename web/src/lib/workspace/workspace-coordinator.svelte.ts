@@ -58,9 +58,6 @@ interface WorkspaceCoordinatorDeps {
 
 function revealSidebarMutations(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] {
 	const mutations: WorkspaceLayoutMutation[] = [];
-	if (snapshot.manualFullscreen) {
-		mutations.push({ type: 'set-manual-fullscreen', enabled: false });
-	}
 	if (!snapshot.sidebarOpen) mutations.push({ type: 'set-sidebar-open', open: true });
 	return mutations;
 }
@@ -296,16 +293,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const commit = () =>
 			this.#presentation.commit((latest) => {
 				if (!latest.surfaces[surfaceId]) return [];
-				const mutations: WorkspaceLayoutMutation[] = [];
-				if (
-					destination === 'sidebar' &&
-					latest.manualFullscreen &&
-					latest.main.activeId === surfaceId
-				) {
-					mutations.push({ type: 'set-manual-fullscreen', enabled: false });
-				}
-				mutations.push({ type: 'move-to-host', surfaceId, destination });
-				return mutations;
+				return [{ type: 'move-to-host', surfaceId, destination }];
 			});
 		const current =
 			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen
@@ -561,10 +549,27 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#presentation.commit([{ type: 'set-sidebar-width', width }]);
 	}
 
-	async setManualFullscreen(enabled: boolean): Promise<void> {
-		const current = await this.#presentation.commit([{ type: 'set-manual-fullscreen', enabled }]);
+	async toggleFullscreen(host: HostId): Promise<void> {
+		if (this.isMobile) return;
+		const snapshot = this.layout.snapshot;
+		if (host === 'sidebar' && (!snapshot.sidebarOpen || !snapshot.sidebar.activeId)) return;
+		if (host === 'sidebar' && snapshot.fullscreenHost !== 'sidebar' && this.isChatPresented) {
+			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+		}
+		const current = await this.#presentation.commit((latest) => {
+			if (host === 'sidebar' && (!latest.sidebarOpen || !latest.sidebar.activeId)) {
+				return [];
+			}
+			return [
+				{
+					type: 'set-fullscreen-host',
+					host: latest.fullscreenHost === host ? null : host,
+				},
+			];
+		});
 		if (!current) return;
-		if (enabled) this.#presentation.presentSurface(this.activeMainId);
+		const activeId = this.layout.snapshot[host].activeId;
+		if (activeId) this.#presentation.presentSurface(activeId);
 	}
 
 	async retryPresentation(surfaceId: string, host: PresentationHostId): Promise<void> {

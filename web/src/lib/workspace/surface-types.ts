@@ -23,8 +23,7 @@ export type FocusOwner =
 	| { kind: 'host-chrome'; host: HostId; surfaceId: string };
 
 export type PortableSingletonKind = (typeof PORTABLE_SINGLETON_KINDS)[number];
-export type TransientMobileSingletonKind =
-	(typeof TRANSIENT_MOBILE_SINGLETON_KINDS)[number];
+export type TransientMobileSingletonKind = (typeof TRANSIENT_MOBILE_SINGLETON_KINDS)[number];
 export type SingletonSurfaceKind = 'chat' | PortableSingletonKind;
 
 export type PortableSingletonDescriptor = {
@@ -65,7 +64,7 @@ export interface WorkspaceLayoutSnapshot {
 	readonly sidebarOpen: boolean;
 	readonly desiredSidebarWidth: number;
 	readonly dialogFileSurfaceId: string | null;
-	readonly manualFullscreen: boolean;
+	readonly fullscreenHost: HostId | null;
 	readonly mobileActiveSurfaceId: string;
 	readonly mobileOnlySurfaceIds: readonly string[];
 	readonly mobileReturnStack: readonly MobileReturnTarget[];
@@ -98,7 +97,7 @@ export type WorkspaceLayoutMutation =
 	| { type: 'remove-surface'; surfaceId: string }
 	| { type: 'set-sidebar-open'; open: boolean }
 	| { type: 'set-sidebar-width'; width: number }
-	| { type: 'set-manual-fullscreen'; enabled: boolean }
+	| { type: 'set-fullscreen-host'; host: HostId | null }
 	| {
 			type: 'set-mobile-presentation';
 			activeId: string;

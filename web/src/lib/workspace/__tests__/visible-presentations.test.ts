@@ -4,6 +4,7 @@ import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import {
 	nextRetainedSingletonPresentationKeys,
 	renderedPortablePresentations,
+	visiblePresentationMap,
 	visiblePortablePresentations,
 } from '../visible-presentations';
 
@@ -81,5 +82,53 @@ describe('visiblePortablePresentations', () => {
 		const closed = reduceWorkspaceLayout(open, [{ type: 'set-sidebar-open', open: false }]);
 		expect(nextRetainedSingletonPresentationKeys(closed, false, [], retained).size).toBe(0);
 		expect(nextRetainedSingletonPresentationKeys(open, true, visible, retained).size).toBe(0);
+	});
+
+	it('projects only the fullscreen desktop host while preserving mobile projection', () => {
+		const open = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
+			{ type: 'set-sidebar-open', open: true },
+		]);
+		const mainFullscreen = reduceWorkspaceLayout(open, [
+			{ type: 'set-fullscreen-host', host: 'main' },
+		]);
+		expect([...visiblePresentationMap(mainFullscreen, 'desktop')]).toEqual([
+			['main', 'singleton:git'],
+		]);
+
+		const sidebarFullscreen = reduceWorkspaceLayout(open, [
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+		]);
+		expect([...visiblePresentationMap(sidebarFullscreen, 'desktop')]).toEqual([
+			['sidebar', 'singleton:files'],
+		]);
+		expect([...visiblePresentationMap(sidebarFullscreen, 'mobile')]).toEqual([
+			['mobile', 'singleton:chat'],
+		]);
+	});
+
+	it('drops retained singleton renderers from whichever host fullscreen hides', () => {
+		const open = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
+			{ type: 'set-sidebar-open', open: true },
+		]);
+		const visible = visiblePortablePresentations(open, false);
+		const retained = nextRetainedSingletonPresentationKeys(open, false, visible, new Set());
+		expect([...retained]).toEqual(['main:singleton:git', 'sidebar:singleton:files']);
+
+		const sidebarFullscreen = reduceWorkspaceLayout(open, [
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+		]);
+		const sidebarVisible = visiblePortablePresentations(sidebarFullscreen, false);
+		const sidebarRetained = nextRetainedSingletonPresentationKeys(
+			sidebarFullscreen,
+			false,
+			sidebarVisible,
+			retained,
+		);
+		expect([...sidebarRetained]).toEqual(['sidebar:singleton:files']);
+		expect(
+			renderedPortablePresentations(sidebarFullscreen, false, sidebarVisible, sidebarRetained),
+		).toEqual([{ surfaceId: 'singleton:files', presentation: 'sidebar', visible: true }]);
 	});
 });

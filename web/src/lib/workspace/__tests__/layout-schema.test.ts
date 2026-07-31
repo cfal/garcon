@@ -97,7 +97,7 @@ describe('workspace layout persistence', () => {
 			{ type: 'place-in-dialog', surfaceId: file.id },
 			{ type: 'register-surface', surface: terminal, host: 'main' },
 			{ type: 'focus-host', host: 'main', surfaceId: terminal.id },
-			{ type: 'set-manual-fullscreen', enabled: true },
+			{ type: 'set-fullscreen-host', host: 'main' },
 		]);
 		const serialized = serializeWorkspaceLayout(snapshot);
 
@@ -108,7 +108,25 @@ describe('workspace layout persistence', () => {
 		]);
 		expect(serialized.main.active).toEqual({ type: 'terminal', terminalId: 'a' });
 		expect(JSON.stringify(serialized)).not.toContain('file:a');
-		expect(JSON.stringify(serialized)).not.toContain('manualFullscreen');
+		expect(JSON.stringify(serialized)).not.toContain('fullscreenHost');
+		expect(
+			parsePersistedWorkspaceLayout(JSON.stringify(serialized)).snapshot.fullscreenHost,
+		).toBeNull();
+	});
+
+	it('preserves sidebar placement but not sidebar fullscreen', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-sidebar-open', open: true },
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+		]);
+		const serialized = serializeWorkspaceLayout(snapshot);
+		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized)).snapshot;
+
+		expect(serialized.sidebarOpen).toBe(true);
+		expect(restored.sidebarOpen).toBe(true);
+		expect(restored.sidebar.order).toEqual(snapshot.sidebar.order);
+		expect(restored.sidebar.activeId).toBe(snapshot.sidebar.activeId);
+		expect(restored.fullscreenHost).toBeNull();
 	});
 
 	it('round-trips intentionally unplaced terminal sessions', () => {

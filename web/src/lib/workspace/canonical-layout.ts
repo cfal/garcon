@@ -52,7 +52,7 @@ export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
 		sidebarOpen: false,
 		desiredSidebarWidth: DEFAULT_WORKSPACE_SIDEBAR_WIDTH,
 		dialogFileSurfaceId: null,
-		manualFullscreen: false,
+		fullscreenHost: null,
 		mobileActiveSurfaceId: CHAT_SURFACE_ID,
 		mobileOnlySurfaceIds: [],
 		mobileReturnStack: [],

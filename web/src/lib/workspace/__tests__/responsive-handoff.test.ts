@@ -31,9 +31,29 @@ describe('selectMobileEntrySurface', () => {
 		expect(selectMobileEntrySurface(closedSidebar, 'singleton:files')).toBe('singleton:chat');
 
 		const fullscreen = reduceWorkspaceLayout(openSidebar, [
-			{ type: 'set-manual-fullscreen', enabled: true },
+			{ type: 'set-fullscreen-host', host: 'main' },
 		]);
 		expect(selectMobileEntrySurface(fullscreen, 'singleton:files')).toBe('singleton:chat');
+
+		const sidebarFullscreen = reduceWorkspaceLayout(openSidebar, [
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+		]);
+		expect(selectMobileEntrySurface(sidebarFullscreen, 'singleton:chat')).toBe('singleton:files');
+	});
+
+	it('keeps a dialog ahead of the fullscreen host', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-sidebar-open', open: true },
+			{ type: 'set-fullscreen-host', host: 'sidebar' },
+			{
+				type: 'register-surface',
+				surface: { id: 'file:dialog', type: 'file', fileSessionId: 'dialog' },
+				host: 'main',
+			},
+			{ type: 'place-in-dialog', surfaceId: 'file:dialog' },
+		]);
+
+		expect(selectMobileEntrySurface(snapshot, 'singleton:files')).toBe('file:dialog');
 	});
 });
 
@@ -108,10 +128,7 @@ describe('planDesktopReturnMutations', () => {
 		]);
 
 		expect(
-			planDesktopReturnMutations(mobile, [
-				'singleton:git-compare',
-				'singleton:git-history',
-			]),
+			planDesktopReturnMutations(mobile, ['singleton:git-compare', 'singleton:git-history']),
 		).toEqual([
 			{ type: 'remove-surface', surfaceId: 'singleton:git-compare' },
 			{ type: 'remove-surface', surfaceId: 'singleton:git-history' },
@@ -141,10 +158,7 @@ describe('planDesktopReturnMutations', () => {
 		]);
 
 		expect(
-			planDesktopReturnMutations(desktop, [
-				'singleton:git-history',
-				'singleton:git-compare',
-			]),
+			planDesktopReturnMutations(desktop, ['singleton:git-history', 'singleton:git-compare']),
 		).toEqual([]);
 	});
 });

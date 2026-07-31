@@ -12,8 +12,9 @@ export function selectMobileEntrySurface(
 ): string {
 	if (layout.dialogFileSurfaceId) return layout.dialogFileSurfaceId;
 	const activeMainId = layout.main.activeId ?? CHAT_SURFACE_ID;
-	const activeSidebarId =
-		layout.sidebarOpen && !layout.manualFullscreen ? layout.sidebar.activeId : null;
+	const activeSidebarId = layout.sidebarOpen ? layout.sidebar.activeId : null;
+	if (layout.fullscreenHost === 'main') return activeMainId;
+	if (layout.fullscreenHost === 'sidebar') return activeSidebarId ?? activeMainId;
 	if (lastFocusedSurfaceId === activeMainId || lastFocusedSurfaceId === activeSidebarId) {
 		return lastFocusedSurfaceId;
 	}

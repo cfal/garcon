@@ -2,6 +2,7 @@ import {
 	CHAT_SURFACE_ID,
 	MAX_MOBILE_RETURN_TARGETS,
 	type ActiveSurfaceKind,
+	type HostId,
 	type HostState,
 	type MobileReturnTarget,
 	type SurfaceDescriptor,
@@ -91,6 +92,25 @@ function removeEveryPlacement(
 			snapshot.dialogFileSurfaceId === surfaceId ? null : snapshot.dialogFileSurfaceId,
 		mobileOnlySurfaceIds: snapshot.mobileOnlySurfaceIds.filter((id) => id !== surfaceId),
 	};
+}
+
+function normalizeFullscreenHost(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutSnapshot {
+	const sidebarOpen = snapshot.sidebar.order.length > 0 && snapshot.sidebarOpen;
+	const fullscreenHost =
+		snapshot.fullscreenHost === 'sidebar' && (!sidebarOpen || !snapshot.sidebar.activeId)
+			? null
+			: snapshot.fullscreenHost;
+	if (sidebarOpen === snapshot.sidebarOpen && fullscreenHost === snapshot.fullscreenHost) {
+		return snapshot;
+	}
+	return { ...snapshot, sidebarOpen, fullscreenHost };
+}
+
+function fullscreenAfterHostActivation(
+	snapshot: WorkspaceLayoutSnapshot,
+	host: HostId,
+): HostId | null {
+	return snapshot.fullscreenHost === host ? host : null;
 }
 
 function registerSurface(
@@ -208,10 +228,9 @@ function updateTerminalPlacement(
 	const next = surface ? removeEveryPlacement(snapshot, surfaceId) : snapshot;
 	const surfaces = { ...next.surfaces };
 	delete surfaces[surfaceId];
-	return {
+	return normalizeFullscreenHost({
 		...next,
 		surfaces,
-		sidebarOpen: next.sidebar.order.length > 0 && next.sidebarOpen,
 		mobileActiveSurfaceId:
 			next.mobileActiveSurfaceId === surfaceId
 				? (next.main.activeId ?? CHAT_SURFACE_ID)
@@ -220,7 +239,7 @@ function updateTerminalPlacement(
 			placement === 'unplaced'
 				? unique([...next.unplacedTerminalIds, terminalId])
 				: next.unplacedTerminalIds.filter((id) => id !== terminalId),
-	};
+	});
 }
 
 function swapTerminalPlacements(
@@ -272,8 +291,9 @@ function moveToHost(
 		[mutation.destination]: host,
 		sidebarOpen:
 			mutation.destination === 'sidebar' ? true : next.sidebar.order.length > 0 && next.sidebarOpen,
+		fullscreenHost: fullscreenAfterHostActivation(next, mutation.destination),
 	};
-	return next;
+	return normalizeFullscreenHost(next);
 }
 
 function applyMutation(
@@ -295,6 +315,7 @@ function applyMutation(
 				...snapshot,
 				[mutation.host]: activateHost(snapshot[mutation.host], mutation.surfaceId),
 				sidebarOpen: mutation.host === 'sidebar' ? true : snapshot.sidebarOpen,
+				fullscreenHost: fullscreenAfterHostActivation(snapshot, mutation.host),
 			};
 		}
 		case 'move-to-host':
@@ -305,14 +326,14 @@ function applyMutation(
 				throw new Error(`Surface does not exist: ${mutation.surfaceId}`);
 			}
 			const next = removeEveryPlacement(snapshot, mutation.surfaceId);
-			return {
+			return normalizeFullscreenHost({
 				...next,
 				[mutation.destination]: insertIntoHost(
 					next[mutation.destination],
 					mutation.surfaceId,
 					mutation.index,
 				),
-			};
+			});
 		}
 		case 'place-in-dialog': {
 			const surface = snapshot.surfaces[mutation.surfaceId];
@@ -320,10 +341,10 @@ function applyMutation(
 			if (snapshot.dialogFileSurfaceId && snapshot.dialogFileSurfaceId !== mutation.surfaceId) {
 				throw new Error('Dialog capacity must be resolved before placement');
 			}
-			return {
+			return normalizeFullscreenHost({
 				...removeEveryPlacement(snapshot, mutation.surfaceId),
 				dialogFileSurfaceId: mutation.surfaceId,
-			};
+			});
 		}
 		case 'move-dialog-to-host': {
 			if (snapshot.dialogFileSurfaceId !== mutation.surfaceId) {
@@ -346,25 +367,31 @@ function applyMutation(
 			const next = removeEveryPlacement(snapshot, mutation.surfaceId);
 			const surfaces = { ...next.surfaces };
 			delete surfaces[mutation.surfaceId];
-			return {
+			return normalizeFullscreenHost({
 				...next,
 				surfaces,
-				sidebarOpen: next.sidebar.order.length > 0 && next.sidebarOpen,
 				mobileActiveSurfaceId:
 					next.mobileActiveSurfaceId === mutation.surfaceId
 						? (next.main.activeId ?? CHAT_SURFACE_ID)
 						: next.mobileActiveSurfaceId,
-			};
+			});
 		}
-		case 'set-sidebar-open':
-			return {
+		case 'set-sidebar-open': {
+			const sidebarOpen = mutation.open && snapshot.sidebar.order.length > 0;
+			return normalizeFullscreenHost({
 				...snapshot,
-				sidebarOpen: mutation.open && snapshot.sidebar.order.length > 0,
-			};
+				sidebarOpen,
+				fullscreenHost:
+					sidebarOpen && snapshot.fullscreenHost === 'main' ? null : snapshot.fullscreenHost,
+			});
+		}
 		case 'set-sidebar-width':
 			return { ...snapshot, desiredSidebarWidth: clampDesiredSidebarWidth(mutation.width) };
-		case 'set-manual-fullscreen':
-			return { ...snapshot, manualFullscreen: mutation.enabled };
+		case 'set-fullscreen-host':
+			if (mutation.host === 'sidebar' && (!snapshot.sidebarOpen || !snapshot.sidebar.activeId)) {
+				throw new Error('Sidebar must be open and active before entering fullscreen');
+			}
+			return { ...snapshot, fullscreenHost: mutation.host };
 		case 'set-mobile-presentation':
 			if (!snapshot.surfaces[mutation.activeId]) {
 				throw new Error(`Unknown mobile surface: ${mutation.activeId}`);
@@ -427,6 +454,12 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 	}
 	if (snapshot.sidebar.order.length === 0 && snapshot.sidebarOpen) {
 		throw new Error('Empty sidebar cannot be open');
+	}
+	if (
+		snapshot.fullscreenHost === 'sidebar' &&
+		(!snapshot.sidebarOpen || !snapshot.sidebar.activeId)
+	) {
+		throw new Error('Sidebar fullscreen requires an open active sidebar');
 	}
 	for (const host of [snapshot.main, snapshot.sidebar]) {
 		if (unique(host.order).length !== host.order.length)
