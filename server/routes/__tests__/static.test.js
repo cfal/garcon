@@ -64,6 +64,22 @@ describe('staticHeaders', () => {
     expect(headers.get('Cache-Control')).toBe('no-cache, no-store, must-revalidate');
     expect(headers.get('Content-Length')).toBe('512');
   });
+
+  it('denies framing and referrer leakage on html documents', () => {
+    const headers = staticHeaders('/index.html', 2048);
+    expect(headers.get('X-Frame-Options')).toBe('DENY');
+    expect(headers.get('Content-Security-Policy')).toBe("frame-ancestors 'none'");
+    expect(headers.get('Referrer-Policy')).toBe('same-origin');
+    expect(headers.get('X-Content-Type-Options')).toBe('nosniff');
+  });
+
+  it('adds nosniff without framing headers on non-html assets', () => {
+    const headers = staticHeaders('/_app/immutable/chunk.js', 4096);
+    expect(headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(headers.get('X-Frame-Options')).toBeNull();
+    expect(headers.get('Content-Security-Policy')).toBeNull();
+    expect(headers.get('Referrer-Policy')).toBeNull();
+  });
 });
 
 describe('static app routes', () => {

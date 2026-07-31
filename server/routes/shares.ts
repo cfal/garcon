@@ -8,7 +8,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
 import { renderSharedChatText } from '../chats/share-transcript.ts';
 import { injectSharedChatContext, renderStandaloneSharedHtml } from '../chats/share-page.ts';
-import { loadStaticText } from './static.js';
+import { applyAppDocumentSecurityHeaders, loadStaticText } from './static.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
@@ -50,12 +50,16 @@ function extractShareTokenFromPath(pathname: string): string | null {
 }
 
 function htmlResponse(html: string): Response {
-  return new Response(html, {
-    headers: {
+  // The share page boots the full SPA on the app origin, so it must refuse
+  // framing like every other app document; otherwise content framed by the
+  // Browser surface could navigate itself here and run same-origin.
+  const headers = applyAppDocumentSecurityHeaders(
+    new Headers({
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
-    },
-  });
+    }),
+  );
+  return new Response(html, { headers });
 }
 
 export default function createShareRoutes(

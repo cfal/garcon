@@ -45,11 +45,28 @@ export function cacheHeaders(requestPath: string): HeadersInit {
   return {};
 }
 
+// Denies framing for any document served from the app origin. The Browser
+// surface runs `allow-scripts allow-same-origin`, which is only safe while no
+// app-origin document can ever render inside it: a framed page can navigate
+// itself (or redirect) to an app URL, so refusing at the client is not enough.
+// Every HTML-serving route must apply this. See BROWSER_SURFACE_DESIGN.md.
+export function applyAppDocumentSecurityHeaders(headers: Headers): Headers {
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+  headers.set('Referrer-Policy', 'same-origin');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  return headers;
+}
+
 // Builds static response headers including an explicit uncompressed
 // Content-Length so the compressor can skip small assets without buffering.
 export function staticHeaders(requestPath: string, size: number): Headers {
   const headers = new Headers(cacheHeaders(requestPath));
   headers.set('Content-Length', String(size));
+  headers.set('X-Content-Type-Options', 'nosniff');
+  if (requestPath.endsWith('.html')) {
+    applyAppDocumentSecurityHeaders(headers);
+  }
   return headers;
 }
 

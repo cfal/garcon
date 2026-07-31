@@ -480,6 +480,27 @@ describe('files route', () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(imageBytes);
   });
 
+  it('serves raw content with a document sandbox so workspace HTML cannot run app-origin script', async () => {
+    await fs.writeFile(
+      path.join(projectPath, 'page.html'),
+      '<script>document.title = "owned"</script>',
+    );
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/content?projectPath=${encodeURIComponent(projectPath)}&path=page.html`,
+    );
+    const response = await routes['/api/v1/files/content'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('text/html');
+    expect(response.headers.get('content-security-policy')).toBe('sandbox');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
   it('rejects writes through project symlink directories that resolve outside the project root', async () => {
     await fs.symlink(outsidePath, path.join(projectPath, 'outside-dir'), 'dir');
 

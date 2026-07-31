@@ -602,6 +602,11 @@ export default function createFilesRoutes(
         headers: {
           'Content-Type': mimeType,
           [FILE_REVISION_HEADER]: revision,
+          // Workspace bytes must never execute with app-origin authority if
+          // this response is rendered as a document (e.g. direct navigation
+          // with auth disabled). Fetch/blob consumers ignore response CSP.
+          'Content-Security-Policy': 'sandbox',
+          'X-Content-Type-Options': 'nosniff',
         },
       });
     } catch (error) {
