@@ -138,7 +138,10 @@ export function resolveModelSelection(
       modelProtocol: null,
     };
   }
-  if ((selected.apiProviderId && !selected.endpointId) || (!selected.apiProviderId && selected.endpointId)) {
+  if (
+    (selected.apiProviderId && (!selected.endpointId || !selected.protocol))
+    || (!selected.apiProviderId && (selected.endpointId || selected.protocol))
+  ) {
     throw new CliError('catalog resolution', `model routing for ${requested.model} is incomplete`, 3);
   }
   return {

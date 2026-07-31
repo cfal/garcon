@@ -56,6 +56,9 @@ jobs:
       - name: Run server tests
         run: bun run test:server
 
+      - name: Run CLI checks
+        run: bun run --cwd cli typecheck && bun run --cwd cli test
+
       - name: Run web tests for release validation
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: bun run --cwd web test

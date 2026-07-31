@@ -133,6 +133,21 @@ describe('resolveModelSelection', () => {
       modelProtocol: null,
     });
   });
+
+  test('rejects incomplete provider routing from a malformed catalog', () => {
+    const malformed = agent({
+      models: [{
+        value: 'east:qwen',
+        label: 'Qwen',
+        rawModel: 'qwen',
+        apiProviderId: 'acme',
+        endpointId: 'east',
+      }],
+    });
+    expect(() => resolveModelSelection(catalog(malformed), 'codex', {
+      model: 'east:qwen',
+    })).toThrow('routing');
+  });
 });
 
 describe('execution selection', () => {
