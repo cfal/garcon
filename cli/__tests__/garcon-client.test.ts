@@ -101,4 +101,16 @@ describe('GarconClient', () => {
     });
     await expect(client.runChat(runRequest)).rejects.toThrow('invalid command acceptance');
   });
+
+  test('rejects an accepted response for a different request', async () => {
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async () => Response.json({
+        ...await accepted(runRequest).json(),
+        clientRequestId: 'other',
+      }),
+    });
+    await expect(client.runChat(runRequest)).rejects.toThrow('uncorrelated');
+  });
 });

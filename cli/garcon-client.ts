@@ -149,11 +149,11 @@ export class GarconClient {
   }
 
   startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
-    return this.#submit('/api/v1/chats/start', request, signal);
+    return this.#submit('/api/v1/chats/start', 'chat-start', request, signal);
   }
 
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
-    return this.#submit('/api/v1/chats/run', request, signal);
+    return this.#submit('/api/v1/chats/run', 'agent-run', request, signal);
   }
 
   async getTurnReceipt(chatId: string, turnId: string, signal?: AbortSignal): Promise<AgentTurnReceipt> {
@@ -180,13 +180,24 @@ export class GarconClient {
 
   async #submit(
     route: string,
+    commandType: 'chat-start' | 'agent-run',
     request: StartChatCommandRequest | AgentRunCommandRequest,
     signal?: AbortSignal,
   ): Promise<AgentTurnCommandResponse> {
     let lastError: unknown;
     for (let attempt = 0; attempt < SUBMISSION_ATTEMPTS; attempt += 1) {
       try {
-        return parseAcceptedResponse(await this.#request('submission', 'POST', route, request, signal));
+        const accepted = parseAcceptedResponse(
+          await this.#request('submission', 'POST', route, request, signal),
+        );
+        if (
+          accepted.commandType !== commandType
+          || accepted.clientRequestId !== request.clientRequestId
+          || accepted.chatId !== request.chatId
+        ) {
+          throw new CliError('submission', 'server returned an uncorrelated command acceptance', 3);
+        }
+        return accepted;
       } catch (error) {
         lastError = error;
         const transient = error instanceof GarconTransportError
