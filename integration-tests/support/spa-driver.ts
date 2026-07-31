@@ -41,9 +41,13 @@ export class SpaDriver {
     await this.#page.waitForFunction(() => document.querySelector('button') !== null);
   }
 
-  async startOpenAiDirectChat(content: string): Promise<RecordedCompletionRequest> {
+  async startOpenAiDirectChat(
+    content: string,
+    options: { projectPath?: string } = {},
+  ): Promise<RecordedCompletionRequest> {
     return this.#startDirectChat({
       content,
+      projectPath: options.projectPath,
       selectedAgentLabel: 'Direct (Chat Completions)',
       optionAgentLabel: 'Chat Completions',
       modelLabel: 'Integration Echo',
@@ -69,6 +73,7 @@ export class SpaDriver {
 
   async #startDirectChat<TRequest>(input: {
     content: string;
+    projectPath?: string;
     selectedAgentLabel: string;
     optionAgentLabel: string;
     modelLabel: string;
@@ -107,14 +112,15 @@ export class SpaDriver {
       await this.clickButton(input.modelLabel);
     }
 
+    const requestedProjectPath = input.projectPath ?? this.#integration.dirs.project;
     const projectPath = await this.#page.$eval(
       '[role="dialog"] input[aria-label="Project Path"]',
       (element) => (element as HTMLInputElement).value,
     );
-    if (projectPath !== this.#integration.dirs.project) {
+    if (projectPath !== requestedProjectPath) {
       await this.fill(
         '[role="dialog"] input[aria-label="Project Path"]',
-        this.#integration.dirs.project,
+        requestedProjectPath,
       );
     }
     await this.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', input.content);
