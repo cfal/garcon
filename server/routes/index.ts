@@ -13,6 +13,8 @@ import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
 import createTerminalRoutes from './terminals.js';
+import { createRuntimeRoutes } from './runtime.js';
+import type { ServerRuntimeProbe } from '@garcon/common/server-runtime';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -62,6 +64,7 @@ export default function createAllRoutes({
   terminals,
   searchIndex,
   transcriptSearchSettings,
+  runtimeProbe,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -86,8 +89,10 @@ export default function createAllRoutes({
   terminals: TerminalManager;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
+  runtimeProbe: ServerRuntimeProbe;
 }): RouteMap {
   return {
+    ...createRuntimeRoutes(runtimeProbe),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),

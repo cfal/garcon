@@ -19,6 +19,7 @@ type CliValueFlag = keyof typeof CLI_VALUE_FLAGS;
 export interface ServerConfig {
   configDir: string;
   workspaceDir: string;
+  workspaceName: string | null;
   port: number;
   bindAddress: string;
   jwtTokenExpiry: string;
@@ -97,13 +98,15 @@ function parsePort(value: string, source: string): number {
 
 function parseServerConfig(): ServerConfig {
   const configDir = parseConfigDir();
+  const workspace = parseWorkspace(configDir);
   const maxWsClients = envInt('MAX_WS_CLIENTS', 128);
   if (maxWsClients < 1) {
     throw new Error('Invalid GARCON_MAX_WS_CLIENTS value: must be at least 1.');
   }
   return {
     configDir,
-    workspaceDir: parseWorkspaceDir(configDir),
+    workspaceDir: workspace.workspaceDir,
+    workspaceName: workspace.workspaceName,
     port: parsePortConfig(),
     bindAddress: parseBindAddress(),
     jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
@@ -134,29 +137,31 @@ function parseConfigDir(): string {
   return path.join(os.homedir(), '.garcon');
 }
 
-function parseWorkspaceDir(configDir: string): string {
+function parseWorkspace(configDir: string): Pick<ServerConfig, 'workspaceDir' | 'workspaceName'> {
   const workspaceDir = nonEmptyValue(
     envValue('GARCON_WORKSPACE_DIR') ?? cliValue('--workspace-dir'),
     'Invalid --workspace-dir value: must be a non-empty directory path.',
   );
-  if (workspaceDir !== null) return workspaceDir;
+  if (workspaceDir !== null) return { workspaceDir, workspaceName: null };
 
-  let workspace: string;
+  let workspaceName: string;
   const envWorkspace = envValue('GARCON_WORKSPACE');
   if (envWorkspace !== null) {
-    workspace = 'workspace-' + envWorkspace;
+    workspaceName = envWorkspace;
   } else {
-    const workspaceName = nonEmptyValue(
+    const cliWorkspaceName = nonEmptyValue(
       cliValue('--workspace'),
       'Invalid --workspace value: must be a non-empty name.',
     );
-    if (workspaceName !== null) {
-      workspace = 'workspace-' + workspaceName;
-    } else {
-      workspace = 'workspace-default';
-    }
+    workspaceName = cliWorkspaceName ?? 'default';
   }
-  return path.join(configDir, workspace);
+  if (workspaceName === '.' || workspaceName === '..' || /[\\/\0]/.test(workspaceName)) {
+    throw new Error('Invalid workspace name: must not contain path separators.');
+  }
+  return {
+    workspaceDir: path.join(configDir, `workspace-${workspaceName}`),
+    workspaceName,
+  };
 }
 
 function parsePortConfig(): number {
