@@ -1,6 +1,6 @@
 # Files Responsive Details Policy Design
 
-Status: Execution-ready follow-up
+Status: Implemented and reviewed
 
 Repository baseline: `120be62edd16e158e81da1e3e03c06ae425d2571`
 
@@ -332,6 +332,10 @@ The details row will use three horizontal regions inside the row header:
 - Indentation and directory disclosure rail.
 - One 32 px file or folder icon centered across the two-line block.
 - One `min-w-0` text stack containing the title line and subtitle line.
+
+Synthetic parent and child-status rows use the same presentation-sized icon rail so their labels
+remain horizontally aligned with ordinary entries. The parent glyph consumes the full 16/32 px
+rail; loading and error glyphs remain compact inside a centered 16/32 px rail.
 
 The 32 px icon matches two 16 px lines. The existing 44 px fine-pointer and 52 px coarse-pointer rows leave 6 px or 10 px of vertical breathing room around that block. Virtual geometry does not change.
 
@@ -791,6 +795,28 @@ Rollback is client-only:
 - The existing details renderer and virtual geometry remain valid.
 
 No telemetry is added. Confidence comes from pure boundary tests, ResizeObserver integration tests modeled on Workbench, virtual scroll regressions, full validation, and manual host resizing.
+
+## Implementation and Review Record
+
+The responsive policy and row restructure were implemented in `169d9d3`. The implementation keeps
+one `FileTreeVirtualRows` host and one virtual controller while passing the derived presentation mode
+through the existing geometry transition path.
+
+The original Kimi K3 review found no admissible defects in the responsive policy, persistence,
+container measurement, row structure, menu semantics, or virtual-controller integration. Its two
+remaining risks were explicitly browser-specific: first-paint timing and ResizeObserver cadence
+during a continuous resize.
+
+The original Claude Opus review found two low-severity issues. Both were accepted:
+
+- Synthetic parent, loading, and error rows did not consume the same presentation-sized icon rail as
+  ordinary entries, creating an alignment change between 16 px column icons and 32 px details icons.
+- The copy-path interaction test exercised only the initial narrow details presentation after the
+  responsive change, so column-mode copy markup no longer had direct interaction coverage.
+
+The review follow-up aligns every synthetic row to the presentation icon rail and exercises the same
+file row and copy action before and after a 700 px transition to columns. Final review resumes both
+original sessions against the follow-up commit rather than starting unrelated review contexts.
 
 ## Acceptance Criteria
 

@@ -56,12 +56,16 @@
 		style={`padding-left: calc(${(level - 1) * 16}px + var(--file-tree-disclosure-size))`}
 	>
 		{#if kind === 'loading'}
-			<LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+			<span class="file-tree-entry-icon flex shrink-0 items-center justify-center">
+				<LoaderCircle class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+			</span>
 			<span role="status" class="truncate">
 				{m.filetree_loading_directory({ name: directoryName })}
 			</span>
 		{:else}
-			<AlertCircle class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+			<span class="file-tree-entry-icon flex shrink-0 items-center justify-center">
+				<AlertCircle class="h-3.5 w-3.5" aria-hidden="true" />
+			</span>
 			<span class="truncate">{m.filetree_directory_error({ name: directoryName })}</span>
 			<button
 				type="button"

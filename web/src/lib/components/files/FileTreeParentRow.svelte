@@ -42,7 +42,7 @@
 >
 	<div role="rowheader" class="flex min-w-0 items-center" title={path}>
 		<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
-		<FolderUp class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
+		<FolderUp class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
 		<span class="truncate">..</span>
 		<span class="sr-only">{m.filetree_parent_directory()}</span>
 	</div>

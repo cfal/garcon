@@ -122,15 +122,30 @@ describe('FileTree', () => {
 	it('copies file paths without activating rows and omits the action from directories', async () => {
 		const src = entry('src', 'directory');
 		const readme = entry('README.md', 'file');
-		const { onFileSelect } = renderReady([src, readme]);
+		const { container, onFileSelect } = renderReady([src, readme]);
 		const copyButton = screen.getByRole('button', { name: 'Copy file path' });
+		const readmeRow = container.querySelector<HTMLElement>(
+			`[data-file-tree-row-key="${readme.path}"]`,
+		);
+		if (!readmeRow) throw new Error('Expected file row');
 
 		expect(screen.getAllByRole('button', { name: 'Copy file path' })).toHaveLength(1);
+		expect(readmeRow.querySelector('[data-file-tree-subtitle]')).toBeTruthy();
 		await fireEvent.keyDown(copyButton, { key: 'Enter' });
 		expect(onFileSelect).not.toHaveBeenCalled();
 
 		await fireEvent.click(copyButton);
 		expect(copyToClipboard).toHaveBeenCalledWith(readme.relativePath, undefined);
+		expect(onFileSelect).not.toHaveBeenCalled();
+
+		await setFileTreeWidth(container, 700);
+		expect(container.querySelector<HTMLElement>(`[data-file-tree-row-key="${readme.path}"]`)).toBe(
+			readmeRow,
+		);
+		expect(readmeRow.querySelectorAll('[role="gridcell"]')).toHaveLength(2);
+		expect(readmeRow.querySelector('[data-file-tree-subtitle]')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Copy file path' }));
+		expect(copyToClipboard).toHaveBeenCalledTimes(2);
 		expect(onFileSelect).not.toHaveBeenCalled();
 	});
 
@@ -207,6 +222,7 @@ describe('FileTree', () => {
 			'[data-file-tree-row-key^="file-tree-child-status:"]',
 		);
 		if (!srcRow || !errorRow) throw new Error('Expected directory and child error rows');
+		expect(errorRow.querySelector('.file-tree-entry-icon')).toBeTruthy();
 
 		srcRow.focus();
 		await fireEvent.keyDown(srcRow, { key: 'ArrowRight' });
@@ -377,6 +393,11 @@ describe('FileTree', () => {
 		expect(screen.getByRole('treegrid').style.getPropertyValue('--file-tree-entry-icon-size')).toBe(
 			'32px',
 		);
+		expect(
+			container
+				.querySelector('[data-file-tree-parent-row] svg')
+				?.classList.contains('file-tree-entry-icon'),
+		).toBe(true);
 		expect(readmeRow.querySelector('[data-file-tree-entry-text]')?.classList.contains('h-8')).toBe(
 			true,
 		);
