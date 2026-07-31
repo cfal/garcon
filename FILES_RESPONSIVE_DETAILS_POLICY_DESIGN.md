@@ -841,6 +841,10 @@ to the far edge of the name column. That growth class was unnecessary for trunca
 title cell already shrinks with `min-w-0` and `overflow-hidden`, so it was removed to preserve the
 existing name-adjacent placement without reintroducing the focus defect.
 
+Both original reviewer sessions were resumed once more against `6e91a7e`. Kimi K3 and Claude Opus
+independently verified the flex shrink/truncation behavior, stable component identity, details grid
+placement, and directory path, and reported no remaining admissible finding.
+
 ## Acceptance Criteria
 
 - The popup label is `Always use detailed rows`.
