@@ -10,6 +10,7 @@
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import History from '@lucide/svelte/icons/history';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
+	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import PanelLeft from '@lucide/svelte/icons/panel-left';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
@@ -68,6 +69,7 @@
 		onSelect,
 		onFocus,
 		startActions,
+		layoutMenuItems,
 		menuItems,
 		endActions,
 	}: {
@@ -78,6 +80,7 @@
 		onSelect: (surfaceId: string) => void;
 		onFocus?: (surfaceId: string) => void;
 		startActions?: Snippet;
+		layoutMenuItems?: Snippet;
 		menuItems?: Snippet;
 		endActions?: Snippet;
 	} = $props();
@@ -123,6 +126,7 @@
 		),
 	);
 	const activeSurfaceId = $derived(hostState.activeId);
+	const fullscreen = $derived(workspace.layout.snapshot.fullscreenHost === host);
 	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
 	const unplacedTerminalSessions = $derived(
 		terminals.orderedSessions.filter(
@@ -399,7 +403,11 @@
 					<EllipsisVertical class="h-3.5 w-3.5" />
 				</DropdownMenuTrigger>
 			</div>
-			<DropdownMenuContent align="end" class="w-64">
+			<DropdownMenuContent
+				align="end"
+				class="w-64"
+				data-workspace-taskbar-menu={host}
+			>
 				{#if hasTabActions(activeSurfaceId)}
 					{@render tabActions(activeSurfaceId, DropdownMenuItem)}
 					<DropdownMenuSeparator />
@@ -450,6 +458,15 @@
 						{m.workspace_open_surface({ surface: singletonLabels[kind]() })}
 					</DropdownMenuItem>
 				{/each}
+				<DropdownMenuSeparator />
+				{@render layoutMenuItems?.()}
+				<DropdownMenuItem
+					data-workspace-fullscreen-menu-item={host}
+					onclick={() => void workspace.toggleFullscreen(host)}
+				>
+					{#if fullscreen}<Minimize2 />{:else}<Maximize2 />{/if}
+					{fullscreen ? m.workspace_exit_fullscreen() : m.workspace_fullscreen()}
+				</DropdownMenuItem>
 				{#if menuItems}
 					<DropdownMenuSeparator />
 					{@render menuItems()}

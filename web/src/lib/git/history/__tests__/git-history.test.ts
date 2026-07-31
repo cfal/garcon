@@ -303,7 +303,7 @@ describe('GitHistoryController', () => {
 			severity: 'warning',
 		});
 		expect(history.document.commentError).toBe(
-			'Add or close this comment before changing context lines.',
+			'Add or close the open comment in this or another Git view before changing context lines.',
 		);
 	});
 

@@ -23,6 +23,10 @@ import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import GitHistoryView from '../GitHistoryView.svelte';
 
+vi.mock('$lib/components/workspace/WorkspaceFullscreenButton.svelte', async () => ({
+	default: (await import('./WorkspaceFullscreenButtonStub.svelte')).default,
+}));
+
 vi.mock('$lib/api/git.js', () => ({
 	getGitHistoryCommits: vi.fn(),
 	getGitCommitSnapshot: vi.fn(),
@@ -233,7 +237,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -278,7 +282,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -301,6 +305,9 @@ describe('GitHistoryView', () => {
 		const fileTreeToggle = screen.getByRole('button', { name: 'Hide file tree' });
 		const resizer = screen.getByRole('slider', { name: 'Resize file tree, 300 pixels' });
 		expect(primaryHeader?.contains(fileTreeToggle)).toBe(true);
+		expect(
+			fileTreeToggle.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
+		).toBe('main');
 		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
 
 		await fireEvent.keyDown(resizer, { key: 'ArrowRight' });
@@ -327,7 +334,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: true,
+				presentation: 'mobile',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -344,6 +351,7 @@ describe('GitHistoryView', () => {
 		if (!details) return;
 		ResizeObserverHarness.emit(details, 1_100);
 		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
+		expect(container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
 
 		const filesPane = container.querySelector<HTMLElement>('[data-git-history-files-pane]');
 		const diffPane = container.querySelector<HTMLElement>('[data-git-history-diff-pane]');
@@ -384,7 +392,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -457,7 +465,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -507,7 +515,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -567,7 +575,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -621,7 +629,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -649,7 +657,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison: vi.fn(),
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -675,7 +683,7 @@ describe('GitHistoryView', () => {
 				onOpenSelectedComparison,
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -717,14 +725,14 @@ describe('GitHistoryView', () => {
 				});
 			}
 		});
-		render(GitHistoryView, {
+		const { container } = render(GitHistoryView, {
 			props: {
 				history,
 				comparisonSelection,
 				onOpenSelectedComparison,
 				onOpenChat: vi.fn(),
 				projectPath: '/project',
-				isMobile: false,
+				presentation: 'main',
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
@@ -745,6 +753,16 @@ describe('GitHistoryView', () => {
 			expect.objectContaining({ context: 5 }),
 		);
 		expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+		const comparison = container.querySelector<HTMLElement>('[data-git-diff-document]');
+		expect(comparison).toBeTruthy();
+		if (!comparison) return;
+		ResizeObserverHarness.emit(comparison, 1_100);
+		await waitFor(() => expect(comparison.dataset.gitHistoryLayout).toBe('wide'));
+		expect(
+			screen
+				.getByRole('button', { name: 'Hide file tree' })
+				.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
+		).toBe('main');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
 
@@ -755,5 +773,37 @@ describe('GitHistoryView', () => {
 			from: 'older',
 			to: 'newer',
 		});
+	});
+
+	it('targets the sidebar host from commit details and omits the control from the list', async () => {
+		const { container } = render(GitHistoryView, {
+			props: {
+				history: createHistory(),
+				comparisonSelection,
+				onOpenSelectedComparison: vi.fn(),
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				presentation: 'sidebar',
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		expect(container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
+		await screen.findByText('Commit detail');
+		const details = container.querySelector<HTMLElement>('[data-git-diff-document]');
+		expect(details).toBeTruthy();
+		if (!details) return;
+		ResizeObserverHarness.emit(details, 1_100);
+		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('wide'));
+		expect(
+			screen
+				.getByRole('button', { name: 'Hide file tree' })
+				.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
+		).toBe('sidebar');
 	});
 });

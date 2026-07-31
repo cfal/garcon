@@ -15,6 +15,7 @@
 	import GitFileTree from './GitFileTree.svelte';
 	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
 	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
+	import WorkspaceFullscreenButton from '$lib/components/workspace/WorkspaceFullscreenButton.svelte';
 	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
@@ -33,7 +34,7 @@
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers, getWorkspaceShortcuts } from '$lib/context';
-	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
+	import { singletonSurfaceId, type HostId } from '$lib/workspace/surface-types.js';
 	import {
 		containerPresentationForWidth,
 		observeContainerWidth,
@@ -47,7 +48,7 @@
 	interface GitWorkbenchProps {
 		projectPath?: string | null;
 		target?: GitWorkbenchTarget | null;
-		isMobile: boolean;
+		presentation: HostId | 'mobile';
 		active?: boolean;
 		wb: GitWorkbenchStore;
 		diffFontSize: number;
@@ -59,7 +60,7 @@
 	let {
 		projectPath = null,
 		target = null,
-		isMobile,
+		presentation,
 		active = true,
 		wb,
 		diffFontSize,
@@ -67,6 +68,8 @@
 		onOpenChat = () => undefined,
 		onOpenInEditor,
 	}: GitWorkbenchProps = $props();
+	let isMobile = $derived(presentation === 'mobile');
+	let fullscreenHost = $derived<HostId | null>(presentation === 'mobile' ? null : presentation);
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
 			? {
@@ -412,6 +415,9 @@
 				{@render diffNavigation()}
 				{@render inspectorButtons()}
 				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={toggleFileTree} />
+				{#if fullscreenHost}
+					<WorkspaceFullscreenButton host={fullscreenHost} />
+				{/if}
 			</div>
 		</div>
 	{/if}

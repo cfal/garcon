@@ -7,6 +7,7 @@
 		GitDiffSeverity,
 	} from '$lib/git/review/git-inline-comment.svelte.js';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
+	import type { HostId } from '$lib/workspace/surface-types.js';
 	import GitCommitDetailsHeader from './GitCommitDetailsHeader.svelte';
 	import GitDiffDocumentScreen from './GitDiffDocumentScreen.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -20,7 +21,7 @@
 		scrollRequest: { filePath: string; token: number } | null;
 		fileFilter: string;
 		focusedFilePath: string | null;
-		isMobile: boolean;
+		presentation: HostId | 'mobile';
 		active?: boolean;
 		fontSize: number;
 		diffMode: DiffMode;
@@ -56,6 +57,10 @@
 	}
 
 	let props: GitCommitDetailsScreenProps = $props();
+	const isMobile = $derived(props.presentation === 'mobile');
+	const fullscreenHost = $derived<HostId | null>(
+		props.presentation === 'mobile' ? null : props.presentation,
+	);
 </script>
 
 {#snippet header(
@@ -78,6 +83,7 @@
 			{showFileTreeToggle}
 			{fileTreeVisible}
 			{onToggleFileTree}
+			{fullscreenHost}
 		/>
 	{/if}
 {/snippet}
@@ -93,7 +99,7 @@
 	scrollRequest={props.scrollRequest}
 	fileFilter={props.fileFilter}
 	focusedFilePath={props.focusedFilePath}
-	isMobile={props.isMobile}
+	{isMobile}
 	active={props.active ?? true}
 	fontSize={props.fontSize}
 	loadingLabel={m.git_commit_details_loading()}

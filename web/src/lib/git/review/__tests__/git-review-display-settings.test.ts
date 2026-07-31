@@ -69,13 +69,13 @@ describe('GitReviewDisplaySettingsStore', () => {
 		expect(hidden.apply).toHaveBeenCalledWith('split', 9);
 	});
 
-	it('lets a hidden comment composer block context changes for all relevant consumers', () => {
+	it('reports a comment composer retained in the fullscreen-hidden host', () => {
 		const store = new GitReviewDisplaySettingsStore();
 		const requester = consumer({ visible: true });
 		const blocker = consumer({ composer: true });
 		const unrelated = consumer();
-		store.register('requester', requester.value);
-		store.register('blocker', blocker.value);
+		store.register('visible-sidebar-history', requester.value);
+		store.register('hidden-main-workbench', blocker.value);
 		store.register('unrelated', unrelated.value);
 
 		expect(store.setContextLines(12)).toBe(false);

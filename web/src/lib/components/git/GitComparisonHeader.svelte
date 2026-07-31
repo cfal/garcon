@@ -2,6 +2,8 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import type { GitComparisonSnapshotReady } from '$lib/api/git-comparison.js';
+	import type { HostId } from '$lib/workspace/surface-types.js';
+	import WorkspaceFullscreenButton from '$lib/components/workspace/WorkspaceFullscreenButton.svelte';
 	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -11,6 +13,7 @@
 		fileTreeVisible: boolean;
 		onToggleFileTree: () => void;
 		onBack?: () => void;
+		fullscreenHost: HostId | null;
 	}
 
 	let {
@@ -19,6 +22,7 @@
 		fileTreeVisible,
 		onToggleFileTree,
 		onBack,
+		fullscreenHost,
 	}: GitComparisonHeaderProps = $props();
 	let additions = $derived(snapshot.files.reduce((sum, file) => sum + file.additions, 0));
 	let additionsKnown = $derived(snapshot.files.every((file) => file.statsKnown !== false));
@@ -55,7 +59,12 @@
 			</div>
 		</div>
 		{#if showFileTreeToggle}
-			<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
+			<div class="flex shrink-0 items-center gap-1">
+				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
+				{#if fullscreenHost}
+					<WorkspaceFullscreenButton host={fullscreenHost} />
+				{/if}
+			</div>
 		{/if}
 	</div>
 	<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

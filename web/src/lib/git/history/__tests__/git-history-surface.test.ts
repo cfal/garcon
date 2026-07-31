@@ -163,7 +163,7 @@ describe('GitHistorySurfaceController', () => {
 		expect(deps.reviewDisplay.setContextLines(12)).toBe(false);
 		expect(controller.history.comparison.document.commentComposer.body).toBe('Keep this comment');
 		expect(controller.history.comparison.document.commentError).toBe(
-			'Add or close this comment before changing context lines.',
+			'Add or close the open comment in this or another Git view before changing context lines.',
 		);
 	});
 

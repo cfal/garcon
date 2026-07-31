@@ -1,13 +1,22 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
+import type { GitComparisonSnapshotReady } from '$lib/api/git-comparison.js';
 import GitComparisonScreen from '../GitComparisonScreen.svelte';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness.js';
+
+vi.mock('$lib/components/workspace/WorkspaceFullscreenButton.svelte', async () => ({
+	default: (await import('./WorkspaceFullscreenButtonStub.svelte')).default,
+}));
 
 function renderScreen(comparison: GitComparisonController, isLoading: boolean): void {
 	render(GitComparisonScreen, {
 		comparison,
 		isLoading,
-		isMobile: false,
+		presentation: 'main',
 		fontSize: 12,
 		onEdit: vi.fn(),
 		onRefresh: vi.fn(),
@@ -16,7 +25,16 @@ function renderScreen(comparison: GitComparisonController, isLoading: boolean): 
 }
 
 describe('GitComparisonScreen', () => {
-	afterEach(cleanup);
+	let restoreResizeObserver: () => void;
+
+	beforeEach(() => {
+		restoreResizeObserver = installResizeObserverHarness();
+	});
+
+	afterEach(() => {
+		cleanup();
+		restoreResizeObserver();
+	});
 
 	it('shows initialization as loading instead of a comparison error', () => {
 		renderScreen(new GitComparisonController(), true);
@@ -43,7 +61,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			isMobile: false,
+			presentation: 'main',
 			fontSize: 12,
 			onBack,
 			onRefresh: vi.fn(),
@@ -51,9 +69,88 @@ describe('GitComparisonScreen', () => {
 		});
 
 		expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
-		await fireEvent.click(
-			screen.getByRole('button', { name: 'Back to commit selection' }),
-		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
 		expect(onBack).toHaveBeenCalledOnce();
 	});
+
+	it.each(['main', 'sidebar'] as const)(
+		'places the %s fullscreen control after the wide file-tree toggle',
+		async (presentation) => {
+			const comparison = new GitComparisonController();
+			comparison.snapshot = readySnapshot();
+			const { container } = render(GitComparisonScreen, {
+				comparison,
+				isLoading: false,
+				presentation,
+				fontSize: 12,
+				onRefresh: vi.fn(),
+				onOpenChat: vi.fn(),
+			});
+			const document = container.querySelector<HTMLElement>('[data-git-diff-document]');
+			expect(document).toBeTruthy();
+			if (!document) return;
+			ResizeObserverHarness.emit(document, 1_100);
+			await vi.waitFor(() => expect(document.dataset.gitHistoryLayout).toBe('wide'));
+
+			expect(
+				screen
+					.getByRole('button', { name: 'Hide file tree' })
+					.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
+			).toBe(presentation);
+		},
+	);
+
+	it('omits the inline fullscreen control from mobile comparison', () => {
+		const comparison = new GitComparisonController();
+		comparison.snapshot = readySnapshot();
+		const { container } = render(GitComparisonScreen, {
+			comparison,
+			isLoading: false,
+			presentation: 'mobile',
+			fontSize: 12,
+			onRefresh: vi.fn(),
+			onOpenChat: vi.fn(),
+		});
+
+		expect(container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
+	});
 });
+
+function readySnapshot(): GitComparisonSnapshotReady {
+	return {
+		status: 'ready',
+		project: '/project',
+		repoRoot: '/project',
+		documentId: 'comparison-document',
+		mode: 'direct',
+		from: {
+			kind: 'revision',
+			requestedRevision: 'HEAD~1',
+			label: 'HEAD~1',
+			hash: 'a'.repeat(40),
+			shortHash: 'aaaaaaa',
+		},
+		to: {
+			kind: 'working-tree',
+			label: 'Working Tree',
+			branch: 'main',
+			headHash: 'b'.repeat(40),
+			fingerprint: 'worktree-fingerprint',
+			shortFingerprint: 'worktree',
+		},
+		effectiveFromHash: 'a'.repeat(40),
+		files: [],
+		limits: {
+			maxSummaryFiles: 1000,
+			maxBodyBatchFiles: 24,
+			maxLoadedRows: 10_000,
+			maxLoadedPatchBytes: 1024 * 1024,
+			maxFileRows: 10_000,
+			maxFilePatchBytes: 1024 * 1024,
+			maxLineBytes: 20_000,
+			maxContextLines: 50,
+			bodyConcurrency: 4,
+		},
+		firstBodyCandidates: [],
+	};
+}

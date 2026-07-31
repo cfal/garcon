@@ -16,6 +16,8 @@ const {
 	createTerminal,
 	openTerminalSession,
 	openSingleton,
+	toggleFullscreen,
+	fullscreen,
 	terminalRegistry,
 } = vi.hoisted(() => ({
 	surfaces: {
@@ -31,6 +33,8 @@ const {
 	createTerminal: vi.fn(async () => 'terminal-created'),
 	openTerminalSession: vi.fn(async () => undefined),
 	openSingleton: vi.fn(async () => undefined),
+	toggleFullscreen: vi.fn(async () => undefined),
+	fullscreen: { host: null as 'main' | 'sidebar' | null },
 	terminalRegistry: {
 		orderedSessions: [] as Array<{
 			metadata: { terminalId: string; displaySequence: number };
@@ -43,6 +47,9 @@ vi.mock('$lib/context', () => ({
 	getWorkspaceCoordinator: () => ({
 		layout: {
 			surface: (surfaceId: string) => surfaces[surfaceId] ?? null,
+			get snapshot() {
+				return { fullscreenHost: fullscreen.host };
+			},
 		},
 		moveSurface,
 		popOutFile,
@@ -51,6 +58,7 @@ vi.mock('$lib/context', () => ({
 		openSingleton,
 		createTerminal,
 		openTerminalSession,
+		toggleFullscreen,
 	}),
 	getTerminalRegistry: () => terminalRegistry,
 	getGhCapability: () => ({ hasChecked: true, available: true }),
@@ -64,6 +72,7 @@ describe('WorkspaceTaskBar', () => {
 		vi.clearAllMocks();
 		terminalRegistry.orderedSessions = [];
 		terminalRegistry.listStatus = 'ready';
+		fullscreen.host = null;
 		delete surfaces['singleton:git-history'];
 		delete surfaces['singleton:git-compare'];
 		vi.stubGlobal('ResizeObserver', undefined);
@@ -183,6 +192,9 @@ describe('WorkspaceTaskBar', () => {
 			const compare = screen.getByRole('menuitem', {
 				name: m.workspace_open_git_compare(),
 			});
+			const fullscreenItem = screen.getByRole('menuitem', {
+				name: m.workspace_fullscreen(),
+			});
 			const openTerminal = screen.getByRole('menuitem', { name: 'Terminal 1' });
 
 			expect(history.querySelector('.lucide-history')).toBeTruthy();
@@ -190,6 +202,7 @@ describe('WorkspaceTaskBar', () => {
 			expect(items.indexOf(terminal)).toBeLessThan(items.indexOf(history));
 			expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));
 			expect(items.indexOf(compare)).toBeLessThan(items.indexOf(openTerminal));
+			expect(items.indexOf(openTerminal)).toBeLessThan(items.indexOf(fullscreenItem));
 
 			await fireEvent.click(history);
 			expect(openSingleton).toHaveBeenCalledWith('git-history', host);
@@ -242,6 +255,69 @@ describe('WorkspaceTaskBar', () => {
 		expect(moveSurface).toHaveBeenCalledWith('singleton:git-history', 'sidebar');
 		expect(openSingleton).not.toHaveBeenCalled();
 	});
+
+	it.each(['main', 'sidebar'] as const)(
+		'offers one canonical fullscreen command for the %s host',
+		async (host) => {
+			render(WorkspaceTaskBar, {
+				host,
+				hostState:
+					host === 'main'
+						? {
+								order: ['singleton:chat'],
+								activeId: 'singleton:chat',
+								mru: ['singleton:chat'],
+							}
+						: {
+								order: ['singleton:files'],
+								activeId: 'singleton:files',
+								mru: ['singleton:files'],
+							},
+				labelFor: (surfaceId: string) => (surfaceId === 'singleton:chat' ? 'Chat' : 'Files'),
+				onSelect: vi.fn(),
+			});
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+			const item = screen.getByRole('menuitem', { name: m.workspace_fullscreen() });
+			expect(screen.getAllByRole('menuitem', { name: m.workspace_fullscreen() })).toHaveLength(1);
+			expect(screen.queryByText('Enter workspace fullscreen')).toBeNull();
+			expect(
+				item.closest('[data-workspace-taskbar-menu]')?.getAttribute('data-workspace-taskbar-menu'),
+			).toBe(host);
+
+			await fireEvent.click(item);
+			expect(toggleFullscreen).toHaveBeenCalledWith(host);
+		},
+	);
+
+	it.each(['main', 'sidebar'] as const)(
+		'labels only the fullscreen %s host as Exit fullscreen',
+		async (host) => {
+			fullscreen.host = host;
+			render(WorkspaceTaskBar, {
+				host,
+				hostState:
+					host === 'main'
+						? {
+								order: ['singleton:chat'],
+								activeId: 'singleton:chat',
+								mru: ['singleton:chat'],
+							}
+						: {
+								order: ['singleton:files'],
+								activeId: 'singleton:files',
+								mru: ['singleton:files'],
+							},
+				labelFor: (surfaceId: string) => (surfaceId === 'singleton:chat' ? 'Chat' : 'Files'),
+				onSelect: vi.fn(),
+			});
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+			expect(screen.getAllByRole('menuitem', { name: m.workspace_exit_fullscreen() })).toHaveLength(
+				1,
+			);
+		},
+	);
 
 	it('omits an open Git view command and labels standalone tabs without a Git prefix', async () => {
 		surfaces['singleton:git-history'] = {

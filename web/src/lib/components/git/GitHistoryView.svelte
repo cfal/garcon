@@ -7,6 +7,7 @@
 		type GitHistoryController,
 	} from '$lib/git/history/git-history.svelte.js';
 	import type { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
+	import type { HostId } from '$lib/workspace/surface-types.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
 	import GitComparisonScreen from './GitComparisonScreen.svelte';
@@ -15,7 +16,7 @@
 		history: GitHistoryController;
 		comparisonSelection: GitHistoryComparisonSelectionState;
 		projectPath: string | null;
-		isMobile: boolean;
+		presentation: HostId | 'mobile';
 		active?: boolean;
 		diffMode: DiffMode;
 		contextLines: number;
@@ -34,7 +35,7 @@
 		history,
 		comparisonSelection,
 		projectPath,
-		isMobile,
+		presentation,
 		active = true,
 		diffMode,
 		contextLines,
@@ -48,6 +49,7 @@
 		onSetContextLines = () => undefined,
 		onSetDiffFontSize = () => undefined,
 	}: GitHistoryViewProps = $props();
+	const isMobile = $derived(presentation === 'mobile');
 
 	function revertListCommit(commit: { hash: string; shortHash: string; subject: string }): void {
 		onRevertCommit({
@@ -95,7 +97,7 @@
 		scrollRequest={history.scrollRequest}
 		fileFilter={history.fileFilter}
 		focusedFilePath={history.focusedFilePath}
-		{isMobile}
+		{presentation}
 		{active}
 		fontSize={Number(diffFontSize) || 12}
 		{diffMode}
@@ -131,7 +133,7 @@
 	<GitComparisonScreen
 		comparison={history.comparison}
 		isLoading={history.comparison.isLoading}
-		{isMobile}
+		{presentation}
 		{active}
 		fontSize={Number(diffFontSize) || 12}
 		onBack={() => history.backToList()}

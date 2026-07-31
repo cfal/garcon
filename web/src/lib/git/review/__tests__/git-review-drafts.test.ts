@@ -43,6 +43,8 @@ describe('GitReviewDrafts', () => {
 		drafts.markContextChangeBlocked();
 
 		expect(drafts.commentComposer).toMatchObject({ open: true, body: 'Keep this draft' });
-		expect(drafts.commentError).toBe('Add or close this comment before changing context lines.');
+		expect(drafts.commentError).toBe(
+			'Add or close the open comment in this or another Git view before changing context lines.',
+		);
 	});
 });

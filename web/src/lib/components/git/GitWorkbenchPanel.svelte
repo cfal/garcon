@@ -6,11 +6,7 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 	import { resolveGitEditorRoot } from '$lib/git/surface/git-editor-root.js';
-	import {
-		getFileSessions,
-		getLocalSettings,
-		getWorkspaceCoordinator,
-	} from '$lib/context';
+	import { getFileSessions, getLocalSettings, getWorkspaceCoordinator } from '$lib/context';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitFreshnessBanner from './GitFreshnessBanner.svelte';
@@ -37,17 +33,11 @@
 	const wb = $derived(controller.workbench);
 	const repository = $derived(controller.repository);
 	const presentationVisible = $derived(
-		visible &&
-			controller.presentationVisible &&
-			!controller.target.projectIdentityPending,
+		visible && controller.presentationVisible && !controller.target.projectIdentityPending,
 	);
 	const activeProjectPath = $derived(controller.target.activeProjectPath);
-	const activeTarget = $derived(
-		controller.target.activeTarget ?? controller.target.fallbackTarget,
-	);
-	const diffFontSize = $derived(
-		Number.parseInt(localSettings.gitDiffFontSize, 10) || 12,
-	);
+	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
+	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
 
 	$effect(() => {
 		if (!presentationVisible || !activeProjectPath) return;
@@ -81,9 +71,7 @@
 		await controller.target.refreshTargets();
 	}
 
-	async function runMutation<T>(
-		action: (projectPath: string) => Promise<T>,
-	): Promise<T | null> {
+	async function runMutation<T>(action: (projectPath: string) => Promise<T>): Promise<T | null> {
 		const projectPath = activeProjectPath;
 		if (!projectPath || !wb.ensureFreshForGitMutation()) return null;
 		return wb.runLocalGitMutation(projectPath, () => action(projectPath));
@@ -164,7 +152,7 @@
 
 		<GitWorkbench
 			target={activeTarget}
-			isMobile={presentation === 'mobile'}
+			{presentation}
 			active={presentationVisible}
 			{wb}
 			{onAppendToChatDraft}

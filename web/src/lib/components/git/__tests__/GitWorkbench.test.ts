@@ -10,6 +10,10 @@ import {
 } from '$lib/components/shared/__tests__/resize-observer-harness';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
+vi.mock('$lib/components/workspace/WorkspaceFullscreenButton.svelte', async () => ({
+	default: (await import('./WorkspaceFullscreenButtonStub.svelte')).default,
+}));
+
 function makeTarget(): GitWorkbenchTarget {
 	return {
 		projectPath: '/project',
@@ -149,7 +153,7 @@ describe('GitWorkbench', () => {
 		render(GitWorkbenchTestHost, {
 			props: {
 				target: makeTarget(),
-				isMobile: false,
+				presentation: 'main',
 				wb: makeWorkbenchStub(),
 				diffFontSize: 12,
 			},
@@ -164,7 +168,7 @@ describe('GitWorkbench', () => {
 		const { container } = render(GitWorkbenchTestHost, {
 			props: {
 				target,
-				isMobile: false,
+				presentation: 'main',
 				wb: makeWorkbenchStub(target),
 				diffFontSize: 12,
 			},
@@ -176,12 +180,17 @@ describe('GitWorkbench', () => {
 		ResizeObserverHarness.emit(workbench, 1_100);
 		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('wide'));
 		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
+		const fileTreeToggle = screen.getByRole('button', { name: 'Hide file tree' });
+		expect(
+			fileTreeToggle.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
+		).toBe('main');
 		const diffSurface = container.querySelector('[data-git-virtual-diff-root]');
 		expect(diffSurface).toBeTruthy();
 
 		ResizeObserverHarness.emit(workbench, 700);
 		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('narrow'));
 		expect(container.querySelector('[data-git-tree-resizer]')).toBeNull();
+		expect(container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
 		expect(container.querySelector('[data-git-segmented-navigation]')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy();
@@ -213,7 +222,7 @@ describe('GitWorkbench', () => {
 		const { container } = render(GitWorkbenchTestHost, {
 			props: {
 				target,
-				isMobile: false,
+				presentation: 'main',
 				wb: makeWorkbenchStub(target),
 				diffFontSize: 12,
 			},
@@ -243,5 +252,43 @@ describe('GitWorkbench', () => {
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
 		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
+	});
+
+	it('targets the rendered desktop host and omits fullscreen on mobile', async () => {
+		const target = makeTarget();
+		const sidebar = render(GitWorkbenchTestHost, {
+			props: {
+				target,
+				presentation: 'sidebar',
+				wb: makeWorkbenchStub(target),
+				diffFontSize: 12,
+			},
+		});
+		const sidebarWorkbench = sidebar.container.querySelector<HTMLElement>('[data-git-workbench]');
+		expect(sidebarWorkbench).toBeTruthy();
+		if (!sidebarWorkbench) return;
+		ResizeObserverHarness.emit(sidebarWorkbench, 1_100);
+		await waitFor(() => expect(sidebarWorkbench.dataset.gitLayout).toBe('wide'));
+		expect(
+			screen
+				.getByRole('button', { name: 'Hide file tree' })
+				.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
+		).toBe('sidebar');
+
+		sidebar.unmount();
+		const mobile = render(GitWorkbenchTestHost, {
+			props: {
+				target,
+				presentation: 'mobile',
+				wb: makeWorkbenchStub(target),
+				diffFontSize: 12,
+			},
+		});
+		const mobileWorkbench = mobile.container.querySelector<HTMLElement>('[data-git-workbench]');
+		expect(mobileWorkbench).toBeTruthy();
+		if (!mobileWorkbench) return;
+		ResizeObserverHarness.emit(mobileWorkbench, 1_100);
+		await waitFor(() => expect(mobileWorkbench.dataset.gitLayout).toBe('narrow'));
+		expect(mobile.container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
 	});
 });
