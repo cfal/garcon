@@ -5,12 +5,14 @@
   "type": "module",
   "main": "server/main.ts",
   "workspaces": [
+    "cli",
     "common",
     "server",
     "web",
     "server-agents/*"
   ],
   "files": [
+    "cli/",
     "server/",
     "server-agents/",
     "common/",
