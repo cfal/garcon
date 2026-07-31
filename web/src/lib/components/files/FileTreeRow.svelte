@@ -145,24 +145,25 @@
 				<div
 					class={cn(
 						'flex min-h-0 min-w-0 items-center overflow-hidden',
+						profile.mode === 'columns' && 'flex-1',
 						profile.mode === 'details' && 'col-start-1 row-start-1 leading-4',
 					)}
 				>
 					<span class="min-w-0 truncate">{entry.name}</span>
-					{#if profile.mode === 'columns' && entry.type === 'file'}
-						<CopyFilePathButton path={entry.relativePath} class="ml-1" />
-					{/if}
 				</div>
 				{#if profile.mode === 'details'}
 					<div class="col-start-1 row-start-2 min-w-0 overflow-hidden">
 						<FileTreeRowSubtitle {entry} keys={profile.subtitleKeys} />
 					</div>
-					{#if entry.type === 'file'}
-						<CopyFilePathButton
-							path={entry.relativePath}
-							class="col-start-2 row-span-2 row-start-1 self-center"
-						/>
-					{/if}
+				{/if}
+				{#if entry.type === 'file'}
+					<CopyFilePathButton
+						path={entry.relativePath}
+						class={cn(
+							profile.mode === 'columns' && 'ml-1',
+							profile.mode === 'details' && 'col-start-2 row-span-2 row-start-1 self-center',
+						)}
+					/>
 				{/if}
 			</div>
 		</div>

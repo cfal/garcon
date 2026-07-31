@@ -137,14 +137,19 @@ describe('FileTree', () => {
 		await fireEvent.click(copyButton);
 		expect(copyToClipboard).toHaveBeenCalledWith(readme.relativePath, undefined);
 		expect(onFileSelect).not.toHaveBeenCalled();
+		copyButton.focus();
+		expect(document.activeElement).toBe(copyButton);
 
 		await setFileTreeWidth(container, 700);
 		expect(container.querySelector<HTMLElement>(`[data-file-tree-row-key="${readme.path}"]`)).toBe(
 			readmeRow,
 		);
+		expect(readmeRow.querySelector('[data-copy-file-path]')).toBe(copyButton);
+		expect(document.activeElement).toBe(copyButton);
+		expect(copyButton.getAttribute('aria-label')).toBe('File path copied');
 		expect(readmeRow.querySelectorAll('[role="gridcell"]')).toHaveLength(2);
 		expect(readmeRow.querySelector('[data-file-tree-subtitle]')).toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: 'Copy file path' }));
+		await fireEvent.click(copyButton);
 		expect(copyToClipboard).toHaveBeenCalledTimes(2);
 		expect(onFileSelect).not.toHaveBeenCalled();
 	});
@@ -288,6 +293,16 @@ describe('FileTree', () => {
 		).toBe('details');
 		expect(screen.getByText('Details')).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: 'Reset column widths' })).toBeNull();
+		await setFileTreeWidth(container, 480);
+		expect(detailsMode.getAttribute('aria-checked')).toBe('true');
+		expect(
+			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
+		).toBe('details');
+		await setFileTreeWidth(container, 700, 'details');
+		expect(detailsMode.getAttribute('aria-checked')).toBe('true');
+		expect(
+			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
+		).toBe('details');
 		expect(screen.getAllByRole('menuitemradio').map((item) => item.textContent?.trim())).toEqual([
 			'Name',
 			'Size',
@@ -352,13 +367,16 @@ describe('FileTree', () => {
 
 	it('keeps name-only rows in columns at narrow widths', async () => {
 		const { container, store } = renderReady([entry('README.md', 'file')]);
+		const root = container.querySelector<HTMLElement>('[data-file-tree-root]');
+		if (!root) throw new Error('Expected file tree root');
 		store.setColumnVisible('size', false);
 		store.setColumnVisible('modified', false);
 		await setFileTreeWidth(container, 200, 'columns');
 
-		expect(
-			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
-		).toBe('columns');
+		expect(root.dataset.fileTreeLayout).toBe('columns');
+		await setFileTreeWidth(container, 480, 'columns');
+		store.setColumnVisible('size', true);
+		await waitFor(() => expect(root.dataset.fileTreeLayout).toBe('details'));
 	});
 
 	it('renders configured details as an accessible one-line subtitle', async () => {

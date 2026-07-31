@@ -399,12 +399,16 @@ The row header will put the subtitle inside the same text stack as the title:
 			<div class="col-start-1 row-start-2 min-w-0 overflow-hidden">
 				<FileTreeRowSubtitle {entry} keys={profile.subtitleKeys} />
 			</div>
-			{#if entry.type === 'file'}
-				<CopyFilePathButton
-					path={entry.relativePath}
-					class="col-start-2 row-span-2 row-start-1 self-center"
-				/>
-			{/if}
+		{/if}
+		{#if entry.type === 'file'}
+			<CopyFilePathButton
+				path={entry.relativePath}
+				class={cn(
+					profile.mode === 'columns' && 'ml-1',
+					profile.mode === 'details' &&
+						'col-start-2 row-span-2 row-start-1 self-center',
+				)}
+			/>
 		{/if}
 	</div>
 </div>
@@ -418,7 +422,10 @@ pl-[calc(var(--file-tree-disclosure-size)+1.5rem)]
 
 The details text stack uses two explicit 16 px tracks, and its title line adopts `leading-4`; `FileTreeRowSubtitle` already uses `leading-4`. A file's 24 px copy action spans both tracks in its own fixed column, so it cannot overlap either line or distort their alignment. The subtitle no longer guesses the width of siblings. Its parent stack establishes alignment directly. Indent guides continue to span the full row header, and the disclosure button remains centered independently from the 32 px icon.
 
-Column mode uses the same markup with a 16 px icon and no subtitle. Disclosure, copy-path, activation, keyboard, focus, selection, and ARIA behavior remain unchanged.
+Column mode uses the same markup with a 16 px icon and no subtitle. A file's copy action is one
+stable component instance whose placement classes change with the surrounding flex/grid layout, so
+its focus and copied state survive responsive transitions. Disclosure, copy-path, activation,
+keyboard, focus, selection, and ARIA behavior remain unchanged.
 
 ## Persistence and Migration
 
@@ -818,6 +825,14 @@ The review follow-up aligns every synthetic row to the presentation icon rail an
 file row and copy action before and after a 700 px transition to columns. Final review resumes both
 original sessions against the follow-up commit rather than starting unrelated review contexts.
 
+Both resumed sessions then independently found the same low-severity focus issue: the copy action was
+rendered as separate mode-specific component instances, so crossing 520 px while that keyboard-reachable
+button was focused destroyed it and dropped focus. The finding was accepted. The final follow-up renders
+one instance with mode-dependent placement classes and asserts button identity, focus, copied state,
+copy behavior, and row activation isolation across the responsive transition. It also closes two
+informational matrix gaps by testing that an always-details override remains pinned across later width
+changes and that enabling metadata at 480 px changes a name-only column view to details.
+
 ## Acceptance Criteria
 
 - The popup label is `Always use detailed rows`.
@@ -836,4 +851,5 @@ original sessions against the follow-up commit rather than starting unrelated re
 - Details-mode file and folder icons are 32 px and span the two-line text block.
 - Column-mode icons remain 16 px.
 - Title and subtitle share one structurally aligned text stack without compensating subtitle padding.
+- A focused copy-path action preserves its DOM identity, focus, and transient state across responsive transitions.
 - All focused tests, `bun run check`, `bun run test`, and fresh startup validation pass.
