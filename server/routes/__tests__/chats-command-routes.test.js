@@ -416,6 +416,10 @@ function createRouteAgent(sessionOverrides = {}) {
     getRunningSessions: mock(() => ({ claude: [{ id: CHAT_ID }] })),
     startSession: mock(() => Promise.resolve(undefined)),
     modelSupportsImages: mock(() => Promise.resolve(true)),
+    getAgentCatalogEntry: mock(() => Promise.resolve({
+      supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
+      supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    })),
     runSingleQuery: mock(() => Promise.resolve('title')),
     forkAgentSession: mock(() => Promise.resolve({
       kind: 'materialized',

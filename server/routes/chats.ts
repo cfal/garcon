@@ -777,8 +777,6 @@ export default function createChatRoutes({
     try {
       const input = parseCommandRequest(parseAgentRunCommandRequest, body);
       const images = validatedCommandAttachments(input.images);
-      const session = registry.getChat(input.chatId);
-      if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const result = await commands.submitRun({ ...input, images });
 
       return Response.json(result, { status: 202 });
