@@ -1,8 +1,15 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
+import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
+import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout.js';
+import { fileSurfaceId, type WorkspaceLayoutMutation } from '$lib/workspace/surface-types.js';
+import {
+	createWorkspaceLayoutStore,
+	reduceWorkspaceLayout,
+} from '$lib/workspace/workspace-layout.svelte.js';
 import MarkdownViewerTestHost from './MarkdownViewerTestHost.svelte';
 
 afterEach(() => {
@@ -10,16 +17,46 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-function markdownSession(content: string): FileSession {
+function markdownSession(content: string, relativePath = 'docs/guides/current.md'): FileSession {
 	const session = new FileSession(
 		{
 			canonicalFileRootPath: '/workspace/project',
-			normalizedRelativePath: 'docs/guides/current.md',
+			normalizedRelativePath: relativePath,
 		},
-		'/workspace/project:docs/guides/current.md',
+		`/workspace/project:${relativePath}`,
 	);
 	session.content = content;
 	return session;
+}
+
+function workspaceLayoutWithDialog(dialogSession: FileSession, backgroundSession?: FileSession) {
+	const mutations: WorkspaceLayoutMutation[] = [
+		{
+			type: 'register-surface',
+			surface: {
+				id: fileSurfaceId(dialogSession.id),
+				type: 'file',
+				fileSessionId: dialogSession.id,
+			},
+			host: 'main',
+		},
+		{ type: 'place-in-dialog', surfaceId: fileSurfaceId(dialogSession.id) },
+	];
+	if (backgroundSession) {
+		mutations.push(
+			{
+				type: 'register-surface',
+				surface: {
+					id: fileSurfaceId(backgroundSession.id),
+					type: 'file',
+					fileSessionId: backgroundSession.id,
+				},
+				host: 'main',
+			},
+			{ type: 'focus-host', host: 'main', surfaceId: fileSurfaceId(backgroundSession.id) },
+		);
+	}
+	return createWorkspaceLayoutStore(reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), mutations));
 }
 
 describe('MarkdownViewer', () => {
@@ -158,6 +195,72 @@ describe('MarkdownViewer', () => {
 		expect(onOpen).toHaveBeenCalledWith(
 			expect.objectContaining({ relativePath: 'docs/guides/current.md' }),
 		);
+	});
+
+	it('notifies when a dialog link opens behind the current dialog', async () => {
+		const source = markdownSession('[Sibling](sibling.md)');
+		const opened = markdownSession('', 'docs/guides/sibling.md');
+		const notifications = new NotificationsStore();
+
+		render(MarkdownViewerTestHost, {
+			session: source,
+			presentation: 'dialog',
+			onOpen: vi.fn(() => opened),
+			notifications,
+			workspaceLayout: workspaceLayoutWithDialog(source, opened),
+		});
+
+		await fireEvent.click(screen.getByRole('link', { name: 'Sibling' }));
+
+		await waitFor(() => expect(notifications.items).toHaveLength(1));
+		expect(notifications.items[0]).toMatchObject({
+			key: 'file-opened-behind-dialog',
+			tone: 'info',
+			message: 'Opened sibling.md in another view. Close this dialog to see it.',
+		});
+	});
+
+	it('does not notify when the linked file becomes the dialog occupant', async () => {
+		const source = markdownSession('[Sibling](sibling.md)');
+		const opened = markdownSession('', 'docs/guides/sibling.md');
+		const notifications = new NotificationsStore();
+		const onOpen = vi.fn(() => opened);
+
+		render(MarkdownViewerTestHost, {
+			session: source,
+			presentation: 'dialog',
+			onOpen,
+			notifications,
+			workspaceLayout: workspaceLayoutWithDialog(opened),
+		});
+
+		await fireEvent.click(screen.getByRole('link', { name: 'Sibling' }));
+		await waitFor(() => expect(onOpen).toHaveBeenCalledOnce());
+		await tick();
+		await Promise.resolve();
+
+		expect(notifications.items).toHaveLength(0);
+	});
+
+	it('does not notify when the linked file fails to open', async () => {
+		const source = markdownSession('[Sibling](sibling.md)');
+		const notifications = new NotificationsStore();
+		const onOpen = vi.fn(() => null);
+
+		render(MarkdownViewerTestHost, {
+			session: source,
+			presentation: 'dialog',
+			onOpen,
+			notifications,
+			workspaceLayout: workspaceLayoutWithDialog(source),
+		});
+
+		await fireEvent.click(screen.getByRole('link', { name: 'Sibling' }));
+		await waitFor(() => expect(onOpen).toHaveBeenCalledOnce());
+		await tick();
+		await Promise.resolve();
+
+		expect(notifications.items).toHaveLength(0);
 	});
 
 	it.each(['../../../outside.md', '/tmp/outside.md'])(

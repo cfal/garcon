@@ -2,13 +2,21 @@
 	import Markdown, { type MarkdownLinkNavigateEvent } from '$lib/components/chat/Markdown.svelte';
 	import { resolveFileLinkFromFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
-	import { getFileSessions, getLocalSettings } from '$lib/context';
-	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
+	import {
+		getFileSessions,
+		getLocalSettings,
+		getNotifications,
+		getWorkspaceLayout,
+	} from '$lib/context';
+	import { fileSurfaceId, type PresentationHostId } from '$lib/workspace/surface-types.js';
+	import * as m from '$lib/paraglide/messages.js';
 
 	let { session, presentation }: { session: FileSession; presentation: PresentationHostId } =
 		$props();
 	const files = getFileSessions();
 	const localSettings = getLocalSettings();
+	const notifications = getNotifications();
+	const workspaceLayout = getWorkspaceLayout();
 	let contentElement: HTMLDivElement;
 	const markdownFontSize = $derived(
 		Number.parseInt(localSettings.markdownViewerFontSize, 10) || 12,
@@ -41,12 +49,21 @@
 			sourceFilePath: session.relativePath,
 		});
 		if (!target) return false;
-		void files.open({
-			...target,
-			mode: 'auto',
-			origin: presentation,
-			reason: 'user-open',
-		});
+		void files
+			.open({
+				...target,
+				mode: 'auto',
+				origin: presentation,
+				reason: 'user-open',
+			})
+			.then((opened) => {
+				if (!opened || presentation !== 'dialog') return;
+				const dialogSurfaceId = workspaceLayout.snapshot.dialogFileSurfaceId;
+				if (!dialogSurfaceId || dialogSurfaceId === fileSurfaceId(opened.id)) return;
+				notifications.info(m.file_session_opened_in_another_view({ fileName: opened.fileName }), {
+					key: 'file-opened-behind-dialog',
+				});
+			});
 		return true;
 	}
 </script>

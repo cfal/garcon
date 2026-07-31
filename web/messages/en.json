@@ -839,6 +839,7 @@
 	"file_session_loading": "Loading file...",
 	"file_session_content_request_failed": "The file request failed with status {status}.",
 	"file_session_open_failed": "Unable to open {fileName}: {detail}",
+	"file_session_opened_in_another_view": "Opened {fileName} in another view. Close this dialog to see it.",
 	"file_session_move_main": "Move to main view",
 	"file_session_move_sidebar": "Move to sidebar",
 	"file_session_restore_dialog": "Restore dialog",
