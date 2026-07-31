@@ -157,6 +157,19 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(registry.gitCompare()).not.toBe(compare);
 	});
 
+	it('retains one Browser controller and creates a fresh one after Close', () => {
+		localStorage.clear();
+		const { registry } = createRegistry();
+		const browser = registry.browser();
+
+		registry.setPresentationVisible('browser', true);
+		registry.setPresentationVisible('browser', false);
+		expect(registry.browser()).toBe(browser);
+
+		registry.disposeSurface('browser');
+		expect(registry.browser()).not.toBe(browser);
+	});
+
 	it('routes visibility for every singleton through one lifecycle owner', () => {
 		const { registry, pullRequestsStores, commits } = createRegistry();
 		registry.pullRequests();

@@ -187,6 +187,16 @@
 						? workspace.focusMobileSingleton('commit')
 						: workspace.openSingleton('commit', 'sidebar')),
 			},
+			{
+				id: 'workspace-browser',
+				label: m.workspace_surface_browser(),
+				description: m.command_open_panel({ panel: m.workspace_surface_browser() }),
+				category: categories.workspace,
+				action: () =>
+					void (workspace.isMobile
+						? workspace.focusMobileSingleton('browser')
+						: workspace.openSingleton('browser', 'main')),
+			},
 		];
 	});
 

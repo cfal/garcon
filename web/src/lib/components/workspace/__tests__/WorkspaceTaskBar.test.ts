@@ -209,6 +209,41 @@ describe('WorkspaceTaskBar', () => {
 		},
 	);
 
+	it.each(['main', 'sidebar'] as const)(
+		'offers Open Browser below New Terminal and opens it in the %s host',
+		async (host) => {
+			render(WorkspaceTaskBar, {
+				host,
+				hostState:
+					host === 'main'
+						? {
+								order: ['singleton:chat'],
+								activeId: 'singleton:chat',
+								mru: ['singleton:chat'],
+							}
+						: {
+								order: ['singleton:files'],
+								activeId: 'singleton:files',
+								mru: ['singleton:files'],
+							},
+				labelFor: (surfaceId: string) => (surfaceId === 'singleton:chat' ? 'Chat' : 'Files'),
+				onSelect: vi.fn(),
+			});
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+			const items = screen.getAllByRole('menuitem');
+			const terminal = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });
+			const browserItem = screen.getByRole('menuitem', {
+				name: m.workspace_open_surface({ surface: m.workspace_surface_browser() }),
+			});
+			expect(browserItem.querySelector('.lucide-globe')).toBeTruthy();
+			expect(items.indexOf(browserItem)).toBeGreaterThan(items.indexOf(terminal));
+
+			await fireEvent.click(browserItem);
+			expect(openSingleton).toHaveBeenCalledWith('browser', host);
+		},
+	);
+
 	it('moves an existing generic singleton from the sidebar into the main view', async () => {
 		render(WorkspaceTaskBar, {
 			host: 'main',

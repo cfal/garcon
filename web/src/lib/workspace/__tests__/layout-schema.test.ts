@@ -182,6 +182,28 @@ describe('workspace layout persistence', () => {
 		expect(restored.snapshot.sidebar.order).toContain('singleton:git-compare');
 	});
 
+	it('round-trips Browser surface placements in either host', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:browser', type: 'singleton', kind: 'browser' },
+				host: 'sidebar',
+			},
+		]);
+
+		const serialized = serializeWorkspaceLayout(snapshot);
+		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized));
+
+		expect(serialized.sidebar.order).toContainEqual({ type: 'singleton', kind: 'browser' });
+		expect(restored.source).toBe('valid');
+		expect(restored.snapshot.sidebar.order).toContain('singleton:browser');
+		expect(restored.snapshot.surfaces['singleton:browser']).toEqual({
+			id: 'singleton:browser',
+			type: 'singleton',
+			kind: 'browser',
+		});
+	});
+
 	it('does not serialize mobile-only History or Compare', () => {
 		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{

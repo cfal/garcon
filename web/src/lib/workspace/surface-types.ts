@@ -10,6 +10,7 @@ export const PORTABLE_SINGLETON_KINDS = [
 	'pull-requests',
 	'files',
 	'commit',
+	'browser',
 ] as const;
 export const TRANSIENT_MOBILE_SINGLETON_KINDS = ['git-history', 'git-compare'] as const;
 
@@ -123,6 +124,8 @@ export function portableSingletonDescriptor(
 		case 'files':
 			return { id: singletonSurfaceId(kind), type: 'singleton', kind };
 		case 'commit':
+			return { id: singletonSurfaceId(kind), type: 'singleton', kind };
+		case 'browser':
 			return { id: singletonSurfaceId(kind), type: 'singleton', kind };
 	}
 }

@@ -370,7 +370,9 @@ describe('AppShell responsive workspace binding', () => {
 		},
 	);
 
-	it.each(['git-history', 'git-compare'] as const)(
+	// `commit` is transient too but is already present in the canonical layout,
+	// so it cannot be registered through this harness.
+	it.each(['git-history', 'git-compare', 'browser'] as const)(
 		'hides the mobile bottom bar for transient %s',
 		async (kind) => {
 			const workspace = installContext();

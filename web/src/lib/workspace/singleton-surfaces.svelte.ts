@@ -1,6 +1,7 @@
 import { untrack } from 'svelte';
 import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
+import { BrowserSurfaceController } from '$lib/browser/browser-surface.svelte.js';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
 import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
@@ -43,6 +44,7 @@ export interface SingletonControllerByKind {
 	'pull-requests': PullRequestsStore;
 	files: FilesSurfaceController;
 	commit: CommitController;
+	browser: BrowserSurfaceController;
 }
 
 type SingletonControllerFactories = {
@@ -64,6 +66,7 @@ export class SingletonSurfaceRegistry {
 		'pull-requests': false,
 		files: false,
 		commit: false,
+		browser: false,
 	};
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
@@ -73,6 +76,7 @@ export class SingletonSurfaceRegistry {
 			'git-compare': () => new GitCompareSurfaceController(this.deps),
 			files: () => new FilesSurfaceController(),
 			commit: () => this.deps.createCommit(),
+			browser: () => new BrowserSurfaceController(),
 			'pull-requests': () => {
 				const controller = this.deps.createPullRequests();
 				controller.setCapability(
@@ -110,6 +114,10 @@ export class SingletonSurfaceRegistry {
 
 	pullRequests(): PullRequestsStore {
 		return this.#controller('pull-requests');
+	}
+
+	browser(): BrowserSurfaceController {
+		return this.#controller('browser');
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {

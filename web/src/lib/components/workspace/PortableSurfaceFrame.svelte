@@ -73,7 +73,7 @@
 			onClose={() => void workspace.closeSurface(surface.id)}
 			closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
 		/>
-	{:else if presentation === 'mobile' && surface.type === 'singleton' && surface.kind === 'commit'}
+	{:else if presentation === 'mobile' && surface.type === 'singleton' && (surface.kind === 'commit' || surface.kind === 'browser')}
 		<div class="flex h-full min-h-0 flex-col">
 			<div class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
 				<button
