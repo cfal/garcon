@@ -31,7 +31,7 @@
 </script>
 
 <div
-	class="flex min-w-0 items-center overflow-hidden whitespace-nowrap pl-[calc(var(--file-tree-disclosure-size)+1.5rem)] text-xs leading-4 text-muted-foreground"
+	class="flex min-w-0 items-center overflow-hidden whitespace-nowrap text-xs leading-4 text-muted-foreground"
 	data-file-tree-subtitle
 	title={subtitleTitle || m.filetree_no_details_available()}
 >

@@ -10,6 +10,7 @@
 	import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 	import { isImageFilePath } from '$lib/utils/file-kind.js';
+	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import CopyFilePathButton from './CopyFilePathButton.svelte';
 	import FileTreeRowSubtitle from './FileTreeRowSubtitle.svelte';
@@ -80,7 +81,7 @@
 >
 	<div
 		role="rowheader"
-		class="relative min-w-0 overflow-hidden"
+		class="relative h-full min-w-0 overflow-hidden"
 		style={`padding-left: ${(row.level - 1) * 16}px`}
 		title={entry.path}
 	>
@@ -92,7 +93,7 @@
 				{/each}
 			</div>
 		{/if}
-		<div class="flex min-w-0 items-center">
+		<div class="flex h-full min-w-0 items-center" data-file-tree-entry-layout>
 			{#if entry.type === 'directory'}
 				<button
 					type="button"
@@ -114,31 +115,57 @@
 					{/if}
 				</button>
 				{#if expanded}
-					<FolderOpen class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
+					<FolderOpen class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
 				{:else}
-					<Folder class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
+					<Folder class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
 				{/if}
 			{:else}
 				<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
 				{@const kind = iconType()}
 				{#if kind === 'code'}
-					<FileCode2 class="mr-2 h-4 w-4 shrink-0 text-file-icon-code" />
+					<FileCode2 class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-code" />
 				{:else if kind === 'document'}
-					<FileText class="mr-2 h-4 w-4 shrink-0 text-file-icon-doc" />
+					<FileText class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-doc" />
 				{:else if kind === 'image'}
-					<FileImage class="mr-2 h-4 w-4 shrink-0 text-file-icon-image" />
+					<FileImage class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-image" />
 				{:else}
-					<File class="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+					<File class="file-tree-entry-icon mr-2 shrink-0 text-muted-foreground" />
 				{/if}
 			{/if}
-			<span class="min-w-0 truncate">{entry.name}</span>
-			{#if entry.type === 'file'}
-				<CopyFilePathButton path={entry.relativePath} class="ml-1" />
-			{/if}
+			<div
+				class={cn(
+					'min-w-0 flex-1',
+					profile.mode === 'columns' && 'flex items-center',
+					profile.mode === 'details' && 'grid h-8 grid-rows-[16px_16px]',
+					profile.mode === 'details' &&
+						(entry.type === 'file' ? 'grid-cols-[minmax(0,1fr)_24px]' : 'grid-cols-1'),
+				)}
+				data-file-tree-entry-text
+			>
+				<div
+					class={cn(
+						'flex min-h-0 min-w-0 items-center overflow-hidden',
+						profile.mode === 'details' && 'col-start-1 row-start-1 leading-4',
+					)}
+				>
+					<span class="min-w-0 truncate">{entry.name}</span>
+					{#if profile.mode === 'columns' && entry.type === 'file'}
+						<CopyFilePathButton path={entry.relativePath} class="ml-1" />
+					{/if}
+				</div>
+				{#if profile.mode === 'details'}
+					<div class="col-start-1 row-start-2 min-w-0 overflow-hidden">
+						<FileTreeRowSubtitle {entry} keys={profile.subtitleKeys} />
+					</div>
+					{#if entry.type === 'file'}
+						<CopyFilePathButton
+							path={entry.relativePath}
+							class="col-start-2 row-span-2 row-start-1 self-center"
+						/>
+					{/if}
+				{/if}
+			</div>
 		</div>
-		{#if profile.mode === 'details'}
-			<FileTreeRowSubtitle {entry} keys={profile.subtitleKeys} />
-		{/if}
 	</div>
 	{#if profile.mode === 'columns'}
 		{#each profile.columnDetailKeys as key (key)}

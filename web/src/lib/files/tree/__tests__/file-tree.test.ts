@@ -382,15 +382,15 @@ describe('FileTreeStore', () => {
 
 	it('persists breadcrumb and optional-column defaults and changes', () => {
 		expect(store.showBreadcrumbs).toBe(true);
-		expect(store.viewMode).toBe('columns');
+		expect(store.viewPreference).toBe('responsive');
 		expect(store.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 
 		store.setShowBreadcrumbs(false);
-		store.setShowDetailsInRow(true);
+		store.setAlwaysUseDetailedRows(true);
 		store.setColumnVisible('permissions', true);
 
 		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs)).toBe('false');
-		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeViewMode)).toBe('details');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeViewPreference)).toBe('always-details');
 		expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility) ?? '')).toEqual({
 			size: true,
 			modified: true,
@@ -400,20 +400,20 @@ describe('FileTreeStore', () => {
 
 	it('loads valid preferences and ignores malformed values', () => {
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs, 'false');
-		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewMode, 'details');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewPreference, 'always-details');
 		mockStorage.set(
 			LOCAL_STORAGE_KEYS.fileTreeColumnVisibility,
 			JSON.stringify({ size: false, modified: true, permissions: true }),
 		);
 		const loaded = new FileTreeStore();
 		expect(loaded.showBreadcrumbs).toBe(false);
-		expect(loaded.viewMode).toBe('details');
+		expect(loaded.viewPreference).toBe('always-details');
 		expect(loaded.visibleColumnKeys).toEqual(['name', 'modified', 'permissions']);
 
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility, '{bad');
-		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewMode, 'tiles');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewPreference, 'tiles');
 		const malformed = new FileTreeStore();
-		expect(malformed.viewMode).toBe('columns');
+		expect(malformed.viewPreference).toBe('responsive');
 		expect(malformed.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 	});
 

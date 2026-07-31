@@ -23,12 +23,7 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
-	<div class="min-h-0 flex-1">
-		<FileTree
-			store={tree}
-			{presentation}
-			onFileSelect={handleFileSelect}
-			onImageSelect={handleFileSelect}
-		/>
+	<div class="min-h-0 min-w-0 flex-1">
+		<FileTree store={tree} onFileSelect={handleFileSelect} onImageSelect={handleFileSelect} />
 	</div>
 </div>

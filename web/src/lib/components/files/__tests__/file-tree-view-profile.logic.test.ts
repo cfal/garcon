@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createFileTreeViewProfile, fileTreeViewGeometry } from '../file-tree-view-profile.js';
+import {
+	createFileTreeViewProfile,
+	fileTreeViewGeometry,
+	resolveFileTreeViewMode,
+} from '../file-tree-view-profile.js';
 
 describe('file tree view profile', () => {
 	it('keeps the column rendering contract intact', () => {
@@ -15,7 +19,8 @@ describe('file tree view profile', () => {
 			fillerColumnKeys: ['size', 'permissions'],
 			columnDetailKeys: ['size', 'permissions'],
 			accessibleColumnCount: 3,
-			minimumTableWidth: '520px',
+			minimumTableWidthPx: 520,
+			entryIconSizePx: 16,
 		});
 	});
 
@@ -32,7 +37,8 @@ describe('file tree view profile', () => {
 			fillerColumnKeys: [],
 			subtitleKeys: ['modified', 'permissions'],
 			accessibleColumnCount: 1,
-			minimumTableWidth: '240px',
+			minimumTableWidthPx: 240,
+			entryIconSizePx: 32,
 		});
 	});
 
@@ -43,7 +49,31 @@ describe('file tree view profile', () => {
 			columnGridTemplate: 'minmax(0, 1fr)',
 		});
 
-		expect(profile.minimumTableWidth).toBe('240px');
+		expect(profile.minimumTableWidthPx).toBe(240);
+	});
+
+	it('resolves responsive layouts from preference, metadata, and container width', () => {
+		const resolve = (
+			containerWidth: number,
+			visibleColumnKeys: ('name' | 'size' | 'modified' | 'permissions')[] = ['name', 'size'],
+		) =>
+			resolveFileTreeViewMode({
+				preference: 'responsive',
+				containerWidth,
+				visibleColumnKeys,
+			});
+
+		expect(resolve(0)).toBe('details');
+		expect(resolve(519.5)).toBe('details');
+		expect(resolve(520)).toBe('columns');
+		expect(resolve(200, ['name'])).toBe('columns');
+		expect(
+			resolveFileTreeViewMode({
+				preference: 'always-details',
+				containerWidth: 900,
+				visibleColumnKeys: ['name'],
+			}),
+		).toBe('details');
 	});
 
 	it('provides fixed geometry for both modes', () => {

@@ -16,13 +16,16 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { fileTreeFieldLabel } from './file-tree-entry-presentation.js';
+	import type { FileTreeViewMode } from './file-tree-view-profile.js';
 
 	let {
 		overflowActions,
 		store,
+		viewMode,
 	}: {
 		overflowActions: readonly ResponsiveSurfaceAction[];
 		store: FileTreeStore;
+		viewMode: FileTreeViewMode;
 	} = $props();
 </script>
 
@@ -59,15 +62,15 @@
 	{m.filetree_show_breadcrumbs()}
 </DropdownMenuCheckboxItem>
 <DropdownMenuCheckboxItem
-	checked={store.viewMode === 'details'}
+	checked={store.viewPreference === 'always-details'}
 	closeOnSelect={false}
-	onCheckedChange={(checked) => store.setShowDetailsInRow(Boolean(checked))}
+	onCheckedChange={(checked) => store.setAlwaysUseDetailedRows(Boolean(checked))}
 >
-	{m.filetree_show_details_in_row()}
+	{m.filetree_always_use_detailed_rows()}
 </DropdownMenuCheckboxItem>
 <DropdownMenuSeparator />
 <DropdownMenuLabel class="flex items-center gap-2 text-xs text-muted-foreground">
-	{#if store.viewMode === 'details'}
+	{#if viewMode === 'details'}
 		<Rows3 class="h-3.5 w-3.5" />
 		{m.filetree_details()}
 	{:else}
@@ -94,7 +97,7 @@
 	{m.filetree_permissions()}
 </DropdownMenuCheckboxItem>
 <DropdownMenuSeparator />
-{#if store.viewMode === 'columns'}
+{#if viewMode === 'columns'}
 	<DropdownMenuItem onclick={() => store.resetColumnWidths()}>
 		<RotateCcw class="h-4 w-4" />
 		{m.filetree_reset_column_widths()}

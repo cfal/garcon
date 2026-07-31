@@ -3,7 +3,6 @@
 	import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 	import { buildFileTreeRenderModel } from '$lib/files/tree/file-tree-render-rows.js';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
-	import type { HostId } from '$lib/workspace/surface-types.js';
 	import { isImageFilePath } from '$lib/utils/file-kind.js';
 	import { errorMessage } from '$lib/utils/error-message.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -11,17 +10,21 @@
 	import FileTreeDetailsHeader from './FileTreeDetailsHeader.svelte';
 	import FileTreeRenderRow from './FileTreeRenderRow.svelte';
 	import { FileTreeVirtualController } from './FileTreeVirtualController.svelte.js';
-	import { createFileTreeViewProfile, fileTreeViewGeometry } from './file-tree-view-profile.js';
+	import {
+		createFileTreeViewProfile,
+		fileTreeViewGeometry,
+		type FileTreeViewMode,
+	} from './file-tree-view-profile.js';
 
 	let {
 		store,
-		presentation,
+		viewMode,
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
 	}: {
 		store: FileTreeStore;
-		presentation: HostId | 'mobile';
+		viewMode: FileTreeViewMode;
 		selectedPath?: string | null;
 		onFileSelect: (entry: FileTreeEntry) => void;
 		onImageSelect?: (entry: FileTreeEntry) => void;
@@ -49,17 +52,13 @@
 	);
 	let profile = $derived(
 		createFileTreeViewProfile({
-			mode: store.viewMode,
+			mode: viewMode,
 			visibleColumnKeys: store.visibleColumnKeys,
 			columnGridTemplate: store.columnGridTemplate,
 		}),
 	);
-	let geometry = $derived(fileTreeViewGeometry(store.viewMode));
-	let tableMinimumWidth = $derived(
-		presentation === 'mobile'
-			? `min(${profile.minimumTableWidth}, 100%)`
-			: profile.minimumTableWidth,
-	);
+	let geometry = $derived(fileTreeViewGeometry(viewMode));
+	let tableMinimumWidth = $derived(`min(${profile.minimumTableWidthPx}px, 100%)`);
 
 	function activateEntry(row: FileTableRow): void {
 		if (row.entry.type === 'directory') {
@@ -108,6 +107,7 @@
 	style:overflow-anchor="none"
 	style:--file-tree-row-height={`${controller.rowHeight}px`}
 	style:--file-tree-disclosure-size={`${controller.disclosureSize}px`}
+	style:--file-tree-entry-icon-size={`${profile.entryIconSizePx}px`}
 	data-file-tree-grid
 >
 	<div role="presentation" style:min-width={tableMinimumWidth}>
@@ -197,5 +197,10 @@
 	.file-tree-virtual-grid :global(.file-tree-disclosure-slot) {
 		height: var(--file-tree-disclosure-size);
 		width: var(--file-tree-disclosure-size);
+	}
+
+	.file-tree-virtual-grid :global(.file-tree-entry-icon) {
+		height: var(--file-tree-entry-icon-size);
+		width: var(--file-tree-entry-icon-size);
 	}
 </style>

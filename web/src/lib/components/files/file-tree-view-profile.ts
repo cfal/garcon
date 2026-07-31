@@ -1,8 +1,15 @@
 import type {
 	FileTreeColumnKey,
-	FileTreeViewMode,
+	FileTreeViewPreference,
 	OptionalFileTreeColumnKey,
 } from '$lib/files/tree/file-tree.svelte.js';
+
+export const FILE_TREE_VIEW_MODES = ['columns', 'details'] as const;
+export type FileTreeViewMode = (typeof FILE_TREE_VIEW_MODES)[number];
+
+export const FILE_TREE_NAME_ONLY_MINIMUM_WIDTH_PX = 240;
+export const FILE_TREE_MULTI_COLUMN_MINIMUM_WIDTH_PX = 520;
+export const FILE_TREE_DETAILS_MINIMUM_WIDTH_PX = 240;
 
 export interface FileTreeViewGeometry {
 	readonly headerHeight: number;
@@ -16,7 +23,8 @@ interface FileTreeViewProfileBase {
 	readonly gridTemplate: string;
 	readonly fillerColumnKeys: readonly OptionalFileTreeColumnKey[];
 	readonly accessibleColumnCount: number;
-	readonly minimumTableWidth: string;
+	readonly minimumTableWidthPx: number;
+	readonly entryIconSizePx: number;
 }
 
 export type FileTreeViewProfile =
@@ -33,6 +41,12 @@ interface CreateFileTreeViewProfileOptions {
 	readonly mode: FileTreeViewMode;
 	readonly visibleColumnKeys: readonly FileTreeColumnKey[];
 	readonly columnGridTemplate: string;
+}
+
+interface ResolveFileTreeViewModeOptions {
+	readonly preference: FileTreeViewPreference;
+	readonly containerWidth: number;
+	readonly visibleColumnKeys: readonly FileTreeColumnKey[];
 }
 
 const FILE_TREE_VIEW_GEOMETRY = {
@@ -60,6 +74,16 @@ export function fileTreeViewGeometry(mode: FileTreeViewMode): FileTreeViewGeomet
 	return FILE_TREE_VIEW_GEOMETRY[mode];
 }
 
+export function resolveFileTreeViewMode({
+	preference,
+	containerWidth,
+	visibleColumnKeys,
+}: ResolveFileTreeViewModeOptions): FileTreeViewMode {
+	if (preference === 'always-details') return 'details';
+	if (!visibleColumnKeys.some((key) => key !== 'name')) return 'columns';
+	return containerWidth < FILE_TREE_MULTI_COLUMN_MINIMUM_WIDTH_PX ? 'details' : 'columns';
+}
+
 export function createFileTreeViewProfile({
 	mode,
 	visibleColumnKeys,
@@ -75,7 +99,8 @@ export function createFileTreeViewProfile({
 			fillerColumnKeys: [],
 			subtitleKeys: detailKeys,
 			accessibleColumnCount: 1,
-			minimumTableWidth: '240px',
+			minimumTableWidthPx: FILE_TREE_DETAILS_MINIMUM_WIDTH_PX,
+			entryIconSizePx: 32,
 		};
 	}
 	return {
@@ -84,6 +109,10 @@ export function createFileTreeViewProfile({
 		fillerColumnKeys: detailKeys,
 		columnDetailKeys: detailKeys,
 		accessibleColumnCount: visibleColumnKeys.length,
-		minimumTableWidth: visibleColumnKeys.length === 1 ? '240px' : '520px',
+		minimumTableWidthPx:
+			visibleColumnKeys.length === 1
+				? FILE_TREE_NAME_ONLY_MINIMUM_WIDTH_PX
+				: FILE_TREE_MULTI_COLUMN_MINIMUM_WIDTH_PX,
+		entryIconSizePx: 16,
 	};
 }

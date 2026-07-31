@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import * as filesApi from '$lib/api/files';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness.js';
 import FileTree from '../FileTree.svelte';
 
 const { copyToClipboard } = vi.hoisted(() => ({
@@ -58,21 +62,37 @@ function renderReady(entries: FileTreeEntry[]) {
 	const onFileSelect = vi.fn();
 	const result = render(FileTree, {
 		store,
-		presentation: 'main',
 		onFileSelect,
 		onImageSelect: onFileSelect,
 	});
 	return { ...result, store, onFileSelect };
 }
 
+async function setFileTreeWidth(
+	container: HTMLElement,
+	width: number,
+	expectedLayout: 'columns' | 'details' = width < 520 ? 'details' : 'columns',
+): Promise<void> {
+	const root = container.querySelector<HTMLElement>('[data-file-tree-root]');
+	if (!root) throw new Error('Expected file tree root');
+	ResizeObserverHarness.emit(root, width);
+	await waitFor(() => expect(root.dataset.fileTreeLayout).toBe(expectedLayout));
+}
+
 describe('FileTree', () => {
+	let restoreResizeObserver: () => void;
+
 	beforeEach(() => {
 		localStorage.clear();
 		vi.resetAllMocks();
 		copyToClipboard.mockResolvedValue(true);
+		restoreResizeObserver = installResizeObserverHarness();
 	});
 
-	afterEach(cleanup);
+	afterEach(() => {
+		cleanup();
+		restoreResizeObserver();
+	});
 
 	it('expands only from disclosure and enters from the rest of the directory row', async () => {
 		const src = entry('src', 'directory');
@@ -95,7 +115,7 @@ describe('FileTree', () => {
 		const readme = entry('README.md', 'file');
 		const { onFileSelect } = renderReady([readme]);
 
-		await fireEvent.click(screen.getByRole('rowheader', { name: 'README.md' }));
+		await fireEvent.click(screen.getByRole('rowheader', { name: /^README\.md/ }));
 		expect(onFileSelect).toHaveBeenCalledWith(readme);
 	});
 
@@ -128,9 +148,9 @@ describe('FileTree', () => {
 		await fireEvent.input(input, { target: { value: 'app' } });
 
 		expect(screen.getByRole('rowheader', { name: /Parent directory/ })).toBeTruthy();
-		expect(screen.getByRole('rowheader', { name: 'src' })).toBeTruthy();
-		expect(screen.getByRole('rowheader', { name: 'App.svelte' })).toBeTruthy();
-		expect(screen.queryByRole('rowheader', { name: 'README.md' })).toBeNull();
+		expect(screen.getByRole('rowheader', { name: /^src/ })).toBeTruthy();
+		expect(screen.getByRole('rowheader', { name: /^App\.svelte/ })).toBeTruthy();
+		expect(screen.queryByRole('rowheader', { name: /^README\.md/ })).toBeNull();
 		expect(filesApi.getTree).not.toHaveBeenCalled();
 	});
 
@@ -235,15 +255,21 @@ describe('FileTree', () => {
 		expect(screen.queryByRole('navigation', { name: 'File location' })).toBeNull();
 	});
 
-	it('switches view mode and sorting without reopening the actions menu', async () => {
-		const { store } = renderReady([entry('README.md', 'file')]);
+	it('pins detailed rows and sorts without reopening the actions menu', async () => {
+		const { container, store } = renderReady([entry('README.md', 'file')]);
+		await setFileTreeWidth(container, 700);
 		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
-		const detailsMode = screen.getByRole('menuitemcheckbox', { name: 'Show details in row' });
+		const detailsMode = screen.getByRole('menuitemcheckbox', {
+			name: 'Always use detailed rows',
+		});
 		expect(detailsMode.getAttribute('aria-checked')).toBe('false');
 
 		await fireEvent.click(detailsMode);
-		expect(store.viewMode).toBe('details');
+		expect(store.viewPreference).toBe('always-details');
 		expect(detailsMode.getAttribute('aria-checked')).toBe('true');
+		expect(
+			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
+		).toBe('details');
 		expect(screen.getByText('Details')).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: 'Reset column widths' })).toBeNull();
 		expect(screen.getAllByRole('menuitemradio').map((item) => item.textContent?.trim())).toEqual([
@@ -267,10 +293,56 @@ describe('FileTree', () => {
 		).toBe('true');
 
 		await fireEvent.click(detailsMode);
-		expect(store.viewMode).toBe('columns');
+		expect(store.viewPreference).toBe('responsive');
+		expect(
+			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
+		).toBe('columns');
 		expect(screen.getByText('Columns')).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: 'Reset column widths' })).toBeTruthy();
 		expect(screen.queryByRole('menuitemradio')).toBeNull();
+	});
+
+	it('automatically uses detailed rows only while metadata columns do not fit', async () => {
+		const { container, store } = renderReady([entry('README.md', 'file')]);
+		const root = container.querySelector<HTMLElement>('[data-file-tree-root]');
+		const treegrid = screen.getByRole('treegrid');
+		if (!root) throw new Error('Expected file tree root');
+
+		expect(root.dataset.fileTreeLayout).toBe('details');
+		await setFileTreeWidth(container, 700);
+		expect(screen.getByRole('treegrid')).toBe(treegrid);
+		await setFileTreeWidth(container, 519.5);
+		expect(screen.getByRole('treegrid')).toBe(treegrid);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const alwaysDetails = screen.getByRole('menuitemcheckbox', {
+			name: 'Always use detailed rows',
+		});
+		expect(alwaysDetails.getAttribute('aria-checked')).toBe('false');
+		expect(store.viewPreference).toBe('responsive');
+		expect(screen.getByText('Details')).toBeTruthy();
+		expect(screen.getAllByRole('menuitemradio').length).toBeGreaterThan(0);
+		await fireEvent.click(alwaysDetails);
+		expect(store.viewPreference).toBe('always-details');
+		expect(root.dataset.fileTreeLayout).toBe('details');
+		await fireEvent.click(alwaysDetails);
+		expect(store.viewPreference).toBe('responsive');
+		expect(root.dataset.fileTreeLayout).toBe('details');
+
+		await setFileTreeWidth(container, 520);
+		expect(screen.getByRole('treegrid')).toBe(treegrid);
+		expect(root.dataset.fileTreeLayout).toBe('columns');
+	});
+
+	it('keeps name-only rows in columns at narrow widths', async () => {
+		const { container, store } = renderReady([entry('README.md', 'file')]);
+		store.setColumnVisible('size', false);
+		store.setColumnVisible('modified', false);
+		await setFileTreeWidth(container, 200, 'columns');
+
+		expect(
+			container.querySelector('[data-file-tree-root]')?.getAttribute('data-file-tree-layout'),
+		).toBe('columns');
 	});
 
 	it('renders configured details as an accessible one-line subtitle', async () => {
@@ -280,7 +352,7 @@ describe('FileTree', () => {
 		const src = entry('src', 'directory');
 		const { container, store } = renderReady([readme, src]);
 
-		store.setViewMode('details');
+		store.setAlwaysUseDetailedRows(true);
 		const readmeRow = await waitFor(() => {
 			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${readme.path}"]`);
 			if (!row) throw new Error('Expected file row');
@@ -302,6 +374,12 @@ describe('FileTree', () => {
 				.getByRole('columnheader', { name: 'Name and details, sorted by Name' })
 				.getAttribute('aria-sort'),
 		).toBe('ascending');
+		expect(screen.getByRole('treegrid').style.getPropertyValue('--file-tree-entry-icon-size')).toBe(
+			'32px',
+		);
+		expect(readmeRow.querySelector('[data-file-tree-entry-text]')?.classList.contains('h-8')).toBe(
+			true,
+		);
 
 		store.setColumnVisible('permissions', true);
 		await waitFor(() => expect(readmeSubtitle.textContent).toContain('Permissions: rw-r--r--'));
@@ -334,7 +412,7 @@ describe('FileTree', () => {
 			previous: response([]),
 			error: { message: 'Directory not found', retryable: false },
 		};
-		render(FileTree, { store, presentation: 'main', onFileSelect: vi.fn() });
+		render(FileTree, { store, onFileSelect: vi.fn() });
 
 		expect(screen.getByRole('alert')).toBeTruthy();
 		expect(screen.getByText('Could not open this directory')).toBeTruthy();

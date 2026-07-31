@@ -256,7 +256,7 @@ This biases the unmeasured first frame toward the safe narrow presentation and a
 >
 	<FileTreeToolbar {store} {viewMode} />
 	<!-- Existing states remain here. -->
-	<FileTreeVirtualRows {store} {viewMode} {presentation} ... />
+	<FileTreeVirtualRows {store} {viewMode} ... />
 </div>
 ```
 
@@ -379,17 +379,28 @@ The row header will put the subtitle inside the same text stack as the title:
 	<!-- Existing disclosure button or spacer. -->
 	<!-- Existing icon selected from entry type. -->
 	<div
-		class={cn('min-w-0 flex-1', profile.mode === 'details' && 'grid h-8 grid-rows-[16px_16px]')}
+		class={cn(
+			'min-w-0 flex-1',
+			profile.mode === 'details' &&
+				'grid h-8 grid-cols-[minmax(0,1fr)_24px] grid-rows-[16px_16px]',
+		)}
 		data-file-tree-entry-text
 	>
 		<div
 			class={cn('flex min-h-0 min-w-0 items-center', profile.mode === 'details' && 'leading-4')}
 		>
 			<span class="min-w-0 truncate">{entry.name}</span>
-			<!-- Existing copy button for files. -->
 		</div>
 		{#if profile.mode === 'details'}
-			<FileTreeRowSubtitle {entry} keys={profile.subtitleKeys} />
+			<div class="col-start-1 row-start-2 min-w-0 overflow-hidden">
+				<FileTreeRowSubtitle {entry} keys={profile.subtitleKeys} />
+			</div>
+			{#if entry.type === 'file'}
+				<CopyFilePathButton
+					path={entry.relativePath}
+					class="col-start-2 row-span-2 row-start-1 self-center"
+				/>
+			{/if}
 		{/if}
 	</div>
 </div>
@@ -401,7 +412,7 @@ The row header will put the subtitle inside the same text stack as the title:
 pl-[calc(var(--file-tree-disclosure-size)+1.5rem)]
 ```
 
-The details text stack uses two explicit 16 px tracks, and its title line adopts `leading-4`; `FileTreeRowSubtitle` already uses `leading-4`. The subtitle no longer guesses the width of siblings. Its parent stack establishes alignment directly. Indent guides continue to span the full row header, and the disclosure button remains centered independently from the 32 px icon.
+The details text stack uses two explicit 16 px tracks, and its title line adopts `leading-4`; `FileTreeRowSubtitle` already uses `leading-4`. A file's 24 px copy action spans both tracks in its own fixed column, so it cannot overlap either line or distort their alignment. The subtitle no longer guesses the width of siblings. Its parent stack establishes alignment directly. Indent guides continue to span the full row header, and the disclosure button remains centered independently from the 32 px icon.
 
 Column mode uses the same markup with a 16 px icon and no subtitle. Disclosure, copy-path, activation, keyboard, focus, selection, and ARIA behavior remain unchanged.
 
@@ -633,6 +644,7 @@ Assertions:
 - The same icon element is adjacent to the shared title/subtitle stack.
 - Title and subtitle occupy the same `data-file-tree-entry-text` container.
 - The details title and subtitle each occupy one 16 px line beside the 32 px icon.
+- The copy-path action spans both details tracks in a separate 24 px column.
 - The subtitle has no disclosure/icon compensation padding.
 - File, folder, expanded folder, image, document, code, and generic icons all consume the shared size rule.
 - Disclosure click still expands without activation.

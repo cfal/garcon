@@ -5,27 +5,37 @@
 	import X from '@lucide/svelte/icons/x';
 	import type { FileTreeEntry } from '$shared/file-contracts';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
-	import type { HostId } from '$lib/workspace/surface-types.js';
+	import { observeContainerWidth } from '$lib/components/shared/container-presentation.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeBreadcrumbs from './FileTreeBreadcrumbs.svelte';
 	import FileTreeToolbar from './FileTreeToolbar.svelte';
 	import FileTreeVirtualRows from './FileTreeVirtualRows.svelte';
+	import { resolveFileTreeViewMode, type FileTreeViewMode } from './file-tree-view-profile.js';
 
 	let {
 		store,
-		presentation,
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
 	}: {
 		store: FileTreeStore;
-		presentation: HostId | 'mobile';
 		selectedPath?: string | null;
 		onFileSelect: (file: FileTreeEntry) => void;
 		onImageSelect?: (file: FileTreeEntry) => void;
 	} = $props();
 
 	let navigationRetryButton = $state<HTMLButtonElement | null>(null);
+	let containerWidth = $state(0);
+	const observeFileTreeWidth = observeContainerWidth((width) => {
+		containerWidth = width;
+	});
+	let viewMode = $derived<FileTreeViewMode>(
+		resolveFileTreeViewMode({
+			preference: store.viewPreference,
+			containerWidth,
+			visibleColumnKeys: store.visibleColumnKeys,
+		}),
+	);
 
 	$effect(() => {
 		const navigation = store.navigation;
@@ -34,8 +44,13 @@
 	});
 </script>
 
-<div class="flex h-full min-h-0 flex-col bg-card">
-	<FileTreeToolbar {store} />
+<div
+	class="flex h-full min-h-0 min-w-0 flex-col bg-card"
+	data-file-tree-root
+	data-file-tree-layout={viewMode}
+	{@attach observeFileTreeWidth}
+>
+	<FileTreeToolbar {store} {viewMode} />
 	{#if store.showBreadcrumbs && store.currentBreadcrumbs.length > 0}
 		<FileTreeBreadcrumbs
 			breadcrumbs={store.currentBreadcrumbs}
@@ -119,7 +134,7 @@
 			</div>
 		</div>
 	{:else if store.navigation.kind === 'ready'}
-		<FileTreeVirtualRows {store} {presentation} {selectedPath} {onFileSelect} {onImageSelect} />
+		<FileTreeVirtualRows {store} {viewMode} {selectedPath} {onFileSelect} {onImageSelect} />
 	{:else}
 		<div class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
 			{m.filetree_no_files_found()}

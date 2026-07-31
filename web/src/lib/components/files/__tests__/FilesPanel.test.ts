@@ -93,7 +93,7 @@ describe('FilesPanel', () => {
 
 		setFilesPanelTestContext({ fileSessions, singletonSurfaces });
 		render(FilesPanelTestHost, { presentation });
-		await fireEvent.click(screen.getByRole('rowheader', { name: 'file.ts' }));
+		await fireEvent.click(screen.getByRole('rowheader', { name: /^file\.ts/ }));
 
 		expect(open).toHaveBeenCalledWith(
 			expect.objectContaining({

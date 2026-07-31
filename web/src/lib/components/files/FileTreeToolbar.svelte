@@ -10,8 +10,9 @@
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeMenuContent from './FileTreeMenuContent.svelte';
+	import type { FileTreeViewMode } from './file-tree-view-profile.js';
 
-	let { store }: { store: FileTreeStore } = $props();
+	let { store, viewMode }: { store: FileTreeStore; viewMode: FileTreeViewMode } = $props();
 	let root = $state<HTMLElement | null>(null);
 	let filterInput = $state<HTMLInputElement | null>(null);
 
@@ -74,7 +75,7 @@
 </script>
 
 {#snippet fileMenu(overflowActions: readonly ResponsiveSurfaceAction[])}
-	<FileTreeMenuContent {overflowActions} {store} />
+	<FileTreeMenuContent {overflowActions} {store} {viewMode} />
 {/snippet}
 
 <div bind:this={root} class="shrink-0 border-b border-border bg-card" data-file-tree-toolbar>

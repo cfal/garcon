@@ -21,8 +21,8 @@ export type SortKey = FileTreeColumnKey;
 export type FileTreeColumnWidths = Record<FileTreeColumnKey, number>;
 export type FileTreeColumnVisibility = Record<OptionalFileTreeColumnKey, boolean>;
 
-export const FILE_TREE_VIEW_MODES = ['columns', 'details'] as const;
-export type FileTreeViewMode = (typeof FILE_TREE_VIEW_MODES)[number];
+export const FILE_TREE_VIEW_PREFERENCES = ['responsive', 'always-details'] as const;
+export type FileTreeViewPreference = (typeof FILE_TREE_VIEW_PREFERENCES)[number];
 
 export const DEFAULT_FILE_TREE_COLUMN_WIDTHS: Readonly<FileTreeColumnWidths> = {
 	name: 42,
@@ -127,8 +127,8 @@ function parseColumnVisibility(raw: string | null): FileTreeColumnVisibility | n
 	}
 }
 
-function isFileTreeViewMode(value: string | null): value is FileTreeViewMode {
-	return value !== null && FILE_TREE_VIEW_MODES.includes(value as FileTreeViewMode);
+function isFileTreeViewPreference(value: string | null): value is FileTreeViewPreference {
+	return value !== null && FILE_TREE_VIEW_PREFERENCES.includes(value as FileTreeViewPreference);
 }
 
 function isSortKey(value: string): value is SortKey {
@@ -193,7 +193,7 @@ export class FileTreeStore {
 	foldersFirst = $state(true);
 	showHiddenFiles = $state(true);
 	showBreadcrumbs = $state(true);
-	viewMode = $state<FileTreeViewMode>('columns');
+	viewPreference = $state<FileTreeViewPreference>('responsive');
 	visibleColumns = $state.raw<FileTreeColumnVisibility>(
 		copyColumnVisibility(DEFAULT_FILE_TREE_COLUMN_VISIBILITY),
 	);
@@ -540,14 +540,14 @@ export class FileTreeStore {
 		this.filterInput = '';
 	}
 
-	setViewMode(mode: FileTreeViewMode): void {
-		if (mode === this.viewMode) return;
-		this.viewMode = mode;
-		this.#persist(LOCAL_STORAGE_KEYS.fileTreeViewMode, mode);
+	setViewPreference(preference: FileTreeViewPreference): void {
+		if (preference === this.viewPreference) return;
+		this.viewPreference = preference;
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeViewPreference, preference);
 	}
 
-	setShowDetailsInRow(show: boolean): void {
-		this.setViewMode(show ? 'details' : 'columns');
+	setAlwaysUseDetailedRows(always: boolean): void {
+		this.setViewPreference(always ? 'always-details' : 'responsive');
 	}
 
 	selectSortKey(value: string): void {
@@ -785,8 +785,8 @@ export class FileTreeStore {
 		if (showBreadcrumbs === 'true' || showBreadcrumbs === 'false') {
 			this.showBreadcrumbs = showBreadcrumbs === 'true';
 		}
-		const viewMode = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeViewMode);
-		if (isFileTreeViewMode(viewMode)) this.viewMode = viewMode;
+		const viewPreference = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeViewPreference);
+		if (isFileTreeViewPreference(viewPreference)) this.viewPreference = viewPreference;
 		const visibility = parseColumnVisibility(
 			getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility),
 		);

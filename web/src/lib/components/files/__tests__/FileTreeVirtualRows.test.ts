@@ -3,9 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
-import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
-import type { HostId } from '$lib/workspace/surface-types.js';
 import FileTreeVirtualRows from '../FileTreeVirtualRows.svelte';
+import type { FileTreeViewMode } from '../file-tree-view-profile.js';
 import {
 	FILE_TREE_COARSE_ROW_HEIGHT,
 	FILE_TREE_HEADER_HEIGHT,
@@ -40,15 +39,18 @@ function response(items: FileTreeEntry[]): FileTreeResponse {
 	};
 }
 
-function renderRows(count: number, presentation: HostId | 'mobile' = 'main') {
+function renderRows(count: number, viewMode: FileTreeViewMode = 'columns') {
 	const store = new FileTreeStore();
 	store.navigation = { kind: 'ready', response: response(entries(count)) };
+	const onFileSelect = vi.fn();
 	const result = render(FileTreeVirtualRows, {
 		store,
-		presentation,
-		onFileSelect: vi.fn(),
+		viewMode,
+		onFileSelect,
 	});
-	return { ...result, store };
+	const setViewMode = (nextViewMode: FileTreeViewMode) =>
+		result.rerender({ store, viewMode: nextViewMode, onFileSelect });
+	return { ...result, store, setViewMode };
 }
 
 function mockFinePointerViewport(
@@ -113,15 +115,15 @@ describe('FileTreeVirtualRows', () => {
 	beforeEach(() => localStorage.clear());
 	afterEach(cleanup);
 
-	it('caps the table minimum width at the available mobile panel width', () => {
-		const { container } = renderRows(1, 'mobile');
+	it('caps the multi-column table minimum width at the available panel width', () => {
+		const { container } = renderRows(1);
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
 
 		expect(table?.style.minWidth).toBe('min(520px, 100%)');
 	});
 
 	it('suppresses scroll-boundary bounce in the file viewport', () => {
-		const { container } = renderRows(1, 'mobile');
+		const { container } = renderRows(1);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 
 		expect(treegrid?.classList.contains('overscroll-none')).toBe(true);
@@ -146,7 +148,7 @@ describe('FileTreeVirtualRows', () => {
 		});
 
 		try {
-			const { container, store } = renderRows(1, 'mobile');
+			const { container, setViewMode } = renderRows(1);
 			const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 			await waitFor(() =>
 				expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe(
@@ -157,7 +159,7 @@ describe('FileTreeVirtualRows', () => {
 				`${FILE_TREE_COARSE_ROW_HEIGHT}px`,
 			);
 
-			store.setViewMode('details');
+			await setViewMode('details');
 			await waitFor(() =>
 				expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe('52px'),
 			);
@@ -171,25 +173,25 @@ describe('FileTreeVirtualRows', () => {
 	});
 
 	it('uses the compact row height for fine pointers', async () => {
-		const { container, store } = renderRows(1);
+		const { container, setViewMode } = renderRows(1);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 
 		expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe(
 			`${FILE_TREE_ROW_HEIGHT}px`,
 		);
 
-		store.setViewMode('details');
+		await setViewMode('details');
 		await waitFor(() =>
 			expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
 		);
 		expect(treegrid?.style.getPropertyValue('--file-tree-disclosure-size')).toBe('28px');
 	});
 
-	it('preserves the scrollable table minimum width in desktop presentations', () => {
-		const { container } = renderRows(1, 'sidebar');
+	it('caps the scrollable table minimum width in column mode', () => {
+		const { container } = renderRows(1);
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
 
-		expect(table?.style.minWidth).toBe('520px');
+		expect(table?.style.minWidth).toBe('min(520px, 100%)');
 	});
 
 	it('caps the single-column mobile table at the available panel width', () => {
@@ -199,7 +201,7 @@ describe('FileTreeVirtualRows', () => {
 		store.setColumnVisible('modified', false);
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'mobile',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
@@ -207,9 +209,8 @@ describe('FileTreeVirtualRows', () => {
 		expect(table?.style.minWidth).toBe('min(240px, 100%)');
 	});
 
-	it('starts a persisted details view with details geometry and semantics', async () => {
-		localStorage.setItem(LOCAL_STORAGE_KEYS.fileTreeViewMode, 'details');
-		const { container } = renderRows(1);
+	it('starts a details view with details geometry and semantics', async () => {
+		const { container } = renderRows(1, 'details');
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
 		const header = screen.getByRole('columnheader', {
@@ -219,7 +220,7 @@ describe('FileTreeVirtualRows', () => {
 		expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe('44px');
 		expect(treegrid?.style.getPropertyValue('--file-tree-disclosure-size')).toBe('28px');
 		expect(treegrid?.getAttribute('aria-colcount')).toBe('1');
-		expect(table?.style.minWidth).toBe('240px');
+		expect(table?.style.minWidth).toBe('min(240px, 100%)');
 		expect(header.getAttribute('aria-colindex')).toBe('1');
 		expect(header.getAttribute('aria-sort')).toBe('ascending');
 		await waitFor(() =>
@@ -228,7 +229,7 @@ describe('FileTreeVirtualRows', () => {
 	});
 
 	it('keeps a 100,000-row directory to a bounded mounted window with absolute ARIA positions', async () => {
-		const { container, store } = renderRows(100_000);
+		const { container, setViewMode } = renderRows(100_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 
@@ -245,7 +246,7 @@ describe('FileTreeVirtualRows', () => {
 		expect(rowIndexes[0]).toBe(1);
 		expect(rowIndexes).toEqual([...rowIndexes].sort((left, right) => left - right));
 
-		store.setViewMode('details');
+		await setViewMode('details');
 		await waitFor(() =>
 			expect(treegrid.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
 		);
@@ -253,7 +254,7 @@ describe('FileTreeVirtualRows', () => {
 	}, 15_000);
 
 	it('preserves the visible anchor and focused row across view geometry changes', async () => {
-		const { container, store } = renderRows(1_000);
+		const { container, setViewMode } = renderRows(1_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		mockFinePointerViewport(treegrid);
@@ -267,7 +268,7 @@ describe('FileTreeVirtualRows', () => {
 		});
 		focused.focus();
 
-		store.setViewMode('details');
+		await setViewMode('details');
 
 		await waitFor(() => expect(treegrid.scrollTop).toBeCloseTo(992, 0));
 		const restored = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${path}"]`);
@@ -276,41 +277,41 @@ describe('FileTreeVirtualRows', () => {
 	});
 
 	it('preserves the physical end when columns grow into details rows', async () => {
-		const { container, store } = renderRows(1_000);
+		const { container, setViewMode } = renderRows(1_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		mockFinePointerViewport(treegrid);
 		treegrid.scrollTop = 27_392;
 		await fireEvent.scroll(treegrid);
 
-		store.setViewMode('details');
+		await setViewMode('details');
 
 		await waitFor(() => expect(treegrid.scrollTop).toBe(43_360));
 	});
 
 	it('preserves the physical end when details rows shrink into columns', async () => {
-		const { container, store } = renderRows(1_000);
+		const { container, setViewMode } = renderRows(1_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		mockFinePointerViewport(treegrid);
-		store.setViewMode('details');
+		await setViewMode('details');
 		await waitFor(() =>
 			expect(treegrid.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
 		);
 		treegrid.scrollTop = 43_360;
 		await fireEvent.scroll(treegrid);
 
-		store.setViewMode('columns');
+		await setViewMode('columns');
 
 		await waitFor(() => expect(treegrid.scrollTop).toBe(27_392));
 	});
 
 	it('preserves a deep anchor instead of treating a shrinking geometry as the end', async () => {
-		const { container, store } = renderRows(1_000);
+		const { container, setViewMode } = renderRows(1_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		mockFinePointerViewport(treegrid, 'layout');
-		store.setViewMode('details');
+		await setViewMode('details');
 		await waitFor(() =>
 			expect(treegrid.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
 		);
@@ -323,14 +324,14 @@ describe('FileTreeVirtualRows', () => {
 		);
 
 		const frameLayout = forceLayoutOnNextAnimationFrame(treegrid);
-		store.setViewMode('columns');
+		await setViewMode('columns');
 		await frameLayout;
 
 		await waitFor(() => expect(treegrid.scrollTop).toBeCloseTo(19_104, 0));
 	});
 
 	it('preserves a near-end anchor after the removed header temporarily clamps scrolling', async () => {
-		const { container, store } = renderRows(1_000);
+		const { container, setViewMode } = renderRows(1_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		mockFinePointerViewport(treegrid);
@@ -342,13 +343,13 @@ describe('FileTreeVirtualRows', () => {
 			if (!row) throw new Error('Expected near-end anchor row');
 		});
 
-		store.setViewMode('details');
+		await setViewMode('details');
 
 		await waitFor(() => expect(treegrid.scrollTop).toBeCloseTo(43_012, 0));
 	});
 
 	it('does not overwrite user scrolling while a geometry restore is deferred', async () => {
-		const { container, store } = renderRows(1_000);
+		const { container, setViewMode } = renderRows(1_000);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		mockFinePointerViewport(treegrid);
@@ -356,7 +357,7 @@ describe('FileTreeVirtualRows', () => {
 		await fireEvent.scroll(treegrid);
 
 		const userScroll = scrollOnNextAnimationFrame(treegrid, 700);
-		store.setViewMode('details');
+		await setViewMode('details');
 		await userScroll;
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -417,7 +418,7 @@ describe('FileTreeVirtualRows', () => {
 		store.navigation = { kind: 'ready', response: response(items) };
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const removedPath = items[1]!.path;
@@ -442,7 +443,7 @@ describe('FileTreeVirtualRows', () => {
 		store.navigation = { kind: 'ready', response: response(items) };
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
@@ -483,7 +484,7 @@ describe('FileTreeVirtualRows', () => {
 		store.navigation = { kind: 'ready', response: response(items) };
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
@@ -525,7 +526,7 @@ describe('FileTreeVirtualRows', () => {
 		store.loadingDirs = new Set([directory.path]);
 		const { container } = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
+			viewMode: 'columns',
 			onFileSelect: vi.fn(),
 		});
 		const status = await screen.findByRole('status');
@@ -552,11 +553,13 @@ describe('FileTreeVirtualRows', () => {
 		const store = new FileTreeStore();
 		store.navigation = { kind: 'ready', response: response(entries(1_000)) };
 		const sortEntries = vi.spyOn(store, 'sortEntries');
-		const { container } = render(FileTreeVirtualRows, {
+		const onFileSelect = vi.fn();
+		const rendered = render(FileTreeVirtualRows, {
 			store,
-			presentation: 'main',
-			onFileSelect: vi.fn(),
+			viewMode: 'columns',
+			onFileSelect,
 		});
+		const { container } = rendered;
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		await waitFor(() =>
@@ -567,7 +570,7 @@ describe('FileTreeVirtualRows', () => {
 		treegrid.scrollTop = 6_400;
 		await fireEvent.scroll(treegrid);
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-		store.setViewMode('details');
+		await rendered.rerender({ store, viewMode: 'details', onFileSelect });
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 		expect(sortEntries).toHaveBeenCalledTimes(callsAfterModelBuild);
