@@ -220,10 +220,20 @@ export class GitWorkbenchStore {
 		return this.porcelainController;
 	}
 
-	async setTarget(nextTarget: GitWorkbenchTarget | null): Promise<void> {
+	// Applies the target and owns tab coherence: a retained same-path document
+	// switching tabs runs the full tab transition so the loaded tree and review
+	// document always correspond to the active tab.
+	async setTarget(
+		nextTarget: GitWorkbenchTarget | null,
+		activeTab?: GitDiffTab,
+	): Promise<void> {
 		const nextKey = targetKey(nextTarget);
 		if (nextKey === this.lastTargetKey) {
 			this.target = nextTarget;
+			if (nextTarget && activeTab && activeTab !== this.treeState.activeTab) {
+				await this.applyActiveTab(activeTab);
+				return;
+			}
 			this.virtualReview.markDemandReadinessChanged();
 			if (
 				nextTarget &&
@@ -239,6 +249,7 @@ export class GitWorkbenchStore {
 		this.target = nextTarget;
 		this.lastTargetKey = nextKey;
 		this.resetForTargetChange();
+		if (activeTab) this.treeState.activeTab = activeTab;
 
 		if (nextTarget) {
 			await this.refresh({
@@ -246,6 +257,13 @@ export class GitWorkbenchStore {
 				preserveSelection: false,
 			});
 		}
+	}
+
+	// Clears user interaction state that must not survive a surface identity
+	// change even when the physical target and its loaded data are retained.
+	resetReviewInteraction(): void {
+		this.lineSelection.clearSelection();
+		this.reviewDrafts.closeCommentComposer();
 	}
 
 	dismissError(): void {
@@ -401,6 +419,10 @@ export class GitWorkbenchStore {
 	}
 
 	setActiveTab(tab: GitDiffTab): void {
+		void this.applyActiveTab(tab);
+	}
+
+	private async applyActiveTab(tab: GitDiffTab): Promise<void> {
 		if (tab === this.treeState.activeTab) return;
 		this.treeState.activeTab = tab;
 		this.lineSelection.clearSelection();
@@ -408,7 +430,7 @@ export class GitWorkbenchStore {
 		this.virtualReview.clearForDisplayChange();
 		this.selectFirstVisibleFileForActiveTab();
 		if (this.target)
-			void this.refresh({
+			await this.refresh({
 				reason: 'tab-change',
 				preserveSelection: true,
 				preferSelectedFile: true,

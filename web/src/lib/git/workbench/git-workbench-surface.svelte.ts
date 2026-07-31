@@ -111,14 +111,16 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 		if (identityChanged) {
 			this.#saveSelection();
 			const snapshot = identity ? takeMostRecent(this.#selectionByTarget, identity) : null;
-			this.workbench.files.activeTab = snapshot?.diffTab ?? 'unstaged';
 			this.workbench.setDisplayOptions(
 				this.deps.reviewDisplay.diffMode,
 				this.deps.reviewDisplay.contextLines,
 				{ refresh: false },
 			);
 			this.repository.resetForProject(projectPath, { deferMetadata: true });
-			await this.workbench.setTarget(target);
+			// A retained same-path document must not carry the previous surface
+			// identity's open composer or line selection into the new identity.
+			this.workbench.resetReviewInteraction();
+			await this.workbench.setTarget(target, snapshot?.diffTab ?? 'unstaged');
 			this.#loadedIdentity = identity;
 			if (
 				projectPath &&
