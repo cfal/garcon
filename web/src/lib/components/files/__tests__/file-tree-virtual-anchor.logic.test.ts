@@ -7,6 +7,11 @@ import {
 	captureFileTreeVirtualAnchor,
 	resolveFileTreeAnchorIndex,
 } from '../file-tree-virtual-anchor.js';
+import {
+	createFileTreeVirtualLayout,
+	fileTreeLogicalItemStart,
+	fileTreeLogicalToPhysicalOffset,
+} from '../file-tree-virtual-layout.js';
 
 function row(name: string): FileTableRow {
 	const entry: FileTreeEntry = {
@@ -66,5 +71,25 @@ describe('file tree virtual anchor', () => {
 		const anchor = { key: c.key, previousIndex: 2, offsetFromContentViewport: 0 };
 		expect(resolveFileTreeAnchorIndex(anchor, [a, b, c], model([a]))).toBe(0);
 		expect(resolveFileTreeAnchorIndex(anchor, [a, b, c], model([]))).toBeNull();
+	});
+
+	it('maps a column-layout anchor into details-layout coordinates', () => {
+		const rows = Array.from({ length: 23 }, (_, index) => row(`file-${index}`));
+		const anchor = captureFileTreeVirtualAnchor(rows, [item(22, 648, 28)], 640, 32);
+		const detailsLayout = createFileTreeVirtualLayout({
+			rowCount: 1_000,
+			rowHeight: 44,
+			viewportHeight: 640,
+			scrollMargin: 0,
+		});
+		if (!anchor) throw new Error('Expected a virtual anchor');
+
+		const logicalOffset =
+			fileTreeLogicalItemStart(detailsLayout, anchor.previousIndex) -
+			detailsLayout.scrollMargin -
+			anchor.offsetFromContentViewport;
+
+		expect(anchor.offsetFromContentViewport).toBe(-24);
+		expect(fileTreeLogicalToPhysicalOffset(detailsLayout, logicalOffset)).toBe(992);
 	});
 });

@@ -11,6 +11,7 @@
 		type FileTreeStore,
 	} from '$lib/files/tree/file-tree.svelte.js';
 	import FileTreeColumnResizeHandle from './FileTreeColumnResizeHandle.svelte';
+	import { fileTreeFieldLabel } from './file-tree-entry-presentation.js';
 
 	let { store, ariaRowIndex }: { store: FileTreeStore; ariaRowIndex: number } = $props();
 	let resizeStartWidths: FileTreeColumnWidths | null = null;
@@ -18,13 +19,6 @@
 	const visibleWeight = $derived(
 		visibleColumns.reduce((sum, column) => sum + store.columnWidths[column], 0),
 	);
-
-	const labels: Record<FileTreeColumnKey, () => string> = {
-		name: m.filetree_name,
-		size: m.filetree_size,
-		modified: m.filetree_modified,
-		permissions: m.filetree_permissions,
-	};
 
 	function boundaryValue(leftColumn: FileTreeColumnKey): number {
 		const boundaryIndex = visibleColumns.indexOf(leftColumn);
@@ -144,7 +138,7 @@
 				onclick={() => store.toggleSort(column)}
 				aria-label={sortLabel(column)}
 			>
-				<span class="truncate">{labels[column]()}</span>
+				<span class="truncate">{fileTreeFieldLabel(column)}</span>
 				{@render sortIcon(column)}
 			</button>
 			{#if columnIndex < visibleColumns.length - 1}
@@ -153,10 +147,10 @@
 					value={boundaryValue(column)}
 					minimum={boundaryMinimum(column)}
 					maximum={boundaryMaximum(column)}
-					valueText={`${labels[column]()} ${Math.round((store.columnWidths[column] / visibleWeight) * 100)}%`}
+					valueText={`${fileTreeFieldLabel(column)} ${Math.round((store.columnWidths[column] / visibleWeight) * 100)}%`}
 					label={m.filetree_resize_columns({
-						leftColumn: labels[column](),
-						rightColumn: labels[rightColumn](),
+						leftColumn: fileTreeFieldLabel(column),
+						rightColumn: fileTreeFieldLabel(rightColumn),
 					})}
 					onResizeStart={beginResize}
 					onResizePreview={(delta) => previewResize(column, delta)}

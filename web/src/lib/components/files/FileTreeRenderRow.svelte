@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { FileTreeRenderRow } from '$lib/files/tree/file-tree-render-rows.js';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
+	import type { FileTreeViewProfile } from './file-tree-view-profile.js';
 	import FileTreeChildRow from './FileTreeChildRow.svelte';
 	import FileTreeParentRow from './FileTreeParentRow.svelte';
 	import FileTreeRow from './FileTreeRow.svelte';
@@ -8,6 +9,7 @@
 	let {
 		row,
 		store,
+		profile,
 		ariaRowIndex,
 		focused,
 		selected,
@@ -17,6 +19,7 @@
 	}: {
 		row: FileTreeRenderRow;
 		store: FileTreeStore;
+		profile: FileTreeViewProfile;
 		ariaRowIndex: number;
 		focused: boolean;
 		selected: boolean;
@@ -30,8 +33,8 @@
 	<FileTreeParentRow
 		rowKey={row.key}
 		path={row.path}
-		columnGridTemplate={store.columnGridTemplate}
-		visibleColumnKeys={store.visibleColumnKeys}
+		gridTemplate={profile.gridTemplate}
+		fillerColumnKeys={profile.fillerColumnKeys}
 		{ariaRowIndex}
 		{focused}
 		{onActivate}
@@ -42,6 +45,7 @@
 	<FileTreeRow
 		{row}
 		{store}
+		{profile}
 		{ariaRowIndex}
 		{focused}
 		{selected}
@@ -55,8 +59,8 @@
 		rowKey={row.key}
 		level={row.level}
 		directoryName={row.directoryName}
-		columnGridTemplate={store.columnGridTemplate}
-		visibleColumnKeys={store.visibleColumnKeys}
+		gridTemplate={profile.gridTemplate}
+		fillerColumnKeys={profile.fillerColumnKeys}
 		{ariaRowIndex}
 		{focused}
 		onFocus={row.status === 'error' ? onFocus : undefined}

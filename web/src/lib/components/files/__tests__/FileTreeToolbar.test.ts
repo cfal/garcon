@@ -46,9 +46,10 @@ async function renderMeasuredToolbar(initialWidth = 270) {
 			'chat-project': 100,
 			'refresh-files': 32,
 		};
-		element.getBoundingClientRect = () => ({
-			width: widths[element.dataset.surfaceActionMeasure ?? ''] ?? 0,
-		}) as DOMRect;
+		element.getBoundingClientRect = () =>
+			({
+				width: widths[element.dataset.surfaceActionMeasure ?? ''] ?? 0,
+			}) as DOMRect;
 	}
 	const menuMeasure = container.querySelector<HTMLElement>(
 		'[data-surface-action-overflow-measure]',
@@ -126,5 +127,17 @@ describe('FileTreeToolbar', () => {
 		await tick();
 
 		expect(document.activeElement).toBe(screen.getByPlaceholderText('Filter by name...'));
+	});
+
+	it('keeps overflow actions before persistent view controls', async () => {
+		const { setWidth } = await renderMeasuredToolbar();
+		await setWidth(240);
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const refresh = screen.getByRole('menuitem', { name: 'Refresh files' });
+		const details = screen.getByRole('menuitemcheckbox', { name: 'Show details in row' });
+
+		expect(
+			refresh.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 	});
 });

@@ -6,8 +6,8 @@
 	let {
 		rowKey,
 		path,
-		columnGridTemplate,
-		visibleColumnKeys,
+		gridTemplate,
+		fillerColumnKeys,
 		ariaRowIndex,
 		focused,
 		onActivate,
@@ -16,8 +16,8 @@
 	}: {
 		rowKey: string;
 		path: string;
-		columnGridTemplate: string;
-		visibleColumnKeys: readonly FileTreeColumnKey[];
+		gridTemplate: string;
+		fillerColumnKeys: readonly FileTreeColumnKey[];
 		ariaRowIndex: number;
 		focused: boolean;
 		onActivate: () => void;
@@ -35,7 +35,7 @@
 	data-file-tree-row-key={rowKey}
 	data-file-tree-parent-row
 	class="file-tree-virtual-row-content grid min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-	style={`grid-template-columns: ${columnGridTemplate}`}
+	style={`grid-template-columns: ${gridTemplate}`}
 	onclick={onActivate}
 	onfocus={onFocus}
 	onkeydown={onKeydown}
@@ -46,7 +46,7 @@
 		<span class="truncate">..</span>
 		<span class="sr-only">{m.filetree_parent_directory()}</span>
 	</div>
-	{#each visibleColumnKeys.slice(1) as column (column)}
+	{#each fillerColumnKeys as column (column)}
 		<div role="gridcell"></div>
 	{/each}
 </div>

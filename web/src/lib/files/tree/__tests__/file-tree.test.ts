@@ -382,12 +382,15 @@ describe('FileTreeStore', () => {
 
 	it('persists breadcrumb and optional-column defaults and changes', () => {
 		expect(store.showBreadcrumbs).toBe(true);
+		expect(store.viewMode).toBe('columns');
 		expect(store.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 
 		store.setShowBreadcrumbs(false);
+		store.setShowDetailsInRow(true);
 		store.setColumnVisible('permissions', true);
 
 		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs)).toBe('false');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeViewMode)).toBe('details');
 		expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility) ?? '')).toEqual({
 			size: true,
 			modified: true,
@@ -397,23 +400,26 @@ describe('FileTreeStore', () => {
 
 	it('loads valid preferences and ignores malformed values', () => {
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs, 'false');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewMode, 'details');
 		mockStorage.set(
 			LOCAL_STORAGE_KEYS.fileTreeColumnVisibility,
 			JSON.stringify({ size: false, modified: true, permissions: true }),
 		);
 		const loaded = new FileTreeStore();
 		expect(loaded.showBreadcrumbs).toBe(false);
+		expect(loaded.viewMode).toBe('details');
 		expect(loaded.visibleColumnKeys).toEqual(['name', 'modified', 'permissions']);
 
 		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility, '{bad');
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeViewMode, 'tiles');
 		const malformed = new FileTreeStore();
+		expect(malformed.viewMode).toBe('columns');
 		expect(malformed.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 	});
 
 	it('resets hidden active sorting and resizes only adjacent visible columns', () => {
 		store.setColumnVisible('permissions', true);
-		store.setSortKey('size');
-		store.setSortDirection('desc');
+		store.setSort('size', 'desc');
 		store.setColumnVisible('size', false);
 		expect(store.sortKey).toBe('name');
 		expect(store.sortDirection).toBe('asc');
@@ -428,5 +434,19 @@ describe('FileTreeStore', () => {
 		expect(resized.permissions).toBe(DEFAULT_FILE_TREE_COLUMN_WIDTHS.permissions);
 		expect(resized.name).toBeGreaterThan(DEFAULT_FILE_TREE_COLUMN_WIDTHS.name);
 		expect(resized.modified).toBeLessThan(DEFAULT_FILE_TREE_COLUMN_WIDTHS.modified);
+	});
+
+	it('selects only visible sort keys and starts a new key ascending', () => {
+		store.setSort('name', 'desc');
+
+		store.selectSortKey('modified');
+		expect(store.sortKey).toBe('modified');
+		expect(store.sortDirection).toBe('asc');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortKey)).toBe('modified');
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortDirection)).toBe('asc');
+
+		store.selectSortKey('permissions');
+		store.selectSortKey('invalid');
+		expect(store.sortKey).toBe('modified');
 	});
 });

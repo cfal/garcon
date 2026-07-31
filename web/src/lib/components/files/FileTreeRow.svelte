@@ -12,10 +12,14 @@
 	import { isImageFilePath } from '$lib/utils/file-kind.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import CopyFilePathButton from './CopyFilePathButton.svelte';
+	import FileTreeRowSubtitle from './FileTreeRowSubtitle.svelte';
+	import { presentFileTreeDetail } from './file-tree-entry-presentation.js';
+	import type { FileTreeViewProfile } from './file-tree-view-profile.js';
 
 	let {
 		row,
 		store,
+		profile,
 		ariaRowIndex,
 		focused,
 		selected,
@@ -25,6 +29,7 @@
 	}: {
 		row: FileTableRow;
 		store: FileTreeStore;
+		profile: FileTreeViewProfile;
 		ariaRowIndex: number;
 		focused: boolean;
 		selected: boolean;
@@ -40,29 +45,6 @@
 		event.stopPropagation();
 		store.toggleDirectory(entry.path);
 		(event.currentTarget as HTMLElement).closest<HTMLElement>('[data-file-tree-row]')?.focus();
-	}
-
-	function formatFileSize(bytes: number): string {
-		if (bytes === 0) return '0 B';
-		const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-		const value = bytes / 1024 ** unitIndex;
-		return `${Number(value.toFixed(1))} ${units[unitIndex]}`;
-	}
-
-	function formatRelativeTime(value: string | null): string {
-		if (!value) return '-';
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return '-';
-		let remaining = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-		if (remaining < 60) return m.filetree_just_now();
-		remaining = Math.floor(remaining / 60);
-		if (remaining < 60) return m.filetree_min_ago({ count: remaining });
-		remaining = Math.floor(remaining / 60);
-		if (remaining < 24) return m.filetree_hours_ago({ count: remaining });
-		remaining = Math.floor(remaining / 24);
-		if (remaining < 30) return m.filetree_days_ago({ count: remaining });
-		return date.toLocaleDateString();
 	}
 
 	function iconType(): 'code' | 'document' | 'image' | 'generic' {
@@ -91,14 +73,14 @@
 	data-file-tree-row-key={row.key}
 	data-file-tree-row-level={row.level}
 	class={`file-tree-virtual-row-content relative grid min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${selected ? 'bg-accent ring-1 ring-inset ring-ring/30' : ''}`}
-	style={`grid-template-columns: ${store.columnGridTemplate}`}
+	style={`grid-template-columns: ${profile.gridTemplate}`}
 	onclick={onActivate}
 	onfocus={onFocus}
 	onkeydown={onKeydown}
 >
 	<div
 		role="rowheader"
-		class="relative flex min-w-0 items-center overflow-hidden"
+		class="relative min-w-0 overflow-hidden"
 		style={`padding-left: ${(row.level - 1) * 16}px`}
 		title={entry.path}
 	>
@@ -110,70 +92,65 @@
 				{/each}
 			</div>
 		{/if}
-		{#if entry.type === 'directory'}
-			<button
-				type="button"
-				tabindex="-1"
-				class="file-tree-disclosure-slot relative z-10 inline-flex shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-				aria-label={expanded
-					? m.filetree_collapse_directory({ name: entry.name })
-					: m.filetree_expand_directory({ name: entry.name })}
-				title={expanded
-					? m.filetree_collapse_directory({ name: entry.name })
-					: m.filetree_expand_directory({ name: entry.name })}
-				onclick={toggleDisclosure}
-				onkeydown={(event) => event.stopPropagation()}
-			>
+		<div class="flex min-w-0 items-center">
+			{#if entry.type === 'directory'}
+				<button
+					type="button"
+					tabindex="-1"
+					class="file-tree-disclosure-slot relative z-10 inline-flex shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					aria-label={expanded
+						? m.filetree_collapse_directory({ name: entry.name })
+						: m.filetree_expand_directory({ name: entry.name })}
+					title={expanded
+						? m.filetree_collapse_directory({ name: entry.name })
+						: m.filetree_expand_directory({ name: entry.name })}
+					onclick={toggleDisclosure}
+					onkeydown={(event) => event.stopPropagation()}
+				>
+					{#if expanded}
+						<ChevronDown class="h-3.5 w-3.5" />
+					{:else}
+						<ChevronRight class="h-3.5 w-3.5" />
+					{/if}
+				</button>
 				{#if expanded}
-					<ChevronDown class="h-3.5 w-3.5" />
+					<FolderOpen class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
 				{:else}
-					<ChevronRight class="h-3.5 w-3.5" />
+					<Folder class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
 				{/if}
-			</button>
-			{#if expanded}
-				<FolderOpen class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
 			{:else}
-				<Folder class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
+				<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
+				{@const kind = iconType()}
+				{#if kind === 'code'}
+					<FileCode2 class="mr-2 h-4 w-4 shrink-0 text-file-icon-code" />
+				{:else if kind === 'document'}
+					<FileText class="mr-2 h-4 w-4 shrink-0 text-file-icon-doc" />
+				{:else if kind === 'image'}
+					<FileImage class="mr-2 h-4 w-4 shrink-0 text-file-icon-image" />
+				{:else}
+					<File class="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+				{/if}
 			{/if}
-		{:else}
-			<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
-			{@const kind = iconType()}
-			{#if kind === 'code'}
-				<FileCode2 class="mr-2 h-4 w-4 shrink-0 text-file-icon-code" />
-			{:else if kind === 'document'}
-				<FileText class="mr-2 h-4 w-4 shrink-0 text-file-icon-doc" />
-			{:else if kind === 'image'}
-				<FileImage class="mr-2 h-4 w-4 shrink-0 text-file-icon-image" />
-			{:else}
-				<File class="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+			<span class="min-w-0 truncate">{entry.name}</span>
+			{#if entry.type === 'file'}
+				<CopyFilePathButton path={entry.relativePath} class="ml-1" />
 			{/if}
-		{/if}
-		<span class="min-w-0 truncate">{entry.name}</span>
-		{#if entry.type === 'file'}
-			<CopyFilePathButton path={entry.relativePath} class="ml-1" />
+		</div>
+		{#if profile.mode === 'details'}
+			<FileTreeRowSubtitle {entry} keys={profile.subtitleKeys} />
 		{/if}
 	</div>
-	{#if store.visibleColumns.size}
-		<div role="gridcell" class="truncate whitespace-nowrap text-muted-foreground">
-			{entry.type === 'file' ? formatFileSize(entry.size) : '-'}
-		</div>
-	{/if}
-	{#if store.visibleColumns.modified}
-		<div
-			role="gridcell"
-			class="truncate whitespace-nowrap text-muted-foreground"
-			title={formatRelativeTime(entry.modified)}
-		>
-			{formatRelativeTime(entry.modified)}
-		</div>
-	{/if}
-	{#if store.visibleColumns.permissions}
-		<div
-			role="gridcell"
-			class="truncate whitespace-nowrap font-mono text-muted-foreground"
-			title={entry.permissionsRwx || '-'}
-		>
-			{entry.permissionsRwx || '-'}
-		</div>
+	{#if profile.mode === 'columns'}
+		{#each profile.columnDetailKeys as key (key)}
+			{@const detail = presentFileTreeDetail(entry, key)}
+			<div
+				role="gridcell"
+				class:font-mono={detail.monospace}
+				class="truncate whitespace-nowrap text-muted-foreground"
+				title={detail.value ?? '-'}
+			>
+				{detail.value ?? '-'}
+			</div>
+		{/each}
 	{/if}
 </div>

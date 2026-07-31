@@ -16,6 +16,7 @@ function entry(
 	name: string,
 	type: 'file' | 'directory',
 	parent = '/workspace/project',
+	extra: Partial<FileTreeEntry> = {},
 ): FileTreeEntry {
 	return {
 		name,
@@ -25,6 +26,7 @@ function entry(
 		size: type === 'file' ? 42 : 4096,
 		modified: null,
 		permissionsRwx: type === 'file' ? 'rw-r--r--' : 'rwxr-xr-x',
+		...extra,
 	};
 }
 
@@ -231,6 +233,82 @@ describe('FileTree', () => {
 		await fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Show breadcrumbs' }));
 		expect(store.showBreadcrumbs).toBe(false);
 		expect(screen.queryByRole('navigation', { name: 'File location' })).toBeNull();
+	});
+
+	it('switches view mode and sorting without reopening the actions menu', async () => {
+		const { store } = renderReady([entry('README.md', 'file')]);
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const detailsMode = screen.getByRole('menuitemcheckbox', { name: 'Show details in row' });
+		expect(detailsMode.getAttribute('aria-checked')).toBe('false');
+
+		await fireEvent.click(detailsMode);
+		expect(store.viewMode).toBe('details');
+		expect(detailsMode.getAttribute('aria-checked')).toBe('true');
+		expect(screen.getByText('Details')).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: 'Reset column widths' })).toBeNull();
+		expect(screen.getAllByRole('menuitemradio').map((item) => item.textContent?.trim())).toEqual([
+			'Name',
+			'Size',
+			'Modified',
+			'Ascending',
+			'Descending',
+		]);
+
+		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Modified' }));
+		expect(store.sortKey).toBe('modified');
+		expect(store.sortDirection).toBe('asc');
+		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Descending' }));
+		expect(store.sortDirection).toBe('desc');
+		expect(
+			screen.getByRole('menuitemradio', { name: 'Modified' }).getAttribute('aria-checked'),
+		).toBe('true');
+		expect(
+			screen.getByRole('menuitemradio', { name: 'Descending' }).getAttribute('aria-checked'),
+		).toBe('true');
+
+		await fireEvent.click(detailsMode);
+		expect(store.viewMode).toBe('columns');
+		expect(screen.getByText('Columns')).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: 'Reset column widths' })).toBeTruthy();
+		expect(screen.queryByRole('menuitemradio')).toBeNull();
+	});
+
+	it('renders configured details as an accessible one-line subtitle', async () => {
+		const readme = entry('README.md', 'file', '/workspace/project', {
+			modified: new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString(),
+		});
+		const src = entry('src', 'directory');
+		const { container, store } = renderReady([readme, src]);
+
+		store.setViewMode('details');
+		const readmeRow = await waitFor(() => {
+			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${readme.path}"]`);
+			if (!row) throw new Error('Expected file row');
+			return row;
+		});
+		const readmeSubtitle = readmeRow.querySelector<HTMLElement>('[data-file-tree-subtitle]');
+		const srcRow = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${src.path}"]`);
+		const srcSubtitle = srcRow?.querySelector<HTMLElement>('[data-file-tree-subtitle]');
+		if (!readmeSubtitle || !srcSubtitle) throw new Error('Expected details subtitles');
+
+		expect(readmeSubtitle.textContent).toContain('Size: 42 B');
+		expect(readmeSubtitle.textContent).toContain('Modified: 2 hours ago');
+		expect(readmeSubtitle.querySelector('[aria-hidden="true"]')?.textContent).toBe('·');
+		expect(srcSubtitle.textContent).toContain('No details available');
+		expect(readmeRow.querySelectorAll('[role="gridcell"]')).toHaveLength(0);
+		expect(screen.getByRole('treegrid').getAttribute('aria-colcount')).toBe('1');
+		expect(
+			screen
+				.getByRole('columnheader', { name: 'Name and details, sorted by Name' })
+				.getAttribute('aria-sort'),
+		).toBe('ascending');
+
+		store.setColumnVisible('permissions', true);
+		await waitFor(() => expect(readmeSubtitle.textContent).toContain('Permissions: rw-r--r--'));
+		expect(srcSubtitle.textContent).toContain('Permissions: rwxr-xr-x');
+		const subtitleText = readmeSubtitle.textContent ?? '';
+		expect(subtitleText.indexOf('Size:')).toBeLessThan(subtitleText.indexOf('Modified:'));
+		expect(subtitleText.indexOf('Modified:')).toBeLessThan(subtitleText.indexOf('Permissions:'));
 	});
 
 	it('exposes complete breadcrumb paths as accessible names', () => {

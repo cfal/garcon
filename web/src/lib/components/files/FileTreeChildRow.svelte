@@ -9,8 +9,8 @@
 		rowKey = null,
 		level,
 		directoryName,
-		columnGridTemplate,
-		visibleColumnKeys,
+		gridTemplate,
+		fillerColumnKeys,
 		ariaRowIndex,
 		focused = false,
 		onFocus,
@@ -21,8 +21,8 @@
 		rowKey?: string | null;
 		level: number;
 		directoryName: string;
-		columnGridTemplate: string;
-		visibleColumnKeys: readonly FileTreeColumnKey[];
+		gridTemplate: string;
+		fillerColumnKeys: readonly FileTreeColumnKey[];
 		ariaRowIndex: number;
 		focused?: boolean;
 		onFocus?: () => void;
@@ -45,7 +45,7 @@
 	data-file-tree-row={kind === 'error' ? '' : undefined}
 	data-file-tree-row-key={kind === 'error' ? rowKey : undefined}
 	class={`file-tree-virtual-row-content grid items-center gap-2 overflow-hidden px-2 text-xs outline-none ${kind === 'error' ? 'cursor-default text-destructive hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring' : 'text-muted-foreground'}`}
-	style={`grid-template-columns: ${columnGridTemplate}`}
+	style={`grid-template-columns: ${gridTemplate}`}
 	onclick={kind === 'error' ? onRetry : undefined}
 	onfocus={onFocus}
 	onkeydown={onKeydown}
@@ -73,7 +73,7 @@
 			</button>
 		{/if}
 	</div>
-	{#each visibleColumnKeys.slice(1) as column (column)}
+	{#each fillerColumnKeys as column (column)}
 		<div role="gridcell"></div>
 	{/each}
 </div>
