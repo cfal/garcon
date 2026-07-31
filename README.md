@@ -137,6 +137,31 @@ Useful options and environment variables:
 
 Configure Telegram notifications in Settings. Create and manage scheduled prompts from the sidebar menu. Run `bun run help` for the full option list.
 
+### Agent Consultations From The CLI
+
+`garcon-cli` starts an ordinary Garcon chat through an already-running local server, waits for the submitted turn, and prints the chat ID and final assistant response. The same chat remains visible in the SPA, including its tools, permission requests, transcript, and Stop controls.
+
+```bash
+garcon-cli \
+  --workspace default \
+  --cwd /path/to/project \
+  --agent codex \
+  --model gpt-5.4 \
+  --permissions acceptEdits \
+  --reasoning-effort high \
+  "Implement the validation and run its focused tests."
+```
+
+Resume the same agent session without repeating its persisted selection:
+
+```bash
+garcon-cli --workspace default --resume 1785337200123456 "Now address the review findings."
+```
+
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+
+Discovery requires the server to use a named `--workspace`; servers launched with `--workspace-dir` are intentionally not discoverable. Run `garcon-cli --help` for provider, endpoint, server override, and complete mode options.
+
 ### Local Trusted Use
 
 To disable Garcon's local authentication for a trusted single-user environment:
