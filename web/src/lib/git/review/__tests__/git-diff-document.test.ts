@@ -73,6 +73,15 @@ function bodyResponse(documentId: string, paths: readonly string[]) {
 	};
 }
 
+function testCommentSource() {
+	return {
+		kind: 'commit' as const,
+		shortHash: 'abc1234',
+		subject: 'Test commit',
+		baseLabel: 'parent abc',
+	};
+}
+
 describe('GitDiffDocumentController', () => {
 	it('reconciles retained viewport demand when the matching document becomes ready', async () => {
 		const controller = new GitDiffDocumentController();
@@ -96,7 +105,13 @@ describe('GitDiffDocumentController', () => {
 				limits,
 				firstBodyCandidates: [],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledOnce());
@@ -120,7 +135,13 @@ describe('GitDiffDocumentController', () => {
 				limits,
 				firstBodyCandidates: [],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 
 		controller.handleBodyDemand({
@@ -156,7 +177,13 @@ describe('GitDiffDocumentController', () => {
 				limits,
 				firstBodyCandidates: [],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 		controller.handleBodyDemand({
 			kind: 'viewport',
@@ -191,7 +218,13 @@ describe('GitDiffDocumentController', () => {
 				limits: constrainedLimits,
 				firstBodyCandidates: ['initial.ts', 'visible.ts'],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(2));
 
@@ -232,7 +265,13 @@ describe('GitDiffDocumentController', () => {
 				limits: constrainedLimits,
 				firstBodyCandidates: ['initial.ts', 'blocked.ts', 'visible.ts'],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 		await vi.waitFor(() => expect(controller.fileBodies['initial.ts']?.bodyState).toBe('loaded'));
 
@@ -265,7 +304,13 @@ describe('GitDiffDocumentController', () => {
 				limits: { ...limits, maxLoadedRows: 6 },
 				firstBodyCandidates: [],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 		controller.handleBodyDemand({
 			kind: 'viewport',
@@ -322,7 +367,13 @@ describe('GitDiffDocumentController', () => {
 				limits,
 				firstBodyCandidates: ['initial.ts'],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 
 		controller.focusFile('selected.ts');
@@ -355,7 +406,13 @@ describe('GitDiffDocumentController', () => {
 				limits: { ...limits, maxSummaryFiles: files.length },
 				firstBodyCandidates: [],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 
 		controller.focusFile('file-9999.ts');
@@ -492,6 +549,7 @@ describe('GitDiffDocumentController', () => {
 				diffMode: 'unified',
 				loadBodies,
 				onError: vi.fn(),
+				commentSource: testCommentSource(),
 			},
 		);
 
@@ -543,6 +601,7 @@ describe('GitDiffDocumentController', () => {
 					errors: {},
 				})),
 				onError: vi.fn(),
+				commentSource: testCommentSource(),
 			},
 		);
 
@@ -598,6 +657,7 @@ describe('GitDiffDocumentController', () => {
 				diffMode: 'unified',
 				loadBodies,
 				onError: vi.fn(),
+				commentSource: testCommentSource(),
 			},
 		);
 
@@ -647,6 +707,7 @@ describe('GitDiffDocumentController', () => {
 				diffMode: 'unified',
 				loadBodies,
 				onError: vi.fn(),
+				commentSource: testCommentSource(),
 			},
 		);
 
@@ -702,6 +763,7 @@ describe('GitDiffDocumentController', () => {
 					errors: { 'a.ts': 'Unable to read this path.' },
 				})),
 				onError: vi.fn(),
+				commentSource: testCommentSource(),
 			},
 		);
 
@@ -743,7 +805,13 @@ describe('GitDiffDocumentController', () => {
 				limits,
 				firstBodyCandidates: ['a.ts'],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 		await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('error'));
 
@@ -773,7 +841,13 @@ describe('GitDiffDocumentController', () => {
 					limits: boundedLimits,
 					firstBodyCandidates: [path],
 				},
-				{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					loadBodies,
+					onError: vi.fn(),
+					commentSource: testCommentSource(),
+				},
 			);
 
 		open('doc-a', 'a.ts');
@@ -816,7 +890,13 @@ describe('GitDiffDocumentController', () => {
 					limits,
 					firstBodyCandidates: [path],
 				},
-				{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+				{
+					contextLines: 5,
+					diffMode: 'unified',
+					loadBodies,
+					onError: vi.fn(),
+					commentSource: testCommentSource(),
+				},
 			);
 		};
 
@@ -847,7 +927,13 @@ describe('GitDiffDocumentController', () => {
 				limits,
 				firstBodyCandidates: ['a.ts'],
 			},
-			{ contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn() },
+			{
+				contextLines: 5,
+				diffMode: 'unified',
+				loadBodies,
+				onError: vi.fn(),
+				commentSource: testCommentSource(),
+			},
 		);
 		await vi.waitFor(() => expect(controller.isStale).toBe(true));
 
@@ -961,6 +1047,7 @@ describe('GitDiffDocumentController', () => {
 			diffMode: 'unified' as const,
 			loadBodies,
 			onError: vi.fn(),
+			commentSource: testCommentSource(),
 		};
 		controller.open(documentSnapshot, options);
 		await vi.waitFor(() => expect(controller.fileBodies['a.ts']).toBeTruthy());

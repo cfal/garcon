@@ -76,7 +76,10 @@ export interface GitDiffDocumentOpenOptions {
 	onBodyLoadSuccess?: () => void;
 	onStale?: (message: string) => void;
 	onExpired?: (message: string) => void;
-	commentSource?: GitReviewCommentSource;
+	// Every review document is commentable; the source describes the comparison
+	// for the generated chat comment. Read-only diff rendering belongs to the
+	// PR surface's own row source, not to this controller.
+	commentSource: GitReviewCommentSource;
 }
 
 export class GitDiffDocumentController {
@@ -190,9 +193,7 @@ export class GitDiffDocumentController {
 			focusedFilePath: this.focusedFilePath,
 			diffMode: this.diffMode,
 			contextLines: this.contextLines,
-			interaction: this.commentSource
-				? { kind: 'commentable', composerState: this.commentComposer }
-				: { kind: 'read-only' },
+			interaction: { kind: 'commentable', composerState: this.commentComposer },
 			...(placeholderLimit ? { placeholderLimit } : {}),
 		});
 	});
@@ -206,7 +207,7 @@ export class GitDiffDocumentController {
 		this.onBodyLoadSuccess = options.onBodyLoadSuccess ?? null;
 		this.onStale = options.onStale ?? null;
 		this.onExpired = options.onExpired ?? null;
-		this.commentSource = options.commentSource ?? null;
+		this.commentSource = options.commentSource;
 		this.diffMode = options.diffMode;
 		this.contextLines = options.contextLines;
 		this.fileBodies = {};
@@ -288,7 +289,6 @@ export class GitDiffDocumentController {
 	}
 
 	openCommentComposer(filePath: string, side: 'before' | 'after', line: number): void {
-		if (!this.commentSource) return;
 		this.inlineComment.open(filePath, side, line);
 	}
 
