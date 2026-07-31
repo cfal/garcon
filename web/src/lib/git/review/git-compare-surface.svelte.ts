@@ -113,7 +113,14 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 			diffMode: this.deps.reviewDisplay.diffMode,
 			contextLines: this.deps.reviewDisplay.contextLines,
 		});
+		// Marked before the await so a concurrent activation for the same
+		// identity does not start a second default load.
 		this.#loadedTargetIdentity = targetIdentity;
-		await this.comparison.compare(projectPath);
+		const loaded = await this.comparison.compare(projectPath);
+		// A failed default load must stay retryable on the next visibility or
+		// activation pass; a superseded identity keeps the newer marker.
+		if (!loaded && this.#loadedTargetIdentity === targetIdentity) {
+			this.#loadedTargetIdentity = null;
+		}
 	}
 }
