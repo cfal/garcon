@@ -7,7 +7,7 @@ import type { ApiProtocol } from '$shared/api-providers';
 import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
-} from '$lib/agents/agent-modes.js';
+} from '$shared/execution-defaults';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { errorDetail } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import * as m from '$lib/paraglide/messages.js';

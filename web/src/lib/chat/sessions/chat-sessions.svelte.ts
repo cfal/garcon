@@ -7,7 +7,7 @@ import {
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
-import { createEmptyAgentSettings, normalizeAgentSettings } from '$lib/agents/agent-settings.js';
+import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-settings';
 import {
 	deleteChat as deleteChatApi,
 	generateChatTitle,

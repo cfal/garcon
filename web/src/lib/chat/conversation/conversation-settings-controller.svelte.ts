@@ -1,9 +1,9 @@
 import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
-import { withAgentSetting } from '$lib/agents/agent-settings.js';
+import { withAgentSetting } from '$shared/agent-settings';
 import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
-} from '$lib/agents/agent-modes.js';
+} from '$shared/execution-defaults';
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { JsonObject, JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
