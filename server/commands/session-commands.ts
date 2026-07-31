@@ -38,18 +38,89 @@ export class SessionCommands {
   }
 
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
-    this.support.requireChat(input.chatId);
-    this.support.assertContent(input.command, input.images);
     return this.support.withChatMutationLock(input.chatId, () =>
-      this.support.submitHttpRun({
-        chatId: input.chatId,
-        command: input.command,
-        images: input.images,
-        clientRequestId: input.clientRequestId,
-        clientMessageId: input.clientMessageId,
-        options: runOptionsForCommand(input),
-      }),
+      this.submitRunLocked(input),
     );
+  }
+
+  private async submitRunLocked(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+    const chat = this.deps.chats.getChat(input.chatId);
+    if (!chat) {
+      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    }
+    this.support.assertContent(input.command, input.images);
+    if (input.expectedAgentId !== undefined && input.expectedAgentId !== chat.agentId) {
+      throw new CommandValidationError(
+        'EXPECTED_AGENT_MISMATCH',
+        `Expected agent ${input.expectedAgentId}, but chat uses ${chat.agentId}`,
+        409,
+      );
+    }
+    if (!input.model && !chat.model) {
+      throw new CommandValidationError(
+        'INCOMPLETE_EXECUTION_CONFIG',
+        'The chat has no model and this turn did not provide one',
+        422,
+      );
+    }
+    if (input.agentSettings !== undefined && input.agentSettings.ownerId !== chat.agentId) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        `agentSettings must be owned by ${chat.agentId}`,
+        400,
+      );
+    }
+    const agentSettings = input.agentSettings ?? chat.agentSettingsById[chat.agentId];
+    if (!agentSettings || agentSettings.ownerId !== chat.agentId) {
+      throw new CommandValidationError(
+        'INCOMPLETE_EXECUTION_CONFIG',
+        `The chat has no valid settings for agent ${chat.agentId}`,
+        422,
+      );
+    }
+    if (input.permissionMode !== undefined || input.thinkingMode !== undefined) {
+      const catalog = await this.deps.agents.getAgentCatalogEntry(chat.agentId);
+      if (!catalog) {
+        throw new CommandValidationError(
+          'UNSUPPORTED_AGENT',
+          `Unsupported agent: ${chat.agentId}`,
+          422,
+        );
+      }
+      if (
+        input.permissionMode !== undefined
+        && !catalog.supportedPermissionModes.includes(input.permissionMode)
+      ) {
+        throw new CommandValidationError(
+          'VALIDATION_FAILED',
+          `Permission mode ${input.permissionMode} is not supported by ${chat.agentId}`,
+          422,
+        );
+      }
+      if (
+        input.thinkingMode !== undefined
+        && !catalog.supportedThinkingModes.includes(input.thinkingMode)
+      ) {
+        throw new CommandValidationError(
+          'VALIDATION_FAILED',
+          `Thinking mode ${input.thinkingMode} is not supported by ${chat.agentId}`,
+          422,
+        );
+      }
+    }
+
+    const result = await this.support.submitHttpRun({
+      chatId: input.chatId,
+      command: input.command,
+      images: input.images,
+      clientRequestId: input.clientRequestId,
+      clientMessageId: input.clientMessageId,
+      options: runOptionsForCommand(input),
+      expectedAgentId: input.expectedAgentId,
+      tagsToAdd: input.tagsToAdd,
+    });
+    if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
+    return result;
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {

@@ -24,6 +24,7 @@ import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatProjectPathUpdatedPayload } from '../../common/ws-events.js';
+import { normalizeTags } from '../../common/tags.js';
 
 const logger = createLogger('chats:store');
 
@@ -135,6 +136,7 @@ export interface IChatRegistry {
     update: ChatRegistryProjectPathUpdate,
     options: { flush: true },
   ): Promise<ChatRegistryResolvedEntry | null>;
+  addTags(id: string, tags: readonly string[]): ChatRegistryResolvedEntry | null;
   removeChat(id: string): boolean;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
   saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
@@ -466,6 +468,16 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     }
     this.#scheduleRegistrySave();
     return resolved;
+  }
+
+  addTags(id: string, tags: readonly string[]): ChatRegistryResolvedEntry | null {
+    const existing = this.getRegistry().sessions[id];
+    if (!existing) return null;
+    const nextTags = normalizeTags([...existing.tags, ...tags]);
+    if (isDeepStrictEqual(nextTags, existing.tags)) return { id, ...existing };
+    existing.tags = nextTags;
+    this.#scheduleRegistrySave();
+    return { id, ...existing };
   }
 
   async updateProjectPath(

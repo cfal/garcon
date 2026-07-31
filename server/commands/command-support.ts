@@ -89,6 +89,7 @@ export type AgentRegistryDep = Pick<
   | 'getAgentAuthStatusMap'
   | 'getAgentReadinessMap'
   | 'getAgentCatalogEntries'
+  | 'getAgentCatalogEntry'
   | 'runSingleQuery'
   | 'supportsFork'
   | 'supportsForkAtMessage'
@@ -163,6 +164,8 @@ export interface NormalizedSubmitRunInput {
   clientRequestId: string;
   clientMessageId: string;
   options: RunAgentTurnOptions;
+  expectedAgentId?: string;
+  tagsToAdd?: string[];
 }
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
@@ -484,5 +487,7 @@ function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): R
     apiProviderId: input.options?.apiProviderId,
     modelEndpointId: input.options?.modelEndpointId,
     modelProtocol: input.options?.modelProtocol,
+    expectedAgentId: input.expectedAgentId,
+    tagsToAdd: input.tagsToAdd,
   };
 }

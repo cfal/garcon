@@ -164,6 +164,13 @@ function makeService(overrides = {}) {
       sessions.set(chatId, { ...current, ...patch });
       return sessions.get(chatId);
     }),
+    addTags: mock((chatId, tags) => {
+      const current = sessions.get(chatId);
+      if (!current) return null;
+      const next = { ...current, tags: [...new Set([...current.tags, ...tags])].sort() };
+      sessions.set(chatId, next);
+      return { id: chatId, ...next };
+    }),
     updateProjectPath: mock((chatId, update) => {
       const current = sessions.get(chatId);
       if (!current) return Promise.resolve(null);
@@ -496,6 +503,10 @@ function makeService(overrides = {}) {
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
     getAgentCatalogEntries: mock(() => []),
+    getAgentCatalogEntry: mock(() => Promise.resolve({
+      supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
+      supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    })),
     runSingleQuery: mock(() => Promise.resolve('')),
     ...overrides.agents,
   };
@@ -1262,6 +1273,78 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-1',
       commandType: 'agent-run',
     });
+  });
+
+  it('asserts the resume agent and adds tags only after admission', async () => {
+    const { service, chats, queue } = makeService();
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-agent-mismatch',
+      clientMessageId: 'msg-agent-mismatch',
+      expectedAgentId: 'codex',
+      tagsToAdd: ['cli'],
+    })).rejects.toMatchObject({ code: 'EXPECTED_AGENT_MISMATCH', status: 409 });
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(chats.addTags).not.toHaveBeenCalled();
+
+    const result = await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-agent-match',
+      clientMessageId: 'msg-agent-match',
+      expectedAgentId: 'claude',
+      tagsToAdd: ['cli'],
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+  });
+
+  it('applies supported resume overrides to one turn without persisting them', async () => {
+    const { service, chats, queue } = makeService();
+
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue deeply',
+      clientRequestId: 'req-overrides',
+      clientMessageId: 'msg-overrides',
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      agentSettings: agentSettings('claude', { effort: 'high' }),
+    });
+
+    expect(queue.runReservedTurn.mock.calls[0][2]).toMatchObject({
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      agentSettings: agentSettings('claude', { effort: 'high' }),
+    });
+    expect(chats.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported explicit modes before creating a command receipt', async () => {
+    const { service, queue, ledger } = makeService({
+      agents: {
+        getAgentCatalogEntry: mock(() => Promise.resolve({
+          supportedPermissionModes: ['default'],
+          supportedThinkingModes: ['none'],
+        })),
+      },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-unsupported-mode',
+      clientMessageId: 'msg-unsupported-mode',
+      permissionMode: 'acceptEdits',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'agent-run', 'req-unsupported-mode')).toBeNull();
   });
 
   it('rejects a concurrent direct submission before pending input preparation', async () => {

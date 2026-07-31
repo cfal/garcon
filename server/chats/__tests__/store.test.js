@@ -106,6 +106,17 @@ describe('ChatRegistry', () => {
     expect(registry.getChatByAgentSessionId('native-2')?.[0]).toBe(CHAT_ID);
   });
 
+  it('adds normalized tags without removing existing tags', () => {
+    registry.addChat(newChat({ tags: ['existing'] }));
+
+    expect(registry.addTags(CHAT_ID, ['CLI', 'existing', 'Review Needed'])).toMatchObject({
+      tags: ['cli', 'existing', 'review-needed'],
+    });
+    expect(registry.addTags(CHAT_ID, ['cli'])).toMatchObject({
+      tags: ['cli', 'existing', 'review-needed'],
+    });
+  });
+
   it('validates owner-bound settings patches', () => {
     registry.addChat(newChat());
     expect(() => registry.updateChat(CHAT_ID, {
