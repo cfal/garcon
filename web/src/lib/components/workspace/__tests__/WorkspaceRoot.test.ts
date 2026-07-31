@@ -454,6 +454,43 @@ describe('PortableSurfaceContent', () => {
 });
 
 describe('WorkspaceRoot', () => {
+	it('moves a singleton through the other host Open command in both directions', async () => {
+		const { workspace } = installContext(withAdditionalSurfaces());
+		const { container } = render(WorkspaceRoot, { isMobile: false, chatActions });
+		const mainMenu = container.querySelector<HTMLButtonElement>(
+			'[data-floating-workspace-toolbar] [data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
+		);
+		const sidebarMenu = container.querySelector<HTMLButtonElement>(
+			'[data-floating-sidebar-toolbar] [data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
+		);
+		const openGitWorkbench = m.workspace_open_surface({
+			surface: m.workspace_surface_git_workbench(),
+		});
+		expect(mainMenu).toBeTruthy();
+		expect(sidebarMenu).toBeTruthy();
+		if (!mainMenu || !sidebarMenu) return;
+
+		await fireEvent.click(mainMenu);
+		expect(screen.queryByRole('menuitem', { name: openGitWorkbench })).toBeNull();
+		await fireEvent.keyDown(document, { key: 'Escape' });
+
+		await fireEvent.click(sidebarMenu);
+		await fireEvent.click(screen.getByRole('menuitem', { name: openGitWorkbench }));
+		await waitFor(() => {
+			expect(workspace.layout.snapshot.main.order).not.toContain('singleton:git');
+			expect(workspace.layout.snapshot.sidebar.order).toContain('singleton:git');
+			expect(workspace.layout.snapshot.sidebar.activeId).toBe('singleton:git');
+		});
+
+		await fireEvent.click(mainMenu);
+		await fireEvent.click(screen.getByRole('menuitem', { name: openGitWorkbench }));
+		await waitFor(() => {
+			expect(workspace.layout.snapshot.main.order).toContain('singleton:git');
+			expect(workspace.layout.snapshot.main.activeId).toBe('singleton:git');
+			expect(workspace.layout.snapshot.sidebar.order).not.toContain('singleton:git');
+		});
+	});
+
 	it('opens the user-message navigator from the active Chat taskbar menu', async () => {
 		installContext(canonicalWorkspaceSnapshot());
 		testContext.current!.workspaceContext = {

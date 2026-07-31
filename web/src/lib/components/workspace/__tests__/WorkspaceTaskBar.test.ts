@@ -94,6 +94,11 @@ describe('WorkspaceTaskBar', () => {
 		const moveItem = screen.getByRole('menuitem', { name: m.workspace_move_to_sidebar() });
 		const closeItem = screen.getByRole('menuitem', { name: m.workspace_close_tab() });
 		const newTerminalItem = screen.getByRole('menuitem', { name: m.workspace_new_terminal() });
+		expect(
+			screen.queryByRole('menuitem', {
+				name: m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
+			}),
+		).toBeNull();
 		expect(items.indexOf(moveItem)).toBeLessThan(items.indexOf(newTerminalItem));
 		expect(items.indexOf(closeItem)).toBeLessThan(items.indexOf(newTerminalItem));
 
@@ -150,9 +155,7 @@ describe('WorkspaceTaskBar', () => {
 	it.each(['main', 'sidebar'] as const)(
 		'places standalone Git view commands directly after New Terminal in the %s menu',
 		async (host) => {
-			terminalRegistry.orderedSessions = [
-				{ metadata: { terminalId: 'one', displaySequence: 1 } },
-			];
+			terminalRegistry.orderedSessions = [{ metadata: { terminalId: 'one', displaySequence: 1 } }];
 			render(WorkspaceTaskBar, {
 				host,
 				hostState:
@@ -167,8 +170,7 @@ describe('WorkspaceTaskBar', () => {
 								activeId: 'singleton:files',
 								mru: ['singleton:files'],
 							},
-				labelFor: (surfaceId: string) =>
-					surfaceId === 'singleton:chat' ? 'Chat' : 'Files',
+				labelFor: (surfaceId: string) => (surfaceId === 'singleton:chat' ? 'Chat' : 'Files'),
 				onSelect: vi.fn(),
 			});
 
@@ -183,6 +185,8 @@ describe('WorkspaceTaskBar', () => {
 			});
 			const openTerminal = screen.getByRole('menuitem', { name: 'Terminal 1' });
 
+			expect(history.querySelector('.lucide-history')).toBeTruthy();
+			expect(compare.querySelector('.lucide-git-compare-arrows')).toBeTruthy();
 			expect(items.indexOf(terminal)).toBeLessThan(items.indexOf(history));
 			expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));
 			expect(items.indexOf(compare)).toBeLessThan(items.indexOf(openTerminal));
@@ -191,6 +195,53 @@ describe('WorkspaceTaskBar', () => {
 			expect(openSingleton).toHaveBeenCalledWith('git-history', host);
 		},
 	);
+
+	it('moves an existing generic singleton from the sidebar into the main view', async () => {
+		render(WorkspaceTaskBar, {
+			host: 'main',
+			hostState: {
+				order: ['singleton:chat'],
+				activeId: 'singleton:chat',
+				mru: ['singleton:chat'],
+			},
+			labelFor: () => 'Chat',
+			onSelect: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+		await fireEvent.click(
+			screen.getByRole('menuitem', {
+				name: m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
+			}),
+		);
+
+		expect(moveSurface).toHaveBeenCalledWith('singleton:git', 'main');
+		expect(openSingleton).not.toHaveBeenCalled();
+	});
+
+	it('moves an existing standalone Git view from main into the sidebar', async () => {
+		surfaces['singleton:git-history'] = {
+			id: 'singleton:git-history',
+			type: 'singleton',
+			kind: 'git-history',
+		};
+		render(WorkspaceTaskBar, {
+			host: 'sidebar',
+			hostState: {
+				order: ['singleton:files'],
+				activeId: 'singleton:files',
+				mru: ['singleton:files'],
+			},
+			labelFor: () => 'Files',
+			onSelect: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_history() }));
+
+		expect(moveSurface).toHaveBeenCalledWith('singleton:git-history', 'sidebar');
+		expect(openSingleton).not.toHaveBeenCalled();
+	});
 
 	it('omits an open Git view command and labels standalone tabs without a Git prefix', async () => {
 		surfaces['singleton:git-history'] = {
@@ -205,20 +256,15 @@ describe('WorkspaceTaskBar', () => {
 				activeId: 'singleton:git-history',
 				mru: ['singleton:git-history', 'singleton:chat'],
 			},
-			labelFor: (surfaceId: string) =>
-				surfaceId === 'singleton:chat' ? 'Chat' : 'History',
+			labelFor: (surfaceId: string) => (surfaceId === 'singleton:chat' ? 'Chat' : 'History'),
 			onSelect: vi.fn(),
 		});
 
 		expect(screen.getByRole('tab', { name: 'History' })).toBeTruthy();
 		expect(screen.queryByRole('tab', { name: 'Git History' })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
-		expect(
-			screen.queryByRole('menuitem', { name: m.workspace_open_git_history() }),
-		).toBeNull();
-		expect(
-			screen.getByRole('menuitem', { name: m.workspace_open_git_compare() }),
-		).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
+		expect(screen.getByRole('menuitem', { name: m.workspace_open_git_compare() })).toBeTruthy();
 	});
 
 	it('offers move, pop out, and close for an inactive tab context menu', async () => {

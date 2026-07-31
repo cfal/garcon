@@ -111,17 +111,15 @@
 		hostState.order.filter((surfaceId) => !displayedSurfaceIds.includes(surfaceId)),
 	);
 	const gitViewKinds = ['git-history', 'git-compare'] as const;
-	const closedGitViewKinds = $derived(
-		gitViewKinds.filter(
-			(kind) => !workspace.layout.surface(singletonSurfaceId(kind)),
-		),
+	const availableGitViewKinds = $derived(
+		gitViewKinds.filter((kind) => !hostState.order.includes(singletonSurfaceId(kind))),
 	);
-	const otherClosedSingletonKinds = $derived(
+	const otherAvailableSingletonKinds = $derived(
 		PORTABLE_SINGLETON_KINDS.filter(
 			(kind) =>
 				!gitViewKinds.includes(kind as (typeof gitViewKinds)[number]) &&
 				canOffer(kind) &&
-				!workspace.layout.surface(singletonSurfaceId(kind)),
+				!hostState.order.includes(singletonSurfaceId(kind)),
 		),
 	);
 	const activeSurfaceId = $derived(hostState.activeId);
@@ -197,6 +195,15 @@
 		void workspace.moveSurface(surfaceId, host === 'main' ? 'sidebar' : 'main');
 	}
 
+	function openSingletonInHost(kind: PortableSingletonKind): void {
+		const surfaceId = singletonSurfaceId(kind);
+		if (workspace.layout.surface(surfaceId)) {
+			void workspace.moveSurface(surfaceId, host);
+			return;
+		}
+		void workspace.openSingleton(kind, host);
+	}
+
 	function recomputeVisibleTabs(): void {
 		if (!taskbarRoot || !measurementRail || !startControls || !endControls) return;
 		const widths = new Map<string, number>();
@@ -254,8 +261,8 @@
 	}
 </script>
 
-{#snippet icon(surfaceId: string)}
-	{@const kind = iconKind(surfaceId)}
+{#snippet icon(surfaceId: string, singletonKind?: PortableSingletonKind)}
+	{@const kind = singletonKind ?? iconKind(surfaceId)}
 	{#if kind === 'chat'}<MessageSquare class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'git'}<GitBranch class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'git-history'}<History class="h-3.5 w-3.5 shrink-0" />
@@ -416,9 +423,9 @@
 					<SquareTerminal />
 					{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
 				</DropdownMenuItem>
-				{#each closedGitViewKinds as kind (kind)}
-					<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
-						{@render icon(singletonSurfaceId(kind))}
+				{#each availableGitViewKinds as kind (kind)}
+					<DropdownMenuItem onclick={() => openSingletonInHost(kind)}>
+						{@render icon(singletonSurfaceId(kind), kind)}
 						{kind === 'git-history'
 							? m.workspace_open_git_history()
 							: m.workspace_open_git_compare()}
@@ -437,9 +444,9 @@
 						</DropdownMenuItem>
 					{/each}
 				{/if}
-				{#each otherClosedSingletonKinds as kind (kind)}
-					<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
-						{@render icon(singletonSurfaceId(kind))}
+				{#each otherAvailableSingletonKinds as kind (kind)}
+					<DropdownMenuItem onclick={() => openSingletonInHost(kind)}>
+						{@render icon(singletonSurfaceId(kind), kind)}
 						{m.workspace_open_surface({ surface: singletonLabels[kind]() })}
 					</DropdownMenuItem>
 				{/each}
