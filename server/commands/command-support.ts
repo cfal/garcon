@@ -7,6 +7,7 @@ import {
   type AgentInterruptAndSendCommandRequest,
   type AgentRunCommandRequest,
   type AgentStopCommandRequest,
+  type AgentTurnCommandResponse,
   type CompactCommandRequest,
   type CommandAcceptedResponse,
   type CommandErrorCode,
@@ -272,6 +273,18 @@ export function commandResultFromRecord(
   };
 }
 
+export function agentTurnResultFromRecord(
+  record: CommandLedgerRecord,
+  status: CommandAcceptedResponse['status'] = 'accepted',
+): AgentTurnCommandResponse {
+  if (!record.turnId) throw new Error(`Agent turn command ${record.key} has no turnId`);
+  return {
+    ...commandResultFromRecord(record, status),
+    chatId: record.chatId,
+    turnId: record.turnId,
+  };
+}
+
 export function runOptionsForCommand(
   input: AgentRunCommandRequest | ForkRunCommandRequest,
 ): RunAgentTurnOptions {
@@ -383,7 +396,7 @@ export class CommandSupport {
 
   async submitHttpRun(
     input: NormalizedSubmitRunInput,
-  ): Promise<CommandAcceptedResponse> {
+  ): Promise<AgentTurnCommandResponse> {
     const clientRequestId = this.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
@@ -408,7 +421,7 @@ export class CommandSupport {
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
     commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
     preparation?: AcceptedRunPreparation,
-  ): Promise<CommandAcceptedResponse> {
+  ): Promise<AgentTurnCommandResponse> {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError(
         'IDEMPOTENCY_CONFLICT',
@@ -420,7 +433,7 @@ export class CommandSupport {
       && ledger.record.status === 'accepted';
     if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
       this.throwRecordedExecutionFailure(ledger.record);
-      return commandResultFromRecord(ledger.record, 'duplicate');
+      return agentTurnResultFromRecord(ledger.record, 'duplicate');
     }
 
     const options: RunAgentTurnOptions = {
@@ -448,7 +461,7 @@ export class CommandSupport {
     } catch (error) {
       throw await this.withCurrentExecutionControl(input.chatId, error);
     }
-    return commandResultFromRecord(
+    return agentTurnResultFromRecord(
       ledger.record,
       recoveringAcceptedCommand ? 'duplicate' : 'accepted',
     );

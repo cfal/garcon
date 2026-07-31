@@ -8,6 +8,7 @@
     "./agent-execution": "./agent-execution.ts",
     "./agent-integration": "./agent-integration.ts",
     "./agent-settings": "./agent-settings.ts",
+    "./agent-turn-receipt": "./agent-turn-receipt.ts",
     "./agents": "./agents.ts",
     "./api-provider-templates": "./api-provider-templates.ts",
     "./api-providers": "./api-providers.ts",

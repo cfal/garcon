@@ -31,6 +31,12 @@ export interface CommandLedgerRecord {
   errorCode?: string;
   forkPreparation?: ForkPreparationState;
   stopOutcome?: ChatStopOutcome;
+  assistantMessages?: string[];
+  assistantBytes?: number;
+  turnResultAvailability?: 'available' | 'too-large' | 'expired';
+  interruptionReason?: 'user-stop' | 'chat-deleted';
+  interruptionRequested?: 'user-stop' | 'chat-deleted';
+  publicTerminalAt?: string;
 }
 
 type SteerCommandTombstone = Omit<
@@ -61,6 +67,8 @@ export type CommandTerminalResult =
 export const LEDGER_RECORD_LIMIT = 1000;
 // Refuses new identities at the limit because eviction could redeliver a native steer.
 export const STEER_IDENTITY_LIMIT = 10_000;
+export const TURN_RESULT_BYTE_LIMIT = 4 * 1024 * 1024;
+export const TOTAL_TURN_RESULT_BYTE_LIMIT = 64 * 1024 * 1024;
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
 
 export class SteerIdentityCapacityError extends Error {
@@ -72,6 +80,9 @@ export class SteerIdentityCapacityError extends Error {
 
 export interface CommandLedgerOptions {
   steerIdentityLimit?: number;
+  recordLimit?: number;
+  turnResultByteLimit?: number;
+  totalTurnResultByteLimit?: number;
 }
 
 const TERMINAL_COMMAND_STATUSES = new Set<CommandLedgerStatus>([
@@ -147,6 +158,7 @@ function cloneRecord(record: CommandLedgerRecord): CommandLedgerRecord {
     ...record,
     payload: { ...record.payload },
     ...(record.forkPreparation ? { forkPreparation: { ...record.forkPreparation } } : {}),
+    ...(record.assistantMessages ? { assistantMessages: [...record.assistantMessages] } : {}),
   };
 }
 
@@ -160,12 +172,21 @@ export class CommandLedger {
   readonly #keysByIdentity = new Map<string, string>();
   readonly #steerIdentityLimit: number;
   #steerIdentityCount = 0;
+  readonly #turnIndex = new Map<string, string>();
+  readonly #recordLimit: number;
+  readonly #turnResultByteLimit: number;
+  readonly #totalTurnResultByteLimit: number;
+  #resultBytes = 0;
 
   constructor(_workspaceDir?: string, options: CommandLedgerOptions = {}) {
     this.#steerIdentityLimit = options.steerIdentityLimit ?? STEER_IDENTITY_LIMIT;
     if (!Number.isSafeInteger(this.#steerIdentityLimit) || this.#steerIdentityLimit < 1) {
       throw new Error('steerIdentityLimit must be a positive safe integer');
     }
+    this.#recordLimit = options.recordLimit ?? LEDGER_RECORD_LIMIT;
+    this.#turnResultByteLimit = options.turnResultByteLimit ?? TURN_RESULT_BYTE_LIMIT;
+    this.#totalTurnResultByteLimit = options.totalTurnResultByteLimit
+      ?? TOTAL_TURN_RESULT_BYTE_LIMIT;
   }
 
   async getRecord(key: string): Promise<CommandLedgerRecord | null> {
@@ -173,6 +194,93 @@ export class CommandLedger {
     if (record) return cloneRecord(record);
     const tombstone = this.#steerTombstones.get(key);
     return tombstone ? recordFromSteerTombstone(tombstone) : null;
+  }
+
+  async getTurnRecord(chatId: string, turnId: string): Promise<CommandLedgerRecord | null> {
+    const key = this.#turnIndex.get(turnIndexKey(chatId, turnId));
+    if (!key) return null;
+    const record = this.#records.get(key);
+    return record ? cloneRecord(record) : null;
+  }
+
+  async appendAssistantMessages(
+    chatId: string,
+    turnId: string,
+    messages: readonly string[],
+  ): Promise<CommandLedgerRecord | null> {
+    const record = this.#recordForTurn(chatId, turnId);
+    if (!record || record.publicTerminalAt || record.turnResultAvailability !== 'available') {
+      return record ? cloneRecord(record) : null;
+    }
+    const appended = messages.filter((message) => typeof message === 'string');
+    if (appended.length === 0) return cloneRecord(record);
+    const additionalBytes = appended.reduce((total, message) => total + Buffer.byteLength(message), 0);
+    const currentBytes = record.assistantBytes ?? 0;
+    if (currentBytes + additionalBytes > this.#turnResultByteLimit) {
+      this.#resultBytes -= currentBytes;
+      record.assistantMessages = undefined;
+      record.assistantBytes = 0;
+      record.turnResultAvailability = 'too-large';
+    } else {
+      record.assistantMessages = [...(record.assistantMessages ?? []), ...appended];
+      record.assistantBytes = currentBytes + additionalBytes;
+      this.#resultBytes += additionalBytes;
+    }
+    record.updatedAt = new Date().toISOString();
+    return cloneRecord(record);
+  }
+
+  async markInterruptionRequested(
+    chatId: string,
+    turnId: string,
+    reason: 'user-stop' | 'chat-deleted',
+  ): Promise<CommandLedgerRecord | null> {
+    const record = this.#recordForTurn(chatId, turnId);
+    if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
+    record.interruptionRequested = reason;
+    record.updatedAt = new Date().toISOString();
+    return cloneRecord(record);
+  }
+
+  async clearInterruptionRequested(chatId: string, turnId: string): Promise<void> {
+    const record = this.#recordForTurn(chatId, turnId);
+    if (!record || record.publicTerminalAt) return;
+    record.interruptionRequested = undefined;
+    record.updatedAt = new Date().toISOString();
+  }
+
+  async markPublicTerminal(
+    chatId: string,
+    turnId: string,
+    interruptionReason?: 'user-stop' | 'chat-deleted',
+  ): Promise<CommandLedgerRecord | null> {
+    const record = this.#recordForTurn(chatId, turnId);
+    if (!record) return null;
+    if (record.publicTerminalAt) return cloneRecord(record);
+    const now = new Date().toISOString();
+    record.publicTerminalAt = now;
+    record.updatedAt = now;
+    record.payload = {};
+    if (interruptionReason) {
+      record.interruptionReason = interruptionReason;
+      record.status = 'finished';
+    }
+    record.interruptionRequested = undefined;
+    this.#expireTerminalResults();
+    this.#trimRecords();
+    return cloneRecord(record);
+  }
+
+  async markChatInterrupted(
+    chatId: string,
+    reason: 'chat-deleted',
+    makePublic: boolean,
+  ): Promise<void> {
+    for (const record of this.#records.values()) {
+      if (record.chatId !== chatId || !record.turnId || record.publicTerminalAt) continue;
+      record.interruptionRequested = reason;
+      if (makePublic) await this.markPublicTerminal(chatId, record.turnId, reason);
+    }
   }
 
   isTerminal(key: string): boolean {
@@ -234,6 +342,8 @@ export class CommandLedger {
     if (existing) {
       if (existing.payloadHash !== payloadHash) return { kind: 'conflict', record: cloneRecord(existing) };
       if (existing.status === 'failed' && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE) {
+        this.#removeTurnIndex(existing);
+        this.#discardResult(existing);
         const now = new Date().toISOString();
         const record: CommandLedgerRecord = {
           ...existing,
@@ -246,8 +356,15 @@ export class CommandLedger {
           error: undefined,
           errorCode: undefined,
           forkPreparation: undefined,
+          assistantMessages: [],
+          assistantBytes: 0,
+          turnResultAvailability: 'available',
+          interruptionReason: undefined,
+          interruptionRequested: undefined,
+          publicTerminalAt: undefined,
         };
         this.#records.set(key, record);
+        this.#indexTurn(record);
         return { kind: 'accepted', record: cloneRecord(record) };
       }
       return { kind: 'duplicate', record: cloneRecord(existing) };
@@ -292,10 +409,16 @@ export class CommandLedger {
       updatedAt: now,
       turnId: input.turnId,
       entryId: input.entryId,
+      ...(input.turnId ? {
+        assistantMessages: [],
+        assistantBytes: 0,
+        turnResultAvailability: 'available' as const,
+      } : {}),
     };
     this.#records.set(key, record);
     this.#keysByIdentity.set(identityKey, key);
     if (input.commandType === 'steer') this.#steerIdentityCount += 1;
+    this.#indexTurn(record);
     this.#trimRecords();
     return { kind: 'accepted', record: cloneRecord(record) };
   }
@@ -350,6 +473,7 @@ export class CommandLedger {
       ...patch,
       status,
       updatedAt: new Date().toISOString(),
+      payload: {},
     };
     this.#records.set(key, record);
     this.#trimRecords();
@@ -357,11 +481,11 @@ export class CommandLedger {
   }
 
   #trimRecords(): void {
-    while (this.#records.size > LEDGER_RECORD_LIMIT) {
+    while (this.#records.size > this.#recordLimit) {
       const oldest = [...this.#records]
         .find(([, record]) => (
           TERMINAL_COMMAND_STATUSES.has(record.status) && record.forkPreparation === undefined
-        ));
+      ));
       if (!oldest) return;
       const [key, record] = oldest;
       if (record.commandType === 'steer') {
@@ -379,11 +503,57 @@ export class CommandLedger {
           record.clientRequestId,
         ));
       }
-      this.#records.delete(key);
+      this.#removeRecord(key);
+    }
+  }
+
+  #recordForTurn(chatId: string, turnId: string): CommandLedgerRecord | undefined {
+    const key = this.#turnIndex.get(turnIndexKey(chatId, turnId));
+    return key ? this.#records.get(key) : undefined;
+  }
+
+  #indexTurn(record: CommandLedgerRecord): void {
+    if (record.turnId) this.#turnIndex.set(turnIndexKey(record.chatId, record.turnId), record.key);
+  }
+
+  #removeTurnIndex(record: CommandLedgerRecord): void {
+    if (!record.turnId) return;
+    const indexKey = turnIndexKey(record.chatId, record.turnId);
+    if (this.#turnIndex.get(indexKey) === record.key) this.#turnIndex.delete(indexKey);
+  }
+
+  #discardResult(record: CommandLedgerRecord): void {
+    this.#resultBytes -= record.assistantBytes ?? 0;
+    record.assistantMessages = undefined;
+    record.assistantBytes = 0;
+  }
+
+  #removeRecord(key: string): void {
+    const record = this.#records.get(key);
+    if (!record) return;
+    this.#removeTurnIndex(record);
+    this.#discardResult(record);
+    this.#records.delete(key);
+  }
+
+  #expireTerminalResults(): void {
+    while (this.#resultBytes > this.#totalTurnResultByteLimit) {
+      const oldest = [...this.#records.values()].find((record) => (
+        record.publicTerminalAt !== undefined
+        && record.turnResultAvailability === 'available'
+        && (record.assistantBytes ?? 0) > 0
+      ));
+      if (!oldest) return;
+      this.#discardResult(oldest);
+      oldest.turnResultAvailability = 'expired';
     }
   }
 }
 
 function commandLedgerIdentityKey(chatId: string, clientRequestId: string): string {
   return JSON.stringify([chatId, clientRequestId]);
+}
+
+function turnIndexKey(chatId: string, turnId: string): string {
+  return `${chatId}:${turnId}`;
 }

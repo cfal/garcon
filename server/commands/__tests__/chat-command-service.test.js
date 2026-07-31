@@ -1832,6 +1832,25 @@ describe('ChatCommandService', () => {
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(false);
   });
 
+  it('settles accepted turn receipts as interrupted when their chat is deleted', async () => {
+    const { service, ledger } = makeService();
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-delete-receipt',
+      turnId: 'turn-delete-receipt',
+      payload: { command: 'working' },
+    });
+
+    await service.deleteChat({ chatId: SOURCE_CHAT_ID });
+
+    expect(await ledger.getTurnRecord(SOURCE_CHAT_ID, 'turn-delete-receipt')).toMatchObject({
+      status: 'finished',
+      interruptionReason: 'chat-deleted',
+      publicTerminalAt: expect.any(String),
+    });
+  });
+
   it('preserves chat ownership when the active runtime cannot be retired', async () => {
     const { service, chats, queue, settings, pendingInputs, sessions } = makeService({
       queue: { abortForChatDeletion: mock(() => Promise.resolve(false)) },

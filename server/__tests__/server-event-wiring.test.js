@@ -60,6 +60,10 @@ function createWiringFixture(overrides = {}) {
   };
   const commandLedger = {
     settleTerminal: mock(async () => undefined),
+    appendAssistantMessages: mock(async () => undefined),
+    markPublicTerminal: mock(async () => undefined),
+    markInterruptionRequested: mock(async () => undefined),
+    clearInterruptionRequested: mock(async () => undefined),
     ...overrides.commandLedger,
   };
   const searchIndex = {
@@ -273,6 +277,53 @@ describe('server event wiring', () => {
       .toBeLessThan(types.indexOf('chat-processing-updated'));
     expect(types.indexOf('chat-processing-updated'))
       .toBeLessThan(types.indexOf('agent-run-finished'));
+    expect(fixture.commandLedger.appendAssistantMessages).toHaveBeenCalledWith(
+      'chat-1',
+      'turn-1',
+      ['final reply'],
+    );
+    expect(fixture.commandLedger.markPublicTerminal).toHaveBeenCalledWith(
+      'chat-1',
+      'turn-1',
+      undefined,
+    );
+  });
+
+  it('publishes the Stop outcome before making an interrupted receipt public', async () => {
+    const timeline = [];
+    let stopRequested;
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => timeline.push(JSON.parse(payload).type)),
+      },
+      queue: {
+        onSessionStopRequested: mock((callback) => { stopRequested = callback; }),
+      },
+      commandLedger: {
+        markPublicTerminal: mock(async (_chatId, _turnId, reason) => {
+          timeline.push(`receipt:${reason}`);
+        }),
+      },
+    });
+    const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };
+
+    stopRequested('chat-1', 'stop-1', turn);
+    fixture.queueListeners.sessionStopped(
+      'chat-1',
+      'interrupt-requested',
+      'stop',
+      'stop-1',
+      5,
+    );
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.commandLedger.markInterruptionRequested).toHaveBeenCalledWith(
+      'chat-1',
+      'turn-1',
+      'user-stop',
+    );
+    expect(timeline.indexOf('chat-session-stopped'))
+      .toBeLessThan(timeline.indexOf('receipt:user-stop'));
   });
 
   it('preserves stop transitions after a pending turn message', async () => {
@@ -575,7 +626,13 @@ describe('server event wiring', () => {
       chatNativeReloader: {},
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },
-      commandLedger: {},
+      commandLedger: {
+        settleTerminal: mock(async () => undefined),
+        appendAssistantMessages: mock(async () => undefined),
+        markPublicTerminal: mock(async () => undefined),
+        markInterruptionRequested: mock(async () => undefined),
+        clearInterruptionRequested: mock(async () => undefined),
+      },
       shareStore: {},
       telegramNotifier: {},
       telegramSettings: { onChanged: noOpSubscription },
@@ -676,7 +733,13 @@ describe('server event wiring', () => {
       chatNativeReloader: { reloadFromNative },
       pendingInputs,
       pendingRecovery: { waitForSettlements: mock(async () => undefined) },
-      commandLedger: {},
+      commandLedger: {
+        settleTerminal: mock(async () => undefined),
+        appendAssistantMessages: mock(async () => undefined),
+        markPublicTerminal: mock(async () => undefined),
+        markInterruptionRequested: mock(async () => undefined),
+        clearInterruptionRequested: mock(async () => undefined),
+      },
       shareStore: {},
       telegramNotifier: {},
       telegramSettings: { onChanged: noOpSubscription },

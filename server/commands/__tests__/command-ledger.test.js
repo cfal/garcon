@@ -127,6 +127,78 @@ describe('CommandLedger', () => {
     ]));
   });
 
+  it('indexes turn results and exposes them only after the public terminal barrier', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-1', ['first', 'second']);
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    const terminal = await ledger.getTurnRecord('chat-1', 'turn-1');
+    expect(terminal).toMatchObject({
+      status: 'finished',
+      assistantMessages: ['first', 'second'],
+      payload: {},
+    });
+    expect(terminal.publicTerminalAt).toBeUndefined();
+
+    await ledger.markPublicTerminal('chat-1', 'turn-1');
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      publicTerminalAt: expect.any(String),
+      turnResultAvailability: 'available',
+    });
+  });
+
+  it('discards an oversized result instead of retaining a truncated prefix', async () => {
+    const ledger = new CommandLedger(undefined, { turnResultByteLimit: 5 });
+    await ledger.accept(acceptedInput({ turnId: 'turn-large' }));
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-large', ['1234']);
+    await ledger.appendAssistantMessages('chat-1', 'turn-large', ['56']);
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-large')).toMatchObject({
+      turnResultAvailability: 'too-large',
+      assistantBytes: 0,
+    });
+    expect((await ledger.getTurnRecord('chat-1', 'turn-large')).assistantMessages).toBeUndefined();
+  });
+
+  it('expires the oldest public result under aggregate pressure', async () => {
+    const ledger = new CommandLedger(undefined, {
+      turnResultByteLimit: 10,
+      totalTurnResultByteLimit: 5,
+    });
+    const first = await ledger.accept(acceptedInput({ clientRequestId: 'first', turnId: 'turn-first' }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
+    await ledger.settleTerminal(first.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-first');
+    const second = await ledger.accept(acceptedInput({ clientRequestId: 'second', turnId: 'turn-second' }));
+    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+    await ledger.settleTerminal(second.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-second');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
+      turnResultAvailability: 'expired',
+    });
+    expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
+      turnResultAvailability: 'available',
+      assistantMessages: ['5678'],
+    });
+  });
+
+  it('moves the turn index when a pre-schedule retry receives a new turn', async () => {
+    const ledger = new CommandLedger();
+    const first = await ledger.accept(acceptedInput({ turnId: 'turn-old' }));
+    await ledger.update(first.record.key, {
+      status: 'failed',
+      errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+    });
+
+    await ledger.accept(acceptedInput({ turnId: 'turn-new' }));
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-old')).toBeNull();
+    expect(await ledger.getTurnRecord('chat-1', 'turn-new')).not.toBeNull();
+  });
+
   it('keeps unsettled and fork-preparation records while trimming old terminal records', async () => {
     const ledger = new CommandLedger();
     const unsettled = await ledger.accept(acceptedInput({ clientRequestId: 'unsettled' }));

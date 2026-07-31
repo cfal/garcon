@@ -14,6 +14,7 @@ import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
 import createTerminalRoutes from './terminals.js';
 import { createRuntimeRoutes } from './runtime.js';
+import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
 import type { ServerRuntimeProbe } from '@garcon/common/server-runtime';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -39,6 +40,7 @@ import type { TerminalManager } from '../terminals/terminal-manager.js';
 import type { TranscriptSearchController } from '../chats/search/controller.js';
 import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
+import type { CommandLedger } from '../commands/command-ledger.js';
 
 export default function createAllRoutes({
   registry,
@@ -65,6 +67,7 @@ export default function createAllRoutes({
   searchIndex,
   transcriptSearchSettings,
   runtimeProbe,
+  commandLedger,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -90,9 +93,11 @@ export default function createAllRoutes({
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
   runtimeProbe: ServerRuntimeProbe;
+  commandLedger: CommandLedger;
 }): RouteMap {
   return {
     ...createRuntimeRoutes(runtimeProbe),
+    ...createAgentTurnReceiptRoutes(commandLedger),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),

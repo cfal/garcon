@@ -73,6 +73,7 @@ import type {
   ExecutionSettingsPatchRequest,
   ModelPatchRequest,
   AgentModelPatchRequest,
+  CommandAcceptedResponse,
   QueueCommandErrorResponse,
   RunningChatsResponse,
 } from '../../common/chat-command-contracts.ts';
@@ -111,6 +112,14 @@ import {
   generateChatTitleFromMessage,
   TitleGenerationError,
 } from '../chats/title-generator.js';
+
+function acceptedTurnResponse(result: CommandAcceptedResponse): Response {
+  if (!result.chatId || !result.turnId) {
+    throw new Error('Accepted agent turn is missing its receipt identity');
+  }
+  const location = `/api/v1/chats/turn-receipt?chatId=${encodeURIComponent(result.chatId)}&turnId=${encodeURIComponent(result.turnId)}`;
+  return Response.json(result, { status: 202, headers: { Location: location } });
+}
 
 interface SettingsDep {
   getPinnedChatIds(): string[];
@@ -487,7 +496,7 @@ export default function createChatRoutes({
       const input = parseCommandRequest(parseStartChatCommandRequest, body);
       const images = validatedCommandAttachments(input.images);
       const result = await commands.submitStart({ ...input, images });
-      return Response.json(result, { status: 202 });
+      return acceptedTurnResponse(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
@@ -779,7 +788,7 @@ export default function createChatRoutes({
       const images = validatedCommandAttachments(input.images);
       const result = await commands.submitRun({ ...input, images });
 
-      return Response.json(result, { status: 202 });
+      return acceptedTurnResponse(result);
     } catch (error: unknown) {
       if (error instanceof CommandExecutionControlError) {
         const body: QueueCommandErrorResponse = {

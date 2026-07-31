@@ -8,7 +8,7 @@ import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path
 import {
   CommandSupport,
   CommandValidationError,
-  commandResultFromRecord,
+  agentTurnResultFromRecord,
   type ChatStartInput,
   type NormalizedChatStart,
   type ScheduledChatStartInput,
@@ -136,7 +136,7 @@ export class StartCommands {
     if (ledger.kind === 'duplicate') this.support.throwRecordedExecutionFailure(ledger.record);
     if (ledger.kind === 'duplicate') {
       return {
-        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        ...agentTurnResultFromRecord(ledger.record, 'duplicate'),
         chat: await this.support.projectCommandChat(ledger.record.chatId),
       };
     }
@@ -231,7 +231,7 @@ export class StartCommands {
       turnId,
     });
     return {
-      ...commandResultFromRecord(accepted ?? ledger.record),
+      ...agentTurnResultFromRecord(accepted ?? ledger.record),
       chat: await this.support.projectCommandChat(input.chatId),
     };
   }

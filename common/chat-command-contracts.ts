@@ -77,7 +77,12 @@ export interface CommandAcceptedResponse {
   acceptedAt: string;
 }
 
-export interface StartChatCommandResponse extends CommandAcceptedResponse {
+export interface AgentTurnCommandResponse extends CommandAcceptedResponse {
+  chatId: string;
+  turnId: string;
+}
+
+export interface StartChatCommandResponse extends AgentTurnCommandResponse {
   chat: ChatListEntry;
 }
 
@@ -97,7 +102,7 @@ export interface DeleteChatCommandRequest {
   chatId: string;
 }
 
-export interface ForkRunCommandResponse extends CommandAcceptedResponse {
+export interface ForkRunCommandResponse extends AgentTurnCommandResponse {
   chat: ChatListEntry;
 }
 

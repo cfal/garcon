@@ -580,6 +580,9 @@ describe('REST chat command routes', () => {
       status: 'accepted',
     });
     expect(typeof body.turnId).toBe('string');
+    expect(response.headers.get('Location')).toBe(
+      `/api/v1/chats/turn-receipt?chatId=${CHAT_ID}&turnId=${body.turnId}`,
+    );
     expect(order).toEqual(['pending', 'run']);
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       CHAT_ID,

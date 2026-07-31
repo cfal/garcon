@@ -580,6 +580,7 @@ export async function startServer(): Promise<void> {
       searchIndex: chatSearch,
       transcriptSearchSettings,
       runtimeProbe: runtimeState.identity,
+      commandLedger,
     });
 
     const chatHandler = new ChatHandler({
