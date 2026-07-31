@@ -23,9 +23,10 @@ export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as con
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
-export type FileOpenPlacementPreference = DesktopPlacement | 'source';
+export type FileOpenPlacementPreference = DesktopPlacement | 'source' | 'other';
 export const FILE_OPEN_PLACEMENT_VALUES = [
 	'source',
+	'other',
 	'dialog',
 	'main',
 	'sidebar',

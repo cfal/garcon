@@ -217,16 +217,17 @@ describe('Settings', () => {
 				name: 'Markdown viewers',
 			});
 			expect(screen.getAllByRole('option', { name: 'Same view' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'Other view' })).toHaveLength(3);
 			expect(screen.getAllByRole('option', { name: 'Dialog' })).toHaveLength(3);
 			expect(screen.getAllByRole('option', { name: 'Main view' })).toHaveLength(3);
 			expect(screen.getAllByRole('option', { name: 'Sidebar view' })).toHaveLength(3);
 			expect((textEditorPlacement as HTMLSelectElement).value).toBe('source');
 			expect((imageViewerPlacement as HTMLSelectElement).value).toBe('source');
 			expect((markdownViewerPlacement as HTMLSelectElement).value).toBe('source');
-			await fireEvent.change(textEditorPlacement, { target: { value: 'main' } });
+			await fireEvent.change(textEditorPlacement, { target: { value: 'other' } });
 			await fireEvent.change(imageViewerPlacement, { target: { value: 'sidebar' } });
 			await fireEvent.change(markdownViewerPlacement, { target: { value: 'dialog' } });
-			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'main');
+			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'other');
 			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'sidebar');
 			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'dialog');
 			await fireEvent.change(textEditorPlacement, { target: { value: 'source' } });

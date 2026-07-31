@@ -194,20 +194,20 @@ describe('LocalSettingsStore', () => {
 
 	it('persists and restores independent file opening preferences', () => {
 		const store = createLocalSettingsStore();
-		store.set('textEditorOpenPlacement', 'source');
+		store.set('textEditorOpenPlacement', 'other');
 		store.set('imageViewerOpenPlacement', 'sidebar');
 		store.set('markdownViewerOpenPlacement', 'dialog');
 
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
-			textEditorOpenPlacement: 'source',
+			textEditorOpenPlacement: 'other',
 			imageViewerOpenPlacement: 'sidebar',
 			markdownViewerOpenPlacement: 'dialog',
 		});
 
 		const restored = createLocalSettingsStore();
-		expect(restored.textEditorOpenPlacement).toBe('source');
+		expect(restored.textEditorOpenPlacement).toBe('other');
 		expect(restored.imageViewerOpenPlacement).toBe('sidebar');
 		expect(restored.markdownViewerOpenPlacement).toBe('dialog');
 

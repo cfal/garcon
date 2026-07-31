@@ -43,6 +43,7 @@
 		'textEditorOpenPlacement' | 'imageViewerOpenPlacement' | 'markdownViewerOpenPlacement';
 	const fileOpenPlacementLabels: Record<FileOpenPlacementPreference, () => string> = {
 		source: m.settings_file_open_placement_source,
+		other: m.settings_file_open_placement_other,
 		dialog: m.settings_file_open_placement_dialog,
 		main: m.settings_file_open_placement_main,
 		sidebar: m.settings_file_open_placement_sidebar,

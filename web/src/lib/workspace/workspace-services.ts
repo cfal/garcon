@@ -58,8 +58,9 @@ export function resolveConfiguredFilePlacement(
 		}
 	})();
 
-	if (preference !== 'source') return preference;
-	return origin === 'mobile' ? 'main' : origin;
+	if (preference === 'source') return origin === 'mobile' ? 'main' : origin;
+	if (preference === 'other') return origin === 'main' ? 'sidebar' : 'main';
+	return preference;
 }
 
 export interface WorkspaceRootDependencies {

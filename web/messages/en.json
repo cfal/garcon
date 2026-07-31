@@ -1192,6 +1192,7 @@
 	"settings_image_viewer_open_placement": "Image viewers",
 	"settings_markdown_viewer_open_placement": "Markdown viewers",
 	"settings_file_open_placement_source": "Same view",
+	"settings_file_open_placement_other": "Other view",
 	"settings_file_open_placement_dialog": "Dialog",
 	"settings_file_open_placement_main": "Main view",
 	"settings_file_open_placement_sidebar": "Sidebar view",
