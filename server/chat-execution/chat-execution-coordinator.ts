@@ -583,9 +583,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#interruptActiveTurn(chatId);
   }
 
-  async abortForChatDeletion(chatId: string): Promise<boolean> {
-    return this.#abortForDeletion(chatId);
-  }
+  async abortForChatDeletion(chatId: string): Promise<boolean> { return this.#abortForDeletion(chatId); }
 
   rollbackChatDeletion(chatId: string): void { this.#rollbackDeletion(chatId); }
 
@@ -904,8 +902,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   async #performStop(
-    chatId: string,
-    stopId: string,
+    chatId: string, stopId: string,
     intent: ChatStopIntent,
   ): Promise<StopResolution> {
     const startedAt = Date.now();
