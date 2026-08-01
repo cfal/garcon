@@ -2138,6 +2138,75 @@ describe('ChatCommandService', () => {
     expect(record.publicTerminalAt).toBeUndefined();
   });
 
+  it('keeps a failed admission private when deletion commits before its retry', async () => {
+    const { service, chats, ledger, queue } = makeService();
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue after deletion',
+      clientRequestId: 'req-delete-private-failure',
+      clientMessageId: 'msg-delete-private-failure',
+      tagsToAdd: ['cli'],
+    };
+    queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+
+    await expect(service.submitRun(input)).rejects.toThrow('append failed');
+    await service.deleteChat({ chatId: SOURCE_CHAT_ID });
+    await ledger.markChatInterrupted(SOURCE_CHAT_ID, 'chat-deleted');
+
+    await expect(service.submitRun(input)).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+      status: 404,
+    });
+    const record = await ledger.getRecord(
+      commandLedgerKey('agent-run', SOURCE_CHAT_ID, input.clientRequestId),
+    );
+    expect(record).toMatchObject({
+      status: 'failed',
+      errorCode: 'PRE_SCHEDULE_FAILED',
+      retainedPrivateTerminal: true,
+    });
+    expect(record.publicTerminalAt).toBeUndefined();
+    expect(chats.addTags).not.toHaveBeenCalled();
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed admission normally when chat deletion rolls back', async () => {
+    const { service, chats, ledger, ownership, queue } = makeService({
+      ownership: {
+        delete: mock(async () => {
+          throw new Error('journal append failed');
+        }),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue after rollback',
+      clientRequestId: 'req-rollback-private-failure',
+      clientMessageId: 'msg-rollback-private-failure',
+      tagsToAdd: ['cli'],
+    };
+    queue.registerPendingUserInput
+      .mockRejectedValueOnce(new Error('append failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(service.submitRun(input)).rejects.toThrow('append failed');
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toThrow(
+      'journal append failed',
+    );
+    const retry = await service.submitRun(input);
+
+    expect(retry.status).toBe('accepted');
+    expect(ownership.delete).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(chats.addTags).toHaveBeenCalledTimes(1);
+    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+    expect((await ledger.getRecord(
+      commandLedgerKey('agent-run', SOURCE_CHAT_ID, input.clientRequestId),
+    )).publicTerminalAt).toBeUndefined();
+  });
+
   it('preserves chat ownership when the active runtime cannot be retired', async () => {
     const { service, chats, queue, settings, pendingInputs, sessions } = makeService({
       queue: { abortForChatDeletion: mock(() => Promise.resolve(false)) },

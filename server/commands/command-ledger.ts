@@ -292,7 +292,7 @@ export class CommandLedger {
   ): Promise<CommandLedgerRecord | null> {
     const record = this.#recordForTurn(chatId, turnId);
     if (!record) return null;
-    if (record.publicTerminalAt) return cloneRecord(record);
+    if (record.publicTerminalAt || record.retainedPrivateTerminal) return cloneRecord(record);
     if (interruptionReason) {
       record.interruptionReason = interruptionReason;
       record.status = 'finished';
