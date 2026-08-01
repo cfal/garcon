@@ -173,7 +173,9 @@ describe('PaginatedCodexHistorySource', () => {
     const source = new PaginatedCodexHistorySource(
       { ...profile, nativePath },
       () => clientForPages(new Map([['first', {
-        data: [], nextCursor: null, backwardsCursor: null,
+        data: [turn('turn-1', [], 1_753_056_001)],
+        nextCursor: null,
+        backwardsCursor: null,
       }]])),
     );
 
@@ -190,6 +192,57 @@ describe('PaginatedCodexHistorySource', () => {
         entryId: 'turn:turn-1:item:user-steer-1',
         byteOffset: expect.any(Number),
         lineNumber: 2,
+      });
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes raw user-message evidence for turns removed from native history', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codex-evidence-'));
+    const nativePath = path.join(directory, 'rollout.jsonl');
+    const userMessage = (turnId, id, clientId, text) => JSON.stringify({
+      timestamp: '2026-07-20T00:00:01.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'item_completed',
+        thread_id: 'thread-1',
+        turn_id: turnId,
+        completed_at_ms: 1_753_056_001_000,
+        item: {
+          type: 'UserMessage',
+          id,
+          client_id: clientId,
+          content: [{ type: 'text', text }],
+        },
+      },
+    });
+    await fs.writeFile(nativePath, [
+      userMessage('turn-surviving', 'user-surviving', 'message-surviving', 'keep this'),
+      userMessage('turn-rolled-back', 'user-rolled-back', 'message-rolled-back', 'remove this'),
+      JSON.stringify({
+        timestamp: '2026-07-20T00:00:02.000Z',
+        type: 'event_msg',
+        payload: { type: 'thread_rolled_back', num_turns: 1 },
+      }),
+    ].join('\n'));
+    const source = new PaginatedCodexHistorySource(
+      { ...profile, nativePath },
+      () => clientForPages(new Map([['first', {
+        data: [turn('turn-surviving', [], 1_753_056_001)],
+        nextCursor: null,
+        backwardsCursor: null,
+      }]])),
+    );
+
+    try {
+      const messages = await source.load(new AbortController().signal);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({
+        type: 'user-message',
+        content: 'keep this',
+        metadata: { upstreamRequestId: 'message-surviving' },
       });
     } finally {
       await fs.rm(directory, { recursive: true, force: true });

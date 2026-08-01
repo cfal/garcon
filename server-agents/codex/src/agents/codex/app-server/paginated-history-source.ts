@@ -33,6 +33,7 @@ export class PaginatedCodexHistorySource {
     const client = this.createClient();
     try {
       const messages: ChatMessage[] = [];
+      const survivingTurnIds = new Set<string>();
       const seenCursors = new Set<string>();
       let cursor: string | null = null;
       let pageCount = 0;
@@ -50,6 +51,7 @@ export class PaginatedCodexHistorySource {
           if (turn.itemsView !== 'full') {
             throw new Error(`Codex returned ${turn.itemsView} items for turn ${turn.id}`);
           }
+          survivingTurnIds.add(turn.id);
           const timestamp = codexTimestamp(turn.startedAt ?? turn.completedAt, this.profile.createdAt);
           for (const item of turn.items) {
             const converted = convertCodexAppServerItem(item, timestamp, { includeUserMessages: true });
@@ -75,6 +77,7 @@ export class PaginatedCodexHistorySource {
         this.profile.nativePath,
         this.profile.createdAt,
         signal,
+        survivingTurnIds,
       );
       const existingSources = new Set(messages.flatMap((message) => {
         const entryId = getNativeMessageSource(message)?.entryId;

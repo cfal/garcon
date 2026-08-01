@@ -9,6 +9,7 @@ export async function loadPaginatedUserMessageEvidence(
   nativePath: string,
   fallbackTimestamp: string,
   signal: AbortSignal,
+  survivingTurnIds: ReadonlySet<string>,
 ): Promise<ChatMessage[]> {
   // Pinned Codex persists ItemCompleted user messages but omits them from terminal
   // history reconstruction: https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/rollout/src/policy.rs#L86-L93
@@ -20,10 +21,13 @@ export async function loadPaginatedUserMessageEvidence(
     const rollout = record(parsed.value);
     const payload = record(rollout?.payload);
     const item = record(payload?.item);
+    const turnId = nonEmptyString(payload?.turn_id) ?? nonEmptyString(payload?.turnId);
     if (
       rollout?.type !== 'event_msg'
       || payload?.type !== 'item_completed'
       || (item?.type !== 'UserMessage' && item?.type !== 'userMessage')
+      || !turnId
+      || !survivingTurnIds.has(turnId)
     ) continue;
 
     const id = nonEmptyString(item.id);
@@ -43,7 +47,7 @@ export async function loadPaginatedUserMessageEvidence(
     convertCodexAppServerItem(threadItem, timestamp, { includeUserMessages: true })
       .forEach((message, withinSourceOrdinal) => {
         messages.push(attachNativeMessageSource(message, {
-          entryId: `turn:${String(payload.turn_id ?? 'unknown')}:item:${id}`,
+          entryId: `turn:${turnId}:item:${id}`,
           byteOffset: entry.byteOffset,
           lineNumber: entry.lineNumber,
           withinSourceOrdinal,
