@@ -57,6 +57,16 @@ describe('submitIdempotentCommand', () => {
 		expect(submit).toHaveBeenCalledTimes(2);
 	});
 
+	it('still probes a coded generic server failure once', async () => {
+		const submit = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(500, 'response lost', 'INTERNAL_ERROR'))
+			.mockResolvedValueOnce({ status: 'duplicate' });
+
+		await expect(submitIdempotentCommand(submit)).resolves.toEqual({ status: 'duplicate' });
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
+
 	it('reports an unknown outcome after two ambiguous responses', async () => {
 		const submit = vi
 			.fn()
