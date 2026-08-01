@@ -126,9 +126,11 @@
 		}),
 		getPermissionModes: () => ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions'],
 		getThinkingModes: () => ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
-		supportsFork: () => true,
-		supportsForkWhileRunning: () => true,
-	} as never);
+			supportsFork: () => true,
+			supportsForkWhileRunning: () => true,
+			supportsSteering: (agentId: string) => agentId === 'codex',
+			supportsGoals: (agentId: string) => agentId === 'codex',
+		} as never);
 
 	const chatInteractionGate = new ChatInteractionGate();
 	const transientLayers = new TransientLayerRegistry(chatInteractionGate);

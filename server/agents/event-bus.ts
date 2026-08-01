@@ -1,5 +1,5 @@
 import type {
-  AgentActiveInputHandoff,
+  AgentGoalControlHandoff,
   AgentExecutionEvent,
   AgentOperationIdentity,
 } from '@garcon/server-agent-interface';
@@ -58,8 +58,8 @@ export class AgentEventBus {
     chatId: string,
     predecessor: TurnEventMetadata | undefined,
     successor: TurnEventMetadata,
-    downstream: AgentActiveInputHandoff,
-  ): AgentActiveInputHandoff {
+    downstream: AgentGoalControlHandoff,
+  ): AgentGoalControlHandoff {
     const next = turnMetadata(successor);
     const validate = () => {
       const active = this.#turnMetadataByChatId.get(chatId);

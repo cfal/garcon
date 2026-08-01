@@ -1,11 +1,15 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { AgentIntegrationError, type AgentTranscriptPage, type AgentTranscriptPreview } from '@garcon/server-agent-interface';
-import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import {
+  attachNativeMessageSource,
+  getNativeMessageSource,
+} from '@garcon/server-agent-common/shared/native-message-source';
 import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 import type { CodexHistoryProfile } from '../history-profile.js';
-import { pageFromMessages } from '../history-loader.js';
+import { pageFromMessages, sortChatMessagesByTimestamp } from '../history-loader.js';
 import { CodexAppServerClient } from './client.js';
 import { convertCodexAppServerItem } from './converter.js';
+import { loadPaginatedUserMessageEvidence } from './paginated-user-message-evidence.js';
 
 const TURN_PAGE_SIZE = 100;
 const MAX_TURN_PAGES = 100_000;
@@ -21,6 +25,7 @@ export class PaginatedCodexHistorySource {
   constructor(
     private readonly profile: PaginatedProfile,
     private readonly createClient: () => CodexPaginatedHistoryClient,
+    private readonly loadUserMessageEvidence = loadPaginatedUserMessageEvidence,
   ) {}
 
   async load(signal: AbortSignal): Promise<ChatMessage[]> {
@@ -66,7 +71,28 @@ export class PaginatedCodexHistorySource {
           throw new Error('Codex paginated history exceeded the page limit');
         }
       } while (cursor);
-      return messages;
+      const evidence = await this.loadUserMessageEvidence(
+        this.profile.nativePath,
+        this.profile.createdAt,
+        signal,
+      );
+      const existingSources = new Set(messages.flatMap((message) => {
+        const entryId = getNativeMessageSource(message)?.entryId;
+        return entryId ? [entryId] : [];
+      }));
+      const existingRequestIds = new Set(messages.flatMap((message) => {
+        const requestId = upstreamRequestId(message);
+        return requestId ? [requestId] : [];
+      }));
+      return sortChatMessagesByTimestamp([
+        ...messages,
+        ...evidence.filter((message) => {
+          const sourceId = getNativeMessageSource(message)?.entryId;
+          const requestId = upstreamRequestId(message);
+          return !(sourceId && existingSources.has(sourceId))
+            && !(requestId && existingRequestIds.has(requestId));
+        }),
+      ]);
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof AgentIntegrationError) throw error;
@@ -130,4 +156,10 @@ function validPage(page: { readonly limit: number; readonly offset: number }): b
     && Number.isSafeInteger(page.offset)
     && page.offset >= 0
     && page.offset <= Number.MAX_SAFE_INTEGER - page.limit;
+}
+
+function upstreamRequestId(message: ChatMessage): string | null {
+  if (!('metadata' in message)) return null;
+  const value = message.metadata?.upstreamRequestId;
+  return typeof value === 'string' && value ? value : null;
 }

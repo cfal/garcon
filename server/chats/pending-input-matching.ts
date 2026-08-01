@@ -46,6 +46,7 @@ function imagesMatch(record: PendingUserInputRecord, images: ChatImage[] | undef
 
 function isUnidentifiedPendingEcho(record: PendingUserInputRecord, message: UserMessage): boolean {
   if (message.metadata?.clientRequestId) return false;
+  if (record.clientMessageId && message.metadata?.upstreamRequestId) return false;
   if (record.turnId && message.metadata?.turnId && record.turnId !== message.metadata.turnId) {
     return false;
   }
@@ -64,6 +65,7 @@ function identitylessEvidenceKey(message: UserMessage): string {
     content: message.content,
     images: message.images ?? [],
     turnId: message.metadata?.turnId ?? null,
+    upstreamRequestId: message.metadata?.upstreamRequestId ?? null,
   })).digest('hex');
 }
 
@@ -97,6 +99,19 @@ export function matchingRequestIds(
       (message, index) => (
         !matchedMessageIndexes.has(index)
         && message.metadata?.clientRequestId === record.clientRequestId
+      ),
+    );
+    if (messageIndex < 0) continue;
+    matchedMessageIndexes.add(messageIndex);
+    requestIds.add(record.clientRequestId);
+  }
+
+  for (const record of records) {
+    if (requestIds.has(record.clientRequestId) || !record.clientMessageId) continue;
+    const messageIndex = messages.findIndex(
+      (message, index) => (
+        !matchedMessageIndexes.has(index)
+        && message.metadata?.upstreamRequestId === record.clientMessageId
       ),
     );
     if (messageIndex < 0) continue;

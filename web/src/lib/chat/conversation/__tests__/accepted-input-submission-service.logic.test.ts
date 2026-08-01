@@ -8,7 +8,8 @@ function transport(overrides: Partial<AcceptedInputTransport> = {}): AcceptedInp
 		run: vi.fn(),
 		fork: vi.fn(),
 		enqueue: vi.fn(),
-		active: vi.fn(),
+		steer: vi.fn(),
+		goalControl: vi.fn(),
 		...overrides,
 	};
 }
@@ -92,31 +93,51 @@ describe('AcceptedInputSubmissionService', () => {
 		expect(createId).toHaveBeenCalledTimes(2);
 	});
 
-	it('uses one request identity for queued and active submissions', async () => {
+	it('uses one identity for queued and goal-control submissions', async () => {
 		const enqueue = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
-		const active = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
-		const createId = vi.fn().mockReturnValueOnce('queue-1').mockReturnValueOnce('active-1');
+		const goalControl = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
+		const createId = vi.fn().mockReturnValueOnce('queue-1').mockReturnValueOnce('goal-1');
 		const service = new AcceptedInputSubmissionService(
-			transport({ enqueue, active }),
+			transport({ enqueue, goalControl }),
 			createId,
 		);
 
 		const queued = service.enqueue({ chatId: 'chat-1', content: 'later' });
-		const activeInput = service.active({ chatId: 'chat-1', content: 'now' });
+		const goal = service.goalControl({ chatId: 'chat-1', content: '/goal pause' });
 		await queued.submit();
-		await activeInput.submit();
+		await goal.submit();
 
 		expect(queued).toMatchObject({ clientRequestId: 'queue-1' });
-		expect(activeInput).toMatchObject({ clientRequestId: 'active-1' });
+		expect(goal).toMatchObject({ clientRequestId: 'goal-1' });
 		expect(enqueue).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			content: 'later',
 			clientRequestId: 'queue-1',
 		});
-		expect(active).toHaveBeenCalledWith({
+		expect(goalControl).toHaveBeenCalledWith({
 			chatId: 'chat-1',
-			content: 'now',
-			clientRequestId: 'active-1',
+			content: '/goal pause',
+			clientRequestId: 'goal-1',
+		});
+	});
+
+	it('creates both steering identities before submission', async () => {
+		const steer = vi.fn().mockResolvedValue({ success: true, status: 'accepted' });
+		const createId = vi.fn().mockReturnValueOnce('request-1').mockReturnValueOnce('message-1');
+		const service = new AcceptedInputSubmissionService(transport({ steer }), createId);
+
+		const submission = service.steer({ chatId: 'chat-1', content: 'focus here' });
+
+		expect(submission).toMatchObject({
+			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
+		});
+		await submission.submit();
+		expect(steer).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			content: 'focus here',
+			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
 		});
 	});
 });

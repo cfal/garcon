@@ -9,11 +9,12 @@ import {
 } from '../../common/chat-types.ts';
 import {
   type AgentExecutionAdmission,
+  type AgentSteerOptions,
   type RunAgentTurnOptions,
 } from '../agents/session-types.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
-import { ActiveInputDeliveryError, DomainError } from '../lib/domain-error.js';
+import { DomainError } from '../lib/domain-error.js';
 import type { TurnIdentity } from '../lib/turn-identity.js';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
 import {
@@ -32,19 +33,22 @@ import {
 } from './chat-execution-control-transitions.ts';
 import {
   executionTurnIdentity,
-  type AcceptedActiveInput,
-  type AcceptedActiveInputOutcome,
+  type AcceptedGoalControl,
+  type AcceptedGoalControlOutcome,
   type AcceptedDirectInput,
   type AcceptedDirectOperation,
   type AcceptedQueueCreate,
   type AcceptedQueueDelete,
   type AcceptedQueueMove,
   type AcceptedQueueReplace,
+  type AcceptedSteerInput,
+  type AcceptedSteerOutcome,
   type AgentTurnRunnerPort,
   type ChatExecutionService,
   type ChatExistsResolver,
   type ChatMessagesCallback,
   type ChatMessagesPort,
+  type CapturedSteerTarget,
   type ChatIdleCallback,
   type DirectTurnReservation,
   type DispatchingCallback,
@@ -68,6 +72,8 @@ import { ChatExecutionControlOperations } from './chat-execution-control-operati
 import { ExecutionOwnership } from './execution-ownership.ts';
 import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
+import { GoalControlDelivery } from './goal-control-delivery.ts';
+import { SteerInputDelivery } from './steer-input-delivery.ts';
 import { waitUntilStopAbortable } from './stop-abortability.ts';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
@@ -115,6 +121,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #controlOperations: ChatExecutionControlOperations;
   #acceptedInputHandler: AcceptedInputHandler;
   #acceptedInputTranscript: AcceptedInputTranscript;
+  #goalControlDelivery: GoalControlDelivery;
+  #steerInputDelivery: SteerInputDelivery;
 
   constructor(
     _workspaceDir: string,
@@ -156,6 +164,25 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         this.emit('execution-control-updated', chatId, control);
       },
     });
+    const inputDeliveryOptions = {
+      turnRunner: this.#turnRunner,
+      pendingInputs: this.#pendingInputs,
+      ownership: this.#ownership,
+      registerPending: (
+        chatId: string,
+        content: string,
+        options: PendingUserInputRegistrationOptions,
+      ) => this.registerPendingUserInput(chatId, content, options),
+    };
+    this.#goalControlDelivery = new GoalControlDelivery({
+      ...inputDeliveryOptions,
+      getDrainOptions: this.#getDrainOptions,
+      readControl: (chatId) => this.readChatExecutionControl(chatId),
+    });
+    this.#steerInputDelivery = new SteerInputDelivery({
+      ...inputDeliveryOptions,
+      isShuttingDown: () => this.#shuttingDown,
+    });
     this.#acceptedInputHandler = new AcceptedInputHandler({
       controls: this.#controlOperations,
       pendingInputs: this.#pendingInputs,
@@ -174,8 +201,11 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
           this.#runDirect(reservation, content, options, dispatch, beforeFailureRelease)
         ),
         trackDispatch: (task) => { this.#trackDispatch(task); },
-        deliverActive: (chatId, content, options, beforeDelivery) => (
-          this.deliverActiveInput(chatId, content, options, beforeDelivery)
+        deliverGoalControl: (chatId, content, options, beforeDelivery) => (
+          this.deliverGoalControlInput(chatId, content, options, beforeDelivery)
+        ),
+        steer: (chatId, content, options, target, afterPendingRegistered) => (
+          this.steerInput(chatId, content, options, target, afterPendingRegistered)
         ),
         hasAppliedCreate: (chatId, commandKey, entryId) => (
           this.hasAppliedQueueCreateCommand(chatId, commandKey, entryId)
@@ -384,75 +414,54 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     await this.#acceptedInputHandler.scheduleOperation(input);
   }
 
-  async deliverActiveInput(
+  captureSteerTarget(chatId: string): CapturedSteerTarget | null {
+    return this.#steerInputDelivery.captureTarget(chatId);
+  }
+
+  async steerInput(
+    chatId: string,
+    content: string,
+    options: AgentSteerOptions,
+    target: CapturedSteerTarget,
+    afterPendingRegistered: (turnId: string) => Promise<void>,
+  ): Promise<AcceptedSteerOutcome> {
+    return this.#steerInputDelivery.deliver(
+      chatId,
+      content,
+      options,
+      target,
+      afterPendingRegistered,
+    );
+  }
+
+  async deliverGoalControlInput(
     chatId: string,
     content: string,
     options: RunAgentTurnOptions = {},
     afterPendingRegistered?: () => Promise<void>,
   ): Promise<boolean> {
-    const supportsActiveInput =
-      this.#turnRunner.isChatRunning(chatId) && typeof this.#turnRunner.submitActiveInput === 'function';
-    const currentQueue = supportsActiveInput ? await this.readChatExecutionControl(chatId) : null;
-    if (
-      !supportsActiveInput
-      || currentQueue?.entries.length !== 0
-      || currentQueue.pause !== null
-    ) return false;
-
-    const activeOptions = {
-      ...this.#getDrainOptions(chatId),
-      ...options,
-    };
-    assertTurnIdentifiers(activeOptions);
-    const activeAttempt = this.#ownership.attempt(chatId);
-    const predecessor = activeAttempt?.identity();
-    const successor = executionTurnIdentity(activeOptions)!;
-    let pendingRegistered = false;
-    let deliveryMayHaveStarted = false;
-    try {
-      const handled = await this.#turnRunner.submitActiveInput!(chatId, content, activeOptions, async (handoff) => {
-        const validateOwner = () => {
-          if (this.#ownership.attempt(chatId) !== activeAttempt) {
-            throw new Error(`Cannot hand off execution attempt for chat ${chatId} after its owner changed`);
-          }
-        };
-        validateOwner();
-        const committedHandoff = activeAttempt && predecessor
-          ? activeAttempt.handoffTurn(predecessor, successor, handoff)
-          : handoff;
-        committedHandoff.validate();
-        await this.registerPendingUserInput(chatId, content, activeOptions);
-        pendingRegistered = true;
-        await afterPendingRegistered?.();
-        validateOwner();
-        committedHandoff.validate();
-        committedHandoff.commit();
-        deliveryMayHaveStarted = true;
-      });
-      if (!handled && deliveryMayHaveStarted) {
-        throw new Error('Agent accepted active input without handling it');
-      }
-      return handled;
-    } catch (error) {
-      if (deliveryMayHaveStarted) {
-        this.#pendingInputs.markUnconfirmed(chatId, activeOptions.clientRequestId!);
-      } else if (pendingRegistered) {
-        this.#pendingInputs.markFailed(chatId, activeOptions.clientRequestId!);
-      }
-      throw new ActiveInputDeliveryError(error, deliveryMayHaveStarted);
-    }
+    return this.#goalControlDelivery.deliver(
+      chatId,
+      content,
+      options,
+      afterPendingRegistered,
+    );
   }
 
-  async deliverAcceptedActiveInput(
-    input: AcceptedActiveInput,
-  ): Promise<AcceptedActiveInputOutcome> {
-    return this.#acceptedInputHandler.deliverActive(input);
+  async deliverAcceptedGoalControl(
+    input: AcceptedGoalControl,
+  ): Promise<AcceptedGoalControlOutcome> {
+    return this.#acceptedInputHandler.deliverGoalControl(input);
   }
 
-  async recoverAcceptedActiveInput(
-    input: AcceptedActiveInput,
-  ): Promise<AcceptedActiveInputOutcome> {
-    return this.#acceptedInputHandler.recoverActive(input);
+  async deliverAcceptedSteer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome> {
+    return this.#acceptedInputHandler.steer(input);
+  }
+
+  async recoverAcceptedGoalControl(
+    input: AcceptedGoalControl,
+  ): Promise<AcceptedGoalControlOutcome> {
+    return this.#acceptedInputHandler.recoverGoalControl(input);
   }
 
   async clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState> {
@@ -978,20 +987,5 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #rollbackDeletion(chatId: string): void {
     this.#ownership.clearDeletionSuppression(chatId);
     this.#requestDrain(chatId, 'deletion rollback');
-  }
-}
-
-function assertTurnIdentifiers(
-  options: RunAgentTurnOptions,
-): asserts options is RunAgentTurnOptions & Required<Pick<
-  RunAgentTurnOptions,
-  'clientRequestId' | 'clientMessageId' | 'turnId'
->> {
-  if (!options.clientRequestId || !options.clientMessageId || !options.turnId) {
-    throw new DomainError(
-      'INTERNAL_ERROR',
-      'Accepted input is missing command identifiers',
-      500,
-    );
   }
 }

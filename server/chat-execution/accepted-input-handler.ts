@@ -1,18 +1,25 @@
 import crypto from 'crypto';
-import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/session-types.ts';
-import { ActiveInputDeliveryError, DomainError } from '../lib/domain-error.ts';
+import type {
+  AgentExecutionAdmission,
+  AgentSteerOptions,
+  RunAgentTurnOptions,
+} from '../agents/session-types.ts';
+import { GoalControlDeliveryError, DomainError } from '../lib/domain-error.ts';
 import { createLogger } from '../lib/log.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type {
-  AcceptedActiveInput,
-  AcceptedActiveInputOutcome,
+  AcceptedGoalControl,
+  AcceptedGoalControlOutcome,
   AcceptedDirectInput,
   AcceptedDirectOperation,
   AcceptedQueueCreate,
   AcceptedQueueDelete,
   AcceptedQueueMove,
   AcceptedQueueReplace,
+  AcceptedSteerInput,
+  AcceptedSteerOutcome,
+  CapturedSteerTarget,
   DirectTurnReservation,
   PendingInputsPort,
   PendingUserInputRegistrationOptions,
@@ -41,12 +48,19 @@ export interface AcceptedInputCoordinator {
     beforeFailureRelease?: (error: unknown) => Promise<void>,
   ): Promise<void>;
   trackDispatch(task: Promise<void>): void;
-  deliverActive(
+  deliverGoalControl(
     chatId: string,
     content: string,
     options: RunAgentTurnOptions,
     beforeDelivery: () => Promise<void>,
   ): Promise<boolean>;
+  steer(
+    chatId: string,
+    content: string,
+    options: AgentSteerOptions,
+    target: CapturedSteerTarget,
+    afterPendingRegistered: (turnId: string) => Promise<void>,
+  ): Promise<AcceptedSteerOutcome>;
   hasAppliedCreate(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
 }
 
@@ -211,10 +225,10 @@ export class AcceptedInputHandler {
     );
   }
 
-  async deliverActive(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome> {
+  async deliverGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome> {
     const turnId = input.command.turnId;
     if (!turnId) {
-      throw new DomainError('INTERNAL_ERROR', 'Accepted active input is missing a turn identifier', 500);
+      throw new DomainError('INTERNAL_ERROR', 'Accepted goal control is missing a turn identifier', 500);
     }
     const delivery = {
       clientRequestId: input.command.clientRequestId,
@@ -223,12 +237,12 @@ export class AcceptedInputHandler {
     };
     let deliveryAccepted = false;
     try {
-      const delivered = await this.#coordinator.deliverActive(
+      const delivered = await this.#coordinator.deliverGoalControl(
         input.command.chatId,
         input.content,
         delivery,
         async () => {
-          await this.#controls.stageActiveFallback(
+          await this.#controls.stageGoalControlFallback(
             input.command.chatId,
             input.content,
             { key: input.command.key, entryId: input.command.entryId },
@@ -245,12 +259,12 @@ export class AcceptedInputHandler {
       if (delivered) {
         deliveryAccepted = true;
         await this.#controls.removeSent(input.command.chatId, input.command.entryId);
-        await input.settlement.settleActiveInput(input.command);
+        await input.settlement.settleGoalControl(input.command);
         return { delivery: 'active', control: await this.#controls.read(input.command.chatId) };
       }
     } catch (error) {
-      deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
-      await input.settlement.settleActiveInputFailure(input.command, error, deliveryAccepted);
+      deliveryAccepted ||= error instanceof GoalControlDeliveryError && error.deliveryAccepted;
+      await input.settlement.settleGoalControlFailure(input.command, error, deliveryAccepted);
       throw error;
     }
     const queued = await this.enqueue({
@@ -261,7 +275,27 @@ export class AcceptedInputHandler {
     return { delivery: 'queued', entryId: queued.entryId, control: queued.control };
   }
 
-  async recoverActive(input: AcceptedActiveInput): Promise<AcceptedActiveInputOutcome> {
+  async steer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome> {
+    try {
+      const outcome = await this.#coordinator.steer(
+        input.command.chatId,
+        input.content,
+        {
+          clientRequestId: input.command.clientRequestId,
+          clientMessageId: input.clientMessageId,
+        },
+        input.target,
+        (turnId) => input.settlement.markScheduled(input.command, turnId),
+      );
+      await input.settlement.settleSteerSuccess(input.command, outcome.turnId);
+      return outcome;
+    } catch (error) {
+      await input.settlement.settleSteerFailure(input.command, error);
+      throw error;
+    }
+  }
+
+  async recoverGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome> {
     const applied = await this.#coordinator.hasAppliedCreate(
       input.command.chatId,
       input.command.key,
@@ -270,7 +304,7 @@ export class AcceptedInputHandler {
     if (!applied) {
       throw new DomainError(
         'INTERNAL_ERROR',
-        'The previous active-input delivery did not reach a recorded outcome',
+        'The previous goal-control delivery did not reach a recorded outcome',
         409,
       );
     }
@@ -279,7 +313,7 @@ export class AcceptedInputHandler {
       input.command.entryId,
     );
     await input.settlement.settleQueueMutation(input.command, input.command.entryId);
-    this.#coordinator.requestDrain(input.command.chatId, 'recovered active fallback');
+    this.#coordinator.requestDrain(input.command.chatId, 'recovered goal-control fallback');
     return {
       delivery: 'queued',
       entryId: input.command.entryId,

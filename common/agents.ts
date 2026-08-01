@@ -44,6 +44,8 @@ export interface AgentCatalogEntry {
   supportsForkAtMessage: boolean;
   supportsForkWhileRunning: boolean;
   supportsUpdateProjectPath: boolean;
+  supportsSteering: boolean;
+  supportsGoals: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];

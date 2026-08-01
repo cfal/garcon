@@ -14,6 +14,8 @@ const baseProps = {
 	agent: 'claude',
 	projectPath: '',
 	supportsFork: true,
+	supportsSteering: false,
+	supportsGoals: false,
 	canScheduleIn: true,
 };
 const mockedGetSlashCommands = vi.mocked(getSlashCommands);
@@ -156,10 +158,10 @@ describe('SlashCommandMenu', () => {
 		expect(onSelect).toHaveBeenCalledWith('s');
 	});
 
-	it('lists the Codex goal command only for Codex', () => {
+	it('lists the goal command when the agent supports goals', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
-			agent: 'codex',
+			supportsGoals: true,
 			isVisible: true,
 			query: 'goal',
 			onSelect: vi.fn(),
@@ -167,10 +169,10 @@ describe('SlashCommandMenu', () => {
 		});
 
 		expect(screen.getByText('/goal')).toBeTruthy();
-		expect(screen.getByText('Set a Codex goal and start working toward it')).toBeTruthy();
+		expect(screen.getByText('Set an agent goal and start working toward it')).toBeTruthy();
 	});
 
-	it('hides the Codex goal command for other agents', () => {
+	it('hides the goal command without the capability', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
@@ -182,10 +184,10 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('/goal')).toBeNull();
 	});
 
-	it('lists the steer command only for Codex', () => {
+	it('lists the steer command from capability data', () => {
 		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,
-			agent: 'codex',
+			supportsSteering: true,
 			isVisible: true,
 			query: 'steer',
 			onSelect: vi.fn(),
@@ -193,7 +195,7 @@ describe('SlashCommandMenu', () => {
 		});
 
 		expect(screen.getByText('/steer')).toBeTruthy();
-		expect(screen.getByText('Send guidance to the active Codex turn immediately')).toBeTruthy();
+		expect(screen.getByText('Send guidance to the active turn immediately')).toBeTruthy();
 		unmount();
 
 		render(SlashCommandMenuTestHost, {
@@ -309,6 +311,8 @@ describe('SlashCommandMenu', () => {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
+			supportsSteering: true,
+			supportsGoals: true,
 			canScheduleIn: true,
 			isVisible: true,
 			query: 'skill-11',
@@ -335,6 +339,8 @@ describe('SlashCommandMenu', () => {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
+			supportsSteering: true,
+			supportsGoals: true,
 			canScheduleIn: true,
 			isVisible: true,
 			query: 'skill',

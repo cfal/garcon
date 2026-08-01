@@ -1,10 +1,11 @@
 import type {
-  ActiveInputCommandRequest,
   ForkChatCommandRequest,
+  GoalControlCommandRequest,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
+  SteerCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import {
   CommandSupport,
@@ -25,6 +26,7 @@ import { ForkCommands } from './fork-commands.js';
 import { QueueCommands } from './queue-commands.js';
 import { SessionCommands } from './session-commands.js';
 import { StartCommands } from './start-commands.js';
+import { SteerCommands } from './steer-commands.js';
 
 export {
   CommandExecutionControlError,
@@ -43,6 +45,7 @@ export class ChatCommandService {
   readonly #fork: ForkCommands;
   readonly #queue: QueueCommands;
   readonly #session: SessionCommands;
+  readonly #steer: SteerCommands;
 
   constructor(private readonly deps: ChatCommandServiceDeps) {
     const support = new CommandSupport(deps);
@@ -50,6 +53,7 @@ export class ChatCommandService {
     this.#fork = new ForkCommands(support);
     this.#queue = new QueueCommands(support);
     this.#session = new SessionCommands(support);
+    this.#steer = new SteerCommands(support);
   }
 
   async waitForBackgroundTasks(): Promise<void> {
@@ -96,8 +100,12 @@ export class ChatCommandService {
     return this.#queue.submitQueueEntryMove(input);
   }
 
-  submitActiveInput(input: ActiveInputCommandRequest) {
-    return this.#queue.submitActiveInput(input);
+  submitGoalControl(input: GoalControlCommandRequest) {
+    return this.#queue.submitGoalControl(input);
+  }
+
+  submitSteer(input: SteerCommandRequest) {
+    return this.#steer.submit(input);
   }
 
   submitScheduledExistingChat(input: ScheduledExistingChatInput) {

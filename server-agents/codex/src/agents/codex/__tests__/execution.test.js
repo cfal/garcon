@@ -15,7 +15,7 @@ function createRuntime() {
     return { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' };
   });
   runtime.runTurn = mock(async () => undefined);
-  runtime.submitActiveInput = mock(async () => true);
+  runtime.submitGoalControl = mock(async () => true);
   runtime.compact = mock(async () => undefined);
   runtime.abort = mock(async () => false);
   runtime.isRunning = mock(() => false);
@@ -74,7 +74,7 @@ async function commitHandoff(handoff) {
   handoff.commit();
 }
 
-function activeInputRequest(operation, beforeDelivery = commitHandoff) {
+function goalControlRequest(operation, beforeDelivery = commitHandoff) {
   return startRequest({
     agentSessionId: 'thread-1',
     nativeSession: {
@@ -211,7 +211,7 @@ describe('CodexExecution', () => {
   });
 
   for (const outcome of ['decline', 'failure']) {
-    it(`keeps the predecessor operation visible when active input has a pre-boundary ${outcome}`, async () => {
+    it(`keeps the predecessor operation visible when goal control has a pre-boundary ${outcome}`, async () => {
       const runtime = createRuntime();
       const execution = new CodexExecution(
         createHost(),
@@ -225,7 +225,7 @@ describe('CodexExecution', () => {
       const events = [];
       execution.subscribe((event) => events.push(event));
       await execution.start(startRequest());
-      runtime.submitActiveInput.mockImplementation(async () => {
+      runtime.submitGoalControl.mockImplementation(async () => {
         runtime.emitFinished('chat-1', 0, {
           clientRequestId: predecessor.clientRequestId,
           turnId: predecessor.turnId,
@@ -234,7 +234,7 @@ describe('CodexExecution', () => {
         return false;
       });
 
-      const activeInput = execution.submitActiveInput(activeInputRequest(successor));
+      const activeInput = execution.submitGoalControl(goalControlRequest(successor));
       if (outcome === 'failure') await expect(activeInput).rejects.toThrow('failed before delivery boundary');
       else await expect(activeInput).resolves.toBe(false);
       expect(events).toContainEqual(expect.objectContaining({
@@ -242,7 +242,7 @@ describe('CodexExecution', () => {
         operation: predecessor,
       }));
 
-      await execution.resume(activeInputRequest(next));
+      await execution.resume(goalControlRequest(next));
       expect(runtime.runTurn).toHaveBeenCalledOnce();
     });
   }
@@ -260,7 +260,7 @@ describe('CodexExecution', () => {
     const events = [];
     execution.subscribe((event) => events.push(event));
     await execution.start(startRequest());
-    runtime.submitActiveInput.mockImplementation(async (_request, beforeDelivery) => {
+    runtime.submitGoalControl.mockImplementation(async (_request, beforeDelivery) => {
       await beforeDelivery({
         validate: () => undefined,
         commit: () => undefined,
@@ -268,7 +268,7 @@ describe('CodexExecution', () => {
       throw new Error('delivery outcome unknown');
     });
 
-    await expect(execution.submitActiveInput(activeInputRequest(successor)))
+    await expect(execution.submitGoalControl(goalControlRequest(successor)))
       .rejects.toThrow('delivery outcome unknown');
     runtime.emitFailed('chat-1', 'delivery failed', {
       clientRequestId: successor.clientRequestId,
@@ -331,7 +331,7 @@ describe('CodexExecution', () => {
     bus.markTurnAbortable('chat-1', predecessor);
     attempt.markAbortable();
     await execution.start(startRequest());
-    runtime.submitActiveInput.mockImplementation(async (request, beforeDelivery) => {
+    runtime.submitGoalControl.mockImplementation(async (request, beforeDelivery) => {
       await beforeDelivery({
         validate: () => undefined,
         commit: () => {
@@ -345,7 +345,7 @@ describe('CodexExecution', () => {
       return true;
     });
 
-    await expect(execution.submitActiveInput(activeInputRequest(rejected, async (operationHandoff) => {
+    await expect(execution.submitGoalControl(goalControlRequest(rejected, async (operationHandoff) => {
       const handoff = composeHandoff(operationHandoff, rejected);
       handoff.validate();
       await Promise.resolve();
@@ -356,8 +356,8 @@ describe('CodexExecution', () => {
     emitOutput('A after persistence failed');
     assertOwner('turn-1', 'A after persistence failed');
 
-    await expect(execution.submitActiveInput({
-      ...activeInputRequest(successor, async (operationHandoff) => {
+    await expect(execution.submitGoalControl({
+      ...goalControlRequest(successor, async (operationHandoff) => {
         const handoff = composeHandoff(operationHandoff, successor);
         handoff.validate();
         await Promise.resolve();

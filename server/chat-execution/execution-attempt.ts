@@ -1,5 +1,5 @@
 import { matchesTurnIdentity, type TurnIdentity } from '../lib/turn-identity.js';
-import type { AgentActiveInputHandoff } from '@garcon/server-agent-interface';
+import type { AgentGoalControlHandoff } from '@garcon/server-agent-interface';
 
 type ExecutionAttemptPhase =
   | 'reserved'
@@ -96,8 +96,8 @@ export class QueueExecutionAttempt {
   handoffTurn(
     predecessor: TurnIdentity,
     successor: TurnIdentity,
-    downstream: AgentActiveInputHandoff,
-  ): AgentActiveInputHandoff {
+    downstream: AgentGoalControlHandoff,
+  ): AgentGoalControlHandoff {
     const next = { ...successor };
     const validate = () => {
       if (!sameTurnIdentity(this.#turn, predecessor)) {

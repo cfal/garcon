@@ -7,10 +7,12 @@ import type {
   AgentCommands,
   AgentEndpoints,
   AgentForking,
+  AgentGoals,
   AgentLifecycle,
   AgentMigration,
   AgentSettings,
   AgentSingleQuery,
+  AgentSteering,
 } from './services.js';
 import type { AgentTranscriptIndexModuleReference } from './transcript-index.js';
 import type { AgentTranscript } from './transcript.js';
@@ -26,6 +28,8 @@ export interface AgentIntegration {
   readonly auth: AgentAuth | null;
   readonly commands: AgentCommands | null;
   readonly forking: AgentForking | null;
+  readonly steering: AgentSteering | null;
+  readonly goals: AgentGoals | null;
   readonly endpoints: AgentEndpoints | null;
   readonly singleQuery: AgentSingleQuery | null;
 }
@@ -33,6 +37,6 @@ export interface AgentIntegration {
 export interface AgentIntegrationClass {
   new (host: AgentHost): AgentIntegration;
   readonly integrationId: string;
-  readonly apiVersion: 2;
+  readonly apiVersion: 3;
   readonly transcriptIndex: AgentTranscriptIndexModuleReference;
 }

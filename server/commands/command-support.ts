@@ -72,6 +72,7 @@ export type PendingInputsDep = Pick<
   | 'clearChat'
   | 'hasInFlightForChat'
   | 'markFailed'
+  | 'markUnconfirmed'
   | 'reconcileNativeHistory'
   | 'reconcileRetainedHistory'
 >;

@@ -110,9 +110,20 @@ describe('CommandLedger', () => {
       commandType: 'queue-entry-delete',
       clientRequestId: 'queue-2',
     }));
+    const goalControl = await ledger.accept(acceptedInput({
+      commandType: 'goal-control',
+      clientRequestId: 'goal-control-1',
+    }));
+    await ledger.accept(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-1',
+    }));
     await ledger.settleTerminal(first.record.key, 'finished');
 
-    expect(ledger.unsettledQueueReceiptKeys('chat-1')).toEqual(new Set([second.record.key]));
+    expect(ledger.unsettledQueueReceiptKeys('chat-1')).toEqual(new Set([
+      second.record.key,
+      goalControl.record.key,
+    ]));
   });
 
   it('keeps unsettled and fork-preparation records while trimming old terminal records', async () => {
@@ -135,6 +146,39 @@ describe('CommandLedger', () => {
     expect(await ledger.getRecord(unsettled.record.key)).not.toBeNull();
     expect(await ledger.getRecord(fork.record.key)).not.toBeNull();
     expect(await ledger.getRecord(commandLedgerKey('agent-run', 'chat-1', 'terminal-0'))).toBeNull();
+  });
+
+  it('retains compact steering identities for process-lifetime at-most-once delivery', async () => {
+    const ledger = new CommandLedger();
+    const steerInput = acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'steer-retained',
+      payload: {
+        chatId: 'chat-1',
+        content: 'sensitive steering content',
+        clientMessageId: 'message-retained',
+      },
+    });
+    const steer = await ledger.accept(steerInput);
+    await ledger.settleTerminal(steer.record.key, 'finished', { turnId: 'turn-1' });
+
+    for (let index = 0; index < LEDGER_RECORD_LIMIT + 5; index += 1) {
+      const result = await ledger.accept(acceptedInput({ clientRequestId: `terminal-${index}` }));
+      await ledger.settleTerminal(result.record.key, 'finished');
+    }
+
+    expect(await ledger.accept(steerInput)).toMatchObject({
+      kind: 'duplicate',
+      record: { payload: {}, status: 'finished', turnId: 'turn-1' },
+    });
+    expect(await ledger.accept({
+      ...steerInput,
+      payload: { ...steerInput.payload, content: 'changed content' },
+    })).toMatchObject({ kind: 'conflict' });
+    expect(await ledger.accept(acceptedInput({
+      commandType: 'agent-run',
+      clientRequestId: 'steer-retained',
+    }))).toMatchObject({ kind: 'conflict' });
   });
 
   it('does not share records between process-lifetime ledger instances', async () => {

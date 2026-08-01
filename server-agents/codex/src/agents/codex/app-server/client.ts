@@ -47,6 +47,8 @@ export type SpawnCodexAppServer = (
 interface PendingRequest<T> {
   resolve: (value: T) => void;
   reject: (error: Error) => void;
+  timeout?: ReturnType<typeof setTimeout>;
+  deliveryOutcome?: 'unknown';
 }
 
 export class CodexAppServerRpcError extends Error {
@@ -58,6 +60,31 @@ export class CodexAppServerRpcError extends Error {
     super(message);
   }
 }
+
+export class CodexAppServerDeliveryError extends Error {
+  readonly safeMessage: string;
+
+  constructor(
+    public readonly outcome: 'not-sent' | 'unknown',
+    cause: unknown,
+  ) {
+    super(
+      outcome === 'unknown'
+        ? 'Codex steering outcome could not be confirmed'
+        : 'Codex steering input was not sent',
+      { cause },
+    );
+    this.name = 'CodexAppServerDeliveryError';
+    this.safeMessage = this.message;
+  }
+}
+
+export interface CodexSteerRequestOptions {
+  readonly prepareDelivery: () => Promise<void>;
+  readonly acknowledgementTimeoutMs?: number;
+}
+
+export const CODEX_STEER_ACKNOWLEDGEMENT_TIMEOUT_MS = 15_000;
 
 export interface CodexAppServerClientOptions {
   env?: Record<string, string>;
@@ -141,9 +168,13 @@ export class CodexAppServerClient extends EventEmitter {
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     await this.connect();
+    return this.#withRequestMetric(method, () => this.#sendRequest<T>(method, params));
+  }
+
+  async #withRequestMetric<T>(method: string, operation: () => Promise<T>): Promise<T> {
     const startedAt = performance.now();
     try {
-      const result = await this.#sendRequest<T>(method, params);
+      const result = await operation();
       this.#emitMetric({
         name: 'codex.app_server.request',
         method,
@@ -238,8 +269,25 @@ export class CodexAppServerClient extends EventEmitter {
     expectedTurnId: string;
     input: Array<Record<string, unknown>>;
     clientUserMessageId?: string;
-  }): Promise<TurnSteerResponse> {
-    return this.request<TurnSteerResponse>('turn/steer', params);
+  }, options?: CodexSteerRequestOptions): Promise<TurnSteerResponse> {
+    if (!options) return this.request<TurnSteerResponse>('turn/steer', params);
+    return this.#strictSteerRequest(params, options);
+  }
+
+  async #strictSteerRequest(
+    params: {
+      threadId: string;
+      expectedTurnId: string;
+      input: Array<Record<string, unknown>>;
+      clientUserMessageId?: string;
+    },
+    options: CodexSteerRequestOptions,
+  ): Promise<TurnSteerResponse> {
+    await this.connect();
+    return this.#withRequestMetric(
+      'turn/steer',
+      () => this.#sendStrictRequest<TurnSteerResponse>('turn/steer', params, options),
+    );
   }
 
   interruptTurn(threadId: string, turnId: string): Promise<Record<string, never>> {
@@ -300,6 +348,61 @@ export class CodexAppServerClient extends EventEmitter {
     return promise;
   }
 
+  async #sendStrictRequest<T>(
+    method: string,
+    params: unknown,
+    options: CodexSteerRequestOptions,
+  ): Promise<T> {
+    const id = this.#nextId++;
+    let frame: string;
+    try {
+      frame = `${JSON.stringify({ id, method, params })}\n`;
+    } catch (error) {
+      throw new CodexAppServerDeliveryError('not-sent', error);
+    }
+    const stdin = this.#proc?.stdin;
+    if (!stdin) {
+      throw new CodexAppServerDeliveryError(
+        'not-sent',
+        new Error('Codex app-server stdin is unavailable'),
+      );
+    }
+
+    await options.prepareDelivery();
+    const promise = new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        const pending = this.#pending.get(id);
+        if (!pending) return;
+        this.#pending.delete(id);
+        pending.reject(new CodexAppServerDeliveryError(
+          'unknown',
+          new Error('Codex steering acknowledgement timed out'),
+        ));
+      }, options.acknowledgementTimeoutMs ?? CODEX_STEER_ACKNOWLEDGEMENT_TIMEOUT_MS);
+      this.#pending.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timeout,
+        deliveryOutcome: 'unknown',
+      });
+    });
+
+    try {
+      stdin.write(frame);
+    } catch (error) {
+      this.#clearPendingRequest(id);
+      throw new CodexAppServerDeliveryError('unknown', error);
+    }
+    return promise;
+  }
+
+  #clearPendingRequest(id: number): PendingRequest<unknown> | undefined {
+    const pending = this.#pending.get(id);
+    this.#pending.delete(id);
+    if (pending?.timeout) clearTimeout(pending.timeout);
+    return pending;
+  }
+
   #write(payload: unknown): void {
     const stdin = this.#proc?.stdin;
     if (!stdin) throw new Error('Codex app-server stdin is unavailable');
@@ -342,17 +445,23 @@ export class CodexAppServerClient extends EventEmitter {
 
     if (typeof obj.id === 'number' && 'result' in obj) {
       const success = message as JsonRpcSuccess;
-      const pending = this.#pending.get(success.id);
-      this.#pending.delete(success.id);
-      pending?.resolve(success.result);
+      const pending = this.#clearPendingRequest(success.id);
+      if (!pending) {
+        this.emit('warning', `Ignoring late Codex app-server response: ${success.id}`);
+        return;
+      }
+      pending.resolve(success.result);
       return;
     }
 
     if (typeof obj.id === 'number' && 'error' in obj) {
       const failure = message as JsonRpcFailure;
-      const pending = this.#pending.get(failure.id);
-      this.#pending.delete(failure.id);
-      pending?.reject(new CodexAppServerRpcError(
+      const pending = this.#clearPendingRequest(failure.id);
+      if (!pending) {
+        this.emit('warning', `Ignoring late Codex app-server response: ${failure.id}`);
+        return;
+      }
+      pending.reject(new CodexAppServerRpcError(
         failure.error.message,
         failure.error.code,
         failure.error.data,
@@ -391,7 +500,12 @@ export class CodexAppServerClient extends EventEmitter {
   async #watchExit(exited: Promise<number>): Promise<void> {
     const code = await exited;
     const error = new Error(`Codex app-server exited with code ${code}`);
-    for (const pending of this.#pending.values()) pending.reject(error);
+    for (const pending of this.#pending.values()) {
+      if (pending.timeout) clearTimeout(pending.timeout);
+      pending.reject(pending.deliveryOutcome
+        ? new CodexAppServerDeliveryError(pending.deliveryOutcome, error)
+        : error);
+    }
     this.#pending.clear();
     this.#proc = null;
     this.#ready = null;

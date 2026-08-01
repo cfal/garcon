@@ -9,7 +9,6 @@ function input(
 		isDraft: false,
 		isProcessing: false,
 		control: emptyChatExecutionControlState(),
-		isActiveDeliveryInput: false,
 		hasAttachments: false,
 		...overrides,
 	};
@@ -19,11 +18,6 @@ describe('classifySubmission', () => {
 	it.each([
 		['draft chat', input({ isDraft: true }), 'draft'],
 		['idle chat', input(), 'direct'],
-		[
-			'active steering input',
-			input({ isProcessing: true, isActiveDeliveryInput: true }),
-			'active',
-		],
 		['ordinary active-turn input', input({ isProcessing: true }), 'queue'],
 		[
 			'queued predecessor',

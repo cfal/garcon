@@ -57,8 +57,10 @@ import {
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import {
 	submitDraftRoute,
+	submitGoalControlRoute,
 	submitQueueRoute,
 	submitRunRoute,
+	submitSteerRoute,
 } from '$lib/chat/conversation/submission-routes.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -188,6 +190,8 @@ export interface SessionControllerDeps {
 		getThinkingModes: (agentId: SessionAgentId) => readonly ThinkingMode[];
 		supportsFork: (agentId: SessionAgentId) => boolean;
 		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
+		supportsSteering: (agentId: SessionAgentId) => boolean;
+		supportsGoals: (agentId: SessionAgentId) => boolean;
 	};
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
@@ -481,6 +485,24 @@ export class ConversationSessionController {
 		});
 		if (slash.kind === 'handled') return slash.outcome;
 
+		const specializedContext = {
+			chatId,
+			chat: selected,
+			startup: deps.sessions.startupByChatId[chatId],
+			text,
+			content: slash.content,
+			images: [] as ChatImage[],
+			previousText,
+			previousImages,
+			restoreComposerOnFailure,
+		};
+		if (slash.kind === 'steer') {
+			return submitSteerRoute(deps, this.#acceptedInputs, specializedContext);
+		}
+		if (slash.kind === 'goal-control') {
+			return submitGoalControlRoute(deps, this.#acceptedInputs, this.#queue, specializedContext);
+		}
+
 		const isDraft = selected.status === 'draft';
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
 		const pendingControlRefresh = this.#queue.pendingControlRefresh(chatId);
@@ -491,7 +513,6 @@ export class ConversationSessionController {
 			isDraft,
 			isProcessing: activeTurn,
 			control: deps.conversationUi.getExecutionControl(chatId),
-			isActiveDeliveryInput: slash.isActiveDeliveryInput,
 			hasAttachments: submissionImages.length > 0,
 		});
 		if (route === 'queue-attachments-unsupported') {
@@ -525,8 +546,8 @@ export class ConversationSessionController {
 			previousImages,
 			restoreComposerOnFailure,
 		};
-		if (route === 'queue' || route === 'active') {
-			return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context, route);
+		if (route === 'queue') {
+			return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context);
 		}
 		if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
 		return submitRunRoute(

@@ -8,6 +8,7 @@ import {
   type CommandSettlementPort,
   type PreScheduleFailure,
 } from '../chat-execution/types.ts';
+import { DomainError } from '../lib/domain-error.ts';
 
 export class ChatCommandSettlement implements CommandSettlementPort {
   constructor(private readonly ledger: CommandLedger) {}
@@ -52,11 +53,11 @@ export class ChatCommandSettlement implements CommandSettlementPort {
     });
   }
 
-  async settleActiveInput(command: AcceptedExecutionCommand): Promise<void> {
+  async settleGoalControl(command: AcceptedExecutionCommand): Promise<void> {
     await this.ledger.update(command.key, { status: 'finished', entryId: undefined });
   }
 
-  async settleActiveInputFailure(
+  async settleGoalControlFailure(
     command: AcceptedExecutionCommand,
     error: unknown,
     deliveryAccepted: boolean,
@@ -65,8 +66,29 @@ export class ChatCommandSettlement implements CommandSettlementPort {
       status: deliveryAccepted ? 'accepted' : 'failed',
       error: error instanceof Error ? error.message : String(error),
       errorCode: deliveryAccepted
-        ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
+        ? 'GOAL_CONTROL_OUTCOME_UNKNOWN'
         : PRE_SCHEDULE_FAILURE_ERROR_CODE,
+    });
+  }
+
+  async settleSteerSuccess(command: AcceptedExecutionCommand, turnId: string): Promise<void> {
+    await this.ledger.update(command.key, {
+      status: 'finished',
+      turnId,
+      entryId: undefined,
+      error: undefined,
+      errorCode: undefined,
+    });
+  }
+
+  async settleSteerFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void> {
+    const domainError = error instanceof DomainError ? error : null;
+    const rejected = domainError !== null && domainError.status < 500;
+    await this.ledger.update(command.key, {
+      status: rejected ? 'rejected' : 'failed',
+      error: domainError?.message ?? (error instanceof Error ? error.message : String(error)),
+      errorCode: domainError?.code ?? 'INTERNAL_ERROR',
+      entryId: undefined,
     });
   }
 

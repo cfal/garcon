@@ -28,8 +28,14 @@ export type CommandErrorCode = Extract<
   | 'QUEUE_ENTRY_REVISION_CONFLICT'
   | 'QUEUE_ENTRY_REORDER_CONFLICT'
   | 'QUEUE_PAUSE_CHANGED'
-  | 'ACTIVE_INPUT_NOT_DELIVERED'
-  | 'ACTIVE_INPUT_OUTCOME_UNKNOWN'
+  | 'STEER_NOT_DELIVERED'
+  | 'STEER_OUTCOME_UNKNOWN'
+  | 'STEER_PROVIDER_REJECTED'
+  | 'STEER_TURN_UNAVAILABLE'
+  | 'STEER_TURN_CHANGED'
+  | 'STEER_TURN_NOT_STEERABLE'
+  | 'GOAL_CONTROL_NOT_DELIVERED'
+  | 'GOAL_CONTROL_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
   | 'OPERATION_UNSUPPORTED'
   | 'SOURCE_REVISION_CHANGED'
@@ -45,6 +51,7 @@ export type CommandErrorCode = Extract<
   | 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
+  | 'SERVER_SHUTTING_DOWN'
   | 'INTERNAL_ERROR'
 >;
 
@@ -178,13 +185,27 @@ export interface QueueEntryDeleteResponse extends CommandAcceptedResponse {
   control: ChatExecutionControlState;
 }
 
-export interface ActiveInputCommandRequest {
+export interface SteerCommandRequest {
+  clientRequestId: string;
+  clientMessageId: string;
+  chatId: string;
+  content: string;
+}
+
+export interface SteerCommandResponse extends CommandAcceptedResponse {
+  commandType: 'steer';
+  chatId: string;
+  turnId: string;
+}
+
+export interface GoalControlCommandRequest {
   clientRequestId: string;
   chatId: string;
   content: string;
 }
 
-export interface ActiveInputCommandResponse extends CommandAcceptedResponse {
+export interface GoalControlCommandResponse extends CommandAcceptedResponse {
+  commandType: 'goal-control';
   delivery: 'active' | 'queued';
   entryId?: string;
   control: ChatExecutionControlState;
@@ -527,7 +548,17 @@ export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMov
   };
 }
 
-export function parseActiveInputCommandRequest(value: unknown): ActiveInputCommandRequest {
+export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
+  const body = requestRecord(value);
+  return {
+    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientMessageId: requiredString(body, 'clientMessageId'),
+    chatId: requiredChatId(body, 'chatId'),
+    content: requiredContent(body, 'content'),
+  };
+}
+
+export function parseGoalControlCommandRequest(value: unknown): GoalControlCommandRequest {
   const body = requestRecord(value);
   return {
     clientRequestId: requiredString(body, 'clientRequestId'),

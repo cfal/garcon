@@ -21,9 +21,12 @@ export class ValidationDomainError extends DomainError {
   }
 }
 
-export const ACTIVE_INPUT_NOT_DELIVERED_MESSAGE = 'Active input was not delivered. Retry the request.';
-export const ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE =
-  'Active input delivery could not be confirmed after acceptance. Check the chat before sending it again.';
+export const STEER_NOT_DELIVERED_MESSAGE = 'Steering input was not delivered.';
+export const STEER_OUTCOME_UNKNOWN_MESSAGE =
+  'Steering delivery could not be confirmed. Check the chat before sending it again.';
+export const GOAL_CONTROL_NOT_DELIVERED_MESSAGE = 'Goal control was not delivered. Retry the request.';
+export const GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE =
+  'Goal control delivery could not be confirmed after acceptance. Check the chat before sending it again.';
 export const TRANSCRIPT_UNAVAILABLE_MESSAGE = 'Chat transcript is unavailable.';
 export const TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE =
   'Chat transcript is temporarily unavailable. Retry the request.';
@@ -34,18 +37,34 @@ export function transcriptUnavailableMessage(retryable: boolean): string {
     : TRANSCRIPT_UNAVAILABLE_MESSAGE;
 }
 
-export class ActiveInputDeliveryError extends DomainError {
+export class SteerDeliveryError extends DomainError {
+  readonly outcome: 'not-sent' | 'unknown';
+
+  constructor(error: unknown, outcome: 'not-sent' | 'unknown') {
+    super(
+      outcome === 'unknown' ? 'STEER_OUTCOME_UNKNOWN' : 'STEER_NOT_DELIVERED',
+      outcome === 'unknown' ? STEER_OUTCOME_UNKNOWN_MESSAGE : STEER_NOT_DELIVERED_MESSAGE,
+      500,
+      false,
+      { cause: error },
+    );
+    this.name = 'SteerDeliveryError';
+    this.outcome = outcome;
+  }
+}
+
+export class GoalControlDeliveryError extends DomainError {
   readonly deliveryAccepted: boolean;
 
   constructor(error: unknown, deliveryAccepted: boolean) {
     super(
-      deliveryAccepted ? 'ACTIVE_INPUT_OUTCOME_UNKNOWN' : 'ACTIVE_INPUT_NOT_DELIVERED',
-      deliveryAccepted ? ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE : ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+      deliveryAccepted ? 'GOAL_CONTROL_OUTCOME_UNKNOWN' : 'GOAL_CONTROL_NOT_DELIVERED',
+      deliveryAccepted ? GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE : GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
       500,
       !deliveryAccepted,
       { cause: error },
     );
-    this.name = 'ActiveInputDeliveryError';
+    this.name = 'GoalControlDeliveryError';
     this.deliveryAccepted = deliveryAccepted;
   }
 }

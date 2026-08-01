@@ -17,7 +17,7 @@ export function validateAgentIntegration(
   options: AgentIntegrationConformanceOptions,
 ): void {
   const { integration, integrationClass } = options;
-  if (integrationClass.apiVersion !== 2) {
+  if (integrationClass.apiVersion !== 3) {
     throw new Error(`Unsupported agent integration API version: ${integrationClass.apiVersion}`);
   }
   if (integrationClass.integrationId !== integration.descriptor.id) {
@@ -42,6 +42,26 @@ export function validateAgentIntegration(
   }
   if (!integration.catalog || !integration.settings || !integration.lifecycle || !integration.migration) {
     throw new Error(`Agent integration ${integration.descriptor.id} is missing a required service facet`);
+  }
+  for (const facet of ['steering', 'goals'] as const) {
+    if (!(facet in integration) || integration[facet] === undefined) {
+      throw new Error(`Agent integration ${integration.descriptor.id} is missing required ${facet} capability state`);
+    }
+  }
+  if (
+    integration.steering !== null
+    && (
+      typeof integration.steering.captureTarget !== 'function'
+      || typeof integration.steering.steer !== 'function'
+    )
+  ) {
+    throw new Error(`Agent integration ${integration.descriptor.id} has an invalid steering facet`);
+  }
+  if (integration.goals !== null && typeof integration.goals.submitControl !== 'function') {
+    throw new Error(`Agent integration ${integration.descriptor.id} has an invalid goals facet`);
+  }
+  if ('submitActiveInput' in integration.execution) {
+    throw new Error(`Agent integration ${integration.descriptor.id} exposes removed execution.submitActiveInput`);
   }
   assertUniqueDescriptorValues(
     integration.descriptor.id,

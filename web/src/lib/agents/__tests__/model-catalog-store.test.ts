@@ -58,6 +58,8 @@ describe('ModelCatalogStore', () => {
 		expect(store.getAgents()).toEqual([]);
 		expect(store.getModels('claude')).toEqual([]);
 		expect(store.supportsFork('claude')).toBe(false);
+		expect(store.supportsSteering('claude')).toBe(false);
+		expect(store.supportsGoals('claude')).toBe(false);
 		expect(store.getPermissionModes('claude')).toEqual([]);
 		expect(store.getThinkingModes('claude')).toEqual([]);
 	});
@@ -108,6 +110,8 @@ describe('ModelCatalogStore', () => {
 		expect(store.getSelectableAgents()).toEqual(['sample']);
 		expect(store.getModels('sample')).toEqual([{ value: 'sample-model', label: 'Sample Model' }]);
 		expect(store.supportsFork('sample')).toBe(true);
+		expect(store.supportsSteering('sample')).toBe(false);
+		expect(store.supportsGoals('sample')).toBe(false);
 		expect(store.getPermissionModes('sample')).toEqual(['default', 'manualBypass']);
 		expect(store.getThinkingModes('sample')).toEqual(['none', 'high']);
 		expect(store.getAgentSettingsDescriptors('sample')).toEqual([
@@ -227,6 +231,8 @@ describe('ModelCatalogStore', () => {
 						label: 'Sample Agent',
 						supportsFork: true,
 						supportsForkAtMessage: true,
+						supportsSteering: true,
+						supportsGoals: true,
 						supportsUpdateProjectPath: true,
 						supportsImages: true,
 						supportedPermissionModes: ['default', 'plan'],
@@ -257,6 +263,8 @@ describe('ModelCatalogStore', () => {
 		expect(store.getAgent('stale')).toBeNull();
 		expect(store.supportsFork('sample-agent')).toBe(true);
 		expect(store.supportsForkAtMessage('sample-agent')).toBe(true);
+		expect(store.supportsSteering('sample-agent')).toBe(true);
+		expect(store.supportsGoals('sample-agent')).toBe(true);
 		expect(store.supportsUpdateProjectPath('sample-agent')).toBe(true);
 		expect(store.supportsImages('sample-agent')).toBe(true);
 		expect(store.getPermissionModes('sample-agent')).toEqual(['default', 'plan']);

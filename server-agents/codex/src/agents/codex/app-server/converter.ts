@@ -75,7 +75,14 @@ export function convertCodexAppServerItem(
     case 'userMessage': {
       const text = userInputText(item.content);
       if (options.includeUserMessages === false) return [];
-      return text.trim() ? [new UserMessage(timestamp, stripResolvedFileMentionContext(text))] : [];
+      return text.trim()
+        ? [new UserMessage(
+            timestamp,
+            stripResolvedFileMentionContext(text),
+            undefined,
+            item.clientId ? { upstreamRequestId: item.clientId } : undefined,
+          )]
+        : [];
     }
     case 'agentMessage': {
       return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];

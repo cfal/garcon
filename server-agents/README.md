@@ -62,7 +62,7 @@ import { resolveAgentStandaloneEntrypoint } from '@garcon/server-agent-common/bu
 
 export default class ExampleAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'example';
-  static readonly apiVersion = 2 as const;
+  static readonly apiVersion = 3 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -96,9 +96,12 @@ Every property exists on the aggregate. Required facets are:
 | `migration` | Translates legacy native-session and settings records during core-managed migrations. |
 
 Optional capabilities are still explicit properties and use `null` when they
-are not supported: `auth`, `commands`, `forking`, `endpoints`, and
-`singleQuery`. Optional methods inside a required facet may be omitted when the
+are not supported: `auth`, `commands`, `forking`, `steering`, `goals`,
+`endpoints`, and `singleQuery`. Optional methods inside a required facet may be omitted when the
 interface allows it.
+
+The runtime integration API is version 3. The independent `garconBuild.apiVersion`
+package metadata contract remains version 2.
 
 Read the contracts in `server-agents/interface/src/contracts/` before choosing
 an implementation shape. The interface is the authority; existing packages

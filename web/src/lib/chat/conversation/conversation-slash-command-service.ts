@@ -10,7 +10,7 @@ import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import {
 	parseCompactCommand,
-	isCodexGoalCommand,
+	isGoalCommand,
 	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
@@ -94,6 +94,8 @@ interface SlashCommandModelCatalog {
 	};
 	supportsFork(agentId: SessionAgentId): boolean;
 	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
+	supportsSteering(agentId: SessionAgentId): boolean;
+	supportsGoals(agentId: SessionAgentId): boolean;
 }
 
 export interface ConversationSlashCommandDeps {
@@ -110,7 +112,9 @@ export interface ConversationSlashCommandDeps {
 
 export type SlashCommandSubmissionResolution =
 	| { kind: 'handled'; outcome: ConversationSubmissionOutcome | Promise<ConversationSubmissionOutcome> }
-	| { kind: 'continue'; content: string; isActiveDeliveryInput: boolean };
+	| { kind: 'steer'; content: string }
+	| { kind: 'goal-control'; content: string }
+	| { kind: 'continue'; content: string };
 
 export class ConversationSlashCommandService {
 	readonly #scheduleInFlight = new Set<string>();
@@ -174,13 +178,27 @@ export class ConversationSlashCommandService {
 			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_prompt_required());
 			return { kind: 'handled', outcome: 'rejected' };
 		}
-		if (steer.kind === 'valid' && agentId !== 'codex') {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_codex_only());
+		if (steer.kind === 'valid' && !this.deps.modelCatalog.supportsSteering(agentId)) {
+			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_unsupported());
 			return { kind: 'handled', outcome: 'rejected' };
 		}
-		if (steer.kind === 'valid' && (chat.status !== 'running' || !chat.isProcessing)) {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_requires_active_turn());
+		if (steer.kind === 'valid' && images.length > 0) {
+			this.deps.chatState.appendLocalNotice('error', m.chat_notice_steer_attachments_unavailable());
 			return { kind: 'handled', outcome: 'rejected' };
+		}
+		if (steer.kind === 'valid') return { kind: 'steer', content: steer.prompt };
+
+		if (
+			isGoalCommand(text)
+			&& chat.status === 'running'
+			&& chat.isProcessing
+			&& this.deps.modelCatalog.supportsGoals(agentId)
+		) {
+			if (images.length > 0) {
+				this.deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
+				return { kind: 'handled', outcome: 'rejected' };
+			}
+			return { kind: 'goal-control', content: text };
 		}
 
 		if (this.deps.modelCatalog.supportsFork(agentId)) {
@@ -217,9 +235,7 @@ export class ConversationSlashCommandService {
 
 		return {
 			kind: 'continue',
-			content: steer.kind === 'valid' ? steer.prompt : text,
-			isActiveDeliveryInput:
-				steer.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)),
+			content: text,
 		};
 	}
 

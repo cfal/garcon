@@ -138,7 +138,7 @@ export interface CodexCollabAgentState {
 }
 
 export type CodexThreadItem =
-  | { type: 'userMessage'; id: string; content: CodexUserInput[] }
+  | { type: 'userMessage'; id: string; content: CodexUserInput[]; clientId?: string | null }
   | { type: 'hookPrompt'; id: string; fragments: unknown[] }
   | { type: 'agentMessage'; id: string; text: string; phase: string | null; memoryCitation: unknown }
   | { type: 'plan'; id: string; text: string }
@@ -294,6 +294,7 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
   switch (item.type) {
     case 'userMessage':
       protocolArray(item.content, `${label} content`);
+      nullableProtocolString(item.clientId, `${label} clientId`);
       return;
     case 'hookPrompt':
       protocolArray(item.fragments, `${label} fragments`);

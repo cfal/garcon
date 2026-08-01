@@ -52,7 +52,7 @@ function controllerFixture(integrations, registrations, service = createService(
   const byId = new Map(integrations.map((entry) => [entry.descriptor.id, entry]));
   const classes = integrations.map((entry) => ({
     integrationId: entry.descriptor.id,
-    apiVersion: 2,
+    apiVersion: 3,
     transcriptIndex: { apiVersion: 1, moduleUrl: import.meta.url },
   }));
   return {

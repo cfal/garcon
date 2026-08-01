@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type {
-  ActiveInputCommandRequest,
-  ActiveInputCommandResponse,
+  GoalControlCommandRequest,
+  GoalControlCommandResponse,
   QueueEntryCommandResponse,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
@@ -222,7 +222,7 @@ export class QueueCommands {
     });
   }
 
-  async submitActiveInput(input: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse> {
+  async submitGoalControl(input: GoalControlCommandRequest): Promise<GoalControlCommandResponse> {
     this.support.requireChat(input.chatId);
     this.support.assertContent(input.content);
     return this.support.withChatMutationLock(input.chatId, async () => {
@@ -230,7 +230,7 @@ export class QueueCommands {
       const preparedEntryId = crypto.randomUUID();
       const turnId = crypto.randomUUID();
       const ledger = await this.deps.ledger.accept({
-        commandType: 'active-input',
+        commandType: 'goal-control',
         chatId: input.chatId,
         clientRequestId: this.support.requireClientRequestId(input.clientRequestId),
         payload: { chatId: input.chatId, content },
@@ -243,7 +243,7 @@ export class QueueCommands {
           this.support.throwRecordedExecutionFailure(ledger.record);
         }
         if (ledger.record.status === 'accepted') {
-          const outcome = await this.deps.queue.recoverAcceptedActiveInput({
+          const outcome = await this.deps.queue.recoverAcceptedGoalControl({
             command: {
               key: ledger.record.key,
               chatId: input.chatId,
@@ -256,6 +256,7 @@ export class QueueCommands {
           });
           return {
             ...commandResultFromRecord(ledger.record, 'duplicate'),
+            commandType: 'goal-control',
             delivery: outcome.delivery,
             ...(outcome.entryId ? { entryId: outcome.entryId } : {}),
             control: toClientChatExecutionControlState(outcome.control),
@@ -263,6 +264,7 @@ export class QueueCommands {
         }
         return {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
+          commandType: 'goal-control',
           delivery: ledger.record.entryId ? 'queued' : 'active',
           ...(ledger.record.entryId ? { entryId: ledger.record.entryId } : {}),
           control: toClientChatExecutionControlState(
@@ -271,7 +273,7 @@ export class QueueCommands {
         };
       }
 
-      const outcome = await this.deps.queue.deliverAcceptedActiveInput({
+      const outcome = await this.deps.queue.deliverAcceptedGoalControl({
         command: {
           key: ledger.record.key,
           chatId: input.chatId,
@@ -284,6 +286,7 @@ export class QueueCommands {
       });
       return {
         ...commandResultFromRecord(ledger.record),
+        commandType: 'goal-control',
         delivery: outcome.delivery,
         ...(outcome.entryId ? { entryId: outcome.entryId } : {}),
         control: toClientChatExecutionControlState(outcome.control),

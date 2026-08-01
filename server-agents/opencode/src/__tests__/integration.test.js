@@ -27,7 +27,7 @@ describe('OpenCodeAgentIntegration', () => {
     const integration = new OpenCodeAgentIntegration(host);
 
     expect(OpenCodeAgentIntegration.integrationId).toBe('opencode');
-    expect(OpenCodeAgentIntegration.apiVersion).toBe(2);
+    expect(OpenCodeAgentIntegration.apiVersion).toBe(3);
     expect(OpenCodeAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('opencode');
     expect(integration.execution).toBeDefined();

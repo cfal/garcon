@@ -37,7 +37,7 @@ const AMP_DESCRIPTOR = {
 
 export default class AmpAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'amp';
-  static readonly apiVersion = 2 as const;
+  static readonly apiVersion = 3 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -57,6 +57,8 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly forking = null;
+  readonly steering = null;
+  readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 

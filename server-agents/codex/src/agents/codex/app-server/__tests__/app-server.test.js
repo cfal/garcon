@@ -5,7 +5,10 @@ import os from 'os';
 import path from 'path';
 import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
-import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
+import {
+  CodexAppServerClient,
+  CodexAppServerRpcError,
+} from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
@@ -210,6 +213,9 @@ function createRpcClientFixture(responder, options = {}) {
     }
     resolveExit(0);
   };
+  const sendResult = (id, result) => {
+    controller.enqueue(encoder.encode(`${JSON.stringify({ id, result })}\n`));
+  };
   const proc = {
     stdin: {
       write(data) {
@@ -219,6 +225,7 @@ function createRpcClientFixture(responder, options = {}) {
         if (typeof message.id !== 'number') return;
 
         const response = responder(message);
+        if (response === undefined && options.allowMissingResponse) return;
         if (response?.error) {
           controller.enqueue(encoder.encode(`${JSON.stringify({ id: message.id, error: response.error })}\n`));
           return;
@@ -240,7 +247,7 @@ function createRpcClientFixture(responder, options = {}) {
     resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
     shutdownGraceMs: options.shutdownGraceMs,
   });
-  return { client, writes, spawn, proc, finishExit };
+  return { client, writes, spawn, proc, finishExit, sendResult };
 }
 
 const initializeResponse = {
@@ -471,6 +478,133 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
         input: [{ type: 'text', text: 'Steer now' }],
       },
     }));
+  });
+
+  it('prepares strict steering immediately before the native write', async () => {
+    const events = [];
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      events.push('written');
+      return { turnId: message.params.expectedTurnId };
+    });
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      clientUserMessageId: 'message-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => { events.push('prepared'); },
+      acknowledgementTimeoutMs: 100,
+    })).resolves.toEqual({ turnId: 'turn-1' });
+
+    expect(events).toEqual(['prepared', 'written']);
+    expect(writes.at(-1)).toMatchObject({
+      method: 'turn/steer',
+      params: {
+        expectedTurnId: 'turn-1',
+        clientUserMessageId: 'message-1',
+      },
+    });
+    await client.shutdown();
+  });
+
+  it('classifies strict steering serialization failure as definitely not sent', async () => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+    await client.connect();
+    const circular = {};
+    circular.self = circular;
+    const prepareDelivery = mock(async () => undefined);
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [circular],
+    }, { prepareDelivery })).rejects.toMatchObject({
+      outcome: 'not-sent',
+      name: 'CodexAppServerDeliveryError',
+    });
+    expect(prepareDelivery).not.toHaveBeenCalled();
+    await client.shutdown();
+  });
+
+  it('classifies a strict steering write failure as outcome unknown', async () => {
+    const { client, proc } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+    await client.connect();
+    proc.stdin.write = mock(() => {
+      throw new Error('pipe write failed');
+    });
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => undefined,
+      acknowledgementTimeoutMs: 100,
+    })).rejects.toMatchObject({
+      outcome: 'unknown',
+      name: 'CodexAppServerDeliveryError',
+    });
+    await client.shutdown();
+  });
+
+  it('classifies app-server exit after a strict steering write as outcome unknown', async () => {
+    const { client, writes, finishExit } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return undefined;
+    }, { allowMissingResponse: true });
+    await client.connect();
+
+    const steering = client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => undefined,
+      acknowledgementTimeoutMs: 100,
+    });
+    while (!writes.some((write) => write.method === 'turn/steer')) await Bun.sleep(0);
+    finishExit();
+
+    await expect(steering).rejects.toMatchObject({
+      outcome: 'unknown',
+      name: 'CodexAppServerDeliveryError',
+    });
+    await client.shutdown();
+  });
+
+  it('bounds strict steering acknowledgement and ignores its late response', async () => {
+    const { client, writes, sendResult } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return undefined;
+    }, { allowMissingResponse: true });
+    const warnings = [];
+    client.on('warning', (warning) => warnings.push(warning));
+
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'focus here' }],
+    }, {
+      prepareDelivery: async () => undefined,
+      acknowledgementTimeoutMs: 5,
+    })).rejects.toMatchObject({
+      outcome: 'unknown',
+      name: 'CodexAppServerDeliveryError',
+    });
+
+    const request = writes.find((write) => write.method === 'turn/steer');
+    sendResult(request.id, { turnId: 'turn-1' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(warnings).toContain(`Ignoring late Codex app-server response: ${request.id}`);
+    await client.shutdown();
   });
 
   it('emits a failed request metric when the app-server rejects a request', async () => {
@@ -854,7 +988,12 @@ describe('Codex app-server converter', () => {
 
   it('converts app-server live item families to shared chat messages', () => {
     const items = [
-      { type: 'userMessage', id: 'u1', content: [{ type: 'text', text: 'Hi', text_elements: [] }] },
+      {
+        type: 'userMessage',
+        id: 'u1',
+        clientId: 'message-1',
+        content: [{ type: 'text', text: 'Hi', text_elements: [] }],
+      },
       { type: 'reasoning', id: 'r1', summary: ['thinking'], content: [] },
       { type: 'agentMessage', id: 'a1', text: 'Hello', phase: null, memoryCitation: null },
       { type: 'commandExecution', id: 'c1', command: 'ls', cwd: '/repo', processId: null, source: 'agent', status: 'completed', commandActions: [], aggregatedOutput: 'ok', exitCode: 0, durationMs: 12 },
@@ -875,6 +1014,9 @@ describe('Codex app-server converter', () => {
       'web-search-tool-use',
       'tool-result',
     ]);
+    expect(messages[0]).toMatchObject({
+      metadata: { upstreamRequestId: 'message-1' },
+    });
     expect(messages.find((message) => message.type === 'web-search-tool-use')?.query).toBe('codex app server');
   });
 
@@ -1376,7 +1518,7 @@ describe('CodexAppServerRuntime', () => {
       tmpDir,
       {
         runAgentTurn: async () => { throw new Error('must use active delivery'); },
-        submitActiveInput: (_chatId, command, options, beforeDelivery) => provider.submitActiveInput(makeRequest({
+        submitGoalControl: (_chatId, command, options, beforeDelivery) => provider.submitGoalControl(makeRequest({
           ...options,
           agentSessionId: 'thread-1',
           command,
@@ -1423,6 +1565,279 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('steers an ordinary active turn once with its expected native identity', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-thread.jsonl');
+    const prepared = mock(async () => undefined);
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async ({ expectedTurnId }, options) => {
+        await options.prepareDelivery();
+        return { turnId: expectedTurnId };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'focus on the failing test',
+      clientMessageId: 'message-steer',
+      prepareDelivery: prepared,
+    })).resolves.toEqual({ kind: 'accepted' });
+
+    expect(prepared).toHaveBeenCalledOnce();
+    expect(fake.steerTurn).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-active',
+      input: [{ type: 'text', text: 'focus on the failing test', text_elements: [] }],
+      clientUserMessageId: 'message-steer',
+    }, expect.objectContaining({ prepareDelivery: prepared }));
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a native expected-turn mismatch without retrying another turn', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-mismatch.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async () => {
+        throw new CodexAppServerRpcError(
+          'expected active turn id `turn-active` but found `turn-replacement`',
+          -32602,
+        );
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'too late',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'turn-changed',
+      message: 'The active Codex turn changed',
+    });
+    expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects when the native turn changes after target capture but before delivery', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-captured-turn.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-captured', status: 'inProgress' }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+    const target = provider.captureSteerTarget('thread-1');
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-replacement', status: 'inProgress' }),
+      },
+    });
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target,
+      input: 'must stay on the captured turn',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'turn-changed',
+      message: 'The active Codex turn changed',
+    });
+    expect(fake.steerTurn).not.toHaveBeenCalled();
+  });
+
+  it('maps native review and compaction rejection without waiting or retrying', async () => {
+    for (const turnKind of ['review', 'compact']) {
+      const nativePath = path.join(tmpDir, `strict-steer-${turnKind}.jsonl`);
+      const fake = new FakeClient({
+        startThread: async () => ({
+          thread: makeThread({ id: `thread-${turnKind}`, path: nativePath }),
+          model: 'gpt',
+          modelProvider: 'openai',
+          serviceTier: null,
+          cwd: '/repo',
+        }),
+        startTurn: async () => {
+          await fs.writeFile(nativePath, '{}\n');
+          return { turn: makeTurn({ id: `turn-${turnKind}`, status: 'inProgress' }) };
+        },
+        steerTurn: async () => {
+          throw new CodexAppServerRpcError(
+            `cannot steer a ${turnKind} turn`,
+            -32602,
+            { codexErrorInfo: { activeTurnNotSteerable: { turnKind } } },
+          );
+        },
+      });
+      const provider = new CodexAppServerRuntime({
+        createClient: () => fake,
+        materializationTimeoutMs: 20,
+      });
+      await provider.startSession(makeRequest({ chatId: `chat-${turnKind}` }));
+
+      await expect(provider.steer({
+        chatId: `chat-${turnKind}`,
+        projectPath: '/repo',
+        agentSessionId: `thread-${turnKind}`,
+        nativeSession: null,
+        target: provider.captureSteerTarget(`thread-${turnKind}`),
+        input: 'focus here',
+        clientMessageId: `message-${turnKind}`,
+        prepareDelivery: async () => undefined,
+      })).resolves.toEqual({
+        kind: 'rejected',
+        reason: 'turn-not-steerable',
+        message: 'The active Codex turn cannot be steered',
+      });
+      expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+      expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('maps the pinned structured oversized-input rejection to validation', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-input-too-large.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async () => {
+        throw new CodexAppServerRpcError(
+          'Input exceeds the maximum length of 1048576 bytes.',
+          -32602,
+          { input_error_code: 'input_too_large' },
+        );
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'oversized input',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'rejected',
+      reason: 'invalid-input',
+      message: 'Codex rejected the steering input',
+    });
+  });
+
+  it('treats an unexpected native acknowledgement identity as unknown without retrying', async () => {
+    const nativePath = path.join(tmpDir, 'strict-steer-unexpected-ack.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+      steerTurn: async (_params, options) => {
+        await options.prepareDelivery();
+        return { turnId: 'turn-unexpected' };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest());
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'focus here',
+      clientMessageId: 'message-steer',
+      prepareDelivery: async () => undefined,
+    })).resolves.toEqual({
+      kind: 'failed',
+      outcome: 'unknown',
+      message: 'Codex acknowledged steering for an unexpected turn',
+    });
+    expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
   });
 
   it('does not create a thread when admission closes during client startup', async () => {
@@ -2171,7 +2586,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Continue through capacity recovery',
       nativePath: null,
@@ -2501,7 +2916,7 @@ describe('CodexAppServerRuntime', () => {
       emitCapacityFailure(fake, 'turn-1');
       await expect(controlledDelay.started).resolves.toBe(25);
 
-      await expect(provider.submitActiveInput(makeRequest({
+      await expect(provider.submitGoalControl(makeRequest({
         agentSessionId: 'thread-1',
         command: `/goal ${control}`,
         codexGoalCommand: { kind: control },
@@ -2546,7 +2961,7 @@ describe('CodexAppServerRuntime', () => {
     emitCapacityFailure(fake, 'turn-1');
     await expect(controlledDelay.started).resolves.toBe(25);
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Investigate the next failure',
       nativePath: null,
@@ -2861,6 +3276,10 @@ describe('CodexAppServerRuntime', () => {
           params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
         }));
         return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async ({ expectedTurnId }, options) => {
+        await options.prepareDelivery();
+        return { turnId: expectedTurnId };
       },
     });
     const provider = new CodexAppServerRuntime({ createClient: () => fake });
@@ -4017,7 +4436,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Prioritize the failing test',
       clientMessageId: 'message-steer',
@@ -4033,6 +4452,51 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.resumeThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('strictly steers the current regular turn inside a managed goal', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async (_params, options) => {
+        await options.prepareDelivery();
+        return { turnId: 'goal-turn' };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+    const prepareDelivery = mock(async () => undefined);
+
+    await expect(provider.steer({
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      agentSessionId: 'thread-1',
+      nativeSession: null,
+      target: provider.captureSteerTarget('thread-1'),
+      input: 'Prioritize the failing test',
+      clientMessageId: 'message-strict-steer',
+      prepareDelivery,
+    })).resolves.toEqual({ kind: 'accepted' });
+
+    expect(prepareDelivery).toHaveBeenCalledOnce();
+    expect(fake.steerTurn).toHaveBeenLastCalledWith({
+      threadId: 'thread-1',
+      expectedTurnId: 'goal-turn',
+      clientUserMessageId: 'message-strict-steer',
+      input: [{ type: 'text', text: 'Prioritize the failing test', text_elements: [] }],
+    }, expect.objectContaining({ prepareDelivery }));
+    expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
   it('transfers an already-abortable active session to the successor callback at commit', async () => {
@@ -4058,7 +4522,7 @@ describe('CodexAppServerRuntime', () => {
     }));
     expect(predecessorAbortable).toHaveBeenCalledTimes(1);
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Take ownership now',
       nativePath: null,
@@ -4091,7 +4555,7 @@ describe('CodexAppServerRuntime', () => {
     }));
     expect(predecessorAbortable).not.toHaveBeenCalled();
 
-    const delivery = provider.submitActiveInput(makeRequest({
+    const delivery = provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Continue after restoration',
       nativePath: null,
@@ -4116,9 +4580,9 @@ describe('CodexAppServerRuntime', () => {
     expect(successorAbortable).toHaveBeenCalledTimes(1);
   });
 
-  it('reconciles active input through the delivered payload and native history loader', async () => {
-    const content = 'Preserve active input & literal markup <exactly>';
-    const nativePath = path.join(tmpDir, 'active-input.jsonl');
+  it('reconciles goal control through the delivered payload and native history loader', async () => {
+    const content = 'Preserve goal control & literal markup <exactly>';
+    const nativePath = path.join(tmpDir, 'goal-control.jsonl');
     let fake;
     fake = new FakeClient({
       getThreadGoal: async () => ({ goal: null }),
@@ -4150,7 +4614,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: content,
       clientMessageId: 'message-steer',
@@ -4200,7 +4664,7 @@ describe('CodexAppServerRuntime', () => {
       tmpDir,
       {
         runAgentTurn: async () => { throw new Error('must use active delivery'); },
-        submitActiveInput: (_chatId, command, options, beforeDelivery) => provider.submitActiveInput(makeRequest({
+        submitGoalControl: (_chatId, command, options, beforeDelivery) => provider.submitGoalControl(makeRequest({
           ...options,
           agentSessionId: 'thread-1',
           command,
@@ -4228,7 +4692,7 @@ describe('CodexAppServerRuntime', () => {
       () => true,
     );
 
-    const result = await queue.deliverActiveInput('chat-1', 'Steer from the queue', {
+    const result = await queue.deliverGoalControlInput('chat-1', 'Steer from the queue', {
       clientRequestId: 'request-queue',
       clientMessageId: 'message-queue',
       turnId: 'turn-queue',
@@ -4267,7 +4731,7 @@ describe('CodexAppServerRuntime', () => {
     }));
     const queue = createActiveGoalQueue(provider, { kind: 'pause' }, markUnconfirmed);
 
-    await expect(queue.deliverActiveInput('chat-1', '/goal pause', {
+    await expect(queue.deliverGoalControlInput('chat-1', '/goal pause', {
       clientRequestId: 'request-goal-failure',
       clientMessageId: 'message-goal-failure',
       turnId: 'turn-goal-failure',
@@ -4312,7 +4776,7 @@ describe('CodexAppServerRuntime', () => {
     });
     const queue = createActiveGoalQueue(provider, { kind: 'resume' }, markUnconfirmed);
 
-    const delivery = queue.deliverActiveInput('chat-1', '/goal resume', {
+    const delivery = queue.deliverGoalControlInput('chat-1', '/goal resume', {
       clientRequestId: 'request-goal-cancelled',
       clientMessageId: 'message-goal-cancelled',
       turnId: 'turn-goal-cancelled',
@@ -4329,7 +4793,7 @@ describe('CodexAppServerRuntime', () => {
     expect(markUnconfirmed).toHaveBeenCalledWith('chat-1', 'request-goal-cancelled');
   });
 
-  it('declines active input without accepting its user row after the Codex session ends', async () => {
+  it('declines goal control without accepting its user row after the Codex session ends', async () => {
     const nativePath = path.join(tmpDir, 'ended-before-acceptance.jsonl');
     const fake = new FakeClient({
       startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
@@ -4348,7 +4812,7 @@ describe('CodexAppServerRuntime', () => {
     await finished;
     let accepted = false;
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'too late',
       nativePath: null,
@@ -4364,7 +4828,7 @@ describe('CodexAppServerRuntime', () => {
     await provider.compact(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
     let accepted = false;
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'queue after compact',
       nativePath: null,
@@ -4396,7 +4860,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Take this next',
       nativePath: null,
@@ -4443,7 +4907,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Do this exactly once',
       nativePath: null,
@@ -4483,7 +4947,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Steer across rollover',
       nativePath: null,
@@ -4528,7 +4992,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Deliver across the boundary',
       nativePath: null,
@@ -4578,7 +5042,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Deliver to the continuation',
       nativePath: null,
@@ -4639,7 +5103,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Do not drop this input',
       nativePath: null,
@@ -4698,7 +5162,7 @@ describe('CodexAppServerRuntime', () => {
       }));
       let accepted = false;
 
-      const delivery = provider.submitActiveInput(makeRequest({
+      const delivery = provider.submitGoalControl(makeRequest({
         agentSessionId: 'thread-1',
         command: `Deliver after ${turnKind}`,
         nativePath: null,
@@ -4753,7 +5217,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Start after the boundary',
       nativePath: null,
@@ -4797,7 +5261,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Steer the fresh turn',
       nativePath: null,
@@ -4831,7 +5295,7 @@ describe('CodexAppServerRuntime', () => {
       turnId: 'turn-a',
     }));
 
-    const first = provider.submitActiveInput(makeRequest({
+    const first = provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       clientRequestId: 'request-b',
       command: 'First input',
@@ -4859,7 +5323,7 @@ describe('CodexAppServerRuntime', () => {
       },
     });
     let accepted = false;
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: 'Must fall back',
       nativePath: null,
@@ -4893,7 +5357,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal pause',
       codexGoalCommand: { kind: 'pause' },
@@ -4932,7 +5396,7 @@ describe('CodexAppServerRuntime', () => {
       nativePath: null,
     }));
 
-    await provider.submitActiveInput(makeRequest({
+    await provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },
@@ -4979,7 +5443,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal pause',
       codexGoalCommand: { kind: 'pause' },
@@ -5016,7 +5480,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
 
-    await expect(provider.submitActiveInput(makeRequest({
+    await expect(provider.submitGoalControl(makeRequest({
       agentSessionId: 'thread-1',
       command: '/goal clear',
       codexGoalCommand: { kind: 'clear' },

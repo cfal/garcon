@@ -11,7 +11,8 @@ import {
 	resumeChatQueue,
 	runChat,
 	replaceQueuedInput,
-	sendActiveInput,
+	steerChat,
+	submitGoalControl,
 	startChat,
 	stopChat,
 	updateChatAgentModel,
@@ -50,7 +51,8 @@ vi.mock('$lib/api/chats.js', () => ({
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
-	sendActiveInput: vi.fn(),
+	steerChat: vi.fn(),
+	submitGoalControl: vi.fn(),
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
 	stopChat: vi.fn(),
@@ -75,7 +77,8 @@ const mockStartChat = vi.mocked(startChat);
 const mockCreateQueuedInput = vi.mocked(createQueuedInput);
 const mockDeleteQueuedInput = vi.mocked(deleteQueuedInput);
 const mockReplaceQueuedInput = vi.mocked(replaceQueuedInput);
-const mockSendActiveInput = vi.mocked(sendActiveInput);
+const mockSteerChat = vi.mocked(steerChat);
+const mockSubmitGoalControl = vi.mocked(submitGoalControl);
 const mockStopChat = vi.mocked(stopChat);
 const mockUpdateChatAgentModel = vi.mocked(updateChatAgentModel);
 const mockUpdateChatModel = vi.mocked(updateChatModel);
@@ -404,6 +407,8 @@ function createDeps(chat = createRunningChat()) {
 			]),
 			supportsFork: vi.fn(() => true),
 			supportsForkWhileRunning: vi.fn(() => false),
+			supportsSteering: vi.fn((agentId: string) => agentId === 'codex'),
+			supportsGoals: vi.fn((agentId: string) => agentId === 'codex'),
 		},
 		readReceiptOutbox: {
 			enqueue: vi.fn(),
@@ -437,7 +442,8 @@ describe('ConversationSessionController', () => {
 		mockCreateQueuedInput.mockReset();
 		mockDeleteQueuedInput.mockReset();
 		mockReplaceQueuedInput.mockReset();
-		mockSendActiveInput.mockReset();
+		mockSteerChat.mockReset();
+		mockSubmitGoalControl.mockReset();
 		mockStopChat.mockReset();
 		mockUpdateChatAgentModel.mockReset();
 		mockUpdateChatAgentModel.mockResolvedValue({
@@ -2232,7 +2238,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', latestControl);
 	});
 
-	it('steers an active Codex turn without queuing the slash command', async () => {
+	it('steers through the capability without reading or mutating a paused queue', async () => {
 		const chat = createRunningChat({
 			agentId: 'codex',
 			model: 'gpt-5.5',
@@ -2240,27 +2246,192 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = '/steer Focus on the failing contract test';
-		mockSendActiveInput.mockResolvedValueOnce({
+		deps.conversationUi.getExecutionControl.mockReturnValue(controlWithQueue(
+			{
+				entries: [{
+					id: 'future-entry',
+					content: 'Run this later',
+					revision: 1,
+					createdAt: '2026-07-11T00:00:00.000Z',
+					updatedAt: '2026-07-11T00:00:00.000Z',
+				}],
+				pause: {
+					id: 'pause-1',
+					kind: 'manual',
+					pausedAt: '2026-07-11T00:00:00.000Z',
+				},
+			},
+		));
+		mockSteerChat.mockResolvedValueOnce({
 			success: true,
-			commandType: 'active-input',
+			commandType: 'steer',
 			clientRequestId: 'req-steer',
 			chatId: 'chat-1',
+			turnId: 'turn-1',
 			status: 'accepted',
 			acceptedAt: '2026-07-11T00:00:00.000Z',
-			delivery: 'active',
-			control: emptyControl(),
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(mockSendActiveInput).toHaveBeenCalledWith({
+		expect(mockSteerChat).toHaveBeenCalledWith({
 			clientRequestId: expect.any(String),
+			clientMessageId: expect.any(String),
 			chatId: 'chat-1',
 			content: 'Focus on the failing contract test',
 		});
+		const steerRequest = mockSteerChat.mock.calls[0][0];
+		expect(deps.chatState.pendingUserInputs[0]).toMatchObject({
+			clientRequestId: steerRequest.clientRequestId,
+			clientMessageId: steerRequest.clientMessageId,
+			content: 'Focus on the failing contract test',
+			deliveryStatus: 'accepted',
+		});
+		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
+		expect(deps.conversationUi.getExecutionControl).not.toHaveBeenCalled();
+		expect(deps.conversationUi.setExecutionControl).not.toHaveBeenCalled();
 	});
 
-	it('rejects steer without guidance or an active Codex turn', async () => {
+	it('restores untouched steering text after a definitive turn-state failure', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		deps.composerState.inputText = '/steer Keep the current turn';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockSteerChat.mockRejectedValueOnce(new ApiError(
+			409,
+			'The active turn changed before steering could be applied',
+			'STEER_TURN_CHANGED',
+		));
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(deps.composerState.inputText).toBe('/steer Keep the current turn');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: 'The active turn changed before steering could be applied.',
+		});
+	});
+
+	it('does not overwrite newer composer text after a definitive steering failure', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		const pending = deferred<Awaited<ReturnType<typeof steerChat>>>();
+		deps.composerState.inputText = '/steer Keep the current turn';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockSteerChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
+		await flushPromises();
+		deps.composerState.inputText = 'newer draft';
+		pending.reject(new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'));
+
+		await submission;
+
+		expect(deps.composerState.inputText).toBe('newer draft');
+		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('does not restore an older failed steer after a newer steer succeeds', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		const first = deferred<Awaited<ReturnType<typeof steerChat>>>();
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+		});
+		mockSteerChat
+			.mockReturnValueOnce(first.promise)
+			.mockResolvedValueOnce({
+				success: true,
+				commandType: 'steer',
+				clientRequestId: 'request-second',
+				chatId: 'chat-1',
+				turnId: 'turn-1',
+				status: 'accepted',
+				acceptedAt: '2026-07-11T00:00:00.000Z',
+			});
+		const controller = new ConversationSessionController(deps);
+
+		deps.composerState.inputText = '/steer first';
+		const firstSubmission = controller.submitForChat('chat-1');
+		await flushPromises();
+		deps.composerState.inputText = '/steer second';
+		await controller.submitForChat('chat-1');
+		first.reject(new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'));
+		await firstSubmission;
+
+		expect(deps.composerState.inputText).toBe('');
+		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('does not restore steering after the user types and deletes newer text', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		const pending = deferred<Awaited<ReturnType<typeof steerChat>>>();
+		deps.composerState.inputText = '/steer first';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+		});
+		mockSteerChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
+		await flushPromises();
+		deps.composerState.inputText = 'new text';
+		deps.composerState.contentRevision += 1;
+		deps.composerState.inputText = '';
+		deps.composerState.contentRevision += 1;
+		pending.reject(new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'));
+
+		await submission;
+
+		expect(deps.composerState.inputText).toBe('');
+		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('does not append a failed steer notice to a newly selected chat', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		const pending = deferred<Awaited<ReturnType<typeof steerChat>>>();
+		deps.composerState.inputText = '/steer first';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockSteerChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
+		await flushPromises();
+		deps.sessions.selectedChatId = 'chat-2';
+		pending.reject(new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'));
+
+		await submission;
+
+		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('keeps ambiguous steering unconfirmed without restoring the composer', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		deps.composerState.inputText = '/steer Keep the current turn';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockSteerChat.mockRejectedValue(new ApiError(
+			500,
+			'Steering delivery could not be confirmed',
+			'STEER_OUTCOME_UNKNOWN',
+		));
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockSteerChat).toHaveBeenCalledTimes(2);
+		expect(deps.composerState.inputText).toBe('');
+		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('unconfirmed');
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: 'Steering could not be confirmed. Check the conversation before sending it again.',
+		});
+	});
+
+	it('rejects steer without guidance but lets the endpoint decide stale processing state', async () => {
 		const { deps } = createDeps(createRunningChat({ agentId: 'codex', model: 'gpt-5.5' }));
 		const controller = new ConversationSessionController(deps);
 
@@ -2272,12 +2443,17 @@ describe('ConversationSessionController', () => {
 		);
 
 		deps.composerState.inputText = '/steer Continue now';
+		mockSteerChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'req-steer',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-11T00:00:00.000Z',
+		});
 		await controller.submitForChat('chat-1');
-		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
-			'error',
-			'/steer requires an active Codex turn.',
-		);
-		expect(mockSendActiveInput).not.toHaveBeenCalled();
+		expect(mockSteerChat).toHaveBeenCalledOnce();
 	});
 
 	it('keeps local pending command messages when a REST history load returns an older snapshot', async () => {

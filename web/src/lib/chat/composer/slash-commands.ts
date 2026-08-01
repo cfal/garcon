@@ -46,12 +46,12 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{
 		name: 'goal',
 		source: 'command',
-		description: 'Set a Codex goal and start working toward it',
+		description: 'Set an agent goal and start working toward it',
 	},
 	{
 		name: 'steer',
 		source: 'command',
-		description: 'Send guidance to the active Codex turn immediately',
+		description: 'Send guidance to the active turn immediately',
 	},
 	{
 		name: 's',
@@ -129,7 +129,7 @@ export function parseSteerCommand(input: string): SteerCommandParseResult {
 	return { kind: 'valid', prompt };
 }
 
-export function isCodexGoalCommand(input: string): boolean {
+export function isGoalCommand(input: string): boolean {
 	return /^\s*\/goal(?=\s|$)/i.test(input);
 }
 

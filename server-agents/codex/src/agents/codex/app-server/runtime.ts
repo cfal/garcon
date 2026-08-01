@@ -1,7 +1,13 @@
 import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { AgentEventEmitterRuntime } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import type { AgentActiveInputHandoff, AgentLogger } from '@garcon/server-agent-interface';
+import type {
+  AgentGoalControlHandoff,
+  AgentLogger,
+  AgentSteerRequest,
+  AgentSteerResult,
+  AgentSteerTarget,
+} from '@garcon/server-agent-interface';
 import { CodexHistoryService } from '../history-source.js';
 import {
   assertCodexExecutionOpen,
@@ -16,7 +22,12 @@ import {
 } from '../runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
-import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
+import {
+  CodexAppServerClient,
+  CodexAppServerRpcError,
+  type CodexAppServerClientOptions,
+  type CodexAppServerMetric,
+} from './client.js';
 import { convertCodexRawCodeModeItem } from './converter.js';
 import { accessibleThreadPath, waitForMaterializedThread } from './durability.js';
 import { NativePathDiscoveryRefreshLimiter, type NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
@@ -53,6 +64,13 @@ import type { CodexGoalCommand } from '../goal-command.js';
 import { cleanupMaterializedGoalDraft, materializeGoalDraft } from './goal-files.js';
 import { editedGoalStatus, formatGoalStatusMessage, formatGoalUpdatedMessage, goalStatusLabel } from './goal-display.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
+import {
+  actualTurnIdFromSteerMismatch,
+  isActiveTurnNotSteerableError,
+  isNoActiveTurnError,
+  rejectedCodexSteer,
+  steerCodexSession,
+} from './steering.ts';
 
 type RunningStatus = 'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted';
 type FinishSessionOptions = { failedMessage?: string; aborted?: boolean; emitFinishedOnAbort?: boolean };
@@ -62,7 +80,7 @@ type GoalCommandOptions = {
   propagateDeliveryFailure?: boolean;
 };
 const GOAL_TURN_START_TIMEOUT_MS = 30_000;
-const MAX_ACTIVE_INPUT_DELIVERY_TRANSITIONS = 8;
+const MAX_GOAL_CONTROL_DELIVERY_TRANSITIONS = 8;
 const MAX_CAPACITY_RETRIES = 3;
 const CAPACITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 const NOOP_LOGGER: AgentLogger = {
@@ -124,6 +142,10 @@ export interface CodexAppServerRuntimeOptions {
 
 export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #sessions = new Map<string, RunningCodexSession>();
+  #steerTargets = new WeakMap<AgentSteerTarget, {
+    session: RunningCodexSession;
+    turnId: string;
+  }>();
   #pendingApprovals = new Map<string, CodexPendingApproval & { client: CodexAppServerClient }>();
   #bufferingClients = new Set<CodexAppServerClient>();
   #bufferedClientEvents = new Map<CodexAppServerClient, BufferedClientEvent[]>();
@@ -375,9 +397,43 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  async submitActiveInput(
+  captureSteerTarget(agentSessionId: string): AgentSteerTarget | null {
+    const session = this.#sessions.get(agentSessionId);
+    if (
+      !session
+      || isTerminalSessionStatus(session.status)
+      || hasTerminalPendingFinish(session)
+      || !session.activeTurnId
+    ) return null;
+    const target = Object.freeze({});
+    this.#steerTargets.set(target, { session, turnId: session.activeTurnId });
+    return target;
+  }
+
+  async steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
+    const session = this.#sessions.get(request.agentSessionId);
+    if (!session || isTerminalSessionStatus(session.status) || hasTerminalPendingFinish(session)) {
+      return rejectedCodexSteer('no-active-turn', 'No active Codex turn');
+    }
+    const captured = request.target ? this.#steerTargets.get(request.target) : undefined;
+    if (!captured) {
+      return rejectedCodexSteer('no-active-turn', 'No active Codex turn');
+    }
+    this.#steerTargets.delete(request.target!);
+    if (captured.session !== session || captured.turnId !== session.activeTurnId) {
+      return rejectedCodexSteer('turn-changed', 'The active Codex turn changed');
+    }
+    return steerCodexSession(
+      session,
+      captured.turnId,
+      request,
+      () => this.#flushPendingFinish(session),
+    );
+  }
+
+  async submitGoalControl(
     request: CodexResumeRequest,
-    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void> = async (handoff) => {
+    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void> = async (handoff) => {
       handoff.validate();
       handoff.commit();
     },
@@ -404,7 +460,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             || hasTerminalPendingFinish(session)
             || isTerminalSessionStatus(session.status)
           ) {
-            throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before active input delivery');
+            throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before goal control delivery');
           }
         };
         let committed = false;
@@ -418,11 +474,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             if (session.abortableNotified) session.onAbortable?.();
           },
         });
-        if (!committed) throw new Error('Codex active input handoff was not committed');
+        if (!committed) throw new Error('Codex goal control handoff was not committed');
         if (hasTerminalPendingFinish(session) || isTerminalSessionStatus(session.status)) {
-          throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before active input delivery');
+          throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before goal control delivery');
         }
-        await this.#deliverReservedActiveInput(session, request);
+        await this.#deliverReservedGoalControl(session, request);
         if (session.activeTurnId && session.pendingFinish && !session.pendingFinish.failedMessage && !session.pendingFinish.aborted) {
           session.pendingFinish = null;
         }
@@ -436,7 +492,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     return operation;
   }
 
-  async #deliverReservedActiveInput(session: RunningCodexSession, request: CodexResumeRequest): Promise<void> {
+  async #deliverReservedGoalControl(session: RunningCodexSession, request: CodexResumeRequest): Promise<void> {
     if (request.codexGoalCommand) {
       await this.#handleGoalCommand(session.client, session, request.codexGoalCommand, request, {
         keepSession: true,
@@ -467,12 +523,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
     let turnAttemptGeneration = session.turnAttemptGeneration;
 
-    while (transitions < MAX_ACTIVE_INPUT_DELIVERY_TRANSITIONS) {
+    while (transitions < MAX_GOAL_CONTROL_DELIVERY_TRANSITIONS) {
       if (session.turnAttemptGeneration !== turnAttemptGeneration) {
-        throw new TurnStartWaitCancelledError('Codex turn changed before active input delivery');
+        throw new TurnStartWaitCancelledError('Codex turn changed before goal control delivery');
       }
       if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
-        throw new TurnStartWaitCancelledError('Codex session ended before active input delivery');
+        throw new TurnStartWaitCancelledError('Codex session ended before goal control delivery');
       }
       if (!turnId && session.activeTurnId) turnId = session.activeTurnId;
 
@@ -558,7 +614,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         throw error;
       }
     }
-    throw new Error('Codex active input delivery exceeded the turn transition limit');
+    throw new Error('Codex goal control delivery exceeded the turn transition limit');
   }
 
   #retainAttachmentCleanup(session: RunningCodexSession, cleanup: () => Promise<void>): void {
@@ -654,7 +710,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           this.emitProcessing(request.chatId, true);
           if (!request.codexGoalCommand) {
             if (session.managesGoalLifecycle) {
-              await this.#deliverReservedActiveInput(session, request);
+              await this.#deliverReservedGoalControl(session, request);
             } else {
               await this.#startRequestedTurn(client, session, request);
             }
@@ -1630,31 +1686,6 @@ function isUtilityOverload(error: unknown): boolean {
 function isCapacityError(error: CodexTurnError | null | undefined): boolean {
   return error?.codexErrorInfo === 'serverOverloaded'
     || /selected model is at capacity/i.test(error?.message ?? '');
-}
-
-function isNoActiveTurnError(error: unknown): boolean {
-  const message = String((error as Error)?.message || error || '');
-  return /no active turn|expected turn.*(?:not active|mismatch|active turn)|active turn.*not found/i.test(message);
-}
-
-function isActiveTurnNotSteerableError(error: unknown): boolean {
-  if (error instanceof CodexAppServerRpcError) {
-    const data = error.data && typeof error.data === 'object'
-      ? error.data as Record<string, unknown>
-      : null;
-    const codexErrorInfo = data?.codexErrorInfo;
-    if (codexErrorInfo && typeof codexErrorInfo === 'object' && 'activeTurnNotSteerable' in codexErrorInfo) {
-      return true;
-    }
-  }
-  const message = String((error as Error)?.message || error || '');
-  return /cannot steer (?:a )?(?:review|compact) turn/i.test(message);
-}
-
-function actualTurnIdFromSteerMismatch(error: unknown): string | null {
-  const message = String((error as Error)?.message || error || '');
-  const match = /^expected active turn id `[^`]+` but found `([^`]+)`$/.exec(message);
-  return match?.[1] ?? null;
 }
 
 function isActiveTurnConflictError(error: unknown): boolean {

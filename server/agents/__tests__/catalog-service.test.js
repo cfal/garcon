@@ -54,6 +54,11 @@ function createIntegration() {
     },
     auth: { launchLogin: async () => ({}) },
     forking: { supportsAtMessage: true, supportsWhileRunning: false },
+    steering: {
+      captureTarget: () => ({}),
+      steer: async () => ({ kind: "accepted" }),
+    },
+    goals: null,
     endpoints: {},
   };
 }
@@ -85,6 +90,8 @@ describe("AgentCatalogService", () => {
       supportsFork: true,
       supportsForkAtMessage: true,
       supportsForkWhileRunning: false,
+      supportsSteering: true,
+      supportsGoals: false,
       supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,

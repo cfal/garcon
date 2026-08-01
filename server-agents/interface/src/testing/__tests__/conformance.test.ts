@@ -58,6 +58,8 @@ const integration = {
   auth: null,
   commands: null,
   forking: null,
+  steering: null,
+  goals: null,
   endpoints: null,
   singleQuery: null,
 } satisfies AgentIntegration;
@@ -65,7 +67,7 @@ const integration = {
 describe('validateAgentIntegration', () => {
   test('rejects a descriptor and class ID mismatch', () => {
     const integrationClass = {
-      integrationId: 'fake', apiVersion: 2 as const,
+      integrationId: 'fake', apiVersion: 3 as const,
       transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
     };
     expect(() => validateAgentIntegration({
@@ -76,7 +78,7 @@ describe('validateAgentIntegration', () => {
 
   test('rejects duplicate descriptor values', () => {
     const integrationClass = {
-      integrationId: 'other', apiVersion: 2 as const,
+      integrationId: 'other', apiVersion: 3 as const,
       transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
     };
     expect(() => validateAgentIntegration({
@@ -89,5 +91,20 @@ describe('validateAgentIntegration', () => {
         },
       },
     })).toThrow('duplicate permission modes');
+  });
+
+  test('rejects a steering facet without admission-time target capture', () => {
+    const integrationClass = {
+      integrationId: 'other', apiVersion: 3 as const,
+      transcriptIndex: { apiVersion: 1 as const, moduleUrl: import.meta.url },
+    };
+
+    expect(() => validateAgentIntegration({
+      integrationClass,
+      integration: {
+        ...integration,
+        steering: { steer: async () => ({ kind: 'accepted' as const }) },
+      } as AgentIntegration,
+    })).toThrow('invalid steering facet');
   });
 });

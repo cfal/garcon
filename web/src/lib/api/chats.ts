@@ -39,8 +39,10 @@ import type {
 	PermissionDecisionCommandRequest,
 	ProjectPathPatchRequest,
 	ProjectPathPatchResponse,
-	ActiveInputCommandRequest,
-	ActiveInputCommandResponse,
+	GoalControlCommandRequest,
+	GoalControlCommandResponse,
+	SteerCommandRequest,
+	SteerCommandResponse,
 	QueueEntryCommandResponse,
 	QueueEntryCreateCommandRequest,
 	QueueEntryDeleteCommandRequest,
@@ -229,12 +231,16 @@ export async function moveQueuedInput(
 	);
 }
 
-export async function sendActiveInput(
-	params: ActiveInputCommandRequest,
-): Promise<ActiveInputCommandResponse> {
+export async function submitGoalControl(
+	params: GoalControlCommandRequest,
+): Promise<GoalControlCommandResponse> {
 	return withParsedControl(
-		await apiPost<ActiveInputCommandResponse>('/api/v1/chats/active-input', params),
+		await apiPost<GoalControlCommandResponse>('/api/v1/chats/goal-control', params),
 	);
+}
+
+export async function steerChat(params: SteerCommandRequest): Promise<SteerCommandResponse> {
+	return apiPost<SteerCommandResponse>('/api/v1/chats/steer', params);
 }
 
 export async function getChatExecutionControl(

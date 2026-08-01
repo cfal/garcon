@@ -2,19 +2,22 @@ import {
 	createQueuedInput,
 	forkRunChat,
 	runChat,
-	sendActiveInput,
+	steerChat,
+	submitGoalControl,
 	startChat,
 	type StartChatParams,
 } from '$lib/api/chats.js';
 import type {
-	ActiveInputCommandRequest,
-	ActiveInputCommandResponse,
+	GoalControlCommandRequest,
+	GoalControlCommandResponse,
 	AgentRunCommandRequest,
 	CommandAcceptedResponse,
 	ForkRunCommandRequest,
 	ForkRunCommandResponse,
 	QueueEntryCommandResponse,
 	QueueEntryCreateCommandRequest,
+	SteerCommandRequest,
+	SteerCommandResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import { createClientCommandId } from './client-command-id.js';
@@ -33,7 +36,8 @@ export interface AcceptedInputTransport {
 	run(request: AgentRunCommandRequest): Promise<CommandAcceptedResponse>;
 	fork(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse>;
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;
-	active(request: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse>;
+	steer(request: SteerCommandRequest): Promise<SteerCommandResponse>;
+	goalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse>;
 }
 
 const defaultTransport: AcceptedInputTransport = {
@@ -41,7 +45,8 @@ const defaultTransport: AcceptedInputTransport = {
 	run: runChat,
 	fork: forkRunChat,
 	enqueue: createQueuedInput,
-	active: sendActiveInput,
+	steer: steerChat,
+	goalControl: submitGoalControl,
 };
 
 export class AcceptedInputSubmissionService {
@@ -67,9 +72,13 @@ export class AcceptedInputSubmissionService {
 		return this.#prepared(request, () => this.transport.enqueue(request));
 	}
 
-	active(input: Omit<ActiveInputCommandRequest, 'clientRequestId'>) {
+	steer(input: Omit<SteerCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
+		return this.#messageSubmission(input, (request) => this.transport.steer(request));
+	}
+
+	goalControl(input: Omit<GoalControlCommandRequest, 'clientRequestId'>) {
 		const request = { ...input, clientRequestId: this.createId() };
-		return this.#prepared(request, () => this.transport.active(request));
+		return this.#prepared(request, () => this.transport.goalControl(request));
 	}
 
 	#messageSubmission<T extends object, R>(

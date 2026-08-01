@@ -52,6 +52,8 @@ export interface AgentMetadata {
 	supportsForkAtMessage: boolean;
 	supportsForkWhileRunning: boolean;
 	supportsUpdateProjectPath: boolean;
+	supportsSteering: boolean;
+	supportsGoals: boolean;
 	supportsImages: boolean;
 	acceptsApiProviderEndpoints: boolean;
 	supportedProtocols: ApiProtocol[];
@@ -288,6 +290,8 @@ function normalizeAgentMetadataMap(agentMetadata: AgentMetadataMap): AgentMetada
 						supportsForkAtMessage: metadata.supportsForkAtMessage === true,
 						supportsForkWhileRunning: metadata.supportsForkWhileRunning === true,
 						supportsUpdateProjectPath: metadata.supportsUpdateProjectPath === true,
+						supportsSteering: metadata.supportsSteering === true,
+						supportsGoals: metadata.supportsGoals === true,
 						label: metadata.label ?? id,
 						supportedPermissionModes: normalizePermissionModes(metadata.supportedPermissionModes),
 						supportedThinkingModes: normalizeThinkingModes(metadata.supportedThinkingModes),
@@ -328,6 +332,8 @@ function parseCatalogResponse(data: unknown): {
 			supportsForkAtMessage: Boolean(entry.supportsForkAtMessage),
 			supportsForkWhileRunning: Boolean(entry.supportsForkWhileRunning),
 			supportsUpdateProjectPath: Boolean(entry.supportsUpdateProjectPath),
+			supportsSteering: Boolean(entry.supportsSteering),
+			supportsGoals: Boolean(entry.supportsGoals),
 			supportsImages: Boolean(entry.supportsImages),
 			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
 			supportedProtocols: normalizeProtocols(entry.supportedProtocols),
@@ -528,6 +534,16 @@ export class ModelCatalogStore {
 	supportsUpdateProjectPath(agentId: SessionAgentId): boolean {
 		if (!isAgentId(agentId)) return false;
 		return this.agentMetadata[agentId]?.supportsUpdateProjectPath ?? false;
+	}
+
+	supportsSteering(agentId: SessionAgentId): boolean {
+		if (!isAgentId(agentId)) return false;
+		return this.agentMetadata[agentId]?.supportsSteering ?? false;
+	}
+
+	supportsGoals(agentId: SessionAgentId): boolean {
+		if (!isAgentId(agentId)) return false;
+		return this.agentMetadata[agentId]?.supportsGoals ?? false;
 	}
 
 	supportsImages(

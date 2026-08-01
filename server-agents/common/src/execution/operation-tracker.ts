@@ -1,5 +1,5 @@
 import type {
-  AgentActiveInputHandoff,
+  AgentGoalControlHandoff,
   AgentOperationIdentity,
 } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '../shared/event-emitter-runtime.js';
@@ -15,8 +15,8 @@ export class AgentOperationTracker {
     chatId: string,
     predecessor: AgentOperationIdentity | null,
     successor: AgentOperationIdentity,
-    downstream: AgentActiveInputHandoff,
-  ): AgentActiveInputHandoff {
+    downstream: AgentGoalControlHandoff,
+  ): AgentGoalControlHandoff {
     const validate = () => {
       if ((this.#operations.get(chatId) ?? null) !== predecessor) {
         throw new Error(`Cannot hand off operation for chat ${chatId} after its active operation changed`);

@@ -17,6 +17,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
 import type {
   AgentExecutionContext,
+  AgentResumeRequest,
   AgentStartedSession,
 } from './execution.js';
 import type { AgentMigrationStore } from './host.js';
@@ -52,6 +53,63 @@ export interface AgentAuth {
 
 export interface AgentCommands {
   discover(projectPath: string, signal: AbortSignal): Promise<readonly SlashCommand[]>;
+}
+
+export interface AgentSteering {
+  captureTarget(request: AgentSteerTargetRequest): AgentSteerTarget | null;
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult>;
+}
+
+export type AgentSteerTarget = object;
+
+export interface AgentSteerTargetRequest {
+  readonly chatId: string;
+  readonly agentSessionId: string;
+  readonly nativeSession: AgentNativeSessionRef | null;
+}
+
+export interface AgentSteerRequest {
+  readonly chatId: string;
+  readonly projectPath: string;
+  readonly agentSessionId: string;
+  readonly nativeSession: AgentNativeSessionRef | null;
+  readonly target: AgentSteerTarget | null;
+  readonly input: string;
+  readonly clientMessageId: string;
+  readonly prepareDelivery: () => Promise<void>;
+}
+
+export type AgentSteerRejectionReason =
+  | 'no-active-turn'
+  | 'turn-changed'
+  | 'turn-not-steerable'
+  | 'invalid-input'
+  | 'provider-rejected';
+
+export type AgentSteerResult =
+  | { readonly kind: 'accepted' }
+  | {
+      readonly kind: 'rejected';
+      readonly reason: AgentSteerRejectionReason;
+      readonly message: string;
+    }
+  | {
+      readonly kind: 'failed';
+      readonly outcome: 'not-sent' | 'unknown';
+      readonly message: string;
+    };
+
+export interface AgentGoals {
+  submitControl(request: AgentGoalControlRequest): Promise<boolean>;
+}
+
+export interface AgentGoalControlRequest extends AgentResumeRequest {
+  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
+}
+
+export interface AgentGoalControlHandoff {
+  validate(): void;
+  commit(): void;
 }
 
 export interface AgentForking {

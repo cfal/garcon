@@ -4,7 +4,7 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
-import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
+import { GOAL_CONTROL_NOT_DELIVERED_MESSAGE, GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
 
 let workspaceDir = '';
 let queue;
@@ -17,6 +17,7 @@ const runtimeHandoff = () => ({
 function createStateOnlyAgents() {
   return {
     runAgentTurn: mock(() => Promise.reject(new Error('state-only queue cannot run turns'))),
+    captureSteerTarget: mock(() => null),
     abortSession: mock(() => Promise.resolve(false)),
     isChatRunning: mock(() => false),
     waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
@@ -628,6 +629,7 @@ describe('orchestration', () => {
   beforeEach(async () => {
     mockAgents = {
       runAgentTurn: mock(() => Promise.resolve()),
+      captureSteerTarget: mock(() => ({ provider: 'target' })),
       abortSession: mock(() => Promise.resolve(true)),
       isChatRunning: mock(() => false),
       waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
@@ -1254,8 +1256,120 @@ describe('orchestration', () => {
     });
   });
 
-  describe('active input delivery', () => {
-    const activeInputOptions = (clientRequestId = 'request-active') => ({
+  describe('strict steering', () => {
+    it('keeps the current turn identity and leaves a paused queue unchanged', async () => {
+      const reservation = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-active',
+        turnId: 'turn-active',
+      });
+      await orchQueue.createChatQueueEntry('c1', 'future input');
+      await orchQueue.pauseChatQueue('c1');
+      const queueBefore = await orchQueue.readChatExecutionControl('c1');
+      const target = orchQueue.captureSteerTarget('c1');
+      const events = [];
+      mockAgents.steerInput = mock(async (
+        _chatId,
+        _content,
+        _options,
+        _target,
+        prepareDelivery,
+      ) => {
+        await prepareDelivery();
+        events.push('delivered');
+        return { kind: 'accepted' };
+      });
+
+      await expect(orchQueue.steerInput(
+        'c1',
+        'focus here',
+        { clientRequestId: 'request-steer', clientMessageId: 'message-steer' },
+        target,
+        async (turnId) => { events.push(`scheduled:${turnId}`); },
+      )).resolves.toEqual({ turnId: 'turn-active' });
+
+      expect(events).toEqual(['scheduled:turn-active', 'delivered']);
+      expect(mockAgents.steerInput).toHaveBeenCalledWith(
+        'c1',
+        'focus here',
+        expect.objectContaining({ clientRequestId: 'request-steer' }),
+        target.providerTarget,
+        expect.any(Function),
+      );
+      expect(mockPendingInputs.register).toHaveBeenCalledWith(
+        'c1',
+        'focus here',
+        expect.objectContaining({
+          clientRequestId: 'request-steer',
+          clientMessageId: 'message-steer',
+          turnId: 'turn-active',
+        }),
+      );
+      expect(orchQueue.captureSteerTarget('c1')).toEqual(target);
+      expect(await orchQueue.readChatExecutionControl('c1')).toEqual(queueBefore);
+      await orchQueue.releaseDirectTurn(reservation);
+    });
+
+    it('rejects a target whose execution attempt changed before delivery', async () => {
+      const original = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-a',
+        turnId: 'turn-a',
+      });
+      const target = orchQueue.captureSteerTarget('c1');
+      await orchQueue.releaseDirectTurn(original);
+      const replacement = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-b',
+        turnId: 'turn-b',
+      });
+      mockAgents.steerInput = mock(async (
+        _chatId,
+        _content,
+        _options,
+        _target,
+        prepareDelivery,
+      ) => {
+        await prepareDelivery();
+        return { kind: 'accepted' };
+      });
+
+      await expect(orchQueue.steerInput(
+        'c1',
+        'stale steer',
+        { clientRequestId: 'request-steer', clientMessageId: 'message-steer' },
+        target,
+        async () => undefined,
+      )).rejects.toMatchObject({ code: 'STEER_TURN_CHANGED', status: 409 });
+      expect(mockPendingInputs.register).not.toHaveBeenCalled();
+      await orchQueue.releaseDirectTurn(replacement);
+    });
+
+    it('marks an acknowledged transport ambiguity unconfirmed', async () => {
+      const reservation = orchQueue.reserveDirectTurn('c1', { turnId: 'turn-active' });
+      const target = orchQueue.captureSteerTarget('c1');
+      mockAgents.steerInput = mock(async (
+        _chatId,
+        _content,
+        _options,
+        _target,
+        prepareDelivery,
+      ) => {
+        await prepareDelivery();
+        return { kind: 'failed', outcome: 'unknown', message: 'connection closed' };
+      });
+
+      await expect(orchQueue.steerInput(
+        'c1',
+        'focus here',
+        { clientRequestId: 'request-steer', clientMessageId: 'message-steer' },
+        target,
+        async () => undefined,
+      )).rejects.toMatchObject({ code: 'STEER_OUTCOME_UNKNOWN', outcome: 'unknown' });
+      expect(mockPendingInputs.markUnconfirmed).toHaveBeenCalledWith('c1', 'request-steer');
+      await orchQueue.releaseDirectTurn(reservation);
+    });
+  });
+
+  describe('goal-control delivery', () => {
+    const goalControlOptions = (clientRequestId = 'request-active') => ({
       clientRequestId,
       clientMessageId: `${clientRequestId}-message`,
       turnId: `${clientRequestId}-turn`,
@@ -1263,46 +1377,46 @@ describe('orchestration', () => {
 
     it('persists input by default without offering it to a running agent', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
+      mockAgents.submitGoalControl = mock(() => Promise.resolve(true));
 
       const result = await orchQueue.createChatQueueEntry('c1', 'scheduled input');
 
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(mockAgents.submitGoalControl).not.toHaveBeenCalled();
       expect(result.control.entries.map((entry) => entry.content)).toEqual(['scheduled input']);
     });
 
-    it('rejects accepted active input without ledger identifiers', async () => {
+    it('rejects accepted goal control without ledger identifiers', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
+      mockAgents.submitGoalControl = mock(() => Promise.resolve(true));
 
-      await expect(orchQueue.deliverActiveInput('c1', 'missing identity')).rejects.toMatchObject({
+      await expect(orchQueue.deliverGoalControlInput('c1', 'missing identity')).rejects.toMatchObject({
         code: 'INTERNAL_ERROR',
         status: 500,
       });
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(mockAgents.submitGoalControl).not.toHaveBeenCalled();
     });
 
-    it('registers the user row before delivering active input to a running agent', async () => {
+    it('registers the user row before delivering goal control to a running agent', async () => {
       const order = [];
       mockAgents.isChatRunning.mockReturnValue(true);
       mockPendingInputs.register.mockImplementation(async () => {
         order.push('registered');
       });
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery(runtimeHandoff());
         order.push('delivered');
         return true;
       });
 
-      const result = await orchQueue.deliverActiveInput('c1', '/goal pause', {
-        ...activeInputOptions(),
+      const result = await orchQueue.deliverGoalControlInput('c1', '/goal pause', {
+        ...goalControlOptions(),
         clientMessageId: 'message-active',
       });
 
       expect(order).toEqual(['registered', 'delivered']);
       expect(result).toBe(true);
       expect(await orchQueue.readChatExecutionControl('c1')).toEqual(expect.objectContaining({ entries: [] }));
-      expect(mockAgents.submitActiveInput).toHaveBeenCalledWith(
+      expect(mockAgents.submitGoalControl).toHaveBeenCalledWith(
         'c1',
         '/goal pause',
         expect.objectContaining({
@@ -1313,20 +1427,20 @@ describe('orchestration', () => {
       );
     });
 
-    it('preserves the active-input runner receiver', async () => {
+    it('preserves the goal-control runner receiver', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async function (_chatId, _content, _options, beforeDelivery) {
+      mockAgents.submitGoalControl = mock(async function (_chatId, _content, _options, beforeDelivery) {
         expect(this).toBe(mockAgents);
         await beforeDelivery(runtimeHandoff());
         return true;
       });
 
       await expect(
-        orchQueue.deliverActiveInput('c1', 'receiver-safe', activeInputOptions()),
+        orchQueue.deliverGoalControlInput('c1', 'receiver-safe', goalControlOptions()),
       ).resolves.toBe(true);
     });
 
-    it('persists input for running agents without active-input support', async () => {
+    it('persists input for running agents without goal-control support', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
 
       const result = await orchQueue.createChatQueueEntry('c1', 'wait for later');
@@ -1338,9 +1452,9 @@ describe('orchestration', () => {
 
     it('reports unavailable active delivery without creating a queue entry', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => false);
+      mockAgents.submitGoalControl = mock(async () => false);
 
-      const result = await orchQueue.deliverActiveInput('c1', 'race-safe input', activeInputOptions());
+      const result = await orchQueue.deliverGoalControlInput('c1', 'race-safe input', goalControlOptions());
 
       expect(result).toBe(false);
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
@@ -1348,31 +1462,31 @@ describe('orchestration', () => {
       expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
     });
 
-    it('does not deliver active input ahead of an older queued entry', async () => {
+    it('does not deliver goal control ahead of an older queued entry', async () => {
       await orchQueue.createChatQueueEntry('c1', 'older queued input');
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => true);
+      mockAgents.submitGoalControl = mock(async () => true);
 
-      const delivered = await orchQueue.deliverActiveInput('c1', 'newer input');
+      const delivered = await orchQueue.deliverGoalControlInput('c1', 'newer input');
       const result = await orchQueue.createChatQueueEntry('c1', 'newer input');
 
       expect(delivered).toBe(false);
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(mockAgents.submitGoalControl).not.toHaveBeenCalled();
       expect(result.control.entries.map((entry) => entry.content)).toEqual(['older queued input', 'newer input']);
       expect(new Set(result.control.entries.map((entry) => entry.id)).size).toBe(2);
     });
 
-    it('does not deliver active input ahead of a sending entry', async () => {
+    it('does not deliver goal control ahead of a sending entry', async () => {
       const older = await orchQueue.createChatQueueEntry('c1', 'older sending input');
       await orchQueue.popNextChat('c1');
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => true);
+      mockAgents.submitGoalControl = mock(async () => true);
 
-      const delivered = await orchQueue.deliverActiveInput('c1', 'newer input');
+      const delivered = await orchQueue.deliverGoalControlInput('c1', 'newer input');
       const result = await orchQueue.createChatQueueEntry('c1', 'newer input');
 
       expect(delivered).toBe(false);
-      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(mockAgents.submitGoalControl).not.toHaveBeenCalled();
       expect(result.control.entries).toEqual([
         expect.objectContaining({
           id: older.entry.id,
@@ -1396,17 +1510,17 @@ describe('orchestration', () => {
 
     it('marks accepted input unconfirmed when live delivery throws', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery(runtimeHandoff());
         throw new Error('steer failed');
       });
 
       await expect(
-        orchQueue.deliverActiveInput('c1', 'accepted then failed', {
-          ...activeInputOptions('request-failed'),
+        orchQueue.deliverGoalControlInput('c1', 'accepted then failed', {
+          ...goalControlOptions('request-failed'),
         }),
       ).rejects.toMatchObject({
-        message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+        message: GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
         cause: expect.objectContaining({ message: 'steer failed' }),
         deliveryAccepted: true,
         retryable: false,
@@ -1417,10 +1531,10 @@ describe('orchestration', () => {
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
-    it('settles a retained predecessor under the accepted active-input identity', async () => {
+    it('settles a retained predecessor under the accepted goal-control identity', async () => {
       let running = false;
       mockAgents.isChatRunning.mockImplementation(() => running);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery(runtimeHandoff());
         return true;
       });
@@ -1433,17 +1547,17 @@ describe('orchestration', () => {
       running = true;
       await orchQueue.completeDirectTurn(predecessor);
 
-      await expect(orchQueue.deliverActiveInput(
+      await expect(orchQueue.deliverGoalControlInput(
         'c1',
         'active successor',
-        activeInputOptions('request-b'),
+        goalControlOptions('request-b'),
       )).resolves.toBe(true);
       await orchQueue.createChatQueueEntry('c1', 'later queued input');
       await orchQueue.triggerDrain('c1');
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
 
       running = false;
-      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      orchQueue.onAgentTurnTerminal('c1', goalControlOptions('request-b'));
       expect(settled).toEqual([{
         clientRequestId: 'request-b',
         turnId: 'request-b-turn',
@@ -1459,11 +1573,11 @@ describe('orchestration', () => {
       expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
     });
 
-    it('restores a retained predecessor when the active-input boundary fails', async () => {
+    it('restores a retained predecessor when the goal-control boundary fails', async () => {
       let running = false;
       let runtimeOwner = 'turn-a';
       mockAgents.isChatRunning.mockImplementation(() => running);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery({
           validate: () => {
             if (runtimeOwner !== 'turn-a') throw new Error('runtime owner changed');
@@ -1479,19 +1593,19 @@ describe('orchestration', () => {
       running = true;
       await orchQueue.completeDirectTurn(predecessor);
 
-      await expect(orchQueue.deliverActiveInput(
+      await expect(orchQueue.deliverGoalControlInput(
         'c1',
         'rejected successor',
-        activeInputOptions('request-b'),
+        goalControlOptions('request-b'),
         async () => { throw new Error('boundary failed'); },
       )).rejects.toMatchObject({
-        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        message: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
         deliveryAccepted: false,
       });
       expect(runtimeOwner).toBe('turn-a');
 
       running = false;
-      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      orchQueue.onAgentTurnTerminal('c1', goalControlOptions('request-b'));
       expect(orchQueue.ownsExecution('c1')).toBe(true);
       orchQueue.onAgentTurnTerminal('c1', {
         clientRequestId: 'request-a',
@@ -1510,7 +1624,7 @@ describe('orchestration', () => {
       });
       running = true;
       await orchQueue.completeDirectTurn(predecessor);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         running = false;
         await orchQueue.deleteChatQueueFile('c1');
         replacement = orchQueue.reserveDirectTurn('c1', {
@@ -1522,17 +1636,17 @@ describe('orchestration', () => {
         return true;
       });
 
-      await expect(orchQueue.deliverActiveInput(
+      await expect(orchQueue.deliverGoalControlInput(
         'c1',
         'stale successor',
-        activeInputOptions('request-b'),
+        goalControlOptions('request-b'),
       )).rejects.toMatchObject({
-        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        message: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
         deliveryAccepted: false,
       });
 
       running = false;
-      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      orchQueue.onAgentTurnTerminal('c1', goalControlOptions('request-b'));
       expect(orchQueue.ownsExecution('c1')).toBe(true);
       await orchQueue.releaseDirectTurn(replacement);
       expect(orchQueue.ownsExecution('c1')).toBe(false);
@@ -1542,7 +1656,7 @@ describe('orchestration', () => {
       let running = true;
       let replacement;
       mockAgents.isChatRunning.mockImplementation(() => running);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         running = false;
         replacement = orchQueue.reserveDirectTurn('c1', {
           clientRequestId: 'request-c',
@@ -1553,17 +1667,17 @@ describe('orchestration', () => {
         return true;
       });
 
-      await expect(orchQueue.deliverActiveInput(
+      await expect(orchQueue.deliverGoalControlInput(
         'c1',
         'stale restored successor',
-        activeInputOptions('request-b'),
+        goalControlOptions('request-b'),
       )).rejects.toMatchObject({
-        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        message: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
         deliveryAccepted: false,
       });
 
       running = false;
-      orchQueue.onAgentTurnTerminal('c1', activeInputOptions('request-b'));
+      orchQueue.onAgentTurnTerminal('c1', goalControlOptions('request-b'));
       expect(orchQueue.ownsExecution('c1')).toBe(true);
       await orchQueue.releaseDirectTurn(replacement);
       expect(orchQueue.ownsExecution('c1')).toBe(false);
@@ -1572,23 +1686,23 @@ describe('orchestration', () => {
     it('marks a registered input failed when durable admission fails before live delivery', async () => {
       let delivered = false;
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery(runtimeHandoff());
         delivered = true;
         return true;
       });
 
       await expect(
-        orchQueue.deliverActiveInput(
+        orchQueue.deliverGoalControlInput(
           'c1',
           'not delivered',
-          activeInputOptions('request-admission-failed'),
+          goalControlOptions('request-admission-failed'),
           async () => {
             throw new Error('ledger scheduling failed');
           },
         ),
       ).rejects.toMatchObject({
-        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        message: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
         cause: expect.objectContaining({ message: 'ledger scheduling failed' }),
         deliveryAccepted: false,
         retryable: true,
@@ -1606,18 +1720,18 @@ describe('orchestration', () => {
         clientRequestId: 'request-append-failed',
       });
       mockChatMessages.appendMessages.mockRejectedValue(new Error('chat append failed'));
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery(runtimeHandoff());
         delivered = true;
         return true;
       });
 
       await expect(
-        orchQueue.deliverActiveInput('c1', 'must not deliver', {
-          ...activeInputOptions('request-append-failed'),
+        orchQueue.deliverGoalControlInput('c1', 'must not deliver', {
+          ...goalControlOptions('request-append-failed'),
         }),
       ).rejects.toMatchObject({
-        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        message: GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
         cause: expect.objectContaining({ message: 'chat append failed' }),
         deliveryAccepted: false,
         retryable: true,
@@ -1635,7 +1749,7 @@ describe('orchestration', () => {
       mockPendingInputs.register.mockResolvedValue({
         clientRequestId: 'request-listener-failed',
       });
-      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+      mockAgents.submitGoalControl = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery(runtimeHandoff());
         deliveries += 1;
         return true;
@@ -1644,8 +1758,8 @@ describe('orchestration', () => {
         throw new Error('listener failed');
       });
 
-      const result = await orchQueue.deliverActiveInput('c1', 'deliver despite listener', {
-        ...activeInputOptions('request-listener-failed'),
+      const result = await orchQueue.deliverGoalControlInput('c1', 'deliver despite listener', {
+        ...goalControlOptions('request-listener-failed'),
       });
 
       expect(result).toBe(true);

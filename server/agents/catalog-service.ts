@@ -82,6 +82,8 @@ export class AgentCatalogService {
         integration.forking?.supportsWhileRunning ?? false,
       supportsUpdateProjectPath:
         integration.descriptor.supportsProjectPathUpdate,
+      supportsSteering: integration.steering !== null,
+      supportsGoals: integration.goals !== null,
       supportsImages: integration.descriptor.supportsImages,
       acceptsApiProviderEndpoints: integration.endpoints !== null,
       supportedProtocols: [...integration.descriptor.supportedEndpointProtocols],

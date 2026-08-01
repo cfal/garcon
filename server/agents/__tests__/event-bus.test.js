@@ -63,7 +63,7 @@ describe('AgentEventBus', () => {
     await expect(waiting).resolves.toBe(false);
   });
 
-  it('transfers abortability across an active-input identity handoff', async () => {
+  it('transfers abortability across an goal-control identity handoff', async () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
     bus.markTurnAbortable('chat-1', operation('turn-1'));
@@ -90,7 +90,7 @@ describe('AgentEventBus', () => {
     expect(bus.getActiveTurn('chat-1')?.turnId).toBe('turn-1');
   });
 
-  it('commits an explicit active-input identity handoff at its delivery boundary', () => {
+  it('commits an explicit goal-control identity handoff at its delivery boundary', () => {
     const { bus } = makeBus();
     bus.trackTurn('chat-1', operation('turn-1'));
 

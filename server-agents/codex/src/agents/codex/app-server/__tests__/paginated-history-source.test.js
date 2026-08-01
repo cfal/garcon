@@ -1,4 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
 import { PaginatedCodexHistorySource } from '../paginated-history-source.ts';
@@ -62,7 +65,7 @@ describe('PaginatedCodexHistorySource', () => {
       const client = clientForPages(pages, shutdown);
       clients.push(client);
       return client;
-    });
+    }, async () => []);
 
     const messages = await source.load(new AbortController().signal);
 
@@ -96,7 +99,7 @@ describe('PaginatedCodexHistorySource', () => {
     const source = new PaginatedCodexHistorySource(profile, () => clientForPages(new Map([
       ['first', { data: [], nextCursor: 'repeat', backwardsCursor: null }],
       ['repeat', { data: [], nextCursor: 'repeat', backwardsCursor: null }],
-    ]), shutdown));
+    ]), shutdown), async () => []);
 
     await expect(source.load(new AbortController().signal)).rejects.toMatchObject({
       code: 'TRANSCRIPT_UNAVAILABLE',
@@ -127,7 +130,11 @@ describe('PaginatedCodexHistorySource', () => {
       nextCursor: null,
       backwardsCursor: null,
     }]]);
-    const source = new PaginatedCodexHistorySource(profile, () => clientForPages(pages));
+    const source = new PaginatedCodexHistorySource(
+      profile,
+      () => clientForPages(pages),
+      async () => [],
+    );
 
     await expect(source.preview(new AbortController().signal)).resolves.toEqual({
       firstMessage: 'hello',
@@ -137,6 +144,58 @@ describe('PaginatedCodexHistorySource', () => {
     });
   });
 
+  it('supplements paginated history with exact client ids from rollout item events', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codex-evidence-'));
+    const nativePath = path.join(directory, 'rollout.jsonl');
+    await fs.writeFile(nativePath, [
+      JSON.stringify({
+        timestamp: '2026-07-20T00:00:00.000Z',
+        type: 'session_meta',
+        payload: { id: 'thread-1', timestamp: '2026-07-20T00:00:00.000Z' },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-20T00:00:01.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'item_completed',
+          thread_id: 'thread-1',
+          turn_id: 'turn-1',
+          completed_at_ms: 1_753_056_001_000,
+          item: {
+            type: 'UserMessage',
+            id: 'user-steer-1',
+            client_id: 'message-steer-1',
+            content: [{ type: 'text', text: 'focus here' }],
+          },
+        },
+      }),
+    ].join('\n'));
+    const source = new PaginatedCodexHistorySource(
+      { ...profile, nativePath },
+      () => clientForPages(new Map([['first', {
+        data: [], nextCursor: null, backwardsCursor: null,
+      }]])),
+    );
+
+    try {
+      const messages = await source.load(new AbortController().signal);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({
+        type: 'user-message',
+        content: 'focus here',
+        metadata: { upstreamRequestId: 'message-steer-1' },
+      });
+      expect(getNativeMessageSource(messages[0])).toEqual({
+        entryId: 'turn:turn-1:item:user-steer-1',
+        byteOffset: expect.any(Number),
+        lineNumber: 2,
+      });
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('stops requesting pages after abort and shuts down', async () => {
     const controller = new AbortController();
     const shutdown = mock();
@@ -144,7 +203,11 @@ describe('PaginatedCodexHistorySource', () => {
       controller.abort(new Error('stop history'));
       return { data: [], nextCursor: 'unused', backwardsCursor: null };
     });
-    const source = new PaginatedCodexHistorySource(profile, () => ({ listThreadTurns, shutdown }));
+    const source = new PaginatedCodexHistorySource(
+      profile,
+      () => ({ listThreadTurns, shutdown }),
+      async () => [],
+    );
 
     await expect(source.load(controller.signal)).rejects.toThrow('stop history');
     expect(listThreadTurns).toHaveBeenCalledTimes(1);

@@ -1,7 +1,9 @@
 import type {
-  AgentActiveInputHandoff,
+  AgentGoalControlHandoff,
   AgentNativeSessionRef,
   AgentProjectPathUpdatePreparation,
+  AgentSteerResult,
+  AgentSteerTarget,
   AgentTranscriptPage,
   AgentTranscriptSourceLocation,
 } from '@garcon/server-agent-interface';
@@ -26,6 +28,7 @@ import type {
   AgentExecutionCommandType,
   ForkedAgentSessionOutcome,
   AgentSessionSettingsPatch,
+  AgentSteerOptions,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
   StartedAgentSession,
@@ -52,11 +55,19 @@ export interface AgentRegistryServiceContract {
   supportsImages(agentId: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
-  submitActiveInput(
+  captureSteerTarget(chatId: string): AgentSteerTarget | null;
+  steerInput(
+    chatId: string,
+    input: string,
+    options: AgentSteerOptions,
+    target: AgentSteerTarget | null,
+    prepareDelivery: () => Promise<void>,
+  ): Promise<AgentSteerResult>;
+  submitGoalControl(
     chatId: string,
     command: string,
     opts: RunAgentTurnOptions,
-    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
+    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
   ): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   getRunningChatIdsSnapshot(): string[];
@@ -184,13 +195,25 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
   }
-  submitActiveInput(
+  captureSteerTarget(chatId: string): AgentSteerTarget | null {
+    return this.#runtime.captureSteerTarget(chatId);
+  }
+  steerInput(
+    chatId: string,
+    input: string,
+    options: AgentSteerOptions,
+    target: AgentSteerTarget | null,
+    prepareDelivery: () => Promise<void>,
+  ): Promise<AgentSteerResult> {
+    return this.#runtime.steerInput(chatId, input, options, target, prepareDelivery);
+  }
+  submitGoalControl(
     chatId: string,
     command: string,
     opts: RunAgentTurnOptions,
-    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
+    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
   ): Promise<boolean> {
-    return this.#runtime.submitActiveInput(chatId, command, opts, beforeDelivery);
+    return this.#runtime.submitGoalControl(chatId, command, opts, beforeDelivery);
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
   compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }

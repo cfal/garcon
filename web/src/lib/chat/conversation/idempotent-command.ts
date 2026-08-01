@@ -2,12 +2,8 @@ import { ApiError } from '$lib/api/client.js';
 import type { CommandErrorCode } from '$shared/chat-command-contracts';
 
 const OUTCOME_UNKNOWN_ERROR_CODES = new Set<string>(
-	['ACTIVE_INPUT_OUTCOME_UNKNOWN'] satisfies CommandErrorCode[],
+	['STEER_OUTCOME_UNKNOWN', 'GOAL_CONTROL_OUTCOME_UNKNOWN'] satisfies CommandErrorCode[],
 );
-const DEFINITIVE_ERROR_CODES = new Set<string>(
-	['ACTIVE_INPUT_NOT_DELIVERED'] satisfies CommandErrorCode[],
-);
-
 export class CommandOutcomeUnknownError extends Error {
 	constructor(options?: ErrorOptions) {
 		super('The command outcome could not be confirmed', options);
@@ -17,9 +13,8 @@ export class CommandOutcomeUnknownError extends Error {
 
 function isAmbiguousCommandFailure(error: unknown): boolean {
 	if (!(error instanceof ApiError)) return true;
-	if (error.errorCode && DEFINITIVE_ERROR_CODES.has(error.errorCode)) return false;
-	return error.status >= 500
-		|| (error.errorCode !== undefined && OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode));
+	if (error.errorCode !== undefined) return OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode);
+	return error.status >= 500;
 }
 
 /** Retries one ambiguous transport outcome with the caller's unchanged command identity. */

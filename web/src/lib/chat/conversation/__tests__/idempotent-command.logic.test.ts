@@ -24,8 +24,8 @@ describe('submitIdempotentCommand', () => {
 	it('does not retry a typed definitive non-delivery returned as a server error', async () => {
 		const error = new ApiError(
 			500,
-			'Active input was not delivered',
-			'ACTIVE_INPUT_NOT_DELIVERED',
+			'Steering input was not delivered',
+			'STEER_NOT_DELIVERED',
 			undefined,
 			true,
 		);
@@ -35,12 +35,36 @@ describe('submitIdempotentCommand', () => {
 		expect(submit).toHaveBeenCalledOnce();
 	});
 
+	it('does not retry a structured shutdown response', async () => {
+		const error = new ApiError(
+			503,
+			'The server is shutting down',
+			'SERVER_SHUTTING_DOWN',
+		);
+		const submit = vi.fn().mockRejectedValue(error);
+
+		await expect(submitIdempotentCommand(submit)).rejects.toBe(error);
+		expect(submit).toHaveBeenCalledOnce();
+	});
+
+	it('still probes an unstructured server failure once', async () => {
+		const submit = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(500, 'upstream failed'))
+			.mockResolvedValueOnce({ status: 'duplicate' });
+
+		await expect(submitIdempotentCommand(submit)).resolves.toEqual({ status: 'duplicate' });
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
+
 	it('reports an unknown outcome after two ambiguous responses', async () => {
 		const submit = vi
 			.fn()
-			.mockRejectedValueOnce(new ApiError(500, 'server failed', 'INTERNAL_ERROR'))
 			.mockRejectedValueOnce(
-				new ApiError(409, 'accepted outcome unknown', 'ACTIVE_INPUT_OUTCOME_UNKNOWN'),
+				new ApiError(500, 'accepted outcome unknown', 'STEER_OUTCOME_UNKNOWN'),
+			)
+			.mockRejectedValueOnce(
+				new ApiError(500, 'accepted outcome unknown', 'STEER_OUTCOME_UNKNOWN'),
 			);
 
 		await expect(submitIdempotentCommand(submit)).rejects.toBeInstanceOf(

@@ -7,6 +7,8 @@ import type { ConversationQueueController } from './conversation-queue-controlle
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import { errorDetail, pendingUserInput } from './conversation-submission-helpers.js';
 import { settleSubmissionFailure } from './submission-settlement.js';
+import { ApiError } from '$lib/api/client.js';
+import { CommandOutcomeUnknownError } from './idempotent-command.js';
 import * as m from '$lib/paraglide/messages.js';
 
 type RouteDeps = Pick<
@@ -44,14 +46,11 @@ export async function submitQueueRoute(
 	acceptedInputs: AcceptedInputSubmissionService,
 	queue: ConversationQueueController,
 	context: SubmissionContext,
-	route: 'queue' | 'active',
 ): Promise<ConversationSubmissionOutcome> {
 	const sequence = queue.beginSubmission(context.chatId);
 	// Clears before awaiting the network so typing during the request survives.
 	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
-	const submission = route === 'active'
-		? acceptedInputs.active({ chatId: context.chatId, content: context.content })
-		: acceptedInputs.enqueue({ chatId: context.chatId, content: context.content });
+	const submission = acceptedInputs.enqueue({ chatId: context.chatId, content: context.content });
 	try {
 		const result = await submission.submit();
 		deps.conversationUi.setExecutionControl(context.chatId, result.control);
@@ -72,6 +71,88 @@ export async function submitQueueRoute(
 		});
 	} finally {
 		queue.finishSubmission(context.chatId);
+	}
+}
+
+export async function submitGoalControlRoute(
+	deps: RouteDeps,
+	acceptedInputs: AcceptedInputSubmissionService,
+	queue: ConversationQueueController,
+	context: SubmissionContext,
+): Promise<ConversationSubmissionOutcome> {
+	const sequence = queue.beginSubmission(context.chatId);
+	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
+	const submission = acceptedInputs.goalControl({
+		chatId: context.chatId,
+		content: context.content,
+	});
+	try {
+		const result = await submission.submit();
+		deps.conversationUi.setExecutionControl(context.chatId, result.control);
+		return 'accepted';
+	} catch (error) {
+		return settleSubmissionFailure(deps, context, error, {
+			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
+			rejectedNotice: (failure) => m.chat_notice_failed_queue_message({
+				detail: errorDetail(failure),
+				content: context.restoreComposerOnFailure ? context.previousText : context.text,
+			}),
+			restoreRejected: () => queue.recordSubmissionFailure(context.chatId, {
+				sequence,
+				text: context.previousText,
+				images: context.previousImages,
+			}),
+			refreshControl: () => queue.startControlRefresh(context.chatId),
+		});
+	} finally {
+		queue.finishSubmission(context.chatId);
+	}
+}
+
+export async function submitSteerRoute(
+	deps: RouteDeps,
+	acceptedInputs: AcceptedInputSubmissionService,
+	context: SubmissionContext,
+): Promise<ConversationSubmissionOutcome> {
+	const submission = acceptedInputs.steer({
+		chatId: context.chatId,
+		content: context.content,
+	});
+	deps.chatState.upsertPendingUserInput(
+		pendingUserInput(
+			context.chatId,
+			context.content,
+			[],
+			submission.clientRequestId,
+			submission.clientMessageId,
+		),
+	);
+	deps.chatState.isUserScrolledUp = false;
+	let clearedComposerRevision: number | null = null;
+	if (context.restoreComposerOnFailure) {
+		deps.composerState.clearAfterSubmit(context.chatId);
+		clearedComposerRevision = deps.composerState.contentRevision;
+	}
+	try {
+		await submission.submit();
+		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
+		return 'accepted';
+	} catch (error) {
+		const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+		deps.chatState.updatePendingUserInputDeliveryStatus(
+			submission.clientRequestId,
+			outcomeUnknown ? 'unconfirmed' : 'failed',
+		);
+		if (!outcomeUnknown) restoreSteerComposer(deps, context, clearedComposerRevision);
+		if (deps.sessions.selectedChatId === context.chatId) {
+			deps.chatState.appendLocalNotice(
+				'error',
+				outcomeUnknown
+					? m.chat_notice_steer_outcome_unconfirmed()
+					: steerFailureNotice(error),
+			);
+		}
+		return outcomeUnknown ? 'unknown' : 'rejected';
 	}
 }
 
@@ -169,4 +250,41 @@ function beginOptimisticInput(
 	deps.chatState.isUserScrolledUp = false;
 	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
 	deps.composerState.isSubmitting = true;
+}
+
+function restoreSteerComposer(
+	deps: RouteDeps,
+	context: SubmissionContext,
+	clearedComposerRevision: number | null,
+): void {
+	if (
+		!context.restoreComposerOnFailure
+		|| deps.sessions.selectedChatId !== context.chatId
+		|| deps.composerState.contentRevision !== clearedComposerRevision
+		|| deps.composerState.inputText !== ''
+		|| deps.composerState.images.length > 0
+	) return;
+	deps.composerState.inputText = context.previousText;
+	deps.composerState.images = context.previousImages;
+	deps.composerState.saveDraft(context.chatId);
+}
+
+function steerFailureNotice(error: unknown): string {
+	if (error instanceof ApiError) {
+		switch (error.errorCode) {
+			case 'OPERATION_UNSUPPORTED':
+				return m.chat_notice_steer_unsupported();
+			case 'STEER_TURN_UNAVAILABLE':
+				return m.chat_notice_steer_turn_unavailable();
+			case 'STEER_TURN_CHANGED':
+				return m.chat_notice_steer_turn_changed();
+			case 'STEER_TURN_NOT_STEERABLE':
+				return m.chat_notice_steer_turn_not_steerable();
+			case 'STEER_PROVIDER_REJECTED':
+				return m.chat_notice_steer_provider_rejected();
+			case 'STEER_NOT_DELIVERED':
+				return m.chat_notice_steer_not_delivered();
+		}
+	}
+	return m.chat_notice_failed_steer({ detail: errorDetail(error) });
 }

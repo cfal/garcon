@@ -150,3 +150,8 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   executionAdmission?: AgentExecutionAdmission;
   integrationEndpoint?: AgentEndpointSelection | null;
 };
+
+export interface AgentSteerOptions {
+  readonly clientRequestId: string;
+  readonly clientMessageId: string;
+}

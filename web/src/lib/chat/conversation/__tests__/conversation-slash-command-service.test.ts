@@ -16,7 +16,8 @@ vi.mock('$lib/api/chats.js', () => ({
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
 	runChat: vi.fn(),
-	sendActiveInput: vi.fn(),
+	steerChat: vi.fn(),
+	submitGoalControl: vi.fn(),
 	startChat: vi.fn(),
 }));
 
@@ -170,6 +171,8 @@ function createDeps(chat = createChat()) {
 			})),
 			supportsFork: vi.fn(() => false),
 			supportsForkWhileRunning: vi.fn(() => false),
+			supportsSteering: vi.fn(() => false),
+			supportsGoals: vi.fn(() => false),
 		},
 		navigation: { navigateToChat: vi.fn() },
 		refetchTranscript: vi.fn().mockResolvedValue(undefined),
@@ -181,6 +184,75 @@ function createDeps(chat = createChat()) {
 describe('ConversationSlashCommandService', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+	});
+
+	it('routes supported steering before queue policy despite a stale processing projection', () => {
+		const { deps } = createDeps(createChat({
+			agentId: 'codex',
+			isProcessing: false,
+		}));
+		deps.modelCatalog.supportsSteering.mockReturnValue(true);
+
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: 'chat-1',
+			chat: deps.sessions.byId['chat-1'],
+			text: '/steer Focus on the failing assertion',
+			images: [],
+			ownsComposer: true,
+		});
+
+		expect(result).toEqual({ kind: 'steer', content: 'Focus on the failing assertion' });
+	});
+
+	it('rejects steering when the capability is absent or attachments are present', () => {
+		const { deps, appendLocalNotice } = createDeps(createChat({ agentId: 'codex' }));
+		const service = new ConversationSlashCommandService(deps);
+		const input = {
+			chatId: 'chat-1',
+			chat: deps.sessions.byId['chat-1'],
+			text: '/steer Focus here',
+			images: [] as File[],
+			ownsComposer: true,
+		};
+
+		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'/steer is not supported by this agent.',
+		);
+
+		deps.modelCatalog.supportsSteering.mockReturnValue(true);
+		input.images = [new File(['image'], 'capture.png', { type: 'image/png' })];
+		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Remove attachments before steering the active turn.',
+		);
+	});
+
+	it('keeps active goal controls distinct from ordinary goal submissions', () => {
+		const chat = createChat({ agentId: 'codex', isProcessing: true });
+		const { deps } = createDeps(chat);
+		deps.modelCatalog.supportsGoals.mockReturnValue(true);
+		const service = new ConversationSlashCommandService(deps);
+		const input = {
+			chatId: 'chat-1',
+			chat,
+			text: '/goal pause',
+			images: [],
+			ownsComposer: true,
+		};
+
+		expect(service.dispatchSubmission(input)).toEqual({
+			kind: 'goal-control',
+			content: '/goal pause',
+		});
+
+		chat.isProcessing = false;
+		expect(service.dispatchSubmission(input)).toEqual({
+			kind: 'continue',
+			content: '/goal pause',
+		});
 	});
 
 	it('restores rename text and attachments when rename fails', async () => {
@@ -711,7 +783,6 @@ describe('ConversationSlashCommandService', () => {
 		).toEqual({
 			kind: 'continue',
 			content: '/move-to-top',
-			isActiveDeliveryInput: false,
 		});
 	});
 

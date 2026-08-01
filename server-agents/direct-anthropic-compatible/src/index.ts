@@ -44,7 +44,7 @@ const DESCRIPTOR = {
 
 export default class DirectAnthropicCompatibleIntegration implements AgentIntegration {
   static readonly integrationId = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
-  static readonly apiVersion = 2 as const;
+  static readonly apiVersion = 3 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -64,6 +64,8 @@ export default class DirectAnthropicCompatibleIntegration implements AgentIntegr
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly forking;
+  readonly steering = null;
+  readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 

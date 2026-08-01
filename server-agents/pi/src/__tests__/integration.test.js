@@ -27,7 +27,7 @@ describe('PiAgentIntegration', () => {
     const integration = new PiAgentIntegration(host);
 
     expect(PiAgentIntegration.integrationId).toBe('pi');
-    expect(PiAgentIntegration.apiVersion).toBe(2);
+    expect(PiAgentIntegration.apiVersion).toBe(3);
     expect(PiAgentIntegration.transcriptIndex.apiVersion).toBe(1);
     expect(integration.descriptor.id).toBe('pi');
     expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);

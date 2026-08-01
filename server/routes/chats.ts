@@ -40,7 +40,8 @@ import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
-  ActiveInputDeliveryError,
+  GoalControlDeliveryError,
+  SteerDeliveryError,
   DomainError,
   transcriptUnavailableMessage,
   ValidationDomainError,
@@ -78,7 +79,8 @@ import type {
 } from '../../common/chat-command-contracts.ts';
 import {
   CommandRequestValidationError,
-  parseActiveInputCommandRequest,
+  parseGoalControlCommandRequest,
+  parseSteerCommandRequest,
   parseAgentInterruptAndSendCommandRequest,
   parseAgentRunCommandRequest,
   parseAgentStopCommandRequest,
@@ -935,17 +937,36 @@ export default function createChatRoutes({
     }
   }
 
-  async function postActiveInput(body: unknown): Promise<Response> {
+  async function postGoalControl(body: unknown): Promise<Response> {
     try {
-      const input = parseCommandRequest(parseActiveInputCommandRequest, body);
-      const result = await commands.submitActiveInput(input);
+      const input = parseCommandRequest(parseGoalControlCommandRequest, body);
+      const result = await commands.submitGoalControl(input);
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      if (error instanceof ActiveInputDeliveryError) {
-        logger.error('queue: active input delivery failed:', error.cause);
+      if (error instanceof GoalControlDeliveryError) {
+        logger.error('queue: goal control delivery failed:', error.cause);
+      }
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function postSteer(body: unknown): Promise<Response> {
+    try {
+      const input = parseCommandRequest(parseSteerCommandRequest, body);
+      const result = await commands.submitSteer(input);
+      return Response.json(result, { status: 202 });
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof SteerDeliveryError) {
+        logger.error('steer delivery failed:', {
+          outcome: error.outcome,
+          causeType: error.cause instanceof Error ? error.cause.name : typeof error.cause,
+        });
       }
       return jsonErrorFromUnknown(error);
     }
@@ -1157,7 +1178,8 @@ export default function createChatRoutes({
     '/api/v1/chats/queue/entries/move': {
       PUT: withJsonBody(putQueueEntryMove),
     },
-    '/api/v1/chats/active-input': { POST: withJsonBody(postActiveInput) },
+    '/api/v1/chats/goal-control': { POST: withJsonBody(postGoalControl) },
+    '/api/v1/chats/steer': { POST: withJsonBody(postSteer) },
     '/api/v1/chats/queue/clear': {
       POST: withJsonBody((body: unknown) => postQueueMutation(body, 'clear')),
     },

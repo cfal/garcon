@@ -24,6 +24,8 @@
 		isVisible: boolean;
 		query: string;
 		supportsFork: boolean;
+		supportsSteering: boolean;
+		supportsGoals: boolean;
 		canScheduleIn: boolean;
 		onSelect: (name: string) => void;
 		onClose: () => void;
@@ -37,6 +39,8 @@
 		isVisible,
 		query,
 		supportsFork,
+		supportsSteering,
+		supportsGoals,
 		canScheduleIn,
 		onSelect,
 		onClose,
@@ -93,7 +97,8 @@
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
 			if (command.name === 'fork') return supportsFork;
 			if (command.name === 'in') return canScheduleIn;
-			if (command.name === 'goal' || command.name === 'steer') return agent === 'codex';
+			if (command.name === 'steer') return supportsSteering;
+			if (command.name === 'goal') return supportsGoals;
 			return true;
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));

@@ -126,7 +126,7 @@ function validateClass(
   integrationClass: AgentIntegrationClass,
   existing: ReadonlyMap<string, IntegrationRecord>,
 ): void {
-  if (integrationClass.apiVersion !== 2) {
+  if (integrationClass.apiVersion !== 3) {
     throw new Error(
       `Unsupported agent integration API version for ${integrationClass.integrationId}: ${integrationClass.apiVersion}`,
     );

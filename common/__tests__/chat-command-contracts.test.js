@@ -4,10 +4,12 @@ import {
   parseAgentRunCommandRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
+  parseGoalControlCommandRequest,
   parsePermissionDecisionCommandRequest,
   parseQueueEntryMoveCommandRequest,
   parseQueueEntryReplaceCommandRequest,
   parseStartChatCommandRequest,
+  parseSteerCommandRequest,
 } from '../chat-command-contracts.ts';
 import {
   CHAT_STOP_OUTCOMES,
@@ -75,6 +77,37 @@ describe('chat command request parsers', () => {
     expect(parsed.permissionMode).toBe('default');
     expect(parsed.thinkingMode).toBe('none');
     expect(parsed.agentSettings).toEqual(agentSettings());
+  });
+
+  it('requires distinct request and message identities for steering', () => {
+    expect(parseSteerCommandRequest({
+      clientRequestId: ' request-steer ',
+      clientMessageId: ' message-steer ',
+      chatId: CHAT_ID,
+      content: ' focus here ',
+    })).toEqual({
+      clientRequestId: 'request-steer',
+      clientMessageId: 'message-steer',
+      chatId: CHAT_ID,
+      content: ' focus here ',
+    });
+    expect(() => parseSteerCommandRequest({
+      clientRequestId: 'request-steer',
+      chatId: CHAT_ID,
+      content: 'focus here',
+    })).toThrow(CommandRequestValidationError);
+  });
+
+  it('keeps goal control on its request-only command identity', () => {
+    expect(parseGoalControlCommandRequest({
+      clientRequestId: 'request-goal',
+      chatId: CHAT_ID,
+      content: '/goal pause',
+    })).toEqual({
+      clientRequestId: 'request-goal',
+      chatId: CHAT_ID,
+      content: '/goal pause',
+    });
   });
 
   it('rejects malformed command identities and fork cutoffs', () => {

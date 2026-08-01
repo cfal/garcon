@@ -3,6 +3,7 @@ import {
   AgentIntegrationError,
   type AgentExecution,
   type AgentExecutionContext,
+  type AgentGoalControlRequest,
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import { AgentExecutionEventChannel } from '@garcon/server-agent-common/execution/event-channel';
@@ -95,8 +96,8 @@ export class CodexExecution implements AgentExecution {
     return this.#resume(request, (runtimeRequest) => this.runtime.runTurn(runtimeRequest));
   }
 
-  async submitActiveInput(
-    request: Parameters<NonNullable<AgentExecution['submitActiveInput']>>[0],
+  async submitGoalControl(
+    request: AgentGoalControlRequest,
   ): Promise<boolean> {
     const predecessor = this.#operations.current(request.chatId);
     const runtimeRequest = prepareResumeRequest(
@@ -104,7 +105,7 @@ export class CodexExecution implements AgentExecution {
       await this.#runtimeConfiguration(request),
       this.nativeSessions,
     );
-    return this.runtime.submitActiveInput(
+    return this.runtime.submitGoalControl(
       runtimeRequest,
       (handoff) => request.beforeDelivery(this.#operations.handoff(
         request.chatId,

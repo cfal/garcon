@@ -590,7 +590,7 @@
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
-	const forkCapabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
+	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDraftStartupSubmitting = $derived(
 		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
 	);
@@ -908,7 +908,9 @@
 			chatId={sessions.selectedChatId}
 			isVisible={ui.showSlashMenu}
 			query={ui.slashQuery}
-			supportsFork={modelCatalog.supportsFork(forkCapabilityAgentId)}
+			supportsFork={modelCatalog.supportsFork(capabilityAgentId)}
+			supportsSteering={modelCatalog.supportsSteering(capabilityAgentId)}
+			supportsGoals={modelCatalog.supportsGoals(capabilityAgentId)}
 			canScheduleIn={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}

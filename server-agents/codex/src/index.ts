@@ -59,7 +59,7 @@ const CODEX_DESCRIPTOR = {
 
 export default class CodexAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'codex';
-  static readonly apiVersion = 2 as const;
+  static readonly apiVersion = 3 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -79,6 +79,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands: NonNullable<AgentIntegration['commands']>;
   readonly forking;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
+  readonly goals: NonNullable<AgentIntegration['goals']>;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
@@ -117,7 +119,15 @@ export default class CodexAgentIntegration implements AgentIntegration {
       defaults: {},
       descriptors: [],
     });
-    this.execution = new CodexExecution(host, runtime, nativeSessions, config);
+    const execution = new CodexExecution(host, runtime, nativeSessions, config);
+    this.execution = execution;
+    this.steering = {
+      captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
+      steer: (request) => runtime.steer(request),
+    };
+    this.goals = {
+      submitControl: (request) => execution.submitGoalControl(request),
+    };
     this.transcript = createCodexTranscript(runtime, nativeSessions, config, logger);
     this.catalog = createModelCatalog({
       logger: host.logger,

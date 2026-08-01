@@ -33,6 +33,11 @@ export interface CommandLedgerRecord {
   stopOutcome?: ChatStopOutcome;
 }
 
+type SteerCommandTombstone = Omit<
+  CommandLedgerRecord,
+  'payload' | 'entryId' | 'forkPreparation' | 'stopOutcome'
+>;
+
 export interface LedgerAcceptInput {
   commandType: string;
   chatId: string;
@@ -67,7 +72,7 @@ const QUEUE_RECEIPT_COMMANDS = new Set([
   'queue-entry-replace',
   'queue-entry-delete',
   'queue-entry-move',
-  'active-input',
+  'goal-control',
 ]);
 
 function stableStringify(value: unknown): string {
@@ -132,19 +137,27 @@ function cloneRecord(record: CommandLedgerRecord): CommandLedgerRecord {
   };
 }
 
+function recordFromSteerTombstone(tombstone: SteerCommandTombstone): CommandLedgerRecord {
+  return { ...tombstone, payload: {} };
+}
+
 export class CommandLedger {
   readonly #records = new Map<string, CommandLedgerRecord>();
+  readonly #steerTombstones = new Map<string, SteerCommandTombstone>();
 
   constructor(_workspaceDir?: string) {}
 
   async getRecord(key: string): Promise<CommandLedgerRecord | null> {
     const record = this.#records.get(key);
-    return record ? cloneRecord(record) : null;
+    if (record) return cloneRecord(record);
+    const tombstone = this.#steerTombstones.get(key);
+    return tombstone ? recordFromSteerTombstone(tombstone) : null;
   }
 
   isTerminal(key: string): boolean {
     const record = this.#records.get(key);
-    return record !== undefined && TERMINAL_COMMAND_STATUSES.has(record.status);
+    return this.#steerTombstones.has(key)
+      || (record !== undefined && TERMINAL_COMMAND_STATUSES.has(record.status));
   }
 
   unsettledQueueReceiptKeys(chatId: string): ReadonlySet<string> {
@@ -184,8 +197,18 @@ export class CommandLedger {
       }
       return { kind: 'duplicate', record: cloneRecord(existing) };
     }
+    const existingTombstone = this.#steerTombstones.get(key);
+    if (existingTombstone) {
+      const record = recordFromSteerTombstone(existingTombstone);
+      return existingTombstone.payloadHash === payloadHash
+        ? { kind: 'duplicate', record }
+        : { kind: 'conflict', record };
+    }
 
-    const conflictingIdentity = [...this.#records.values()].find((record) => (
+    const conflictingIdentity = [
+      ...this.#records.values(),
+      ...[...this.#steerTombstones.values()].map(recordFromSteerTombstone),
+    ].find((record) => (
       record.chatId === input.chatId && record.clientRequestId === input.clientRequestId
     ));
     if (conflictingIdentity) return { kind: 'conflict', record: cloneRecord(conflictingIdentity) };
@@ -270,9 +293,20 @@ export class CommandLedger {
       const oldest = [...this.#records]
         .find(([, record]) => (
           TERMINAL_COMMAND_STATUSES.has(record.status) && record.forkPreparation === undefined
-        ))?.[0];
+        ));
       if (!oldest) return;
-      this.#records.delete(oldest);
+      const [key, record] = oldest;
+      if (record.commandType === 'steer') {
+        const {
+          payload: _payload,
+          entryId: _entryId,
+          forkPreparation: _forkPreparation,
+          stopOutcome: _stopOutcome,
+          ...tombstone
+        } = record;
+        this.#steerTombstones.set(key, tombstone);
+      }
+      this.#records.delete(key);
     }
   }
 }

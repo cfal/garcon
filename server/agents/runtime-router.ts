@@ -2,10 +2,12 @@ import crypto from 'node:crypto';
 import {
   AgentIntegrationError,
   computeAgentTranscriptRevisions,
-  type AgentActiveInputHandoff,
+  type AgentGoalControlHandoff,
   type AgentExecutionContext,
   type AgentOperationIdentity,
   type AgentProjectPathUpdatePreparation,
+  type AgentSteerResult,
+  type AgentSteerTarget,
 } from '@garcon/server-agent-interface';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -28,6 +30,7 @@ import type {
   AgentChatEntry,
   AgentExecutionAdmission,
   AgentExecutionCommandType,
+  AgentSteerOptions,
   ForkedAgentSessionOutcome,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
@@ -195,16 +198,78 @@ export class AgentRuntimeRouter {
     }
   }
 
-  async submitActiveInput(
+  async steerInput(
+    chatId: string,
+    input: string,
+    options: AgentSteerOptions,
+    target: AgentSteerTarget | null,
+    prepareDelivery: () => Promise<void>,
+  ): Promise<AgentSteerResult> {
+    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    if (!entry.agentSessionId) {
+      return {
+        kind: 'rejected',
+        reason: 'no-active-turn',
+        message: 'No active agent session',
+      };
+    }
+    const integration = this.#directory.require(entry.agentId);
+    if (!integration.steering) {
+      throw new DomainError(
+        'OPERATION_UNSUPPORTED',
+        'This agent does not support steering',
+        422,
+      );
+    }
+    const result = await integration.steering.steer({
+      chatId,
+      projectPath: entry.projectPath,
+      agentSessionId: entry.agentSessionId,
+      nativeSession: entry.nativeSession ?? null,
+      target,
+      input: await resolveFileMentionsInCommand(input, entry.projectPath),
+      clientMessageId: options.clientMessageId,
+      prepareDelivery,
+    });
+    const details = {
+      chatId,
+      clientRequestId: options.clientRequestId,
+      integrationId: entry.agentId,
+    };
+    if (result.kind === 'accepted') {
+      logger.info('steer accepted', details);
+    } else if (result.kind === 'rejected') {
+      logger.warn('steer rejected', { ...details, reason: result.reason });
+    } else if (result.outcome === 'unknown') {
+      logger.error('steer outcome unknown', { ...details, outcome: result.outcome });
+    } else {
+      logger.warn('steer not delivered', { ...details, outcome: result.outcome });
+    }
+    return result;
+  }
+
+  captureSteerTarget(chatId: string): AgentSteerTarget | null {
+    const entry = this.#registry.getChat(chatId);
+    if (!entry?.agentSessionId) return null;
+    const steering = this.#directory.get(entry.agentId)?.steering;
+    if (!steering) return null;
+    return steering.captureTarget({
+      chatId,
+      agentSessionId: entry.agentSessionId,
+      nativeSession: entry.nativeSession ?? null,
+    });
+  }
+
+  async submitGoalControl(
     chatId: string,
     prompt: string,
     opts: RunAgentTurnOptions,
-    beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>,
+    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>,
   ): Promise<boolean> {
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) return false;
     const integration = this.#directory.require(entry.agentId);
-    if (!integration.execution.submitActiveInput) return false;
+    if (!integration.goals) return false;
     const selection = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
       model: opts.model ?? entry.model,
@@ -215,7 +280,7 @@ export class AgentRuntimeRouter {
     await this.#validateEndpoint(integration, selection);
     const operation = operationIdentity(opts, opts.commandType ?? 'agent-run');
     const previousTurn = this.#events.getActiveTurn(chatId);
-    return integration.execution.submitActiveInput({
+    return integration.goals.submitControl({
       ...this.#executionContext(chatId, entry, selection, operation, opts),
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,

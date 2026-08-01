@@ -66,7 +66,7 @@ const CLAUDE_DESCRIPTOR = {
 
 export default class ClaudeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'claude';
-  static readonly apiVersion = 2 as const;
+  static readonly apiVersion = 3 as const;
   static readonly transcriptIndex = {
     apiVersion: 1,
     moduleUrl: resolveAgentStandaloneEntrypoint({
@@ -86,6 +86,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands: NonNullable<AgentIntegration['commands']>;
   readonly forking;
+  readonly steering = null;
+  readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 

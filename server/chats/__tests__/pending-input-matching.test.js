@@ -34,6 +34,36 @@ describe('matchingRequestIds', () => {
       identityless: [],
     },
     {
+      name: 'matches a provider echo by the forwarded client message identity',
+      records: [record('request-1', { clientMessageId: 'message-1' })],
+      messages: [message({
+        content: 'provider-normalized',
+        metadata: { upstreamRequestId: 'message-1' },
+      })],
+      expected: ['request-1'],
+      identityless: [],
+    },
+    {
+      name: 'does not content-match a conflicting forwarded message identity',
+      records: [record('request-1', { clientMessageId: 'message-1' })],
+      messages: [message({ metadata: { upstreamRequestId: 'message-2' } })],
+      expected: [],
+      identityless: [],
+    },
+    {
+      name: 'reconciles identical prompts by their forwarded message identities',
+      records: [
+        record('request-1', { clientMessageId: 'message-1' }),
+        record('request-2', { clientMessageId: 'message-2' }),
+      ],
+      messages: [
+        message({ metadata: { upstreamRequestId: 'message-2' } }),
+        message({ metadata: { upstreamRequestId: 'message-1' } }),
+      ],
+      expected: ['request-1', 'request-2'],
+      identityless: [],
+    },
+    {
       name: 'matches a nearby identityless echo',
       records: [record('request-1')],
       messages: [message()],

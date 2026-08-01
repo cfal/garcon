@@ -14,8 +14,10 @@ const MAX_LINES = 1000;
 // This is the ceiling for the execution-ownership unification: steps in that
 // work offset each other rather than raising it, because the concepts it
 // removes live outside the measured directories and would otherwise let the
-// footprint grow while the subsystem is supposedly getting simpler.
-const EXECUTION_FOOTPRINT_BUDGET = 6615;
+// footprint grow while the subsystem is supposedly getting simpler. Strict
+// same-turn steering adds a separately reviewed 461-line command admission,
+// immutable target, delivery settlement, and pending-input increment.
+const EXECUTION_FOOTPRINT_BUDGET = 7076;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

@@ -72,7 +72,7 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async stageActiveFallback(
+  async stageGoalControlFallback(
     chatId: string,
     content: string,
     command: QueueCommandIdentity,
@@ -95,7 +95,7 @@ export class ChatExecutionControlOperations {
       if (!popped.outcome.value) {
         throw new DomainError(
           'SESSION_BUSY',
-          'Chat queue changed before active input delivery',
+          'Chat queue changed before goal control delivery',
           409,
           true,
         );

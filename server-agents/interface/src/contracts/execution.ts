@@ -13,7 +13,6 @@ export interface AgentExecution {
   abort(agentSessionId: string): Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   runningSessions(): readonly AgentRunningSession[];
-  submitActiveInput?(request: AgentActiveInput): Promise<boolean>;
   compact?(request: AgentCompactRequest): Promise<void>;
   applySessionConfiguration?(
     agentSessionId: string,
@@ -52,15 +51,6 @@ export interface AgentResumeRequest extends AgentExecutionContext {
   readonly nativeSession: AgentNativeSessionRef | null;
   readonly prompt: string;
   readonly attachments: readonly AgentAttachment[];
-}
-
-export interface AgentActiveInput extends AgentResumeRequest {
-  readonly beforeDelivery: (handoff: AgentActiveInputHandoff) => Promise<void>;
-}
-
-export interface AgentActiveInputHandoff {
-  validate(): void;
-  commit(): void;
 }
 
 export interface AgentCompactRequest extends AgentResumeRequest {

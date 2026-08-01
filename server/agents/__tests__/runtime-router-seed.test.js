@@ -37,14 +37,19 @@ function makeRouter(overrides = {}) {
     nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
   }));
   const resume = overrides.resume ?? mock(async () => undefined);
-  const submitActiveInput = overrides.submitActiveInput ?? mock(async () => true);
+  const submitGoalControl = overrides.submitGoalControl ?? mock(async () => true);
+  const steer = overrides.steer ?? mock(async () => ({ kind: 'accepted' }));
+  const providerTarget = overrides.providerTarget ?? {};
+  const captureTarget = overrides.captureTarget ?? mock(() => providerTarget);
   const integration = {
     descriptor: {
       id: 'test',
       supportedPermissionModes: ['default'],
       supportedThinkingModes: ['none'],
     },
-    execution: { start, resume, submitActiveInput, isRunning: () => false, runningSessions: () => [] },
+    execution: { start, resume, isRunning: () => false, runningSessions: () => [] },
+    steering: { captureTarget, steer },
+    goals: { submitControl: submitGoalControl },
     settings: { defaults: () => settings, parse: (input) => input },
   };
   const registry = {
@@ -102,7 +107,18 @@ function makeRouter(overrides = {}) {
     getCarryOverRevision: () => 'carry-1',
     loadCarryOver: () => carryOver,
   });
-  return { router, start, resume, submitActiveInput, registry, events, carryOver };
+  return {
+    router,
+    start,
+    resume,
+    captureTarget,
+    providerTarget,
+    steer,
+    submitGoalControl,
+    registry,
+    events,
+    carryOver,
+  };
 }
 
 describe('AgentRuntimeRouter fresh-session boundary', () => {
@@ -167,16 +183,16 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       commandType: 'chat-start',
       turnId: 'turn-predecessor',
     };
-    const { router, events, submitActiveInput, resume } = makeRouter({
+    const { router, events, submitGoalControl, resume } = makeRouter({
       entry: { agentSessionId: 'native-1' },
       activeTurn: predecessor,
     });
-    submitActiveInput.mockImplementation(async () => {
+    submitGoalControl.mockImplementation(async () => {
       events.clearTurn('chat-1');
       return false;
     });
 
-    await expect(router.submitActiveInput('chat-1', 'steer', {
+    await expect(router.submitGoalControl('chat-1', 'steer', {
       clientRequestId: 'request-steer',
       turnId: 'turn-steer',
     }, async () => undefined)).resolves.toBe(false);
@@ -195,16 +211,16 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       commandType: 'chat-start',
       turnId: 'turn-predecessor',
     };
-    const { router, events, submitActiveInput, resume } = makeRouter({
+    const { router, events, submitGoalControl, resume } = makeRouter({
       entry: { agentSessionId: 'native-1' },
       activeTurn: predecessor,
     });
-    submitActiveInput.mockImplementation(async () => {
+    submitGoalControl.mockImplementation(async () => {
       events.clearTurn('chat-1');
       throw new Error('delivery failed');
     });
 
-    await expect(router.submitActiveInput('chat-1', 'steer', {
+    await expect(router.submitGoalControl('chat-1', 'steer', {
       clientRequestId: 'request-steer',
       turnId: 'turn-steer',
     }, async () => undefined)).rejects.toThrow('delivery failed');
@@ -223,16 +239,16 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       commandType: 'chat-start',
       turnId: 'turn-predecessor',
     };
-    const { router, events, submitActiveInput } = makeRouter({
+    const { router, events, submitGoalControl } = makeRouter({
       entry: { agentSessionId: 'native-1' },
       activeTurn: predecessor,
     });
-    submitActiveInput.mockImplementation(async (request) => {
+    submitGoalControl.mockImplementation(async (request) => {
       await request.beforeDelivery(terminalHandoff());
       throw new Error('delivery outcome unknown');
     });
 
-    await expect(router.submitActiveInput('chat-1', 'steer', {
+    await expect(router.submitGoalControl('chat-1', 'steer', {
       clientRequestId: 'request-steer',
       turnId: 'turn-steer',
     }, async (handoff) => {
@@ -241,5 +257,39 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     })).rejects.toThrow('delivery outcome unknown');
 
     expect(events.getActiveTurn()).toMatchObject({ turnId: 'turn-steer' });
+  });
+
+  it('routes steering through its facet without handing off the active operation', async () => {
+    const activeTurn = {
+      clientRequestId: 'request-active',
+      commandType: 'agent-run',
+      turnId: 'turn-active',
+    };
+    const { router, events, captureTarget, providerTarget, steer } = makeRouter({
+      entry: { agentSessionId: 'native-1' },
+      activeTurn,
+    });
+    const prepareDelivery = mock(async () => undefined);
+    const target = router.captureSteerTarget('chat-1');
+
+    await expect(router.steerInput('chat-1', 'review @notes.txt', {
+      clientRequestId: 'request-steer',
+      clientMessageId: 'message-steer',
+    }, target, prepareDelivery)).resolves.toEqual({ kind: 'accepted' });
+
+    expect(captureTarget).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'chat-1',
+      agentSessionId: 'native-1',
+    }));
+    expect(steer).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'chat-1',
+      agentSessionId: 'native-1',
+      target: providerTarget,
+      input: expect.stringContaining('USER FILE BODY'),
+      clientMessageId: 'message-steer',
+      prepareDelivery,
+    }));
+    expect(events.handoffTurn).not.toHaveBeenCalled();
+    expect(events.getActiveTurn()).toEqual(activeTurn);
   });
 });

@@ -66,6 +66,8 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     auth: null,
     commands: null,
     forking: null,
+    steering: null,
+    goals: null,
     endpoints: null,
     singleQuery: null,
     testHost: host,
@@ -75,7 +77,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
 function integrationClass(id, options = {}) {
   return class TestIntegration {
     static integrationId = id;
-    static apiVersion = options.apiVersion ?? 2;
+    static apiVersion = options.apiVersion ?? 3;
     static transcriptIndex = { apiVersion: 1, moduleUrl: import.meta.url };
 
     constructor(host) {
