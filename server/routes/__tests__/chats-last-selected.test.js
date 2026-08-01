@@ -24,8 +24,10 @@ function createFixture() {
     ensureInNormal: mock(() => Promise.resolve(undefined)),
     togglePin: mock(() => Promise.resolve({ isPinned: true })),
     toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
-    reorderWindow: mock(() => Promise.resolve({ success: true })),
-    reorderRelative: mock(() => Promise.resolve({ success: true })),
+  reorderChat: mock(() => Promise.resolve({
+    success: true,
+    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+  })),
   };
   const queue = {
     abortForChatDeletion: mock(() => Promise.resolve(false)),

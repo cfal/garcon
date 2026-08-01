@@ -1,4 +1,4 @@
-import type { ChatOrderList } from '$lib/api/chats.js';
+import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type {
 	SidebarChatOrderMap,
@@ -7,12 +7,12 @@ import type {
 	SidebarVirtualRow,
 } from './sidebar-virtual-chat-list';
 
-const chatOrderLists: ChatOrderList[] = ['pinned', 'normal', 'archived'];
+const chatOrderLists: PersistedChatOrderGroup[] = ['pinned', 'normal', 'archived'];
 const unknownProjectKey = '<unknown-project>';
 const unknownProjectSortLabel = 'Unknown project';
 
 interface PartitionedChats {
-	byId: Record<ChatOrderList, Map<string, ChatSessionRecord>>;
+	byId: Record<PersistedChatOrderGroup, Map<string, ChatSessionRecord>>;
 	hasPinned: boolean;
 }
 
@@ -28,7 +28,7 @@ function emptyOrderMap(): SidebarChatOrderMap {
 	return { pinned: [], normal: [], archived: [] };
 }
 
-function listForChat(chat: ChatSessionRecord): ChatOrderList {
+function listForChat(chat: ChatSessionRecord): PersistedChatOrderGroup {
 	if (chat.isPinned) return 'pinned';
 	if (chat.isArchived) return 'archived';
 	return 'normal';
@@ -39,7 +39,7 @@ export function sidebarProjectKey(projectPath: string): string {
 }
 
 export function partitionSidebarChats(chats: ChatSessionRecord[]): PartitionedChats {
-	const byId: Record<ChatOrderList, Map<string, ChatSessionRecord>> = {
+	const byId: Record<PersistedChatOrderGroup, Map<string, ChatSessionRecord>> = {
 		pinned: new Map(),
 		normal: new Map(),
 		archived: new Map(),
@@ -214,7 +214,7 @@ function projectOrderFromDisplayedChats(
 
 function createChatRow(
 	chat: ChatSessionRecord,
-	list: ChatOrderList,
+	list: PersistedChatOrderGroup,
 	reorderScopeKey: string,
 	reorderScopeIds: string[],
 	group: SidebarProjectGroup = exactProjectGroup(chat.projectPath),

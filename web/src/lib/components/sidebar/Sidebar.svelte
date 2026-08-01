@@ -16,7 +16,10 @@
 		getRemoteSettings,
 	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
+	import type {
+		ChatOrderPlacement,
+		PersistedChatOrderGroup,
+	} from '$shared/chat-order-contracts';
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
@@ -31,9 +34,9 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface QuickMoveWrite {
-		list: ChatOrderList;
+		list: PersistedChatOrderGroup;
 		chatId: string;
-		target: ReorderQuickTarget;
+		placement: Extract<ChatOrderPlacement, { kind: 'relative' }>;
 		onSuccess?: () => void;
 		onFailure?: () => void;
 	}
@@ -209,9 +212,9 @@
 		onNewChat();
 	}
 
-	const quickMoveQueue = createPerListWriteQueue<ChatOrderList, QuickMoveWrite>(
-		async ({ chatId, target }) => {
-			await controller.quickMove(chatId, target);
+	const quickMoveQueue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(
+		async ({ chatId, placement }) => {
+			await controller.reorderChat(chatId, placement);
 		},
 		(error, task) => {
 			reportActionFailure(
@@ -223,13 +226,13 @@
 	);
 
 	function handleQuickMove(
-		list: ChatOrderList,
+		list: PersistedChatOrderGroup,
 		chatId: string,
-		target: ReorderQuickTarget,
+		placement: Extract<ChatOrderPlacement, { kind: 'relative' }>,
 		onSuccess?: () => void,
 		onFailure?: () => void,
 	) {
-		quickMoveQueue.enqueue({ list, chatId, target, onSuccess, onFailure });
+		quickMoveQueue.enqueue({ list, chatId, placement, onSuccess, onFailure });
 	}
 
 	// Multi-select mode handlers.

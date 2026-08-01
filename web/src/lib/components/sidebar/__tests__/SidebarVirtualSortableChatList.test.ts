@@ -618,7 +618,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			kind: 'relative',
 			list: 'normal',
 			chatId: 'chat-0',
-			target: { chatIdAbove: 'chat-1' },
+			placement: { kind: 'relative', referenceChatId: 'chat-1', position: 'after' },
 			visibleOrder: [
 				'chat-1',
 				'chat-0',
@@ -680,7 +680,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(onQuickMove.mock.calls[0]?.slice(0, 3)).toEqual([
 			'normal',
 			'chat-0',
-			{ chatIdAbove: 'chat-2' },
+			{ kind: 'relative', referenceChatId: 'chat-2', position: 'after' },
 		]);
 	});
 

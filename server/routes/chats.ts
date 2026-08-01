@@ -10,6 +10,11 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import type { JsonObject } from '../../common/json.js';
+import {
+  parseReorderChatRequest,
+  type ReorderChatRequest,
+  type ReorderChatResponse,
+} from '../../common/chat-order-contracts.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
@@ -42,7 +47,7 @@ import {
 } from '../lib/domain-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import { TranscriptSearchUnavailableError } from '../chats/search/errors.js';
-import type { ReorderResult } from '../settings/types.js';
+import type { ChatReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import {
@@ -119,8 +124,10 @@ interface SettingsDep {
   removeSessionName(chatId: string): Promise<void>;
   togglePin(chatId: string): Promise<{ isPinned: boolean }>;
   toggleArchive(chatId: string): Promise<{ isArchived: boolean }>;
-  reorderWindow(list: string, oldOrder: string[], newOrder: string[]): Promise<ReorderResult>;
-  reorderRelative(chatId: string, refId: string, mode: string): Promise<ReorderResult>;
+  reorderChat(
+    request: ReorderChatRequest,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatReorderResult>;
 }
 
 interface PathCacheDep {
@@ -701,58 +708,30 @@ export default function createChatRoutes({
     }
   }
 
-  async function postReorderChats(body: Record<string, unknown>): Promise<Response> {
+  async function postReorderChat(body: unknown): Promise<Response> {
     try {
-      const list = typeof body?.list === 'string' ? body.list : '';
-      const oldOrder = stringArrayOrNull(body?.oldOrder);
-      const newOrder = stringArrayOrNull(body?.newOrder);
-
-      if (!['pinned', 'normal', 'archived'].includes(list)) {
-        return jsonError('list must be "pinned", "normal", or "archived"', 400);
+      const request = parseReorderChatRequest(body);
+      if (!request) {
+        return jsonError('Invalid chat reorder request', 400, 'VALIDATION_FAILED', false);
       }
-      if (!oldOrder || !newOrder) {
-        return jsonError('oldOrder and newOrder must be arrays', 400);
+      if (!registry.getChat(request.chatId)) {
+        return jsonError('Chat not found', 404, 'SESSION_NOT_FOUND', false);
+      }
+      if (
+        request.placement.kind === 'relative'
+        && !registry.getChat(request.placement.referenceChatId)
+      ) {
+        return jsonError('Reference chat not found', 404, 'SESSION_NOT_FOUND', false);
       }
 
-      const result = await settings.reorderWindow(list, oldOrder, newOrder);
+      const result = await settings.reorderChat(
+        request,
+        (chatId) => registry.getChat(chatId) != null,
+      );
       if (!result.success) {
-        return jsonError(result.error, result.status, result.errorCode);
+        return jsonError(result.error, result.status, result.errorCode, false);
       }
-
-      return Response.json({ success: true });
-    } catch (error: unknown) {
-      return jsonErrorFromUnknown(error);
-    }
-  }
-
-  async function postReorderQuick(body: Record<string, unknown>): Promise<Response> {
-    try {
-      const chatId = typeof body?.chatId === 'string' ? body.chatId.trim() : '';
-      const chatIdAbove = typeof body?.chatIdAbove === 'string' ? body.chatIdAbove.trim() : '';
-      const chatIdBelow = typeof body?.chatIdBelow === 'string' ? body.chatIdBelow.trim() : '';
-
-      if (!chatId) {
-        return jsonError('chatId is required', 400);
-      }
-      if ((chatIdAbove && chatIdBelow) || (!chatIdAbove && !chatIdBelow)) {
-        return jsonError('Exactly one of chatIdAbove or chatIdBelow must be provided', 400);
-      }
-
-      const refId = chatIdAbove || chatIdBelow;
-      const mode = chatIdAbove ? 'below' : 'above';
-
-      const session = registry.getChat(chatId);
-      if (!session) return jsonError('Chat not found', 404, 'SESSION_NOT_FOUND');
-
-      const refSession = registry.getChat(refId);
-      if (!refSession) return jsonError('Reference chat not found', 404, 'SESSION_NOT_FOUND');
-
-      const result = await settings.reorderRelative(chatId, refId, mode);
-      if (!result.success) {
-        return jsonError(result.error, result.status, result.errorCode);
-      }
-
-      return Response.json({ success: true });
+      return Response.json(result.response satisfies ReorderChatResponse);
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
@@ -1203,8 +1182,7 @@ export default function createChatRoutes({
     '/api/v1/chats/pin': { POST: withJsonBody(postTogglePin) },
     '/api/v1/chats/archive': { POST: withJsonBody(postToggleArchive) },
     '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
-    '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChats) },
-    '/api/v1/chats/reorder-quick': { POST: withJsonBody(postReorderQuick) },
+    '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChat) },
     '/api/v1/chats/tags': { PATCH: withJsonBody(patchChatTags) },
   };
 }

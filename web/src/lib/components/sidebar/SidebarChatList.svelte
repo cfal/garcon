@@ -17,7 +17,10 @@
 	} from './sidebar-display-options';
 	import { sortChatsByRecencyDesc } from './chat-recency-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
+	import type {
+		ChatOrderPlacement,
+		PersistedChatOrderGroup,
+	} from '$shared/chat-order-contracts';
 
 	interface SidebarChatListProps {
 		viewportRef?: HTMLElement | null;
@@ -46,9 +49,9 @@
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onQuickMove: (
-			list: ChatOrderList,
+			list: PersistedChatOrderGroup,
 			chatId: string,
-			target: ReorderQuickTarget,
+			placement: Extract<ChatOrderPlacement, { kind: 'relative' }>,
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
@@ -133,7 +136,7 @@
 		onQuickMove(
 			request.list,
 			request.chatId,
-			request.target,
+			request.placement,
 			() => reorder.completeIfCurrent(request.list, request.sequence),
 			() => reorder.rollbackIfCurrent(request.list, request.sequence, request.visibleOrder),
 		);

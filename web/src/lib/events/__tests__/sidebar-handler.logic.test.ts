@@ -158,7 +158,7 @@ describe('handleChatListInvalidated', () => {
 	it('calls refreshChats when chatId is present', () => {
 		const ctx = createSidebarContext();
 
-		handleChatListInvalidated(new ChatListRefreshRequestedMessage('pinned-toggled', 'chat-1'), ctx);
+		handleChatListInvalidated(new ChatListRefreshRequestedMessage('chats-reordered', 'chat-1'), ctx);
 
 		expect(ctx.refreshChats).toHaveBeenCalledTimes(1);
 	});

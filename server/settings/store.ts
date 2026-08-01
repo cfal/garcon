@@ -40,10 +40,12 @@ import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { isRecord } from '../../common/json.js';
+import type { ReorderChatRequest } from '../../common/chat-order-contracts.js';
 
 const logger = createLogger('settings:store');
 import type {
   ChatFolder,
+  ChatReorderResult,
   ProjectSettings,
   ReorderResult,
   SavedChatSearch,
@@ -459,8 +461,11 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#chatOrder.toggleArchive(chatId);
   }
 
-  async reorderWindow(list: string, rawOldOrder: unknown, rawNewOrder: unknown): Promise<ReorderResult> {
-    return this.#chatOrder.reorderWindow(list, rawOldOrder, rawNewOrder);
+  async reorderChat(
+    request: ReorderChatRequest,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatReorderResult> {
+    return this.#chatOrder.reorderChat(request, isKnownChat);
   }
 
   getSavedSearches(): SavedChatSearch[] {
@@ -499,7 +504,4 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#folders.removeFolder(folderId);
   }
 
-  async reorderRelative(chatId: string, refId: string, mode: string): Promise<ReorderResult> {
-    return this.#chatOrder.reorderRelative(chatId, refId, mode);
-  }
 }

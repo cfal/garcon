@@ -36,7 +36,7 @@
 		type SidebarChatDragData,
 		type SidebarDropInstruction,
 	} from './sidebar-pragmatic-dnd';
-	import type { ChatOrderList } from '$lib/api/chats.js';
+import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -118,7 +118,7 @@
 	let touchDrag: {
 		identifier: number;
 		sourceChatId: string;
-		sourceList: ChatOrderList;
+	sourceList: PersistedChatOrderGroup;
 		sourceScopeKey: string;
 		startX: number;
 		startY: number;
@@ -494,7 +494,7 @@
 		return target.closest<HTMLElement>('[data-sidebar-virtual-row]');
 	}
 
-	function rowListFromElement(element: HTMLElement): ChatOrderList | null {
+	function rowListFromElement(element: HTMLElement): PersistedChatOrderGroup | null {
 		const list = element.dataset.sidebarVirtualListRow;
 		if (list === 'pinned' || list === 'normal' || list === 'archived') return list;
 		return null;
@@ -549,7 +549,7 @@
 
 	function touchSourceDragData(current: {
 		sourceChatId: string;
-		sourceList: ChatOrderList;
+		sourceList: PersistedChatOrderGroup;
 		sourceScopeKey: string;
 	}): SidebarChatDragData {
 		return getSidebarChatDragData({

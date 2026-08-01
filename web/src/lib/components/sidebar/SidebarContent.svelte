@@ -2,7 +2,10 @@
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
+	import type {
+		ChatOrderPlacement,
+		PersistedChatOrderGroup,
+	} from '$shared/chat-order-contracts';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
@@ -34,9 +37,9 @@
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onQuickMove: (
-			list: ChatOrderList,
+			list: PersistedChatOrderGroup,
 			chatId: string,
-			target: ReorderQuickTarget,
+			placement: Extract<ChatOrderPlacement, { kind: 'relative' }>,
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;

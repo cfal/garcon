@@ -68,6 +68,11 @@ import {
 } from '$shared/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '$shared/chat-types';
 import type { AgentCommandImage } from '$shared/ws-requests';
+import {
+	parseReorderChatResponse,
+	type ReorderChatRequest,
+	type ReorderChatResponse,
+} from '$shared/chat-order-contracts';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
 
@@ -459,27 +464,12 @@ export async function forkChat(params: ForkChatParams): Promise<ForkChatResponse
 	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params);
 }
 
-export type ChatOrderList = 'pinned' | 'normal' | 'archived';
-
-export interface ReorderChatsRequest {
-	list: ChatOrderList;
-	oldOrder: string[];
-	newOrder: string[];
-}
-
-export type ReorderQuickTarget =
-	{ chatIdAbove: string; chatIdBelow?: never } | { chatIdBelow: string; chatIdAbove?: never };
-
-export type ReorderQuickRequest = { chatId: string } & ReorderQuickTarget;
-
-/** Persists a window reorder within a group. */
-export async function reorderChats(body: ReorderChatsRequest): Promise<{ success: boolean }> {
-	return apiPost('/api/v1/chats/reorder', body);
-}
-
-/** Moves a single chat relative to a neighbor within the same group. */
-export async function reorderChatsQuick(body: ReorderQuickRequest): Promise<{ success: boolean }> {
-	return apiPost('/api/v1/chats/reorder-quick', body);
+/** Persists a chat placement within its server-resolved section. */
+export async function reorderChat(request: ReorderChatRequest): Promise<ReorderChatResponse> {
+	const response = await apiPost<unknown>('/api/v1/chats/reorder', request);
+	const parsed = parseReorderChatResponse(response);
+	if (!parsed) throw new Error('Invalid chat reorder response');
+	return parsed;
 }
 
 export interface SetChatTagsResponse {

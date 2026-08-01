@@ -1,4 +1,4 @@
-import type { ChatOrderList } from '$lib/api/chats.js';
+import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 export const DESKTOP_CHAT_ROW_HEIGHT = 88;
@@ -22,7 +22,7 @@ export interface SidebarVirtualChatRow {
 	type: 'chat';
 	key: string;
 	chat: ChatSessionRecord;
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	isPinned: boolean;
 	isArchived: boolean;
 	projectPath: string;
@@ -35,7 +35,7 @@ export interface SidebarVirtualChatRow {
 
 export type SidebarVirtualRow = SidebarVirtualProjectHeaderRow | SidebarVirtualChatRow;
 
-export type SidebarChatOrderMap = Record<ChatOrderList, string[]>;
+export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
 
 export interface SidebarRowModel {
 	rows: SidebarVirtualRow[];

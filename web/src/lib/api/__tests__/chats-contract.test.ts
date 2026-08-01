@@ -6,8 +6,7 @@ import {
 	togglePinned,
 	toggleArchive,
 	markChatsReadBatch,
-	reorderChats,
-	reorderChatsQuick,
+	reorderChat,
 	forkChat,
 	validateStart,
 	runChat,
@@ -732,40 +731,62 @@ describe('chats API contract', () => {
 		expect(body.entries).toEqual(entries);
 	});
 
-	it('reorderChats sends list, oldOrder, newOrder', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+	it('reorderChat sends and parses a boundary placement', async () => {
+		const result = {
+			success: true as const,
+			chatId: 'c-1',
+			orderGroup: 'normal' as const,
+			changed: true,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(result));
 
-		await reorderChats({
-			list: 'normal',
-			oldOrder: ['a', 'b'],
-			newOrder: ['b', 'a'],
+		await expect(reorderChat({
+			chatId: 'c-1',
+			placement: { kind: 'boundary', boundary: 'top' },
+		})).resolves.toEqual(result);
+
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/reorder');
+		expect(options.method).toBe('POST');
+		expect(JSON.parse(options.body)).toEqual({
+			chatId: 'c-1',
+			placement: { kind: 'boundary', boundary: 'top' },
+		});
+	});
+
+	it('reorderChat sends a relative placement', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			success: true,
+			chatId: 'c-1',
+			orderGroup: 'pinned',
+			changed: false,
+		}));
+
+		await reorderChat({
+			chatId: 'c-1',
+			placement: { kind: 'relative', referenceChatId: 'c-2', position: 'before' },
 		});
 
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.list).toBe('normal');
-		expect(body.oldOrder).toEqual(['a', 'b']);
-		expect(body.newOrder).toEqual(['b', 'a']);
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			chatId: 'c-1',
+			placement: { kind: 'relative', referenceChatId: 'c-2', position: 'before' },
+		});
 	});
 
-	it('reorderChatsQuick sends chatId with an above neighbor', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+	for (const [name, response] of [
+		['missing chat ID', { success: true, orderGroup: 'normal', changed: true }],
+		['invalid group', { success: true, chatId: 'c-1', orderGroup: 'orphan', changed: true }],
+		['invalid changed value', { success: true, chatId: 'c-1', orderGroup: 'normal', changed: 'yes' }],
+	] as const) {
+		it(`rejects a reorder response with ${name}`, async () => {
+			fetchMock.mockResolvedValue(jsonResponse(response));
 
-		await reorderChatsQuick({ chatId: 'c-1', chatIdAbove: 'c-0' });
-
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.chatId).toBe('c-1');
-		expect(body.chatIdAbove).toBe('c-0');
-	});
-
-	it('reorderChatsQuick sends chatId with a below neighbor', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
-
-		await reorderChatsQuick({ chatId: 'c-1', chatIdBelow: 'c-2' });
-
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.chatId).toBe('c-1');
-		expect(body.chatIdBelow).toBe('c-2');
-	});
+			await expect(reorderChat({
+				chatId: 'c-1',
+				placement: { kind: 'boundary', boundary: 'bottom' },
+			})).rejects.toThrow('Invalid chat reorder response');
+		});
+	}
 
 	it('forkChat sends POST with sourceChatId and chatId', async () => {
 		fetchMock.mockResolvedValue(

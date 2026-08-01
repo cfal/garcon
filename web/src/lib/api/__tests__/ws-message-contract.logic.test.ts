@@ -473,10 +473,17 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'chat-list-refresh-requested',
-				reason: 'chat-added',
+				reason: 'chats-reordered',
 				chatId: 'c-1',
 			}),
 		).toBeInstanceOf(ChatListRefreshRequestedMessage);
+		expect(
+			parseServerWsMessage({
+				type: 'chat-list-refresh-requested',
+				reason: 'chats-reordered-quick',
+				chatId: 'c-1',
+			}),
+		).toBeNull();
 		const settingsChanged = parseServerWsMessage({
 			type: 'settings-changed',
 			settings: makeSettingsSnapshot({

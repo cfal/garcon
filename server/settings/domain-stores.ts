@@ -6,12 +6,18 @@ import {
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   normalizeRemoteFeatureSettings,
 } from '../../common/settings.js';
+import type {
+  PersistedChatOrderGroup,
+  ReorderChatRequest,
+  ReorderChatResponse,
+} from '../../common/chat-order-contracts.js';
 import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
 } from './settings-shared.js';
 import type {
   ChatFolder,
+  ChatReorderResult,
   ExecutionDefaults,
   ProjectSettings,
   ReorderResult,
@@ -37,13 +43,13 @@ import {
 const ORDER_LIST_KEYS = ['pinnedChatIds', 'normalChatIds', 'archivedChatIds'] as const;
 
 type OrderListKey = typeof ORDER_LIST_KEYS[number];
-type ChatOrderGroup = 'pinned' | 'normal' | 'archived';
+type ChatOrderSnapshot = Record<OrderListKey, string[]>;
 
-interface ResolvedChatGroup {
-  group: ChatOrderGroup;
-  list: string[];
-  key: OrderListKey;
-}
+const ORDER_GROUP_KEYS: Record<PersistedChatOrderGroup, OrderListKey> = {
+  pinned: 'pinnedChatIds',
+  normal: 'normalChatIds',
+  archived: 'archivedChatIds',
+};
 
 function bumpRemoteSettingsVersion(settings: ProjectSettings): void {
   settings.remoteSettingsVersion = normalizeRemoteSettingsVersion(settings.remoteSettingsVersion) + 1;
@@ -138,26 +144,46 @@ function validateWindowReorder(rawOldOrder: unknown, rawNewOrder: unknown): Wind
   return { success: true, oldOrder, newOrder };
 }
 
-function moveRelative(list: string[], chatId: string, refId: string, mode: string): string[] | null {
-  const from = list.indexOf(chatId);
-  const ref = list.indexOf(refId);
-  if (from < 0 || ref < 0) return null;
-  const next = [...list];
-  next.splice(from, 1);
-  const refAfterRemoval = next.indexOf(refId);
-  const insertAt = mode === 'above' ? refAfterRemoval : refAfterRemoval + 1;
-  next.splice(insertAt, 0, chatId);
-  return next;
+function orderSnapshot(settings: ProjectSettings): ChatOrderSnapshot {
+  return {
+    pinnedChatIds: [...(settings.pinnedChatIds || [])],
+    normalChatIds: [...(settings.normalChatIds || [])],
+    archivedChatIds: [...(settings.archivedChatIds || [])],
+  };
 }
 
-function resolveGroupInSettings(s: ProjectSettings, chatId: string): ResolvedChatGroup | null {
-  const pinned = s.pinnedChatIds || [];
-  if (pinned.includes(chatId)) return { group: 'pinned', list: pinned, key: 'pinnedChatIds' };
-  const normal = s.normalChatIds || [];
-  if (normal.includes(chatId)) return { group: 'normal', list: normal, key: 'normalChatIds' };
-  const archived = s.archivedChatIds || [];
-  if (archived.includes(chatId)) return { group: 'archived', list: archived, key: 'archivedChatIds' };
-  return null;
+function restoreOrderSnapshot(settings: ProjectSettings, snapshot: ChatOrderSnapshot): void {
+  for (const key of ORDER_LIST_KEYS) settings[key] = [...snapshot[key]];
+}
+
+function sameOrderSnapshot(left: ChatOrderSnapshot, right: ChatOrderSnapshot): boolean {
+  return ORDER_LIST_KEYS.every((key) => sameOrderedStringArray(left[key], right[key]));
+}
+
+function resolveOrReconcileGroup(
+  settings: ProjectSettings,
+  chatId: string,
+): PersistedChatOrderGroup {
+  if (settings.pinnedChatIds.includes(chatId)) return 'pinned';
+  if (settings.normalChatIds.includes(chatId)) return 'normal';
+  if (settings.archivedChatIds.includes(chatId)) return 'archived';
+  settings.normalChatIds.push(chatId);
+  return 'normal';
+}
+
+function removeFromEveryOrderGroup(settings: ProjectSettings, chatId: string): void {
+  for (const key of ORDER_LIST_KEYS) {
+    settings[key] = dedup(settings[key]).filter((id) => id !== chatId);
+  }
+}
+
+function sessionNotFound(error: string): ChatReorderResult {
+  return {
+    success: false,
+    error,
+    errorCode: 'SESSION_NOT_FOUND',
+    status: 404,
+  };
 }
 
 export class ChatNameStore {
@@ -564,92 +590,71 @@ export class ChatOrderStore {
     });
   }
 
-  async reorderWindow(list: string, rawOldOrder: unknown, rawNewOrder: unknown): Promise<ReorderResult> {
-    const validation = validateWindowReorder(rawOldOrder, rawNewOrder);
-    if (!validation.success) return validation;
-    const { oldOrder, newOrder } = validation;
-
+  async reorderChat(
+    request: ReorderChatRequest,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatReorderResult> {
     return this.#context.mutate(async () => {
-      const s = this.#context.readSettings();
-      const key = list === 'pinned' ? 'pinnedChatIds' : list === 'archived' ? 'archivedChatIds' : 'normalChatIds';
-      const current = dedup(s[key] || []);
+      const settings = this.#context.readSettings();
+      if (!isKnownChat(request.chatId)) return sessionNotFound('Chat not found');
+      if (
+        request.placement.kind === 'relative'
+        && !isKnownChat(request.placement.referenceChatId)
+      ) {
+        return sessionNotFound('Reference chat not found');
+      }
 
-      const currentSet = new Set(current);
-      for (const id of oldOrder) {
-        if (!currentSet.has(id)) {
+      const before = orderSnapshot(settings);
+      const sourceGroup = resolveOrReconcileGroup(settings, request.chatId);
+      if (request.placement.kind === 'relative') {
+        const referenceGroup = resolveOrReconcileGroup(
+          settings,
+          request.placement.referenceChatId,
+        );
+        if (sourceGroup !== referenceGroup) {
+          restoreOrderSnapshot(settings, before);
           return {
             success: false,
-            error: `ID "${id}" is not in the ${list} list`,
-            errorCode: 'ORDER_ITEM_NOT_FOUND',
-            status: 404,
+            error: 'Cross-group reorder is not allowed',
+            errorCode: 'ORDER_CROSS_GROUP',
+            status: 400,
           };
         }
       }
 
-      const result = applyWindowReorder(current, oldOrder, newOrder);
-      if (!result) {
-        return {
-          success: false,
-          error: 'oldOrder is not a contiguous subsequence of the current list',
-          errorCode: 'ORDER_INVALID_INPUT',
-          status: 400,
-        };
+      removeFromEveryOrderGroup(settings, request.chatId);
+      const target = settings[ORDER_GROUP_KEYS[sourceGroup]];
+      if (request.placement.kind === 'boundary') {
+        const index = request.placement.boundary === 'top' ? 0 : target.length;
+        target.splice(index, 0, request.chatId);
+      } else {
+        const referenceIndex = target.indexOf(request.placement.referenceChatId);
+        if (referenceIndex < 0) {
+          throw new Error('Resolved reorder reference is absent');
+        }
+        const index = request.placement.position === 'before'
+          ? referenceIndex
+          : referenceIndex + 1;
+        target.splice(index, 0, request.chatId);
       }
 
-      s[key] = result;
-      const remoteSettingsChanged = list === 'pinned';
-      if (remoteSettingsChanged) {
-        bumpRemoteSettingsVersion(s);
-      }
-      await this.#context.saveAndMaybeEmitRemote(s, remoteSettingsChanged);
-
-      const anchorChatId = newOrder[0] || list;
-      this.#context.emitListChanged('chats-reordered', anchorChatId);
-      return { success: true };
-    });
-  }
-
-  async reorderRelative(chatId: string, refId: string, mode: string): Promise<ReorderResult> {
-    return this.#context.mutate(async () => {
-      const s = this.#context.readSettings();
-      const chatGroup = resolveGroupInSettings(s, chatId);
-      const refGroup = resolveGroupInSettings(s, refId);
-
-      if (!chatGroup || !refGroup) {
-        return {
-          success: false,
-          error: 'Chat not found in any order list',
-          errorCode: 'ORDER_ITEM_NOT_FOUND',
-          status: 404,
-        };
-      }
-      if (chatGroup.group !== refGroup.group) {
-        return {
-          success: false,
-          error: 'Cross-group reorder is not allowed',
-          errorCode: 'ORDER_CROSS_GROUP',
-          status: 400,
-        };
+      const response: ReorderChatResponse = {
+        success: true,
+        chatId: request.chatId,
+        orderGroup: sourceGroup,
+        changed: !sameOrderSnapshot(before, orderSnapshot(settings)),
+      };
+      if (!response.changed) {
+        return { success: true, response };
       }
 
-      const result = moveRelative(chatGroup.list, chatId, refId, mode);
-      if (!result) {
-        return {
-          success: false,
-          error: 'Chat positions could not be resolved',
-          errorCode: 'ORDER_POSITION_UNRESOLVED',
-          status: 400,
-        };
-      }
-
-      s[chatGroup.key] = result;
-      const remoteSettingsChanged = chatGroup.group === 'pinned';
-      if (remoteSettingsChanged) {
-        bumpRemoteSettingsVersion(s);
-      }
-      await this.#context.saveAndMaybeEmitRemote(s, remoteSettingsChanged);
-      this.#context.emitListChanged('chats-reordered-quick', chatId);
-      return { success: true };
+      const remoteSettingsChanged = bumpRemoteSettingsVersionForPinnedChange(
+        settings,
+        before.pinnedChatIds,
+      );
+      await this.#context.saveAndMaybeEmitRemote(settings, remoteSettingsChanged);
+      this.#context.emitListChanged('chats-reordered', request.chatId);
+      return { success: true, response };
     });
   }
 }

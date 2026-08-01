@@ -46,8 +46,10 @@ function createRoutesFixture(overrides = {}) {
     removeSessionName: mock(async () => undefined),
     togglePin: mock(async () => ({ isPinned: true })),
     toggleArchive: mock(async () => ({ isArchived: true })),
-    reorderWindow: mock(async () => ({ success: true })),
-    reorderRelative: mock(async () => ({ success: true })),
+  reorderChat: mock(async () => ({
+    success: true,
+    response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+  })),
   };
   const queue = {
     deleteChatQueueFile: mock(async () => undefined),

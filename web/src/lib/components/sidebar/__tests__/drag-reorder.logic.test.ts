@@ -103,13 +103,17 @@ describe('movedId', () => {
 describe('resolveFilteredRelativeMove', () => {
 	it('uses the visible predecessor when one exists', () => {
 		expect(resolveFilteredRelativeMove('c', ['a', 'c', 'b'])).toEqual({
-			chatIdAbove: 'a',
+			kind: 'relative',
+			referenceChatId: 'a',
+			position: 'after',
 		});
 	});
 
 	it('uses the visible successor for a top drop', () => {
 		expect(resolveFilteredRelativeMove('c', ['c', 'a', 'b'])).toEqual({
-			chatIdBelow: 'a',
+			kind: 'relative',
+			referenceChatId: 'a',
+			position: 'before',
 		});
 	});
 

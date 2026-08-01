@@ -6,17 +6,19 @@ import {
 	togglePinned,
 	toggleArchive,
 	deleteChat,
-	reorderChatsQuick,
+	reorderChat,
 	getChatDetails,
 	forkChat,
 	setChatTags,
 	updateChatProjectPath,
-	type ReorderQuickTarget,
 } from '$lib/api/chats.js';
 import { createClientChatId } from '$lib/chat/sessions/client-chat-id.js';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatListEntry } from '$shared/chat-list';
+import type { ChatOrderPlacement } from '$shared/chat-order-contracts';
+
+type RelativeChatOrderPlacement = Extract<ChatOrderPlacement, { kind: 'relative' }>;
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;
@@ -53,8 +55,8 @@ export class SidebarController {
 		await this.deps.onQuietRefresh();
 	}
 
-	async quickMove(chatId: string, target: ReorderQuickTarget): Promise<void> {
-		await reorderChatsQuick({ chatId, ...target });
+	async reorderChat(chatId: string, placement: RelativeChatOrderPlacement): Promise<void> {
+		await reorderChat({ chatId, placement });
 		await this.deps.onQuietRefresh();
 	}
 

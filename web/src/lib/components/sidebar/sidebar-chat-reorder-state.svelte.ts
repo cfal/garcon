@@ -1,4 +1,4 @@
-import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
+import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import {
 	arraysEqual,
@@ -7,19 +7,20 @@ import {
 	resolveFilteredRelativeMove,
 	sameMembers,
 	type BoundaryMove,
+	type RelativeChatOrderPlacement,
 } from './drag-reorder';
 
-export type SidebarChatOrderMap = Record<ChatOrderList, string[]>;
+export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
 
 export interface SidebarChatPreviewMove {
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	sourceChatId: string;
 	targetChatId: string;
 	closestEdge: Edge | null;
 }
 
 export interface SidebarChatBoundaryMove {
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	chatId: string;
 	boundary: BoundaryMove;
 	scope?: SidebarChatReorderScope;
@@ -31,9 +32,9 @@ export interface SidebarChatReorderScope {
 
 export interface SidebarChatReorderRequest {
 	kind: 'relative';
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	chatId: string;
-	target: ReorderQuickTarget;
+	placement: RelativeChatOrderPlacement;
 	visibleOrder: string[];
 	sequence: number;
 }
@@ -42,7 +43,7 @@ interface SidebarChatReorderDeps {
 	get visibleOrders(): SidebarChatOrderMap;
 }
 
-const chatOrderLists: ChatOrderList[] = ['pinned', 'normal', 'archived'];
+const chatOrderLists: PersistedChatOrderGroup[] = ['pinned', 'normal', 'archived'];
 
 function cloneOrders(orders: Partial<SidebarChatOrderMap>): Partial<SidebarChatOrderMap> {
 	return { ...orders };
@@ -51,23 +52,23 @@ function cloneOrders(orders: Partial<SidebarChatOrderMap>): Partial<SidebarChatO
 export class SidebarChatReorderState {
 	#deps: SidebarChatReorderDeps;
 
-	activeList = $state<ChatOrderList | null>(null);
+	activeList = $state<PersistedChatOrderGroup | null>(null);
 	activeChatId = $state<string | null>(null);
 	#startOrderByList = $state<Partial<SidebarChatOrderMap>>({});
 	#overrideByList = $state<Partial<SidebarChatOrderMap>>({});
-	#pendingSequenceByList = $state<Partial<Record<ChatOrderList, number>>>({});
-	#activeScopeByList = $state<Partial<Record<ChatOrderList, string[]>>>({});
+	#pendingSequenceByList = $state<Partial<Record<PersistedChatOrderGroup, number>>>({});
+	#activeScopeByList = $state<Partial<Record<PersistedChatOrderGroup, string[]>>>({});
 	#nextSequence = 0;
 
 	constructor(deps: SidebarChatReorderDeps) {
 		this.#deps = deps;
 	}
 
-	orderFor(list: ChatOrderList): string[] {
+	orderFor(list: PersistedChatOrderGroup): string[] {
 		return this.#overrideByList[list] ?? this.#deps.visibleOrders[list];
 	}
 
-	begin(list: ChatOrderList, chatId: string, scope?: SidebarChatReorderScope): void {
+	begin(list: PersistedChatOrderGroup, chatId: string, scope?: SidebarChatReorderScope): void {
 		const order = this.orderFor(list);
 		const nextScopes = { ...this.#activeScopeByList };
 		if (scope?.ids) nextScopes[list] = [...scope.ids];
@@ -104,7 +105,7 @@ export class SidebarChatReorderState {
 		this.setOverrideIfChanged(input.list, current, next);
 	}
 
-	finish(list: ChatOrderList): SidebarChatReorderRequest | null {
+	finish(list: PersistedChatOrderGroup): SidebarChatReorderRequest | null {
 		const chatId = this.activeChatId;
 		const oldOrder = this.#startOrderByList[list] ?? this.#deps.visibleOrders[list];
 		const newOrder = this.#overrideByList[list] ?? oldOrder;
@@ -123,7 +124,7 @@ export class SidebarChatReorderState {
 		return this.persistOptimisticMove(list, chatId, newOrder);
 	}
 
-	cancel(list: ChatOrderList): void {
+	cancel(list: PersistedChatOrderGroup): void {
 		this.clear(list);
 	}
 
@@ -139,7 +140,7 @@ export class SidebarChatReorderState {
 		return this.persistOptimisticMove(input.list, input.chatId, newOrder, input.scope?.ids);
 	}
 
-	clear(list: ChatOrderList): void {
+	clear(list: PersistedChatOrderGroup): void {
 		const nextOverrides = cloneOrders(this.#overrideByList);
 		const nextStarts = cloneOrders(this.#startOrderByList);
 		const nextPending = { ...this.#pendingSequenceByList };
@@ -158,7 +159,7 @@ export class SidebarChatReorderState {
 		}
 	}
 
-	rollbackIfCurrent(list: ChatOrderList, sequence: number, failedOrder: string[]): void {
+	rollbackIfCurrent(list: PersistedChatOrderGroup, sequence: number, failedOrder: string[]): void {
 		if (this.#pendingSequenceByList[list] !== sequence) return;
 		const current = this.#overrideByList[list];
 		if (current && arraysEqual(current, failedOrder)) {
@@ -168,11 +169,9 @@ export class SidebarChatReorderState {
 		this.completeIfCurrent(list, sequence);
 	}
 
-	completeIfCurrent(list: ChatOrderList, sequence: number): void {
+	completeIfCurrent(list: PersistedChatOrderGroup, sequence: number): void {
 		if (this.#pendingSequenceByList[list] !== sequence) return;
-		const nextPending = { ...this.#pendingSequenceByList };
-		delete nextPending[list];
-		this.#pendingSequenceByList = nextPending;
+		this.clear(list);
 	}
 
 	reconcile(): void {
@@ -214,7 +213,7 @@ export class SidebarChatReorderState {
 	}
 
 	private setOverrideIfChanged(
-		list: ChatOrderList,
+		list: PersistedChatOrderGroup,
 		current: string[],
 		next: string[] | null,
 	): void {
@@ -258,7 +257,7 @@ export class SidebarChatReorderState {
 	}
 
 	private scopedOrderForTarget(
-		list: ChatOrderList,
+		list: PersistedChatOrderGroup,
 		fullOrder: string[],
 		scopeIds = this.#activeScopeByList[list],
 	): string[] {
@@ -267,7 +266,7 @@ export class SidebarChatReorderState {
 		return fullOrder.filter((id) => allowed.has(id));
 	}
 
-	private clearActiveScope(list: ChatOrderList): void {
+	private clearActiveScope(list: PersistedChatOrderGroup): void {
 		if (!this.#activeScopeByList[list]) return;
 		const nextScopes = { ...this.#activeScopeByList };
 		delete nextScopes[list];
@@ -275,7 +274,7 @@ export class SidebarChatReorderState {
 	}
 
 	private persistOptimisticMove(
-		list: ChatOrderList,
+		list: PersistedChatOrderGroup,
 		chatId: string,
 		newOrder: string[],
 		scopeIds?: string[],
@@ -286,8 +285,8 @@ export class SidebarChatReorderState {
 		};
 
 		const targetOrder = this.scopedOrderForTarget(list, newOrder, scopeIds);
-		const target = resolveFilteredRelativeMove(chatId, targetOrder);
-		if (!target) {
+		const placement = resolveFilteredRelativeMove(chatId, targetOrder);
+		if (!placement) {
 			this.clear(list);
 			return null;
 		}
@@ -304,7 +303,7 @@ export class SidebarChatReorderState {
 			kind: 'relative',
 			list,
 			chatId,
-			target,
+			placement,
 			visibleOrder: newOrder,
 			sequence,
 		};

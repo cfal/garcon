@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createPerListWriteQueue, type PerListWrite } from '../reorder-write-queue';
-import type { ChatOrderList } from '$lib/api/chats';
+import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 
 function deferred<T>() {
 	let resolve!: (value: T | PromiseLike<T>) => void;
@@ -12,7 +12,7 @@ function deferred<T>() {
 
 describe('createPerListWriteQueue', () => {
 	it('serializes writes in order for the same list', async () => {
-		interface WindowWrite extends PerListWrite<ChatOrderList> {
+		interface WindowWrite extends PerListWrite<PersistedChatOrderGroup> {
 			oldOrder: string[];
 			newOrder: string[];
 		}
@@ -20,7 +20,7 @@ describe('createPerListWriteQueue', () => {
 		const started: WindowWrite[] = [];
 		const inFlight: Array<{ resolve: () => void }> = [];
 
-		const queue = createPerListWriteQueue<ChatOrderList, WindowWrite>(
+		const queue = createPerListWriteQueue<PersistedChatOrderGroup, WindowWrite>(
 			async (task) => {
 				started.push(task);
 				const gate = deferred<void>();
@@ -56,16 +56,16 @@ describe('createPerListWriteQueue', () => {
 		expect(started[2].newOrder).toEqual(['c', 'b', 'a']);
 	});
 
-	it('serializes relative quick moves by list', async () => {
-		interface QuickMoveWrite extends PerListWrite<ChatOrderList> {
+	it('serializes relative placements by list', async () => {
+		interface QuickMoveWrite extends PerListWrite<PersistedChatOrderGroup> {
 			chatId: string;
-			target: { chatIdAbove?: string; chatIdBelow?: string };
+			placement: { kind: 'relative'; referenceChatId: string; position: 'before' | 'after' };
 		}
 
 		const started: QuickMoveWrite[] = [];
 		const completed: string[] = [];
 		const inFlight: Array<{ resolve: () => void }> = [];
-		const queue = createPerListWriteQueue<ChatOrderList, QuickMoveWrite>(
+		const queue = createPerListWriteQueue<PersistedChatOrderGroup, QuickMoveWrite>(
 			async (task) => {
 				started.push(task);
 				const gate = deferred<void>();
@@ -78,26 +78,34 @@ describe('createPerListWriteQueue', () => {
 		queue.enqueue({
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdAbove: 'b' },
+			placement: { kind: 'relative', referenceChatId: 'b', position: 'after' },
 			onSuccess: () => completed.push('above'),
 		});
 		queue.enqueue({
 			list: 'normal',
 			chatId: 'a',
-			target: { chatIdBelow: 'b' },
+			placement: { kind: 'relative', referenceChatId: 'b', position: 'before' },
 			onSuccess: () => completed.push('below'),
 		});
 
 		await Promise.resolve();
 		expect(started).toHaveLength(1);
-		expect(started[0].target).toEqual({ chatIdAbove: 'b' });
+		expect(started[0].placement).toEqual({
+			kind: 'relative',
+			referenceChatId: 'b',
+			position: 'after',
+		});
 
 		inFlight[0].resolve();
 		await Promise.resolve();
 		await Promise.resolve();
 
 		expect(started).toHaveLength(2);
-		expect(started[1].target).toEqual({ chatIdBelow: 'b' });
+		expect(started[1].placement).toEqual({
+			kind: 'relative',
+			referenceChatId: 'b',
+			position: 'before',
+		});
 		expect(completed).toEqual(['above']);
 
 		inFlight[1].resolve();

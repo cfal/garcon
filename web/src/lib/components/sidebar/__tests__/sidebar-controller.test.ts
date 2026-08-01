@@ -7,7 +7,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	togglePinned: vi.fn(),
 	toggleArchive: vi.fn(),
 	deleteChat: vi.fn(),
-	reorderChatsQuick: vi.fn(),
+	reorderChat: vi.fn(),
 	getChatDetails: vi.fn(),
 	forkChat: vi.fn(),
 	setChatTags: vi.fn(),
@@ -16,14 +16,14 @@ vi.mock('$lib/api/chats.js', () => ({
 import {
 	togglePinned,
 	toggleArchive,
-	reorderChatsQuick,
+	reorderChat,
 	getChatDetails,
 	forkChat,
 } from '$lib/api/chats.js';
 
 const mockTogglePinned = vi.mocked(togglePinned);
 const mockToggleArchive = vi.mocked(toggleArchive);
-const mockReorderQuick = vi.mocked(reorderChatsQuick);
+const mockReorderChat = vi.mocked(reorderChat);
 const mockGetChatDetails = vi.mocked(getChatDetails);
 const mockForkChat = vi.mocked(forkChat);
 
@@ -98,29 +98,38 @@ describe('SidebarController', () => {
 		});
 	});
 
-	describe('quickMove', () => {
-		it('passes an above neighbor and refreshes', async () => {
-			mockReorderQuick.mockResolvedValue({ success: true });
-
-			await controller.quickMove('c-2', { chatIdAbove: 'c-1' });
-
-			expect(mockReorderQuick).toHaveBeenCalledWith({
+	describe('reorderChat', () => {
+		it('passes an after placement and refreshes', async () => {
+			mockReorderChat.mockResolvedValue({
+				success: true,
 				chatId: 'c-2',
-				chatIdAbove: 'c-1',
+				orderGroup: 'normal',
+				changed: true,
+			});
+
+			await controller.reorderChat('c-2', {
+				kind: 'relative',
+				referenceChatId: 'c-1',
+				position: 'after',
+			});
+
+			expect(mockReorderChat).toHaveBeenCalledWith({
+				chatId: 'c-2',
+				placement: { kind: 'relative', referenceChatId: 'c-1', position: 'after' },
 			});
 			expect(quietRefresh).toHaveBeenCalledOnce();
 		});
 
-		it('passes a below neighbor and refreshes', async () => {
-			mockReorderQuick.mockResolvedValue({ success: true });
+		it('does not refresh after a mutation failure', async () => {
+			mockReorderChat.mockRejectedValue(new Error('reorder failed'));
 
-			await controller.quickMove('c-2', { chatIdBelow: 'c-3' });
+			await expect(controller.reorderChat('c-2', {
+				kind: 'relative',
+				referenceChatId: 'c-3',
+				position: 'before',
+			})).rejects.toThrow('reorder failed');
 
-			expect(mockReorderQuick).toHaveBeenCalledWith({
-				chatId: 'c-2',
-				chatIdBelow: 'c-3',
-			});
-			expect(quietRefresh).toHaveBeenCalledOnce();
+			expect(quietRefresh).not.toHaveBeenCalled();
 		});
 	});
 

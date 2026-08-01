@@ -1,10 +1,9 @@
 import { reorder } from '@atlaskit/pragmatic-drag-and-drop/reorder';
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { getReorderDestinationIndex } from '@atlaskit/pragmatic-drag-and-drop-hitbox/util/get-reorder-destination-index';
+import type { ChatOrderPlacement } from '$shared/chat-order-contracts';
 
-export type RelativeReorderTarget =
-	| { chatIdAbove: string; chatIdBelow?: never }
-	| { chatIdBelow: string; chatIdAbove?: never };
+export type RelativeChatOrderPlacement = Extract<ChatOrderPlacement, { kind: 'relative' }>;
 
 export type BoundaryMove = 'start' | 'end';
 
@@ -82,15 +81,19 @@ export function moveToBoundary(input: {
 export function resolveFilteredRelativeMove(
 	chatId: string,
 	finalVisibleOrder: string[],
-): RelativeReorderTarget | null {
+): RelativeChatOrderPlacement | null {
 	const index = finalVisibleOrder.indexOf(chatId);
 	if (index < 0) return null;
 
 	const chatIdAbove = finalVisibleOrder[index - 1];
-	if (chatIdAbove) return { chatIdAbove };
+	if (chatIdAbove) {
+		return { kind: 'relative', referenceChatId: chatIdAbove, position: 'after' };
+	}
 
 	const chatIdBelow = finalVisibleOrder[index + 1];
-	if (chatIdBelow) return { chatIdBelow };
+	if (chatIdBelow) {
+		return { kind: 'relative', referenceChatId: chatIdBelow, position: 'before' };
+	}
 
 	return null;
 }

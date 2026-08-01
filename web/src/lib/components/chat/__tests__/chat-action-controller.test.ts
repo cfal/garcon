@@ -13,7 +13,7 @@ vi.mock('$lib/api/chats', () => ({
 	deleteChat: vi.fn(),
 	forkChat: vi.fn(),
 	getChatDetails: vi.fn(),
-	reorderChatsQuick: vi.fn(),
+	reorderChat: vi.fn(),
 	setChatTags: vi.fn(),
 	toggleArchive: vi.fn(),
 	togglePinned: vi.fn(),

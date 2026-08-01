@@ -1,4 +1,4 @@
-import type { ChatOrderList } from '$lib/api/chats.js';
+import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { DropTargetRecord } from '@atlaskit/pragmatic-drag-and-drop/types';
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
@@ -6,13 +6,13 @@ import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/clo
 const sidebarChatDragKind = 'sidebar-chat';
 const splitPaneChatDragKind = 'split-pane-chat';
 const sidebarChatDropTargetKind = 'sidebar-chat-row-target';
-const chatOrderLists: ChatOrderList[] = ['pinned', 'normal', 'archived'];
+const chatOrderLists: PersistedChatOrderGroup[] = ['pinned', 'normal', 'archived'];
 
 export interface SidebarChatDragData extends Record<string | symbol, unknown> {
 	kind: typeof sidebarChatDragKind;
 	splitPaneDragKind: typeof splitPaneChatDragKind;
 	chatId: string;
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	index: number;
 	instanceId: symbol;
 	reorderScopeKey: string;
@@ -21,7 +21,7 @@ export interface SidebarChatDragData extends Record<string | symbol, unknown> {
 export interface SidebarChatDropTargetData extends Record<string | symbol, unknown> {
 	kind: typeof sidebarChatDropTargetKind;
 	chatId: string;
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	index: number;
 	instanceId: symbol;
 	reorderScopeKey: string;
@@ -29,16 +29,16 @@ export interface SidebarChatDropTargetData extends Record<string | symbol, unkno
 
 export interface SidebarDropInstruction {
 	sourceChatId: string;
-	sourceList: ChatOrderList;
+	sourceList: PersistedChatOrderGroup;
 	sourceScopeKey: string;
 	targetChatId: string;
-	targetList: ChatOrderList;
+	targetList: PersistedChatOrderGroup;
 	closestEdge: Edge | null;
 }
 
 export function getSidebarChatDragData(input: {
 	chatId: string;
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	index: number;
 	instanceId: symbol;
 	reorderScopeKey: string;
@@ -56,7 +56,7 @@ export function getSidebarChatDragData(input: {
 
 export function getSidebarChatDropTargetData(input: {
 	chatId: string;
-	list: ChatOrderList;
+	list: PersistedChatOrderGroup;
 	index: number;
 	instanceId: symbol;
 	reorderScopeKey: string;
@@ -76,8 +76,8 @@ function asDataRecord(data: unknown): Record<string, unknown> | null {
 	return data as Record<string, unknown>;
 }
 
-function isChatOrderList(value: unknown): value is ChatOrderList {
-	return typeof value === 'string' && chatOrderLists.includes(value as ChatOrderList);
+function isChatOrderList(value: unknown): value is PersistedChatOrderGroup {
+	return typeof value === 'string' && chatOrderLists.includes(value as PersistedChatOrderGroup);
 }
 
 export function isSidebarChatDragData(data: unknown): data is SidebarChatDragData {

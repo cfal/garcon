@@ -5,6 +5,10 @@ import type {
 } from '../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
+  ReorderChatErrorCode,
+  ReorderChatResponse,
+} from '../../common/chat-order-contracts.js';
+import type {
   AppIdentityUiSettings,
   ChatTitleUiSettings,
   CommitMessageUiSettings,
@@ -97,9 +101,6 @@ export interface SettingsStoreContext {
 }
 
 export type ReorderErrorCode =
-  | 'ORDER_ITEM_NOT_FOUND'
-  | 'ORDER_CROSS_GROUP'
-  | 'ORDER_POSITION_UNRESOLVED'
   | 'ORDER_INVALID_INPUT';
 
 export interface SuccessfulReorder {
@@ -126,3 +127,17 @@ export interface InvalidWindowReorder extends FailedReorder {
 }
 
 export type WindowReorderValidation = ValidatedWindowReorder | InvalidWindowReorder;
+
+export interface SuccessfulChatReorder {
+  success: true;
+  response: ReorderChatResponse;
+}
+
+export interface FailedChatReorder {
+  success: false;
+  error: string;
+  errorCode: ReorderChatErrorCode;
+  status: number;
+}
+
+export type ChatReorderResult = SuccessfulChatReorder | FailedChatReorder;

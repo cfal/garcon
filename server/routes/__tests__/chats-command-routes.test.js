@@ -156,8 +156,10 @@ function createRouteAgent(sessionOverrides = {}) {
     getPinnedChatIds: mock(() => []),
     getNormalChatIds: mock(() => [...normalIds]),
     getArchivedChatIds: mock(() => []),
-    reorderWindow: mock(() => Promise.resolve({ success: true })),
-    reorderRelative: mock(() => Promise.resolve({ success: true })),
+	reorderChat: mock(() => Promise.resolve({
+		success: true,
+		response: { success: true, chatId: 'chat', orderGroup: 'normal', changed: true },
+	})),
   };
   const queue = {
     scheduleDirectInput: mock(async (input) => {

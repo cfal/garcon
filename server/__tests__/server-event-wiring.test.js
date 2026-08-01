@@ -16,6 +16,7 @@ function deferred() {
 function createWiringFixture(overrides = {}) {
   const agentListeners = {};
   const queueListeners = {};
+  const settingsListeners = {};
   const noOpSubscription = mock(() => undefined);
   const pendingInputs = overrides.pendingInputs ?? new PendingUserInputService({
     loadNativeMessages: mock(async () => []),
@@ -80,7 +81,7 @@ function createWiringFixture(overrides = {}) {
     chatRegistry,
     settings: {
       onSessionNameChanged: noOpSubscription,
-      onListChanged: noOpSubscription,
+      onListChanged: mock((callback) => { settingsListeners.listChanged = callback; }),
       onRemoteSettingsChanged: noOpSubscription,
     },
     queue,
@@ -108,6 +109,7 @@ function createWiringFixture(overrides = {}) {
   return {
     agentListeners,
     queueListeners,
+    settingsListeners,
     wiring,
     metadata,
     chatViews,
@@ -117,6 +119,23 @@ function createWiringFixture(overrides = {}) {
 }
 
 describe('server event wiring', () => {
+  it('broadcasts the generic chat reorder invalidation', () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.settingsListeners.listChanged('chats-reordered', 'chat-1');
+
+    expect(published).toEqual([{
+      type: 'chat-list-refresh-requested',
+      reason: 'chats-reordered',
+      chatId: 'chat-1',
+    }]);
+  });
+
   it('publishes canonical processing phases before the Stop outcome', async () => {
     let phase = 'running';
     const published = [];

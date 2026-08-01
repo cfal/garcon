@@ -804,74 +804,44 @@ describe('settings store', () => {
     });
   });
 
-  describe('reorderWindow', () => {
-    it('reorders a contiguous window within a list', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b', 'c', 'd'], archivedChatIds: [] });
+  describe('reorderChat', () => {
+    const isKnownChat = (chatId) => ['a', 'b', 'c'].includes(chatId);
+
+    it('persists a placement and emits the generic list invalidation', async () => {
+      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b', 'c'], archivedChatIds: [] });
       const events = [];
       store.onListChanged((reason, chatId) => events.push({ reason, chatId }));
 
-      const result = await store.reorderWindow('normal', ['b', 'c'], ['c', 'b']);
+      const result = await store.reorderChat({
+        chatId: 'c',
+        placement: { kind: 'relative', referenceChatId: 'a', position: 'before' },
+      }, isKnownChat);
 
-      expect(result).toEqual({ success: true });
-      const settings = await store.loadSettings();
-      expect(settings.normalChatIds).toEqual(['a', 'c', 'b', 'd']);
-      expect(events[0].reason).toBe('chats-reordered');
+      expect(result).toEqual({
+        success: true,
+        response: { success: true, chatId: 'c', orderGroup: 'normal', changed: true },
+      });
+      expect((await store.loadSettings()).normalChatIds).toEqual(['c', 'a', 'b']);
+      expect(events).toEqual([{ reason: 'chats-reordered', chatId: 'c' }]);
     });
 
-    it('bumps remote settings version when reordering pinned chats', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b', 'c'], normalChatIds: [], archivedChatIds: [] });
-      const remoteEvents = [];
-      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
-
-      const result = await store.reorderWindow('pinned', ['a', 'b'], ['b', 'a']);
-
-      expect(result).toEqual({ success: true });
-      expect(await store.getPinnedChatIds()).toEqual(['b', 'a', 'c']);
-      expect(await store.getRemoteSettingsVersion()).toBe(1);
-      expect(remoteEvents).toEqual(['changed']);
-    });
-
-    it('rejects empty oldOrder', async () => {
-      const result = await store.reorderWindow('normal', [], []);
-      expect(result.success).toBe(false);
-    });
-
-    it('rejects mismatched IDs between oldOrder and newOrder', async () => {
-      const result = await store.reorderWindow('normal', ['a', 'b'], ['a', 'c']);
-      expect(result.success).toBe(false);
-    });
-  });
-
-  describe('reorderRelative', () => {
-    it('moves a chat above another in the same group', async () => {
+    it('resolves the section after an earlier queued group mutation', async () => {
       await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: [], normalChatIds: ['a', 'b', 'c'], archivedChatIds: [] });
 
-      const result = await store.reorderRelative('c', 'a', 'above');
+      const archive = store.toggleArchive('a');
+      const reorder = store.reorderChat({
+        chatId: 'a',
+        placement: { kind: 'boundary', boundary: 'bottom' },
+      }, isKnownChat);
 
-      expect(result).toEqual({ success: true });
+      await archive;
+      expect(await reorder).toEqual({
+        success: true,
+        response: { success: true, chatId: 'a', orderGroup: 'archived', changed: false },
+      });
       const settings = await store.loadSettings();
-      expect(settings.normalChatIds).toEqual(['c', 'a', 'b']);
-    });
-
-    it('bumps remote settings version when quickly reordering pinned chats', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a', 'b', 'c'], normalChatIds: [], archivedChatIds: [] });
-      const remoteEvents = [];
-      store.onRemoteSettingsChanged(() => remoteEvents.push('changed'));
-
-      const result = await store.reorderRelative('c', 'a', 'above');
-
-      expect(result).toEqual({ success: true });
-      expect(await store.getPinnedChatIds()).toEqual(['c', 'a', 'b']);
-      expect(await store.getRemoteSettingsVersion()).toBe(1);
-      expect(remoteEvents).toEqual(['changed']);
-    });
-
-    it('rejects cross-group reorder', async () => {
-      await writeRaw({ ui: {}, paths: {}, chatNames: {}, pinnedChatIds: ['a'], normalChatIds: ['b'], archivedChatIds: [] });
-
-      const result = await store.reorderRelative('a', 'b', 'above');
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Cross-group');
+      expect(settings.normalChatIds).toEqual(['b', 'c']);
+      expect(settings.archivedChatIds).toEqual(['a']);
     });
   });
 

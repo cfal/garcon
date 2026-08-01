@@ -240,7 +240,6 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'pinned-toggled',
   'archive-toggled',
   'chats-reordered',
-  'chats-reordered-quick',
 ] as const;
 
 export type ChatListInvalidationReason =
