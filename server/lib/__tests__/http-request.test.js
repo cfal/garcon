@@ -64,4 +64,18 @@ describe('authenticateHttpRequest', () => {
     });
     expect(verifyAuthTokenClaims).not.toHaveBeenCalled();
   });
+
+  it('rejects a Unicode token with equal character length without throwing', async () => {
+    verifyAuthTokenClaims.mockResolvedValue(null);
+    const capability = `garcon_local_${'a'.repeat(43)}`;
+    const token = `garcon_local_\u00e9${'a'.repeat(42)}`;
+    expect(token.length).toBe(capability.length);
+
+    const result = await authenticateHttpRequest(new Request('http://localhost/api/private', {
+      headers: { authorization: `Bearer ${token}` },
+    }), { localCapability: capability });
+
+    expect(result.errorResponse.status).toBe(401);
+    expect(result.principal).toBeNull();
+  });
 });

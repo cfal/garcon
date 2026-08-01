@@ -49,10 +49,14 @@ export async function authenticateHttpRequest(
     return { errorResponse: jsonError('Access denied. No token provided.', 401), principal: null };
   }
 
+  const tokenBytes = Buffer.from(token);
+  const localCapabilityBytes = options.localCapability
+    ? Buffer.from(options.localCapability)
+    : null;
   if (
-    options.localCapability
-    && token.length === options.localCapability.length
-    && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(options.localCapability))
+    localCapabilityBytes
+    && tokenBytes.length === localCapabilityBytes.length
+    && crypto.timingSafeEqual(tokenBytes, localCapabilityBytes)
   ) {
     return {
       errorResponse: null,
