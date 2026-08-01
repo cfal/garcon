@@ -212,6 +212,28 @@ describe('CommandLedger', () => {
     });
   });
 
+  it('bounds aggregate result memory while every retained turn is still pending', async () => {
+    const ledger = new CommandLedger(undefined, {
+      turnResultByteLimit: 10,
+      totalTurnResultByteLimit: 5,
+    });
+    await ledger.accept(acceptedInput({ clientRequestId: 'first', turnId: 'turn-first' }));
+    await ledger.accept(acceptedInput({ clientRequestId: 'second', turnId: 'turn-second' }));
+
+    await ledger.appendAssistantMessages('chat-1', 'turn-first', ['1234']);
+    await ledger.appendAssistantMessages('chat-1', 'turn-second', ['5678']);
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toMatchObject({
+      turnResultAvailability: 'available',
+      assistantMessages: ['1234'],
+      assistantBytes: 4,
+    });
+    expect(await ledger.getTurnRecord('chat-1', 'turn-second')).toMatchObject({
+      turnResultAvailability: 'too-large',
+      assistantBytes: 0,
+    });
+  });
+
   it('moves the turn index when a pre-schedule retry receives a new turn', async () => {
     const ledger = new CommandLedger();
     const first = await ledger.accept(acceptedInput({ turnId: 'turn-old' }));

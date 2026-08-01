@@ -217,14 +217,18 @@ export class CommandLedger {
     const additionalBytes = appended.reduce((total, message) => total + Buffer.byteLength(message), 0);
     const currentBytes = record.assistantBytes ?? 0;
     if (currentBytes + additionalBytes > this.#turnResultByteLimit) {
-      this.#resultBytes -= currentBytes;
-      record.assistantMessages = undefined;
-      record.assistantBytes = 0;
+      this.#discardResult(record);
       record.turnResultAvailability = 'too-large';
     } else {
-      record.assistantMessages = [...(record.assistantMessages ?? []), ...appended];
-      record.assistantBytes = currentBytes + additionalBytes;
-      this.#resultBytes += additionalBytes;
+      this.#expireTerminalResults(additionalBytes);
+      if (this.#resultBytes + additionalBytes > this.#totalTurnResultByteLimit) {
+        this.#discardResult(record);
+        record.turnResultAvailability = 'too-large';
+      } else {
+        record.assistantMessages = [...(record.assistantMessages ?? []), ...appended];
+        record.assistantBytes = currentBytes + additionalBytes;
+        this.#resultBytes += additionalBytes;
+      }
     }
     record.updatedAt = new Date().toISOString();
     return cloneRecord(record);
@@ -543,8 +547,8 @@ export class CommandLedger {
     this.#records.delete(key);
   }
 
-  #expireTerminalResults(): void {
-    while (this.#resultBytes > this.#totalTurnResultByteLimit) {
+  #expireTerminalResults(requiredBytes = 0): void {
+    while (this.#resultBytes + requiredBytes > this.#totalTurnResultByteLimit) {
       const oldest = [...this.#records.values()].find((record) => (
         record.publicTerminalAt !== undefined
         && record.turnResultAvailability === 'available'

@@ -40,7 +40,7 @@ describe('agent turn receipt route', () => {
   it('distinguishes missing and expired turn results', async () => {
     const ledger = new CommandLedger(undefined, {
       turnResultByteLimit: 10,
-      totalTurnResultByteLimit: 1,
+      totalTurnResultByteLimit: 5,
     });
     const missing = await getReceipt(ledger, 'chatId=chat-1&turnId=missing');
     expect(missing.response.status).toBe(404);
@@ -56,6 +56,14 @@ describe('agent turn receipt route', () => {
     await ledger.appendAssistantMessages('chat-1', 'turn-1', ['done']);
     await ledger.settleTerminal(accepted.record.key, 'finished');
     await ledger.markPublicTerminal('chat-1', 'turn-1');
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-2',
+      clientRequestId: 'req-2',
+      turnId: 'turn-2',
+      payload: { command: 'hello' },
+    });
+    await ledger.appendAssistantMessages('chat-2', 'turn-2', ['more']);
     const expired = await getReceipt(ledger, 'chatId=chat-1&turnId=turn-1');
     expect(expired.response.status).toBe(410);
     expect(expired.body.errorCode).toBe('TURN_RESULT_EXPIRED');
