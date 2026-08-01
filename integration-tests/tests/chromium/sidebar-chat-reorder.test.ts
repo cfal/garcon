@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type BrowserContext, type Page, type Request } from 'playwright';
 import {
+  parseReorderChatRequest,
   parseReorderChatResponse,
+  type ReorderChatRequest,
   type ReorderChatResponse,
 } from '../../../common/chat-order-contracts.js';
 import {
@@ -140,7 +142,16 @@ async function waitForSidebarOrder(page: Page, expected: string[]): Promise<void
       );
     },
     { selector: CHAT_ROW_SELECTOR, expectedOrder: expected },
+    { timeout: 10_000 },
   );
+}
+
+function capturedReorderRequests(fixture: ChromiumFixture): ReorderChatRequest[] {
+  return fixture.reorderExchanges.map(({ request }) => {
+    const parsed = parseReorderChatRequest(request.body ? JSON.parse(request.body) : null);
+    if (!parsed) throw new Error(`Invalid captured reorder request: ${request.body ?? '<empty>'}`);
+    return parsed;
+  });
 }
 
 async function dragRelative(
@@ -237,6 +248,10 @@ async function disposeChromiumFixture(fixture: ChromiumFixture): Promise<void> {
   const errors: unknown[] = [];
   try {
     await fixture.context.close();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
     await fixture.browser.close();
   } catch (error) {
     errors.push(error);
@@ -304,6 +319,16 @@ describe('Chromium sidebar chat reorder', () => {
         orderGroup: 'normal',
         changed: true,
       });
+      expect(capturedReorderRequests(fixture)).toEqual([
+        {
+          chatId: sourceId,
+          placement: {
+            kind: 'relative',
+            referenceChatId: neighborId,
+            position: 'before',
+          },
+        },
+      ]);
       await waitForSidebarOrder(fixture.page, movedUp);
       expect(await normalOrder(fixture.integration)).toEqual(movedUp);
 
@@ -318,6 +343,24 @@ describe('Chromium sidebar chat reorder', () => {
         orderGroup: 'normal',
         changed: true,
       });
+      expect(capturedReorderRequests(fixture)).toEqual([
+        {
+          chatId: sourceId,
+          placement: {
+            kind: 'relative',
+            referenceChatId: neighborId,
+            position: 'before',
+          },
+        },
+        {
+          chatId: sourceId,
+          placement: {
+            kind: 'relative',
+            referenceChatId: neighborId,
+            position: 'after',
+          },
+        },
+      ]);
       await waitForSidebarOrder(fixture.page, original);
       expect(await sidebarOrder(fixture.page)).toEqual(original);
       expect(await normalOrder(fixture.integration)).toEqual(original);
@@ -354,11 +397,37 @@ describe('Chromium sidebar chat reorder', () => {
         orderGroup: 'normal',
         changed: true,
       });
+      expect(capturedReorderRequests(fixture)).toEqual([
+        {
+          chatId: sourceId,
+          placement: {
+            kind: 'relative',
+            referenceChatId: neighborId,
+            position: 'before',
+          },
+        },
+        {
+          chatId: sourceId,
+          placement: {
+            kind: 'relative',
+            referenceChatId: neighborId,
+            position: 'after',
+          },
+        },
+        {
+          chatId: popupSourceId,
+          placement: {
+            kind: 'relative',
+            referenceChatId: neighborId,
+            position: 'before',
+          },
+        },
+      ]);
 
       const movedToTop = [popupSourceId, ...original.filter((chatId) => chatId !== popupSourceId)];
       await waitForSidebarOrder(fixture.page, movedToTop);
       expect(await normalOrder(fixture.integration)).toEqual(movedToTop);
       expect(fixture.browserErrors).toEqual([]);
     });
-  }, 60_000);
+  }, 120_000);
 });
