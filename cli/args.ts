@@ -208,8 +208,11 @@ export function parseCliArgs(
 
   if (parsed.positionals.length === 0) throw argumentError('a prompt is required');
   const readsPromptFromStdin = parsed.positionals.length === 1 && parsed.positionals[0] === '-';
-  const prompt = readsPromptFromStdin ? null : parsed.positionals.join(' ').trim();
-  if (prompt !== null && prompt.length === 0) throw argumentError('the prompt must not be empty');
+  if (!readsPromptFromStdin && parsed.positionals.includes('-')) {
+    throw argumentError('stdin marker - must be the only prompt argument');
+  }
+  const prompt = readsPromptFromStdin ? null : parsed.positionals.join(' ');
+  if (prompt !== null && prompt.trim().length === 0) throw argumentError('the prompt must not be empty');
 
   const shared = {
     workspace,

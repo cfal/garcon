@@ -120,6 +120,21 @@ describe('resolveModelSelection', () => {
     }).modelEndpointId).toBe('west');
   });
 
+  test('lists available catalog routing choices in selection errors', () => {
+    expect(() => resolveModelSelection(catalog(), 'unknown', { model: 'gpt-5.4' })).toThrow(
+      'available agents: codex',
+    );
+    expect(() => resolveModelSelection(catalog(), 'codex', {
+      model: 'qwen',
+      providerId: 'unknown',
+    })).toThrow('available providers: acme');
+    expect(() => resolveModelSelection(catalog(), 'codex', {
+      model: 'qwen',
+      providerId: 'acme',
+      endpointId: 'unknown',
+    })).toThrow('available endpoints: east, west');
+  });
+
   test('allows an undiscovered native model only for non-strict agents', () => {
     expect(() => resolveModelSelection(catalog(), 'codex', { model: 'future' })).toThrow(
       'not available',

@@ -5,6 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import {
   SERVER_RUNTIME_FILENAME,
+  ServerRuntimeContractError,
   parseServerRuntimeDescriptor,
   parseServerRuntimeProbe,
   runtimeProofPayload,
@@ -114,6 +115,17 @@ async function readRuntimeDescriptor(workspaceDir: string): Promise<ServerRuntim
     }
     return descriptor;
   } catch (error) {
+    if (
+      error instanceof ServerRuntimeContractError
+      && error.message === 'unsupported runtime schema version'
+    ) {
+      throw new CliError(
+        'discovery',
+        'runtime descriptor schema is unsupported; upgrade Garcon and garcon-cli together',
+        3,
+        { cause: error },
+      );
+    }
     throw new CliError(
       'discovery',
       `cannot read a secure runtime descriptor for ${workspaceDir}`,

@@ -58,6 +58,16 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test('preserves quoted prompt whitespace', () => {
+    const result = parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '  preserve this spacing  ',
+    ], ENV);
+
+    expect(result).toMatchObject({ prompt: '  preserve this spacing  ' });
+  });
+
   test.each([
     { args: ['--agent', 'codex', 'prompt'], message: '--model is required' },
     { args: ['--model', 'gpt', 'prompt'], message: '--agent is required' },
@@ -68,6 +78,7 @@ describe('parseCliArgs', () => {
     { args: ['--permissions', 'dangerous', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--permissions must be' },
     { args: ['--resume', '123', 'prompt'], message: 'valid Garcon chat ID' },
     { args: ['--agent', 'codex', '--agent', 'claude', '--model', 'gpt', 'prompt'], message: 'only once' },
+    { args: ['--agent', 'codex', '--model', 'gpt', 'prompt', '-'], message: 'must be the only prompt argument' },
   ])('rejects invalid arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
     try {

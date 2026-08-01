@@ -40,13 +40,21 @@ function catalogError(message: string): CliError {
   return new CliError('catalog resolution', message, 2);
 }
 
+function availableValues(label: string, values: readonly string[]): string {
+  return `${label}: ${values.length > 0 ? values.join(', ') : 'none'}`;
+}
+
 function isApiProtocol(value: unknown): value is ApiProtocol {
   return value === 'anthropic-messages' || value === 'openai-compatible';
 }
 
 function normalizedAgent(catalog: ModelCatalogResponse, agentId: string): AgentCatalogEntry {
   const raw = catalog.catalog.agents.find((entry) => entry?.id === agentId);
-  if (!raw) throw catalogError(`unknown agent: ${agentId}`);
+  if (!raw) {
+    throw catalogError(
+      `unknown agent: ${agentId}; ${availableValues('available agents', catalog.catalog.agents.map((entry) => entry.id))}`,
+    );
+  }
   const defaultSettings = parseAgentSettingsEnvelope(raw.defaultSettings);
   if (
     !Array.isArray(raw.models)
@@ -138,11 +146,23 @@ function assertProviderAndEndpoint(
   }
   const provider = catalog.catalog.apiProviders.find((entry) => entry?.id === requested.providerId);
   if (!provider || !Array.isArray(provider.endpoints)) {
-    throw catalogError(`unknown API provider: ${requested.providerId}`);
+    throw catalogError(
+      `unknown API provider: ${requested.providerId}; ${availableValues(
+        'available providers',
+        catalog.catalog.apiProviders.map((entry) => entry.id),
+      )}`,
+    );
   }
   if (!requested.endpointId) return;
   const endpoint = provider.endpoints.find((entry) => entry?.id === requested.endpointId);
-  if (!endpoint) throw catalogError(`unknown endpoint ${requested.endpointId} in provider ${provider.id}`);
+  if (!endpoint) {
+    throw catalogError(
+      `unknown endpoint ${requested.endpointId} in provider ${provider.id}; ${availableValues(
+        'available endpoints',
+        provider.endpoints.map((entry) => entry.id),
+      )}`,
+    );
+  }
   if (!agent.supportedProtocols.includes(endpoint.protocol)) {
     throw catalogError(`endpoint ${requested.endpointId} is not compatible with agent ${agent.id}`);
   }

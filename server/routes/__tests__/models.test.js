@@ -459,6 +459,16 @@ describe("GET /api/v1/models", () => {
     expect(body.catalog.agents[0].id).toBe("claude");
   });
 
+  it("lists available agents when an agent filter is unknown", async () => {
+    const url = new URL("http://localhost/api/v1/models?agent=unknown");
+    const response = await handler(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toContain("Available agents: claude");
+    expect(body.error).toContain("codex");
+  });
+
   it("uses strict Pi discovery for the Pi agent filter", async () => {
     modelCatalog.agents.getAgentCatalogEntry.mockResolvedValueOnce({
       ...agentCatalogEntries.find((agent) => agent.id === "pi"),

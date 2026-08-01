@@ -168,6 +168,15 @@ describe('discoverRuntime', () => {
     }, { fetch: async () => Response.json({}) })).rejects.toThrow('secure runtime descriptor');
   });
 
+  test('reports an actionable upgrade diagnostic for an unsupported descriptor schema', async () => {
+    const testFixture = await fixture({ schemaVersion: 2 });
+
+    await expect(discoverRuntime({
+      configDir: testFixture.configDir,
+      workspace: 'review',
+    })).rejects.toThrow('upgrade Garcon and garcon-cli together');
+  });
+
   test('rejects a workspace symlink that escapes the config directory', async () => {
     if (process.platform === 'win32') return;
     const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-cli-config-'));
