@@ -117,18 +117,60 @@ describe('GarconClient', () => {
       .rejects.toBeInstanceOf(GarconTransportError);
   });
 
-  test('does not retry a malformed successful submission response', async () => {
+  test('retries a malformed successful submission response with the exact body', async () => {
     const bodies: string[] = [];
+    let attempts = 0;
     const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
-      fetch: async (_input, init) => {
+      fetch: async (input, init) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
         bodies.push(String(init?.body));
-        return Response.json({ success: true });
+        return attempts === 1
+          ? Response.json({ success: true })
+          : accepted(runRequest);
       },
     });
-    await expect(client.runChat(runRequest)).rejects.toThrow('invalid command acceptance');
-    expect(bodies).toHaveLength(1);
+    await expect(client.runChat(runRequest)).resolves.toMatchObject({ turnId: 'turn-1' });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  test('reports the candidate chat after ambiguous recovery is exhausted', async () => {
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        return new Response('{"success":', { status: 202 });
+      },
+    });
+
+    await expect(client.runChat(runRequest)).rejects.toThrow(
+      `chat ${runRequest.chatId} may still be running`,
+    );
+    expect(attempts).toBe(3);
+  });
+
+  test.each([408, 425])('retries ambiguous HTTP %i responses', async (status) => {
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        return attempts === 1
+          ? Response.json({ error: 'try again' }, { status })
+          : accepted(runRequest);
+      },
+    });
+
+    await expect(client.runChat(runRequest)).resolves.toMatchObject({ turnId: 'turn-1' });
+    expect(attempts).toBe(2);
   });
 
   test('does not retry an ambiguous submission on a replacement runtime', async () => {
@@ -145,7 +187,9 @@ describe('GarconClient', () => {
       },
     });
 
-    await expect(client.runChat(runRequest)).rejects.toThrow('restarted after submission');
+    await expect(client.runChat(runRequest)).rejects.toThrow(
+      `chat ${runRequest.chatId} may have been accepted`,
+    );
     expect(submissions).toBe(1);
   });
 
@@ -203,23 +247,34 @@ describe('GarconClient', () => {
     }
   });
 
-  test('requires correlated fields in accepted responses', async () => {
-    const client = new GarconClient({
-      ...connection,
-      fetch: async () => Response.json({ success: true, status: 'accepted' }),
-    });
-    await expect(client.runChat(runRequest)).rejects.toThrow('invalid command acceptance');
-  });
-
-  test('rejects an accepted response for a different request', async () => {
+  test('does not accept a response without correlated fields', async () => {
     const client = new GarconClient({
       ...connection,
       submissionDelay: async () => undefined,
-      fetch: async () => Response.json({
-        ...await accepted(runRequest).json(),
-        clientRequestId: 'other',
-      }),
+      fetch: async (input) => String(input).includes('/api/v1/runtime')
+        ? runtimeResponse(input)
+        : Response.json({ success: true, status: 'accepted' }),
     });
-    await expect(client.runChat(runRequest)).rejects.toThrow('uncorrelated');
+    await expect(client.runChat(runRequest)).rejects.toThrow('may still be running');
+  });
+
+  test('recovers from an accepted response for a different request', async () => {
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        return attempts === 1
+          ? Response.json({
+            ...await accepted(runRequest).json(),
+            clientRequestId: 'other',
+          })
+          : accepted(runRequest);
+      },
+    });
+    await expect(client.runChat(runRequest)).resolves.toMatchObject({ turnId: 'turn-1' });
+    expect(attempts).toBe(2);
   });
 });

@@ -117,6 +117,20 @@ function retryAfterMilliseconds(value: string | null): number | null {
     : null;
 }
 
+function isAmbiguousSubmissionError(error: unknown): boolean {
+  if (error instanceof GarconTransportError) return true;
+  if (error instanceof GarconHttpError) {
+    return error.retryable
+      || error.status === 408
+      || error.status === 425
+      || error.status === 429
+      || error.status === 502
+      || error.status === 503
+      || error.status === 504;
+  }
+  return error instanceof CliError && error.phase === 'submission';
+}
+
 export class GarconClient {
   readonly #baseUrl: string;
   readonly #instanceId: string;
@@ -200,7 +214,6 @@ export class GarconClient {
     request: StartChatCommandRequest | AgentRunCommandRequest,
     signal?: AbortSignal,
   ): Promise<AgentTurnCommandResponse> {
-    let lastError: unknown;
     for (let attempt = 0; attempt < SUBMISSION_ATTEMPTS; attempt += 1) {
       try {
         const accepted = parseAcceptedResponse(
@@ -215,16 +228,16 @@ export class GarconClient {
         }
         return accepted;
       } catch (error) {
-        lastError = error;
-        const transient = error instanceof GarconTransportError
-          || (error instanceof GarconHttpError
-            ? error.retryable
-              || error.status === 429
-              || error.status === 502
-              || error.status === 503
-              || error.status === 504
-            : false);
-        if (!transient || attempt === SUBMISSION_ATTEMPTS - 1 || signal?.aborted) throw error;
+        const ambiguous = isAmbiguousSubmissionError(error);
+        if (!ambiguous || signal?.aborted) throw error;
+        if (attempt === SUBMISSION_ATTEMPTS - 1) {
+          throw new CliError(
+            'transport recovery',
+            `the command for chat ${request.chatId} may still be running in Garcon; exact submission recovery was exhausted`,
+            3,
+            { cause: error },
+          );
+        }
         const retryAfterMs = error instanceof GarconHttpError ? error.retryAfterMs ?? 0 : 0;
         await this.#submissionDelay(Math.max(100 * (attempt + 1), retryAfterMs), signal);
         let sameRuntime: boolean;
@@ -233,7 +246,7 @@ export class GarconClient {
         } catch (verificationError) {
           throw new CliError(
             'transport recovery',
-            'the accepted command may still be running, but Garcon could not be verified before retry',
+            `the command for chat ${request.chatId} may still be running, but Garcon could not be verified before retry`,
             3,
             { cause: verificationError },
           );
@@ -241,13 +254,13 @@ export class GarconClient {
         if (!sameRuntime) {
           throw new CliError(
             'transport recovery',
-            'Garcon restarted after submission; the command was not retried',
+            `the command for chat ${request.chatId} may have been accepted, but Garcon restarted after submission; the command was not retried`,
             3,
           );
         }
       }
     }
-    throw lastError;
+    throw new CliError('transport recovery', 'submission recovery exhausted unexpectedly', 3);
   }
 
   async #request(
