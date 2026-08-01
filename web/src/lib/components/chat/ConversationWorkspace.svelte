@@ -415,7 +415,9 @@
 		return scheduleInitialTranscriptReveal(() => {
 			if (chatState.activeChatId !== chatId) return false;
 			untrack(() => chatState.revealInitialMessages());
-			return chatState.hasInitialMessagesToReveal;
+			const shouldContinue = chatState.hasInitialMessagesToReveal;
+			if (!shouldContinue) void scroll.fillUnderfilledViewport();
+			return shouldContinue;
 		});
 	});
 

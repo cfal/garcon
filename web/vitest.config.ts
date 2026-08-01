@@ -8,6 +8,8 @@ const TEST_OPTIMIZED_DEPENDENCIES = [
 	'katex',
 ];
 const IMPORT_AUDIT_ENABLED = process.env.VITEST_IMPORT_AUDIT === '1';
+// Uses process workers under Bun because Vitest's thread pools require unavailable Node Worker stdout streams.
+const TESTS_RUN_ON_BUN = 'bun' in process.versions;
 
 export default defineConfig({
 	plugins: [svelte()],
@@ -15,6 +17,7 @@ export default defineConfig({
 		include: TEST_OPTIMIZED_DEPENDENCIES,
 	},
 	test: {
+		maxWorkers: TESTS_RUN_ON_BUN ? 4 : undefined,
 		experimental: {
 			importDurations: {
 				print: IMPORT_AUDIT_ENABLED,
@@ -31,7 +34,7 @@ export default defineConfig({
 					globals: true,
 					include: ['src/**/*.logic.test.ts'],
 					isolate: false,
-					pool: 'threads',
+					pool: TESTS_RUN_ON_BUN ? 'forks' : 'threads',
 					setupFiles: [],
 				},
 			},
@@ -45,7 +48,7 @@ export default defineConfig({
 					include: ['src/**/*.test.ts'],
 					// Reuses worker threads while retaining an isolated VM context for each test file.
 					// Cross-realm boundary values must use shape checks rather than constructor identity.
-					pool: 'vmThreads',
+					pool: TESTS_RUN_ON_BUN ? 'forks' : 'vmThreads',
 					setupFiles: ['./src/test/vitest-setup.ts'],
 				},
 			},

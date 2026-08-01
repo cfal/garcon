@@ -1,6 +1,8 @@
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
+  isPermissionMode,
+  isThinkingMode,
   type PermissionMode,
   type ThinkingMode,
 } from './chat-modes.js';
@@ -30,6 +32,7 @@ export type CommandErrorCode = Extract<
   | 'VALIDATION_FAILED'
   | 'SESSION_NOT_FOUND'
   | 'IDEMPOTENCY_CONFLICT'
+  | 'CHAT_ID_COLLISION'
   | 'QUEUE_ENTRY_NOT_FOUND'
   | 'QUEUE_ENTRY_ALREADY_SENT'
   | 'QUEUE_ENTRY_REVISION_CONFLICT'
@@ -45,6 +48,9 @@ export type CommandErrorCode = Extract<
   | 'GOAL_CONTROL_NOT_DELIVERED'
   | 'GOAL_CONTROL_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
+  | 'EXPECTED_AGENT_MISMATCH'
+  | 'EXPLICIT_BYPASS_REQUIRED'
+  | 'INCOMPLETE_EXECUTION_CONFIG'
   | 'OPERATION_UNSUPPORTED'
   | 'SOURCE_REVISION_CHANGED'
   | 'TRANSCRIPT_UNAVAILABLE'
@@ -73,8 +79,13 @@ export interface CommandAcceptedResponse {
   acceptedAt: string;
 }
 
-export interface StartChatCommandResponse extends CommandAcceptedResponse {
-  chat: ChatListEntry;
+export interface AgentTurnCommandResponse extends CommandAcceptedResponse {
+  chatId: string;
+  turnId: string;
+}
+
+export interface StartChatCommandResponse extends AgentTurnCommandResponse {
+  chat: ChatListEntry | null;
 }
 
 export interface ForkChatResponse {
@@ -93,7 +104,7 @@ export interface DeleteChatCommandRequest {
   chatId: string;
 }
 
-export interface ForkRunCommandResponse extends CommandAcceptedResponse {
+export interface ForkRunCommandResponse extends AgentTurnCommandResponse {
   chat: ChatListEntry;
 }
 
@@ -125,13 +136,16 @@ export interface AgentRunCommandRequest {
   chatId: string;
   command: string;
   images?: AgentCommandImage[];
-  permissionMode: PermissionMode;
-  thinkingMode: ThinkingMode;
-  agentSettings: AgentSettingsEnvelope;
-  model: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  agentSettings?: AgentSettingsEnvelope;
+  model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+  expectedAgentId?: string;
+  tagsToAdd?: string[];
+  permissionFallbackPolicy?: 'require-explicit-bypass';
 }
 
 export interface ForkRunCommandRequest {
@@ -417,19 +431,57 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
 export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequest {
   const body = requestRecord(value);
   const images = optionalImages(body.images);
+  const model = optionalNonEmptyString(body, 'model');
+  const apiProviderId = optionalNullableString(body, 'apiProviderId');
+  const modelEndpointId = optionalNullableString(body, 'modelEndpointId');
+  const modelProtocol = optionalApiProtocol(body.modelProtocol);
+  if (model === undefined && (
+    apiProviderId !== undefined
+    || modelEndpointId !== undefined
+    || modelProtocol !== undefined
+  )) {
+    throw new CommandRequestValidationError('model is required with routing overrides');
+  }
+  if (modelEndpointId !== undefined && apiProviderId === undefined) {
+    throw new CommandRequestValidationError('apiProviderId is required with modelEndpointId');
+  }
+  const permissionMode = optionalPermissionMode(body.permissionMode);
+  const thinkingMode = optionalThinkingMode(body.thinkingMode);
+  const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
+  const expectedAgentId = optionalNonEmptyString(body, 'expectedAgentId');
+  const permissionFallbackPolicy = body.permissionFallbackPolicy;
+  if (
+    permissionFallbackPolicy !== undefined
+    && permissionFallbackPolicy !== null
+    && permissionFallbackPolicy !== 'require-explicit-bypass'
+  ) {
+    throw new CommandRequestValidationError('permissionFallbackPolicy is invalid');
+  }
+  let tagsToAdd: string[] | undefined;
+  if (body.tagsToAdd !== undefined && body.tagsToAdd !== null) {
+    if (!Array.isArray(body.tagsToAdd)) {
+      throw new CommandRequestValidationError('tagsToAdd must be an array');
+    }
+    tagsToAdd = normalizeTags(body.tagsToAdd);
+  }
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     command: contentOrImages(body, 'command', images),
     ...(images === undefined ? {} : { images }),
-    permissionMode: normalizePermissionMode(body.permissionMode),
-    thinkingMode: normalizeThinkingMode(body.thinkingMode),
-    agentSettings: requiredAgentSettings(body.agentSettings, 'agentSettings'),
-    model: requiredString(body, 'model'),
-    apiProviderId: optionalNullableString(body, 'apiProviderId'),
-    modelEndpointId: optionalNullableString(body, 'modelEndpointId'),
-    modelProtocol: optionalApiProtocol(body.modelProtocol),
+    ...(permissionMode === undefined ? {} : { permissionMode }),
+    ...(thinkingMode === undefined ? {} : { thinkingMode }),
+    ...(agentSettings === undefined ? {} : { agentSettings }),
+    ...(model === undefined ? {} : { model }),
+    ...(apiProviderId === undefined ? {} : { apiProviderId }),
+    ...(modelEndpointId === undefined ? {} : { modelEndpointId }),
+    ...(modelProtocol === undefined ? {} : { modelProtocol }),
+    ...(expectedAgentId === undefined ? {} : { expectedAgentId }),
+    ...(tagsToAdd === undefined ? {} : { tagsToAdd }),
+    ...(permissionFallbackPolicy === 'require-explicit-bypass'
+      ? { permissionFallbackPolicy }
+      : {}),
   };
 }
 
@@ -706,6 +758,33 @@ function optionalString(
     throw new CommandRequestValidationError(`${field} must be a string`);
   }
   return trim ? value.trim() : value;
+}
+
+function optionalNonEmptyString(
+  body: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  const value = optionalString(body, field);
+  if (value !== undefined && value.length === 0) {
+    throw new CommandRequestValidationError(`${field} must not be empty`);
+  }
+  return value;
+}
+
+function optionalPermissionMode(value: unknown): PermissionMode | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isPermissionMode(value)) {
+    throw new CommandRequestValidationError('permissionMode is invalid');
+  }
+  return value;
+}
+
+function optionalThinkingMode(value: unknown): ThinkingMode | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isThinkingMode(value)) {
+    throw new CommandRequestValidationError('thinkingMode is invalid');
+  }
+  return value;
 }
 
 function optionalGenerationId(body: Record<string, unknown>): string | undefined {

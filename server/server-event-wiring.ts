@@ -1,6 +1,7 @@
 import {
   isAbortAcknowledged,
   parseChatMessages,
+  type ChatStopIntent,
   type ChatMessage,
 } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
@@ -295,6 +296,19 @@ export function wireServerEvents({
     );
   }
 
+  async function markPublicTurnTerminal(
+    chatId: string,
+    turnMetadata?: TurnEventMetadata,
+    interruptionReason?: 'user-stop' | 'chat-deleted',
+  ): Promise<void> {
+    if (!turnMetadata?.turnId) return;
+    await commandLedger.markPublicTerminal(chatId, turnMetadata.turnId, interruptionReason);
+  }
+
+  function interruptionReason(intent: ChatStopIntent): 'user-stop' | 'chat-deleted' {
+    return intent === 'chat-deletion' ? 'chat-deleted' : 'user-stop';
+  }
+
   function reconcilePendingAfterTerminal(chatId: string, context: string): void {
     pendingInputs.reconcileNativeHistory(chatId).catch((err) => {
       logger.warn(`pending-inputs: reconcile after ${context} failed:`, errorMessage(err));
@@ -358,6 +372,7 @@ export function wireServerEvents({
     await settleExecutionCommand(chatId, turnMetadata, 'failed', agentErrorMessage);
     await reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
     broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
+    await markPublicTurnTerminal(chatId, turnMetadata);
   }
 
   async function handleQueueFailure(
@@ -374,6 +389,7 @@ export function wireServerEvents({
     }
     await pendingInputs.reconcileNativeHistory(chatId);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
+    await markPublicTurnTerminal(chatId, options);
   }
 
   function releaseDeferredTerminalFailure(
@@ -418,6 +434,18 @@ export function wireServerEvents({
           markSearchChatDirty(chatId);
         }
         if (appended.messages.length > 0) {
+          if (turnMetadata?.turnId) {
+            await commandLedger.appendAssistantMessages(
+              chatId,
+              turnMetadata.turnId,
+              committedMessages
+                .flatMap((message) => (
+                  message.type === 'assistant-message' && message.content.length > 0
+                    ? [message.content]
+                    : []
+                )),
+            );
+          }
           broadcast(
             new ChatMessagesMessage(
               chatId,
@@ -435,6 +463,13 @@ export function wireServerEvents({
           'chat-view: append failed; reloading from native:',
           errorMessage(err),
         );
+        if (turnMetadata?.turnId) {
+          await commandLedger.markTurnOutputUnavailable(
+            chatId,
+            turnMetadata.turnId,
+            'recovery',
+          );
+        }
         await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
       }
     });
@@ -481,6 +516,7 @@ export function wireServerEvents({
           turnMetadata?.upstreamRequestId,
         ),
       );
+      if (!expectedAbort) await markPublicTurnTerminal(chatId, turnMetadata);
       void queue.checkChatIdle(chatId).catch((err) => {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
@@ -557,7 +593,7 @@ export function wireServerEvents({
   chatRegistry.onChatAdded((chatId) => {
     markSearchCatalogDirty(chatId);
   });
-  chatRegistry.onChatRemoved((chatId) => {
+  chatRegistry.onChatRemoved((chatId, removalReason) => {
     agentRegistry.discardTurn(chatId);
     userAbortLifecycle.discard(chatId);
     for (const key of deferredTerminalFailures.keys()) {
@@ -566,7 +602,12 @@ export function wireServerEvents({
     pendingInputs.clearChat(chatId, 'chat-removed');
     chatViews.deleteChatView(chatId);
     deleteSearchChat(chatId);
-    broadcast(new ChatSessionDeletedWsMessage(chatId));
+    scheduleChatTask(chatId, 'server-events: chat removal settlement failed', async () => {
+      broadcast(new ChatSessionDeletedWsMessage(chatId));
+      if (removalReason === 'user-deletion') {
+        await commandLedger.markChatInterrupted(chatId, 'chat-deleted');
+      }
+    });
     shareStore.revokeShareByChatId(chatId).catch((err) => {
       logger.warn(
         'share-store: failed to revoke share on chat removal:',
@@ -590,6 +631,12 @@ export function wireServerEvents({
       ),
     );
   });
+  chatRegistry.onChatTagsUpdated((chatId) => {
+    scheduleChatTask(chatId, 'server-events: chat tag invalidation failed', () => {
+      if (!chatExists(chatId)) return;
+      broadcast(new ChatListRefreshRequestedMessage('tags-updated', chatId));
+    });
+  });
 
   queue.onExecutionControlUpdated((chatId, controlState) => {
     broadcast(
@@ -599,7 +646,7 @@ export function wireServerEvents({
       ),
     );
   });
-  queue.onSessionStopRequested((chatId, stopId, preparingTurn) => {
+  queue.onSessionStopRequested((chatId, stopId, preparingTurn, intent) => {
     userAbortLifecycle.onStopRequested(chatId, stopId, preparingTurn);
   });
   queue.onDispatching((chatId, entryId, content) => {
@@ -642,10 +689,11 @@ export function wireServerEvents({
       phase: processing.phase(chatId),
       waitMs,
     });
+    const abortAcknowledged = isAbortAcknowledged(outcome);
     const acknowledgement = userAbortLifecycle.onSessionStopped(
       chatId,
       stopId,
-      isAbortAcknowledged(outcome),
+      abortAcknowledged,
     );
     if (acknowledgement.terminalDisposition === 'suppress') {
       const failure = takeDeferredTerminalFailure(chatId, acknowledgement.turn);
@@ -663,6 +711,15 @@ export function wireServerEvents({
       if (!chatExists(chatId)) return;
       broadcast(new ChatSessionStoppedMessage(chatId, outcome, intent));
     });
+    if (acknowledgement.turn?.turnId) {
+      scheduleChatTask(chatId, 'server-events: interrupted receipt settlement failed', async () => {
+        if (abortAcknowledged) {
+          await markPublicTurnTerminal(chatId, acknowledgement.turn, interruptionReason(intent));
+        } else {
+          await commandLedger.publishDeferredTerminal(chatId, acknowledgement.turn!.turnId!);
+        }
+      });
+    }
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
     const expectedAbort = userAbortLifecycle.onTurnTerminal(chatId, options);

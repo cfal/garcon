@@ -33,7 +33,7 @@ import type { JsonValue } from '$shared/json';
 import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
-} from '$lib/agents/agent-modes.js';
+} from '$shared/execution-defaults';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {

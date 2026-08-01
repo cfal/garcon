@@ -84,6 +84,17 @@ implements AgentExecution {
 
   async resume(request: Parameters<AgentExecution['resume']>[0]): Promise<void> {
     const endpoint = await this.#endpoint(request);
+    const nativeSession = this.nativeSessions.decode(request.nativeSession);
+    if (
+      nativeSession.modelEndpointId
+      && nativeSession.modelEndpointId !== endpoint.selection.endpointId
+    ) {
+      throw new AgentIntegrationError(
+        'INVALID_ENDPOINT',
+        'Direct sessions cannot change API provider endpoints after they start',
+        false,
+      );
+    }
     this.#operations.register(request.chatId, request.operation);
     try {
       await this.runtime.runTurn({
@@ -91,7 +102,7 @@ implements AgentExecution {
         agentSessionId: request.agentSessionId,
         command: request.prompt,
         images: request.attachments,
-        nativePath: this.nativeSessions.decode(request.nativeSession).path,
+        nativePath: nativeSession.path,
         endpoint,
       });
     } catch (error) {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 	import type { JsonValue } from '$shared/json';
-	import { settingValue } from '$lib/agents/agent-settings.js';
+	import { settingValue } from '$shared/agent-settings';
 	import {
 		agentSettingLabel,
 		agentSettingOptionDescription,

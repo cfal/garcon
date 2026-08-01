@@ -13,7 +13,7 @@ import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-led
 import {
   CommandSupport,
   CommandValidationError,
-  commandResultFromRecord,
+  agentTurnResultFromRecord,
   runOptionsForCommand,
   type NormalizedSubmitForkRunInput,
   type SubmitForkRunInput,
@@ -99,7 +99,7 @@ export class ForkCommands {
       }
       this.support.throwRecordedExecutionFailure(ledger.record);
       return {
-        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        ...agentTurnResultFromRecord(ledger.record, 'duplicate'),
         chat: await this.support.projectCommandChat(ledger.record.chatId),
       };
     }
@@ -127,7 +127,7 @@ export class ForkCommands {
       if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
         this.support.throwRecordedExecutionFailure(ledger.record);
         return {
-          ...commandResultFromRecord(ledger.record, 'duplicate'),
+          ...agentTurnResultFromRecord(ledger.record, 'duplicate'),
           chat: await this.support.projectCommandChat(ledger.record.chatId),
         };
       }

@@ -78,7 +78,10 @@ export default function createModelsRoutes({
         return modelDiscoveryUnavailableResponse(error, currentCatalog, staleEntry);
       }
       if (!entry) {
-        return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
+        const availableAgents = currentCatalog.agents.map((agent) => agent.id).join(', ') || 'none';
+        return Response.json({
+          error: `Unknown agent: ${agentId}. Available agents: ${availableAgents}`,
+        }, { status: 400 });
       }
       return Response.json({
         catalog: {

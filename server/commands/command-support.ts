@@ -7,6 +7,7 @@ import {
   type AgentInterruptAndSendCommandRequest,
   type AgentRunCommandRequest,
   type AgentStopCommandRequest,
+  type AgentTurnCommandResponse,
   type CompactCommandRequest,
   type CommandAcceptedResponse,
   type CommandErrorCode,
@@ -39,7 +40,13 @@ import { DomainError } from '../lib/domain-error.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
-import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
+import {
+  PRE_SCHEDULE_FAILURE_ERROR_CODE,
+  commandLedgerKey,
+  commandPayloadHash,
+  type CommandLedger,
+  type CommandLedgerRecord,
+} from './command-ledger.js';
 
 export interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
@@ -89,6 +96,7 @@ export type AgentRegistryDep = Pick<
   | 'getAgentAuthStatusMap'
   | 'getAgentReadinessMap'
   | 'getAgentCatalogEntries'
+  | 'getAgentCatalogEntry'
   | 'runSingleQuery'
   | 'supportsFork'
   | 'supportsForkAtMessage'
@@ -163,6 +171,9 @@ export interface NormalizedSubmitRunInput {
   clientRequestId: string;
   clientMessageId: string;
   options: RunAgentTurnOptions;
+  expectedAgentId?: string;
+  tagsToAdd?: string[];
+  permissionFallbackPolicy?: 'require-explicit-bypass';
 }
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
@@ -193,6 +204,7 @@ export interface NormalizedChatStart {
   clientMessageId: string;
   agentId: string;
   projectPath: string;
+  idempotencyProjectPath: string;
   command: string;
   images: NonNullable<RunAgentTurnOptions['images']>;
   model: string;
@@ -266,6 +278,18 @@ export function commandResultFromRecord(
     turnId: record.turnId,
     status,
     acceptedAt: record.acceptedAt,
+  };
+}
+
+export function agentTurnResultFromRecord(
+  record: CommandLedgerRecord,
+  status: CommandAcceptedResponse['status'] = 'accepted',
+): AgentTurnCommandResponse {
+  if (!record.turnId) throw new Error(`Agent turn command ${record.key} has no turnId`);
+  return {
+    ...commandResultFromRecord(record, status),
+    chatId: record.chatId,
+    turnId: record.turnId,
   };
 }
 
@@ -368,7 +392,7 @@ export class CommandSupport {
   }
 
   async projectCommandChat(chatId: string): Promise<import('../../common/chat-list.js').ChatListEntry> {
-    const chat = await this.deps.chatListProjector.buildOne(chatId);
+    const chat = await this.projectCommandChatIfPresent(chatId);
     if (chat) return chat;
     throw new CommandValidationError(
       'INTERNAL_ERROR',
@@ -378,9 +402,22 @@ export class CommandSupport {
     );
   }
 
+  projectCommandChatIfPresent(
+    chatId: string,
+  ): Promise<import('../../common/chat-list.js').ChatListEntry | null> {
+    return this.deps.chatListProjector.buildOne(chatId);
+  }
+
+  async projectReplayedStartChat(
+    chatId: string,
+  ): Promise<import('../../common/chat-list.js').ChatListEntry | null> {
+    if (!this.deps.chats.getChat(chatId)) return null;
+    return this.projectCommandChat(chatId);
+  }
+
   async submitHttpRun(
     input: NormalizedSubmitRunInput,
-  ): Promise<CommandAcceptedResponse> {
+  ): Promise<AgentTurnCommandResponse> {
     const clientRequestId = this.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
@@ -399,13 +436,48 @@ export class CommandSupport {
     );
   }
 
+  async replayHttpRun(
+    input: NormalizedSubmitRunInput,
+  ): Promise<AgentTurnCommandResponse | null> {
+    const clientRequestId = this.requireClientRequestId(input.clientRequestId);
+    const clientMessageId = this.requireClientRequestId(input.clientMessageId, 'clientMessageId');
+    const existing = await this.deps.ledger.getRecord(
+      commandLedgerKey('agent-run', input.chatId, clientRequestId),
+    );
+    if (!existing) return null;
+    if (existing.payloadHash !== commandPayloadHash(runPayload(input, clientMessageId))) {
+      throw new CommandValidationError(
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId was reused with different payload',
+        409,
+      );
+    }
+    if (
+      existing.status === 'failed'
+      && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
+      && existing.publicTerminalAt === undefined
+    ) {
+      return null;
+    }
+    if (existing.publicTerminalAt === undefined) {
+      this.throwRecordedExecutionFailure(existing);
+    }
+    if (!existing.turnId) throw new Error(`Agent turn command ${existing.key} has no turnId`);
+    return this.scheduleAcceptedHttpRun(
+      { kind: 'duplicate', record: existing },
+      input,
+      { clientRequestId, clientMessageId, turnId: existing.turnId },
+      'agent-run',
+    );
+  }
+
   async scheduleAcceptedHttpRun(
     ledger: Awaited<ReturnType<CommandLedger['accept']>>,
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
     commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
     preparation?: AcceptedRunPreparation,
-  ): Promise<CommandAcceptedResponse> {
+  ): Promise<AgentTurnCommandResponse> {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError(
         'IDEMPOTENCY_CONFLICT',
@@ -416,8 +488,7 @@ export class CommandSupport {
     const recoveringAcceptedCommand = ledger.kind === 'duplicate'
       && ledger.record.status === 'accepted';
     if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
-      this.throwRecordedExecutionFailure(ledger.record);
-      return commandResultFromRecord(ledger.record, 'duplicate');
+      return agentTurnResultFromRecord(ledger.record, 'duplicate');
     }
 
     const options: RunAgentTurnOptions = {
@@ -445,7 +516,7 @@ export class CommandSupport {
     } catch (error) {
       throw await this.withCurrentExecutionControl(input.chatId, error);
     }
-    return commandResultFromRecord(
+    return agentTurnResultFromRecord(
       ledger.record,
       recoveringAcceptedCommand ? 'duplicate' : 'accepted',
     );
@@ -484,5 +555,8 @@ function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): R
     apiProviderId: input.options?.apiProviderId,
     modelEndpointId: input.options?.modelEndpointId,
     modelProtocol: input.options?.modelProtocol,
+    expectedAgentId: input.expectedAgentId,
+    tagsToAdd: input.tagsToAdd,
+    permissionFallbackPolicy: input.permissionFallbackPolicy,
   };
 }

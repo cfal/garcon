@@ -100,6 +100,12 @@ import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
+  advertisedServerUrl,
+  createServerRuntimeState,
+  publishServerRuntime,
+  removeServerRuntime,
+} from './lib/server-runtime.js';
+import {
   cleanupLegacyQueueState,
   WorkspaceMigrationRunner,
 } from './migrations/index.js';
@@ -136,6 +142,7 @@ export async function startServer(): Promise<void> {
       },
     });
     const workspaceDir = workspaceLease.workspaceDir;
+    const runtimeState = createServerRuntimeState(workspaceDir);
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
       const result = await migrateWorkspaceChatIds(workspaceDir);
@@ -572,6 +579,8 @@ export async function startServer(): Promise<void> {
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,
+      runtimeState,
+      commandLedger,
     });
 
     const chatHandler = new ChatHandler({
@@ -598,7 +607,7 @@ export async function startServer(): Promise<void> {
       idleTimeout: config.httpIdleTimeoutSeconds,
       maxConnections: config.maxConnections,
       maxRequestBodySize: config.maxRequestBodySize,
-      routes: wrapRoutes(routes),
+      routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability }),
       error(error) {
         if (error instanceof MalformedJsonError) {
           return malformedJsonResponse();
@@ -711,6 +720,20 @@ export async function startServer(): Promise<void> {
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
     webSocketPublisher = server;
+    const baseUrl = advertisedServerUrl(bindAddress, server.port ?? listenPort);
+    let runtimeFilePath: string | null = null;
+    if (config.workspaceName !== null) {
+      try {
+        const publishedRuntime = await publishServerRuntime(runtimeState, baseUrl);
+        runtimeFilePath = publishedRuntime.filePath;
+        logger.info(
+          `Published workspace ${config.workspaceName} runtime at ${runtimeFilePath} (${baseUrl})`,
+        );
+      } catch (error) {
+        await server.stop(true);
+        throw error;
+      }
+    }
 
     // Graceful shutdown: flush pending writes and clean up timers.
     let shuttingDown = false;
@@ -766,6 +789,14 @@ export async function startServer(): Promise<void> {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       } finally {
+        if (runtimeFilePath) {
+          try {
+            await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);
+          } catch (err) {
+            cleanupFailed = true;
+            logger.warn('server: runtime descriptor cleanup error:', errorMessage(err));
+          }
+        }
         try {
           await workspaceLease?.release();
         } catch (err) {
@@ -780,7 +811,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGINT', shutdown);
 
     logger.info(
-      `Started at http://${bindAddress}:${server.port ?? listenPort}`,
+      `Started at ${baseUrl}`,
     );
     logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
     if (

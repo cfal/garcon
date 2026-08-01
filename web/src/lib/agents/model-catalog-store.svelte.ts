@@ -15,7 +15,7 @@ import {
 	type AgentSettingDescriptor,
 	type AgentSettingsEnvelope,
 } from '$shared/agent-integration';
-import { createEmptyAgentSettings } from '$lib/agents/agent-settings.js';
+import { createEmptyAgentSettings } from '$shared/agent-settings';
 import { isAgentId } from '$shared/agents';
 import {
 	isPermissionMode,

@@ -106,6 +106,20 @@ describe('ChatRegistry', () => {
     expect(registry.getChatByAgentSessionId('native-2')?.[0]).toBe(CHAT_ID);
   });
 
+  it('adds normalized tags without removing existing tags', () => {
+    registry.addChat(newChat({ tags: ['existing'] }));
+    const updated = [];
+    registry.onChatTagsUpdated((chatId) => updated.push(chatId));
+
+    expect(registry.addTags(CHAT_ID, ['CLI', 'existing', 'Review Needed'])).toMatchObject({
+      tags: ['cli', 'existing', 'review-needed'],
+    });
+    expect(registry.addTags(CHAT_ID, ['cli'])).toMatchObject({
+      tags: ['cli', 'existing', 'review-needed'],
+    });
+    expect(updated).toEqual([CHAT_ID]);
+  });
+
   it('validates owner-bound settings patches', () => {
     registry.addChat(newChat());
     expect(() => registry.updateChat(CHAT_ID, {
@@ -187,7 +201,7 @@ describe('ChatRegistry', () => {
     expect(registry.removeChat(CHAT_ID)).toBe(true);
     expect(registry.removeChat(CHAT_ID)).toBe(false);
     expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
-    expect(removed).toHaveBeenCalledWith(CHAT_ID);
+    expect(removed).toHaveBeenCalledWith(CHAT_ID, 'user-deletion');
   });
 
   it('loads a strict version-three registry and rebuilds its native ID index', async () => {

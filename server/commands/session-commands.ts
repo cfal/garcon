@@ -38,18 +38,108 @@ export class SessionCommands {
   }
 
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
-    this.support.requireChat(input.chatId);
-    this.support.assertContent(input.command, input.images);
     return this.support.withChatMutationLock(input.chatId, () =>
-      this.support.submitHttpRun({
-        chatId: input.chatId,
-        command: input.command,
-        images: input.images,
-        clientRequestId: input.clientRequestId,
-        clientMessageId: input.clientMessageId,
-        options: runOptionsForCommand(input),
-      }),
+      this.submitRunLocked(input),
     );
+  }
+
+  private async submitRunLocked(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+    const normalizedInput = {
+      chatId: input.chatId,
+      command: input.command,
+      images: input.images,
+      clientRequestId: input.clientRequestId,
+      clientMessageId: input.clientMessageId,
+      options: runOptionsForCommand(input),
+      expectedAgentId: input.expectedAgentId,
+      tagsToAdd: input.tagsToAdd,
+      permissionFallbackPolicy: input.permissionFallbackPolicy,
+    };
+    const replay = await this.support.replayHttpRun(normalizedInput);
+    if (replay) {
+      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
+      return replay;
+    }
+    const chat = this.deps.chats.getChat(input.chatId);
+    if (!chat) {
+      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    }
+    this.support.assertContent(input.command, input.images);
+    if (input.expectedAgentId !== undefined && input.expectedAgentId !== chat.agentId) {
+      throw new CommandValidationError(
+        'EXPECTED_AGENT_MISMATCH',
+        `Expected agent ${input.expectedAgentId}, but chat uses ${chat.agentId}`,
+        409,
+      );
+    }
+    if (!input.model && !chat.model) {
+      throw new CommandValidationError(
+        'INCOMPLETE_EXECUTION_CONFIG',
+        'The chat has no model and this turn did not provide one',
+        422,
+      );
+    }
+    const effectivePermissionMode = input.permissionMode ?? chat.permissionMode;
+    if (
+      input.permissionFallbackPolicy === 'require-explicit-bypass'
+      && input.permissionMode === undefined
+      && (effectivePermissionMode === 'manualBypass' || effectivePermissionMode === 'bypassPermissions')
+    ) {
+      throw new CommandValidationError(
+        'EXPLICIT_BYPASS_REQUIRED',
+        `Persisted permission mode ${effectivePermissionMode} requires an explicit override`,
+        422,
+      );
+    }
+    if (input.agentSettings !== undefined && input.agentSettings.ownerId !== chat.agentId) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        `agentSettings must be owned by ${chat.agentId}`,
+        400,
+      );
+    }
+    const agentSettings = input.agentSettings ?? chat.agentSettingsById[chat.agentId];
+    if (!agentSettings || agentSettings.ownerId !== chat.agentId) {
+      throw new CommandValidationError(
+        'INCOMPLETE_EXECUTION_CONFIG',
+        `The chat has no valid settings for agent ${chat.agentId}`,
+        422,
+      );
+    }
+    if (input.permissionMode !== undefined || input.thinkingMode !== undefined) {
+      const catalog = await this.deps.agents.getAgentCatalogEntry(chat.agentId);
+      if (!catalog) {
+        throw new CommandValidationError(
+          'UNSUPPORTED_AGENT',
+          `Unsupported agent: ${chat.agentId}`,
+          422,
+        );
+      }
+      if (
+        input.permissionMode !== undefined
+        && !catalog.supportedPermissionModes.includes(input.permissionMode)
+      ) {
+        throw new CommandValidationError(
+          'VALIDATION_FAILED',
+          `Permission mode ${input.permissionMode} is not supported by ${chat.agentId}`,
+          422,
+        );
+      }
+      if (
+        input.thinkingMode !== undefined
+        && !catalog.supportedThinkingModes.includes(input.thinkingMode)
+      ) {
+        throw new CommandValidationError(
+          'VALIDATION_FAILED',
+          `Thinking mode ${input.thinkingMode} is not supported by ${chat.agentId}`,
+          422,
+        );
+      }
+    }
+
+    const result = await this.support.submitHttpRun(normalizedInput);
+    if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
+    return result;
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
@@ -76,12 +166,19 @@ export class SessionCommands {
     });
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
     if (ledger.kind !== 'duplicate') {
-      this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
-        allow: input.allow,
-        alwaysAllow: input.alwaysAllow,
-        response: input.response,
-      });
-      await this.deps.ledger.update(ledger.record.key, { status: 'scheduled' });
+      try {
+        this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
+          allow: input.allow,
+          alwaysAllow: input.alwaysAllow,
+          response: input.response,
+        });
+        await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
+      } catch (error) {
+        await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     }
     return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
   }
@@ -116,11 +213,13 @@ export class SessionCommands {
 
   private async deleteChatLocked(chatId: string): Promise<{ success: true; chatId: string }> {
     this.support.requireChat(chatId);
+    this.deps.ledger.beginChatDeletion(chatId);
 
     let retired: boolean;
     try {
       retired = await this.deps.queue.abortForChatDeletion(chatId);
     } catch (error) {
+      await this.deps.ledger.cancelChatDeletion(chatId);
       logger.warn(
         `sessions: abort before deleting ${chatId} failed:`,
         error instanceof Error ? error.message : String(error),
@@ -133,6 +232,7 @@ export class SessionCommands {
       );
     }
     if (!retired) {
+      await this.deps.ledger.cancelChatDeletion(chatId);
       throw new CommandValidationError(
         'SESSION_BUSY',
         'The active agent session could not be retired for deletion',
@@ -142,8 +242,20 @@ export class SessionCommands {
     }
 
     // Removes registry state after abort because abortSession resolves the owning agent through the chat entry.
+    try {
+      await this.deps.ownership.delete(chatId);
+    } catch (error) {
+      if (this.deps.chats.getChat(chatId)) {
+        this.deps.queue.rollbackChatDeletion(chatId);
+        await this.deps.ledger.cancelChatDeletion(chatId);
+        throw error;
+      }
+      logger.warn(
+        `sessions: deletion cleanup for ${chatId} will resume from the ownership journal:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
-    await this.deps.ownership.delete(chatId);
 
     await Promise.all([
       this.deps.queue.deleteChatQueueFile(chatId).catch(() => {

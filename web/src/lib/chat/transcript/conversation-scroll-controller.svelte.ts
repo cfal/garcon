@@ -6,7 +6,7 @@ import { tick } from 'svelte';
 import { reconcileScrollAfterHeightDelta } from '$lib/chat/transcript/scroll-anchor.js';
 import type {
 	ActiveTranscriptState,
-	OlderMessagesLoadResult,
+	TranscriptPageLoadResult,
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { UserMessageNavigatorTarget } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
@@ -25,9 +25,12 @@ export type ConversationScrollState = Pick<
 	| 'isUserScrolledUp'
 	| 'isViewingInitialMessages'
 	| 'invalidatePendingHistoryLoad'
+	| 'loadEarlierMessages'
+	| 'loadLaterMessages'
 	| 'loadMoreMessages'
 	| 'loadStatus'
 	| 'navigateToWindow'
+	| 'visibleMessageCount'
 >;
 
 export interface ScrollControllerDeps {
@@ -143,6 +146,7 @@ export class ConversationScrollController {
 				this.noteUserScrollIntent();
 				node.scrollTop = 0;
 			}
+			await this.fillUnderfilledViewport();
 		} finally {
 			this.isScrollingToTop = false;
 		}
@@ -153,12 +157,15 @@ export class ConversationScrollController {
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
 		if (this.deps.chatState.isViewingInitialMessages) {
 			this.#preserveDetachedWindowSemantics();
+			const chatId = this.deps.sessions.selectedChatId;
+			if (chatId && this.isNearBottom()) void this.#loadLaterMessagesAtBottom(chatId);
 			return;
 		}
 		const nearBottom = this.isNearBottom();
+		const hasRecentUserScrollIntent = this.#hasRecentUserScrollIntent();
 		const shouldRemainPinned =
 			!nearBottom &&
-			!this.#hasRecentUserScrollIntent() &&
+			!hasRecentUserScrollIntent &&
 			(this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp);
 		if (shouldRemainPinned) {
 			// Layout growth can dispatch a scroll event while a conversation is
@@ -168,6 +175,9 @@ export class ConversationScrollController {
 		}
 		this.deps.chatState.isUserScrolledUp = !nearBottom;
 		this.setPinnedToBottom(nearBottom);
+		if (nearBottom && hasRecentUserScrollIntent) {
+			void this.#compactAtLiveEdge(this.deps.sessions.selectedChatId);
+		}
 
 		if (node.scrollTop < 100 && this.deps.chatState.hasMoreMessages) {
 			const chatId = this.deps.sessions.selectedChatId;
@@ -227,7 +237,7 @@ export class ConversationScrollController {
 		this.setPinnedToBottom(false);
 	}
 
-	async loadMoreMessagesForNavigator(chatId: string): Promise<OlderMessagesLoadResult> {
+	async loadMoreMessagesForNavigator(chatId: string): Promise<TranscriptPageLoadResult> {
 		const container = this.deps.getScrollContainer();
 		if (!container || this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
 
@@ -317,6 +327,7 @@ export class ConversationScrollController {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (this.deps.chatState.isViewingInitialMessages) {
 			this.#preserveDetachedWindowSemantics();
+			await this.#fillUnderfilledInitialWindow(chatId);
 			return;
 		}
 		if (
@@ -329,13 +340,26 @@ export class ConversationScrollController {
 
 		this.#isAutoFillingViewport = true;
 		try {
-			while (this.deps.sessions.selectedChatId === chatId && this.deps.chatState.hasMoreMessages) {
+			while (this.deps.sessions.selectedChatId === chatId) {
 				await tick();
 				const container = this.deps.getScrollContainer();
 				if (!container) return;
 				if (container.scrollHeight > container.clientHeight + 1) return;
 
 				const previousHeight = container.scrollHeight;
+				if (this.deps.chatState.displayMessageCount > this.deps.chatState.visibleMessageCount) {
+					const previousVisibleCount = this.deps.chatState.visibleMessageCount;
+					this.deps.chatState.loadEarlierMessages();
+					if (this.deps.chatState.visibleMessageCount <= previousVisibleCount) return;
+					await tick();
+					const updated = this.deps.getScrollContainer();
+					if (!updated) return;
+					this.scrollToBottom();
+					if (updated.scrollHeight <= previousHeight) return;
+					continue;
+				}
+				if (!this.deps.chatState.hasMoreMessages) return;
+
 				const result = await this.deps.chatState.loadMoreMessages(chatId);
 				if (result !== 'loaded' || this.deps.sessions.selectedChatId !== chatId) return;
 
@@ -348,6 +372,48 @@ export class ConversationScrollController {
 		} finally {
 			this.#isAutoFillingViewport = false;
 		}
+	}
+
+	async #fillUnderfilledInitialWindow(chatId: string | null): Promise<void> {
+		if (!chatId || !this.#isViewportVisible || this.#isAutoFillingViewport) return;
+
+		this.#isAutoFillingViewport = true;
+		try {
+			while (
+				this.deps.sessions.selectedChatId === chatId &&
+				this.deps.chatState.isViewingInitialMessages
+			) {
+				await tick();
+				const container = this.deps.getScrollContainer();
+				if (!container) return;
+				if (container.scrollHeight > container.clientHeight + 1) return;
+
+				const previousHeight = container.scrollHeight;
+				if ((await this.deps.chatState.loadLaterMessages(chatId)) !== 'loaded') return;
+
+				await tick();
+				const updated = this.deps.getScrollContainer();
+				if (!updated || updated.scrollHeight <= previousHeight) return;
+			}
+		} finally {
+			this.#isAutoFillingViewport = false;
+		}
+	}
+
+	async #loadLaterMessagesAtBottom(chatId: string): Promise<void> {
+		if ((await this.deps.chatState.loadLaterMessages(chatId)) !== 'loaded') return;
+		if (
+			this.deps.sessions.selectedChatId !== chatId ||
+			this.deps.chatState.isViewingInitialMessages
+		) {
+			return;
+		}
+
+		await tick();
+		if (this.deps.sessions.selectedChatId !== chatId || !this.isNearBottom()) return;
+		this.deps.chatState.isUserScrolledUp = false;
+		this.setPinnedToBottom(true);
+		await this.#compactAtLiveEdge(chatId);
 	}
 
 	// Creates a ResizeObserver for the queue controls container that
@@ -456,6 +522,7 @@ export class ConversationScrollController {
 		this.#cancelBottomRestoreFrame();
 		if (this.deps.chatState.isViewingInitialMessages) {
 			this.#preserveDetachedWindowSemantics();
+			void this.#fillUnderfilledInitialWindow(this.deps.sessions.selectedChatId);
 			return;
 		}
 		if (!this.#isViewportVisible || this.deps.chatState.isUserScrolledUp) return;
@@ -476,6 +543,15 @@ export class ConversationScrollController {
 			this.#lastUserScrollIntentAt > 0 &&
 			performance.now() - this.#lastUserScrollIntentAt <= USER_SCROLL_INTENT_WINDOW_MS
 		);
+	}
+
+	async #compactAtLiveEdge(chatId: string | null): Promise<void> {
+		if (!chatId || !this.deps.chatState.compactToRecentMessages()) return;
+		await tick();
+		if (this.deps.sessions.selectedChatId !== chatId || this.deps.chatState.isUserScrolledUp) {
+			return;
+		}
+		this.scrollToBottom();
 	}
 
 	async #navigateToWindow(

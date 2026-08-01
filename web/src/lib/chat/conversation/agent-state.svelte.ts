@@ -7,7 +7,7 @@ import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import { THINKING_MODES, MODE_LABELS } from '$lib/chat/composer/chat-ui-constants.js';
 import type { ThinkingModeOption } from '$lib/chat/composer/chat-ui-constants.js';
-import { createEmptyAgentSettings } from '$lib/agents/agent-settings.js';
+import { createEmptyAgentSettings } from '$shared/agent-settings';
 
 export { THINKING_MODES, MODE_LABELS };
 export type { ThinkingModeOption };

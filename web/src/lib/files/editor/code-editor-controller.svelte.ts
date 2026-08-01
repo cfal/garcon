@@ -117,7 +117,8 @@ export class CodeEditorController {
 	#detachCurrent(): void {
 		const view = this.#view;
 		if (!view) return;
-		this.#captureScroll(view);
+		// Detached browser scroll containers report zero after Svelte removes the surface DOM.
+		if (view.scrollDOM.isConnected) this.#captureScroll(view);
 		view.scrollDOM.removeEventListener('scroll', this.#handleScroll);
 		this.session.editorState = view.state;
 		this.session.content = this.#serializeDocument(view.state.doc);

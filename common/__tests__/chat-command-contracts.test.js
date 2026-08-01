@@ -65,7 +65,7 @@ describe('chat command request parsers', () => {
     });
   });
 
-  it('returns a fully typed run request with canonical defaults', () => {
+  it('preserves omitted resume overrides and normalizes additive tags', () => {
     const parsed = parseAgentRunCommandRequest({
       clientRequestId: 'request-2',
       clientMessageId: 'message-2',
@@ -73,11 +73,34 @@ describe('chat command request parsers', () => {
       command: 'continue',
       agentSettings: agentSettings(),
       model: 'opus',
+      expectedAgentId: 'claude',
+      tagsToAdd: ['CLI', 'cli', ' Review '],
+      permissionFallbackPolicy: 'require-explicit-bypass',
     });
 
-    expect(parsed.permissionMode).toBe('default');
-    expect(parsed.thinkingMode).toBe('none');
+    expect(parsed.permissionMode).toBeUndefined();
+    expect(parsed.thinkingMode).toBeUndefined();
     expect(parsed.agentSettings).toEqual(agentSettings());
+    expect(parsed.expectedAgentId).toBe('claude');
+    expect(parsed.tagsToAdd).toEqual(['cli', 'review']);
+    expect(parsed.permissionFallbackPolicy).toBe('require-explicit-bypass');
+  });
+
+  it('rejects partial routing and non-canonical explicit modes', () => {
+    const base = {
+      clientRequestId: 'request-routing',
+      clientMessageId: 'message-routing',
+      chatId: CHAT_ID,
+      command: 'continue',
+    };
+    expect(() => parseAgentRunCommandRequest({ ...base, apiProviderId: 'provider' }))
+      .toThrow('model is required with routing overrides');
+    expect(() => parseAgentRunCommandRequest({ ...base, model: 'opus', permissionMode: 'unsafe' }))
+      .toThrow('permissionMode is invalid');
+    expect(() => parseAgentRunCommandRequest({ ...base, model: 'opus', thinkingMode: 'think-hard' }))
+      .toThrow('thinkingMode is invalid');
+    expect(() => parseAgentRunCommandRequest({ ...base, permissionFallbackPolicy: 'inherit' }))
+      .toThrow('permissionFallbackPolicy is invalid');
   });
 
   it('requires distinct request and message identities for steering', () => {

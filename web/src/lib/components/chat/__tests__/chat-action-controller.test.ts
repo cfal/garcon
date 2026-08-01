@@ -20,7 +20,7 @@ vi.mock('$lib/api/chats', () => ({
 	updateChatProjectPath: vi.fn(),
 }));
 
-vi.mock('$lib/chat/sessions/client-chat-id.js', () => ({
+vi.mock('$shared/client-chat-id', () => ({
 	createClientChatId: () => 'fork-chat-id',
 }));
 

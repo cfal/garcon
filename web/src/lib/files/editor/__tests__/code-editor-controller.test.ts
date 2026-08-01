@@ -4,6 +4,7 @@ import { history } from '@codemirror/commands';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
+import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
 const mounted: HTMLElement[] = [];
 
@@ -60,9 +61,11 @@ describe('CodeEditorController', () => {
 		const firstLease = controller.attach(firstParent);
 		const firstScroller = firstParent.querySelector<HTMLElement>('.cm-scroller');
 		if (!firstScroller) throw new Error('Expected CodeMirror scroller');
+		emulateDetachedScrollReset(firstScroller);
 		firstScroller.scrollLeft = 9;
 		firstScroller.scrollTop = 24;
 		firstScroller.dispatchEvent(new Event('scroll'));
+		firstParent.remove();
 		controller.prepareRendererTransfer();
 		const secondLease = controller.attach(secondParent);
 		controller.detach(firstLease);

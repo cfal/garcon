@@ -13,6 +13,9 @@ import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
 import createTerminalRoutes from './terminals.js';
+import { createRuntimeRoutes } from './runtime.js';
+import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
+import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -37,6 +40,7 @@ import type { TerminalManager } from '../terminals/terminal-manager.js';
 import type { TranscriptSearchController } from '../chats/search/controller.js';
 import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
+import type { CommandLedger } from '../commands/command-ledger.js';
 
 export default function createAllRoutes({
   registry,
@@ -62,6 +66,8 @@ export default function createAllRoutes({
   terminals,
   searchIndex,
   transcriptSearchSettings,
+  runtimeState,
+  commandLedger,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -86,8 +92,12 @@ export default function createAllRoutes({
   terminals: TerminalManager;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
+  runtimeState: ServerRuntimeState;
+  commandLedger: CommandLedger;
 }): RouteMap {
   return {
+    ...createRuntimeRoutes(runtimeState),
+    ...createAgentTurnReceiptRoutes(commandLedger),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),

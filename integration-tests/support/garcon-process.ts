@@ -8,11 +8,14 @@ export interface GarconProcessOptions {
   repoRoot: string;
   configDir: string;
   workspaceDir: string;
+  workspaceName?: string;
   projectDir: string;
   homeDir: string;
   startupTimeoutMs?: number;
   environment?: Record<string, string>;
   redactEnvironmentValues?: boolean;
+  disableAuth?: boolean;
+  port?: number;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -120,19 +123,21 @@ export class GarconProcess {
 
   static async start(options: GarconProcessOptions): Promise<GarconProcess> {
     const ready = new Deferred<string>();
+    const workspaceArguments = options.workspaceName
+      ? ['--workspace', options.workspaceName]
+      : ['--workspace-dir', options.workspaceDir];
     const child = Bun.spawn({
       cmd: [
         process.execPath,
         'server/main.ts',
         '--port',
-        '0',
+        String(options.port ?? 0),
         '--bind-address',
         '127.0.0.1',
-        '--disable-auth',
+        ...(options.disableAuth === false ? [] : ['--disable-auth']),
         '--config-dir',
         options.configDir,
-        '--workspace-dir',
-        options.workspaceDir,
+        ...workspaceArguments,
         '--project-base-dir',
         options.projectDir,
       ],

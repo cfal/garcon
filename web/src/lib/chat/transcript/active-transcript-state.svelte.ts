@@ -21,7 +21,7 @@ type PageApplyResult = MessageApplyResult | 'stale';
 type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
-export type OlderMessagesLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
+export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
 export type TranscriptWindowLoadResult = 'loaded' | 'invalidated' | 'failed';
 export type TranscriptWindowTarget = 'initial' | 'latest';
 
@@ -107,10 +107,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#loadEpoch = 0;
 	#pendingUserInputsRevision = 0;
 	#pendingUserInputsRevisionAtLoadStart = 0;
-	#loadMorePromise: Promise<OlderMessagesLoadResult> | null = null;
+	#loadMorePromise: Promise<TranscriptPageLoadResult> | null = null;
 	#loadingMoreChatId: string | null = null;
+	#loadLaterPromise: Promise<TranscriptPageLoadResult> | null = null;
+	#loadingLaterChatId: string | null = null;
 	#loadMoreOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
+	#detachedWindowLastSeq = 0;
 	#initialRevealPhase = $state<InitialRevealPhase>('complete');
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
@@ -264,6 +267,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (this.isViewingInitialMessages) {
 			this.generationId = generationId;
 			this.lastSeq = result.lastSeq;
+			this.#detachedWindowLastSeq = Math.max(this.#detachedWindowLastSeq, result.lastSeq);
 			if (result.changed) {
 				this.localNotices = [];
 			}
@@ -350,6 +354,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.#initialRevealPhase = 'complete';
 		this.isViewingInitialMessages = false;
+		this.#detachedWindowLastSeq = 0;
 		this.localNotices = [];
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
@@ -398,6 +403,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.isViewingInitialMessages = false;
+		this.#detachedWindowLastSeq = 0;
 		for (const batch of buffered) {
 			const result = this.applyMessages(chatId, batch.generationId, batch.messages);
 			if (result !== 'applied') return result;
@@ -444,7 +450,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		throw new Error(this.loadError);
 	}
 
-	async loadMoreMessages(chatId: string): Promise<OlderMessagesLoadResult> {
+	async loadMoreMessages(chatId: string): Promise<TranscriptPageLoadResult> {
 		if (this.#loadMorePromise) {
 			return this.#loadingMoreChatId === chatId ? this.#loadMorePromise : 'invalidated';
 		}
@@ -471,7 +477,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		chatId: string,
 		generationId: string,
 		operationEpoch: number,
-	): Promise<OlderMessagesLoadResult> {
+	): Promise<TranscriptPageLoadResult> {
 		try {
 			const page = await getChatMessages({
 				chatId,
@@ -502,6 +508,85 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		}
 	}
 
+	async loadLaterMessages(chatId: string): Promise<TranscriptPageLoadResult> {
+		if (this.#loadLaterPromise) {
+			return this.#loadingLaterChatId === chatId ? this.#loadLaterPromise : 'invalidated';
+		}
+		if (!this.isViewingInitialMessages || !chatId) return 'exhausted';
+
+		const generationId = this.generationId;
+		const operationEpoch = this.#loadMoreOperationEpoch;
+		const newestSeq = this.entries.at(-1)?.seq ?? 0;
+		if (newestSeq >= this.#detachedWindowLastSeq) {
+			this.isViewingInitialMessages = false;
+			this.#detachedWindowLastSeq = 0;
+			return 'exhausted';
+		}
+
+		const loadPromise = this.#performLoadLaterMessages(
+			chatId,
+			generationId,
+			operationEpoch,
+			newestSeq,
+		);
+		this.#loadLaterPromise = loadPromise;
+		this.#loadingLaterChatId = chatId;
+		try {
+			return await loadPromise;
+		} finally {
+			if (this.#loadLaterPromise === loadPromise) {
+				this.#loadLaterPromise = null;
+				this.#loadingLaterChatId = null;
+			}
+		}
+	}
+
+	async #performLoadLaterMessages(
+		chatId: string,
+		generationId: string,
+		operationEpoch: number,
+		newestSeq: number,
+	): Promise<TranscriptPageLoadResult> {
+		try {
+			const page = await getChatMessages({
+				chatId,
+				limit: MESSAGES_PER_PAGE,
+				beforeSeq: Math.min(newestSeq + MESSAGES_PER_PAGE + 1, this.#detachedWindowLastSeq + 1),
+			});
+			if (!this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch)) {
+				return 'invalidated';
+			}
+			if (page.generationId !== generationId) {
+				await this.loadMessages(chatId);
+				return 'invalidated';
+			}
+
+			const previousEntryCount = this.entries.length;
+			const applied = applyChatViewMessages(this.entries, page.messages, newestSeq);
+			if (applied.status !== 'applied' || !applied.changed) return 'failed';
+
+			this.entries = applied.messages;
+			this.totalMessages = this.entries.length;
+			this.visibleMessageCount += this.entries.length - previousEntryCount;
+			this.#detachedWindowLastSeq = Math.max(
+				this.#detachedWindowLastSeq,
+				this.lastSeq,
+				page.lastSeq,
+			);
+
+			if ((this.entries.at(-1)?.seq ?? 0) >= this.#detachedWindowLastSeq) {
+				this.transcriptCache.replaceFromPage(chatId, page);
+				this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
+				this.isViewingInitialMessages = false;
+				this.#detachedWindowLastSeq = 0;
+			}
+			return 'loaded';
+		} catch (error) {
+			console.error('Error loading later messages:', error);
+			return 'failed';
+		}
+	}
+
 	invalidatePendingHistoryLoad(): void {
 		this.#invalidateLoadMoreOperation();
 	}
@@ -522,6 +607,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#loadMoreOperationEpoch += 1;
 		this.#loadMorePromise = null;
 		this.#loadingMoreChatId = null;
+		this.#loadLaterPromise = null;
+		this.#loadingLaterChatId = null;
 		this.isLoadingMoreMessages = false;
 	}
 
@@ -599,6 +686,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#snapshotBuffer = null;
 		this.#initialRevealPhase = 'complete';
 		this.isViewingInitialMessages = false;
+		this.#detachedWindowLastSeq = 0;
 	}
 
 	compactToRecentMessages(): boolean {
@@ -715,7 +803,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.#initialRevealPhase = 'complete';
 			const initialWindowServerLastSeq = Math.max(this.lastSeq, page.lastSeq);
 			this.isViewingInitialMessages = (page.messages.at(-1)?.seq ?? 0) < initialWindowServerLastSeq;
-			if (this.isViewingInitialMessages) this.isUserScrolledUp = true;
+			if (this.isViewingInitialMessages) {
+				this.#detachedWindowLastSeq = initialWindowServerLastSeq;
+				this.isUserScrolledUp = true;
+			} else {
+				this.#detachedWindowLastSeq = 0;
+			}
 			this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 			this.loadError = null;
 			return 'loaded';

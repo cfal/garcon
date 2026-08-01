@@ -13,7 +13,6 @@ import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agen
 import type { JsonValue } from '$shared/json';
 import { DEFAULT_AGENT_ID } from '$shared/agents';
 import type {
-	ExecutionDefaults,
 	RecentAgentSetting,
 	RemoteExecutionDefaults,
 	RemoteSettingsSnapshot,
@@ -22,13 +21,14 @@ import {
 	cloneAgentSettings,
 	normalizeAgentSettings,
 	withAgentSetting,
-} from '$lib/agents/agent-settings.js';
+} from '$shared/agent-settings';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import {
+	executionDefaultsForAgent,
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
-} from '$lib/agents/agent-modes.js';
+} from '$shared/execution-defaults';
 import { canSubmitNewChat, type PathValidationStatus } from '$lib/chat/new-chat/new-chat-submit.js';
 import {
 	isPinnedProjectPath,
@@ -685,28 +685,8 @@ export class NewChatFormState {
 		return null;
 	}
 
-	#executionDefaultsForAgent(agentId: SessionAgentId): ExecutionDefaults {
-		const defaults = this.#executionDefaults;
-		if (!defaults) {
-			return {
-				permissionMode: 'default',
-				thinkingMode: 'none',
-				agentSettingsById: {},
-			};
-		}
-		const override = defaults.byAgent[agentId];
-		return {
-			permissionMode: override?.permissionMode ?? defaults.global.permissionMode,
-			thinkingMode: override?.thinkingMode ?? defaults.global.thinkingMode,
-			agentSettingsById: {
-				...defaults.global.agentSettingsById,
-				...(override?.agentSettingsById ?? {}),
-			},
-		};
-	}
-
 	#applyExecutionDefaultsForAgent(agentId: SessionAgentId): void {
-		const modes = this.#executionDefaultsForAgent(agentId);
+		const modes = executionDefaultsForAgent(this.#executionDefaults, agentId);
 		this.permissionMode = normalizeSupportedPermissionMode(
 			modes.permissionMode,
 			this.#modelCatalog.getPermissionModes(agentId),

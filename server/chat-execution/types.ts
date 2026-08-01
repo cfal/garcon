@@ -261,6 +261,7 @@ export type SessionStopRequestedCallback = (
   chatId: string,
   stopId: string,
   turn: TurnIdentity | undefined,
+  intent: ChatStopIntent,
 ) => void;
 export type SessionStoppedCallback = (
   chatId: string,
@@ -316,6 +317,7 @@ export interface ChatExecutionCommands {
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<ChatStopOutcome>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
+  rollbackChatDeletion(chatId: string): void;
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation;
   releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void>;
   waitForDispatches(): Promise<void>;

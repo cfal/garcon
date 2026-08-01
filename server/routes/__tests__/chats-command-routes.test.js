@@ -416,6 +416,10 @@ function createRouteAgent(sessionOverrides = {}) {
     getRunningSessions: mock(() => ({ claude: [{ id: CHAT_ID }] })),
     startSession: mock(() => Promise.resolve(undefined)),
     modelSupportsImages: mock(() => Promise.resolve(true)),
+    getAgentCatalogEntry: mock(() => Promise.resolve({
+      supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
+      supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    })),
     runSingleQuery: mock(() => Promise.resolve('title')),
     forkAgentSession: mock(() => Promise.resolve({
       kind: 'materialized',
@@ -576,6 +580,9 @@ describe('REST chat command routes', () => {
       status: 'accepted',
     });
     expect(typeof body.turnId).toBe('string');
+    expect(response.headers.get('Location')).toBe(
+      `/api/v1/chats/turn-receipt?chatId=${CHAT_ID}&turnId=${body.turnId}`,
+    );
     expect(order).toEqual(['pending', 'run']);
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       CHAT_ID,

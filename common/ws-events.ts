@@ -239,6 +239,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'chat-added',
   'pinned-toggled',
   'archive-toggled',
+  'tags-updated',
   'chats-reordered',
 ] as const;
 

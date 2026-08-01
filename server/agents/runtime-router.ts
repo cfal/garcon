@@ -95,6 +95,8 @@ export class AgentRuntimeRouter {
     commandType?: AgentExecutionCommandType;
     executionAdmission?: AgentExecutionAdmission;
     carryOver?: readonly ChatMessage[];
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
   } = {}): Promise<void> {
     assertExecutionAdmissionOpen(opts);
     if (getMaxSessions() > 0 && this.getRunningSessionCount() >= getMaxSessions()) {
@@ -102,14 +104,23 @@ export class AgentRuntimeRouter {
         `Session limit reached (${getMaxSessions()}). Wait for existing sessions to complete or increase GARCON_MAX_SESSIONS.`,
       );
     }
-    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    const persistedEntry = this.#registry.getChat(chatId);
+    const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
     const integration = this.#directory.require(entry.agentId);
-    const selection = this.#endpointResolver.resolveSelection({
+    const previous = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
-      model: opts.model ?? entry.model,
+      model: persistedEntry?.model || entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
+    const selection = this.#endpointResolver.resolveSelection({
+      agentId: entry.agentId,
+      model: opts.model ?? entry.model,
+      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
+      modelEndpointId:
+        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
+    });
+    assertSameApiProviderBoundary(previous, selection);
     await this.#validateEndpoint(integration, selection);
     const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
     assertExecutionAdmissionOpen(opts);
@@ -129,6 +140,7 @@ export class AgentRuntimeRouter {
       const updated = await this.#registry.updateChat(chatId, {
         agentSessionId: started.agentSessionId,
         nativeSession: started.nativeSession,
+        model: selection.model,
         apiProviderId: selection.apiProviderId,
         modelEndpointId: selection.endpointId,
         modelProtocol: selection.protocol,
@@ -154,7 +166,8 @@ export class AgentRuntimeRouter {
     opts: RunAgentTurnOptions = {},
   ): Promise<void> {
     assertExecutionAdmissionOpen(opts);
-    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    const persistedEntry = this.#registry.getChat(chatId);
+    const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
     if (!entry.agentSessionId) {
       await this.startSession(chatId, prompt, {
         ...opts,
@@ -166,7 +179,7 @@ export class AgentRuntimeRouter {
 
     const previous = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
-      model: entry.model,
+      model: persistedEntry?.model || entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
@@ -621,6 +634,17 @@ export class AgentRuntimeRouter {
       },
     };
   }
+}
+
+function requireAgentChatEntryWithModel(
+  chatId: string,
+  entry: AgentChatEntry | null | undefined,
+  model: string | undefined,
+): ReturnType<typeof requireAgentChatEntry> {
+  return requireAgentChatEntry(
+    chatId,
+    entry && model !== undefined ? { ...entry, model } : entry,
+  );
 }
 
 function operationIdentity(

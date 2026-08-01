@@ -32,6 +32,8 @@ export class ChatCommandSettlement implements CommandSettlementPort {
       status: 'failed' as const,
       error: failure.error instanceof Error ? failure.error.message : String(failure.error),
       errorCode: failure.retryable ? PRE_SCHEDULE_FAILURE_ERROR_CODE : undefined,
+      payload: {},
+      retainedPrivateTerminal: true as const,
       ...(failure.preserveForkPreparation ? {} : { forkPreparation: undefined }),
     };
     await this.ledger.update(command.key, patch);

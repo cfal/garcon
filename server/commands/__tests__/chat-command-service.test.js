@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
+import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
 import { UserMessage } from '../../../common/chat-types.js';
 import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
@@ -164,6 +165,13 @@ function makeService(overrides = {}) {
       sessions.set(chatId, { ...current, ...patch });
       return sessions.get(chatId);
     }),
+    addTags: mock((chatId, tags) => {
+      const current = sessions.get(chatId);
+      if (!current) return null;
+      const next = { ...current, tags: [...new Set([...current.tags, ...tags])].sort() };
+      sessions.set(chatId, next);
+      return { id: chatId, ...next };
+    }),
     updateProjectPath: mock((chatId, update) => {
       const current = sessions.get(chatId);
       if (!current) return Promise.resolve(null);
@@ -220,17 +228,30 @@ function makeService(overrides = {}) {
     }),
     runInitialInput: mock(async (input) => {
       let reservation;
+      let scheduled = false;
       try {
         reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
         await input.preparation?.prepare();
         await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
+        scheduled = true;
         await input.dispatch?.(reservation.executionAdmission);
         await queue.completeDirectTurn(reservation);
       } catch (error) {
-        await input.settlement.settleOperationFailure(input.command, error);
-        await input.preparation?.compensate();
-        if (reservation) await queue.failDirectTurn(reservation);
+        if (scheduled) {
+          await input.settlement.settleOperationFailure(input.command, error);
+          await input.preparation?.compensate();
+          if (reservation) await queue.failDirectTurn(reservation);
+        } else {
+          pendingInputs.markFailed(input.command.chatId, input.options.clientRequestId);
+          await input.preparation?.compensate();
+          if (reservation) await queue.releaseDirectTurn(reservation);
+          await input.settlement.markPreScheduleFailure(input.command, {
+            error,
+            retryable: true,
+            preserveForkPreparation: false,
+          });
+        }
         throw error;
       }
     }),
@@ -413,6 +434,7 @@ function makeService(overrides = {}) {
     })),
     interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
+    rollbackChatDeletion: mock(() => undefined),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     waitForDispatches: mock(() => Promise.all([...executionTasks]).then(() => undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
@@ -496,6 +518,10 @@ function makeService(overrides = {}) {
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
     getAgentCatalogEntries: mock(() => []),
+    getAgentCatalogEntry: mock(() => Promise.resolve({
+      supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
+      supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    })),
     runSingleQuery: mock(() => Promise.resolve('')),
     ...overrides.agents,
   };
@@ -526,7 +552,7 @@ function makeService(overrides = {}) {
     promoteStaged: mock(() => Promise.resolve()),
     discardStaged: mock(() => Promise.resolve()),
   };
-  const ownership = {
+  const ownership = overrides.ownership ?? {
     delete: mock(async (chatId) => {
       sessions.delete(chatId);
     }),
@@ -686,6 +712,31 @@ describe('ChatCommandService', () => {
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 
+  it('rejects a colliding chat ID before accepting a command ledger record', async () => {
+    const { service, ledger, queue } = makeService();
+
+    await expect(service.submitStart({
+      chatId: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start somewhere new',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-chat-id-collision',
+      clientMessageId: 'msg-chat-id-collision',
+    })).rejects.toMatchObject({
+      code: 'CHAT_ID_COLLISION',
+      status: 409,
+    });
+
+    expect(await ledger.getRecord(commandLedgerKey(
+      'chat-start',
+      SOURCE_CHAT_ID,
+      'req-chat-id-collision',
+    ))).toBeNull();
+    expect(queue.runInitialInput).not.toHaveBeenCalled();
+  });
+
   it('stores chat start tags normalized by the request boundary', async () => {
     const { service, chats, ledger } = makeService();
 
@@ -843,7 +894,163 @@ describe('ChatCommandService', () => {
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
     expect(chats.removeChat.mock.invocationCallOrder[0])
       .toBeLessThan(queue.failDirectTurn.mock.invocationCallOrder[0]);
+    expect(chats.removeChat).toHaveBeenCalledWith(TARGET_CHAT_ID, 'start-compensation');
     expect(chats.getChat(TARGET_CHAT_ID)).toBeNull();
+  });
+
+  it('keeps a compensated pre-schedule start failure reopenable', async () => {
+    let attempts = 0;
+    const { service, queue, settings, agents } = makeService();
+    settings.ensureInNormal.mockImplementation(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('startup bookkeeping failed');
+    });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'retry startup',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-reopen',
+      clientMessageId: 'msg-start-reopen',
+    };
+
+    await expect(service.submitStart(input)).rejects.toThrow('startup bookkeeping failed');
+    await expect(service.submitStart(input)).resolves.toMatchObject({ status: 'accepted' });
+
+    expect(settings.ensureInNormal).toHaveBeenCalledTimes(2);
+    expect(agents.startSession).toHaveBeenCalledTimes(1);
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(2);
+  });
+
+  it('replays an accepted start before revalidating a removed project path', async () => {
+    const { service, queue } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start once',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-replay',
+      clientMessageId: 'msg-start-replay',
+    };
+
+    const first = await service.submitStart(input);
+    await fs.rm(projectBaseDir, { recursive: true, force: true });
+    const replay = await service.submitStart(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      chatId: TARGET_CHAT_ID,
+      turnId: first.turnId,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays accepted start identity without retaining a deleted chat projection', async () => {
+    const { service, queue, sessions, chatListProjector } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start once',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-deleted-replay',
+      clientMessageId: 'msg-start-deleted-replay',
+    };
+
+    const first = await service.submitStart(input);
+    sessions.delete(TARGET_CHAT_ID);
+    chatListProjector.buildOne.mockResolvedValueOnce(null);
+    const replay = await service.submitStart(input);
+
+    expect(replay).toEqual({
+      ...first,
+      status: 'duplicate',
+      chat: null,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an unprojectable live start replay retryable', async () => {
+    const { service, queue, chatListProjector } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start once',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-unprojectable-replay',
+      clientMessageId: 'msg-start-unprojectable-replay',
+    };
+
+    await service.submitStart(input);
+    chatListProjector.buildOne.mockResolvedValueOnce(null);
+
+    await expect(service.submitStart(input)).rejects.toMatchObject({
+      code: 'INTERNAL_ERROR',
+      status: 500,
+      retryable: true,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a terminally failed start so callers can read its receipt', async () => {
+    const { service, ledger, queue } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start then fail',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-terminal-replay',
+      clientMessageId: 'msg-start-terminal-replay',
+    };
+
+    const first = await service.submitStart(input);
+    await ledger.settleTerminal(
+      `chat-start:${TARGET_CHAT_ID}:req-start-terminal-replay`,
+      'failed',
+      { error: 'provider rejected the turn' },
+    );
+    await ledger.markPublicTerminal(TARGET_CHAT_ID, first.turnId);
+    const replay = await service.submitStart(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      chatId: TARGET_CHAT_ID,
+      turnId: first.turnId,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a private terminal start failure instead of returning an unreadable receipt', async () => {
+    const { service, ledger, queue } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start then fail privately',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-private-failure',
+      clientMessageId: 'msg-start-private-failure',
+    };
+
+    await service.submitStart(input);
+    await ledger.settleTerminal(
+      `chat-start:${TARGET_CHAT_ID}:req-start-private-failure`,
+      'failed',
+      { error: 'startup rollback failed' },
+    );
+
+    await expect(service.submitStart(input)).rejects.toThrow('startup rollback failed');
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
   });
 
   it('serializes Stop behind provider startup for the same chat', async () => {
@@ -1264,6 +1471,170 @@ describe('ChatCommandService', () => {
     });
   });
 
+  it('replays an admitted run before revalidating changed persisted defaults', async () => {
+    const { service, chats, queue } = makeService({
+      session: { permissionMode: 'default' },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-stable-replay',
+      clientMessageId: 'msg-stable-replay',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    };
+
+    await service.submitRun(input);
+    chats.updateChat(SOURCE_CHAT_ID, { permissionMode: 'bypassPermissions' });
+    const replay = await service.submitRun(input);
+
+    expect(replay.status).toBe('duplicate');
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a terminally failed run so callers can read its receipt', async () => {
+    const { service, ledger, queue } = makeService();
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-failed-replay',
+      clientMessageId: 'msg-failed-replay',
+    };
+
+    const first = await service.submitRun(input);
+    await ledger.settleTerminal(
+      `agent-run:${SOURCE_CHAT_ID}:req-failed-replay`,
+      'failed',
+      { error: 'provider rejected the turn' },
+    );
+    await ledger.markPublicTerminal(SOURCE_CHAT_ID, first.turnId);
+    const replay = await service.submitRun(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      chatId: SOURCE_CHAT_ID,
+      turnId: first.turnId,
+    });
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a private terminal run failure instead of returning an unreadable receipt', async () => {
+    const { service, ledger, queue } = makeService();
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue privately',
+      clientRequestId: 'req-private-failed-replay',
+      clientMessageId: 'msg-private-failed-replay',
+    };
+
+    await service.submitRun(input);
+    await ledger.settleTerminal(
+      `agent-run:${SOURCE_CHAT_ID}:req-private-failed-replay`,
+      'failed',
+      { error: 'run rollback failed' },
+    );
+
+    await expect(service.submitRun(input)).rejects.toThrow('run rollback failed');
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('asserts the resume agent and adds tags only after admission', async () => {
+    const { service, chats, queue } = makeService();
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-agent-mismatch',
+      clientMessageId: 'msg-agent-mismatch',
+      expectedAgentId: 'codex',
+      tagsToAdd: ['cli'],
+    })).rejects.toMatchObject({ code: 'EXPECTED_AGENT_MISMATCH', status: 409 });
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(chats.addTags).not.toHaveBeenCalled();
+
+    const result = await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-agent-match',
+      clientMessageId: 'msg-agent-match',
+      expectedAgentId: 'claude',
+      tagsToAdd: ['cli'],
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+  });
+
+  it('applies supported resume overrides to one turn without persisting them', async () => {
+    const { service, chats, queue } = makeService();
+
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue deeply',
+      clientRequestId: 'req-overrides',
+      clientMessageId: 'msg-overrides',
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      agentSettings: agentSettings('claude', { effort: 'high' }),
+    });
+
+    expect(queue.runReservedTurn.mock.calls[0][2]).toMatchObject({
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      agentSettings: agentSettings('claude', { effort: 'high' }),
+    });
+    expect(chats.updateChat).not.toHaveBeenCalled();
+  });
+
+  it('requires bypass permission to be explicit when inherited bypass is rejected', async () => {
+    const { service, queue, ledger } = makeService({
+      session: { permissionMode: 'bypassPermissions' },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-inherited-bypass',
+      clientMessageId: 'msg-inherited-bypass',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    })).rejects.toMatchObject({ code: 'EXPLICIT_BYPASS_REQUIRED', status: 422 });
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'agent-run', 'req-inherited-bypass')).toBeNull();
+
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue explicitly',
+      clientRequestId: 'req-explicit-bypass',
+      clientMessageId: 'msg-explicit-bypass',
+      permissionMode: 'bypassPermissions',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    });
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unsupported explicit modes before creating a command receipt', async () => {
+    const { service, queue, ledger } = makeService({
+      agents: {
+        getAgentCatalogEntry: mock(() => Promise.resolve({
+          supportedPermissionModes: ['default'],
+          supportedThinkingModes: ['none'],
+        })),
+      },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-unsupported-mode',
+      clientMessageId: 'msg-unsupported-mode',
+      permissionMode: 'acceptEdits',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'agent-run', 'req-unsupported-mode')).toBeNull();
+  });
+
   it('rejects a concurrent direct submission before pending input preparation', async () => {
     let activeReservation = null;
     let releaseExecution;
@@ -1414,6 +1785,7 @@ describe('ChatCommandService', () => {
       updatedAt: '2026-07-17T00:00:00.000Z',
     };
     const ledger = {
+      getRecord: mock(async () => null),
       accept: mock(async () => ({ kind: 'accepted', record })),
       update: mock()
         .mockRejectedValueOnce(new Error('ledger unavailable'))
@@ -1749,6 +2121,92 @@ describe('ChatCommandService', () => {
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(false);
   });
 
+  it('keeps deleted-chat receipts private until the ordered removal event', async () => {
+    const { service, ledger } = makeService();
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-delete-receipt',
+      turnId: 'turn-delete-receipt',
+      payload: { command: 'working' },
+    });
+
+    await service.deleteChat({ chatId: SOURCE_CHAT_ID });
+
+    const record = await ledger.getTurnRecord(SOURCE_CHAT_ID, 'turn-delete-receipt');
+    expect(record.status).toBe('accepted');
+    expect(record.publicTerminalAt).toBeUndefined();
+  });
+
+  it('keeps a failed admission private when deletion commits before its retry', async () => {
+    const { service, chats, ledger, queue } = makeService();
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue after deletion',
+      clientRequestId: 'req-delete-private-failure',
+      clientMessageId: 'msg-delete-private-failure',
+      tagsToAdd: ['cli'],
+    };
+    queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
+
+    await expect(service.submitRun(input)).rejects.toThrow('append failed');
+    await service.deleteChat({ chatId: SOURCE_CHAT_ID });
+    await ledger.markChatInterrupted(SOURCE_CHAT_ID, 'chat-deleted');
+
+    await expect(service.submitRun(input)).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+      status: 404,
+    });
+    const record = await ledger.getRecord(
+      commandLedgerKey('agent-run', SOURCE_CHAT_ID, input.clientRequestId),
+    );
+    expect(record).toMatchObject({
+      status: 'failed',
+      errorCode: 'PRE_SCHEDULE_FAILED',
+      retainedPrivateTerminal: true,
+    });
+    expect(record.publicTerminalAt).toBeUndefined();
+    expect(chats.addTags).not.toHaveBeenCalled();
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed admission normally when chat deletion rolls back', async () => {
+    const { service, chats, ledger, ownership, queue } = makeService({
+      ownership: {
+        delete: mock(async () => {
+          throw new Error('journal append failed');
+        }),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue after rollback',
+      clientRequestId: 'req-rollback-private-failure',
+      clientMessageId: 'msg-rollback-private-failure',
+      tagsToAdd: ['cli'],
+    };
+    queue.registerPendingUserInput
+      .mockRejectedValueOnce(new Error('append failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(service.submitRun(input)).rejects.toThrow('append failed');
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toThrow(
+      'journal append failed',
+    );
+    const retry = await service.submitRun(input);
+
+    expect(retry.status).toBe('accepted');
+    expect(ownership.delete).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(chats.addTags).toHaveBeenCalledTimes(1);
+    expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+    expect((await ledger.getRecord(
+      commandLedgerKey('agent-run', SOURCE_CHAT_ID, input.clientRequestId),
+    )).publicTerminalAt).toBeUndefined();
+  });
+
   it('preserves chat ownership when the active runtime cannot be retired', async () => {
     const { service, chats, queue, settings, pendingInputs, sessions } = makeService({
       queue: { abortForChatDeletion: mock(() => Promise.resolve(false)) },
@@ -1782,6 +2240,49 @@ describe('ChatCommandService', () => {
     expect(chats.removeChat).not.toHaveBeenCalled();
     expect(queue.deleteChatQueueFile).not.toHaveBeenCalled();
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(true);
+  });
+
+  it('rolls back deletion settlement when ownership removal fails before commit', async () => {
+    const retirement = deferred();
+    const retirementStarted = deferred();
+    const { service, ledger, queue, sessions } = makeService({
+      queue: {
+        abortForChatDeletion: mock(() => {
+          retirementStarted.resolve();
+          return retirement.promise;
+        }),
+      },
+      ownership: {
+        delete: mock(async () => {
+          throw new Error('journal append failed');
+        }),
+      },
+    });
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-delete-failed',
+      turnId: 'turn-delete-failed',
+      payload: { command: 'working' },
+    });
+
+    const deletion = service.deleteChat({ chatId: SOURCE_CHAT_ID });
+    await retirementStarted.promise;
+    await ledger.markPublicTerminal(
+      SOURCE_CHAT_ID,
+      'turn-delete-failed',
+      'chat-deleted',
+    );
+    retirement.resolve(true);
+
+    await expect(deletion).rejects.toThrow('journal append failed');
+    expect(queue.rollbackChatDeletion).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(sessions.has(SOURCE_CHAT_ID)).toBe(true);
+    expect(projectAgentTurnReceipt(
+      await ledger.getTurnRecord(SOURCE_CHAT_ID, 'turn-delete-failed'),
+    )).toMatchObject({
+      receipt: { state: 'interrupted', reason: 'user-stop' },
+    });
   });
 
   it('rejects deleting unknown chats', async () => {
@@ -2070,7 +2571,7 @@ describe('ChatCommandService', () => {
     });
 
     const record = await readLedgerRecord(ledger, 'permission-decision', 'req-perm-1');
-    expect(record.payload.response).toEqual(response);
+    expect(record).toMatchObject({ status: 'finished', payload: {} });
   });
 
   it('routes /compact to the agent compaction dispatch', async () => {

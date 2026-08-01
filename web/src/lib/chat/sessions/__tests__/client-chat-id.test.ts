@@ -6,7 +6,7 @@ const originalPerformance = globalThis.performance;
 
 async function loadGenerator() {
 	vi.resetModules();
-	return import('$lib/chat/sessions/client-chat-id.js');
+	return import('$shared/client-chat-id');
 }
 
 afterEach(() => {

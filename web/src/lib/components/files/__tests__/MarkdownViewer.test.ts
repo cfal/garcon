@@ -11,6 +11,7 @@ import {
 	reduceWorkspaceLayout,
 } from '$lib/workspace/workspace-layout.svelte.js';
 import MarkdownViewerTestHost from './MarkdownViewerTestHost.svelte';
+import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
 afterEach(() => {
 	cleanup();
@@ -69,6 +70,7 @@ describe('MarkdownViewer', () => {
 		});
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		const mainContent = screen.getByRole('region', { name: 'current.md' });
+		emulateDetachedScrollReset(mainContent);
 		mainContent.scrollLeft = 11;
 		mainContent.scrollTop = 137;
 		await fireEvent.scroll(mainContent);
