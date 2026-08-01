@@ -285,6 +285,78 @@ describe('SidebarChatReorderState', () => {
 		expect(reorder.orderFor('normal')).toEqual(second.visibleOrder);
 	});
 
+	it('retires an older completion without cancelling an active drag', () => {
+		const visibleOrders = buildOrders(['a', 'b', 'c', 'd']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'a');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'a',
+			targetChatId: 'c',
+			closestEdge: 'bottom',
+		});
+		const first = reorder.finish('normal');
+		if (!first) throw new Error('expected first optimistic reorder request');
+
+		reorder.begin('normal', 'b');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'b',
+			targetChatId: 'a',
+			closestEdge: 'bottom',
+		});
+		reorder.completeIfCurrent('normal', first.sequence);
+
+		expect(reorder.activeList).toBe('normal');
+		expect(reorder.activeChatId).toBe('b');
+		expect(reorder.orderFor('normal')).toEqual(['c', 'a', 'b', 'd']);
+		expect(reorder.finish('normal')).toMatchObject({
+			chatId: 'b',
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'after' },
+		});
+	});
+
+	it('retires an older rollback without cancelling an active drag', () => {
+		const visibleOrders = buildOrders(['a', 'b', 'c', 'd']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'a');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'a',
+			targetChatId: 'c',
+			closestEdge: 'bottom',
+		});
+		const first = reorder.finish('normal');
+		if (!first) throw new Error('expected first optimistic reorder request');
+
+		reorder.begin('normal', 'b');
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'b',
+			targetChatId: 'a',
+			closestEdge: 'bottom',
+		});
+		reorder.rollbackIfCurrent('normal', first.sequence, first.visibleOrder);
+
+		expect(reorder.activeList).toBe('normal');
+		expect(reorder.activeChatId).toBe('b');
+		expect(reorder.orderFor('normal')).toEqual(['c', 'a', 'b', 'd']);
+		expect(reorder.finish('normal')).toMatchObject({
+			chatId: 'b',
+			placement: { kind: 'relative', referenceChatId: 'a', position: 'after' },
+		});
+	});
+
 	it('rolls back only the matching optimistic order', () => {
 		const visibleOrders = buildOrders(['a', 'b', 'c']);
 		const reorder = new SidebarChatReorderState({

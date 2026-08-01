@@ -22,6 +22,8 @@ export type ChatOrderPlacement =
       boundary: ChatOrderBoundary;
     };
 
+export type RelativeChatOrderPlacement = Extract<ChatOrderPlacement, { kind: 'relative' }>;
+
 export interface ReorderChatRequest {
   chatId: string;
   placement: ChatOrderPlacement;

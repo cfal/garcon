@@ -64,6 +64,18 @@ describe('ComposerState', () => {
 		expect(state.images).toEqual([]);
 	});
 
+	it('advances the content revision for every text and attachment assignment', () => {
+		const state = new ComposerState();
+		const initialRevision = state.contentRevision;
+
+		state.inputText = '';
+		expect(state.contentRevision).toBe(initialRevision + 1);
+		state.images = [];
+		expect(state.contentRevision).toBe(initialRevision + 2);
+		state.clearAfterSubmit('test-chat-id');
+		expect(state.contentRevision).toBe(initialRevision + 4);
+	});
+
 	it('debounces draft writes and persists the latest queued text', () => {
 		vi.useFakeTimers();
 		const composer = new ComposerState();

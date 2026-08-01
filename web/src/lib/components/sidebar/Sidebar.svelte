@@ -17,8 +17,8 @@
 	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
-		ChatOrderPlacement,
 		PersistedChatOrderGroup,
+		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
@@ -36,7 +36,7 @@
 	interface QuickMoveWrite {
 		list: PersistedChatOrderGroup;
 		chatId: string;
-		placement: Extract<ChatOrderPlacement, { kind: 'relative' }>;
+		placement: RelativeChatOrderPlacement;
 		onSuccess?: () => void;
 		onFailure?: () => void;
 	}
@@ -228,7 +228,7 @@
 	function handleQuickMove(
 		list: PersistedChatOrderGroup,
 		chatId: string,
-		placement: Extract<ChatOrderPlacement, { kind: 'relative' }>,
+		placement: RelativeChatOrderPlacement,
 		onSuccess?: () => void,
 		onFailure?: () => void,
 	) {

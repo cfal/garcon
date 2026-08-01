@@ -28,8 +28,9 @@ function writeDraft(chatId: string, text: string): void {
 }
 
 export class ComposerState {
-	inputText = $state('');
-	images = $state<File[]>([]);
+	#inputText = $state('');
+	#images = $state<File[]>([]);
+	#contentRevision = 0;
 	isSubmitting = $state(false);
 	isDragActive = $state(false);
 	draftAppendRequest = $state<{ chatId: string; requestId: number } | null>(null);
@@ -37,6 +38,28 @@ export class ComposerState {
 	#pendingDraftSave: { chatId: string; text: string } | null = null;
 	#draftImagesByChatId = new Map<string, File[]>();
 	#nextDraftAppendRequestId = 0;
+
+	get inputText(): string {
+		return this.#inputText;
+	}
+
+	set inputText(value: string) {
+		this.#inputText = value;
+		this.#contentRevision += 1;
+	}
+
+	get images(): File[] {
+		return this.#images;
+	}
+
+	set images(value: File[]) {
+		this.#images = value;
+		this.#contentRevision += 1;
+	}
+
+	get contentRevision(): number {
+		return this.#contentRevision;
+	}
 
 	/** Appends an editable block to the active draft without submitting it. */
 	appendDraftBlock(chatId: string, block: string): ChatDraftAppendResult {

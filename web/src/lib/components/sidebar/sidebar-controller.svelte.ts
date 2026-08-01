@@ -16,9 +16,7 @@ import { createClientChatId } from '$lib/chat/sessions/client-chat-id.js';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatListEntry } from '$shared/chat-list';
-import type { ChatOrderPlacement } from '$shared/chat-order-contracts';
-
-type RelativeChatOrderPlacement = Extract<ChatOrderPlacement, { kind: 'relative' }>;
+import type { RelativeChatOrderPlacement } from '$shared/chat-order-contracts';
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;

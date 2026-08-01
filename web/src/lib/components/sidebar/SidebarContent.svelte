@@ -3,8 +3,8 @@
 	import SidebarChatList from './SidebarChatList.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
-		ChatOrderPlacement,
 		PersistedChatOrderGroup,
+		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -39,7 +39,7 @@
 		onQuickMove: (
 			list: PersistedChatOrderGroup,
 			chatId: string,
-			placement: Extract<ChatOrderPlacement, { kind: 'relative' }>,
+			placement: RelativeChatOrderPlacement,
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;

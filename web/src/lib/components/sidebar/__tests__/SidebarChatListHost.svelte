@@ -2,10 +2,10 @@
 	import SidebarChatList from '../SidebarChatList.svelte';
 	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
 	import type { SidebarDisplayOptions } from '../sidebar-display-options';
-import type {
-	ChatOrderPlacement,
-	PersistedChatOrderGroup,
-} from '$shared/chat-order-contracts';
+	import type {
+		PersistedChatOrderGroup,
+		RelativeChatOrderPlacement,
+	} from '$shared/chat-order-contracts';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarChatListHostProps {
@@ -18,9 +18,9 @@ import type {
 		collapsedProjectKeys?: ReadonlySet<string>;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onQuickMove?: (
-		list: PersistedChatOrderGroup,
-		chatId: string,
-		placement: Extract<ChatOrderPlacement, { kind: 'relative' }>,
+			list: PersistedChatOrderGroup,
+			chatId: string,
+			placement: RelativeChatOrderPlacement,
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;

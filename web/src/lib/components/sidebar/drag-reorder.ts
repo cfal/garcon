@@ -1,9 +1,7 @@
 import { reorder } from '@atlaskit/pragmatic-drag-and-drop/reorder';
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { getReorderDestinationIndex } from '@atlaskit/pragmatic-drag-and-drop-hitbox/util/get-reorder-destination-index';
-import type { ChatOrderPlacement } from '$shared/chat-order-contracts';
-
-export type RelativeChatOrderPlacement = Extract<ChatOrderPlacement, { kind: 'relative' }>;
+import type { RelativeChatOrderPlacement } from '$shared/chat-order-contracts';
 
 export type BoundaryMove = 'start' | 'end';
 

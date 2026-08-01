@@ -18,8 +18,8 @@
 	import { sortChatsByRecencyDesc } from './chat-recency-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type {
-		ChatOrderPlacement,
 		PersistedChatOrderGroup,
+		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
 
 	interface SidebarChatListProps {
@@ -51,7 +51,7 @@
 		onQuickMove: (
 			list: PersistedChatOrderGroup,
 			chatId: string,
-			placement: Extract<ChatOrderPlacement, { kind: 'relative' }>,
+			placement: RelativeChatOrderPlacement,
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;

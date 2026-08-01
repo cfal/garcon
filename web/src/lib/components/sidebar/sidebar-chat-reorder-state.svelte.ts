@@ -1,4 +1,7 @@
-import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
+import type {
+	PersistedChatOrderGroup,
+	RelativeChatOrderPlacement,
+} from '$shared/chat-order-contracts';
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import {
 	arraysEqual,
@@ -7,7 +10,6 @@ import {
 	resolveFilteredRelativeMove,
 	sameMembers,
 	type BoundaryMove,
-	type RelativeChatOrderPlacement,
 } from './drag-reorder';
 
 export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
@@ -161,6 +163,10 @@ export class SidebarChatReorderState {
 
 	rollbackIfCurrent(list: PersistedChatOrderGroup, sequence: number, failedOrder: string[]): void {
 		if (this.#pendingSequenceByList[list] !== sequence) return;
+		if (this.activeList === list) {
+			this.#clearPendingSequence(list);
+			return;
+		}
 		const current = this.#overrideByList[list];
 		if (current && arraysEqual(current, failedOrder)) {
 			this.clear(list);
@@ -171,7 +177,17 @@ export class SidebarChatReorderState {
 
 	completeIfCurrent(list: PersistedChatOrderGroup, sequence: number): void {
 		if (this.#pendingSequenceByList[list] !== sequence) return;
+		if (this.activeList === list) {
+			this.#clearPendingSequence(list);
+			return;
+		}
 		this.clear(list);
+	}
+
+	#clearPendingSequence(list: PersistedChatOrderGroup): void {
+		const nextPending = { ...this.#pendingSequenceByList };
+		delete nextPending[list];
+		this.#pendingSequenceByList = nextPending;
 	}
 
 	reconcile(): void {
