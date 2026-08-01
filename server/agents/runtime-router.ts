@@ -104,11 +104,12 @@ export class AgentRuntimeRouter {
         `Session limit reached (${getMaxSessions()}). Wait for existing sessions to complete or increase GARCON_MAX_SESSIONS.`,
       );
     }
-    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    const persistedEntry = this.#registry.getChat(chatId);
+    const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
     const integration = this.#directory.require(entry.agentId);
     const previous = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
-      model: entry.model,
+      model: persistedEntry?.model || entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
@@ -165,7 +166,8 @@ export class AgentRuntimeRouter {
     opts: RunAgentTurnOptions = {},
   ): Promise<void> {
     assertExecutionAdmissionOpen(opts);
-    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    const persistedEntry = this.#registry.getChat(chatId);
+    const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
     if (!entry.agentSessionId) {
       await this.startSession(chatId, prompt, {
         ...opts,
@@ -177,7 +179,7 @@ export class AgentRuntimeRouter {
 
     const previous = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
-      model: entry.model,
+      model: persistedEntry?.model || entry.model,
       apiProviderId: entry.apiProviderId,
       modelEndpointId: entry.modelEndpointId,
     });
@@ -632,6 +634,17 @@ export class AgentRuntimeRouter {
       },
     };
   }
+}
+
+function requireAgentChatEntryWithModel(
+  chatId: string,
+  entry: AgentChatEntry | null | undefined,
+  model: string | undefined,
+): ReturnType<typeof requireAgentChatEntry> {
+  return requireAgentChatEntry(
+    chatId,
+    entry && model !== undefined ? { ...entry, model } : entry,
+  );
 }
 
 function operationIdentity(

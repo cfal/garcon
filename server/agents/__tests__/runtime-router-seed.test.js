@@ -191,6 +191,32 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     }));
   });
 
+  it('uses an explicit model to complete a legacy lazy session configuration', async () => {
+    const { router, start, registry } = makeRouter({
+      entry: { model: undefined },
+    });
+
+    await router.runAgentTurn('chat-1', 'resume with model', { model: 'model-b' });
+
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ model: 'model-b' }));
+    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+      model: 'model-b',
+    }), { flush: true });
+  });
+
+  it('uses an explicit model to resume a legacy materialized session', async () => {
+    const { router, resume } = makeRouter({
+      entry: { agentSessionId: 'native-1', model: undefined },
+    });
+
+    await router.runAgentTurn('chat-1', 'resume with model', { model: 'model-b' });
+
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      agentSessionId: 'native-1',
+      model: 'model-b',
+    }));
+  });
+
   it('rejects a local-to-cloud override before materializing a lazy session', async () => {
     const { router, start, endpointResolver } = makeRouter({
       entry: {
