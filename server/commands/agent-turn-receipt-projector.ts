@@ -59,6 +59,9 @@ function projectOutput(record: CommandLedgerRecord): AgentTurnOutput {
   if (record.turnResultAvailability === 'too-large') {
     return { availability: 'unavailable', reason: 'too-large' };
   }
+  if (record.turnResultAvailability === 'retention-pressure') {
+    return { availability: 'unavailable', reason: 'retention-pressure' };
+  }
   return {
     availability: 'available',
     completeness: record.status === 'finished' && !record.interruptionReason

@@ -41,9 +41,12 @@ export interface ConsultationDependencies {
 function terminalResult(receipt: AgentTurnReceipt, output: CliOutput): void {
   if (receipt.state === 'completed') {
     if (receipt.output.availability === 'unavailable') {
+      const reason = receipt.output.reason === 'too-large'
+        ? 'its result is too large for the CLI receipt'
+        : 'server retention pressure prevented the CLI from retaining its result';
       throw new CliError(
         'receipt polling',
-        'the turn completed, but its result is too large for the CLI receipt; view it in Garcon',
+        `the turn completed, but ${reason}; view the complete transcript in Garcon`,
         3,
       );
     }

@@ -162,4 +162,18 @@ describe('runConsultation', () => {
     }
     expect(testOutput.messages).toEqual([]);
   });
+
+  test('reports aggregate retention pressure without blaming turn size', async () => {
+    const unavailable = {
+      ...receipt,
+      output: { availability: 'unavailable', reason: 'retention-pressure' },
+    } as AgentTurnReceipt;
+
+    await expect(runConsultation({
+      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      prompt: 'Continue', readsPromptFromStdin: false,
+    }, 'Continue', client({ async getTurnReceipt() { return unavailable; } }), output(), undefined, {
+      createId: () => 'request',
+    })).rejects.toThrow('server retention pressure');
+  });
 });

@@ -854,7 +854,87 @@ describe('ChatCommandService', () => {
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
     expect(chats.removeChat.mock.invocationCallOrder[0])
       .toBeLessThan(queue.failDirectTurn.mock.invocationCallOrder[0]);
+    expect(chats.removeChat).toHaveBeenCalledWith(TARGET_CHAT_ID, 'start-compensation');
     expect(chats.getChat(TARGET_CHAT_ID)).toBeNull();
+  });
+
+  it('keeps a compensated pre-schedule start failure reopenable', async () => {
+    let attempts = 0;
+    const startSession = mock(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('provider startup failed');
+    });
+    const { service, queue } = makeService({ agents: { startSession } });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'retry startup',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-reopen',
+      clientMessageId: 'msg-start-reopen',
+    };
+
+    await expect(service.submitStart(input)).rejects.toThrow('provider startup failed');
+    await expect(service.submitStart(input)).resolves.toMatchObject({ status: 'accepted' });
+
+    expect(startSession).toHaveBeenCalledTimes(2);
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(2);
+  });
+
+  it('replays an accepted start before revalidating a removed project path', async () => {
+    const { service, queue } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start once',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-replay',
+      clientMessageId: 'msg-start-replay',
+    };
+
+    const first = await service.submitStart(input);
+    await fs.rm(projectBaseDir, { recursive: true, force: true });
+    const replay = await service.submitStart(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      chatId: TARGET_CHAT_ID,
+      turnId: first.turnId,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a terminally failed start so callers can read its receipt', async () => {
+    const { service, ledger, queue } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start then fail',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-terminal-replay',
+      clientMessageId: 'msg-start-terminal-replay',
+    };
+
+    const first = await service.submitStart(input);
+    await ledger.settleTerminal(
+      `chat-start:${TARGET_CHAT_ID}:req-start-terminal-replay`,
+      'failed',
+      { error: 'provider rejected the turn' },
+    );
+    const replay = await service.submitStart(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      chatId: TARGET_CHAT_ID,
+      turnId: first.turnId,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
   });
 
   it('serializes Stop behind provider startup for the same chat', async () => {
@@ -1292,6 +1372,31 @@ describe('ChatCommandService', () => {
     const replay = await service.submitRun(input);
 
     expect(replay.status).toBe('duplicate');
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a terminally failed run so callers can read its receipt', async () => {
+    const { service, ledger, queue } = makeService();
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-failed-replay',
+      clientMessageId: 'msg-failed-replay',
+    };
+
+    const first = await service.submitRun(input);
+    await ledger.settleTerminal(
+      `agent-run:${SOURCE_CHAT_ID}:req-failed-replay`,
+      'failed',
+      { error: 'provider rejected the turn' },
+    );
+    const replay = await service.submitRun(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      chatId: SOURCE_CHAT_ID,
+      turnId: first.turnId,
+    });
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
   });
 
@@ -1879,7 +1984,7 @@ describe('ChatCommandService', () => {
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(false);
   });
 
-  it('settles accepted turn receipts as interrupted when their chat is deleted', async () => {
+  it('keeps deleted-chat receipts private until the ordered removal event', async () => {
     const { service, ledger } = makeService();
     await ledger.accept({
       commandType: 'agent-run',
@@ -1891,11 +1996,9 @@ describe('ChatCommandService', () => {
 
     await service.deleteChat({ chatId: SOURCE_CHAT_ID });
 
-    expect(await ledger.getTurnRecord(SOURCE_CHAT_ID, 'turn-delete-receipt')).toMatchObject({
-      status: 'finished',
-      interruptionReason: 'chat-deleted',
-      publicTerminalAt: expect.any(String),
-    });
+    const record = await ledger.getTurnRecord(SOURCE_CHAT_ID, 'turn-delete-receipt');
+    expect(record.status).toBe('accepted');
+    expect(record.publicTerminalAt).toBeUndefined();
   });
 
   it('preserves chat ownership when the active runtime cannot be retired', async () => {

@@ -439,8 +439,11 @@ export function wireServerEvents({
               chatId,
               turnMetadata.turnId,
               committedMessages
-                .filter((message) => message.type === 'assistant-message')
-                .map((message) => message.content),
+                .flatMap((message) => (
+                  message.type === 'assistant-message' && message.content.length > 0
+                    ? [message.content]
+                    : []
+                )),
             );
           }
           broadcast(
@@ -583,7 +586,7 @@ export function wireServerEvents({
   chatRegistry.onChatAdded((chatId) => {
     markSearchCatalogDirty(chatId);
   });
-  chatRegistry.onChatRemoved((chatId) => {
+  chatRegistry.onChatRemoved((chatId, removalReason) => {
     agentRegistry.discardTurn(chatId);
     userAbortLifecycle.discard(chatId);
     for (const key of deferredTerminalFailures.keys()) {
@@ -593,8 +596,10 @@ export function wireServerEvents({
     chatViews.deleteChatView(chatId);
     deleteSearchChat(chatId);
     scheduleChatTask(chatId, 'server-events: chat removal settlement failed', async () => {
-      await commandLedger.markChatInterrupted(chatId, 'chat-deleted', true);
       broadcast(new ChatSessionDeletedWsMessage(chatId));
+      if (removalReason === 'user-deletion') {
+        await commandLedger.markChatInterrupted(chatId, 'chat-deleted');
+      }
     });
     shareStore.revokeShareByChatId(chatId).catch((err) => {
       logger.warn(
@@ -636,13 +641,6 @@ export function wireServerEvents({
   });
   queue.onSessionStopRequested((chatId, stopId, preparingTurn, intent) => {
     userAbortLifecycle.onStopRequested(chatId, stopId, preparingTurn);
-    if (preparingTurn?.turnId) {
-      void commandLedger.markInterruptionRequested(
-        chatId,
-        preparingTurn.turnId,
-        interruptionReason(intent),
-      );
-    }
   });
   queue.onDispatching((chatId, entryId, content) => {
     broadcast(new QueueDispatchingMessage(chatId, entryId, content));
@@ -711,7 +709,7 @@ export function wireServerEvents({
         if (abortAcknowledged) {
           await markPublicTurnTerminal(chatId, acknowledgement.turn, interruptionReason(intent));
         } else {
-          await commandLedger.releaseInterruptionRequest(chatId, acknowledgement.turn!.turnId!);
+          await commandLedger.publishDeferredTerminal(chatId, acknowledgement.turn!.turnId!);
         }
       });
     }

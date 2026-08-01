@@ -75,4 +75,15 @@ describe('agent turn receipt projection', () => {
       receipt: { output: { availability: 'unavailable', reason: 'too-large' } },
     });
   });
+
+  it('projects aggregate retention pressure distinctly', () => {
+    expect(projectAgentTurnReceipt(record({
+      status: 'finished',
+      publicTerminalAt: '2026-07-31T12:01:00.000Z',
+      turnResultAvailability: 'retention-pressure',
+    }))).toMatchObject({
+      kind: 'found',
+      receipt: { output: { availability: 'unavailable', reason: 'retention-pressure' } },
+    });
+  });
 });

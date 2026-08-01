@@ -201,7 +201,7 @@ describe('ChatRegistry', () => {
     expect(registry.removeChat(CHAT_ID)).toBe(true);
     expect(registry.removeChat(CHAT_ID)).toBe(false);
     expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
-    expect(removed).toHaveBeenCalledWith(CHAT_ID);
+    expect(removed).toHaveBeenCalledWith(CHAT_ID, 'user-deletion');
   });
 
   it('loads a strict version-three registry and rebuilds its native ID index', async () => {

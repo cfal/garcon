@@ -232,10 +232,8 @@ export class SessionCommands {
     }
 
     // Removes registry state after abort because abortSession resolves the owning agent through the chat entry.
-    await this.deps.ledger.markChatInterrupted(chatId, 'chat-deleted', false);
     this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
     await this.deps.ownership.delete(chatId);
-    await this.deps.ledger.markChatInterrupted(chatId, 'chat-deleted', true);
 
     await Promise.all([
       this.deps.queue.deleteChatQueueFile(chatId).catch(() => {

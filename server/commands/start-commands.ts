@@ -13,6 +13,12 @@ import {
   type NormalizedChatStart,
   type ScheduledChatStartInput,
 } from './command-support.js';
+import {
+  PRE_SCHEDULE_FAILURE_ERROR_CODE,
+  commandLedgerKey,
+  commandPayloadHash,
+  type CommandLedgerRecord,
+} from './command-ledger.js';
 
 const logger = createLogger('commands:start');
 
@@ -24,29 +30,32 @@ export class StartCommands {
   }
 
   async submitStart(input: ChatStartInput): Promise<StartChatCommandResponse> {
-    const normalized = await this.normalizeStart(input);
+    const chatId = this.support.requireChatId(input.chatId);
     return this.support.withChatMutationLock(
-      normalized.chatId,
-      () => this.submitNormalizedStart(normalized),
+      chatId,
+      async () => {
+        const replay = await this.replayStart(input, chatId);
+        if (replay) return replay;
+        return this.submitNormalizedStart(await this.normalizeStart(input, chatId));
+      },
     );
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
-    const normalized = await this.normalizeStart({
+    return this.submitStart({
       ...input,
       chatId: this.deps.chatIds.allocate(),
       images: [],
       agentSettings: input.agentSettingsById[input.agentId],
     });
-    return this.support.withChatMutationLock(
-      normalized.chatId,
-      () => this.submitNormalizedStart(normalized),
-    );
   }
 
-  private async normalizeStart(input: ChatStartInput): Promise<NormalizedChatStart> {
-    const chatId = this.support.requireChatId(input.chatId);
+  private async normalizeStart(
+    input: ChatStartInput,
+    chatId: NormalizedChatStart['chatId'],
+  ): Promise<NormalizedChatStart> {
     const images = input.images ?? [];
+    const idempotencyProjectPath = String(input.projectPath || '').trim();
 
     if (!this.deps.agents.hasAgent(input.agentId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
@@ -70,6 +79,7 @@ export class StartCommands {
       clientMessageId: input.clientMessageId,
       agentId: input.agentId,
       projectPath: await this.resolveProjectPathForStart(input.projectPath),
+      idempotencyProjectPath,
       command: input.command,
       images,
       model: input.model,
@@ -115,25 +125,9 @@ export class StartCommands {
       chatId: input.chatId,
       clientRequestId: input.clientRequestId,
       turnId,
-      payload: {
-        chatId: input.chatId,
-        clientMessageId: input.clientMessageId,
-        agentId: input.agentId,
-        projectPath: input.projectPath,
-        command: input.command,
-        model: input.model,
-        images: input.images,
-        apiProviderId: input.apiProviderId,
-        modelEndpointId: input.modelEndpointId,
-        modelProtocol: input.modelProtocol,
-        permissionMode: input.permissionMode,
-        thinkingMode: input.thinkingMode,
-        agentSettings: input.agentSettings,
-        tags: input.tags,
-      },
+      payload: startPayload(input),
     });
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
-    if (ledger.kind === 'duplicate') this.support.throwRecordedExecutionFailure(ledger.record);
     if (ledger.kind === 'duplicate') {
       return {
         ...agentTurnResultFromRecord(ledger.record, 'duplicate'),
@@ -196,7 +190,7 @@ export class StartCommands {
         },
         compensate: async () => {
           this.deps.pendingInputs.clearChat(input.chatId, 'chat-removed');
-          this.deps.chats.removeChat(input.chatId);
+          this.deps.chats.removeChat(input.chatId, 'start-compensation');
           try {
             await this.deps.settings.removeFromAllOrderLists(input.chatId);
           } catch (cleanupError: unknown) {
@@ -236,6 +230,37 @@ export class StartCommands {
     };
   }
 
+  private async replayStart(
+    input: ChatStartInput,
+    chatId: NormalizedChatStart['chatId'],
+  ): Promise<StartChatCommandResponse | null> {
+    const existing = await this.deps.ledger.getRecord(
+      commandLedgerKey('chat-start', chatId, input.clientRequestId),
+    );
+    if (!existing) return null;
+    if (existing.payloadHash !== commandPayloadHash(startReplayPayload(input, chatId))) {
+      throw new CommandValidationError(
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId was reused with different payload',
+        409,
+      );
+    }
+    if (
+      existing.status === 'failed'
+      && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
+    ) {
+      return null;
+    }
+    return this.replayedStart(existing);
+  }
+
+  private async replayedStart(record: CommandLedgerRecord): Promise<StartChatCommandResponse> {
+    return {
+      ...agentTurnResultFromRecord(record, 'duplicate'),
+      chat: await this.support.projectCommandChat(record.chatId),
+    };
+  }
+
   private async resolveProjectPathForStart(projectPath: string | undefined): Promise<string> {
     const requestedPath = String(projectPath || '').trim();
     if (!requestedPath) {
@@ -264,4 +289,45 @@ export class StartCommands {
 
     return resolvedPath;
   }
+}
+
+function startPayload(input: NormalizedChatStart): Record<string, unknown> {
+  return {
+    chatId: input.chatId,
+    clientMessageId: input.clientMessageId,
+    agentId: input.agentId,
+    projectPath: input.idempotencyProjectPath,
+    command: input.command,
+    model: input.model,
+    images: input.images,
+    apiProviderId: input.apiProviderId,
+    modelEndpointId: input.modelEndpointId,
+    modelProtocol: input.modelProtocol,
+    permissionMode: input.permissionMode,
+    thinkingMode: input.thinkingMode,
+    agentSettings: input.agentSettings,
+    tags: input.tags,
+  };
+}
+
+function startReplayPayload(
+  input: ChatStartInput,
+  chatId: NormalizedChatStart['chatId'],
+): Record<string, unknown> {
+  return {
+    chatId,
+    clientMessageId: input.clientMessageId,
+    agentId: input.agentId,
+    projectPath: String(input.projectPath || '').trim(),
+    command: input.command,
+    model: input.model,
+    images: input.images ?? [],
+    apiProviderId: input.apiProviderId ?? null,
+    modelEndpointId: input.modelEndpointId ?? null,
+    modelProtocol: input.modelProtocol ?? null,
+    permissionMode: input.permissionMode,
+    thinkingMode: input.thinkingMode,
+    agentSettings: input.agentSettings,
+    tags: input.tags ?? [],
+  };
 }

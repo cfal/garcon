@@ -33,9 +33,8 @@ export interface CommandLedgerRecord {
   stopOutcome?: ChatStopOutcome;
   assistantMessages?: string[];
   assistantBytes?: number;
-  turnResultAvailability?: 'available' | 'too-large' | 'expired';
+  turnResultAvailability?: 'available' | 'too-large' | 'retention-pressure' | 'expired';
   interruptionReason?: 'user-stop' | 'chat-deleted';
-  interruptionRequested?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
 }
 
@@ -69,6 +68,8 @@ export const LEDGER_RECORD_LIMIT = 1000;
 export const STEER_IDENTITY_LIMIT = 10_000;
 export const TURN_RESULT_BYTE_LIMIT = 4 * 1024 * 1024;
 export const TOTAL_TURN_RESULT_BYTE_LIMIT = 64 * 1024 * 1024;
+export const TURN_RESULT_MESSAGE_LIMIT = 4_096;
+export const TOTAL_TURN_RESULT_MESSAGE_LIMIT = 65_536;
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
 
 export class SteerIdentityCapacityError extends Error {
@@ -83,6 +84,8 @@ export interface CommandLedgerOptions {
   recordLimit?: number;
   turnResultByteLimit?: number;
   totalTurnResultByteLimit?: number;
+  turnResultMessageLimit?: number;
+  totalTurnResultMessageLimit?: number;
 }
 
 const TERMINAL_COMMAND_STATUSES = new Set<CommandLedgerStatus>([
@@ -176,7 +179,10 @@ export class CommandLedger {
   readonly #recordLimit: number;
   readonly #turnResultByteLimit: number;
   readonly #totalTurnResultByteLimit: number;
+  readonly #turnResultMessageLimit: number;
+  readonly #totalTurnResultMessageLimit: number;
   #resultBytes = 0;
+  #resultMessages = 0;
 
   constructor(_workspaceDir?: string, options: CommandLedgerOptions = {}) {
     this.#steerIdentityLimit = options.steerIdentityLimit ?? STEER_IDENTITY_LIMIT;
@@ -187,6 +193,9 @@ export class CommandLedger {
     this.#turnResultByteLimit = options.turnResultByteLimit ?? TURN_RESULT_BYTE_LIMIT;
     this.#totalTurnResultByteLimit = options.totalTurnResultByteLimit
       ?? TOTAL_TURN_RESULT_BYTE_LIMIT;
+    this.#turnResultMessageLimit = options.turnResultMessageLimit ?? TURN_RESULT_MESSAGE_LIMIT;
+    this.#totalTurnResultMessageLimit = options.totalTurnResultMessageLimit
+      ?? TOTAL_TURN_RESULT_MESSAGE_LIMIT;
   }
 
   async getRecord(key: string): Promise<CommandLedgerRecord | null> {
@@ -212,48 +221,42 @@ export class CommandLedger {
     if (!record || record.publicTerminalAt || record.turnResultAvailability !== 'available') {
       return record ? cloneRecord(record) : null;
     }
-    const appended = messages.filter((message) => typeof message === 'string');
+    const appended = messages.filter((message) => typeof message === 'string' && message.length > 0);
     if (appended.length === 0) return cloneRecord(record);
     const additionalBytes = appended.reduce((total, message) => total + Buffer.byteLength(message), 0);
     const currentBytes = record.assistantBytes ?? 0;
-    if (currentBytes + additionalBytes > this.#turnResultByteLimit) {
+    const currentMessages = record.assistantMessages?.length ?? 0;
+    if (
+      currentBytes + additionalBytes > this.#turnResultByteLimit
+      || currentMessages + appended.length > this.#turnResultMessageLimit
+    ) {
       this.#discardResult(record);
       record.turnResultAvailability = 'too-large';
     } else {
-      this.#expireTerminalResults(additionalBytes);
-      if (this.#resultBytes + additionalBytes > this.#totalTurnResultByteLimit) {
+      this.#expireTerminalResults(additionalBytes, appended.length);
+      if (
+        this.#resultBytes + additionalBytes > this.#totalTurnResultByteLimit
+        || this.#resultMessages + appended.length > this.#totalTurnResultMessageLimit
+      ) {
         this.#discardResult(record);
-        record.turnResultAvailability = 'too-large';
+        record.turnResultAvailability = 'retention-pressure';
       } else {
         record.assistantMessages = [...(record.assistantMessages ?? []), ...appended];
         record.assistantBytes = currentBytes + additionalBytes;
         this.#resultBytes += additionalBytes;
+        this.#resultMessages += appended.length;
       }
     }
     record.updatedAt = new Date().toISOString();
     return cloneRecord(record);
   }
 
-  async markInterruptionRequested(
-    chatId: string,
-    turnId: string,
-    reason: 'user-stop' | 'chat-deleted',
-  ): Promise<CommandLedgerRecord | null> {
-    const record = this.#recordForTurn(chatId, turnId);
-    if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
-    record.interruptionRequested = reason;
-    record.updatedAt = new Date().toISOString();
-    return cloneRecord(record);
-  }
-
-  async releaseInterruptionRequest(
+  async publishDeferredTerminal(
     chatId: string,
     turnId: string,
   ): Promise<CommandLedgerRecord | null> {
     const record = this.#recordForTurn(chatId, turnId);
     if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
-    record.interruptionRequested = undefined;
-    record.updatedAt = new Date().toISOString();
     if (TERMINAL_COMMAND_STATUSES.has(record.status)) {
       return this.markPublicTerminal(chatId, turnId);
     }
@@ -276,7 +279,6 @@ export class CommandLedger {
       record.interruptionReason = interruptionReason;
       record.status = 'finished';
     }
-    record.interruptionRequested = undefined;
     this.#expireTerminalResults();
     this.#trimRecords();
     return cloneRecord(record);
@@ -285,12 +287,10 @@ export class CommandLedger {
   async markChatInterrupted(
     chatId: string,
     reason: 'chat-deleted',
-    makePublic: boolean,
   ): Promise<void> {
     for (const record of this.#records.values()) {
       if (record.chatId !== chatId || !record.turnId || record.publicTerminalAt) continue;
-      record.interruptionRequested = reason;
-      if (makePublic) await this.markPublicTerminal(chatId, record.turnId, reason);
+      await this.markPublicTerminal(chatId, record.turnId, reason);
     }
   }
 
@@ -371,7 +371,6 @@ export class CommandLedger {
           assistantBytes: 0,
           turnResultAvailability: 'available',
           interruptionReason: undefined,
-          interruptionRequested: undefined,
           publicTerminalAt: undefined,
         };
         this.#records.set(key, record);
@@ -535,6 +534,7 @@ export class CommandLedger {
 
   #discardResult(record: CommandLedgerRecord): void {
     this.#resultBytes -= record.assistantBytes ?? 0;
+    this.#resultMessages -= record.assistantMessages?.length ?? 0;
     record.assistantMessages = undefined;
     record.assistantBytes = 0;
   }
@@ -547,12 +547,15 @@ export class CommandLedger {
     this.#records.delete(key);
   }
 
-  #expireTerminalResults(requiredBytes = 0): void {
-    while (this.#resultBytes + requiredBytes > this.#totalTurnResultByteLimit) {
+  #expireTerminalResults(requiredBytes = 0, requiredMessages = 0): void {
+    while (
+      this.#resultBytes + requiredBytes > this.#totalTurnResultByteLimit
+      || this.#resultMessages + requiredMessages > this.#totalTurnResultMessageLimit
+    ) {
       const oldest = [...this.#records.values()].find((record) => (
         record.publicTerminalAt !== undefined
         && record.turnResultAvailability === 'available'
-        && (record.assistantBytes ?? 0) > 0
+        && ((record.assistantBytes ?? 0) > 0 || (record.assistantMessages?.length ?? 0) > 0)
       ));
       if (!oldest) return;
       this.#discardResult(oldest);

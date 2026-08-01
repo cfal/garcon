@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
+import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.ts';
+import { CommandLedger } from '../commands/command-ledger.ts';
 import { wireServerEvents } from '../server-event-wiring.js';
 
 function deferred() {
@@ -60,12 +62,11 @@ function createWiringFixture(overrides = {}) {
     })),
     ...overrides.chatViews,
   };
-  const commandLedger = {
+  const commandLedger = overrides.commandLedgerInstance ?? {
     settleTerminal: mock(async () => undefined),
     appendAssistantMessages: mock(async () => undefined),
     markPublicTerminal: mock(async () => undefined),
-    markInterruptionRequested: mock(async () => undefined),
-    releaseInterruptionRequest: mock(async () => undefined),
+    publishDeferredTerminal: mock(async () => undefined),
     markChatInterrupted: mock(async () => undefined),
     ...overrides.commandLedger,
   };
@@ -322,11 +323,6 @@ describe('server event wiring', () => {
     );
     await fixture.wiring.waitForIdle();
 
-    expect(fixture.commandLedger.markInterruptionRequested).toHaveBeenCalledWith(
-      'chat-1',
-      'turn-1',
-      'user-stop',
-    );
     expect(timeline.indexOf('chat-session-stopped'))
       .toBeLessThan(timeline.indexOf('receipt:user-stop'));
   });
@@ -350,11 +346,6 @@ describe('server event wiring', () => {
     );
     await fixture.wiring.waitForIdle();
 
-    expect(fixture.commandLedger.markInterruptionRequested).toHaveBeenCalledWith(
-      'chat-1',
-      'turn-1',
-      'chat-deleted',
-    );
     expect(fixture.commandLedger.markPublicTerminal).toHaveBeenCalledWith(
       'chat-1',
       'turn-1',
@@ -362,7 +353,7 @@ describe('server event wiring', () => {
     );
   });
 
-  it('settles outstanding receipts before broadcasting chat deletion', async () => {
+  it('broadcasts chat deletion before publishing outstanding receipts', async () => {
     const timeline = [];
     const fixture = createWiringFixture({
       server: {
@@ -373,15 +364,67 @@ describe('server event wiring', () => {
       },
     });
 
-    fixture.chatRegistryListeners.removed('chat-1');
+    fixture.chatRegistryListeners.removed('chat-1', 'user-deletion');
     await fixture.wiring.waitForIdle();
 
     expect(fixture.commandLedger.markChatInterrupted).toHaveBeenCalledWith(
       'chat-1',
       'chat-deleted',
-      true,
     );
-    expect(timeline).toEqual(['receipts-settled', 'chat-session-deleted']);
+    expect(timeline).toEqual(['chat-session-deleted', 'receipts-settled']);
+  });
+
+  it('does not classify failed-start compensation as chat deletion', async () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.chatRegistryListeners.removed('chat-1', 'start-compensation');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.commandLedger.markChatInterrupted).not.toHaveBeenCalled();
+    expect(published).toContainEqual({ type: 'chat-session-deleted', chatId: 'chat-1' });
+  });
+
+  it('publishes a deferred natural completion when Stop finds the chat idle', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+      payload: { command: 'work' },
+    });
+    let stopRequested;
+    const fixture = createWiringFixture({
+      commandLedgerInstance: ledger,
+      queue: {
+        onSessionStopRequested: mock((callback) => { stopRequested = callback; }),
+      },
+    });
+    const turn = {
+      commandType: 'agent-run',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+    };
+
+    stopRequested('chat-1', 'stop-1', turn, 'stop');
+    fixture.agentListeners.finished('chat-1', 0, turn);
+    await fixture.wiring.waitForIdle();
+    expect((await ledger.getRecord(accepted.record.key)).publicTerminalAt).toBeUndefined();
+
+    fixture.queueListeners.sessionStopped('chat-1', 'already-idle', 'stop', 'stop-1', 1);
+    await fixture.wiring.waitForIdle();
+
+    const record = await ledger.getTurnRecord('chat-1', 'turn-1');
+    expect(record.publicTerminalAt).toEqual(expect.any(String));
+    expect(projectAgentTurnReceipt(record)).toMatchObject({
+      kind: 'found',
+      receipt: { state: 'completed' },
+    });
   });
 
   it('broadcasts tag changes through the per-chat event queue', async () => {
@@ -707,8 +750,7 @@ describe('server event wiring', () => {
         settleTerminal: mock(async () => undefined),
         appendAssistantMessages: mock(async () => undefined),
         markPublicTerminal: mock(async () => undefined),
-        markInterruptionRequested: mock(async () => undefined),
-        releaseInterruptionRequest: mock(async () => undefined),
+        publishDeferredTerminal: mock(async () => undefined),
         markChatInterrupted: mock(async () => undefined),
       },
       shareStore: {},
@@ -816,8 +858,7 @@ describe('server event wiring', () => {
         settleTerminal: mock(async () => undefined),
         appendAssistantMessages: mock(async () => undefined),
         markPublicTerminal: mock(async () => undefined),
-        markInterruptionRequested: mock(async () => undefined),
-        releaseInterruptionRequest: mock(async () => undefined),
+        publishDeferredTerminal: mock(async () => undefined),
         markChatInterrupted: mock(async () => undefined),
       },
       shareStore: {},

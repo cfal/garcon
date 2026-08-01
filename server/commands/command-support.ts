@@ -204,6 +204,7 @@ export interface NormalizedChatStart {
   clientMessageId: string;
   agentId: string;
   projectPath: string;
+  idempotencyProjectPath: string;
   command: string;
   images: NonNullable<RunAgentTurnOptions['images']>;
   model: string;
@@ -470,7 +471,6 @@ export class CommandSupport {
     const recoveringAcceptedCommand = ledger.kind === 'duplicate'
       && ledger.record.status === 'accepted';
     if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
-      this.throwRecordedExecutionFailure(ledger.record);
       return agentTurnResultFromRecord(ledger.record, 'duplicate');
     }
 
