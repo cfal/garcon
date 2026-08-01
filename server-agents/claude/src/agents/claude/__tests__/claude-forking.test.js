@@ -35,7 +35,25 @@ describe('Claude JSONL forking', () => {
         timestamp: '2026-07-17T15:20:02.808Z',
       },
       {
+        parentUuid: '5ff2ba2d-fac5-421d-b522-df6cf579d2e4',
+        isSidechain: false,
+        sessionId: sourceAgentSessionId,
+        type: 'attachment',
+        attachment: { type: 'hook_success' },
+        uuid: '82a44863-8d08-40e1-8fa2-c5a0c79c3725',
+        timestamp: '2026-07-17T15:20:03.324Z',
+      },
+      {
         parentUuid: 'a4912601-44aa-469d-b00e-3eee75dd027e',
+        isSidechain: false,
+        sessionId: sourceAgentSessionId,
+        type: 'attachment',
+        attachment: { type: 'hook_non_blocking_error' },
+        uuid: '5ff2ba2d-fac5-421d-b522-df6cf579d2e4',
+        timestamp: '2026-07-17T15:20:03.262Z',
+      },
+      {
+        parentUuid: '82a44863-8d08-40e1-8fa2-c5a0c79c3725',
         isSidechain: false,
         sessionId: sourceAgentSessionId,
         type: 'assistant',
@@ -134,16 +152,24 @@ describe('Claude JSONL forking', () => {
     const forkedPath = nativeSessions.decode(forked.nativeSession).path;
     const forkedEntries = (await readFile(forkedPath, 'utf8')).trim().split('\n').map(JSON.parse);
 
-    expect(forkedEntries.map((entry) => entry.sessionId)).toEqual([
-      forked.agentSessionId,
-      forked.agentSessionId,
-      forked.agentSessionId,
-    ]);
-    expect(forkedEntries[0].uuid).not.toBe(sourceEntries[0].uuid);
-    expect(forkedEntries[1].uuid).not.toBe(sourceEntries[1].uuid);
-    expect(forkedEntries[2].uuid).not.toBe(sourceEntries[2].uuid);
-    expect(forkedEntries[1].parentUuid).toBe(forkedEntries[0].uuid);
-    expect(forkedEntries[2].parentUuid).toBe(forkedEntries[1].uuid);
+    expect(forkedEntries.every((entry) => entry.sessionId === forked.agentSessionId)).toBe(true);
+    const entriesBySourceUuid = new Map(forkedEntries.map((entry) => [
+      entry.forkedFrom.messageUuid,
+      entry,
+    ]));
+    for (const sourceEntry of sourceEntries) {
+      expect(entriesBySourceUuid.get(sourceEntry.uuid)?.uuid).not.toBe(sourceEntry.uuid);
+    }
+    const hookSuccess = entriesBySourceUuid.get('82a44863-8d08-40e1-8fa2-c5a0c79c3725');
+    const hookError = entriesBySourceUuid.get('5ff2ba2d-fac5-421d-b522-df6cf579d2e4');
+    expect(hookSuccess).toBeDefined();
+    expect(hookError).toBeDefined();
+    expect(forkedEntries.indexOf(hookSuccess)).toBeLessThan(forkedEntries.indexOf(hookError));
+    expect(hookSuccess.parentUuid).toBe(hookError.uuid);
+    const targetUuids = new Set(forkedEntries.map((entry) => entry.uuid));
+    for (const entry of forkedEntries) {
+      if (entry.parentUuid !== null) expect(targetUuids.has(entry.parentUuid)).toBe(true);
+    }
     expect((await stat(forkedPath)).mode & 0o777).toBe(0o600);
     expect(await readFile(sourcePath, 'utf8')).toBe(sourceContent);
     await expect(loadClaudeChatMessages(forkedPath)).resolves.toMatchObject([

@@ -327,6 +327,89 @@ describe('scripted Claude fork lifecycle matrix', () => {
     });
   });
 
+  test('forks and reforks a transcript whose hook parent appears later in the file', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const sourcePrompt = marker('FORWARD_PARENT_SOURCE_PROMPT');
+    const sourceReply = marker('FORWARD_PARENT_SOURCE_REPLY');
+    const childPrompt = marker('FORWARD_PARENT_CHILD_PROMPT');
+    const childReply = marker('FORWARD_PARENT_CHILD_REPLY');
+    testEnvironment.model.scriptTurn([claudeText(sourceReply)]);
+
+    await withIntegrationFixture('claude-scripted-fork-forward-parent', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const sourceCursor = fixture.client.markEvents();
+      const sourceTurn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId: sourceChatId,
+        projectPath: fixture.dirs.project,
+        command: sourcePrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: sourceChatId,
+        turnId: sourceTurn.turnId,
+        marker: sourceReply,
+        afterIndex: sourceCursor,
+      });
+      await reloadUntilNativeContains(fixture, sourceChatId, sourceReply);
+      const source = await readClaudeChat(fixture.dirs.workspace, sourceChatId);
+      const hookUuids = await injectOutOfOrderHookAttachments(source);
+
+      const forkChatId = fixture.newChatId();
+      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      const fork = await fixture.client.getMessages(forkChatId);
+      expect(userContents(fork.messages)).toEqual([sourcePrompt]);
+      expect(assistantContents(fork.messages)).toContain(sourceReply);
+
+      const forkedChat = await readClaudeChat(fixture.dirs.workspace, forkChatId);
+      const forkedEntries = await readClaudeEntries(forkedChat.nativeSession.value.path);
+      const entriesBySourceUuid = new Map(forkedEntries.map((entry) => [
+        (entry.forkedFrom as { messageUuid?: unknown } | undefined)?.messageUuid,
+        entry,
+      ]));
+      const hookSuccess = entriesBySourceUuid.get(hookUuids.success);
+      const hookError = entriesBySourceUuid.get(hookUuids.error);
+      expect(hookSuccess).toBeDefined();
+      expect(hookError).toBeDefined();
+      expect(forkedEntries.indexOf(hookSuccess!)).toBeLessThan(forkedEntries.indexOf(hookError!));
+      expect(hookSuccess?.parentUuid).toBe(hookError?.uuid);
+
+      testEnvironment.model.scriptTurn((request) => {
+        expect(request.lastUserText).toContain(childPrompt);
+        expect(JSON.stringify(request.body.messages)).toContain(sourcePrompt);
+        expect(JSON.stringify(request.body.messages)).toContain(sourceReply);
+        return [claudeText(childReply)];
+      });
+      const childCursor = fixture.client.markEvents();
+      const childTurn = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId: forkChatId,
+        command: childPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: forkChatId,
+        turnId: childTurn.turnId,
+        marker: childReply,
+        afterIndex: childCursor,
+      });
+      await waitForNativeFileContains(fixture.dirs.workspace, forkChatId, childReply);
+
+      const reforkChatId = fixture.newChatId();
+      await forkAfterSourceSettles(fixture, forkChatId, reforkChatId);
+      const refork = await fixture.client.getMessages(reforkChatId);
+      expect(userContents(refork.messages)).toEqual([sourcePrompt, childPrompt]);
+      expect(assistantContents(refork.messages)).toEqual(expect.arrayContaining([
+        sourceReply,
+        childReply,
+      ]));
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  });
+
   test('forks a never-run chat as an unmaterialized child that starts fresh', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
@@ -602,4 +685,61 @@ async function appendMicrocompaction(chat: PersistedClaudeChat): Promise<void> {
     `${raw.endsWith('\n') || raw.length === 0 ? '' : '\n'}${appended.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
     'utf8',
   );
+}
+
+async function injectOutOfOrderHookAttachments(
+  chat: PersistedClaudeChat,
+): Promise<{ success: string; error: string }> {
+  const entries = await readClaudeEntries(chat.nativeSession.value.path);
+  const assistantIndex = entries.findIndex(
+    (entry) => entry.type === 'assistant'
+      && typeof entry.uuid === 'string'
+      && typeof entry.parentUuid === 'string',
+  );
+  const assistant = entries[assistantIndex];
+  if (!assistant || typeof assistant.parentUuid !== 'string') {
+    throw new Error('Claude transcript lacks an assistant with a parent graph.');
+  }
+
+  const success = crypto.randomUUID();
+  const error = crypto.randomUUID();
+  const assistantTimestamp = typeof assistant.timestamp === 'string'
+    ? Date.parse(assistant.timestamp)
+    : Date.now();
+  const baseTimestamp = Number.isFinite(assistantTimestamp) ? assistantTimestamp : Date.now();
+  const hookEntries = [
+    {
+      type: 'attachment',
+      uuid: success,
+      parentUuid: error,
+      sessionId: chat.agentSessionId,
+      timestamp: new Date(baseTimestamp - 1).toISOString(),
+      isSidechain: false,
+      attachment: { type: 'hook_success' },
+    },
+    {
+      type: 'attachment',
+      uuid: error,
+      parentUuid: assistant.parentUuid,
+      sessionId: chat.agentSessionId,
+      timestamp: new Date(baseTimestamp - 2).toISOString(),
+      isSidechain: false,
+      attachment: { type: 'hook_non_blocking_error' },
+    },
+  ];
+  entries.splice(assistantIndex, 0, ...hookEntries);
+  entries[assistantIndex + hookEntries.length] = { ...assistant, parentUuid: success };
+  await writeFile(
+    chat.nativeSession.value.path,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    'utf8',
+  );
+  return { success, error };
+}
+
+async function readClaudeEntries(path: string): Promise<Record<string, unknown>[]> {
+  return (await readFile(path, 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
