@@ -408,6 +408,13 @@ export class CommandSupport {
     return this.deps.chatListProjector.buildOne(chatId);
   }
 
+  async projectReplayedStartChat(
+    chatId: string,
+  ): Promise<import('../../common/chat-list.js').ChatListEntry | null> {
+    if (!this.deps.chats.getChat(chatId)) return null;
+    return this.projectCommandChat(chatId);
+  }
+
   async submitHttpRun(
     input: NormalizedSubmitRunInput,
   ): Promise<AgentTurnCommandResponse> {

@@ -108,7 +108,8 @@ describe('chat lifecycle', () => {
         clientMessageId,
       });
       expect(accepted.status).toBe('accepted');
-      expect(accepted.chat.id).toBe(chatId);
+      expect(accepted.chat).not.toBeNull();
+      expect(accepted.chat?.id).toBe(chatId);
       expect(accepted.turnId).toBeString();
       expect(accepted.clientRequestId).toBe(clientRequestId);
 

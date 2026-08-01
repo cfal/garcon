@@ -262,7 +262,7 @@ export class StartCommands {
   private async replayedStart(record: CommandLedgerRecord): Promise<StartChatCommandResponse> {
     return {
       ...agentTurnResultFromRecord(record, 'duplicate'),
-      chat: await this.support.projectCommandChatIfPresent(record.chatId),
+      chat: await this.support.projectReplayedStartChat(record.chatId),
     };
   }
 

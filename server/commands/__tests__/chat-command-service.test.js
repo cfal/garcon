@@ -975,6 +975,30 @@ describe('ChatCommandService', () => {
     expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps an unprojectable live start replay retryable', async () => {
+    const { service, queue, chatListProjector } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start once',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-unprojectable-replay',
+      clientMessageId: 'msg-start-unprojectable-replay',
+    };
+
+    await service.submitStart(input);
+    chatListProjector.buildOne.mockResolvedValueOnce(null);
+
+    await expect(service.submitStart(input)).rejects.toMatchObject({
+      code: 'INTERNAL_ERROR',
+      status: 500,
+      retryable: true,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
   it('replays a terminally failed start so callers can read its receipt', async () => {
     const { service, ledger, queue } = makeService({ session: null });
     const input = {
