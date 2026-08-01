@@ -1325,6 +1325,32 @@ describe('ChatCommandService', () => {
     expect(chats.updateChat).not.toHaveBeenCalled();
   });
 
+  it('requires bypass permission to be explicit when inherited bypass is rejected', async () => {
+    const { service, queue, ledger } = makeService({
+      session: { permissionMode: 'bypassPermissions' },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-inherited-bypass',
+      clientMessageId: 'msg-inherited-bypass',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    })).rejects.toMatchObject({ code: 'EXPLICIT_BYPASS_REQUIRED', status: 422 });
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'agent-run', 'req-inherited-bypass')).toBeNull();
+
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue explicitly',
+      clientRequestId: 'req-explicit-bypass',
+      clientMessageId: 'msg-explicit-bypass',
+      permissionMode: 'bypassPermissions',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    });
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects unsupported explicit modes before creating a command receipt', async () => {
     const { service, queue, ledger } = makeService({
       agents: {

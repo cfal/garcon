@@ -35,6 +35,7 @@ export class GarconHttpError extends CliError {
       errorCode === 'SESSION_NOT_FOUND'
         || errorCode === 'UNSUPPORTED_AGENT'
         || errorCode === 'EXPECTED_AGENT_MISMATCH'
+        || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
         || (phase === 'catalog resolution' && status === 400)
         ? 2
         : 3,

@@ -75,6 +75,7 @@ describe('chat command request parsers', () => {
       model: 'opus',
       expectedAgentId: 'claude',
       tagsToAdd: ['CLI', 'cli', ' Review '],
+      permissionFallbackPolicy: 'require-explicit-bypass',
     });
 
     expect(parsed.permissionMode).toBeUndefined();
@@ -82,6 +83,7 @@ describe('chat command request parsers', () => {
     expect(parsed.agentSettings).toEqual(agentSettings());
     expect(parsed.expectedAgentId).toBe('claude');
     expect(parsed.tagsToAdd).toEqual(['cli', 'review']);
+    expect(parsed.permissionFallbackPolicy).toBe('require-explicit-bypass');
   });
 
   it('rejects partial routing and non-canonical explicit modes', () => {
@@ -97,6 +99,8 @@ describe('chat command request parsers', () => {
       .toThrow('permissionMode is invalid');
     expect(() => parseAgentRunCommandRequest({ ...base, model: 'opus', thinkingMode: 'think-hard' }))
       .toThrow('thinkingMode is invalid');
+    expect(() => parseAgentRunCommandRequest({ ...base, permissionFallbackPolicy: 'inherit' }))
+      .toThrow('permissionFallbackPolicy is invalid');
   });
 
   it('requires distinct request and message identities for steering', () => {

@@ -115,6 +115,7 @@ async function submitResume(
     command: prompt,
     ...(invocation.agentId === undefined ? {} : { expectedAgentId: invocation.agentId }),
     tagsToAdd: ['cli'],
+    permissionFallbackPolicy: 'require-explicit-bypass',
   };
   const needsCatalog = invocation.model !== undefined
     || invocation.permissionMode !== undefined

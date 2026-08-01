@@ -63,6 +63,18 @@ export class SessionCommands {
         422,
       );
     }
+    const effectivePermissionMode = input.permissionMode ?? chat.permissionMode;
+    if (
+      input.permissionFallbackPolicy === 'require-explicit-bypass'
+      && input.permissionMode === undefined
+      && (effectivePermissionMode === 'manualBypass' || effectivePermissionMode === 'bypassPermissions')
+    ) {
+      throw new CommandValidationError(
+        'EXPLICIT_BYPASS_REQUIRED',
+        `Persisted permission mode ${effectivePermissionMode} requires an explicit override`,
+        422,
+      );
+    }
     if (input.agentSettings !== undefined && input.agentSettings.ownerId !== chat.agentId) {
       throw new CommandValidationError(
         'VALIDATION_FAILED',
@@ -118,6 +130,7 @@ export class SessionCommands {
       options: runOptionsForCommand(input),
       expectedAgentId: input.expectedAgentId,
       tagsToAdd: input.tagsToAdd,
+      permissionFallbackPolicy: input.permissionFallbackPolicy,
     });
     if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
     return result;

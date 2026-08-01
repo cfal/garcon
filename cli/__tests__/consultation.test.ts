@@ -115,6 +115,7 @@ describe('runConsultation', () => {
     expect(testClient.runs[0]).toEqual({
       clientRequestId: 'request', clientMessageId: 'request', chatId: CHAT_ID,
       command: 'Continue', tagsToAdd: ['cli'],
+      permissionFallbackPolicy: 'require-explicit-bypass',
     });
   });
 

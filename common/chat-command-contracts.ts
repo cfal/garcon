@@ -48,6 +48,7 @@ export type CommandErrorCode = Extract<
   | 'GOAL_CONTROL_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
   | 'EXPECTED_AGENT_MISMATCH'
+  | 'EXPLICIT_BYPASS_REQUIRED'
   | 'INCOMPLETE_EXECUTION_CONFIG'
   | 'OPERATION_UNSUPPORTED'
   | 'SOURCE_REVISION_CHANGED'
@@ -143,6 +144,7 @@ export interface AgentRunCommandRequest {
   modelProtocol?: ApiProtocol | null;
   expectedAgentId?: string;
   tagsToAdd?: string[];
+  permissionFallbackPolicy?: 'require-explicit-bypass';
 }
 
 export interface ForkRunCommandRequest {
@@ -446,6 +448,14 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
   const thinkingMode = optionalThinkingMode(body.thinkingMode);
   const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
   const expectedAgentId = optionalNonEmptyString(body, 'expectedAgentId');
+  const permissionFallbackPolicy = body.permissionFallbackPolicy;
+  if (
+    permissionFallbackPolicy !== undefined
+    && permissionFallbackPolicy !== null
+    && permissionFallbackPolicy !== 'require-explicit-bypass'
+  ) {
+    throw new CommandRequestValidationError('permissionFallbackPolicy is invalid');
+  }
   let tagsToAdd: string[] | undefined;
   if (body.tagsToAdd !== undefined && body.tagsToAdd !== null) {
     if (!Array.isArray(body.tagsToAdd)) {
@@ -468,6 +478,9 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
     ...(modelProtocol === undefined ? {} : { modelProtocol }),
     ...(expectedAgentId === undefined ? {} : { expectedAgentId }),
     ...(tagsToAdd === undefined ? {} : { tagsToAdd }),
+    ...(permissionFallbackPolicy === 'require-explicit-bypass'
+      ? { permissionFallbackPolicy }
+      : {}),
   };
 }
 

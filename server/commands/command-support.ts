@@ -167,6 +167,7 @@ export interface NormalizedSubmitRunInput {
   options: RunAgentTurnOptions;
   expectedAgentId?: string;
   tagsToAdd?: string[];
+  permissionFallbackPolicy?: 'require-explicit-bypass';
 }
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
@@ -502,5 +503,6 @@ function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): R
     modelProtocol: input.options?.modelProtocol,
     expectedAgentId: input.expectedAgentId,
     tagsToAdd: input.tagsToAdd,
+    permissionFallbackPolicy: input.permissionFallbackPolicy,
   };
 }
