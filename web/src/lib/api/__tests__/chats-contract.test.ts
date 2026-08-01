@@ -73,6 +73,30 @@ describe('chats API contract', () => {
 		};
 	}
 
+	function chatEntry(id: string) {
+		return {
+			id,
+			agentId: 'claude',
+			model: 'opus',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			agentSettings: CLAUDE_SETTINGS,
+			title: 'Chat',
+			projectPath: '/project',
+			effectiveProjectKey: '/project',
+			orderGroup: 'normal',
+			tags: [],
+			activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+			preview: { lastMessage: '' },
+			isPinned: false,
+			isArchived: false,
+			isActive: false,
+			isProcessing: true,
+			processingPhase: 'running',
+			isUnread: false,
+		};
+	}
+
 	beforeEach(() => {
 		fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);
@@ -199,7 +223,8 @@ describe('chats API contract', () => {
 	});
 
 	it('startChat sends POST with correct shape', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true, chatId: 'c-1' }));
+		const payload = { success: true, chatId: 'c-1', chat: chatEntry('c-1') };
+		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await startChat({
 			clientRequestId: 'req-start-1',
@@ -214,7 +239,7 @@ describe('chats API contract', () => {
 			command: 'hello',
 		});
 
-		expect(result).toEqual({ success: true, chatId: 'c-1' });
+		expect(result).toEqual(payload);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/start');
 		expect(opts.method).toBe('POST');
@@ -234,7 +259,7 @@ describe('chats API contract', () => {
 	});
 
 	it('startChat forwards top-level images and explicit tags', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, chat: chatEntry('c-2') }));
 		const images = [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }];
 
 		await startChat({
@@ -261,6 +286,35 @@ describe('chats API contract', () => {
 		expect(body.tags).toEqual(['fast']);
 	});
 
+	it('startChat rejects a recovered response after the chat was deleted', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			success: true,
+			commandType: 'chat-start',
+			clientRequestId: 'req-deleted',
+			chatId: 'c-deleted',
+			turnId: 'turn-deleted',
+			status: 'duplicate',
+			acceptedAt: '2026-08-01T00:00:00.000Z',
+			chat: null,
+		}));
+
+		await expect(startChat({
+			clientRequestId: 'req-deleted',
+			clientMessageId: 'msg-deleted',
+			chatId: 'c-deleted',
+			agentId: 'claude',
+			projectPath: '/project',
+			model: 'opus',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			agentSettings: CLAUDE_SETTINGS,
+			command: 'hello',
+		})).rejects.toMatchObject({
+			status: 410,
+			errorCode: 'SESSION_NOT_FOUND',
+		});
+	});
+
 	it('generateChatTitle sends POST /api/v1/chats/title/generate', async () => {
 		const payload = { success: true as const, chatId: 'chat-1', title: 'Generated Title' };
 		fetchMock.mockResolvedValue(jsonResponse(payload));
@@ -283,7 +337,7 @@ describe('chats API contract', () => {
 	});
 
 	it('startChat normalizes invalid mode values before sending the request', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, chat: chatEntry('c-3') }));
 
 		await startChat({
 			clientRequestId: 'req-start-3',

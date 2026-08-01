@@ -1,6 +1,6 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
-import { apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
+import { ApiError, apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizePermissionMode,
@@ -152,13 +152,23 @@ export async function setLastSelectedChat(
 }
 
 /** Starts a new chat session. */
-export async function startChat(params: StartChatParams): Promise<StartChatCommandResponse> {
+export async function startChat(
+	params: StartChatParams,
+): Promise<StartChatCommandResponse & { chat: ChatListEntry }> {
 	const { permissionMode, thinkingMode, ...rest } = params;
-	return apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
+	const response = await apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
 		...rest,
 		permissionMode: normalizePermissionMode(permissionMode),
 		thinkingMode: normalizeThinkingMode(thinkingMode),
 	});
+	if (!response.chat) {
+		throw new ApiError(
+			410,
+			'The chat was deleted before the recovered start response was received',
+			'SESSION_NOT_FOUND',
+		);
+	}
+	return { ...response, chat: response.chat };
 }
 
 export async function runChat(params: AgentRunCommandRequest): Promise<CommandAcceptedResponse> {

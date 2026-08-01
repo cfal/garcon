@@ -949,8 +949,8 @@ describe('ChatCommandService', () => {
     expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
   });
 
-  it('replays the original accepted start after its chat was deleted', async () => {
-    const { service, queue, sessions } = makeService({ session: null });
+  it('replays accepted start identity without retaining a deleted chat projection', async () => {
+    const { service, queue, sessions, chatListProjector } = makeService({ session: null });
     const input = {
       chatId: TARGET_CHAT_ID,
       agentId: 'claude',
@@ -964,11 +964,13 @@ describe('ChatCommandService', () => {
 
     const first = await service.submitStart(input);
     sessions.delete(TARGET_CHAT_ID);
+    chatListProjector.buildOne.mockResolvedValueOnce(null);
     const replay = await service.submitStart(input);
 
     expect(replay).toEqual({
       ...first,
       status: 'duplicate',
+      chat: null,
     });
     expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
   });

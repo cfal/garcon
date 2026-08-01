@@ -392,7 +392,7 @@ export class CommandSupport {
   }
 
   async projectCommandChat(chatId: string): Promise<import('../../common/chat-list.js').ChatListEntry> {
-    const chat = await this.deps.chatListProjector.buildOne(chatId);
+    const chat = await this.projectCommandChatIfPresent(chatId);
     if (chat) return chat;
     throw new CommandValidationError(
       'INTERNAL_ERROR',
@@ -400,6 +400,12 @@ export class CommandSupport {
       500,
       true,
     );
+  }
+
+  projectCommandChatIfPresent(
+    chatId: string,
+  ): Promise<import('../../common/chat-list.js').ChatListEntry | null> {
+    return this.deps.chatListProjector.buildOne(chatId);
   }
 
   async submitHttpRun(

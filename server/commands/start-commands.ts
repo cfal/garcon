@@ -225,7 +225,6 @@ export class StartCommands {
       turnId,
     });
     const chat = await this.support.projectCommandChat(input.chatId);
-    await this.deps.ledger.retainStartChatProjection(ledger.record.key, chat);
     return {
       ...agentTurnResultFromRecord(accepted ?? ledger.record),
       chat,
@@ -263,8 +262,7 @@ export class StartCommands {
   private async replayedStart(record: CommandLedgerRecord): Promise<StartChatCommandResponse> {
     return {
       ...agentTurnResultFromRecord(record, 'duplicate'),
-      chat: record.startChatProjection
-        ?? await this.support.projectCommandChat(record.chatId),
+      chat: await this.support.projectCommandChatIfPresent(record.chatId),
     };
   }
 

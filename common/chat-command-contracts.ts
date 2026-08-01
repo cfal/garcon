@@ -85,7 +85,7 @@ export interface AgentTurnCommandResponse extends CommandAcceptedResponse {
 }
 
 export interface StartChatCommandResponse extends AgentTurnCommandResponse {
-  chat: ChatListEntry;
+  chat: ChatListEntry | null;
 }
 
 export interface ForkChatResponse {

@@ -20,6 +20,7 @@ import type {
 	SteerCommandResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
+import type { ChatListEntry } from '$shared/chat-list';
 import { createClientCommandId } from './client-command-id.js';
 import { submitIdempotentCommand } from './idempotent-command.js';
 
@@ -32,7 +33,7 @@ export interface PreparedAcceptedInput<T> {
 type InputFactory<T> = T | (() => T);
 
 export interface AcceptedInputTransport {
-	start(request: StartChatParams): Promise<StartChatCommandResponse>;
+	start(request: StartChatParams): Promise<StartChatCommandResponse & { chat: ChatListEntry }>;
 	run(request: AgentRunCommandRequest): Promise<CommandAcceptedResponse>;
 	fork(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse>;
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;

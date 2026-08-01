@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import type { ChatStopOutcome } from '../../common/chat-types.js';
-import type { ChatListEntry } from '../../common/chat-list.js';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -42,7 +41,6 @@ export interface CommandLedgerRecord {
     | 'expired';
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
-  startChatProjection?: ChatListEntry;
 }
 
 type SteerCommandTombstone = Omit<
@@ -169,9 +167,6 @@ function cloneRecord(record: CommandLedgerRecord): CommandLedgerRecord {
     payload: { ...record.payload },
     ...(record.forkPreparation ? { forkPreparation: { ...record.forkPreparation } } : {}),
     ...(record.assistantMessages ? { assistantMessages: [...record.assistantMessages] } : {}),
-    ...(record.startChatProjection
-      ? { startChatProjection: structuredClone(record.startChatProjection) }
-      : {}),
   };
 }
 
@@ -221,17 +216,6 @@ export class CommandLedger {
     if (!key) return null;
     const record = this.#records.get(key);
     return record ? cloneRecord(record) : null;
-  }
-
-  async retainStartChatProjection(
-    key: string,
-    chat: ChatListEntry,
-  ): Promise<CommandLedgerRecord | null> {
-    const record = this.#records.get(key);
-    if (!record) return null;
-    record.startChatProjection = structuredClone(chat);
-    record.updatedAt = new Date().toISOString();
-    return cloneRecord(record);
   }
 
   async appendAssistantMessages(
