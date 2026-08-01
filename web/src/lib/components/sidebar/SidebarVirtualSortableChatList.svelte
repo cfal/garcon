@@ -289,25 +289,26 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 		};
 	});
 
+	function clearDragPresentation(): void {
+		activeDrop = null;
+		draggingChatId = null;
+		lastValidDrop = null;
+	}
+
 	function startSidebarDrag(row: SidebarVirtualChatRow): void {
 		if (!dragEnabled) return;
+		clearDragPresentation();
 		draggingChatId = row.chat.id;
-		activeDrop = null;
-		lastValidDrop = null;
 		reorder.begin(row.list, row.chat.id, { ids: row.reorderScopeIds });
 		splitLayout.startDrag(row.chat.id);
 	}
 
 	function cancelUnmountedDragSource(chatId: string): void {
-		if (draggingChatId !== chatId) return;
-
-		const activeList = reorder.activeList;
-		if (activeList) reorder.cancel(activeList);
-		if (touchDrag?.sourceChatId === chatId) clearTouchDrag();
-
-		activeDrop = null;
-		draggingChatId = null;
-		lastValidDrop = null;
+		const isTouchSource = touchDrag?.sourceChatId === chatId;
+		if (draggingChatId !== chatId && !isTouchSource) return;
+		if (isTouchSource) return cancelTouchDrag();
+		if (reorder.activeList) reorder.cancel(reorder.activeList);
+		clearDragPresentation();
 		if (splitLayout.draggedChatId === chatId) splitLayout.endDrag();
 	}
 
@@ -491,9 +492,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 			reorder.cancel(sourceData.list);
 		}
 
-		activeDrop = null;
-		draggingChatId = null;
-		lastValidDrop = null;
+		clearDragPresentation();
 		setTimeout(() => {
 			if (splitLayout.draggedChatId === sourceData.chatId) {
 				splitLayout.endDrag();
@@ -700,9 +699,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 				splitLayout.endDrag();
 			}
 		}
-		activeDrop = null;
-		draggingChatId = null;
-		lastValidDrop = null;
+		clearDragPresentation();
 		clearTouchDrag();
 	}
 
@@ -711,9 +708,8 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 		if (!current || current.activated || !dragEnabled) return;
 		current.activated = true;
 		clearDocumentSelection();
+		clearDragPresentation();
 		draggingChatId = current.sourceChatId;
-		activeDrop = null;
-		lastValidDrop = null;
 		reorder.begin(current.sourceList, current.sourceChatId, {
 			ids: chatRowForId(current.sourceChatId)?.reorderScopeIds ?? [current.sourceChatId],
 		});
@@ -805,9 +801,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 		if (splitLayout.draggedChatId === current.sourceChatId) {
 			splitLayout.endDrag();
 		}
-		activeDrop = null;
-		draggingChatId = null;
-		lastValidDrop = null;
+		clearDragPresentation();
 		clearTouchDrag();
 	}
 

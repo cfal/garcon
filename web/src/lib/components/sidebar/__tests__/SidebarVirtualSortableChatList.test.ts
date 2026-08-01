@@ -712,6 +712,40 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(persist).not.toHaveBeenCalled();
 	});
 
+	it('cancels a pending touch drag when virtualization unmounts its source', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(500),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		if (!row0) throw new Error('expected source row to be rendered');
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		expect(document.body.style.getPropertyValue('user-select')).toBe('none');
+
+		viewport.scrollTop = rowHeight * 120;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(row0.isConnected).toBe(false);
+		expect(document.body.style.getPropertyValue('user-select')).toBe('');
+		vi.advanceTimersByTime(370);
+		await tick();
+		expect(document.querySelector('.opacity-45')).toBeNull();
+		expect(persist).not.toHaveBeenCalled();
+	});
+
 	it('keeps an active touch drag when virtualization unmounts another row', async () => {
 		vi.useFakeTimers();
 
