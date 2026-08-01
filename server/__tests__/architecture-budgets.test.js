@@ -24,10 +24,11 @@ const MAX_LINES = 1000;
 // provider file context outside the command lock without changing transcript content.
 // The fifth review adds 7 lines for a separate FIFO steering preparation lock.
 // The sixth review adds 33 lines for time and resource bounds on uncancellable file reads.
-// Turn receipts add a separately reviewed 425-line ledger, projection, result
-// budget, terminal-race handling, ordered deletion publication, replay-safe
-// admission, and atomic resume-admission increment for the consultation CLI.
-const EXECUTION_FOOTPRINT_BUDGET = 7790;
+// Turn receipts and their adversarial correctness fixes add a separately reviewed
+// 544-line ledger, projection, result budget, terminal-race handling, ordered
+// deletion publication, replay-safe admission, and atomic resume-admission
+// increment for the consultation CLI.
+const EXECUTION_FOOTPRINT_BUDGET = 7909;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
