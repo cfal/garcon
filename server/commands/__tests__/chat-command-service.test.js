@@ -2670,6 +2670,71 @@ describe('ChatCommandService', () => {
     ]);
   });
 
+  it('bounds stalled steering file preparation and skips additional uncancellable reads', async () => {
+    const resolutionStarted = deferred();
+    const releaseResolution = deferred();
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const deliveries = [];
+    const { service, queue, fileMentions } = makeService({
+      fileMentions: {
+        resolve: mock(async () => {
+          resolutionStarted.resolve();
+          await releaseResolution.promise;
+          return 'late expanded context';
+        }),
+      },
+      queue: {
+        captureSteerTarget: mock(() => target),
+        deliverAcceptedSteer: mock(async (input) => {
+          deliveries.push({
+            clientRequestId: input.command.clientRequestId,
+            providerContent: input.providerContent,
+          });
+          await input.settlement.markScheduled(input.command, target.identity.turnId);
+          await input.settlement.settleSteerSuccess(input.command, target.identity.turnId);
+          return { turnId: target.identity.turnId };
+        }),
+      },
+    });
+    const firstInput = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'first @stalled.txt',
+      clientRequestId: 'request-steer-stalled-first',
+      clientMessageId: 'message-steer-stalled-first',
+    };
+
+    const first = service.submitSteer(firstInput);
+    await resolutionStarted.promise;
+    const duplicate = service.submitSteer(firstInput);
+    const later = service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'later without mentions',
+      clientRequestId: 'request-steer-after-stall',
+      clientMessageId: 'message-steer-after-stall',
+    });
+
+    const results = await Promise.all([first, duplicate, later]);
+    releaseResolution.resolve();
+
+    expect(results).toEqual([
+      expect.objectContaining({ status: 'accepted', turnId: 'turn-active' }),
+      expect.objectContaining({ status: 'duplicate', turnId: 'turn-active' }),
+      expect.objectContaining({ status: 'accepted', turnId: 'turn-active' }),
+    ]);
+    expect(fileMentions.resolve).toHaveBeenCalledTimes(1);
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(2);
+    expect(deliveries).toEqual([
+      {
+        clientRequestId: 'request-steer-stalled-first',
+        providerContent: 'first @stalled.txt',
+      },
+      {
+        clientRequestId: 'request-steer-after-stall',
+        providerContent: 'later without mentions',
+      },
+    ]);
+  });
+
   it('records session deletion while steering waits for the chat mutation lock', async () => {
     const lock = new KeyedPromiseLock();
     const entered = deferred();

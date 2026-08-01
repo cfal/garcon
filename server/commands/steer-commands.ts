@@ -6,6 +6,7 @@ import type {
 import { DomainError, SteerDeliveryError } from '../lib/domain-error.ts';
 import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import { createLogger, type Logger } from '../lib/log.ts';
+import { PromiseTimeoutError, withPromiseTimeout } from '../lib/promise-timeout.ts';
 import {
   SteerIdentityCapacityError,
   type LedgerAcceptResult,
@@ -20,10 +21,13 @@ import {
 const logger = createLogger('commands:steer');
 const STEER_CAPACITY_EXHAUSTED_MESSAGE =
   'Steering is temporarily unavailable because the server has retained its maximum number of steering identities';
+const STEER_FILE_CONTEXT_TIMEOUT_MS = 2_000;
+const STEER_FILE_CONTEXT_IN_FLIGHT_LIMIT = 8;
 
 export class SteerCommands {
   // Preserves steering admission order without holding the command lock during file reads.
   readonly #preparationLocks = new KeyedPromiseLock();
+  readonly #fileContextResolutions = new Map<string, Promise<string>>();
 
   constructor(private readonly support: CommandSupport) {}
 
@@ -129,9 +133,7 @@ export class SteerCommands {
         };
       });
       const scheduled = await this.#preparationLocks.runExclusive(`chat:${input.chatId}`, async () => {
-        providerContent = initialChat
-          ? await this.deps.fileMentions.resolve(input.content, initialChat.projectPath)
-          : input.content;
+        providerContent = await this.#resolveProviderContent(input, initialChat?.projectPath);
         // Enqueues the command lock before releasing steering preparation order.
         return { response: scheduleResponse() };
       });
@@ -151,6 +153,40 @@ export class SteerCommands {
         turnId: outcomeTurnId,
       }, { kind: 'failed', error });
       throw error;
+    }
+  }
+
+  async #resolveProviderContent(input: SteerCommandRequest, projectPath?: string): Promise<string> {
+    if (!projectPath) return input.content;
+    if (
+      this.#fileContextResolutions.has(input.chatId)
+      || this.#fileContextResolutions.size >= STEER_FILE_CONTEXT_IN_FLIGHT_LIMIT
+    ) {
+      return input.content;
+    }
+
+    const resolution = this.deps.fileMentions.resolve(input.content, projectPath);
+    this.#fileContextResolutions.set(input.chatId, resolution);
+    const clearResolution = () => {
+      if (this.#fileContextResolutions.get(input.chatId) === resolution) {
+        this.#fileContextResolutions.delete(input.chatId);
+      }
+    };
+    void resolution.then(clearResolution, clearResolution);
+
+    try {
+      return await withPromiseTimeout(
+        resolution,
+        STEER_FILE_CONTEXT_TIMEOUT_MS,
+        'Steering file-context preparation',
+      );
+    } catch (error) {
+      if (!(error instanceof PromiseTimeoutError)) throw error;
+      logger.warn('steer file context timed out', {
+        chatId: input.chatId,
+        clientRequestId: input.clientRequestId,
+      });
+      return input.content;
     }
   }
 

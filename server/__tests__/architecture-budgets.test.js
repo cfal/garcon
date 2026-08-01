@@ -23,7 +23,8 @@ const MAX_LINES = 1000;
 // The fourth review adds 58 lines for post-deletion replay and for resolving
 // provider file context outside the command lock without changing transcript content.
 // The fifth review adds 7 lines for a separate FIFO steering preparation lock.
-const EXECUTION_FOOTPRINT_BUDGET = 7332;
+// The sixth review adds 33 lines for time and resource bounds on uncancellable file reads.
+const EXECUTION_FOOTPRINT_BUDGET = 7365;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
