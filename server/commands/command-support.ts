@@ -128,6 +128,9 @@ export interface ChatViewSeqDep {
   getCursor(chatId: string): { generationId: string; lastSeq: number } | null;
 }
 
+export interface FileMentionResolverDep {
+  resolve(command: string, projectPath: string): Promise<string>;
+}
 
 export interface ChatCommandServiceDeps {
   chats: IChatRegistry;
@@ -140,6 +143,7 @@ export interface ChatCommandServiceDeps {
   metadata: MetadataDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
+  fileMentions: FileMentionResolverDep;
   forkChatFileCopy: ForkChatFileCopyDep;
   carryOver?: CarryOverDep;
   chatIds: Pick<ChatIdAllocator, 'allocate'>;

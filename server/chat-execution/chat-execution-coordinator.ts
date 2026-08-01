@@ -204,8 +204,15 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         deliverGoalControl: (chatId, content, options, beforeDelivery) => (
           this.deliverGoalControlInput(chatId, content, options, beforeDelivery)
         ),
-        steer: (chatId, content, options, target, afterPendingRegistered) => (
-          this.steerInput(chatId, content, options, target, afterPendingRegistered)
+        steer: (chatId, content, providerContent, options, target, afterPendingRegistered) => (
+          this.steerInput(
+            chatId,
+            content,
+            providerContent,
+            options,
+            target,
+            afterPendingRegistered,
+          )
         ),
         hasAppliedCreate: (chatId, commandKey, entryId) => (
           this.hasAppliedQueueCreateCommand(chatId, commandKey, entryId)
@@ -421,6 +428,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   async steerInput(
     chatId: string,
     content: string,
+    providerContent: string,
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
@@ -428,6 +436,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#steerInputDelivery.deliver(
       chatId,
       content,
+      providerContent,
       options,
       target,
       afterPendingRegistered,

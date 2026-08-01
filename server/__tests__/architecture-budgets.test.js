@@ -20,7 +20,9 @@ const MAX_LINES = 1000;
 // adversarial-review corrections add 191 lines for bounded identity retention,
 // bounded correlation IDs, constant-time conflict lookup, deletion revalidation,
 // opaque provider targets, and complete command-outcome telemetry.
-const EXECUTION_FOOTPRINT_BUDGET = 7267;
+// The fourth review adds 58 lines for post-deletion replay and for resolving
+// provider file context outside the command lock without changing transcript content.
+const EXECUTION_FOOTPRINT_BUDGET = 7325;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

@@ -1282,6 +1282,7 @@ describe('orchestration', () => {
       await expect(orchQueue.steerInput(
         'c1',
         'focus here',
+        'focus here\n\nresolved context',
         { clientRequestId: 'request-steer', clientMessageId: 'message-steer' },
         target,
         async (turnId) => { events.push(`scheduled:${turnId}`); },
@@ -1290,7 +1291,7 @@ describe('orchestration', () => {
       expect(events).toEqual(['scheduled:turn-active', 'delivered']);
       expect(mockAgents.steerInput).toHaveBeenCalledWith(
         'c1',
-        'focus here',
+        'focus here\n\nresolved context',
         expect.objectContaining({ clientRequestId: 'request-steer' }),
         target.providerTarget,
         expect.any(Function),
@@ -1334,6 +1335,7 @@ describe('orchestration', () => {
       await expect(orchQueue.steerInput(
         'c1',
         'stale steer',
+        'stale steer',
         { clientRequestId: 'request-steer', clientMessageId: 'message-steer' },
         target,
         async () => undefined,
@@ -1358,6 +1360,7 @@ describe('orchestration', () => {
 
       await expect(orchQueue.steerInput(
         'c1',
+        'focus here',
         'focus here',
         { clientRequestId: 'request-steer', clientMessageId: 'message-steer' },
         target,

@@ -45,6 +45,7 @@ export class SteerInputDelivery {
   async deliver(
     chatId: string,
     content: string,
+    providerContent: string,
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
@@ -55,7 +56,7 @@ export class SteerInputDelivery {
     try {
       result = await this.options.turnRunner.steerInput(
         chatId,
-        content,
+        providerContent,
         options,
         target.providerTarget,
         async () => {

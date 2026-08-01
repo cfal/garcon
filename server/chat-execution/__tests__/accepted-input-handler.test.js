@@ -318,7 +318,14 @@ describe('AcceptedInputHandler', () => {
       settleSteerSuccess: mock(async () => { events.push('settled'); }),
     });
     const { handler, m } = scaffold({
-      steer: mock(async (_chatId, _content, _options, _target, beforeDelivery) => {
+      steer: mock(async (
+        _chatId,
+        _content,
+        _providerContent,
+        _options,
+        _target,
+        beforeDelivery,
+      ) => {
         await beforeDelivery('turn-current');
         events.push('delivered');
         return { turnId: 'turn-current' };
@@ -328,12 +335,21 @@ describe('AcceptedInputHandler', () => {
     await expect(handler.steer({
       command: command({ turnId: undefined, entryId: undefined }),
       content: 'focus here',
+      providerContent: 'focus here\n\nresolved context',
       clientMessageId: 'message-steer',
       target: { attempt: {}, identity: { turnId: 'turn-current' } },
       settlement: settle,
     })).resolves.toEqual({ turnId: 'turn-current' });
 
     expect(events).toEqual(['scheduled', 'delivered', 'settled']);
+    expect(m.steer).toHaveBeenCalledWith(
+      'chat-1',
+      'focus here',
+      'focus here\n\nresolved context',
+      expect.any(Object),
+      expect.any(Object),
+      expect.any(Function),
+    );
     expect(m.stageGoalControlFallback).not.toHaveBeenCalled();
     expect(m.create).not.toHaveBeenCalled();
   });

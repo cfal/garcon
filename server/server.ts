@@ -15,6 +15,7 @@ import {
 } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
+import { resolveFileMentionsInCommand } from './chats/file-mentions.js';
 import { wireServerEvents } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
@@ -468,6 +469,7 @@ export async function startServer(): Promise<void> {
       metadata,
       agents: agentRegistry,
       pendingInputs,
+      fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
       carryOver,
       chatIds,

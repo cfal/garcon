@@ -227,7 +227,7 @@ export class AgentRuntimeRouter {
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       target,
-      input: await resolveFileMentionsInCommand(input, entry.projectPath),
+      input,
       clientMessageId: options.clientMessageId,
       prepareDelivery,
     });

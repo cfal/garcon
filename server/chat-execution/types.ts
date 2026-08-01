@@ -182,6 +182,7 @@ export interface CapturedSteerTarget {
 export interface AcceptedSteerInput {
   command: AcceptedExecutionCommand;
   content: string;
+  providerContent: string;
   clientMessageId: string;
   target: CapturedSteerTarget;
   settlement: CommandSettlementPort;
@@ -406,6 +407,7 @@ export interface ChatExecutionService
   steerInput(
     chatId: string,
     content: string,
+    providerContent: string,
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,

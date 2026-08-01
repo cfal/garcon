@@ -553,6 +553,9 @@ function makeService(overrides = {}) {
   const idleReconciler = overrides.idleReconciler ?? {
     ensureReconciled: mock(async () => undefined),
   };
+  const fileMentions = overrides.fileMentions ?? {
+    resolve: mock(async (command) => command),
+  };
   const service = new ChatCommandService({
     chats,
     queue,
@@ -566,6 +569,7 @@ function makeService(overrides = {}) {
     metadata,
     agents,
     pendingInputs,
+    fileMentions,
     chatIds: overrides.chatIds ?? new ChatIdAllocator(chats),
     chatListProjector,
     pathCache,
@@ -584,6 +588,7 @@ function makeService(overrides = {}) {
     settings,
     agents,
     pendingInputs,
+    fileMentions,
     forkChatFileCopy,
     ledger,
     sessions,
@@ -2497,6 +2502,46 @@ describe('ChatCommandService', () => {
     await held;
     expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
       target: initialTarget,
+    }));
+  });
+
+  it('resolves steering file context without holding the chat mutation lock', async () => {
+    const resolutionStarted = deferred();
+    const releaseResolution = deferred();
+    const lock = new KeyedPromiseLock();
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const fileMentions = {
+      resolve: mock(async () => {
+        resolutionStarted.resolve();
+        await releaseResolution.promise;
+        return 'focus here\n\nresolved context';
+      }),
+    };
+    const { service, queue } = makeService({
+      chatMutationLock: lock,
+      fileMentions,
+      queue: { captureSteerTarget: mock(() => target) },
+    });
+
+    const steering = service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'focus @notes.txt',
+      clientRequestId: 'request-steer-context',
+      clientMessageId: 'message-steer-context',
+    });
+    await resolutionStarted.promise;
+
+    await expect(service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-stop-during-context',
+    })).resolves.toMatchObject({ status: 'accepted' });
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+
+    releaseResolution.resolve();
+    await expect(steering).resolves.toMatchObject({ turnId: 'turn-active' });
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'focus @notes.txt',
+      providerContent: 'focus here\n\nresolved context',
     }));
   });
 

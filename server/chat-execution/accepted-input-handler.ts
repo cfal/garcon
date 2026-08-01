@@ -57,6 +57,7 @@ export interface AcceptedInputCoordinator {
   steer(
     chatId: string,
     content: string,
+    providerContent: string,
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
@@ -280,6 +281,7 @@ export class AcceptedInputHandler {
       const outcome = await this.#coordinator.steer(
         input.command.chatId,
         input.content,
+        input.providerContent,
         {
           clientRequestId: input.command.clientRequestId,
           clientMessageId: input.clientMessageId,

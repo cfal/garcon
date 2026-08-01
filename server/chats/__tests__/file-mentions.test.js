@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -74,5 +74,36 @@ describe('resolveFileMentionsInCommand', () => {
     const resolved = await resolveFileMentionsInCommand('read @src/main.ts', projectPath);
 
     expect(stripResolvedFileMentionContext(resolved)).toBe('read @src/main.ts');
+  });
+
+  it('reads only the configured prefix of a large mentioned file', async () => {
+    const largePath = path.join(projectPath, 'large.txt');
+    const handle = await fs.open(largePath, 'w');
+    await handle.truncate(16 * 1024 * 1024);
+    await handle.write(Buffer.from(`prefix contents${'a'.repeat(4096)}`), 0, 4096, 0);
+    await handle.close();
+
+    const originalOpen = fs.open.bind(fs);
+    let largestReadBuffer = 0;
+    const open = spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const file = await originalOpen(...args);
+      const originalRead = file.read.bind(file);
+      file.read = async (buffer, ...readArgs) => {
+        largestReadBuffer = Math.max(largestReadBuffer, buffer.byteLength);
+        return originalRead(buffer, ...readArgs);
+      };
+      return file;
+    });
+
+    try {
+      const resolved = await resolveFileMentionsInCommand('read @large.txt', projectPath);
+
+      expect(resolved).toContain('prefix contents');
+      expect(resolved).toContain('Garcon truncated this file at 131072 bytes.');
+      expect(largestReadBuffer).toBeGreaterThan(0);
+      expect(largestReadBuffer).toBeLessThanOrEqual(128 * 1024 + 1);
+    } finally {
+      open.mockRestore();
+    }
   });
 });

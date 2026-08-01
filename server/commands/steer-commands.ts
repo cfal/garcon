@@ -47,9 +47,12 @@ export class SteerCommands {
         clientMessageId,
       },
     };
-    let outcomeTurnId: string | undefined;
+    let outcomeTurnId = target?.identity.turnId;
 
     try {
+      const providerContent = initialChat
+        ? await this.deps.fileMentions.resolve(input.content, initialChat.projectPath)
+        : input.content;
       const response = await this.support.withChatMutationLock(input.chatId, async () => {
         if (!initialChat) {
           const observed = await this.deps.ledger.observe(ledgerInput);
@@ -111,6 +114,7 @@ export class SteerCommands {
         const outcome = await this.deps.queue.deliverAcceptedSteer({
           command,
           content: input.content,
+          providerContent,
           clientMessageId,
           target,
           settlement: this.support.settlement,

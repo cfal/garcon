@@ -92,6 +92,7 @@ export function createRouteCommandService({
     agents,
     ledger: commandLedger,
     pendingInputs,
+    fileMentions: { resolve: async (command) => command },
     ownership: {
       delete: async (chatId) => {
         if (!registry.getChat(chatId)) return false;

@@ -285,7 +285,7 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       chatId: 'chat-1',
       agentSessionId: 'native-1',
       target: providerTarget,
-      input: expect.stringContaining('USER FILE BODY'),
+      input: 'review @notes.txt',
       clientMessageId: 'message-steer',
       prepareDelivery,
     }));

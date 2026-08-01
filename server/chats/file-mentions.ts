@@ -110,6 +110,39 @@ function formatFileSection(relativePath: string, content: string, truncated: boo
 	return `@${relativePath}\n${fence}\n${content}${suffix}\n${fence}`;
 }
 
+async function readFilePrefix(filePath: string, contentLimit: number): Promise<{
+	buffer: Buffer;
+	contentLength: number;
+	truncated: boolean;
+} | null> {
+	const readLimit = Math.max(BINARY_SAMPLE_BYTES, contentLimit + 1);
+	const handle = await fs.open(filePath, 'r').catch(() => null);
+	if (!handle) return null;
+	try {
+		const buffer = Buffer.allocUnsafe(readLimit);
+		let bytesRead = 0;
+		while (bytesRead < readLimit) {
+			const result = await handle.read(
+				buffer,
+				bytesRead,
+				readLimit - bytesRead,
+				bytesRead,
+			);
+			if (result.bytesRead === 0) break;
+			bytesRead += result.bytesRead;
+		}
+		return {
+			buffer: buffer.subarray(0, bytesRead),
+			contentLength: Math.min(bytesRead, contentLimit),
+			truncated: bytesRead > contentLimit,
+		};
+	} catch {
+		return null;
+	} finally {
+		await handle.close().catch(() => undefined);
+	}
+}
+
 export async function resolveFileMentionsInCommand(command: string, projectPath: string): Promise<string> {
 	if (!command.includes('@') || !projectPath) return command;
 
@@ -133,22 +166,21 @@ export async function resolveFileMentionsInCommand(command: string, projectPath:
 	let totalBytes = 0;
 	for (const filePath of resolvedFiles) {
 		const relativePath = displayPath(realProjectPath, filePath);
-		const buffer = await fs.readFile(filePath).catch(() => null);
-		if (!buffer) continue;
-		if (isProbablyBinary(buffer)) {
-			sections.push(`@${relativePath}\n[Garcon omitted this binary file.]`);
-			continue;
-		}
 		if (totalBytes >= MAX_TOTAL_BYTES) {
 			sections.push(`@${relativePath}\n[Garcon omitted this file because the @file context limit was reached.]`);
 			continue;
 		}
 		const remainingBytes = MAX_TOTAL_BYTES - totalBytes;
-		const allowedBytes = Math.min(buffer.length, MAX_FILE_BYTES, remainingBytes);
-		const truncated = buffer.length > allowedBytes;
-		const content = buffer.subarray(0, allowedBytes).toString('utf8');
-		totalBytes += allowedBytes;
-		sections.push(formatFileSection(relativePath, content, truncated));
+		const allowedBytes = Math.min(MAX_FILE_BYTES, remainingBytes);
+		const prefix = await readFilePrefix(filePath, allowedBytes);
+		if (!prefix) continue;
+		if (isProbablyBinary(prefix.buffer)) {
+			sections.push(`@${relativePath}\n[Garcon omitted this binary file.]`);
+			continue;
+		}
+		const content = prefix.buffer.subarray(0, prefix.contentLength).toString('utf8');
+		totalBytes += prefix.contentLength;
+		sections.push(formatFileSection(relativePath, content, prefix.truncated));
 	}
 
 	if (sections.length === 0) return command;
