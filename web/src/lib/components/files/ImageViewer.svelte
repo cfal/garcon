@@ -140,7 +140,6 @@
 	$effect(() => {
 		const viewport = viewportElement;
 		if (!viewport) return;
-		let restored = false;
 		correctingScroll = true;
 		const observer = new ResizeObserver(() => {
 			if (session.image.mode === 'fit') fitToWindow();
@@ -153,20 +152,13 @@
 			if (session.image.mode === 'fit') fitToWindow();
 			else restoreSavedManualFocalPoint();
 			scheduleScrollRelease();
-			restored = true;
 		});
+		// Scroll events persist offsets before detached browser viewports report zero.
 		return () => {
 			cancelAnimationFrame(frame);
 			cancelPendingManualZoom();
 			if (scrollReleaseFrame !== null) cancelAnimationFrame(scrollReleaseFrame);
 			observer.disconnect();
-			if (restored) {
-				session.image = {
-					...session.image,
-					scrollLeft: viewport.scrollLeft,
-					scrollTop: viewport.scrollTop,
-				};
-			}
 		};
 	});
 </script>

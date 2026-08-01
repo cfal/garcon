@@ -25,16 +25,12 @@
 	$effect(() => {
 		const element = contentElement;
 		if (!element) return;
-		let restored = false;
 		const frame = requestAnimationFrame(() => {
 			element.scrollLeft = session.markdownScrollLeft;
 			element.scrollTop = session.markdownScrollTop;
-			restored = true;
 		});
-		return () => {
-			cancelAnimationFrame(frame);
-			if (restored) captureScroll(element);
-		};
+		// Scroll events persist offsets before detached browser elements report zero.
+		return () => cancelAnimationFrame(frame);
 	});
 
 	function captureScroll(element: HTMLDivElement): void {

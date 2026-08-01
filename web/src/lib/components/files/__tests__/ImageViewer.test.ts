@@ -3,6 +3,7 @@ import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ImageViewer from '../ImageViewer.svelte';
 import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
+import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js';
 
 describe('ImageViewer', () => {
 	afterEach(() => {
@@ -50,6 +51,7 @@ describe('ImageViewer', () => {
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 		const firstViewport = screen.getByRole('img').closest('.overflow-auto') as HTMLDivElement;
+		emulateDetachedScrollReset(firstViewport);
 		expect(firstViewport.scrollLeft).toBe(31);
 		expect(firstViewport.scrollTop).toBe(79);
 		firstViewport.scrollLeft = 47;
