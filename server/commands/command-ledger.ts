@@ -549,13 +549,14 @@ export class CommandLedger {
   }
 
   #trimRecords(): void {
-    while (this.#records.size > this.#recordLimit) {
-      const oldest = [...this.#records]
-        .find(([, record]) => (
-          TERMINAL_COMMAND_STATUSES.has(record.status)
-          && record.forkPreparation === undefined
-          && (!record.turnId || record.publicTerminalAt !== undefined)
-        ));
+    const evictable = [...this.#records]
+      .filter(([, record]) => (
+        TERMINAL_COMMAND_STATUSES.has(record.status)
+        && record.forkPreparation === undefined
+        && (!record.turnId || record.publicTerminalAt !== undefined)
+      ));
+    while (evictable.length > this.#recordLimit) {
+      const oldest = evictable.shift();
       if (!oldest) return;
       const [key, record] = oldest;
       if (record.commandType === 'steer') {

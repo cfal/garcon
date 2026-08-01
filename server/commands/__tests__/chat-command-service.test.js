@@ -2430,7 +2430,7 @@ describe('ChatCommandService', () => {
     });
 
     const record = await readLedgerRecord(ledger, 'permission-decision', 'req-perm-1');
-    expect(record.payload.response).toEqual(response);
+    expect(record).toMatchObject({ status: 'finished', payload: {} });
   });
 
   it('routes /compact to the agent compaction dispatch', async () => {

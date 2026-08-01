@@ -166,12 +166,19 @@ export class SessionCommands {
     });
     this.support.throwOnConflict(ledger, 'Conflicting permission decision retry');
     if (ledger.kind !== 'duplicate') {
-      this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
-        allow: input.allow,
-        alwaysAllow: input.alwaysAllow,
-        response: input.response,
-      });
-      await this.deps.ledger.update(ledger.record.key, { status: 'scheduled' });
+      try {
+        this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
+          allow: input.allow,
+          alwaysAllow: input.alwaysAllow,
+          response: input.response,
+        });
+        await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
+      } catch (error) {
+        await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     }
     return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
   }

@@ -307,7 +307,7 @@ describe('CommandLedger', () => {
     expect(await ledger.getTurnRecord('chat-1', 'turn-new')).not.toBeNull();
   });
 
-  it('does not count-evict a terminal turn before its public barrier', async () => {
+  it('counts only public terminal records toward the retention limit', async () => {
     const ledger = new CommandLedger(undefined, { recordLimit: 1 });
     const first = await ledger.accept(acceptedInput({
       clientRequestId: 'first',
@@ -325,7 +325,17 @@ describe('CommandLedger', () => {
     expect(privateTerminal.publicTerminalAt).toBeUndefined();
 
     await ledger.markPublicTerminal('chat-1', 'turn-first');
+    expect(await ledger.getTurnRecord('chat-1', 'turn-first')).not.toBeNull();
+
+    const third = await ledger.accept(acceptedInput({
+      clientRequestId: 'third',
+      turnId: 'turn-third',
+    }));
+    await ledger.settleTerminal(third.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-third');
+
     expect(await ledger.getTurnRecord('chat-1', 'turn-first')).toBeNull();
+    expect(await ledger.getTurnRecord('chat-1', 'turn-third')).not.toBeNull();
   });
 
   it('keeps unsettled and fork-preparation records while trimming old terminal records', async () => {
