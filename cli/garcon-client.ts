@@ -120,13 +120,10 @@ function retryAfterMilliseconds(value: string | null): number | null {
 function isAmbiguousSubmissionError(error: unknown): boolean {
   if (error instanceof GarconTransportError) return true;
   if (error instanceof GarconHttpError) {
-    return error.retryable
-      || error.status === 408
+    return error.status === 408
       || error.status === 425
       || error.status === 429
-      || error.status === 502
-      || error.status === 503
-      || error.status === 504;
+      || error.status >= 500;
   }
   return error instanceof CliError && error.phase === 'submission';
 }

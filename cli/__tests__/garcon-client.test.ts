@@ -155,7 +155,7 @@ describe('GarconClient', () => {
     expect(attempts).toBe(3);
   });
 
-  test.each([408, 425])('retries ambiguous HTTP %i responses', async (status) => {
+  test.each([408, 425, 429, 500, 502, 503, 504])('retries ambiguous HTTP %i responses', async (status) => {
     let attempts = 0;
     const client = new GarconClient({
       ...connection,
@@ -193,7 +193,7 @@ describe('GarconClient', () => {
     expect(submissions).toBe(1);
   });
 
-  test('does not retry a terminal admission error', async () => {
+  test('does not confuse a retryable busy admission with an ambiguous outcome', async () => {
     let attempts = 0;
     const client = new GarconClient({
       ...connection,
@@ -203,7 +203,7 @@ describe('GarconClient', () => {
           success: false,
           error: 'Chat is busy',
           errorCode: 'SESSION_BUSY',
-          retryable: false,
+          retryable: true,
         }, { status: 409 });
       },
     });
