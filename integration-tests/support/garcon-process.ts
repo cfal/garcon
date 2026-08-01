@@ -14,6 +14,7 @@ export interface GarconProcessOptions {
   startupTimeoutMs?: number;
   environment?: Record<string, string>;
   redactEnvironmentValues?: boolean;
+  disableAuth?: boolean;
 }
 
 type GarconChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -132,7 +133,7 @@ export class GarconProcess {
         '0',
         '--bind-address',
         '127.0.0.1',
-        '--disable-auth',
+        ...(options.disableAuth === false ? [] : ['--disable-auth']),
         '--config-dir',
         options.configDir,
         ...workspaceArguments,
