@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
-import { CommandLedger, commandLedgerKey } from '../command-ledger.ts';
+import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
 import { UserMessage } from '../../../common/chat-types.js';
 import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
 import {
@@ -2539,6 +2539,105 @@ describe('ChatCommandService', () => {
       status: 'rejected',
       errorCode: 'SESSION_NOT_FOUND',
     });
+  });
+
+  it('replays a completed steer identity after its chat is deleted', async () => {
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const { service, queue, sessions } = makeService({
+      queue: { captureSteerTarget: mock(() => target) },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'retain this outcome',
+      clientRequestId: 'request-steer-retained-after-delete',
+      clientMessageId: 'message-steer-retained-after-delete',
+    };
+
+    await expect(service.submitSteer(input)).resolves.toMatchObject({
+      status: 'accepted',
+      turnId: 'turn-active',
+    });
+    sessions.delete(SOURCE_CHAT_ID);
+
+    await expect(service.submitSteer(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      turnId: 'turn-active',
+    });
+    await expect(service.submitSteer({ ...input, content: 'changed content' })).rejects.toMatchObject({
+      code: 'IDEMPOTENCY_CONFLICT',
+      status: 409,
+    });
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays an unknown steer outcome after its chat is deleted', async () => {
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const deliveryError = new SteerDeliveryError(new Error('connection closed'), 'unknown');
+    const { service, queue, sessions } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => target),
+        deliverAcceptedSteer: mock(async (input) => {
+          await input.settlement.markScheduled(input.command, target.identity.turnId);
+          await input.settlement.settleSteerFailure(input.command, deliveryError);
+          throw deliveryError;
+        }),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'retain this ambiguity',
+      clientRequestId: 'request-steer-unknown-after-delete',
+      clientMessageId: 'message-steer-unknown-after-delete',
+    };
+
+    await expect(service.submitSteer(input)).rejects.toMatchObject({
+      code: 'STEER_OUTCOME_UNKNOWN',
+    });
+    sessions.delete(SOURCE_CHAT_ID);
+
+    await expect(service.submitSteer(input)).rejects.toMatchObject({
+      code: 'STEER_OUTCOME_UNKNOWN',
+    });
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a compact steering tombstone after its chat is deleted', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'retain compact evidence',
+      clientRequestId: 'request-steer-compact-after-delete',
+      clientMessageId: 'message-steer-compact-after-delete',
+    };
+    const accepted = await ledger.accept({
+      commandType: 'steer',
+      chatId: input.chatId,
+      clientRequestId: input.clientRequestId,
+      payload: {
+        chatId: input.chatId,
+        content: input.content,
+        clientMessageId: input.clientMessageId,
+      },
+    });
+    await ledger.settleTerminal(accepted.record.key, 'finished', { turnId: 'turn-compact' });
+    for (let index = 0; index <= LEDGER_RECORD_LIMIT; index += 1) {
+      const result = await ledger.accept({
+        commandType: 'agent-run',
+        chatId: SOURCE_CHAT_ID,
+        clientRequestId: `compact-filler-${index}`,
+        payload: { index },
+      });
+      await ledger.settleTerminal(result.record.key, 'finished');
+    }
+    const { service, queue, sessions } = makeService({ ledger });
+    sessions.delete(SOURCE_CHAT_ID);
+
+    await expect(service.submitSteer(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      turnId: 'turn-compact',
+    });
+    expect(queue.captureSteerTarget).not.toHaveBeenCalled();
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
   });
 
   it('settles a missing steer target terminally without queue fallback', async () => {

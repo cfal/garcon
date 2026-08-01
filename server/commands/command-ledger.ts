@@ -193,6 +193,40 @@ export class CommandLedger {
     );
   }
 
+  async observe(input: LedgerAcceptInput): Promise<LedgerAcceptResult | null> {
+    const key = commandLedgerKey(input.commandType, input.chatId, input.clientRequestId);
+    const payloadHash = commandPayloadHash(input.payload);
+    const existing = this.#records.get(key);
+    if (existing) {
+      return existing.payloadHash === payloadHash
+        ? { kind: 'duplicate', record: cloneRecord(existing) }
+        : { kind: 'conflict', record: cloneRecord(existing) };
+    }
+    const existingTombstone = this.#steerTombstones.get(key);
+    if (existingTombstone) {
+      const record = recordFromSteerTombstone(existingTombstone);
+      return existingTombstone.payloadHash === payloadHash
+        ? { kind: 'duplicate', record }
+        : { kind: 'conflict', record };
+    }
+
+    const conflictingKey = this.#keysByIdentity.get(
+      commandLedgerIdentityKey(input.chatId, input.clientRequestId),
+    );
+    if (!conflictingKey) return null;
+    const conflictingRecord = this.#records.get(conflictingKey);
+    const conflictingTombstone = this.#steerTombstones.get(conflictingKey);
+    if (!conflictingRecord && !conflictingTombstone) {
+      throw new Error(`Command ledger identity index is stale for ${conflictingKey}`);
+    }
+    return {
+      kind: 'conflict',
+      record: conflictingRecord
+        ? cloneRecord(conflictingRecord)
+        : recordFromSteerTombstone(conflictingTombstone!),
+    };
+  }
+
   async accept(input: LedgerAcceptInput): Promise<LedgerAcceptResult> {
     const key = commandLedgerKey(input.commandType, input.chatId, input.clientRequestId);
     const payloadHash = commandPayloadHash(input.payload);

@@ -35,32 +35,37 @@ export class SteerCommands {
       'clientMessageId',
     );
     const initialChat = this.deps.chats.getChat(input.chatId);
-    if (!initialChat) {
-      const error = new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
-      logSteerOutcome(logger, {
+    const integrationId = initialChat?.agentId;
+    const target = initialChat ? this.deps.queue.captureSteerTarget(input.chatId) : null;
+    const ledgerInput = {
+      commandType: 'steer',
+      chatId: input.chatId,
+      clientRequestId,
+      payload: {
         chatId: input.chatId,
-        clientRequestId,
-      }, { kind: 'failed', error });
-      throw error;
-    }
-    const integrationId = initialChat.agentId;
-    const target = this.deps.queue.captureSteerTarget(input.chatId);
+        content: input.content,
+        clientMessageId,
+      },
+    };
     let outcomeTurnId: string | undefined;
 
     try {
       const response = await this.support.withChatMutationLock(input.chatId, async () => {
+        if (!initialChat) {
+          const observed = await this.deps.ledger.observe(ledgerInput);
+          if (observed) {
+            this.support.throwOnConflict(
+              observed,
+              'clientRequestId was reused with different payload',
+            );
+            return this.#duplicateResponse(observed.record);
+          }
+          throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+        }
+
         let ledger: LedgerAcceptResult;
         try {
-          ledger = await this.deps.ledger.accept({
-            commandType: 'steer',
-            chatId: input.chatId,
-            clientRequestId,
-            payload: {
-              chatId: input.chatId,
-              content: input.content,
-              clientMessageId,
-            },
-          });
+          ledger = await this.deps.ledger.accept(ledgerInput);
         } catch (error) {
           if (error instanceof SteerIdentityCapacityError) {
             throw new CommandValidationError(

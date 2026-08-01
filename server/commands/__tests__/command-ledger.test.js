@@ -172,7 +172,15 @@ describe('CommandLedger', () => {
       kind: 'duplicate',
       record: { payload: {}, status: 'finished', turnId: 'turn-1' },
     });
+    expect(await ledger.observe(steerInput)).toMatchObject({
+      kind: 'duplicate',
+      record: { payload: {}, status: 'finished', turnId: 'turn-1' },
+    });
     expect(await ledger.accept({
+      ...steerInput,
+      payload: { ...steerInput.payload, content: 'changed content' },
+    })).toMatchObject({ kind: 'conflict' });
+    expect(await ledger.observe({
       ...steerInput,
       payload: { ...steerInput.payload, content: 'changed content' },
     })).toMatchObject({ kind: 'conflict' });
@@ -207,6 +215,10 @@ describe('CommandLedger', () => {
     });
     expect(await ledger.accept(acceptedInput({ clientRequestId: 'ordinary-after-capacity' })))
       .toMatchObject({ kind: 'accepted' });
+    expect(await ledger.observe(acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'unseen-after-capacity',
+    }))).toBeNull();
   });
 
   it('does not share records between process-lifetime ledger instances', async () => {
