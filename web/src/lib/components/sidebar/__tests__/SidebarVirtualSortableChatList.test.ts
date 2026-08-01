@@ -11,6 +11,7 @@ import {
 	type SidebarVirtualRow,
 } from '../sidebar-virtual-chat-list';
 import { sidebarProjectKey } from '../sidebar-row-model';
+import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 const rowHeight = 88;
@@ -666,6 +667,11 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 		await tick();
 
+		expect(
+			[...document.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]')]
+				.slice(0, 2)
+				.map((row) => row.dataset.sidebarVirtualRow),
+		).toEqual(['chat-1', 'chat-0']);
 		expect(document.querySelector('[data-sidebar-virtual-row="chat-0"]')).toBe(row0);
 		expect(row0.isConnected).toBe(true);
 
@@ -673,6 +679,118 @@ describe('SidebarVirtualSortableChatList', () => {
 			touches: [],
 			changedTouches: [touchAt(1, 20, 150)],
 		});
+	});
+
+	it('cancels a native drag when virtualization unmounts its source', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+		const splitDragEnd = vi.fn();
+		const registered = { reorder: null as SidebarChatReorderState | null };
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(500),
+			rowHeight,
+			onRegisterReorder: (value) => (registered.reorder = value),
+			onPersistReorder: persist,
+			onSplitDragEnd: splitDragEnd,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		if (!row0) throw new Error('expected source row to be rendered');
+		const dataTransfer = new DataTransfer();
+
+		await fireEvent.dragStart(row0, { clientX: 20, clientY: 44, dataTransfer });
+		vi.advanceTimersByTime(17);
+		await tick();
+		expect(row0.className).toContain('opacity-45');
+		expect(registered.reorder?.activeList).toBe('normal');
+
+		viewport.scrollTop = rowHeight * 120;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(row0.isConnected).toBe(false);
+		expect(registered.reorder?.activeList).toBeNull();
+		expect(splitDragEnd).toHaveBeenCalledWith('chat-0');
+		expect(persist).not.toHaveBeenCalled();
+
+		await fireEvent.dragEnd(window, { dataTransfer });
+	});
+
+	it('ignores a touch start while another chat owns a native drag', async () => {
+		vi.useFakeTimers();
+		const splitDragEnd = vi.fn();
+		const registered = { reorder: null as SidebarChatReorderState | null };
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(500),
+			rowHeight,
+			onRegisterReorder: (value) => (registered.reorder = value),
+			onSplitDragEnd: splitDragEnd,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const row5 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-5"]');
+		if (!row0 || !row5) throw new Error('expected native and touch source rows to be rendered');
+		const dataTransfer = new DataTransfer();
+
+		await fireEvent.dragStart(row5, { clientX: 20, clientY: rowHeight * 5 + 44, dataTransfer });
+		vi.advanceTimersByTime(17);
+		await tick();
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		expect(document.body.style.getPropertyValue('user-select')).toBe('');
+
+		viewport.scrollTop = rowHeight * 10;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(row0.isConnected).toBe(false);
+		expect(row5.isConnected).toBe(true);
+		expect(row5.className).toContain('opacity-45');
+		expect(registered.reorder?.activeList).toBe('normal');
+		expect(splitDragEnd).not.toHaveBeenCalled();
+
+		await fireEvent.dragEnd(row5, { dataTransfer });
+	});
+
+	it('cancels a pending touch gesture before starting a native drag', async () => {
+		vi.useFakeTimers();
+		const registered = { reorder: null as SidebarChatReorderState | null };
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			rowHeight,
+			onRegisterReorder: (value) => (registered.reorder = value),
+		});
+		await tick();
+
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const row5 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-5"]');
+		if (!row0 || !row5) throw new Error('expected native and touch source rows to be rendered');
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		expect(document.body.style.getPropertyValue('user-select')).toBe('none');
+
+		const dataTransfer = new DataTransfer();
+		await fireEvent.dragStart(row5, { clientX: 20, clientY: rowHeight * 5 + 44, dataTransfer });
+		vi.advanceTimersByTime(370);
+		await tick();
+
+		expect(document.body.style.getPropertyValue('user-select')).toBe('');
+		expect(row5.className).toContain('opacity-45');
+		expect(registered.reorder?.activeChatId).toBe('chat-5');
+
+		await fireEvent.dragEnd(row5, { dataTransfer });
 	});
 
 	it('cancels an active touch drag when virtualization unmounts its source', async () => {

@@ -36,7 +36,7 @@
 		type SidebarChatDragData,
 		type SidebarDropInstruction,
 	} from './sidebar-pragmatic-dnd';
-import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
+	import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -118,7 +118,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	let touchDrag: {
 		identifier: number;
 		sourceChatId: string;
-	sourceList: PersistedChatOrderGroup;
+		sourceList: PersistedChatOrderGroup;
 		sourceScopeKey: string;
 		startX: number;
 		startY: number;
@@ -297,6 +297,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 
 	function startSidebarDrag(row: SidebarVirtualChatRow): void {
 		if (!dragEnabled) return;
+		if (touchDrag) cancelTouchDrag();
 		clearDragPresentation();
 		draggingChatId = row.chat.id;
 		reorder.begin(row.list, row.chat.id, { ids: row.reorderScopeIds });
@@ -304,9 +305,10 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	}
 
 	function cancelUnmountedDragSource(chatId: string): void {
-		const isTouchSource = touchDrag?.sourceChatId === chatId;
-		if (draggingChatId !== chatId && !isTouchSource) return;
-		if (isTouchSource) return cancelTouchDrag();
+		const ownsTouchDrag = touchDrag?.sourceChatId === chatId;
+		const ownsNativeDrag = draggingChatId === chatId && !(ownsTouchDrag && touchDrag?.activated);
+		if (ownsTouchDrag) cancelTouchDrag();
+		if (!ownsNativeDrag) return;
 		if (reorder.activeList) reorder.cancel(reorder.activeList);
 		clearDragPresentation();
 		if (splitLayout.draggedChatId === chatId) splitLayout.endDrag();
@@ -494,9 +496,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 
 		clearDragPresentation();
 		setTimeout(() => {
-			if (splitLayout.draggedChatId === sourceData.chatId) {
-				splitLayout.endDrag();
-			}
+			if (splitLayout.draggedChatId === sourceData.chatId) splitLayout.endDrag();
 		}, 0);
 	}
 
@@ -695,11 +695,9 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 		const current = touchDrag;
 		if (current?.activated) {
 			reorder.cancel(current.sourceList);
-			if (splitLayout.draggedChatId === current.sourceChatId) {
-				splitLayout.endDrag();
-			}
+			if (splitLayout.draggedChatId === current.sourceChatId) splitLayout.endDrag();
+			clearDragPresentation();
 		}
-		clearDragPresentation();
 		clearTouchDrag();
 	}
 
@@ -719,7 +717,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	}
 
 	function handleTouchStart(event: TouchEvent): void {
-		if (!dragEnabled || event.touches.length !== 1) return;
+		if (!dragEnabled || draggingChatId !== null || event.touches.length !== 1) return;
 		const rowEl = rowElementFromTarget(event.target);
 		if (!rowEl) return;
 		const sourceChatId = rowEl.dataset.sidebarVirtualRow;
@@ -798,9 +796,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 			reorder.cancel(current.sourceList);
 		}
 
-		if (splitLayout.draggedChatId === current.sourceChatId) {
-			splitLayout.endDrag();
-		}
+		if (splitLayout.draggedChatId === current.sourceChatId) splitLayout.endDrag();
 		clearDragPresentation();
 		clearTouchDrag();
 	}

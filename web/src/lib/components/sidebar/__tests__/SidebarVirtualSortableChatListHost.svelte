@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import SidebarVirtualSortableChatList from '../SidebarVirtualSortableChatList.svelte';
 	import {
 		SidebarChatReorderState,
@@ -8,6 +9,7 @@
 	import type { SidebarVirtualChatRow, SidebarVirtualRow } from '../sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from '../sidebar-display-options';
 	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
+	import { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte';
 
 	interface SidebarVirtualSortableChatListHostProps {
 		rows: SidebarVirtualRow[];
@@ -17,7 +19,9 @@
 		displayOptions?: SidebarDisplayOptions;
 		rowHeight?: number;
 		onRegisterRecenter?: (callback: () => void) => void;
+		onRegisterReorder?: (reorder: SidebarChatReorderState) => void;
 		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
+		onSplitDragEnd?: (chatId: string) => void;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 	}
 
@@ -34,7 +38,9 @@
 		},
 		rowHeight,
 		onRegisterRecenter,
+		onRegisterReorder,
 		onPersistReorder = () => {},
+		onSplitDragEnd,
 		onToggleProjectCollapsed,
 	}: SidebarVirtualSortableChatListHostProps = $props();
 
@@ -63,6 +69,7 @@
 			return visibleOrders;
 		},
 	});
+	onMount(() => onRegisterReorder?.(reorder));
 
 	setAppShell({
 		onSidebarRecenterRequested(callback: () => void) {
@@ -83,12 +90,14 @@
 		},
 	} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		draggedChatId: null,
-		startDrag() {},
-		endDrag() {},
-	} as never);
+	class TestSplitLayoutStore extends SplitLayoutStore {
+		override endDrag(): void {
+			const chatId = this.draggedChatId;
+			super.endDrag();
+			if (chatId) onSplitDragEnd?.(chatId);
+		}
+	}
+	setSplitLayout(new TestSplitLayoutStore());
 </script>
 
 <div
