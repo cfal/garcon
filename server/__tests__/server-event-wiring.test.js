@@ -17,6 +17,7 @@ function createWiringFixture(overrides = {}) {
   const agentListeners = {};
   const queueListeners = {};
   const settingsListeners = {};
+  const chatRegistryListeners = {};
   const noOpSubscription = mock(() => undefined);
   const pendingInputs = overrides.pendingInputs ?? new PendingUserInputService({
     loadNativeMessages: mock(async () => []),
@@ -51,6 +52,7 @@ function createWiringFixture(overrides = {}) {
   };
   const chatViews = {
     captureFence: mock(() => 0),
+    deleteChatView: mock(() => undefined),
     appendAfterEnsuringGeneration: mock(async () => ({
       generationId: 'generation-1',
       messages: [],
@@ -63,7 +65,8 @@ function createWiringFixture(overrides = {}) {
     appendAssistantMessages: mock(async () => undefined),
     markPublicTerminal: mock(async () => undefined),
     markInterruptionRequested: mock(async () => undefined),
-    clearInterruptionRequested: mock(async () => undefined),
+    releaseInterruptionRequest: mock(async () => undefined),
+    markChatInterrupted: mock(async () => undefined),
     ...overrides.commandLedger,
   };
   const searchIndex = {
@@ -74,7 +77,7 @@ function createWiringFixture(overrides = {}) {
   const chatRegistry = {
     getChat: mock(() => ({})),
     onChatAdded: noOpSubscription,
-    onChatRemoved: noOpSubscription,
+    onChatRemoved: mock((callback) => { chatRegistryListeners.removed = callback; }),
     onChatReadUpdated: noOpSubscription,
     onChatProjectPathUpdated: noOpSubscription,
     ...overrides.chatRegistry,
@@ -114,6 +117,7 @@ function createWiringFixture(overrides = {}) {
     agentListeners,
     queueListeners,
     settingsListeners,
+    chatRegistryListeners,
     wiring,
     metadata,
     chatViews,
@@ -307,7 +311,7 @@ describe('server event wiring', () => {
     });
     const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };
 
-    stopRequested('chat-1', 'stop-1', turn);
+    stopRequested('chat-1', 'stop-1', turn, 'stop');
     fixture.queueListeners.sessionStopped(
       'chat-1',
       'interrupt-requested',
@@ -324,6 +328,59 @@ describe('server event wiring', () => {
     );
     expect(timeline.indexOf('chat-session-stopped'))
       .toBeLessThan(timeline.indexOf('receipt:user-stop'));
+  });
+
+  it('settles a deletion stop receipt with the chat-deleted reason', async () => {
+    let stopRequested;
+    const fixture = createWiringFixture({
+      queue: {
+        onSessionStopRequested: mock((callback) => { stopRequested = callback; }),
+      },
+    });
+    const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };
+
+    stopRequested('chat-1', 'stop-1', turn, 'chat-deletion');
+    fixture.queueListeners.sessionStopped(
+      'chat-1',
+      'interrupt-requested',
+      'chat-deletion',
+      'stop-1',
+      5,
+    );
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.commandLedger.markInterruptionRequested).toHaveBeenCalledWith(
+      'chat-1',
+      'turn-1',
+      'chat-deleted',
+    );
+    expect(fixture.commandLedger.markPublicTerminal).toHaveBeenCalledWith(
+      'chat-1',
+      'turn-1',
+      'chat-deleted',
+    );
+  });
+
+  it('settles outstanding receipts before broadcasting chat deletion', async () => {
+    const timeline = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => timeline.push(JSON.parse(payload).type)),
+      },
+      commandLedger: {
+        markChatInterrupted: mock(async () => { timeline.push('receipts-settled'); }),
+      },
+    });
+
+    fixture.chatRegistryListeners.removed('chat-1');
+    await fixture.wiring.waitForIdle();
+
+    expect(fixture.commandLedger.markChatInterrupted).toHaveBeenCalledWith(
+      'chat-1',
+      'chat-deleted',
+      true,
+    );
+    expect(timeline).toEqual(['receipts-settled', 'chat-session-deleted']);
   });
 
   it('preserves stop transitions after a pending turn message', async () => {
@@ -631,7 +688,8 @@ describe('server event wiring', () => {
         appendAssistantMessages: mock(async () => undefined),
         markPublicTerminal: mock(async () => undefined),
         markInterruptionRequested: mock(async () => undefined),
-        clearInterruptionRequested: mock(async () => undefined),
+        releaseInterruptionRequest: mock(async () => undefined),
+        markChatInterrupted: mock(async () => undefined),
       },
       shareStore: {},
       telegramNotifier: {},
@@ -641,7 +699,7 @@ describe('server event wiring', () => {
       loadNativeMessages: mock(async () => []),
     });
 
-    queueListeners.stopRequested(chatId, 'stop-a', turn);
+    queueListeners.stopRequested(chatId, 'stop-a', turn, 'stop');
     queueListeners.sessionStopped(chatId, 'interrupt-requested', 'interrupt-and-send', 'stop-a', 5);
     agentListeners.finished(chatId, 0, turn);
     await nativeLoadStarted.promise;
@@ -738,7 +796,8 @@ describe('server event wiring', () => {
         appendAssistantMessages: mock(async () => undefined),
         markPublicTerminal: mock(async () => undefined),
         markInterruptionRequested: mock(async () => undefined),
-        clearInterruptionRequested: mock(async () => undefined),
+        releaseInterruptionRequest: mock(async () => undefined),
+        markChatInterrupted: mock(async () => undefined),
       },
       shareStore: {},
       telegramNotifier: {},
@@ -748,7 +807,7 @@ describe('server event wiring', () => {
       loadNativeMessages: mock(async () => []),
     });
 
-    queueListeners.stopRequested(chatId, 'stop-a', turn);
+    queueListeners.stopRequested(chatId, 'stop-a', turn, 'stop');
     agentListeners.failed(chatId, 'provider failed independently', turn);
     await Promise.resolve();
 

@@ -148,6 +148,33 @@ describe('CommandLedger', () => {
     });
   });
 
+  it('publishes a naturally completed turn when a rejected stop releases its barrier', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+
+    await ledger.markInterruptionRequested('chat-1', 'turn-1', 'user-stop');
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    await ledger.releaseInterruptionRequest('chat-1', 'turn-1');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      status: 'finished',
+      publicTerminalAt: expect.any(String),
+    });
+  });
+
+  it('keeps a running turn private when a rejected stop releases its barrier', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+
+    await ledger.markInterruptionRequested('chat-1', 'turn-1', 'user-stop');
+    await ledger.releaseInterruptionRequest('chat-1', 'turn-1');
+
+    const record = await ledger.getTurnRecord('chat-1', 'turn-1');
+    expect(record).toMatchObject({ status: 'accepted' });
+    expect(record.interruptionRequested).toBeUndefined();
+    expect(record.publicTerminalAt).toBeUndefined();
+  });
+
   it('discards an oversized result instead of retaining a truncated prefix', async () => {
     const ledger = new CommandLedger(undefined, { turnResultByteLimit: 5 });
     await ledger.accept(acceptedInput({ turnId: 'turn-large' }));

@@ -875,7 +875,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #startStop(chatId: string, operation: SessionStopInFlight): void {
     if (operation.started) return;
     operation.started = true;
-    this.#performStop(chatId, operation.stopId).then(
+    this.#performStop(chatId, operation.stopId, operation.intent).then(
       ({ outcome, waitMs }) => {
         operation.outcome = outcome;
         operation.phase = outcome === 'interrupt-requested' ? 'settling' : 'requesting';
@@ -904,6 +904,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   async #performStop(
     chatId: string,
     stopId: string,
+    intent: ChatStopIntent,
   ): Promise<StopResolution> {
     const startedAt = Date.now();
     const attempt = this.#ownership.attempt(chatId);
@@ -915,7 +916,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       return { outcome: 'already-idle', waitMs: Date.now() - startedAt };
     }
     try {
-      this.emit('session-stop-requested', chatId, stopId, currentAttempt?.identity());
+      this.emit('session-stop-requested', chatId, stopId, currentAttempt?.identity(), intent);
     } catch (error) {
       currentAttempt?.allowLaunch();
       throw error;

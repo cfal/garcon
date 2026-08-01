@@ -261,6 +261,7 @@ export type SessionStopRequestedCallback = (
   chatId: string,
   stopId: string,
   turn: TurnIdentity | undefined,
+  intent: ChatStopIntent,
 ) => void;
 export type SessionStoppedCallback = (
   chatId: string,

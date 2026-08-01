@@ -242,11 +242,18 @@ export class CommandLedger {
     return cloneRecord(record);
   }
 
-  async clearInterruptionRequested(chatId: string, turnId: string): Promise<void> {
+  async releaseInterruptionRequest(
+    chatId: string,
+    turnId: string,
+  ): Promise<CommandLedgerRecord | null> {
     const record = this.#recordForTurn(chatId, turnId);
-    if (!record || record.publicTerminalAt) return;
+    if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
     record.interruptionRequested = undefined;
     record.updatedAt = new Date().toISOString();
+    if (TERMINAL_COMMAND_STATUSES.has(record.status)) {
+      return this.markPublicTerminal(chatId, turnId);
+    }
+    return cloneRecord(record);
   }
 
   async markPublicTerminal(

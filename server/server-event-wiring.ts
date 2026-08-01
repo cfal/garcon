@@ -1,6 +1,7 @@
 import {
   isAbortAcknowledged,
   parseChatMessages,
+  type ChatStopIntent,
   type ChatMessage,
 } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
@@ -304,6 +305,10 @@ export function wireServerEvents({
     await commandLedger.markPublicTerminal(chatId, turnMetadata.turnId, interruptionReason);
   }
 
+  function interruptionReason(intent: ChatStopIntent): 'user-stop' | 'chat-deleted' {
+    return intent === 'chat-deletion' ? 'chat-deleted' : 'user-stop';
+  }
+
   function reconcilePendingAfterTerminal(chatId: string, context: string): void {
     pendingInputs.reconcileNativeHistory(chatId).catch((err) => {
       logger.warn(`pending-inputs: reconcile after ${context} failed:`, errorMessage(err));
@@ -587,7 +592,10 @@ export function wireServerEvents({
     pendingInputs.clearChat(chatId, 'chat-removed');
     chatViews.deleteChatView(chatId);
     deleteSearchChat(chatId);
-    broadcast(new ChatSessionDeletedWsMessage(chatId));
+    scheduleChatTask(chatId, 'server-events: chat removal settlement failed', async () => {
+      await commandLedger.markChatInterrupted(chatId, 'chat-deleted', true);
+      broadcast(new ChatSessionDeletedWsMessage(chatId));
+    });
     shareStore.revokeShareByChatId(chatId).catch((err) => {
       logger.warn(
         'share-store: failed to revoke share on chat removal:',
@@ -620,10 +628,14 @@ export function wireServerEvents({
       ),
     );
   });
-  queue.onSessionStopRequested((chatId, stopId, preparingTurn) => {
+  queue.onSessionStopRequested((chatId, stopId, preparingTurn, intent) => {
     userAbortLifecycle.onStopRequested(chatId, stopId, preparingTurn);
     if (preparingTurn?.turnId) {
-      void commandLedger.markInterruptionRequested(chatId, preparingTurn.turnId, 'user-stop');
+      void commandLedger.markInterruptionRequested(
+        chatId,
+        preparingTurn.turnId,
+        interruptionReason(intent),
+      );
     }
   });
   queue.onDispatching((chatId, entryId, content) => {
@@ -691,9 +703,9 @@ export function wireServerEvents({
     if (acknowledgement.turn?.turnId) {
       scheduleChatTask(chatId, 'server-events: interrupted receipt settlement failed', async () => {
         if (abortAcknowledged) {
-          await markPublicTurnTerminal(chatId, acknowledgement.turn, 'user-stop');
+          await markPublicTurnTerminal(chatId, acknowledgement.turn, interruptionReason(intent));
         } else {
-          await commandLedger.clearInterruptionRequested(chatId, acknowledgement.turn!.turnId!);
+          await commandLedger.releaseInterruptionRequest(chatId, acknowledgement.turn!.turnId!);
         }
       });
     }

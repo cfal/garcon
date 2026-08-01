@@ -1788,11 +1788,23 @@ describe('orchestration', () => {
         events.push(`abort:${chatId}`);
         return Promise.resolve(true);
       });
-      orchQueue.onSessionStopRequested((chatId) => events.push(`requested:${chatId}`));
+      orchQueue.onSessionStopRequested((chatId, _stopId, _turn, intent) => {
+        events.push(`requested:${chatId}:${intent}`);
+      });
 
       await orchQueue.interruptActiveTurn('c1');
 
-      expect(events).toEqual(['requested:c1', 'abort:c1']);
+      expect(events).toEqual(['requested:c1:interrupt-and-send', 'abort:c1']);
+    });
+
+    it('publishes chat deletion as the stop request intent', async () => {
+      const requested = [];
+      mockAgents.isChatRunning.mockReturnValue(true);
+      orchQueue.onSessionStopRequested((_chatId, _stopId, _turn, intent) => requested.push(intent));
+
+      await orchQueue.abortForChatDeletion('c1');
+
+      expect(requested).toEqual(['chat-deletion']);
     });
 
     it('includes reserved turn identity before runtime tracking begins', async () => {
