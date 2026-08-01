@@ -10,6 +10,7 @@ import {
   runtimeProofPayload,
   type ServerRuntimeDescriptor,
 } from '@garcon/common/server-runtime';
+import { abortableDelay } from './abortable-delay.js';
 import { CliError } from './errors.js';
 
 const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
@@ -170,31 +171,27 @@ export async function probeRuntime(
   }
 }
 
-function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    }, { once: true });
-  });
-}
-
 export async function discoverRuntime(
   options: RuntimeDiscoveryOptions,
   dependencies: RuntimeDiscoveryDependencies = {},
 ): Promise<RuntimeConnection> {
   const workspaceDir = await canonicalWorkspace(options.configDir, options.workspace);
   const fetchFn = dependencies.fetch ?? fetch;
-  const wait = dependencies.delay ?? delay;
+  const wait = dependencies.delay ?? abortableDelay;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const descriptor = await readRuntimeDescriptor(workspaceDir);
-    const baseUrl = parseLoopbackServerUrl(options.serverUrl ?? descriptor.baseUrl);
+    const baseUrl = parseLoopbackServerUrl(descriptor.baseUrl);
+    if (
+      options.serverUrl !== undefined
+      && parseLoopbackServerUrl(options.serverUrl) !== baseUrl
+    ) {
+      throw new CliError(
+        'runtime verification',
+        '--server must exactly match the URL in the selected workspace runtime descriptor',
+        3,
+      );
+    }
     const verified = await probeRuntime(
       baseUrl,
       descriptor.instanceId,

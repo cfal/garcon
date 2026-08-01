@@ -9,11 +9,13 @@ import type { ChatListResponse } from '@garcon/common/chat-list';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import { normalizeRemoteSettingsSnapshot } from '@garcon/common/settings';
+import { abortableDelay } from './abortable-delay.js';
 import { CliError, type CliErrorPhase } from './errors.js';
 import { probeRuntime, type RuntimeConnection } from './discovery.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const SUBMISSION_ATTEMPTS = 3;
+const MAX_RETRY_AFTER_MS = 5_000;
 
 interface ErrorEnvelope {
   error?: string;
@@ -63,9 +65,17 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-async function responseBody(response: Response): Promise<unknown> {
+async function responseBody(response: Response, phase: CliErrorPhase): Promise<unknown> {
+  let text: string;
   try {
-    return await response.json();
+    text = await response.text();
+  } catch (error) {
+    throw new GarconTransportError(phase, 'the Garcon response body could not be read', {
+      cause: error,
+    });
+  }
+  try {
+    return JSON.parse(text) as unknown;
   } catch {
     return null;
   }
@@ -95,26 +105,16 @@ function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
   };
 }
 
-function defaultDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    }, { once: true });
-  });
-}
-
 function retryAfterMilliseconds(value: string | null): number | null {
   if (value === null) return null;
   const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(MAX_RETRY_AFTER_MS, Math.ceil(seconds * 1_000));
+  }
   const date = Date.parse(value);
-  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+  return Number.isFinite(date)
+    ? Math.min(MAX_RETRY_AFTER_MS, Math.max(0, date - Date.now()))
+    : null;
 }
 
 export class GarconClient {
@@ -129,7 +129,7 @@ export class GarconClient {
     this.#instanceId = options.instanceId;
     this.#capability = options.localCapability;
     this.#fetch = options.fetch ?? fetch;
-    this.#submissionDelay = options.submissionDelay ?? defaultDelay;
+    this.#submissionDelay = options.submissionDelay ?? abortableDelay;
   }
 
   async getModelCatalog(agentId: string, signal?: AbortSignal): Promise<ModelCatalogResponse> {
@@ -225,7 +225,8 @@ export class GarconClient {
               || error.status === 504
             : false);
         if (!transient || attempt === SUBMISSION_ATTEMPTS - 1 || signal?.aborted) throw error;
-        await this.#submissionDelay(100 * (attempt + 1), signal);
+        const retryAfterMs = error instanceof GarconHttpError ? error.retryAfterMs ?? 0 : 0;
+        await this.#submissionDelay(Math.max(100 * (attempt + 1), retryAfterMs), signal);
         let sameRuntime: boolean;
         try {
           sameRuntime = await this.verifyRuntime(signal);
@@ -278,7 +279,7 @@ export class GarconClient {
       });
     }
 
-    const value = await responseBody(response);
+    const value = await responseBody(response, phase);
     if (!response.ok) {
       const envelope = record(value) as ErrorEnvelope | null;
       const errorCode = typeof envelope?.errorCode === 'string' ? envelope.errorCode : null;

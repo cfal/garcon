@@ -14,6 +14,29 @@ export interface MainOptions {
   output?: CliOutput;
 }
 
+async function readDefaultStdin(signal?: AbortSignal): Promise<string> {
+  const reader = Bun.stdin.stream().getReader();
+  const decoder = new TextDecoder();
+  let content = '';
+  const onAbort = () => {
+    void reader.cancel(signal?.reason).catch(() => undefined);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    while (true) {
+      signal?.throwIfAborted();
+      const { done, value } = await reader.read();
+      if (done) break;
+      content += decoder.decode(value, { stream: true });
+    }
+    signal?.throwIfAborted();
+    return content + decoder.decode();
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    reader.releaseLock();
+  }
+}
+
 async function readPromptFromStdin(
   reader: () => Promise<string>,
   signal?: AbortSignal,
@@ -60,7 +83,9 @@ export async function main(
       return 0;
     }
     const prompt = command.readsPromptFromStdin
-      ? await readPromptFromStdin(options.readStdin ?? (() => Bun.stdin.text()), options.signal)
+      ? options.readStdin
+        ? await readPromptFromStdin(options.readStdin, options.signal)
+        : await readDefaultStdin(options.signal)
       : command.prompt ?? '';
     if (prompt.trim().length === 0) {
       throw new CliError('arguments', 'the prompt read from stdin must not be empty', 2);

@@ -22,7 +22,7 @@ The selected permission mode may allow the agent to edit files and run tools.
 Options:
   --workspace <name>           Named Garcon data workspace (default: default)
   --config-dir <path>          Garcon config root (default: ~/.garcon)
-  --server <url>               Verified loopback server URL override
+  --server <url>               Assert the workspace descriptor's exact URL
   --cwd <path>                 Project directory for a new chat (default: current directory)
   --agent <id>                 Agent ID; required for a new chat
   --provider <id>              Configured API provider ID

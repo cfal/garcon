@@ -184,4 +184,44 @@ describe('pollTurnReceipt', () => {
     await expect(pollTurnReceipt(restartedClient, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID))
       .rejects.toThrow('restarted');
   });
+
+  test('directs expired results to the complete Garcon transcript', async () => {
+    const client: ReceiptClient = {
+      async getTurnReceipt() {
+        throw new GarconHttpError(
+          'receipt polling',
+          'expired',
+          410,
+          'TURN_RESULT_EXPIRED',
+          false,
+        );
+      },
+      async verifyRuntime() { return true; },
+    };
+
+    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID))
+      .rejects.toThrow('view the complete transcript in Garcon');
+  });
+
+  test('bounds recovery by elapsed time as well as failure count', async () => {
+    let currentTime = 0;
+    const delays: number[] = [];
+    const client: ReceiptClient = {
+      async getTurnReceipt() {
+        throw new GarconHttpError('receipt polling', 'unavailable', 503, null, true, 5_000);
+      },
+      async verifyRuntime() { return true; },
+    };
+
+    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID, undefined, {
+      now: () => currentTime,
+      delay: async (milliseconds) => {
+        delays.push(milliseconds);
+        currentTime += milliseconds;
+      },
+      random: () => 0.5,
+    })).rejects.toThrow('accepted chat may still be running');
+    expect(delays.every((milliseconds) => milliseconds <= 5_000)).toBe(true);
+    expect(currentTime).toBeLessThan(30_000);
+  });
 });

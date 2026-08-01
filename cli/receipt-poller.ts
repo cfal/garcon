@@ -1,10 +1,12 @@
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import { abortableDelay } from './abortable-delay.js';
 import { CliError } from './errors.js';
 import { GarconHttpError, GarconTransportError } from './garcon-client.js';
 
 const INITIAL_POLL_DELAY_MS = 250;
 const MAX_POLL_DELAY_MS = 2_000;
 const MAX_CONSECUTIVE_TRANSPORT_FAILURES = 8;
+const MAX_TRANSPORT_RECOVERY_MS = 30_000;
 const RUNTIME_RECHECK_INTERVAL_MS = 30_000;
 
 export interface ReceiptClient {
@@ -16,20 +18,6 @@ export interface ReceiptPollerDependencies {
   delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   now?: () => number;
   random?: () => number;
-}
-
-function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    }, { once: true });
-  });
 }
 
 function isRetryable(error: unknown): boolean {
@@ -54,11 +42,12 @@ export async function pollTurnReceipt(
   signal?: AbortSignal,
   dependencies: ReceiptPollerDependencies = {},
 ): Promise<AgentTurnReceipt> {
-  const delay = dependencies.delay ?? wait;
+  const delay = dependencies.delay ?? abortableDelay;
   const now = dependencies.now ?? Date.now;
   const random = dependencies.random ?? Math.random;
   let pollDelay = INITIAL_POLL_DELAY_MS;
   let consecutiveFailures = 0;
+  let recoveryStartedAt: number | null = null;
   let lastRuntimeCheck = now();
 
   while (true) {
@@ -67,6 +56,7 @@ export async function pollTurnReceipt(
     try {
       const receipt = await client.getTurnReceipt(chatId, turnId, signal);
       consecutiveFailures = 0;
+      recoveryStartedAt = null;
       if (
         receipt.chatId !== chatId
         || receipt.turnId !== turnId
@@ -122,8 +112,21 @@ export async function pollTurnReceipt(
           { cause: error },
         );
       }
+      if (
+        error instanceof GarconHttpError
+        && error.status === 410
+        && error.errorCode === 'TURN_RESULT_EXPIRED'
+      ) {
+        throw new CliError(
+          'receipt polling',
+          'the turn result expired before the CLI could read it; view the complete transcript in Garcon',
+          3,
+          { cause: error },
+        );
+      }
       if (!isRetryable(error)) throw error;
       consecutiveFailures += 1;
+      recoveryStartedAt ??= now();
       retryAfterMs = error instanceof GarconHttpError ? error.retryAfterMs ?? 0 : 0;
       try {
         if (!await client.verifyRuntime(signal)) {
@@ -136,12 +139,7 @@ export async function pollTurnReceipt(
         }
       }
       if (consecutiveFailures >= MAX_CONSECUTIVE_TRANSPORT_FAILURES) {
-        throw new CliError(
-          'transport recovery',
-          'the accepted chat may still be running in Garcon, but its turn result could not be reached',
-          3,
-          { cause: error },
-        );
+        throw recoveryFailure(error);
       }
     }
 
@@ -149,7 +147,23 @@ export async function pollTurnReceipt(
       MAX_POLL_DELAY_MS,
       Math.round(pollDelay * (0.9 + random() * 0.2)),
     );
-    await delay(Math.max(jitteredDelay, retryAfterMs), signal);
+    const nextDelay = Math.max(jitteredDelay, retryAfterMs);
+    if (
+      recoveryStartedAt !== null
+      && now() + nextDelay - recoveryStartedAt >= MAX_TRANSPORT_RECOVERY_MS
+    ) {
+      throw recoveryFailure();
+    }
+    await delay(nextDelay, signal);
     pollDelay = Math.min(MAX_POLL_DELAY_MS, pollDelay * 2);
   }
+}
+
+function recoveryFailure(cause?: unknown): CliError {
+  return new CliError(
+    'transport recovery',
+    'the accepted chat may still be running in Garcon, but its turn result could not be reached',
+    3,
+    cause === undefined ? undefined : { cause },
+  );
 }

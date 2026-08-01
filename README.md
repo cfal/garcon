@@ -160,7 +160,7 @@ garcon-cli --workspace default --resume 1785337200123456 "Now address the review
 
 The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
-Discovery requires the server to use a named `--workspace`; servers launched with `--workspace-dir` are intentionally not discoverable. Run `garcon-cli --help` for provider, endpoint, server override, and complete mode options.
+Discovery requires the server to use a named `--workspace`; servers launched with `--workspace-dir` are intentionally not discoverable. `--server` may assert the descriptor's exact URL but cannot redirect credentials to another listener. Run `garcon-cli --help` for provider, endpoint, and complete mode options.
 
 ### Local Trusted Use
 

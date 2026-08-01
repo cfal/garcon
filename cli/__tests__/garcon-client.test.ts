@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
 import type { AgentRunCommandRequest } from '@garcon/common/chat-command-contracts';
 import { runtimeProofPayload } from '@garcon/common/server-runtime';
-import { GarconClient, GarconHttpError } from '../garcon-client.js';
+import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-client.js';
 
 const connection = {
   baseUrl: 'http://127.0.0.1:8080',
@@ -76,6 +76,47 @@ describe('GarconClient', () => {
     expect(bodies[0]).toBe(bodies[1]);
   });
 
+  test('retries when an accepted response body is interrupted', async () => {
+    const bodies: string[] = [];
+    let attempts = 0;
+    const client = new GarconClient({
+      ...connection,
+      submissionDelay: async () => undefined,
+      fetch: async (input, init) => {
+        if (String(input).includes('/api/v1/runtime')) return runtimeResponse(input);
+        attempts += 1;
+        bodies.push(String(init?.body));
+        if (attempts === 1) {
+          return new Response(new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"success":true'));
+              controller.error(new TypeError('connection reset'));
+            },
+          }), { status: 202, headers: { 'Content-Type': 'application/json' } });
+        }
+        return accepted(runRequest);
+      },
+    });
+
+    await expect(client.runChat(runRequest)).resolves.toMatchObject({ turnId: 'turn-1' });
+    expect(attempts).toBe(2);
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  test('classifies an interrupted receipt body as a transport failure', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => new Response(new ReadableStream({
+        start(controller) {
+          controller.error(new TypeError('connection reset'));
+        },
+      }), { status: 200 }),
+    });
+
+    await expect(client.getTurnReceipt(runRequest.chatId, 'turn-1'))
+      .rejects.toBeInstanceOf(GarconTransportError);
+  });
+
   test('does not retry a malformed successful submission response', async () => {
     const bodies: string[] = [];
     const client = new GarconClient({
@@ -141,6 +182,24 @@ describe('GarconClient', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(GarconHttpError);
       expect((error as GarconHttpError).retryAfterMs).toBe(3_000);
+    }
+  });
+
+  test('caps Retry-After values used by recovery', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ error: 'busy' }, {
+        status: 503,
+        headers: { 'Retry-After': '31536000' },
+      }),
+    });
+
+    try {
+      await client.getTurnReceipt(runRequest.chatId, 'turn-1');
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(GarconHttpError);
+      expect((error as GarconHttpError).retryAfterMs).toBe(5_000);
     }
   });
 

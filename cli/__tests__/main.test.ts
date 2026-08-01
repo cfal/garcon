@@ -58,4 +58,36 @@ describe('main', () => {
       await fs.rm(temporaryDirectory, { recursive: true, force: true });
     }
   });
+
+  test('exits after SIGINT while a stdin pipe remains open', async () => {
+    const cliEntry = path.join(import.meta.dir, '..', 'main.ts');
+    const child = Bun.spawn([
+      process.execPath,
+      cliEntry,
+      '--agent', 'codex',
+      '--model', 'gpt-5.4',
+      '-',
+    ], {
+      cwd: path.join(import.meta.dir, '..', '..'),
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const timeout = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error('CLI did not exit after SIGINT')), 3_000);
+    });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      child.kill('SIGINT');
+
+      await expect(Promise.race([child.exited, timeout])).resolves.toBe(130);
+      expect(await new Response(child.stderr).text()).toContain(
+        'terminal interrupted; no Garcon agent was stopped',
+      );
+    } finally {
+      child.stdin.end();
+      if (child.exitCode === null) child.kill('SIGKILL');
+    }
+  });
 });

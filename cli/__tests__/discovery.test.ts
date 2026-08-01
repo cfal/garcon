@@ -140,6 +140,24 @@ describe('discoverRuntime', () => {
     expect(authorization).toBeNull();
   });
 
+  test('rejects a server override before probing a different loopback peer', async () => {
+    const testFixture = await fixture();
+    let probes = 0;
+
+    await expect(discoverRuntime({
+      configDir: testFixture.configDir,
+      workspace: 'review',
+      serverUrl: 'http://127.0.0.1:9090',
+    }, {
+      fetch: async () => {
+        probes += 1;
+        return Response.json({});
+      },
+    })).rejects.toThrow('must exactly match');
+
+    expect(probes).toBe(0);
+  });
+
   test('rejects descriptors readable by other users', async () => {
     if (process.platform === 'win32') return;
     const testFixture = await fixture();
