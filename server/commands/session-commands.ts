@@ -44,6 +44,22 @@ export class SessionCommands {
   }
 
   private async submitRunLocked(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+    const normalizedInput = {
+      chatId: input.chatId,
+      command: input.command,
+      images: input.images,
+      clientRequestId: input.clientRequestId,
+      clientMessageId: input.clientMessageId,
+      options: runOptionsForCommand(input),
+      expectedAgentId: input.expectedAgentId,
+      tagsToAdd: input.tagsToAdd,
+      permissionFallbackPolicy: input.permissionFallbackPolicy,
+    };
+    const replay = await this.support.replayHttpRun(normalizedInput);
+    if (replay) {
+      if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
+      return replay;
+    }
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
@@ -121,17 +137,7 @@ export class SessionCommands {
       }
     }
 
-    const result = await this.support.submitHttpRun({
-      chatId: input.chatId,
-      command: input.command,
-      images: input.images,
-      clientRequestId: input.clientRequestId,
-      clientMessageId: input.clientMessageId,
-      options: runOptionsForCommand(input),
-      expectedAgentId: input.expectedAgentId,
-      tagsToAdd: input.tagsToAdd,
-      permissionFallbackPolicy: input.permissionFallbackPolicy,
-    });
+    const result = await this.support.submitHttpRun(normalizedInput);
     if (input.tagsToAdd?.length) this.deps.chats.addTags(input.chatId, input.tagsToAdd);
     return result;
   }

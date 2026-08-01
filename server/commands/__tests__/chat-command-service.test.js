@@ -1275,6 +1275,26 @@ describe('ChatCommandService', () => {
     });
   });
 
+  it('replays an admitted run before revalidating changed persisted defaults', async () => {
+    const { service, chats, queue } = makeService({
+      session: { permissionMode: 'default' },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-stable-replay',
+      clientMessageId: 'msg-stable-replay',
+      permissionFallbackPolicy: 'require-explicit-bypass',
+    };
+
+    await service.submitRun(input);
+    chats.updateChat(SOURCE_CHAT_ID, { permissionMode: 'bypassPermissions' });
+    const replay = await service.submitRun(input);
+
+    expect(replay.status).toBe('duplicate');
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
   it('asserts the resume agent and adds tags only after admission', async () => {
     const { service, chats, queue } = makeService();
 
@@ -1523,6 +1543,7 @@ describe('ChatCommandService', () => {
       updatedAt: '2026-07-17T00:00:00.000Z',
     };
     const ledger = {
+      getRecord: mock(async () => null),
       accept: mock(async () => ({ kind: 'accepted', record })),
       update: mock()
         .mockRejectedValueOnce(new Error('ledger unavailable'))

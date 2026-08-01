@@ -40,7 +40,13 @@ import { DomainError } from '../lib/domain-error.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
-import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
+import {
+  PRE_SCHEDULE_FAILURE_ERROR_CODE,
+  commandLedgerKey,
+  commandPayloadHash,
+  type CommandLedger,
+  type CommandLedgerRecord,
+} from './command-ledger.js';
 
 export interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
@@ -412,6 +418,37 @@ export class CommandSupport {
       ledger,
       input,
       { clientRequestId, clientMessageId, turnId },
+      'agent-run',
+    );
+  }
+
+  async replayHttpRun(
+    input: NormalizedSubmitRunInput,
+  ): Promise<AgentTurnCommandResponse | null> {
+    const clientRequestId = this.requireClientRequestId(input.clientRequestId);
+    const clientMessageId = this.requireClientRequestId(input.clientMessageId, 'clientMessageId');
+    const existing = await this.deps.ledger.getRecord(
+      commandLedgerKey('agent-run', input.chatId, clientRequestId),
+    );
+    if (!existing) return null;
+    if (existing.payloadHash !== commandPayloadHash(runPayload(input, clientMessageId))) {
+      throw new CommandValidationError(
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId was reused with different payload',
+        409,
+      );
+    }
+    if (
+      existing.status === 'failed'
+      && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
+    ) {
+      return null;
+    }
+    if (!existing.turnId) throw new Error(`Agent turn command ${existing.key} has no turnId`);
+    return this.scheduleAcceptedHttpRun(
+      { kind: 'duplicate', record: existing },
+      input,
+      { clientRequestId, clientMessageId, turnId: existing.turnId },
       'agent-run',
     );
   }
