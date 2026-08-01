@@ -11,8 +11,8 @@ import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   AgentStopResponse,
-  ActiveInputCommandRequest,
-  ActiveInputCommandResponse,
+  GoalControlCommandRequest,
+  GoalControlCommandResponse,
   AgentModelPatchRequest,
   AgentModelPatchResponse,
   CommandAcceptedResponse,
@@ -28,6 +28,8 @@ import type {
   QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
   QueueMutationResponse,
+  SteerCommandRequest,
+  SteerCommandResponse,
   ProjectPathPatchRequest,
   ProjectPathPatchResponse,
   StartChatCommandRequest,
@@ -609,8 +611,12 @@ export class GarconTestClient {
     return this.post<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', request);
   }
 
-  sendActiveInput(request: ActiveInputCommandRequest): Promise<ActiveInputCommandResponse> {
-    return this.post<ActiveInputCommandResponse>('/api/v1/chats/active-input', request);
+  submitGoalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse> {
+    return this.post<GoalControlCommandResponse>('/api/v1/chats/goal-control', request);
+  }
+
+  steer(request: SteerCommandRequest): Promise<SteerCommandResponse> {
+    return this.post<SteerCommandResponse>('/api/v1/chats/steer', request);
   }
 
   enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse> {
