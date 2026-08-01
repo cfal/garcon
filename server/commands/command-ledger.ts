@@ -494,8 +494,10 @@ export class CommandLedger {
     while (this.#records.size > this.#recordLimit) {
       const oldest = [...this.#records]
         .find(([, record]) => (
-          TERMINAL_COMMAND_STATUSES.has(record.status) && record.forkPreparation === undefined
-      ));
+          TERMINAL_COMMAND_STATUSES.has(record.status)
+          && record.forkPreparation === undefined
+          && (!record.turnId || record.publicTerminalAt !== undefined)
+        ));
       if (!oldest) return;
       const [key, record] = oldest;
       if (record.commandType === 'steer') {
