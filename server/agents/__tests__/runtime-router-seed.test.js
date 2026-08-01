@@ -86,6 +86,16 @@ function makeRouter(overrides = {}) {
   const carryOver = overrides.carryOver ?? [
     new UserMessage('2026-07-18T00:00:00.000Z', 'carried context'),
   ];
+  const endpointResolver = {
+    resolveSelection: mock((request) => ({
+      model: request.model,
+      apiProviderId: request.apiProviderId ?? null,
+      endpointId: request.modelEndpointId ?? null,
+      protocol: request.apiProviderId ? 'openai-compatible' : null,
+      isLocal: false,
+    })),
+    resolveEndpointReference: mock(() => null),
+  };
   const router = new AgentRuntimeRouter({
     registry,
     directory: {
@@ -93,16 +103,7 @@ function makeRouter(overrides = {}) {
       get: mock(() => integration),
       list: mock(() => [integration]),
     },
-    endpointResolver: {
-      resolveSelection: mock((request) => ({
-        model: request.model,
-        apiProviderId: null,
-        endpointId: null,
-        protocol: null,
-        isLocal: false,
-      })),
-      resolveEndpointReference: mock(() => null),
-    },
+    endpointResolver,
     events,
     getCarryOverRevision: () => 'carry-1',
     loadCarryOver: () => carryOver,
@@ -118,6 +119,7 @@ function makeRouter(overrides = {}) {
     registry,
     events,
     carryOver,
+    endpointResolver,
   };
 }
 
@@ -150,6 +152,28 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
         turnId: 'turn-1',
       },
     }));
+  });
+
+  it('applies per-turn routing when a lazy session is materialized', async () => {
+    const { router, endpointResolver } = makeRouter({
+      entry: {
+        apiProviderId: 'provider-a',
+        modelEndpointId: 'endpoint-a',
+      },
+    });
+
+    await router.runAgentTurn('chat-1', 'resume with override', {
+      model: 'model-b',
+      apiProviderId: 'provider-b',
+      modelEndpointId: 'endpoint-b',
+    });
+
+    expect(endpointResolver.resolveSelection).toHaveBeenLastCalledWith({
+      agentId: 'test',
+      model: 'model-b',
+      apiProviderId: 'provider-b',
+      modelEndpointId: 'endpoint-b',
+    });
   });
 
   it('binds only the opaque native session returned by the integration', async () => {

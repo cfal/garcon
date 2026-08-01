@@ -95,6 +95,8 @@ export class AgentRuntimeRouter {
     commandType?: AgentExecutionCommandType;
     executionAdmission?: AgentExecutionAdmission;
     carryOver?: readonly ChatMessage[];
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
   } = {}): Promise<void> {
     assertExecutionAdmissionOpen(opts);
     if (getMaxSessions() > 0 && this.getRunningSessionCount() >= getMaxSessions()) {
@@ -107,8 +109,9 @@ export class AgentRuntimeRouter {
     const selection = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
       model: opts.model ?? entry.model,
-      apiProviderId: entry.apiProviderId,
-      modelEndpointId: entry.modelEndpointId,
+      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
+      modelEndpointId:
+        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
     await this.#validateEndpoint(integration, selection);
     const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
