@@ -628,6 +628,130 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 	});
 
+	it('preserves the dragged row element while optimistic order changes', async () => {
+		vi.useFakeTimers();
+		const chats = Array.from({ length: 20 }, (_, index) => makeChat(index));
+
+		render(SidebarChatListHost, {
+			chats,
+			isMobile: true,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('sidebar-list-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const row1 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]');
+		if (!row0 || !row1) throw new Error('expected source and target rows to be rendered');
+
+		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: 0, width: 320, height: 640 }),
+		);
+		vi.spyOn(row0, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: 0, width: 320, height: rowHeight }),
+		);
+		vi.spyOn(row1, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: rowHeight, width: 320, height: rowHeight }),
+		);
+		vi.spyOn(document, 'elementFromPoint').mockReturnValue(row1);
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+
+		expect(document.querySelector('[data-sidebar-virtual-row="chat-0"]')).toBe(row0);
+		expect(row0.isConnected).toBe(true);
+
+		await fireEvent.touchCancel(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+	});
+
+	it('cancels an active touch drag when virtualization unmounts its source', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(500),
+			isMobile: true,
+			rowHeight,
+			onPersistReorder: persist,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		if (!row0) throw new Error('expected source row to be rendered');
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+
+		expect(row0.className).toContain('opacity-45');
+		expect(document.body.style.getPropertyValue('user-select')).toBe('none');
+
+		viewport.scrollTop = rowHeight * 120;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(row0.isConnected).toBe(false);
+		expect(document.querySelector('.opacity-45')).toBeNull();
+		expect(document.body.style.getPropertyValue('user-select')).toBe('');
+		expect(document.documentElement.style.getPropertyValue('user-select')).toBe('');
+		expect(persist).not.toHaveBeenCalled();
+	});
+
+	it('keeps an active touch drag when virtualization unmounts another row', async () => {
+		vi.useFakeTimers();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(500),
+			isMobile: true,
+			rowHeight,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const row5 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-5"]');
+		if (!row0 || !row5) throw new Error('expected source and unrelated rows to be rendered');
+
+		await fireEvent.touchStart(row5, {
+			touches: [touchAt(1, 20, rowHeight * 5 + 44)],
+			changedTouches: [touchAt(1, 20, rowHeight * 5 + 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+
+		viewport.scrollTop = rowHeight * 10;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(row0.isConnected).toBe(false);
+		expect(row5.isConnected).toBe(true);
+		expect(row5.className).toContain('opacity-45');
+		expect(document.body.style.getPropertyValue('user-select')).toBe('none');
+
+		await fireEvent.touchCancel(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, rowHeight * 5 + 44)],
+		});
+		await tick();
+
+		expect(document.body.style.getPropertyValue('user-select')).toBe('');
+	});
+
 	it('persists when the optimistic preview moves the dragged row under the touch point', async () => {
 		vi.useFakeTimers();
 		const onQuickMove = vi.fn();

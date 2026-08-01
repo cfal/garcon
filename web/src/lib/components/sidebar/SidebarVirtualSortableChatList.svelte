@@ -298,6 +298,19 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 		splitLayout.startDrag(row.chat.id);
 	}
 
+	function cancelUnmountedDragSource(chatId: string): void {
+		if (draggingChatId !== chatId) return;
+
+		const activeList = reorder.activeList;
+		if (activeList) reorder.cancel(activeList);
+		if (touchDrag?.sourceChatId === chatId) clearTouchDrag();
+
+		activeDrop = null;
+		draggingChatId = null;
+		lastValidDrop = null;
+		if (splitLayout.draggedChatId === chatId) splitLayout.endDrag();
+	}
+
 	function pointIsInsideViewport(clientX: number, clientY: number): boolean {
 		if (!viewportRef) return false;
 		const rect = viewportRef.getBoundingClientRect();
@@ -985,7 +998,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 			data-sidebar-virtual-list-separator={separator.key}
 		></div>
 	{/each}
-	{#each virtualItems as virtualItem (`${virtualItem.index}:${rows[virtualItem.index]?.key ?? virtualItem.key}`)}
+	{#each virtualItems as virtualItem (virtualItem.key)}
 		{@const row = rows[virtualItem.index]}
 		{#if row}
 			<div
@@ -1016,6 +1029,7 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 						isDragging={draggingChatId === row.chat.id}
 						dropIndicatorEdge={activeDrop?.chatId === row.chat.id ? activeDrop.edge : null}
 						onDragStart={startSidebarDrag}
+						onDragSourceUnmount={cancelUnmountedDragSource}
 						onDragUpdate={previewSidebarDrop}
 						onDropOnRow={finishSidebarDrop}
 						{onChatSelect}

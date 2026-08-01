@@ -40,6 +40,7 @@
 		isDragging?: boolean;
 		dropIndicatorEdge?: Edge | null;
 		onDragStart: (row: SidebarVirtualChatRow) => void;
+		onDragSourceUnmount: (chatId: string) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chat: ChatSessionRecord) => void;
 		onStartRenameChat: (chat: ChatSessionRecord) => void;
@@ -73,6 +74,7 @@
 		isDragging = false,
 		dropIndicatorEdge = null,
 		onDragStart,
+		onDragSourceUnmount,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -97,7 +99,8 @@
 
 	onMount(() => {
 		if (!rowEl) return;
-		return combine(
+		const mountedChatId = row.chat.id;
+		const cleanupDragAndDrop = combine(
 			draggable({
 				element: rowEl,
 				canDrag: () => dragEnabled && !isMobile,
@@ -149,6 +152,11 @@
 				},
 			}),
 		);
+
+		return () => {
+			cleanupDragAndDrop();
+			onDragSourceUnmount(mountedChatId);
+		};
 	});
 </script>
 
