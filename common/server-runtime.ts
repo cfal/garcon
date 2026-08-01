@@ -1,13 +1,17 @@
 export const SERVER_RUNTIME_SCHEMA_VERSION = 1 as const;
 export const SERVER_RUNTIME_FILENAME = 'server-runtime.json';
 export const LOCAL_CAPABILITY_PREFIX = 'garcon_local_';
+export const SERVER_RUNTIME_PROOF_CONTEXT = 'garcon-runtime-proof-v1';
 
 export interface ServerRuntimeProbe {
   schemaVersion: typeof SERVER_RUNTIME_SCHEMA_VERSION;
   instanceId: string;
+  proof: string;
 }
 
-export interface ServerRuntimeIdentity extends ServerRuntimeProbe {
+export interface ServerRuntimeIdentity {
+  schemaVersion: typeof SERVER_RUNTIME_SCHEMA_VERSION;
+  instanceId: string;
   workspaceDir: string;
   startedAt: string;
 }
@@ -31,6 +35,7 @@ export function parseServerRuntimeProbe(value: unknown): ServerRuntimeProbe {
   return {
     schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
     instanceId: requiredString(raw, 'instanceId'),
+    proof: base64Url32(raw, 'proof'),
   };
 }
 
@@ -76,6 +81,14 @@ export function isLocalCapability(value: unknown): value is string {
     && /^[A-Za-z0-9_-]{43}$/.test(value.slice(LOCAL_CAPABILITY_PREFIX.length));
 }
 
+export function isRuntimeProbeChallenge(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+export function runtimeProofPayload(instanceId: string, challenge: string): string {
+  return `${SERVER_RUNTIME_PROOF_CONTEXT}\0${instanceId}\0${challenge}`;
+}
+
 function runtimeRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ServerRuntimeContractError('runtime payload must be an object');
@@ -95,4 +108,12 @@ function requiredString(raw: Record<string, unknown>, field: string): string {
     throw new ServerRuntimeContractError(`${field} must be a non-empty string`);
   }
   return value.trim();
+}
+
+function base64Url32(raw: Record<string, unknown>, field: string): string {
+  const value = requiredString(raw, field);
+  if (!isRuntimeProbeChallenge(value)) {
+    throw new ServerRuntimeContractError(`${field} must be 32-byte base64url data`);
+  }
+  return value;
 }

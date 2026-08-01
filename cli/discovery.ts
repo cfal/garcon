@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
+import crypto from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
 import {
   SERVER_RUNTIME_FILENAME,
   parseServerRuntimeDescriptor,
   parseServerRuntimeProbe,
+  runtimeProofPayload,
   type ServerRuntimeDescriptor,
 } from '@garcon/common/server-runtime';
 import { CliError } from './errors.js';
@@ -124,15 +126,19 @@ async function readRuntimeDescriptor(workspaceDir: string): Promise<ServerRuntim
 
 export async function probeRuntime(
   baseUrl: string,
+  expectedInstanceId: string,
+  localCapability: string,
   fetchFn: typeof fetch = fetch,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<boolean> {
   const timeoutSignal = AbortSignal.timeout(RUNTIME_PROBE_TIMEOUT_MS);
   const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  const challenge = crypto.randomBytes(32).toString('base64url');
   let response: Response;
   try {
-    response = await fetchFn(`${baseUrl}/api/v1/runtime`, {
+    response = await fetchFn(`${baseUrl}/api/v1/runtime?challenge=${encodeURIComponent(challenge)}`, {
       headers: { Accept: 'application/json' },
+      redirect: 'error',
       signal: requestSignal,
     });
   } catch (error) {
@@ -149,7 +155,14 @@ export async function probeRuntime(
     );
   }
   try {
-    return parseServerRuntimeProbe(await response.json()).instanceId;
+    const probe = parseServerRuntimeProbe(await response.json());
+    if (probe.instanceId !== expectedInstanceId) return false;
+    const expectedProof = crypto.createHmac('sha256', localCapability)
+      .update(runtimeProofPayload(probe.instanceId, challenge))
+      .digest();
+    const actualProof = Buffer.from(probe.proof, 'base64url');
+    return actualProof.length === expectedProof.length
+      && crypto.timingSafeEqual(actualProof, expectedProof);
   } catch (error) {
     throw new CliError('runtime verification', 'runtime probe returned an invalid response', 3, {
       cause: error,
@@ -182,11 +195,17 @@ export async function discoverRuntime(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const descriptor = await readRuntimeDescriptor(workspaceDir);
     const baseUrl = parseLoopbackServerUrl(options.serverUrl ?? descriptor.baseUrl);
-    const instanceId = await probeRuntime(baseUrl, fetchFn, options.signal);
-    if (instanceId === descriptor.instanceId) {
+    const verified = await probeRuntime(
+      baseUrl,
+      descriptor.instanceId,
+      descriptor.localCapability,
+      fetchFn,
+      options.signal,
+    );
+    if (verified) {
       return {
         baseUrl,
-        instanceId,
+        instanceId: descriptor.instanceId,
         localCapability: descriptor.localCapability,
         workspaceDir,
       };

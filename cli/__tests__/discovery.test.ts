@@ -7,10 +7,23 @@ import {
   LOCAL_CAPABILITY_PREFIX,
   SERVER_RUNTIME_FILENAME,
   SERVER_RUNTIME_SCHEMA_VERSION,
+  runtimeProofPayload,
 } from '@garcon/common/server-runtime';
 import { discoverRuntime, parseLoopbackServerUrl } from '../discovery.js';
 
 const roots: string[] = [];
+
+function runtimeProof(
+  capability: string,
+  instanceId: string,
+  requestUrl: string | URL | Request,
+): string {
+  const url = new URL(requestUrl instanceof Request ? requestUrl.url : requestUrl);
+  const challenge = url.searchParams.get('challenge') ?? '';
+  return crypto.createHmac('sha256', capability)
+    .update(runtimeProofPayload(instanceId, challenge))
+    .digest('base64url');
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
@@ -49,11 +62,16 @@ describe('discoverRuntime', () => {
       configDir: testFixture.configDir,
       workspace: 'review',
     }, {
-      fetch: async (_input, init) => {
+      fetch: async (input, init) => {
         authorizationHeaders.push(new Headers(init?.headers).get('authorization'));
         return Response.json({
           schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
           instanceId: testFixture.descriptor.instanceId,
+          proof: runtimeProof(
+            String(testFixture.descriptor.localCapability),
+            String(testFixture.descriptor.instanceId),
+            input,
+          ),
         });
       },
     });
@@ -75,17 +93,51 @@ describe('discoverRuntime', () => {
       configDir: testFixture.configDir,
       workspace: 'review',
     }, {
-      fetch: async () => {
+      fetch: async (input) => {
         probes += 1;
-        return Response.json({ schemaVersion: 1, instanceId: rotatedInstanceId });
+        const capability = probes === 1
+          ? String(testFixture.descriptor.localCapability)
+          : String((JSON.parse(await fs.readFile(testFixture.descriptorPath, 'utf8')) as Record<string, unknown>).localCapability);
+        return Response.json({
+          schemaVersion: 1,
+          instanceId: rotatedInstanceId,
+          proof: runtimeProof(capability, rotatedInstanceId, input),
+        });
       },
       delay: async () => {
-        const rotated = { ...testFixture.descriptor, instanceId: rotatedInstanceId };
+        const rotated = {
+          ...testFixture.descriptor,
+          instanceId: rotatedInstanceId,
+          localCapability: `${LOCAL_CAPABILITY_PREFIX}${crypto.randomBytes(32).toString('base64url')}`,
+        };
         await fs.writeFile(testFixture.descriptorPath, JSON.stringify(rotated), { mode: 0o600 });
       },
     });
     expect(probes).toBe(2);
     expect(connection.instanceId).toBe(rotatedInstanceId);
+  });
+
+  test('rejects a replayed instance identity without a fresh capability proof', async () => {
+    const testFixture = await fixture();
+    const replayedProof = crypto.randomBytes(32).toString('base64url');
+    let authorization: string | null = null;
+
+    await expect(discoverRuntime({
+      configDir: testFixture.configDir,
+      workspace: 'review',
+    }, {
+      fetch: async (_input, init) => {
+        authorization = new Headers(init?.headers).get('authorization');
+        return Response.json({
+          schemaVersion: 1,
+          instanceId: testFixture.descriptor.instanceId,
+          proof: replayedProof,
+        });
+      },
+      delay: async () => undefined,
+    })).rejects.toThrow('does not match');
+
+    expect(authorization).toBeNull();
   });
 
   test('rejects descriptors readable by other users', async () => {

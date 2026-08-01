@@ -15,7 +15,7 @@ import createScheduledPromptRoutes from './scheduled-prompts.js';
 import createTerminalRoutes from './terminals.js';
 import { createRuntimeRoutes } from './runtime.js';
 import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
-import type { ServerRuntimeProbe } from '@garcon/common/server-runtime';
+import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -66,7 +66,7 @@ export default function createAllRoutes({
   terminals,
   searchIndex,
   transcriptSearchSettings,
-  runtimeProbe,
+  runtimeState,
   commandLedger,
 }: {
   registry: IChatRegistry;
@@ -92,11 +92,11 @@ export default function createAllRoutes({
   terminals: TerminalManager;
   searchIndex: TranscriptSearchController;
   transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
-  runtimeProbe: ServerRuntimeProbe;
+  runtimeState: ServerRuntimeState;
   commandLedger: CommandLedger;
 }): RouteMap {
   return {
-    ...createRuntimeRoutes(runtimeProbe),
+    ...createRuntimeRoutes(runtimeState),
     ...createAgentTurnReceiptRoutes(commandLedger),
     ...createStaticRoutes(settings),
     ...authRoutes,

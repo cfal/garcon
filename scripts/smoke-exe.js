@@ -23,7 +23,6 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
 const executableNamesByHost = {
   'linux-x64': { server: 'garcon-linux-x64', cli: 'garcon-cli-linux-x64' },
   'darwin-arm64': { server: 'garcon-darwin-arm64', cli: 'garcon-cli-darwin-arm64' },
-  'windows-x64': { server: 'garcon-windows-x64.exe', cli: 'garcon-cli-windows-x64.exe' },
 };
 
 function delay(ms) {

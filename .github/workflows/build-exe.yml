@@ -78,8 +78,7 @@ jobs:
           for executable in \
             dist/garcon-linux-x64 \
             dist/garcon-windows-x64.exe \
-            dist/garcon-cli-linux-x64 \
-            dist/garcon-cli-windows-x64.exe; do
+            dist/garcon-cli-linux-x64; do
             if [ ! -f "$executable" ]; then
               echo "Expected executable at $executable"
               ls -la dist || true
@@ -96,7 +95,6 @@ jobs:
           cp dist/garcon-linux-x64 "artifacts/garcon-v${PACKAGE_VERSION}-linux-x64"
           cp dist/garcon-windows-x64.exe "artifacts/garcon-v${PACKAGE_VERSION}-windows-x64.exe"
           cp dist/garcon-cli-linux-x64 "artifacts/garcon-cli-v${PACKAGE_VERSION}-linux-x64"
-          cp dist/garcon-cli-windows-x64.exe "artifacts/garcon-cli-v${PACKAGE_VERSION}-windows-x64.exe"
 
           ls -la artifacts
 
@@ -119,13 +117,6 @@ jobs:
         with:
           name: garcon-cli-v${{ env.PACKAGE_VERSION }}-linux-x64
           path: artifacts/garcon-cli-v${{ env.PACKAGE_VERSION }}-linux-x64
-          if-no-files-found: error
-
-      - name: Upload Windows x64 CLI executable artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: garcon-cli-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
-          path: artifacts/garcon-cli-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
           if-no-files-found: error
 
   release:
@@ -168,19 +159,15 @@ jobs:
           name: garcon-cli-v${{ env.PACKAGE_VERSION }}-linux-x64
           path: artifacts
 
-      - name: Download Windows x64 CLI executable artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: garcon-cli-v${{ env.PACKAGE_VERSION }}-windows-x64.exe
-          path: artifacts
-
       - name: Package release assets
         run: |
+          chmod +x \
+            "artifacts/garcon-v${PACKAGE_VERSION}-linux-x64" \
+            "artifacts/garcon-cli-v${PACKAGE_VERSION}-linux-x64"
           for artifact in \
             "garcon-v${PACKAGE_VERSION}-linux-x64" \
             "garcon-v${PACKAGE_VERSION}-windows-x64.exe" \
-            "garcon-cli-v${PACKAGE_VERSION}-linux-x64" \
-            "garcon-cli-v${PACKAGE_VERSION}-windows-x64.exe"; do
+            "garcon-cli-v${PACKAGE_VERSION}-linux-x64"; do
             if [ ! -f "artifacts/${artifact}" ]; then
               echo "Missing downloaded executable artifact: ${artifact}"
               ls -la artifacts || true

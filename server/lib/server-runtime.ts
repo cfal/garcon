@@ -5,7 +5,9 @@ import {
   LOCAL_CAPABILITY_PREFIX,
   SERVER_RUNTIME_FILENAME,
   SERVER_RUNTIME_SCHEMA_VERSION,
+  isRuntimeProbeChallenge,
   parseServerRuntimeDescriptor,
+  runtimeProofPayload,
   type ServerRuntimeDescriptor,
   type ServerRuntimeIdentity,
 } from '@garcon/common/server-runtime';
@@ -25,6 +27,16 @@ export function createServerRuntimeState(workspaceDir: string): ServerRuntimeSta
     },
     localCapability: `${LOCAL_CAPABILITY_PREFIX}${crypto.randomBytes(32).toString('base64url')}`,
   };
+}
+
+export function createServerRuntimeProof(
+  state: ServerRuntimeState,
+  challenge: string,
+): string {
+  if (!isRuntimeProbeChallenge(challenge)) throw new Error('runtime challenge is invalid');
+  return crypto.createHmac('sha256', state.localCapability)
+    .update(runtimeProofPayload(state.identity.instanceId, challenge))
+    .digest('base64url');
 }
 
 export function advertisedServerUrl(bindAddress: string, port: number): string {

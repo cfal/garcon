@@ -579,7 +579,7 @@ export async function startServer(): Promise<void> {
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,
-      runtimeProbe: runtimeState.identity,
+      runtimeState,
       commandLedger,
     });
 

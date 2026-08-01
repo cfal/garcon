@@ -22,7 +22,6 @@ const executableTargets = {
   'windows-x64': {
     bunTarget: 'bun-windows-x64-baseline',
     outputName: 'garcon-windows-x64.exe',
-    cliOutputName: 'garcon-cli-windows-x64.exe',
   },
 };
 
@@ -208,6 +207,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions, searchAss
 
 async function buildCliExecutable(targetId) {
   const target = executableTargets[targetId];
+  if (!target.cliOutputName) return;
   const outFile = path.resolve(executableDir, target.cliOutputName);
   const result = await Bun.build({
     entrypoints: [path.join(repoRoot, 'cli', 'main.ts')],

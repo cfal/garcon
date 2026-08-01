@@ -6,6 +6,7 @@ import {
 } from '../server-runtime.js';
 
 const capability = `${LOCAL_CAPABILITY_PREFIX}${'a'.repeat(43)}`;
+const proof = 'b'.repeat(43);
 
 describe('server runtime contracts', () => {
   it('parses a runtime descriptor and normalizes its base URL', () => {
@@ -25,15 +26,18 @@ describe('server runtime contracts', () => {
   });
 
   it('keeps the credential-free probe minimal', () => {
-    expect(parseServerRuntimeProbe({ schemaVersion: 1, instanceId: 'instance-1' })).toEqual({
+    expect(parseServerRuntimeProbe({ schemaVersion: 1, instanceId: 'instance-1', proof })).toEqual({
       schemaVersion: 1,
       instanceId: 'instance-1',
+      proof,
     });
   });
 
   it('rejects unsupported schemas and malformed capabilities', () => {
-    expect(() => parseServerRuntimeProbe({ schemaVersion: 2, instanceId: 'instance-1' }))
+    expect(() => parseServerRuntimeProbe({ schemaVersion: 2, instanceId: 'instance-1', proof }))
       .toThrow('unsupported runtime schema version');
+    expect(() => parseServerRuntimeProbe({ schemaVersion: 1, instanceId: 'instance-1', proof: 'short' }))
+      .toThrow('proof must be 32-byte base64url data');
     expect(() => parseServerRuntimeDescriptor({
       schemaVersion: 1,
       instanceId: 'instance-1',

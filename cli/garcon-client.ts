@@ -175,7 +175,13 @@ export class GarconClient {
   }
 
   async verifyRuntime(signal?: AbortSignal): Promise<boolean> {
-    return await probeRuntime(this.#baseUrl, this.#fetch, signal) === this.#instanceId;
+    return probeRuntime(
+      this.#baseUrl,
+      this.#instanceId,
+      this.#capability,
+      this.#fetch,
+      signal,
+    );
   }
 
   async #submit(
@@ -207,9 +213,27 @@ export class GarconClient {
               || error.status === 502
               || error.status === 503
               || error.status === 504
-            : error instanceof CliError && error.phase === 'submission');
+            : false);
         if (!transient || attempt === SUBMISSION_ATTEMPTS - 1 || signal?.aborted) throw error;
         await this.#submissionDelay(100 * (attempt + 1), signal);
+        let sameRuntime: boolean;
+        try {
+          sameRuntime = await this.verifyRuntime(signal);
+        } catch (verificationError) {
+          throw new CliError(
+            'transport recovery',
+            'the accepted command may still be running, but Garcon could not be verified before retry',
+            3,
+            { cause: verificationError },
+          );
+        }
+        if (!sameRuntime) {
+          throw new CliError(
+            'transport recovery',
+            'Garcon restarted after submission; the command was not retried',
+            3,
+          );
+        }
       }
     }
     throw lastError;
@@ -234,6 +258,7 @@ export class GarconClient {
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        redirect: 'error',
         signal: requestSignal,
       });
     } catch (error) {
