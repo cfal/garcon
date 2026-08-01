@@ -148,6 +148,36 @@ describe('resolveModelSelection', () => {
       model: 'east:qwen',
     })).toThrow('routing');
   });
+
+  test('rejects malformed model rows instead of falling through to native routing', () => {
+    const malformed = agent({
+      requiresStrictModelDiscovery: false,
+      models: [{
+        value: 'future',
+        label: 'Future',
+        protocol: 'invalid',
+      } as unknown as AgentCatalogEntry['models'][number]],
+    });
+
+    expect(() => resolveModelSelection(catalog(malformed), 'codex', { model: 'future' }))
+      .toThrow('model catalog for codex is invalid');
+  });
+
+  test('rejects routed models that disagree with their provider endpoint', () => {
+    const malformed = agent({
+      models: [{
+        value: 'east:qwen',
+        label: 'Qwen',
+        rawModel: 'qwen',
+        apiProviderId: 'acme',
+        endpointId: 'east',
+        protocol: 'anthropic-messages',
+      }],
+    });
+
+    expect(() => resolveModelSelection(catalog(malformed), 'codex', { model: 'east:qwen' }))
+      .toThrow('incompatible');
+  });
 });
 
 describe('execution selection', () => {

@@ -40,6 +40,10 @@ function catalogError(message: string): CliError {
   return new CliError('catalog resolution', message, 2);
 }
 
+function isApiProtocol(value: unknown): value is ApiProtocol {
+  return value === 'anthropic-messages' || value === 'openai-compatible';
+}
+
 function normalizedAgent(catalog: ModelCatalogResponse, agentId: string): AgentCatalogEntry {
   const raw = catalog.catalog.agents.find((entry) => entry?.id === agentId);
   if (!raw) throw catalogError(`unknown agent: ${agentId}`);
@@ -50,6 +54,9 @@ function normalizedAgent(catalog: ModelCatalogResponse, agentId: string): AgentC
     || !raw.supportedPermissionModes.every(isPermissionMode)
     || !Array.isArray(raw.supportedThinkingModes)
     || !raw.supportedThinkingModes.every(isThinkingMode)
+    || !Array.isArray(raw.supportedProtocols)
+    || !raw.supportedProtocols.every(isApiProtocol)
+    || typeof raw.acceptsApiProviderEndpoints !== 'boolean'
     || typeof raw.requiresStrictModelDiscovery !== 'boolean'
     || !defaultSettings
     || defaultSettings.ownerId !== agentId
@@ -60,7 +67,7 @@ function normalizedAgent(catalog: ModelCatalogResponse, agentId: string): AgentC
 }
 
 function normalizedModels(agent: AgentCatalogEntry): AgentModelOption[] {
-  return agent.models.filter((model) => (
+  const valid = agent.models.every((model) => (
     model
     && typeof model.value === 'string'
     && model.value.length > 0
@@ -69,11 +76,55 @@ function normalizedModels(agent: AgentCatalogEntry): AgentModelOption[] {
     && (model.endpointId === undefined || typeof model.endpointId === 'string')
     && (model.rawModel === undefined || typeof model.rawModel === 'string')
     && (
-      model.protocol === undefined
-      || model.protocol === 'anthropic-messages'
-      || model.protocol === 'openai-compatible'
+      model.protocol === undefined || isApiProtocol(model.protocol)
     )
   ));
+  if (!valid) {
+    throw new CliError('catalog resolution', `model catalog for ${agent.id} is invalid`, 3);
+  }
+  return agent.models;
+}
+
+function selectedRouting(
+  catalog: ModelCatalogResponse,
+  agent: AgentCatalogEntry,
+  model: AgentModelOption,
+): ResolvedModelSelection {
+  if (!model.apiProviderId) {
+    if (model.endpointId || model.protocol) {
+      throw new CliError('catalog resolution', `model routing for ${model.value} is incomplete`, 3);
+    }
+    return {
+      model: model.rawModel ?? model.value,
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+    };
+  }
+  if (!model.endpointId || !model.protocol) {
+    throw new CliError('catalog resolution', `model routing for ${model.value} is incomplete`, 3);
+  }
+  const provider = catalog.catalog.apiProviders.find((entry) => entry?.id === model.apiProviderId);
+  if (!provider || !Array.isArray(provider.endpoints)) {
+    throw new CliError('catalog resolution', `model routing for ${model.value} is invalid`, 3);
+  }
+  const endpoint = provider.endpoints.find((entry) => entry?.id === model.endpointId);
+  if (!endpoint) {
+    throw new CliError('catalog resolution', `model routing for ${model.value} is invalid`, 3);
+  }
+  if (
+    !isApiProtocol(endpoint.protocol)
+    || endpoint.protocol !== model.protocol
+    || !agent.supportedProtocols.includes(model.protocol)
+  ) {
+    throw new CliError('catalog resolution', `model routing for ${model.value} is incompatible`, 3);
+  }
+  return {
+    model: model.rawModel ?? model.value,
+    apiProviderId: model.apiProviderId,
+    modelEndpointId: model.endpointId,
+    modelProtocol: model.protocol,
+  };
 }
 
 function assertProviderAndEndpoint(
@@ -138,18 +189,7 @@ export function resolveModelSelection(
       modelProtocol: null,
     };
   }
-  if (
-    (selected.apiProviderId && (!selected.endpointId || !selected.protocol))
-    || (!selected.apiProviderId && (selected.endpointId || selected.protocol))
-  ) {
-    throw new CliError('catalog resolution', `model routing for ${requested.model} is incomplete`, 3);
-  }
-  return {
-    model: selected.rawModel ?? selected.value,
-    apiProviderId: selected.apiProviderId ?? null,
-    modelEndpointId: selected.endpointId ?? null,
-    modelProtocol: selected.protocol ?? null,
-  };
+  return selectedRouting(catalog, agent, selected);
 }
 
 function strictPermissionMode(
