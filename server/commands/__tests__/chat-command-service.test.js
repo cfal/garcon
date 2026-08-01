@@ -2547,6 +2547,44 @@ describe('ChatCommandService', () => {
     });
   });
 
+  it('rejects new steer identities after the process-lifetime capacity is exhausted', async () => {
+    const ledger = new CommandLedger(workspaceDir, { steerIdentityLimit: 1 });
+    const retained = await ledger.accept({
+      commandType: 'steer',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-steer-retained',
+      payload: {
+        chatId: SOURCE_CHAT_ID,
+        content: 'retained',
+        clientMessageId: 'message-steer-retained',
+      },
+    });
+    await ledger.settleTerminal(retained.record.key, 'finished', { turnId: 'turn-retained' });
+    const { service, queue } = makeService({ ledger });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'new steer',
+      clientRequestId: 'request-steer-capacity',
+      clientMessageId: 'message-steer-capacity',
+    })).rejects.toMatchObject({
+      code: 'STEER_CAPACITY_EXHAUSTED',
+      status: 503,
+      retryable: false,
+    });
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+    expect(await ledger.accept({
+      commandType: 'steer',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-steer-retained',
+      payload: {
+        chatId: SOURCE_CHAT_ID,
+        content: 'retained',
+        clientMessageId: 'message-steer-retained',
+      },
+    })).toMatchObject({ kind: 'duplicate' });
+  });
+
   it('never redelivers a steer whose provider outcome is unknown', async () => {
     const target = { attempt: {}, identity: { turnId: 'turn-active' } };
     const deliveryError = new SteerDeliveryError(new Error('connection closed'), 'unknown');

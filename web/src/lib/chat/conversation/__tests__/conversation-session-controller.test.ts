@@ -2315,6 +2315,28 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
+	it('explains when the server has exhausted retained steering identities', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
+		deps.composerState.inputText = '/steer Keep the current turn';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockSteerChat.mockRejectedValueOnce(new ApiError(
+			503,
+			'Steering capacity exhausted',
+			'STEER_CAPACITY_EXHAUSTED',
+		));
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(deps.composerState.inputText).toBe('/steer Keep the current turn');
+		expect(deps.chatState.pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: 'Steering is temporarily unavailable until the server restarts.',
+		});
+	});
+
 	it('does not overwrite newer composer text after a definitive steering failure', async () => {
 		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
 		const pending = deferred<Awaited<ReturnType<typeof steerChat>>>();

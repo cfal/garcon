@@ -221,7 +221,7 @@ export class AgentRuntimeRouter {
         422,
       );
     }
-    const result = await integration.steering.steer({
+    return integration.steering.steer({
       chatId,
       projectPath: entry.projectPath,
       agentSessionId: entry.agentSessionId,
@@ -231,21 +231,6 @@ export class AgentRuntimeRouter {
       clientMessageId: options.clientMessageId,
       prepareDelivery,
     });
-    const details = {
-      chatId,
-      clientRequestId: options.clientRequestId,
-      integrationId: entry.agentId,
-    };
-    if (result.kind === 'accepted') {
-      logger.info('steer accepted', details);
-    } else if (result.kind === 'rejected') {
-      logger.warn('steer rejected', { ...details, reason: result.reason });
-    } else if (result.outcome === 'unknown') {
-      logger.error('steer outcome unknown', { ...details, outcome: result.outcome });
-    } else {
-      logger.warn('steer not delivered', { ...details, outcome: result.outcome });
-    }
-    return result;
   }
 
   captureSteerTarget(chatId: string): AgentSteerTarget | null {

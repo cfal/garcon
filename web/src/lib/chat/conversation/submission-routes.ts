@@ -280,6 +280,8 @@ function steerFailureNotice(error: unknown): string {
 				return m.chat_notice_steer_turn_changed();
 			case 'STEER_TURN_NOT_STEERABLE':
 				return m.chat_notice_steer_turn_not_steerable();
+			case 'STEER_CAPACITY_EXHAUSTED':
+				return m.chat_notice_steer_capacity_exhausted();
 			case 'STEER_PROVIDER_REJECTED':
 				return m.chat_notice_steer_provider_rejected();
 			case 'STEER_NOT_DELIVERED':

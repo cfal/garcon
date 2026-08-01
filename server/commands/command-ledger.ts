@@ -59,7 +59,20 @@ export type CommandTerminalResult =
   | { kind: 'conflict'; record: CommandLedgerRecord };
 
 export const LEDGER_RECORD_LIMIT = 1000;
+// Refuses new identities at the limit because eviction could redeliver a native steer.
+export const STEER_IDENTITY_LIMIT = 10_000;
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
+
+export class SteerIdentityCapacityError extends Error {
+  constructor() {
+    super('The process-lifetime steering identity capacity is exhausted');
+    this.name = 'SteerIdentityCapacityError';
+  }
+}
+
+export interface CommandLedgerOptions {
+  steerIdentityLimit?: number;
+}
 
 const TERMINAL_COMMAND_STATUSES = new Set<CommandLedgerStatus>([
   'finished',
@@ -144,8 +157,16 @@ function recordFromSteerTombstone(tombstone: SteerCommandTombstone): CommandLedg
 export class CommandLedger {
   readonly #records = new Map<string, CommandLedgerRecord>();
   readonly #steerTombstones = new Map<string, SteerCommandTombstone>();
+  readonly #keysByIdentity = new Map<string, string>();
+  readonly #steerIdentityLimit: number;
+  #steerIdentityCount = 0;
 
-  constructor(_workspaceDir?: string) {}
+  constructor(_workspaceDir?: string, options: CommandLedgerOptions = {}) {
+    this.#steerIdentityLimit = options.steerIdentityLimit ?? STEER_IDENTITY_LIMIT;
+    if (!Number.isSafeInteger(this.#steerIdentityLimit) || this.#steerIdentityLimit < 1) {
+      throw new Error('steerIdentityLimit must be a positive safe integer');
+    }
+  }
 
   async getRecord(key: string): Promise<CommandLedgerRecord | null> {
     const record = this.#records.get(key);
@@ -205,13 +226,24 @@ export class CommandLedger {
         : { kind: 'conflict', record };
     }
 
-    const conflictingIdentity = [
-      ...this.#records.values(),
-      ...[...this.#steerTombstones.values()].map(recordFromSteerTombstone),
-    ].find((record) => (
-      record.chatId === input.chatId && record.clientRequestId === input.clientRequestId
-    ));
-    if (conflictingIdentity) return { kind: 'conflict', record: cloneRecord(conflictingIdentity) };
+    const identityKey = commandLedgerIdentityKey(input.chatId, input.clientRequestId);
+    const conflictingKey = this.#keysByIdentity.get(identityKey);
+    if (conflictingKey) {
+      const conflictingRecord = this.#records.get(conflictingKey);
+      const conflictingTombstone = this.#steerTombstones.get(conflictingKey);
+      if (!conflictingRecord && !conflictingTombstone) {
+        throw new Error(`Command ledger identity index is stale for ${conflictingKey}`);
+      }
+      return {
+        kind: 'conflict',
+        record: conflictingRecord
+          ? cloneRecord(conflictingRecord)
+          : recordFromSteerTombstone(conflictingTombstone!),
+      };
+    }
+    if (input.commandType === 'steer' && this.#steerIdentityCount >= this.#steerIdentityLimit) {
+      throw new SteerIdentityCapacityError();
+    }
 
     const now = new Date().toISOString();
     const record: CommandLedgerRecord = {
@@ -228,6 +260,8 @@ export class CommandLedger {
       entryId: input.entryId,
     };
     this.#records.set(key, record);
+    this.#keysByIdentity.set(identityKey, key);
+    if (input.commandType === 'steer') this.#steerIdentityCount += 1;
     this.#trimRecords();
     return { kind: 'accepted', record: cloneRecord(record) };
   }
@@ -305,8 +339,17 @@ export class CommandLedger {
           ...tombstone
         } = record;
         this.#steerTombstones.set(key, tombstone);
+      } else {
+        this.#keysByIdentity.delete(commandLedgerIdentityKey(
+          record.chatId,
+          record.clientRequestId,
+        ));
       }
       this.#records.delete(key);
     }
   }
+}
+
+function commandLedgerIdentityKey(chatId: string, clientRequestId: string): string {
+  return JSON.stringify([chatId, clientRequestId]);
 }

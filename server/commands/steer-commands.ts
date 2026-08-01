@@ -4,12 +4,21 @@ import type {
   SteerCommandResponse,
 } from '../../common/chat-command-contracts.ts';
 import { DomainError, SteerDeliveryError } from '../lib/domain-error.ts';
-import type { CommandLedgerRecord } from './command-ledger.ts';
+import { createLogger, type Logger } from '../lib/log.ts';
+import {
+  SteerIdentityCapacityError,
+  type LedgerAcceptResult,
+  type CommandLedgerRecord,
+} from './command-ledger.ts';
 import {
   CommandSupport,
   CommandValidationError,
   commandResultFromRecord,
 } from './command-support.ts';
+
+const logger = createLogger('commands:steer');
+const STEER_CAPACITY_EXHAUSTED_MESSAGE =
+  'Steering is temporarily unavailable because the server has retained its maximum number of steering identities';
 
 export class SteerCommands {
   constructor(private readonly support: CommandSupport) {}
@@ -19,69 +28,111 @@ export class SteerCommands {
   }
 
   async submit(input: SteerCommandRequest): Promise<SteerCommandResponse> {
-    this.support.requireChat(input.chatId);
     this.support.assertContent(input.content);
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(
       input.clientMessageId,
       'clientMessageId',
     );
-    const target = this.deps.queue.captureSteerTarget(input.chatId);
-
-    return this.support.withChatMutationLock(input.chatId, async () => {
-      const ledger = await this.deps.ledger.accept({
-        commandType: 'steer',
+    const initialChat = this.deps.chats.getChat(input.chatId);
+    if (!initialChat) {
+      const error = new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      logSteerOutcome(logger, {
         chatId: input.chatId,
         clientRequestId,
-        payload: {
+      }, { kind: 'failed', error });
+      throw error;
+    }
+    const integrationId = initialChat.agentId;
+    const target = this.deps.queue.captureSteerTarget(input.chatId);
+    let outcomeTurnId: string | undefined;
+
+    try {
+      const response = await this.support.withChatMutationLock(input.chatId, async () => {
+        let ledger: LedgerAcceptResult;
+        try {
+          ledger = await this.deps.ledger.accept({
+            commandType: 'steer',
+            chatId: input.chatId,
+            clientRequestId,
+            payload: {
+              chatId: input.chatId,
+              content: input.content,
+              clientMessageId,
+            },
+          });
+        } catch (error) {
+          if (error instanceof SteerIdentityCapacityError) {
+            throw new CommandValidationError(
+              'STEER_CAPACITY_EXHAUSTED',
+              STEER_CAPACITY_EXHAUSTED_MESSAGE,
+              503,
+              false,
+            );
+          }
+          throw error;
+        }
+        this.support.throwOnConflict(
+          ledger,
+          'clientRequestId was reused with different payload',
+        );
+
+        outcomeTurnId = ledger.record.turnId;
+        if (ledger.kind === 'duplicate') {
+          return this.#duplicateResponse(ledger.record);
+        }
+
+        outcomeTurnId = target?.identity.turnId;
+        const command = {
+          key: ledger.record.key,
           chatId: input.chatId,
+          clientRequestId,
+        };
+        if (!this.deps.chats.getChat(input.chatId)) {
+          const error = new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
+          await this.support.settlement.settleSteerFailure(command, error);
+          throw error;
+        }
+        if (!target) {
+          const error = new DomainError(
+            'STEER_TURN_UNAVAILABLE',
+            'There is no active turn to steer',
+            409,
+          );
+          await this.support.settlement.settleSteerFailure(command, error);
+          throw error;
+        }
+
+        const outcome = await this.deps.queue.deliverAcceptedSteer({
+          command,
           content: input.content,
           clientMessageId,
-        },
+          target,
+          settlement: this.support.settlement,
+        });
+        return {
+          ...commandResultFromRecord(ledger.record),
+          commandType: 'steer' as const,
+          chatId: input.chatId,
+          turnId: outcome.turnId,
+        };
       });
-      this.support.throwOnConflict(
-        ledger,
-        'clientRequestId was reused with different payload',
-      );
-
-      if (ledger.kind === 'duplicate') {
-        return this.#duplicateResponse(ledger.record);
-      }
-
-      const command = {
-        key: ledger.record.key,
+      logSteerOutcome(logger, {
         chatId: input.chatId,
         clientRequestId,
-      };
-      if (!this.deps.chats.getChat(input.chatId)) {
-        const error = new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
-        await this.support.settlement.settleSteerFailure(command, error);
-        throw error;
-      }
-      if (!target) {
-        const error = new DomainError(
-          'STEER_TURN_UNAVAILABLE',
-          'There is no active turn to steer',
-          409,
-        );
-        await this.support.settlement.settleSteerFailure(command, error);
-        throw error;
-      }
-
-      const outcome = await this.deps.queue.deliverAcceptedSteer({
-        command,
-        content: input.content,
-        clientMessageId,
-        target,
-        settlement: this.support.settlement,
-      });
-      return {
-        ...commandResultFromRecord(ledger.record),
-        commandType: 'steer',
+        integrationId,
+        turnId: response.turnId,
+      }, { kind: 'accepted', status: response.status });
+      return response;
+    } catch (error) {
+      logSteerOutcome(logger, {
         chatId: input.chatId,
-        turnId: outcome.turnId,
-      };
-    });
+        clientRequestId,
+        integrationId,
+        turnId: outcomeTurnId,
+      }, { kind: 'failed', error });
+      throw error;
+    }
   }
 
   async #duplicateResponse(record: CommandLedgerRecord): Promise<SteerCommandResponse> {
@@ -111,6 +162,54 @@ export class SteerCommands {
   }
 }
 
+interface SteerLogContext {
+  chatId: string;
+  clientRequestId: string;
+  integrationId?: string;
+  turnId?: string;
+}
+
+type SteerLogOutcome =
+  | { kind: 'accepted'; status: SteerCommandResponse['status'] }
+  | { kind: 'failed'; error: unknown };
+
+export function logSteerOutcome(
+  outcomeLogger: Logger,
+  context: SteerLogContext,
+  outcome: SteerLogOutcome,
+): void {
+  const details = {
+    chatId: context.chatId,
+    clientRequestId: context.clientRequestId,
+    ...(context.integrationId ? { integrationId: context.integrationId } : {}),
+    ...(context.turnId ? { turnId: context.turnId } : {}),
+  };
+  if (outcome.kind === 'accepted') {
+    outcomeLogger.info('steer accepted', { ...details, status: outcome.status });
+    return;
+  }
+
+  const errorCode = steerOutcomeErrorCode(outcome.error);
+  const failureDetails = {
+    ...details,
+    errorCode,
+    ...(outcome.error instanceof SteerDeliveryError
+      ? { sendAttempted: outcome.error.outcome === 'unknown' }
+      : {}),
+  };
+  if (errorCode === 'STEER_OUTCOME_UNKNOWN' || errorCode === 'INTERNAL_ERROR') {
+    outcomeLogger.error('steer failed', failureDetails);
+  } else {
+    outcomeLogger.warn('steer rejected', failureDetails);
+  }
+}
+
+function steerOutcomeErrorCode(error: unknown): CommandErrorCode {
+  if (error instanceof CommandValidationError) return error.code;
+  if (error instanceof DomainError) return steerErrorCode(error.code);
+  return 'INTERNAL_ERROR';
+}
+
 function recordedSteerError(record: CommandLedgerRecord): CommandValidationError {
   const code = steerErrorCode(record.errorCode);
   return new CommandValidationError(
@@ -134,6 +233,7 @@ function steerErrorCode(value: string | undefined): CommandErrorCode {
     case 'STEER_TURN_UNAVAILABLE':
     case 'STEER_TURN_CHANGED':
     case 'STEER_TURN_NOT_STEERABLE':
+    case 'STEER_CAPACITY_EXHAUSTED':
       return value;
     default:
       return 'INTERNAL_ERROR';
@@ -151,6 +251,7 @@ function steerErrorStatus(code: CommandErrorCode): number {
     case 'STEER_TURN_NOT_STEERABLE': return 409;
     case 'OPERATION_UNSUPPORTED': return 422;
     case 'SERVER_SHUTTING_DOWN': return 503;
+    case 'STEER_CAPACITY_EXHAUSTED': return 503;
     default: return 500;
   }
 }

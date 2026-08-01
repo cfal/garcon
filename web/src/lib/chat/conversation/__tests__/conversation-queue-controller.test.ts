@@ -77,7 +77,7 @@ function createHarness() {
 
 describe('ConversationQueueController', () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 	});
 
 	it('restores the earliest failed concurrent submission after all requests settle', () => {
@@ -170,7 +170,7 @@ describe('ConversationQueueController', () => {
 		const { controller } = createHarness();
 		const control = emptyChatExecutionControlState();
 		vi.mocked(moveQueuedInput)
-			.mockRejectedValueOnce(new ApiError(500, 'Connection lost', 'INTERNAL_ERROR'))
+			.mockRejectedValueOnce(new ApiError(500, 'Connection lost'))
 			.mockResolvedValueOnce({
 				success: true,
 				commandType: 'queue-entry-move',
