@@ -4,6 +4,7 @@ import type {
   SteerCommandResponse,
 } from '../../common/chat-command-contracts.ts';
 import { DomainError, SteerDeliveryError } from '../lib/domain-error.ts';
+import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import { createLogger, type Logger } from '../lib/log.ts';
 import {
   SteerIdentityCapacityError,
@@ -21,6 +22,9 @@ const STEER_CAPACITY_EXHAUSTED_MESSAGE =
   'Steering is temporarily unavailable because the server has retained its maximum number of steering identities';
 
 export class SteerCommands {
+  // Preserves steering admission order without holding the command lock during file reads.
+  readonly #preparationLocks = new KeyedPromiseLock();
+
   constructor(private readonly support: CommandSupport) {}
 
   private get deps() {
@@ -50,10 +54,8 @@ export class SteerCommands {
     let outcomeTurnId = target?.identity.turnId;
 
     try {
-      const providerContent = initialChat
-        ? await this.deps.fileMentions.resolve(input.content, initialChat.projectPath)
-        : input.content;
-      const response = await this.support.withChatMutationLock(input.chatId, async () => {
+      let providerContent = input.content;
+      const scheduleResponse = () => this.support.withChatMutationLock(input.chatId, async () => {
         if (!initialChat) {
           const observed = await this.deps.ledger.observe(ledgerInput);
           if (observed) {
@@ -126,6 +128,14 @@ export class SteerCommands {
           turnId: outcome.turnId,
         };
       });
+      const scheduled = await this.#preparationLocks.runExclusive(`chat:${input.chatId}`, async () => {
+        providerContent = initialChat
+          ? await this.deps.fileMentions.resolve(input.content, initialChat.projectPath)
+          : input.content;
+        // Enqueues the command lock before releasing steering preparation order.
+        return { response: scheduleResponse() };
+      });
+      const response = await scheduled.response;
       logSteerOutcome(logger, {
         chatId: input.chatId,
         clientRequestId,

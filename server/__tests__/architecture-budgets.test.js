@@ -22,7 +22,8 @@ const MAX_LINES = 1000;
 // opaque provider targets, and complete command-outcome telemetry.
 // The fourth review adds 58 lines for post-deletion replay and for resolving
 // provider file context outside the command lock without changing transcript content.
-const EXECUTION_FOOTPRINT_BUDGET = 7325;
+// The fifth review adds 7 lines for a separate FIFO steering preparation lock.
+const EXECUTION_FOOTPRINT_BUDGET = 7332;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

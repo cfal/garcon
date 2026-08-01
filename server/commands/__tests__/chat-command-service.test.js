@@ -2545,6 +2545,131 @@ describe('ChatCommandService', () => {
     }));
   });
 
+  it('keeps the first same-identity steering admission while file preparation is delayed', async () => {
+    const resolutionStarted = deferred();
+    const releaseResolution = deferred();
+    const firstTarget = { attempt: {}, identity: { turnId: 'turn-first' } };
+    const secondTarget = { attempt: {}, identity: { turnId: 'turn-second' } };
+    let captureCount = 0;
+    let resolutionCount = 0;
+    const { service, queue, fileMentions } = makeService({
+      fileMentions: {
+        resolve: mock(async () => {
+          resolutionCount += 1;
+          if (resolutionCount === 1) {
+            resolutionStarted.resolve();
+            await releaseResolution.promise;
+            return 'expanded-first';
+          }
+          return 'expanded-second';
+        }),
+      },
+      queue: {
+        captureSteerTarget: mock(() => {
+          captureCount += 1;
+          return captureCount === 1 ? firstTarget : secondTarget;
+        }),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'focus @notes.txt',
+      clientRequestId: 'request-steer-ordered-duplicate',
+      clientMessageId: 'message-steer-ordered-duplicate',
+    };
+
+    const first = service.submitSteer(input);
+    await resolutionStarted.promise;
+    const second = service.submitSteer(input);
+    expect(fileMentions.resolve).toHaveBeenCalledTimes(1);
+
+    releaseResolution.resolve();
+    await expect(first).resolves.toMatchObject({ status: 'accepted', turnId: 'turn-first' });
+    await expect(second).resolves.toMatchObject({ status: 'duplicate', turnId: 'turn-first' });
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(1);
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
+      providerContent: 'expanded-first',
+      target: firstTarget,
+    }));
+  });
+
+  it('delivers distinct steers in admission order when the first file preparation is delayed', async () => {
+    const resolutionStarted = deferred();
+    const releaseResolution = deferred();
+    const firstDeliveryStarted = deferred();
+    const releaseFirstDelivery = deferred();
+    const secondResolutionStarted = deferred();
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const deliveries = [];
+    const { service, queue, fileMentions } = makeService({
+      fileMentions: {
+        resolve: mock(async (content) => {
+          if (content.startsWith('first')) {
+            resolutionStarted.resolve();
+            await releaseResolution.promise;
+            return 'expanded-first';
+          }
+          secondResolutionStarted.resolve();
+          return 'expanded-second';
+        }),
+      },
+      queue: {
+        captureSteerTarget: mock(() => target),
+        deliverAcceptedSteer: mock(async (input) => {
+          deliveries.push({
+            clientRequestId: input.command.clientRequestId,
+            providerContent: input.providerContent,
+          });
+          if (input.command.clientRequestId === 'request-steer-ordered-first') {
+            firstDeliveryStarted.resolve();
+            await releaseFirstDelivery.promise;
+          }
+          await input.settlement.markScheduled(input.command, target.identity.turnId);
+          await input.settlement.settleSteerSuccess(input.command, target.identity.turnId);
+          return { turnId: target.identity.turnId };
+        }),
+      },
+    });
+
+    const first = service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'first @slow.txt',
+      clientRequestId: 'request-steer-ordered-first',
+      clientMessageId: 'message-steer-ordered-first',
+    });
+    await resolutionStarted.promise;
+    const second = service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'second @fast.txt',
+      clientRequestId: 'request-steer-ordered-second',
+      clientMessageId: 'message-steer-ordered-second',
+    });
+    expect(fileMentions.resolve).toHaveBeenCalledTimes(1);
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+
+    releaseResolution.resolve();
+    await firstDeliveryStarted.promise;
+    await secondResolutionStarted.promise;
+    expect(deliveries).toEqual([{
+      clientRequestId: 'request-steer-ordered-first',
+      providerContent: 'expanded-first',
+    }]);
+
+    releaseFirstDelivery.resolve();
+    await expect(first).resolves.toMatchObject({ status: 'accepted' });
+    await expect(second).resolves.toMatchObject({ status: 'accepted' });
+    expect(deliveries).toEqual([
+      {
+        clientRequestId: 'request-steer-ordered-first',
+        providerContent: 'expanded-first',
+      },
+      {
+        clientRequestId: 'request-steer-ordered-second',
+        providerContent: 'expanded-second',
+      },
+    ]);
+  });
+
   it('records session deletion while steering waits for the chat mutation lock', async () => {
     const lock = new KeyedPromiseLock();
     const entered = deferred();
