@@ -227,17 +227,30 @@ function makeService(overrides = {}) {
     }),
     runInitialInput: mock(async (input) => {
       let reservation;
+      let scheduled = false;
       try {
         reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
         await input.preparation?.prepare();
         await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
+        scheduled = true;
         await input.dispatch?.(reservation.executionAdmission);
         await queue.completeDirectTurn(reservation);
       } catch (error) {
-        await input.settlement.settleOperationFailure(input.command, error);
-        await input.preparation?.compensate();
-        if (reservation) await queue.failDirectTurn(reservation);
+        if (scheduled) {
+          await input.settlement.settleOperationFailure(input.command, error);
+          await input.preparation?.compensate();
+          if (reservation) await queue.failDirectTurn(reservation);
+        } else {
+          pendingInputs.markFailed(input.command.chatId, input.options.clientRequestId);
+          await input.preparation?.compensate();
+          if (reservation) await queue.releaseDirectTurn(reservation);
+          await input.settlement.markPreScheduleFailure(input.command, {
+            error,
+            retryable: true,
+            preserveForkPreparation: false,
+          });
+        }
         throw error;
       }
     }),
@@ -860,11 +873,11 @@ describe('ChatCommandService', () => {
 
   it('keeps a compensated pre-schedule start failure reopenable', async () => {
     let attempts = 0;
-    const startSession = mock(async () => {
+    const { service, queue, settings, agents } = makeService();
+    settings.ensureInNormal.mockImplementation(async () => {
       attempts += 1;
-      if (attempts === 1) throw new Error('provider startup failed');
+      if (attempts === 1) throw new Error('startup bookkeeping failed');
     });
-    const { service, queue } = makeService({ agents: { startSession } });
     const input = {
       chatId: TARGET_CHAT_ID,
       agentId: 'claude',
@@ -876,10 +889,11 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-start-reopen',
     };
 
-    await expect(service.submitStart(input)).rejects.toThrow('provider startup failed');
+    await expect(service.submitStart(input)).rejects.toThrow('startup bookkeeping failed');
     await expect(service.submitStart(input)).resolves.toMatchObject({ status: 'accepted' });
 
-    expect(startSession).toHaveBeenCalledTimes(2);
+    expect(settings.ensureInNormal).toHaveBeenCalledTimes(2);
+    expect(agents.startSession).toHaveBeenCalledTimes(1);
     expect(queue.runInitialInput).toHaveBeenCalledTimes(2);
   });
 
