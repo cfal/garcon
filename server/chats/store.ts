@@ -106,12 +106,14 @@ export type ChatAddedCallback = (chatId: string) => void;
 export type ChatRemovedCallback = (chatId: string) => void;
 export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
 export type ChatProjectPathUpdatedCallback = (payload: ChatProjectPathUpdatedPayload) => void;
+export type ChatTagsUpdatedCallback = (chatId: string) => void;
 
 interface ChatRegistryEvents {
   'chat-added': Parameters<ChatAddedCallback>;
   'chat-removed': Parameters<ChatRemovedCallback>;
   'chat-read-updated': Parameters<ChatReadUpdatedCallback>;
   'chat-project-path-updated': Parameters<ChatProjectPathUpdatedCallback>;
+  'chat-tags-updated': Parameters<ChatTagsUpdatedCallback>;
 }
 
 export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
@@ -145,6 +147,7 @@ export interface IChatRegistry {
   onChatRemoved(cb: ChatRemovedCallback): void;
   onChatReadUpdated(cb: ChatReadUpdatedCallback): void;
   onChatProjectPathUpdated(cb: ChatProjectPathUpdatedCallback): void;
+  onChatTagsUpdated(cb: ChatTagsUpdatedCallback): void;
 }
 
 function createEmptyRegistry(): ChatRegistrySnapshot {
@@ -272,6 +275,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   onChatProjectPathUpdated(cb: ChatProjectPathUpdatedCallback): void {
     this.on('chat-project-path-updated', cb);
   }
+  #emitChatTagsUpdated(id: string): void { this.emit('chat-tags-updated', id); }
+  onChatTagsUpdated(cb: ChatTagsUpdatedCallback): void { this.on('chat-tags-updated', cb); }
 
   #sessionsFilePath(): string {
     return path.join(this.#workspaceDir, 'chats.json');
@@ -454,6 +459,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       throw new Error(`Invalid agent settings for ${id}`);
     }
     const previousAgentSessionId = existing.agentSessionId;
+    const previousTags = existing.tags;
     Object.assign(existing, normalizedPatch);
     if ('agentSessionId' in normalizedPatch && existing.agentSessionId !== previousAgentSessionId) {
       this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
@@ -461,6 +467,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     }
     if ('lastReadAt' in normalizedPatch) {
       this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
+    }
+    if ('tags' in normalizedPatch && !isDeepStrictEqual(existing.tags, previousTags)) {
+      this.#emitChatTagsUpdated(id);
     }
     const resolved = { id, ...existing };
     if (options.flush) {
@@ -476,6 +485,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     const nextTags = normalizeTags([...existing.tags, ...tags]);
     if (isDeepStrictEqual(nextTags, existing.tags)) return { id, ...existing };
     existing.tags = nextTags;
+    this.#emitChatTagsUpdated(id);
     this.#scheduleRegistrySave();
     return { id, ...existing };
   }

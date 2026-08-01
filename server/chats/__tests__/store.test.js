@@ -108,6 +108,8 @@ describe('ChatRegistry', () => {
 
   it('adds normalized tags without removing existing tags', () => {
     registry.addChat(newChat({ tags: ['existing'] }));
+    const updated = [];
+    registry.onChatTagsUpdated((chatId) => updated.push(chatId));
 
     expect(registry.addTags(CHAT_ID, ['CLI', 'existing', 'Review Needed'])).toMatchObject({
       tags: ['cli', 'existing', 'review-needed'],
@@ -115,6 +117,7 @@ describe('ChatRegistry', () => {
     expect(registry.addTags(CHAT_ID, ['cli'])).toMatchObject({
       tags: ['cli', 'existing', 'review-needed'],
     });
+    expect(updated).toEqual([CHAT_ID]);
   });
 
   it('validates owner-bound settings patches', () => {

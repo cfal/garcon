@@ -619,6 +619,12 @@ export function wireServerEvents({
       ),
     );
   });
+  chatRegistry.onChatTagsUpdated((chatId) => {
+    scheduleChatTask(chatId, 'server-events: chat tag invalidation failed', () => {
+      if (!chatExists(chatId)) return;
+      broadcast(new ChatListRefreshRequestedMessage('tags-updated', chatId));
+    });
+  });
 
   queue.onExecutionControlUpdated((chatId, controlState) => {
     broadcast(

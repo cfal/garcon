@@ -473,6 +473,13 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'chat-list-refresh-requested',
+				reason: 'tags-updated',
+				chatId: 'c-1',
+			}),
+		).toBeInstanceOf(ChatListRefreshRequestedMessage);
+		expect(
+			parseServerWsMessage({
+				type: 'chat-list-refresh-requested',
 				reason: 'chats-reordered',
 				chatId: 'c-1',
 			}),

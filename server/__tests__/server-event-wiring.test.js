@@ -80,6 +80,7 @@ function createWiringFixture(overrides = {}) {
     onChatRemoved: mock((callback) => { chatRegistryListeners.removed = callback; }),
     onChatReadUpdated: noOpSubscription,
     onChatProjectPathUpdated: noOpSubscription,
+    onChatTagsUpdated: mock((callback) => { chatRegistryListeners.tagsUpdated = callback; }),
     ...overrides.chatRegistry,
   };
   const wiring = wireServerEvents({
@@ -383,6 +384,24 @@ describe('server event wiring', () => {
     expect(timeline).toEqual(['receipts-settled', 'chat-session-deleted']);
   });
 
+  it('broadcasts tag changes through the per-chat event queue', async () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+
+    fixture.chatRegistryListeners.tagsUpdated('chat-1');
+    await fixture.wiring.waitForIdle();
+
+    expect(published).toContainEqual({
+      type: 'chat-list-refresh-requested',
+      reason: 'tags-updated',
+      chatId: 'chat-1',
+    });
+  });
+
   it('preserves stop transitions after a pending turn message', async () => {
     const published = [];
     const append = deferred();
@@ -669,6 +688,7 @@ describe('server event wiring', () => {
         onChatRemoved: noOpSubscription,
         onChatReadUpdated: noOpSubscription,
         onChatProjectPathUpdated: noOpSubscription,
+        onChatTagsUpdated: noOpSubscription,
       },
       settings: {
         onSessionNameChanged: noOpSubscription,
@@ -777,6 +797,7 @@ describe('server event wiring', () => {
         onChatRemoved: noOpSubscription,
         onChatReadUpdated: noOpSubscription,
         onChatProjectPathUpdated: noOpSubscription,
+        onChatTagsUpdated: noOpSubscription,
       },
       settings: {
         onSessionNameChanged: noOpSubscription,
