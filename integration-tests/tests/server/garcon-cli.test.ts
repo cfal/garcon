@@ -165,7 +165,7 @@ describe('garcon-cli', () => {
     }, { namedWorkspace: WORKSPACE });
   });
 
-  test('returns a bounded transport failure after the accepted server restarts', async () => {
+  test('detects a replacement Garcon instance on the same address', async () => {
     await withIntegrationFixture('garcon-cli-restart', async (fixture) => {
       const before = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-restart' });
@@ -177,7 +177,7 @@ describe('garcon-cli', () => {
       expect(acceptedChat).toBeDefined();
       const aborted = held.expectAbort();
 
-      await fixture.crashAndRestartGarcon();
+      await fixture.crashAndRestartGarcon({ reusePort: true });
       await aborted;
       held.releaseEcho();
 
@@ -185,9 +185,9 @@ describe('garcon-cli', () => {
       expect(result.exitCode).toBe(3);
       expect(result.stdout).toBe(`chat id: ${acceptedChat!.id}\n`);
       expect(result.stderr).toContain('transport recovery:');
-      expect(result.stderr).toContain('accepted chat may still be running');
+      expect(result.stderr).toContain('Garcon restarted while the turn was running');
     }, { namedWorkspace: WORKSPACE });
-  });
+  }, 20_000);
 
   test('authenticates through the runtime capability when normal auth is enabled', async () => {
     await withIntegrationFixture('garcon-cli-auth', async (fixture) => {

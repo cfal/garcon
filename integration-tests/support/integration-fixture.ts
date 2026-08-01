@@ -334,7 +334,8 @@ export class IntegrationFixture {
     await this.#startReplacementGarcon();
   }
 
-  async crashAndRestartGarcon(): Promise<void> {
+  async crashAndRestartGarcon(options: { reusePort?: boolean } = {}): Promise<void> {
+    const previousPort = Number(new URL(this.garcon.baseUrl).port);
     await this.#closeClients();
     await this.garcon.crash();
     const expiredAt = new Date(Date.now() - 60_000);
@@ -345,7 +346,7 @@ export class IntegrationFixture {
     );
     this.#archiveCurrentRun();
     this.#clients.clear();
-    await this.#startReplacementGarcon();
+    await this.#startReplacementGarcon(options.reusePort ? previousPort : undefined);
   }
 
   async crashAndRestartBeforeNativeUserPersistence(input: {
@@ -555,7 +556,7 @@ export class IntegrationFixture {
     }
   }
 
-  async #startReplacementGarcon(): Promise<void> {
+  async #startReplacementGarcon(port?: number): Promise<void> {
     this.garcon = await GarconProcess.start({
       repoRoot: REPO_ROOT,
       configDir: this.dirs.config,
@@ -565,6 +566,7 @@ export class IntegrationFixture {
       homeDir: this.dirs.home,
       environment: this.#serverEnvironment,
       redactEnvironmentValues: this.#redactSensitiveDiagnostics,
+      port,
     });
     this.client = await GarconTestClient.connect(this.garcon.baseUrl, {
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
