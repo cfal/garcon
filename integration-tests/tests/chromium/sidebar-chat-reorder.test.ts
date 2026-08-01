@@ -183,6 +183,125 @@ async function dragRelative(
   return parsed;
 }
 
+function moveRelative(
+  order: string[],
+  input: { sourceId: string; targetId: string; position: 'before' | 'after' },
+): string[] {
+  const withoutSource = order.filter((chatId) => chatId !== input.sourceId);
+  const targetIndex = withoutSource.indexOf(input.targetId);
+  if (targetIndex === -1) throw new Error(`Missing relative reorder target: ${input.targetId}`);
+  const insertionIndex = targetIndex + (input.position === 'after' ? 1 : 0);
+  withoutSource.splice(insertionIndex, 0, input.sourceId);
+  return withoutSource;
+}
+
+async function expectRelativeDrag(
+  fixture: ChromiumFixture,
+  currentOrder: string[],
+  expectedRequests: ReorderChatRequest[],
+  input: { sourceId: string; targetId: string; position: 'before' | 'after' },
+): Promise<string[]> {
+  const response = await dragRelative(fixture.page, {
+    sourceId: input.sourceId,
+    targetId: input.targetId,
+    edge: input.position === 'before' ? 'top' : 'bottom',
+  });
+  expect(response).toEqual({
+    success: true,
+    chatId: input.sourceId,
+    orderGroup: 'normal',
+    changed: true,
+  });
+
+  expectedRequests.push({
+    chatId: input.sourceId,
+    placement: {
+      kind: 'relative',
+      referenceChatId: input.targetId,
+      position: input.position,
+    },
+  });
+  expect(capturedReorderRequests(fixture)).toEqual(expectedRequests);
+
+  const expectedOrder = moveRelative(currentOrder, input);
+  await waitForSidebarOrder(fixture.page, expectedOrder);
+  expect(await sidebarOrder(fixture.page)).toEqual(expectedOrder);
+  expect(await normalOrder(fixture.integration)).toEqual(expectedOrder);
+  expect(
+    await fixture.page
+      .locator(`[data-sidebar-virtual-row="${input.sourceId}"]`)
+      .getAttribute('class'),
+  ).not.toContain('opacity-45');
+  expect(
+    await fixture.page.locator(`${CHAT_ROW_SELECTOR} > div.pointer-events-none`).count(),
+  ).toBe(0);
+  return expectedOrder;
+}
+
+async function startNewOpenAiChat(fixture: ChromiumFixture): Promise<string> {
+  const content = 'native-drag-after-repeated-reorders';
+  const existingIds = new Set(
+    (await fixture.integration.client.listChats()).sessions.map((chat) => chat.id),
+  );
+  const eventCursor = fixture.integration.client.markEvents();
+
+  await fixture.page.getByRole('button', { name: 'New Chat', exact: true }).click();
+  const dialog = fixture.page.getByRole('dialog');
+  await dialog.waitFor({ state: 'visible' });
+  await dialog
+    .getByRole('status', { name: 'Loading chat defaults...' })
+    .waitFor({ state: 'detached', timeout: 20_000 });
+
+  const modelSelector = dialog.locator('button[aria-label*=" / "]').first();
+  await modelSelector.waitFor({ state: 'visible' });
+  const selectedModel = (await modelSelector.getAttribute('aria-label')) ?? '';
+  if (
+    !selectedModel.includes('Direct (Chat Completions)') ||
+    !selectedModel.includes('Integration Echo')
+  ) {
+    await modelSelector.click();
+    await fixture.page.getByRole('button', { name: 'Chat Completions', exact: true }).click();
+    await fixture.page.getByRole('button', { name: 'Integration Echo', exact: true }).click();
+  }
+
+  const projectPathInput = dialog.getByRole('textbox', { name: 'Project Path' });
+  if ((await projectPathInput.inputValue()) !== fixture.integration.dirs.project) {
+    await projectPathInput.fill(fixture.integration.dirs.project);
+  }
+  await dialog.getByPlaceholder('How can I help you today?').fill(content);
+
+  await fixture.page.waitForFunction(
+    () => {
+      const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+        .find((candidate) => (
+          candidate.getAttribute('aria-label') || candidate.textContent?.trim()
+        ) === 'Start session');
+      return button !== undefined && !button.disabled;
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  const newChatPath = fixture.page.waitForFunction(
+    (knownChatIds) => {
+      const match = /^\/chat\/([^/]+)$/.exec(globalThis.location.pathname);
+      if (!match?.[1]) return null;
+      const chatId = decodeURIComponent(match[1]);
+      return knownChatIds.includes(chatId) ? null : chatId;
+    },
+    [...existingIds],
+    { timeout: 20_000 },
+  );
+  await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
+  const chatId = await (await newChatPath).jsonValue();
+  if (typeof chatId !== 'string') throw new Error(`Missing new chat ID in URL: ${fixture.page.url()}`);
+  await fixture.integration.client.waitForTurnTerminal(chatId, undefined, {
+    afterIndex: eventCursor,
+    timeoutMs: 20_000,
+  });
+  await dialog.waitFor({ state: 'detached' });
+  return chatId;
+}
+
 async function createChats(integration: IntegrationFixture, count: number): Promise<string[]> {
   const chatIds = Array.from({ length: count }, () => integration.newChatId());
   for (const [index, chatId] of chatIds.entries()) {
@@ -290,7 +409,7 @@ async function withChromiumFixture<T>(
 }
 
 describe('Chromium sidebar chat reorder', () => {
-  test('persists inverse adjacent drags and leaves popup reorder usable', async () => {
+  test('survives repeated inverse drags, chat creation, and subsequent reorder actions', async () => {
     await withChromiumFixture('sidebar-chat-reorder', async (fixture) => {
       const chatIds = await createChats(fixture.integration, 4);
       const original = await normalOrder(fixture.integration);
@@ -306,75 +425,38 @@ describe('Chromium sidebar chat reorder', () => {
       const sourceId = original[1];
       const neighborId = original[0];
       if (!sourceId || !neighborId) throw new Error('Expected two normal chats.');
+      const expectedRequests: ReorderChatRequest[] = [];
+      let expectedOrder = original;
+      for (const position of ['before', 'after', 'before', 'after', 'before'] as const) {
+        expectedOrder = await expectRelativeDrag(fixture, expectedOrder, expectedRequests, {
+          sourceId,
+          targetId: neighborId,
+          position,
+        });
+      }
 
-      const up = await dragRelative(fixture.page, {
-        sourceId,
-        targetId: neighborId,
-        edge: 'top',
-      });
-      const movedUp = [sourceId, neighborId, ...original.slice(2)];
-      expect(up).toEqual({
-        success: true,
-        chatId: sourceId,
-        orderGroup: 'normal',
-        changed: true,
-      });
-      expect(capturedReorderRequests(fixture)).toEqual([
-        {
-          chatId: sourceId,
-          placement: {
-            kind: 'relative',
-            referenceChatId: neighborId,
-            position: 'before',
-          },
-        },
-      ]);
-      await waitForSidebarOrder(fixture.page, movedUp);
-      expect(await normalOrder(fixture.integration)).toEqual(movedUp);
+      const orderBeforeNewChat = expectedOrder;
+      const newChatId = await startNewOpenAiChat(fixture);
+      expectedOrder = await normalOrder(fixture.integration);
+      expect(expectedOrder).toHaveLength(original.length + 1);
+      expect(expectedOrder.filter((chatId) => chatId !== newChatId)).toEqual(orderBeforeNewChat);
+      await waitForSidebarOrder(fixture.page, expectedOrder);
 
-      const down = await dragRelative(fixture.page, {
-        sourceId,
-        targetId: neighborId,
-        edge: 'bottom',
+      const newChatIndex = expectedOrder.indexOf(newChatId);
+      if (newChatIndex === -1) throw new Error('New chat did not enter the normal order.');
+      const moveNewChatDown = newChatIndex < expectedOrder.length - 1;
+      const newChatNeighbor = expectedOrder[newChatIndex + (moveNewChatDown ? 1 : -1)];
+      if (!newChatNeighbor) throw new Error('New chat does not have an adjacent reorder target.');
+      expectedOrder = await expectRelativeDrag(fixture, expectedOrder, expectedRequests, {
+        sourceId: newChatId,
+        targetId: newChatNeighbor,
+        position: moveNewChatDown ? 'after' : 'before',
       });
-      expect(down).toEqual({
-        success: true,
-        chatId: sourceId,
-        orderGroup: 'normal',
-        changed: true,
-      });
-      expect(capturedReorderRequests(fixture)).toEqual([
-        {
-          chatId: sourceId,
-          placement: {
-            kind: 'relative',
-            referenceChatId: neighborId,
-            position: 'before',
-          },
-        },
-        {
-          chatId: sourceId,
-          placement: {
-            kind: 'relative',
-            referenceChatId: neighborId,
-            position: 'after',
-          },
-        },
-      ]);
-      await waitForSidebarOrder(fixture.page, original);
-      expect(await sidebarOrder(fixture.page)).toEqual(original);
-      expect(await normalOrder(fixture.integration)).toEqual(original);
-      expect(
-        await fixture.page
-          .locator(`[data-sidebar-virtual-row="${sourceId}"]`)
-          .getAttribute('class'),
-      ).not.toContain('opacity-45');
-      expect(
-        await fixture.page.locator(`${CHAT_ROW_SELECTOR} > div.pointer-events-none`).count(),
-      ).toBe(0);
 
-      const popupSourceId = original.at(-1);
+      const popupSourceId = expectedOrder.at(-1);
       if (!popupSourceId) throw new Error('Expected a popup reorder source.');
+      const popupReferenceId = expectedOrder[0];
+      if (!popupReferenceId) throw new Error('Expected a popup reorder reference.');
       const popupRow = fixture.page.locator(`[data-sidebar-virtual-row="${popupSourceId}"]`);
       await popupRow.hover();
       await popupRow
@@ -397,34 +479,20 @@ describe('Chromium sidebar chat reorder', () => {
         orderGroup: 'normal',
         changed: true,
       });
-      expect(capturedReorderRequests(fixture)).toEqual([
-        {
-          chatId: sourceId,
-          placement: {
-            kind: 'relative',
-            referenceChatId: neighborId,
-            position: 'before',
-          },
+      expectedRequests.push({
+        chatId: popupSourceId,
+        placement: {
+          kind: 'relative',
+          referenceChatId: popupReferenceId,
+          position: 'before',
         },
-        {
-          chatId: sourceId,
-          placement: {
-            kind: 'relative',
-            referenceChatId: neighborId,
-            position: 'after',
-          },
-        },
-        {
-          chatId: popupSourceId,
-          placement: {
-            kind: 'relative',
-            referenceChatId: neighborId,
-            position: 'before',
-          },
-        },
-      ]);
+      });
+      expect(capturedReorderRequests(fixture)).toEqual(expectedRequests);
 
-      const movedToTop = [popupSourceId, ...original.filter((chatId) => chatId !== popupSourceId)];
+      const movedToTop = [
+        popupSourceId,
+        ...expectedOrder.filter((chatId) => chatId !== popupSourceId),
+      ];
       await waitForSidebarOrder(fixture.page, movedToTop);
       expect(await normalOrder(fixture.integration)).toEqual(movedToTop);
       expect(fixture.browserErrors).toEqual([]);
