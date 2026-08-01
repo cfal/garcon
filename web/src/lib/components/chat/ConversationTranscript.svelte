@@ -107,14 +107,14 @@
 	{#each renderItems as item (item.id)}
 		{#if item.kind === 'bash-group'}
 			<svelte:boundary>
-				<ChatBashToolGroup messages={item.messages} />
+				<ChatBashToolGroup rows={item.rows} />
 				{#snippet failed(error)}
 					<MessageRenderFallback {error} />
 				{/snippet}
 			</svelte:boundary>
 		{:else if item.kind === 'read-group'}
 			<svelte:boundary>
-				<ChatReadToolGroup messages={item.messages} onFileOpen={handleReadFileOpen} />
+				<ChatReadToolGroup rows={item.rows} onFileOpen={handleReadFileOpen} />
 				{#snippet failed(error)}
 					<MessageRenderFallback {error} />
 				{/snippet}
@@ -145,6 +145,7 @@
 				<ConversationMessage
 					{message}
 					rowId={item.id}
+					anchorId={item.seq === undefined ? undefined : item.id}
 					index={item.index}
 					forkUpToSeq={item.seq}
 					prevMessage={item.prevMessage}

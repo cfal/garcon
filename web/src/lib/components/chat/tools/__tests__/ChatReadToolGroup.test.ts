@@ -5,13 +5,17 @@ import ChatReadToolGroup from '../ChatReadToolGroup.svelte';
 
 const TS = '2026-05-29T00:00:00.000Z';
 
+function rows(messages: ReadToolUseMessage[]) {
+	return messages.map((message, index) => ({ id: `generation-1:${index + 1}`, message }));
+}
+
 describe('ChatReadToolGroup', () => {
 	it('renders known file counts in the header', () => {
 		render(ChatReadToolGroup, {
-			messages: [
+			rows: rows([
 				new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
 				new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
-			],
+			]),
 		});
 
 		expect(screen.getByText('Read')).toBeTruthy();
@@ -20,13 +24,13 @@ describe('ChatReadToolGroup', () => {
 
 	it('renders mixed known and unknown file counts in the header', () => {
 		render(ChatReadToolGroup, {
-			messages: [
+			rows: rows([
 				new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
 				new ReadToolUseMessage(TS, 'read-2', ''),
 				new ReadToolUseMessage(TS, 'read-3', '   '),
 				new ReadToolUseMessage(TS, 'read-4', '/tmp/d.ts'),
 				new ReadToolUseMessage(TS, 'read-5', '/tmp/e.ts'),
-			],
+			]),
 		});
 
 		expect(screen.getByText('5 files (2 unknown)')).toBeTruthy();
@@ -35,13 +39,13 @@ describe('ChatReadToolGroup', () => {
 
 	it('renders all-unknown file counts in the header', () => {
 		render(ChatReadToolGroup, {
-			messages: [
+			rows: rows([
 				new ReadToolUseMessage(TS, 'read-1', ''),
 				new ReadToolUseMessage(TS, 'read-2', ''),
 				new ReadToolUseMessage(TS, 'read-3', ''),
 				new ReadToolUseMessage(TS, 'read-4', ''),
 				new ReadToolUseMessage(TS, 'read-5', ''),
-			],
+			]),
 		});
 
 		expect(screen.getByText('5 unknown files')).toBeTruthy();
@@ -50,10 +54,10 @@ describe('ChatReadToolGroup', () => {
 	it('opens known files and leaves unknown rows inert', async () => {
 		const onFileOpen = vi.fn();
 		render(ChatReadToolGroup, {
-			messages: [
+			rows: rows([
 				new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts', 3, 2),
 				new ReadToolUseMessage(TS, 'read-2', ''),
-			],
+			]),
 			onFileOpen,
 		});
 
@@ -62,5 +66,11 @@ describe('ChatReadToolGroup', () => {
 		expect(onFileOpen).toHaveBeenCalledWith('/tmp/a.ts');
 		expect(screen.getByText('Lines 3-4')).toBeTruthy();
 		expect(screen.getByText('Unknown file')).toBeTruthy();
+		expect(
+			screen
+				.getByText('Unknown file')
+				.closest('[data-chat-anchor-id]')
+				?.getAttribute('data-chat-anchor-id'),
+		).toBe('generation-1:2');
 	});
 });

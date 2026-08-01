@@ -12,9 +12,10 @@ describe('ChatBashToolGroup', () => {
 			'for item in one two; do echo "$item"; done',
 		];
 		const { container } = render(ChatBashToolGroup, {
-			messages: commands.map(
-				(command, index) => new BashToolUseMessage(TS, `bash-${index}`, command),
-			),
+			rows: commands.map((command, index) => ({
+				id: `generation-1:${index + 1}`,
+				message: new BashToolUseMessage(TS, `bash-${index}`, command),
+			})),
 		});
 
 		expect(screen.getByText('2 commands')).toBeTruthy();
@@ -23,6 +24,11 @@ describe('ChatBashToolGroup', () => {
 		expect(codeRows.map((row) => row.textContent)).toEqual(commands);
 		expect(container.querySelector('.markdown-code-block')).toBeNull();
 		expect(container.querySelector('pre')).toBeNull();
+		expect(
+			Array.from(container.querySelectorAll('[data-chat-anchor-id]')).map((row) =>
+				row.getAttribute('data-chat-anchor-id'),
+			),
+		).toEqual(['generation-1:1', 'generation-1:2']);
 
 		for (const row of codeRows) {
 			expect(row.classList.contains('block')).toBe(true);

@@ -36,5 +36,11 @@ describe('ConversationTranscript', () => {
 				(row) => row.dataset.chatRowId,
 			),
 		).toEqual(['generation-1:1', 'pending:request-1']);
+		expect(
+			Array.from(
+				container.querySelectorAll<HTMLElement>('[data-chat-anchor-id]'),
+				(row) => row.dataset.chatAnchorId,
+			),
+		).toEqual(['generation-1:1']);
 	});
 });

@@ -8,7 +8,7 @@ import {
 	ToolResultMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
-import type { ChatDisplayRow, ChatTranscriptRow } from './active-transcript-state.svelte.js';
+import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
 import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import { isRecord } from '$shared/json';
@@ -18,6 +18,12 @@ export interface PermissionTerminalState {
 	allowed?: boolean;
 	reason?: string;
 	selectedQuestionOptions?: Record<string, string[]>;
+}
+
+export interface GroupedTranscriptRow<TMessage extends ChatMessage> {
+	id: string;
+	message: TMessage;
+	seq?: number;
 }
 
 export type ConversationFeedRenderItem =
@@ -32,14 +38,14 @@ export type ConversationFeedRenderItem =
 	| {
 			kind: 'bash-group';
 			id: string;
-			messages: BashToolUseMessage[];
+			rows: GroupedTranscriptRow<BashToolUseMessage>[];
 			index: number;
 			prevMessage: ChatMessage | null;
 	  }
 	| {
 			kind: 'read-group';
 			id: string;
-			messages: ReadToolUseMessage[];
+			rows: GroupedTranscriptRow<ReadToolUseMessage>[];
 			index: number;
 			prevMessage: ChatMessage | null;
 	  }
@@ -215,11 +221,11 @@ function shouldSkipStandaloneMessage(
 	);
 }
 
-function bashGroupId(rows: ChatTranscriptRow[]): string {
+function bashGroupId(rows: Array<{ id: string }>): string {
 	return `bash-group-${rows[0]?.id ?? 'empty'}`;
 }
 
-function readGroupId(rows: ChatTranscriptRow[]): string {
+function readGroupId(rows: Array<{ id: string }>): string {
 	return `read-group-${rows[0]?.id ?? 'empty'}`;
 }
 
@@ -270,8 +276,7 @@ export function buildConversationFeedRenderModel(
 		}
 
 		if (message instanceof BashToolUseMessage) {
-			const groupRows: ChatTranscriptRow[] = [];
-			const group: BashToolUseMessage[] = [];
+			const groupRows: GroupedTranscriptRow<BashToolUseMessage>[] = [];
 			const prevMessage = previousRenderable;
 			const firstIndex = index;
 
@@ -285,25 +290,24 @@ export function buildConversationFeedRenderModel(
 					continue;
 				}
 				if (!(candidate instanceof BashToolUseMessage)) break;
-				groupRows.push(candidateRow);
-				group.push(candidate);
+				groupRows.push({ id: candidateRow.id, message: candidate, seq: candidateRow.seq });
 				previousRenderable = candidate;
 				index += 1;
 			}
 
-			if (group.length > 1) {
+			if (groupRows.length > 1) {
 				items.push({
 					kind: 'bash-group',
 					id: bashGroupId(groupRows),
-					messages: group,
+					rows: groupRows,
 					index: firstIndex,
 					prevMessage,
 				});
-			} else {
+		} else {
 				items.push({
 					kind: 'message',
 					id: groupRows[0].id,
-					message: group[0],
+					message: groupRows[0].message,
 					index: firstIndex,
 					seq: groupRows[0].seq,
 					prevMessage,
@@ -313,8 +317,7 @@ export function buildConversationFeedRenderModel(
 		}
 
 		if (message instanceof ReadToolUseMessage) {
-			const groupRows: ChatTranscriptRow[] = [];
-			const group: ReadToolUseMessage[] = [];
+			const groupRows: GroupedTranscriptRow<ReadToolUseMessage>[] = [];
 			const prevMessage = previousRenderable;
 			const firstIndex = index;
 
@@ -328,17 +331,16 @@ export function buildConversationFeedRenderModel(
 					continue;
 				}
 				if (!(candidate instanceof ReadToolUseMessage)) break;
-				groupRows.push(candidateRow);
-				group.push(candidate);
+				groupRows.push({ id: candidateRow.id, message: candidate, seq: candidateRow.seq });
 				previousRenderable = candidate;
 				index += 1;
 			}
 
-			if (group.length > 1) {
+			if (groupRows.length > 1) {
 				items.push({
 					kind: 'read-group',
 					id: readGroupId(groupRows),
-					messages: group,
+					rows: groupRows,
 					index: firstIndex,
 					prevMessage,
 				});
@@ -346,7 +348,7 @@ export function buildConversationFeedRenderModel(
 				items.push({
 					kind: 'message',
 					id: groupRows[0].id,
-					message: group[0],
+					message: groupRows[0].message,
 					index: firstIndex,
 					seq: groupRows[0].seq,
 					prevMessage,

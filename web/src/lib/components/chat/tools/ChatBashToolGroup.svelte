@@ -7,14 +7,16 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { GroupedTranscriptRow } from '$lib/chat/transcript/conversation-feed-items.js';
 
 	interface Props {
-		messages: BashToolUseMessage[];
+		rows: GroupedTranscriptRow<BashToolUseMessage>[];
 	}
 
-	let { messages }: Props = $props();
+	let { rows }: Props = $props();
 
 	let copied = $state(false);
+	const messages = $derived(rows.map((row) => row.message));
 	const commandCount = $derived(messages.length);
 	const commandLabel = $derived(`${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`);
 	const combinedCommands = $derived(messages.map((message) => message.command).join('\n'));
@@ -53,9 +55,12 @@
 			</div>
 
 			<div class="divide-y divide-border/70">
-				{#each renderItems as item (item.key)}
+				{#each renderItems as item, index (item.key)}
 					{@const message = item.message}
-					<div class="py-1 first:pt-0 last:pb-0">
+					<div
+						class="py-1 first:pt-0 last:pb-0"
+						data-chat-anchor-id={rows[index]?.id}
+					>
 						<code
 							class="code-highlight block whitespace-pre-wrap break-all text-xs text-foreground font-mono"
 						>

@@ -51,6 +51,7 @@
 	interface Props {
 		message: ChatMessage;
 		rowId?: string;
+		anchorId?: string;
 		index: number;
 		forkUpToSeq?: number;
 		prevMessage: ChatMessage | null;
@@ -73,6 +74,7 @@
 	let {
 		message,
 		rowId,
+		anchorId,
 		index,
 		forkUpToSeq,
 		prevMessage,
@@ -419,7 +421,7 @@
 {/snippet}
 
 {#if !shouldHideThinking}
-	<div class={messageClass} data-chat-row-id={rowId}>
+	<div class={messageClass} data-chat-row-id={rowId} data-chat-anchor-id={anchorId}>
 		{#if asUser}
 			<div
 				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"

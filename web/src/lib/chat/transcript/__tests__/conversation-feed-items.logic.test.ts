@@ -145,7 +145,7 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(items).toHaveLength(3);
 		expect(items[1]).toMatchObject({ kind: 'bash-group' });
 		if (items[1].kind !== 'bash-group') throw new Error('expected bash group');
-		expect(items[1].messages.map((message) => message.command)).toEqual(['pwd', 'rg foo']);
+		expect(items[1].rows.map((row) => row.message.command)).toEqual(['pwd', 'rg foo']);
 		expect(items[2]).toMatchObject({ kind: 'message', prevMessage: messages[2] });
 	});
 
@@ -175,7 +175,7 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(items).toHaveLength(3);
 		expect(items[1]).toMatchObject({ kind: 'read-group' });
 		if (items[1].kind !== 'read-group') throw new Error('expected read group');
-		expect(items[1].messages.map((message) => message.filePath)).toEqual([
+		expect(items[1].rows.map((row) => row.message.filePath)).toEqual([
 			'/tmp/a.ts',
 			'/tmp/b.ts',
 		]);
@@ -208,7 +208,7 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(items).toHaveLength(1);
 		expect(items[0]).toMatchObject({ kind: 'bash-group' });
 		if (items[0].kind !== 'bash-group') throw new Error('expected bash group');
-		expect(items[0].messages.map((message) => message.toolId)).toEqual(['bash-1', 'bash-2']);
+		expect(items[0].rows.map((row) => row.message.toolId)).toEqual(['bash-1', 'bash-2']);
 	});
 
 	it('groups read tool uses across hidden tool results', () => {
@@ -224,7 +224,7 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(model.items).toHaveLength(1);
 		expect(model.items[0]).toMatchObject({ kind: 'read-group' });
 		if (model.items[0].kind !== 'read-group') throw new Error('expected read group');
-		expect(model.items[0].messages.map((message) => message.toolId)).toEqual(['read-1', 'read-2']);
+		expect(model.items[0].rows.map((row) => row.message.toolId)).toEqual(['read-1', 'read-2']);
 		expect(model.toolResultIndex.get('read-1')?.content).toEqual({ content: 'a' });
 		expect(model.toolResultIndex.get('read-2')?.content).toEqual({ content: 'b' });
 	});

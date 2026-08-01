@@ -5,14 +5,16 @@
 		buildReadToolGroupRenderItems,
 		summarizeReadToolGroup,
 	} from '$lib/chat/tools/read-tool-group-items.js';
+	import type { GroupedTranscriptRow } from '$lib/chat/transcript/conversation-feed-items.js';
 
 	interface Props {
-		messages: ReadToolUseMessage[];
+		rows: GroupedTranscriptRow<ReadToolUseMessage>[];
 		onFileOpen?: (filePath: string) => void;
 	}
 
-	let { messages, onFileOpen }: Props = $props();
+	let { rows, onFileOpen }: Props = $props();
 
+	const messages = $derived(rows.map((row) => row.message));
 	const summary = $derived(summarizeReadToolGroup(messages));
 	const renderItems = $derived(buildReadToolGroupRenderItems(messages));
 
@@ -31,8 +33,11 @@
 			</div>
 
 			<div class="divide-y divide-border/70">
-				{#each renderItems as item (item.key)}
-					<div class="py-1 first:pt-0 last:pb-0 min-w-0">
+				{#each renderItems as item, index (item.key)}
+					<div
+						class="py-1 first:pt-0 last:pb-0 min-w-0"
+						data-chat-anchor-id={rows[index]?.id}
+					>
 						<div class="flex items-center gap-1.5 min-w-0">
 							{#if item.isUnknown || !onFileOpen}
 								<span
