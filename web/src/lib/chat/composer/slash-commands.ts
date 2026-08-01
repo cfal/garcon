@@ -7,6 +7,7 @@ import type { SlashCommand } from '$shared/slash-commands';
 import { hasLeadingSlashCommand } from '$shared/scheduled-prompts';
 import { parseScheduleDuration, type ScheduleDurationError } from '$shared/schedule-duration';
 import { SNIPPET_SHORT_NAME_PATTERN } from '$shared/snippets';
+import type { ChatOrderBoundary } from '$shared/chat-order-contracts';
 
 // Built-in commands surfaced in the composer menu even when agent discovery
 // misses them. Each command is handled by its owning submit or runtime path.
@@ -30,6 +31,16 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		name: 'rename',
 		source: 'command',
 		description: 'Rename the current chat',
+	},
+	{
+		name: 'move-to-top',
+		source: 'command',
+		description: 'Move this chat to the top of its section in Manual order',
+	},
+	{
+		name: 'move-to-bottom',
+		source: 'command',
+		description: 'Move this chat to the bottom of its section in Manual order',
 	},
 	{
 		name: 'goal',
@@ -143,6 +154,28 @@ export function parseRenameCommand(input: string): RenameCommand | null {
 	const match = RENAME_COMMAND_RE.exec(input);
 	if (!match) return null;
 	return { title: (match[1] ?? '').trim() };
+}
+
+export type MoveChatBoundaryCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid'; error: 'arguments-not-supported' }
+	| { kind: 'valid'; boundary: ChatOrderBoundary };
+
+const MOVE_CHAT_BOUNDARY_RE =
+	/^\s*\/(move-to-top|move-to-bottom)(?=\s|$)(?:\s+([\s\S]*))?$/i;
+
+export function parseMoveChatBoundaryCommand(
+	input: string,
+): MoveChatBoundaryCommandParseResult {
+	const match = MOVE_CHAT_BOUNDARY_RE.exec(input);
+	if (!match) return { kind: 'not-command' };
+	if ((match[2] ?? '').trim()) {
+		return { kind: 'invalid', error: 'arguments-not-supported' };
+	}
+	return {
+		kind: 'valid',
+		boundary: match[1].toLowerCase() === 'move-to-top' ? 'top' : 'bottom',
+	};
 }
 
 export type ScheduleInCommandError =

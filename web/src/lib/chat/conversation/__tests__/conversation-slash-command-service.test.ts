@@ -110,6 +110,12 @@ function createDeps(chat = createChat()) {
 			selectedChatId: chat.id,
 			byId: { [chat.id]: chat },
 			renameChat: vi.fn().mockResolvedValue(true),
+			moveChatToBoundary: vi.fn().mockResolvedValue({
+				success: true,
+				chatId: chat.id,
+				orderGroup: 'normal',
+				changed: true,
+			}),
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
 		},
@@ -168,6 +174,228 @@ describe('ConversationSlashCommandService', () => {
 		expect(composerState.inputText).toBe('original command');
 		expect(composerState.images).toEqual([image]);
 		expect(composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('does not overwrite text entered while a failed rename is pending', async () => {
+		const { deps, composerState } = createDeps();
+		const pending = deferred<boolean>();
+		deps.sessions.renameChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitRenameCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'Renamed chat',
+			[],
+			true,
+		);
+		composerState.inputText = 'replacement draft';
+
+		pending.resolve(false);
+		await expect(submission).resolves.toBe('rejected');
+
+		expect(composerState.inputText).toBe('replacement draft');
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('does not restore a failed rename after switching chats', async () => {
+		const { deps, composerState } = createDeps();
+		const pending = deferred<boolean>();
+		deps.sessions.renameChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitRenameCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'Renamed chat',
+			[],
+			true,
+		);
+		deps.sessions.selectedChatId = 'chat-2';
+
+		pending.resolve(false);
+		await expect(submission).resolves.toBe('rejected');
+
+		expect(composerState.inputText).toBe('');
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('claims a busy move command, clears immediately, and appends its source notice', async () => {
+		const chat = createChat({ isProcessing: true, processingPhase: 'running' });
+		const { deps, composerState, appendLocalNotice } = createDeps(chat);
+		composerState.inputText = '/move-to-top';
+		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id,
+			chat,
+			text: '/move-to-top',
+			images: [],
+			ownsComposer: true,
+		});
+
+		expect(dispatch.kind).toBe('handled');
+		expect(composerState.clearAfterSubmit).toHaveBeenCalledWith(chat.id);
+		expect(composerState.inputText).toBe('');
+		expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith(chat.id, 'top');
+		pending.resolve({ success: true, chatId: chat.id, orderGroup: 'normal', changed: true });
+		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+		await expect(dispatch.outcome).resolves.toBe('accepted');
+
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'info',
+			'Moved this chat to the top of its section in Manual order.',
+		);
+		expect(deps.chatState.isUserScrolledUp).toBe(false);
+		expect(deps.scrollToBottom).toHaveBeenCalledOnce();
+		expect(mockScheduleChatPrompt).not.toHaveBeenCalled();
+	});
+
+	it('reports an unchanged bottom boundary without sending the command onward', async () => {
+		const { deps, appendLocalNotice } = createDeps();
+		deps.sessions.moveChatToBoundary.mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			orderGroup: 'archived',
+			changed: false,
+		});
+
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: 'chat-1',
+			chat: deps.sessions.byId['chat-1'],
+			text: '/MOVE-TO-BOTTOM ',
+			images: [],
+			ownsComposer: true,
+		});
+
+		expect(dispatch.kind).toBe('handled');
+		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+		await expect(dispatch.outcome).resolves.toBe('accepted');
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'info',
+			'This chat is already at the bottom of its section in Manual order.',
+		);
+	});
+
+	it('rejects move arguments, drafts, and attachments before clearing or mutating', async () => {
+		for (const input of [
+			{ text: '/move-to-top later', chat: createChat(), images: [] },
+			{ text: '/move-to-top', chat: createChat({ status: 'draft' }), images: [] },
+			{
+				text: '/move-to-bottom',
+				chat: createChat(),
+				images: [new File(['image'], 'test.png', { type: 'image/png' })],
+			},
+		]) {
+			const { deps, composerState } = createDeps(input.chat);
+			const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: input.chat.id,
+				chat: input.chat,
+				text: input.text,
+				images: input.images,
+				ownsComposer: true,
+			});
+
+			expect(dispatch.kind).toBe('handled');
+			if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+			await expect(dispatch.outcome).resolves.toBe('rejected');
+			expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
+			expect(deps.sessions.moveChatToBoundary).not.toHaveBeenCalled();
+		}
+	});
+
+	it('restores a failed move only while the source composer remains untouched', async () => {
+		const { deps, composerState } = createDeps();
+		composerState.inputText = '/move-to-top';
+		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+
+		const result = await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(composerState.inputText).toBe('/move-to-top');
+		expect(composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('does not restore a failed move over newly entered text', async () => {
+		const { deps, composerState } = createDeps();
+		composerState.inputText = '/move-to-top';
+		const pending = deferred<null>();
+		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			true,
+		);
+		composerState.inputText = 'new draft';
+
+		pending.resolve(null);
+		await submission;
+
+		expect(composerState.inputText).toBe('new draft');
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('does not restore or append a notice after switching away from the source chat', async () => {
+		const { deps, composerState, appendLocalNotice } = createDeps();
+		composerState.inputText = '/move-to-bottom';
+		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const service = new ConversationSlashCommandService(deps);
+		const submission = service.submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'bottom' },
+			[],
+			true,
+		);
+		deps.sessions.selectedChatId = 'chat-2';
+		deps.chatState.activeChatId = 'chat-2';
+
+		pending.resolve({ success: true, chatId: 'chat-1', orderGroup: 'normal', changed: true });
+		await expect(submission).resolves.toBe('accepted');
+
+		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(deps.scrollToBottom).not.toHaveBeenCalled();
+		expect(composerState.inputText).toBe('');
+	});
+
+	it('does not clear or restore a composer the source submission does not own', async () => {
+		const { deps, composerState } = createDeps();
+		composerState.inputText = 'other chat draft';
+		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+
+		await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			false,
+		);
+
+		expect(composerState.inputText).toBe('other chat draft');
+		expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('leaves a similar slash token for ordinary submission', () => {
+		const { deps } = createDeps();
+
+		expect(new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: 'chat-1',
+			chat: deps.sessions.byId['chat-1'],
+			text: '/move-to-topical',
+			images: [],
+			ownsComposer: true,
+		})).toEqual({
+			kind: 'continue',
+			content: '/move-to-topical',
+			isActiveDeliveryInput: false,
+		});
 	});
 
 	it('deduplicates an in-flight schedule and restores a failed command', async () => {

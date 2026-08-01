@@ -11,6 +11,7 @@ import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import {
 	parseCompactCommand,
 	isCodexGoalCommand,
+	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
 	parseSteerCommand,
@@ -20,6 +21,7 @@ import { createClientCommandId } from '$lib/chat/conversation/client-command-id.
 import type {
 	ScheduleInCommandError,
 	ScheduleInCommandParseResult,
+	MoveChatBoundaryCommandParseResult,
 } from '$lib/chat/composer/slash-commands.js';
 import { formatScheduledInstant } from '$lib/scheduling/local-schedule.js';
 import {
@@ -36,11 +38,16 @@ import {
 import type { ChatViewMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
+import type { ReorderChatResponse } from '$shared/chat-order-contracts';
 
 interface SlashCommandSessions {
 	selectedChatId: string | null;
 	byId: Record<string, ChatSessionRecord>;
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
+	moveChatToBoundary(
+		chatId: string,
+		boundary: 'top' | 'bottom',
+	): Promise<ReorderChatResponse | null>;
 	upsertServerChat(entry: ChatListEntry): void;
 	setSelectedChatId(chatId: string | null): void;
 }
@@ -121,6 +128,20 @@ export class ConversationSlashCommandService {
 			return {
 				kind: 'handled',
 				outcome: this.submitRenameCommand(chatId, chat, rename.title, images, ownsComposer),
+			};
+		}
+
+		const move = parseMoveChatBoundaryCommand(text);
+		if (move.kind !== 'not-command') {
+			return {
+				kind: 'handled',
+				outcome: this.submitMoveChatBoundaryCommand(
+					chatId,
+					chat,
+					move,
+					images,
+					ownsComposer,
+				),
 			};
 		}
 
@@ -252,7 +273,7 @@ export class ConversationSlashCommandService {
 		chat: ChatSessionRecord,
 		title: string,
 		images: File[],
-		clearComposer: boolean,
+		ownsComposer: boolean,
 	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (!title) {
@@ -270,14 +291,78 @@ export class ConversationSlashCommandService {
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		if (clearComposer) deps.composerState.clearAfterSubmit(chatId);
+		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
 		const renamed = await deps.sessions.renameChat(chatId, title);
-		if (!renamed && clearComposer && deps.sessions.selectedChatId === chatId) {
-			deps.composerState.inputText = previousText;
-			deps.composerState.images = previousImages;
-			deps.composerState.saveDraft(chatId);
+		if (!renamed) {
+			this.#restoreComposerIfUntouched({
+				chatId,
+				ownsComposer,
+				text: previousText,
+				images: previousImages,
+			});
 		}
 		return renamed ? 'accepted' : 'rejected';
+	}
+
+	async submitMoveChatBoundaryCommand(
+		chatId: string,
+		chat: ChatSessionRecord,
+		command: MoveChatBoundaryCommandParseResult,
+		images: File[],
+		ownsComposer: boolean,
+	): Promise<ConversationSubmissionOutcome> {
+		const { deps } = this;
+		if (command.kind === 'invalid') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_move_arguments());
+			return 'rejected';
+		}
+		if (command.kind !== 'valid') return 'no-op';
+		if (chat.status === 'draft') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_move_draft());
+			return 'rejected';
+		}
+		if (images.length > 0) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_move_attachments());
+			return 'rejected';
+		}
+
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
+		const result = await deps.sessions.moveChatToBoundary(chatId, command.boundary);
+		if (!result) {
+			this.#restoreComposerIfUntouched({
+				chatId,
+				ownsComposer,
+				text: previousText,
+				images: previousImages,
+			});
+			return 'rejected';
+		}
+
+		if (deps.chatState.activeChatId === chatId) {
+			deps.chatState.appendLocalNotice(
+				'info',
+				moveChatNotice(command.boundary, result.changed),
+			);
+			deps.chatState.isUserScrolledUp = false;
+			deps.scrollToBottom();
+		}
+		return 'accepted';
+	}
+
+	#restoreComposerIfUntouched(input: {
+		chatId: string;
+		ownsComposer: boolean;
+		text: string;
+		images: File[];
+	}): void {
+		const { deps } = this;
+		if (!input.ownsComposer || deps.sessions.selectedChatId !== input.chatId) return;
+		if (deps.composerState.inputText !== '' || deps.composerState.images.length !== 0) return;
+		deps.composerState.inputText = input.text;
+		deps.composerState.images = [...input.images];
+		deps.composerState.saveDraft(input.chatId);
 	}
 
 	async submitCompactCommand(
@@ -511,6 +596,17 @@ function forkFailureNotice(error: unknown): string {
 	return error instanceof ApiError && error.errorCode === 'MESSAGE_NOT_IN_NATIVE_HISTORY'
 		? m.chat_notice_fork_message_not_in_native_history()
 		: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) });
+}
+
+function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {
+	if (boundary === 'top') {
+		return changed
+			? m.chat_notice_move_top_success()
+			: m.chat_notice_move_top_unchanged();
+	}
+	return changed
+		? m.chat_notice_move_bottom_success()
+		: m.chat_notice_move_bottom_unchanged();
 }
 
 function scheduleInErrorMessage(error: ScheduleInCommandError): string {

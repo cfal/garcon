@@ -151,6 +151,7 @@ export interface SessionControllerDeps {
 		| 'upsertServerChat'
 		| 'setSelectedChatId'
 		| 'renameChat'
+		| 'moveChatToBoundary'
 	>;
 	chatState: SessionTranscriptState;
 	composerState: SessionComposerState;

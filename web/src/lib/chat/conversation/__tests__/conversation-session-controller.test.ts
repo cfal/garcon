@@ -301,6 +301,12 @@ function createDeps(chat = createRunningChat()) {
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			renameChat: vi.fn().mockResolvedValue(true),
+			moveChatToBoundary: vi.fn().mockResolvedValue({
+				success: true,
+				chatId: chat.id,
+				orderGroup: 'normal',
+				changed: true,
+			}),
 		},
 		chatState,
 		composerState: {
@@ -469,6 +475,19 @@ describe('ConversationSessionController', () => {
 		await controller.submitForChat('chat-1');
 
 		expect(deps.sessions.renameChat).toHaveBeenCalledWith('chat-1', 'Migration plan');
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('moves the current chat in Manual order without sending or queueing the command', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.composerState.inputText = '/move-to-top';
+		const controller = new ConversationSessionController(deps);
+
+		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
+
+		expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith('chat-1', 'top');
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');

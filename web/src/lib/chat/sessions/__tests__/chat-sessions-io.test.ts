@@ -7,6 +7,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	deleteChat: vi.fn(),
 	setLastSelectedChat: vi.fn(),
 	generateChatTitle: vi.fn(),
+	reorderChat: vi.fn(),
 }));
 
 vi.mock('$lib/api/settings.js', () => ({
@@ -17,6 +18,7 @@ import {
 	deleteChat,
 	generateChatTitle,
 	listChats,
+	reorderChat,
 	setLastSelectedChat,
 } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
@@ -25,6 +27,7 @@ const mockListChats = vi.mocked(listChats);
 const mockDeleteChat = vi.mocked(deleteChat);
 const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
 const mockGenerateChatTitle = vi.mocked(generateChatTitle);
+const mockReorderChat = vi.mocked(reorderChat);
 const mockUpdateSessionName = vi.mocked(updateSessionName);
 
 function deferred<T>() {
@@ -151,6 +154,73 @@ describe('ChatSessionsStore IO', () => {
 
 		expect(mockUpdateSessionName).toHaveBeenCalledWith('chat-1', 'New Title');
 		expect(renamed).toBe(true);
+	});
+
+	it('moves a chat to a boundary and quietly refreshes changed order', async () => {
+		const response = {
+			success: true as const,
+			chatId: 'chat-1',
+			orderGroup: 'normal' as const,
+			changed: true,
+		};
+		mockReorderChat.mockResolvedValue(response);
+		mockListChats.mockResolvedValue({ sessions: [], total: 0, lastSelectedChatId: null });
+		const store = new ChatSessionsStore();
+
+		await expect(store.moveChatToBoundary('chat-1', 'top')).resolves.toEqual(response);
+
+		expect(mockReorderChat).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			placement: { kind: 'boundary', boundary: 'top' },
+		});
+		expect(mockListChats).toHaveBeenCalledTimes(1);
+	});
+
+	it('quietly refreshes an unchanged boundary result', async () => {
+		mockReorderChat.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			orderGroup: 'archived',
+			changed: false,
+		});
+		mockListChats.mockResolvedValue({ sessions: [], total: 0, lastSelectedChatId: null });
+		const store = new ChatSessionsStore();
+
+		await store.moveChatToBoundary('chat-1', 'bottom');
+
+		expect(mockReorderChat).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			placement: { kind: 'boundary', boundary: 'bottom' },
+		});
+		expect(mockListChats).toHaveBeenCalledTimes(1);
+	});
+
+	it('notifies and skips refresh when boundary mutation fails', async () => {
+		const notifyError = vi.fn();
+		mockReorderChat.mockRejectedValue(new Error('reorder failed'));
+		const store = new ChatSessionsStore({ notifyError });
+
+		await expect(store.moveChatToBoundary('chat-1', 'top')).resolves.toBeNull();
+
+		expect(notifyError).toHaveBeenCalledWith('Failed to reorder chats.');
+		expect(mockListChats).not.toHaveBeenCalled();
+	});
+
+	it('preserves mutation success when the quiet refresh fails', async () => {
+		const notifyError = vi.fn();
+		const response = {
+			success: true as const,
+			chatId: 'chat-1',
+			orderGroup: 'pinned' as const,
+			changed: true,
+		};
+		mockReorderChat.mockResolvedValue(response);
+		mockListChats.mockRejectedValue(new Error('refresh failed'));
+		const store = new ChatSessionsStore({ notifyError });
+
+		await expect(store.moveChatToBoundary('chat-1', 'bottom')).resolves.toEqual(response);
+
+		expect(notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
 	});
 
 	it('generates a chat title from a message and patches local state', async () => {

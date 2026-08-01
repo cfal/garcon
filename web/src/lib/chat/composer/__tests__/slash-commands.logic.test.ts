@@ -4,6 +4,7 @@ import {
 	BUILTIN_SLASH_COMMANDS,
 	findSlashCommandTrigger,
 	parseCompactCommand,
+	parseMoveChatBoundaryCommand,
 	parseRenameCommand,
 	parseScheduleInCommand,
 	parseSnippetCommand,
@@ -63,6 +64,8 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
 		const steer = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'steer');
 		const rename = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'rename');
+		const moveToTop = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'move-to-top');
+		const moveToBottom = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'move-to-bottom');
 		const snippet = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'snippet');
 		const snippetShort = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 's');
 		expect(compact).toBeDefined();
@@ -78,12 +81,53 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(steer?.description).toBeTruthy();
 		expect(rename?.source).toBe('command');
 		expect(rename?.description).toBeTruthy();
+		expect(moveToTop).toHaveLength(1);
+		expect(moveToTop[0].source).toBe('command');
+		expect(moveToBottom).toHaveLength(1);
+		expect(moveToBottom[0].source).toBe('command');
 		expect(snippet?.source).toBe('command');
 		expect(snippet?.description).toBeTruthy();
 		expect(snippetShort?.source).toBe('command');
 		expect(snippetShort?.description).toBeTruthy();
 		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name === 'snippets')).toBe(false);
 	});
+});
+
+describe('parseMoveChatBoundaryCommand', () => {
+	for (const [input, boundary] of [
+		['/move-to-top', 'top'],
+		['/MOVE-TO-TOP', 'top'],
+		['  /Move-To-Bottom  ', 'bottom'],
+		['/move-to-bottom ', 'bottom'],
+	] as const) {
+		it(`parses ${JSON.stringify(input)}`, () => {
+			expect(parseMoveChatBoundaryCommand(input)).toEqual({ kind: 'valid', boundary });
+		});
+	}
+
+	for (const input of [
+		'/move-to-top now',
+		'/move-to-bottom later',
+		'/move-to-top\nnow',
+	]) {
+		it(`claims unsupported arguments in ${JSON.stringify(input)}`, () => {
+			expect(parseMoveChatBoundaryCommand(input)).toEqual({
+				kind: 'invalid',
+				error: 'arguments-not-supported',
+			});
+		});
+	}
+
+	for (const input of [
+		'/move-to-topical',
+		'/move-to-bottomless',
+		'please /move-to-top',
+		'/other /move-to-top',
+	]) {
+		it(`does not claim ${JSON.stringify(input)}`, () => {
+			expect(parseMoveChatBoundaryCommand(input)).toEqual({ kind: 'not-command' });
+		});
+	}
 });
 
 describe('parseSnippetCommand', () => {

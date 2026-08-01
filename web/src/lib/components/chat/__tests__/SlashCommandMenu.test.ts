@@ -63,6 +63,55 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Rename the current chat')).toBeTruthy();
 	});
 
+	it('lists both Manual order boundary commands', () => {
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 'move-to-',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.getByText('/move-to-top')).toBeTruthy();
+		expect(screen.getByText('/move-to-bottom')).toBeTruthy();
+	});
+
+	it('deduplicates discovered boundary commands behind the built-ins', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'move-to-top', source: 'command', description: 'Agent top' },
+			{ name: 'move-to-bottom', source: 'command', description: 'Agent bottom' },
+		]);
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'move-to-',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(await screen.findByText('/move-to-top')).toBeTruthy();
+		expect(screen.getAllByText('/move-to-top')).toHaveLength(1);
+		expect(screen.getAllByText('/move-to-bottom')).toHaveLength(1);
+		expect(screen.queryByText('Agent top')).toBeNull();
+		expect(screen.queryByText('Agent bottom')).toBeNull();
+	});
+
+	it('selects a boundary command', async () => {
+		const onSelect = vi.fn();
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 'move-to-top',
+			onSelect,
+			onClose: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /\/move-to-top/ }));
+
+		expect(onSelect).toHaveBeenCalledWith('move-to-top');
+	});
+
 	it('lists /snippet and its /s alias without advertising a plural command', () => {
 		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,

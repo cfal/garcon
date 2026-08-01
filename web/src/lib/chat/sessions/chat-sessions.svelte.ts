@@ -12,6 +12,7 @@ import {
 	deleteChat as deleteChatApi,
 	generateChatTitle,
 	listChats,
+	reorderChat as reorderChatApi,
 	setLastSelectedChat,
 } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
@@ -20,6 +21,10 @@ import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-sessi
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatListEntry, ChatOrderGroup } from '$shared/chat-list';
 import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
+import type {
+	ChatOrderBoundary,
+	ReorderChatResponse,
+} from '$shared/chat-order-contracts';
 
 export interface ChatProcessingTransition {
 	chatId: string;
@@ -33,6 +38,7 @@ export interface ChatSessionsStoreDeps {
 	setLastSelectedChat?: typeof setLastSelectedChat;
 	generateChatTitle?: typeof generateChatTitle;
 	updateSessionName?: typeof updateSessionName;
+	reorderChat?: typeof reorderChatApi;
 	notifyError?: (message: string) => void;
 }
 
@@ -45,6 +51,10 @@ export interface ChatSessionsPort {
 	setSelectedChatId(chatId: string | null): void;
 	quietRefreshChats(): Promise<void>;
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
+	moveChatToBoundary(
+		chatId: string,
+		boundary: ChatOrderBoundary,
+	): Promise<ReorderChatResponse | null>;
 	hasChat(chatId: string): boolean;
 	isDraft(chatId: string): boolean;
 	patchDraftStartup(chatId: string, patch: Partial<ChatStartupConfig>): void;
@@ -354,6 +364,25 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			console.error('[ChatSessionsStore] Rename failed:', err);
 			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
 			return false;
+		}
+	}
+
+	async moveChatToBoundary(
+		chatId: string,
+		boundary: ChatOrderBoundary,
+	): Promise<ReorderChatResponse | null> {
+		try {
+			const reorderRemoteChat = this.#deps.reorderChat ?? reorderChatApi;
+			const result = await reorderRemoteChat({
+				chatId,
+				placement: { kind: 'boundary', boundary },
+			});
+			await this.quietRefreshChats();
+			return result;
+		} catch (err) {
+			console.error('[ChatSessionsStore] Reorder failed:', err);
+			this.#deps.notifyError?.(m.notifications_reorder_chats_failed());
+			return null;
 		}
 	}
 
