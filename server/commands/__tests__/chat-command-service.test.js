@@ -992,6 +992,7 @@ describe('ChatCommandService', () => {
       'failed',
       { error: 'provider rejected the turn' },
     );
+    await ledger.markPublicTerminal(TARGET_CHAT_ID, first.turnId);
     const replay = await service.submitStart(input);
 
     expect(replay).toMatchObject({
@@ -999,6 +1000,30 @@ describe('ChatCommandService', () => {
       chatId: TARGET_CHAT_ID,
       turnId: first.turnId,
     });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a private terminal start failure instead of returning an unreadable receipt', async () => {
+    const { service, ledger, queue } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start then fail privately',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-private-failure',
+      clientMessageId: 'msg-start-private-failure',
+    };
+
+    await service.submitStart(input);
+    await ledger.settleTerminal(
+      `chat-start:${TARGET_CHAT_ID}:req-start-private-failure`,
+      'failed',
+      { error: 'startup rollback failed' },
+    );
+
+    await expect(service.submitStart(input)).rejects.toThrow('startup rollback failed');
     expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
   });
 
@@ -1455,6 +1480,7 @@ describe('ChatCommandService', () => {
       'failed',
       { error: 'provider rejected the turn' },
     );
+    await ledger.markPublicTerminal(SOURCE_CHAT_ID, first.turnId);
     const replay = await service.submitRun(input);
 
     expect(replay).toMatchObject({
@@ -1462,6 +1488,26 @@ describe('ChatCommandService', () => {
       chatId: SOURCE_CHAT_ID,
       turnId: first.turnId,
     });
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a private terminal run failure instead of returning an unreadable receipt', async () => {
+    const { service, ledger, queue } = makeService();
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue privately',
+      clientRequestId: 'req-private-failed-replay',
+      clientMessageId: 'msg-private-failed-replay',
+    };
+
+    await service.submitRun(input);
+    await ledger.settleTerminal(
+      `agent-run:${SOURCE_CHAT_ID}:req-private-failed-replay`,
+      'failed',
+      { error: 'run rollback failed' },
+    );
+
+    await expect(service.submitRun(input)).rejects.toThrow('run rollback failed');
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
   });
 

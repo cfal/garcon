@@ -442,8 +442,12 @@ export class CommandSupport {
     if (
       existing.status === 'failed'
       && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
+      && existing.publicTerminalAt === undefined
     ) {
       return null;
+    }
+    if (existing.publicTerminalAt === undefined) {
+      this.throwRecordedExecutionFailure(existing);
     }
     if (!existing.turnId) throw new Error(`Agent turn command ${existing.key} has no turnId`);
     return this.scheduleAcceptedHttpRun(

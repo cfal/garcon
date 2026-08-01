@@ -250,8 +250,12 @@ export class StartCommands {
     if (
       existing.status === 'failed'
       && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
+      && existing.publicTerminalAt === undefined
     ) {
       return null;
+    }
+    if (existing.publicTerminalAt === undefined) {
+      this.support.throwRecordedExecutionFailure(existing);
     }
     return this.replayedStart(existing);
   }
