@@ -154,9 +154,10 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     }));
   });
 
-  it('applies per-turn routing when a lazy session is materialized', async () => {
-    const { router, endpointResolver } = makeRouter({
+  it('materializes a lazy session with one coherent routing tuple', async () => {
+    const { router, endpointResolver, registry, resume, events } = makeRouter({
       entry: {
+        model: 'model-a',
         apiProviderId: 'provider-a',
         modelEndpointId: 'endpoint-a',
       },
@@ -168,12 +169,50 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
       modelEndpointId: 'endpoint-b',
     });
 
+    expect(registry.updateChat).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+      model: 'model-b',
+      apiProviderId: 'provider-b',
+      modelEndpointId: 'endpoint-b',
+      modelProtocol: 'openai-compatible',
+    }), { flush: true });
+
+    events.clearTurn();
+    await router.runAgentTurn('chat-1', 'resume without override');
+
     expect(endpointResolver.resolveSelection).toHaveBeenLastCalledWith({
       agentId: 'test',
       model: 'model-b',
       apiProviderId: 'provider-b',
       modelEndpointId: 'endpoint-b',
     });
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'model-b',
+      agentSessionId: 'native-1',
+    }));
+  });
+
+  it('rejects a local-to-cloud override before materializing a lazy session', async () => {
+    const { router, start, endpointResolver } = makeRouter({
+      entry: {
+        model: 'local-model',
+        apiProviderId: 'local-provider',
+        modelEndpointId: 'local-endpoint',
+      },
+    });
+    endpointResolver.resolveSelection.mockImplementation((request) => ({
+      model: request.model,
+      apiProviderId: request.apiProviderId ?? null,
+      endpointId: request.modelEndpointId ?? null,
+      protocol: request.apiProviderId ? 'openai-compatible' : null,
+      isLocal: request.apiProviderId === 'local-provider',
+    }));
+
+    await expect(router.runAgentTurn('chat-1', 'do not disclose carry-over', {
+      model: 'cloud-model',
+      apiProviderId: 'cloud-provider',
+      modelEndpointId: 'cloud-endpoint',
+    })).rejects.toThrow('Cannot switch from local to cloud model mid-session');
+    expect(start).not.toHaveBeenCalled();
   });
 
   it('binds only the opaque native session returned by the integration', async () => {
@@ -184,6 +223,7 @@ describe('AgentRuntimeRouter fresh-session boundary', () => {
     expect(registry.updateChat).toHaveBeenCalledWith('chat-1', {
       agentSessionId: 'native-1',
       nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+      model: 'model-a',
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,

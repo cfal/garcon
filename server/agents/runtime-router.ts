@@ -106,6 +106,12 @@ export class AgentRuntimeRouter {
     }
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     const integration = this.#directory.require(entry.agentId);
+    const previous = this.#endpointResolver.resolveSelection({
+      agentId: entry.agentId,
+      model: entry.model,
+      apiProviderId: entry.apiProviderId,
+      modelEndpointId: entry.modelEndpointId,
+    });
     const selection = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
       model: opts.model ?? entry.model,
@@ -113,6 +119,7 @@ export class AgentRuntimeRouter {
       modelEndpointId:
         opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
+    assertSameApiProviderBoundary(previous, selection);
     await this.#validateEndpoint(integration, selection);
     const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
     assertExecutionAdmissionOpen(opts);
@@ -132,6 +139,7 @@ export class AgentRuntimeRouter {
       const updated = await this.#registry.updateChat(chatId, {
         agentSessionId: started.agentSessionId,
         nativeSession: started.nativeSession,
+        model: selection.model,
         apiProviderId: selection.apiProviderId,
         modelEndpointId: selection.endpointId,
         modelProtocol: selection.protocol,
