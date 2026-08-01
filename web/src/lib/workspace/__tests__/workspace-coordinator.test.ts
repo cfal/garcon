@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
+import { serializeWorkspaceLayout } from '../layout-schema';
 import { ChatInteractionGate } from '../chat-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
 import { WorkspaceCoordinator } from '../workspace-coordinator.svelte';
@@ -678,6 +679,36 @@ describe('WorkspaceCoordinator', () => {
 		},
 	);
 
+	// Browser hides the mobile bottom bar, so it must install a return target
+	// for the frame chrome's Back control to land on.
+	it('gives the mobile Browser surface a transient return target', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.enterMobilePresentation();
+
+		await coordinator.focusMobileSingleton('browser');
+
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe('singleton:browser');
+		expect(layout.snapshot.mobileReturnStack.length).toBeGreaterThan(0);
+
+		await coordinator.mobileBack();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+	});
+
+	// Only hosted surfaces are serialized, so a mobile-only Browser would vanish
+	// on reload even though its URL is still stored.
+	it('registers a mobile Browser into the host it hands off to, so it survives reload', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.enterMobilePresentation();
+
+		await coordinator.focusMobileSingleton('browser');
+
+		expect(layout.snapshot.main.order).toContain('singleton:browser');
+		expect(layout.snapshot.mobileOnlySurfaceIds).not.toContain('singleton:browser');
+		expect(
+			serializeWorkspaceLayout(layout.snapshot).main.order,
+		).toContainEqual({ type: 'singleton', kind: 'browser' });
+	});
+
 	it('destroys every mobile-only Git view on responsive desktop return', async () => {
 		const { coordinator, layout, singletons } = createHarness();
 		await coordinator.enterMobilePresentation();
@@ -1032,6 +1063,23 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(layout.snapshot.sidebar.order.filter((id) => id === 'singleton:commit')).toHaveLength(1);
 		expect(layout.snapshot.sidebar.activeId).toBe('singleton:commit');
+	});
+
+	it('opens the Browser singleton into the requested host and focuses it', async () => {
+		const { coordinator, layout } = createHarness();
+
+		await coordinator.openSingleton('browser', 'sidebar');
+
+		expect(layout.snapshot.sidebar.order).toContain('singleton:browser');
+		expect(layout.snapshot.sidebar.activeId).toBe('singleton:browser');
+		expect(layout.snapshot.sidebarOpen).toBe(true);
+
+		await coordinator.openSingleton('browser', 'main');
+		expect(
+			[...layout.snapshot.main.order, ...layout.snapshot.sidebar.order].filter(
+				(id) => id === 'singleton:browser',
+			),
+		).toHaveLength(1);
 	});
 
 	it('derives the Terminal launcher only while first-run layout is still canonical', async () => {

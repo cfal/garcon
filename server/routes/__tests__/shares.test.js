@@ -100,6 +100,26 @@ describe('shared transcript routes', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('Share token is required');
   });
+
+  // The share page boots the SPA on the app origin, so it must refuse framing
+  // like every other app document. Otherwise a page framed by the Browser
+  // surface could navigate itself here and run same-origin with Garcon. Every
+  // HTML response from these routes goes through the same helper, and this
+  // path renders standalone when no SPA build is present, so it holds whether
+  // or not web/build exists.
+  it('denies framing of the shared chat page', async () => {
+    const routes = createRoutes();
+    const response = await routes['/shared/:token'].GET(
+      new Request('http://localhost/shared/share-token'),
+      new URL('http://localhost/shared/share-token'),
+    );
+
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+    expect(response.headers.get('referrer-policy')).toBe('same-origin');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
 });
 
 describe('shared chat page route', () => {

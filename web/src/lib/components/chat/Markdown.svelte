@@ -32,6 +32,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 	import CodeBlock from './CodeBlock.svelte';
 	import MermaidBlock from './MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
+	import { getOptionalExternalLinkPolicy } from '$lib/context';
 
 	type MarkdownVariant = 'assistant' | 'user' | 'thinking';
 
@@ -102,6 +103,17 @@ Supports visual variants for assistant, user, and thinking contexts.
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
 		event.stopPropagation();
 	}
+
+	const externalLinkPolicy = getOptionalExternalLinkPolicy();
+
+	// Captures plain left-clicks only; modifier and middle clicks keep the
+	// anchor's default new-tab behavior as an escape hatch.
+	function handleExternalClick(event: MouseEvent, href: string): void {
+		if (!externalLinkPolicy) return;
+		if (event.defaultPrevented || event.button !== 0) return;
+		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+		if (externalLinkPolicy.openExternalLink(href)) event.preventDefault();
+	}
 </script>
 
 <div class={containerClass}>
@@ -141,12 +153,14 @@ Supports visual variants for assistant, user, and thinking contexts.
 				rel={isExternal ? 'noopener noreferrer' : undefined}
 				onpointerdowncapture={stopParentContextTriggerGesture}
 				oncontextmenu={stopParentContextTriggerGesture}
-				onclick={isFile || isAbsPath
-					? (e: MouseEvent) => {
-							e.preventDefault();
-							if (isFile) onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
-						}
-					: undefined}
+				onclick={(e: MouseEvent) => {
+					if (isFile || isAbsPath) {
+						e.preventDefault();
+						if (isFile) onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
+						return;
+					}
+					handleExternalClick(e, href ?? '');
+				}}
 			>
 				{@render children?.()}
 			</a>

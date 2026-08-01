@@ -33,7 +33,8 @@ function parseRef(value: unknown): PersistedWorkspaceSurfaceRef | null {
 			value.kind === 'git-compare' ||
 			value.kind === 'pull-requests' ||
 			value.kind === 'files' ||
-			value.kind === 'commit')
+			value.kind === 'commit' ||
+			value.kind === 'browser')
 	) {
 		return { type: 'singleton', kind: value.kind };
 	}

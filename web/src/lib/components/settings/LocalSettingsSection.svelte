@@ -188,6 +188,12 @@
 				{ description: m.settings_chat_allow_direct_chats_description() },
 			)}
 			{@render settingRow(
+				m.settings_open_links_in_browser(),
+				ls.openLinksInBrowserSurface,
+				() => ls.toggle('openLinksInBrowserSurface'),
+				{ description: m.settings_open_links_in_browser_description() },
+			)}
+			{@render settingRow(
 				m.settings_chat_reduce_motion(),
 				ls.reduceMotion,
 				() => ls.toggle('reduceMotion'),

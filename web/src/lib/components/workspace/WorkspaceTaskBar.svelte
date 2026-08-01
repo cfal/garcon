@@ -8,6 +8,7 @@
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
 	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+	import Globe from '@lucide/svelte/icons/globe';
 	import History from '@lucide/svelte/icons/history';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
@@ -97,6 +98,7 @@
 		'pull-requests': m.workspace_surface_pull_requests,
 		files: m.workspace_surface_files,
 		commit: m.workspace_surface_commit,
+		browser: m.workspace_surface_browser,
 	};
 
 	let tabViewport: HTMLDivElement | null = $state(null);
@@ -274,6 +276,7 @@
 	{:else if kind === 'pull-requests'}<GitPullRequest class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'files'}<Files class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'commit'}<GitCommitHorizontal class="h-3.5 w-3.5 shrink-0" />
+	{:else if kind === 'browser'}<Globe class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'terminal'}<SquareTerminal class="h-3.5 w-3.5 shrink-0" />
 	{:else}<FileCode class="h-3.5 w-3.5 shrink-0" />{/if}
 {/snippet}

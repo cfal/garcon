@@ -59,7 +59,9 @@
 		setGitReviewDisplay,
 		setGitViewLauncher,
 		setSingletonSurfaces,
+		setExternalLinkPolicy,
 	} from '$lib/context';
+	import { BrowserLinkOpener } from '$lib/browser/browser-link-opener.js';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
 	import { SnippetsRouter } from '$lib/events/snippets-router.svelte.js';
@@ -179,6 +181,18 @@
 	setGitReviewDisplay(gitReviewDisplay);
 	setGitViewLauncher(gitViews);
 	setSingletonSurfaces(singletonSurfaces);
+	setExternalLinkPolicy(
+		new BrowserLinkOpener({
+			settings: localSettings,
+			workspace,
+			surfaces: singletonSurfaces,
+			// Getter-backed so it tracks client-side route changes; this layout
+			// instance persists across navigations between app and public routes.
+			get workspacePresented() {
+				return !isPublicRoute;
+			},
+		}),
+	);
 	setWs(ws);
 	setChatProcessingReconciler(chatProcessingReconciler);
 	setFileSessions(fileSessions);

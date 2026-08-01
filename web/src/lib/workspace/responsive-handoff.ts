@@ -2,9 +2,17 @@ import {
 	CHAT_SURFACE_ID,
 	isTransientMobileSingletonKind,
 	type HostId,
+	type PortableSingletonKind,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
+
+// The host a singleton lands in when a mobile session hands off to desktop.
+// Shared so a surface opened on mobile can be registered where it will end up,
+// which is also what makes it survive a reload (only hosted surfaces persist).
+export function desktopHostForSingleton(kind: PortableSingletonKind): HostId {
+	return kind === 'files' || kind === 'commit' ? 'sidebar' : 'main';
+}
 
 export function selectMobileEntrySurface(
 	layout: WorkspaceLayoutSnapshot,
@@ -53,9 +61,11 @@ export function planDesktopReturnMutations(
 				mutations.push({ type: 'remove-surface', surfaceId });
 				continue;
 			}
-			const destination: HostId =
-				surface.kind === 'files' || surface.kind === 'commit' ? 'sidebar' : 'main';
-			mutations.push({ type: 'assign-to-host', surfaceId, destination });
+			mutations.push({
+				type: 'assign-to-host',
+				surfaceId,
+				destination: desktopHostForSingleton(surface.kind),
+			});
 		}
 	}
 	return mutations;

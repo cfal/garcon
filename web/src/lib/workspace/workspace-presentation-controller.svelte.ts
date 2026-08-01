@@ -8,7 +8,7 @@ import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import type { WorkspaceCommitOptions } from './workspace-commit.js';
 import { MobilePresentationPlanner } from './mobile-presentation-planner.js';
-import { selectMobileEntrySurface } from './responsive-handoff.js';
+import { desktopHostForSingleton, selectMobileEntrySurface } from './responsive-handoff.js';
 import {
 	CHAT_SURFACE_ID,
 	PORTABLE_SINGLETON_KINDS,
@@ -360,14 +360,26 @@ export class WorkspacePresentationController {
 		this.deps.chatInteractionGate.cancelBeforeInertTransition();
 		const surfaceId = singletonSurfaceId(kind);
 		if (!this.layout.surface(surfaceId)) {
-			await this.commit([{ type: 'register-surface', surface: portableSingletonDescriptor(kind) }]);
+			// Transient views stay mobile-only because the desktop handoff destroys
+			// them anyway. Everything else is registered into the host it would be
+			// handed off to, so it also survives a reload: only hosted surfaces
+			// are serialized.
+			await this.commit([
+				{
+					type: 'register-surface',
+					surface: portableSingletonDescriptor(kind),
+					...(isTransientMobileSingletonKind(kind)
+						? {}
+						: { host: desktopHostForSingleton(kind) }),
+				},
+			]);
 		}
 		const current = await this.commit([
 			{
 				type: 'set-mobile-presentation',
 				activeId: surfaceId,
 				returnStack:
-					kind === 'commit' || isTransientMobileSingletonKind(kind)
+					kind === 'commit' || kind === 'browser' || isTransientMobileSingletonKind(kind)
 						? this.#mobilePresentation.returnStackForTransient(
 								surfaceId,
 								this.layout.snapshot,

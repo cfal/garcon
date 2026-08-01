@@ -1,4 +1,5 @@
 import authRoutes from './auth.js';
+import createBrowserRoutes from './browser.js';
 import createStaticRoutes from './static.js';
 import createFilesRoutes from './files.js';
 import createCommandsRoutes from './commands.js';
@@ -125,6 +126,7 @@ export default function createAllRoutes({
     }),
     ...createGitRoutes(agents, settings),
     ...createGhRoutes(),
+    ...createBrowserRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
     ...createSnippetRoutes(snippets),
     ...createTerminalRoutes(terminals),

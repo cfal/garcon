@@ -22,6 +22,9 @@
 		() => import('$lib/components/pr/PullRequestsPanel.svelte'),
 	);
 	const commitRenderer = lazyRenderer(() => import('$lib/components/git/CommitSurface.svelte'));
+	const browserRenderer = lazyRenderer(
+		() => import('$lib/components/browser/BrowserSurface.svelte'),
+	);
 </script>
 
 <script lang="ts">
@@ -193,6 +196,11 @@
 				<CommitSurface {controller} {presentation} />
 			{/await}
 		</ProjectSurfaceGate>
+	{:else if surface.type === 'singleton' && surface.kind === 'browser'}
+		{@const controller = singletonSurfaces.browser()}
+		{#await browserRenderer() then BrowserSurface}
+			<BrowserSurface {controller} />
+		{/await}
 	{/if}
 
 	{#snippet failed(error, reset)}

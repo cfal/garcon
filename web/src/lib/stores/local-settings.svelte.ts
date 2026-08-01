@@ -94,6 +94,7 @@ export interface LocalSettingsSnapshot {
 	autoExpandTools: boolean;
 	showThinking: boolean;
 	allowDirectChats: boolean;
+	openLinksInBrowserSurface: boolean;
 	reduceMotion: boolean;
 	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
@@ -127,6 +128,7 @@ type BooleanLocalSettingKey =
 	| 'autoExpandTools'
 	| 'showThinking'
 	| 'allowDirectChats'
+	| 'openLinksInBrowserSurface'
 	| 'reduceMotion'
 	| 'showQuickCommitTray'
 	| 'autoScrollToBottom'
@@ -146,6 +148,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	autoExpandTools: false,
 	showThinking: true,
 	allowDirectChats: false,
+	openLinksInBrowserSurface: false,
 	reduceMotion: false,
 	showQuickCommitTray: true,
 	autoScrollToBottom: true,
@@ -240,6 +243,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
+		openLinksInBrowserSurface: parseBoolean(
+			parsed.openLinksInBrowserSurface,
+			DEFAULTS.openLinksInBrowserSurface,
+		),
 		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
 		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
@@ -322,6 +329,7 @@ export class LocalSettingsStore {
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	showThinking = $state(DEFAULTS.showThinking);
 	allowDirectChats = $state(DEFAULTS.allowDirectChats);
+	openLinksInBrowserSurface = $state(DEFAULTS.openLinksInBrowserSurface);
 	reduceMotion = $state(DEFAULTS.reduceMotion);
 	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
@@ -406,6 +414,7 @@ export class LocalSettingsStore {
 			autoExpandTools: this.autoExpandTools,
 			showThinking: this.showThinking,
 			allowDirectChats: this.allowDirectChats,
+			openLinksInBrowserSurface: this.openLinksInBrowserSurface,
 			reduceMotion: this.reduceMotion,
 			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
@@ -441,6 +450,7 @@ export class LocalSettingsStore {
 		this.autoExpandTools = snap.autoExpandTools;
 		this.showThinking = snap.showThinking;
 		this.allowDirectChats = snap.allowDirectChats;
+		this.openLinksInBrowserSurface = snap.openLinksInBrowserSurface;
 		this.reduceMotion = snap.reduceMotion;
 		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;

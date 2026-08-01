@@ -260,6 +260,7 @@
 			'pull-requests': m.workspace_surface_pull_requests_short(),
 			files: m.workspace_surface_files(),
 			commit: m.workspace_surface_commit(),
+			browser: m.workspace_surface_browser(),
 		};
 		return labels[surface.kind];
 	}

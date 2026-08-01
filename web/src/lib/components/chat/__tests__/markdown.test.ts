@@ -3,6 +3,7 @@ import { fireEvent } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { describe, it, expect, vi } from 'vitest';
 import Markdown from '../Markdown.svelte';
+import MarkdownExternalLinkHost from './MarkdownExternalLinkHost.svelte';
 import { whenMathRendererReady } from '../katex-loader';
 
 describe('Markdown', () => {
@@ -280,6 +281,72 @@ describe('Markdown', () => {
 			await fireEvent.click(link);
 
 			expect(handler).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('external link capture', () => {
+		it('captures plain left-clicks when the policy handles them', async () => {
+			const policy = { openExternalLink: vi.fn(() => true) };
+			render(MarkdownExternalLinkHost, {
+				source: 'See [docs](https://192.0.2.10/docs)',
+				policy,
+			});
+
+			const link = screen.getByRole('link', { name: 'docs' });
+			const notPrevented = await fireEvent.click(link);
+
+			expect(policy.openExternalLink).toHaveBeenCalledWith('https://192.0.2.10/docs');
+			expect(notPrevented).toBe(false);
+			expect(link.getAttribute('target')).toBe('_blank');
+		});
+
+		it('keeps default navigation when the policy declines', async () => {
+			const policy = { openExternalLink: vi.fn(() => false) };
+			render(MarkdownExternalLinkHost, {
+				source: 'See [docs](https://192.0.2.10/docs)',
+				policy,
+			});
+
+			const notPrevented = await fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+
+			expect(policy.openExternalLink).toHaveBeenCalledTimes(1);
+			expect(notPrevented).toBe(true);
+		});
+
+		it('bypasses the policy on modifier clicks', async () => {
+			const policy = { openExternalLink: vi.fn(() => true) };
+			render(MarkdownExternalLinkHost, {
+				source: 'See [docs](https://192.0.2.10/docs)',
+				policy,
+			});
+
+			const link = screen.getByRole('link', { name: 'docs' });
+			await fireEvent.click(link, { ctrlKey: true });
+			await fireEvent.click(link, { metaKey: true });
+			await fireEvent.click(link, { shiftKey: true });
+			await fireEvent.click(link, { button: 1 });
+
+			expect(policy.openExternalLink).not.toHaveBeenCalled();
+		});
+
+		it('never consults the policy for file links', async () => {
+			const policy = { openExternalLink: vi.fn(() => true) };
+			render(MarkdownExternalLinkHost, {
+				source: 'See [config](src/config.ts)',
+				policy,
+			});
+
+			await fireEvent.click(screen.getByRole('link', { name: 'config' }));
+
+			expect(policy.openExternalLink).not.toHaveBeenCalled();
+		});
+
+		it('behaves as before when no policy context exists', async () => {
+			render(Markdown, { source: 'See [docs](https://192.0.2.10/docs)' });
+
+			const notPrevented = await fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+
+			expect(notPrevented).toBe(true);
 		});
 	});
 });

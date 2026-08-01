@@ -217,6 +217,19 @@ function mobileCommitSnapshot(): WorkspaceLayoutSnapshot {
 	};
 }
 
+function mobileBrowserSnapshot(): WorkspaceLayoutSnapshot {
+	const base = canonicalWorkspaceSnapshot();
+	return {
+		...base,
+		surfaces: {
+			...base.surfaces,
+			'singleton:browser': { id: 'singleton:browser', type: 'singleton', kind: 'browser' },
+		},
+		mobileActiveSurfaceId: 'singleton:browser',
+		mobileOnlySurfaceIds: ['singleton:browser'],
+	};
+}
+
 function selectedChat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
@@ -759,6 +772,23 @@ describe('WorkspaceRoot', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close view' }));
 		expect(workspace.closeSurface).toHaveBeenCalledWith('singleton:commit');
+	});
+
+	// The Browser surface hides the mobile bottom bar (it is transient), so the
+	// frame chrome is the only way back to the app.
+	it('retains Back and Close view controls for mobile Browser', async () => {
+		const { workspace } = installContext(mobileBrowserSnapshot());
+		workspace.closeSurface.mockResolvedValueOnce(true);
+		render(WorkspaceRoot, {
+			isMobile: true,
+			chatActions,
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+		expect(workspace.mobileBack).toHaveBeenCalledOnce();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close view' }));
+		expect(workspace.closeSurface).toHaveBeenCalledWith('singleton:browser');
 	});
 
 	it('reserves chat content space only while the desktop taskbar is rendered', async () => {
