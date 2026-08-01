@@ -27,7 +27,9 @@ describe('agent turn receipt projection', () => {
       receipt: {
         chatId: 'chat-1',
         turnId: 'turn-1',
+        clientRequestId: 'req-1',
         acceptedAt: '2026-07-31T12:00:00.000Z',
+        updatedAt: '2026-07-31T12:00:00.000Z',
         state: 'pending',
       },
     });

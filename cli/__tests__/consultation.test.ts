@@ -27,7 +27,9 @@ const receipt: AgentTurnReceipt = {
   state: 'completed',
   chatId: CHAT_ID,
   turnId: 'turn-1',
+  clientRequestId: accepted.clientRequestId,
   acceptedAt: accepted.acceptedAt,
+  updatedAt: accepted.acceptedAt,
   settledAt: new Date().toISOString(),
   output: { availability: 'available', completeness: 'complete', assistantMessages: ['Done'] },
 };

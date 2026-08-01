@@ -163,6 +163,7 @@ export async function runConsultation(
     client,
     accepted.chatId,
     accepted.turnId,
+    accepted.clientRequestId,
     signal,
     dependencies.poller,
   );

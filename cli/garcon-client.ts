@@ -28,6 +28,7 @@ export class GarconHttpError extends CliError {
     readonly status: number,
     readonly errorCode: string | null,
     readonly retryable: boolean,
+    readonly retryAfterMs: number | null = null,
   ) {
     super(
       phase,
@@ -106,6 +107,14 @@ function defaultDelay(milliseconds: number, signal?: AbortSignal): Promise<void>
       reject(signal.reason);
     }, { once: true });
   });
+}
+
+function retryAfterMilliseconds(value: string | null): number | null {
+  if (value === null) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
 }
 
 export class GarconClient {
@@ -282,6 +291,7 @@ export class GarconClient {
         response.status,
         errorCode,
         envelope?.retryable === true || response.status >= 500,
+        retryAfterMilliseconds(response.headers.get('Retry-After')),
       );
     }
     if (value === null) throw new CliError(phase, 'server returned invalid JSON', 3);

@@ -21,7 +21,11 @@ describe('agent turn receipt route', () => {
     });
     const pending = await getReceipt(ledger, 'chatId=chat-1&turnId=turn-1');
     expect(pending.response.headers.get('Cache-Control')).toBe('no-store');
-    expect(pending.body.state).toBe('pending');
+    expect(pending.body).toMatchObject({
+      state: 'pending',
+      clientRequestId: 'req-1',
+      updatedAt: expect.any(String),
+    });
 
     await ledger.appendAssistantMessages('chat-1', 'turn-1', ['done']);
     await ledger.settleTerminal(accepted.record.key, 'finished');

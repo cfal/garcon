@@ -15,6 +15,7 @@ export interface ReceiptClient {
 export interface ReceiptPollerDependencies {
   delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   now?: () => number;
+  random?: () => number;
 }
 
 function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -36,6 +37,8 @@ function isRetryable(error: unknown): boolean {
     || error instanceof CliError && error.phase === 'runtime verification'
     || error instanceof GarconHttpError && (
       error.retryable
+      || error.status === 408
+      || error.status === 425
       || error.status === 429
       || error.status === 502
       || error.status === 503
@@ -47,21 +50,28 @@ export async function pollTurnReceipt(
   client: ReceiptClient,
   chatId: string,
   turnId: string,
+  clientRequestId: string,
   signal?: AbortSignal,
   dependencies: ReceiptPollerDependencies = {},
 ): Promise<AgentTurnReceipt> {
   const delay = dependencies.delay ?? wait;
   const now = dependencies.now ?? Date.now;
+  const random = dependencies.random ?? Math.random;
   let pollDelay = INITIAL_POLL_DELAY_MS;
   let consecutiveFailures = 0;
   let lastRuntimeCheck = now();
 
   while (true) {
     signal?.throwIfAborted();
+    let retryAfterMs = 0;
     try {
       const receipt = await client.getTurnReceipt(chatId, turnId, signal);
       consecutiveFailures = 0;
-      if (receipt.chatId !== chatId || receipt.turnId !== turnId) {
+      if (
+        receipt.chatId !== chatId
+        || receipt.turnId !== turnId
+        || receipt.clientRequestId !== clientRequestId
+      ) {
         throw new CliError('receipt polling', 'server returned a receipt for a different turn', 3);
       }
       if (receipt.state !== 'pending') return receipt;
@@ -86,8 +96,35 @@ export async function pollTurnReceipt(
         }
         throw error;
       }
+      if (
+        error instanceof GarconHttpError
+        && error.status === 404
+        && error.errorCode === 'TURN_RECEIPT_NOT_FOUND'
+      ) {
+        let sameRuntime: boolean;
+        try {
+          sameRuntime = await client.verifyRuntime(signal);
+        } catch (verificationError) {
+          throw new CliError(
+            'transport recovery',
+            'the accepted chat may still be running, but Garcon could not be verified after its turn receipt disappeared',
+            3,
+            { cause: verificationError },
+          );
+        }
+        if (!sameRuntime) {
+          throw new CliError('transport recovery', 'Garcon restarted while the turn was running', 3);
+        }
+        throw new CliError(
+          'receipt polling',
+          'the accepted turn receipt is unavailable on the verified Garcon instance',
+          3,
+          { cause: error },
+        );
+      }
       if (!isRetryable(error)) throw error;
       consecutiveFailures += 1;
+      retryAfterMs = error instanceof GarconHttpError ? error.retryAfterMs ?? 0 : 0;
       try {
         if (!await client.verifyRuntime(signal)) {
           throw new CliError('transport recovery', 'Garcon restarted while the turn was running', 3);
@@ -97,18 +134,22 @@ export async function pollTurnReceipt(
         if (verificationError instanceof CliError && verificationError.phase === 'transport recovery') {
           throw verificationError;
         }
-        if (consecutiveFailures >= MAX_CONSECUTIVE_TRANSPORT_FAILURES) {
-          throw new CliError(
-            'transport recovery',
-            'Garcon remained unreachable while waiting for the turn result',
-            3,
-            { cause: error },
-          );
-        }
+      }
+      if (consecutiveFailures >= MAX_CONSECUTIVE_TRANSPORT_FAILURES) {
+        throw new CliError(
+          'transport recovery',
+          'the accepted chat may still be running in Garcon, but its turn result could not be reached',
+          3,
+          { cause: error },
+        );
       }
     }
 
-    await delay(pollDelay, signal);
+    const jitteredDelay = Math.min(
+      MAX_POLL_DELAY_MS,
+      Math.round(pollDelay * (0.9 + random() * 0.2)),
+    );
+    await delay(Math.max(jitteredDelay, retryAfterMs), signal);
     pollDelay = Math.min(MAX_POLL_DELAY_MS, pollDelay * 2);
   }
 }

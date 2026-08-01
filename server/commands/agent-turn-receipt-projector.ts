@@ -12,7 +12,9 @@ export function projectAgentTurnReceipt(
   const base = {
     chatId: record.chatId,
     turnId: record.turnId ?? '',
+    clientRequestId: record.clientRequestId,
     acceptedAt: record.acceptedAt,
+    updatedAt: record.updatedAt,
   };
   if (!record.publicTerminalAt) {
     return { kind: 'found', receipt: { ...base, state: 'pending' } };

@@ -126,6 +126,24 @@ describe('GarconClient', () => {
     expect(attempts).toBe(1);
   });
 
+  test('parses Retry-After for receipt recovery', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({ error: 'busy' }, {
+        status: 503,
+        headers: { 'Retry-After': '3' },
+      }),
+    });
+
+    try {
+      await client.getTurnReceipt(runRequest.chatId, 'turn-1');
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(GarconHttpError);
+      expect((error as GarconHttpError).retryAfterMs).toBe(3_000);
+    }
+  });
+
   test('requires correlated fields in accepted responses', async () => {
     const client = new GarconClient({
       ...connection,

@@ -6,13 +6,25 @@ import { pollTurnReceipt, type ReceiptClient } from '../receipt-poller.js';
 
 const CHAT_ID = '1785337200123456';
 const TURN_ID = 'turn-1';
+const CLIENT_REQUEST_ID = 'request-1';
+const TIMESTAMP = '2026-07-31T12:00:00.000Z';
 const completed: AgentTurnReceipt = {
   state: 'completed',
   chatId: CHAT_ID,
   turnId: TURN_ID,
-  acceptedAt: new Date().toISOString(),
-  settledAt: new Date().toISOString(),
+  clientRequestId: CLIENT_REQUEST_ID,
+  acceptedAt: TIMESTAMP,
+  updatedAt: TIMESTAMP,
+  settledAt: TIMESTAMP,
   output: { availability: 'available', completeness: 'complete', assistantMessages: ['Done'] },
+};
+const pending: AgentTurnReceipt = {
+  state: 'pending',
+  chatId: CHAT_ID,
+  turnId: TURN_ID,
+  clientRequestId: CLIENT_REQUEST_ID,
+  acceptedAt: TIMESTAMP,
+  updatedAt: TIMESTAMP,
 };
 
 describe('pollTurnReceipt', () => {
@@ -22,14 +34,13 @@ describe('pollTurnReceipt', () => {
     const client: ReceiptClient = {
       async getTurnReceipt() {
         requests += 1;
-        return requests === 1
-          ? { state: 'pending', chatId: CHAT_ID, turnId: TURN_ID, acceptedAt: new Date().toISOString() }
-          : completed;
+        return requests === 1 ? pending : completed;
       },
       async verifyRuntime() { return true; },
     };
-    expect(await pollTurnReceipt(client, CHAT_ID, TURN_ID, undefined, {
+    expect(await pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID, undefined, {
       delay: async (milliseconds) => { delays.push(milliseconds); },
+      random: () => 0.5,
     })).toBe(completed);
     expect(delays).toEqual([250]);
   });
@@ -48,7 +59,9 @@ describe('pollTurnReceipt', () => {
         return true;
       },
     };
-    await pollTurnReceipt(client, CHAT_ID, TURN_ID, undefined, { delay: async () => undefined });
+    await pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID, undefined, {
+      delay: async () => undefined,
+    });
     expect(verifications).toBe(1);
   });
 
@@ -60,7 +73,9 @@ describe('pollTurnReceipt', () => {
       async verifyRuntime() { return false; },
     };
     try {
-      await pollTurnReceipt(client, CHAT_ID, TURN_ID, undefined, { delay: async () => undefined });
+      await pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID, undefined, {
+        delay: async () => undefined,
+      });
       throw new Error('expected rejection');
     } catch (error) {
       expect(error).toBeInstanceOf(CliError);
@@ -76,7 +91,7 @@ describe('pollTurnReceipt', () => {
       },
       async verifyRuntime() { return false; },
     };
-    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID, undefined, {
+    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID, undefined, {
       delay: async () => undefined,
     })).rejects.toThrow('restarted');
   });
@@ -86,6 +101,87 @@ describe('pollTurnReceipt', () => {
       async getTurnReceipt() { return { ...completed, turnId: 'other' }; },
       async verifyRuntime() { return true; },
     };
-    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID)).rejects.toThrow('different turn');
+    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID))
+      .rejects.toThrow('different turn');
+  });
+
+  test('rejects a receipt for a different client request', async () => {
+    const client: ReceiptClient = {
+      async getTurnReceipt() { return { ...completed, clientRequestId: 'other' }; },
+      async verifyRuntime() { return true; },
+    };
+    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID))
+      .rejects.toThrow('different turn');
+  });
+
+  test('retries 408 and 425 responses and honors Retry-After', async () => {
+    let requests = 0;
+    const delays: number[] = [];
+    const client: ReceiptClient = {
+      async getTurnReceipt() {
+        requests += 1;
+        if (requests === 1) {
+          throw new GarconHttpError(
+            'receipt polling',
+            'too early',
+            425,
+            null,
+            false,
+            3_000,
+          );
+        }
+        if (requests === 2) {
+          throw new GarconHttpError('receipt polling', 'timeout', 408, null, false);
+        }
+        return completed;
+      },
+      async verifyRuntime() { return true; },
+    };
+
+    await pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID, undefined, {
+      delay: async (milliseconds) => { delays.push(milliseconds); },
+      random: () => 0.5,
+    });
+
+    expect(delays).toEqual([3_000, 500]);
+  });
+
+  test('bounds a continuous outage even while runtime verification succeeds', async () => {
+    let requests = 0;
+    const client: ReceiptClient = {
+      async getTurnReceipt() {
+        requests += 1;
+        throw new GarconHttpError('receipt polling', 'unavailable', 503, null, true);
+      },
+      async verifyRuntime() { return true; },
+    };
+
+    await expect(pollTurnReceipt(client, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID, undefined, {
+      delay: async () => undefined,
+    })).rejects.toThrow('accepted chat may still be running');
+    expect(requests).toBe(8);
+  });
+
+  test('classifies a missing receipt against the current runtime identity', async () => {
+    const missing = new GarconHttpError(
+      'receipt polling',
+      'missing',
+      404,
+      'TURN_RECEIPT_NOT_FOUND',
+      false,
+    );
+    const currentClient: ReceiptClient = {
+      async getTurnReceipt() { throw missing; },
+      async verifyRuntime() { return true; },
+    };
+    const restartedClient: ReceiptClient = {
+      async getTurnReceipt() { throw missing; },
+      async verifyRuntime() { return false; },
+    };
+
+    await expect(pollTurnReceipt(currentClient, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID))
+      .rejects.toThrow('receipt is unavailable');
+    await expect(pollTurnReceipt(restartedClient, CHAT_ID, TURN_ID, CLIENT_REQUEST_ID))
+      .rejects.toThrow('restarted');
   });
 });

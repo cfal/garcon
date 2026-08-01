@@ -16,7 +16,9 @@ export type AgentTurnOutput = AgentTurnOutputAvailable | AgentTurnOutputUnavaila
 interface AgentTurnReceiptBase {
   chatId: string;
   turnId: string;
+  clientRequestId: string;
   acceptedAt: string;
+  updatedAt: string;
 }
 
 export interface PendingAgentTurnReceipt extends AgentTurnReceiptBase {
@@ -61,7 +63,9 @@ export function parseAgentTurnReceipt(value: unknown): AgentTurnReceipt {
   const base = {
     chatId: requiredString(raw, 'chatId'),
     turnId: requiredString(raw, 'turnId'),
+    clientRequestId: requiredString(raw, 'clientRequestId'),
     acceptedAt: requiredString(raw, 'acceptedAt'),
+    updatedAt: requiredString(raw, 'updatedAt'),
   };
   if (raw.state === 'pending') return { ...base, state: 'pending' };
   const settledAt = requiredString(raw, 'settledAt');

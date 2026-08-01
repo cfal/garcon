@@ -5,7 +5,9 @@ describe('agent turn receipt contract', () => {
   const base = {
     chatId: '1783725900000000',
     turnId: 'turn-1',
+    clientRequestId: 'request-1',
     acceptedAt: '2026-07-31T12:00:00.000Z',
+    updatedAt: '2026-07-31T12:00:01.000Z',
   };
 
   it('parses pending and completed receipts', () => {
@@ -44,5 +46,11 @@ describe('agent turn receipt contract', () => {
         assistantMessages: [],
       },
     })).toMatchObject({ state: 'interrupted', reason: 'user-stop' });
+  });
+
+  it('requires every receipt correlation field', () => {
+    const { clientRequestId: _omitted, ...missingClientRequestId } = base;
+    expect(() => parseAgentTurnReceipt({ ...missingClientRequestId, state: 'pending' }))
+      .toThrow('clientRequestId');
   });
 });
