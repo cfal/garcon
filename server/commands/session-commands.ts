@@ -206,11 +206,13 @@ export class SessionCommands {
 
   private async deleteChatLocked(chatId: string): Promise<{ success: true; chatId: string }> {
     this.support.requireChat(chatId);
+    this.deps.ledger.beginChatDeletion(chatId);
 
     let retired: boolean;
     try {
       retired = await this.deps.queue.abortForChatDeletion(chatId);
     } catch (error) {
+      await this.deps.ledger.cancelChatDeletion(chatId);
       logger.warn(
         `sessions: abort before deleting ${chatId} failed:`,
         error instanceof Error ? error.message : String(error),
@@ -223,6 +225,7 @@ export class SessionCommands {
       );
     }
     if (!retired) {
+      await this.deps.ledger.cancelChatDeletion(chatId);
       throw new CommandValidationError(
         'SESSION_BUSY',
         'The active agent session could not be retired for deletion',
@@ -232,8 +235,20 @@ export class SessionCommands {
     }
 
     // Removes registry state after abort because abortSession resolves the owning agent through the chat entry.
+    try {
+      await this.deps.ownership.delete(chatId);
+    } catch (error) {
+      if (this.deps.chats.getChat(chatId)) {
+        this.deps.queue.rollbackChatDeletion(chatId);
+        await this.deps.ledger.cancelChatDeletion(chatId);
+        throw error;
+      }
+      logger.warn(
+        `sessions: deletion cleanup for ${chatId} will resume from the ownership journal:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
-    await this.deps.ownership.delete(chatId);
 
     await Promise.all([
       this.deps.queue.deleteChatQueueFile(chatId).catch(() => {

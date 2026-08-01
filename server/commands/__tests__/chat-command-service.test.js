@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
+import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
 import { UserMessage } from '../../../common/chat-types.js';
 import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
@@ -433,6 +434,7 @@ function makeService(overrides = {}) {
     })),
     interruptActiveTurn: mock(() => Promise.resolve('interrupt-requested')),
     abortForChatDeletion: mock(() => Promise.resolve(true)),
+    rollbackChatDeletion: mock(() => undefined),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     waitForDispatches: mock(() => Promise.all([...executionTasks]).then(() => undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
@@ -550,7 +552,7 @@ function makeService(overrides = {}) {
     promoteStaged: mock(() => Promise.resolve()),
     discardStaged: mock(() => Promise.resolve()),
   };
-  const ownership = {
+  const ownership = overrides.ownership ?? {
     delete: mock(async (chatId) => {
       sessions.delete(chatId);
     }),
@@ -2048,6 +2050,49 @@ describe('ChatCommandService', () => {
     expect(chats.removeChat).not.toHaveBeenCalled();
     expect(queue.deleteChatQueueFile).not.toHaveBeenCalled();
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(true);
+  });
+
+  it('rolls back deletion settlement when ownership removal fails before commit', async () => {
+    const retirement = deferred();
+    const retirementStarted = deferred();
+    const { service, ledger, queue, sessions } = makeService({
+      queue: {
+        abortForChatDeletion: mock(() => {
+          retirementStarted.resolve();
+          return retirement.promise;
+        }),
+      },
+      ownership: {
+        delete: mock(async () => {
+          throw new Error('journal append failed');
+        }),
+      },
+    });
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-delete-failed',
+      turnId: 'turn-delete-failed',
+      payload: { command: 'working' },
+    });
+
+    const deletion = service.deleteChat({ chatId: SOURCE_CHAT_ID });
+    await retirementStarted.promise;
+    await ledger.markPublicTerminal(
+      SOURCE_CHAT_ID,
+      'turn-delete-failed',
+      'chat-deleted',
+    );
+    retirement.resolve(true);
+
+    await expect(deletion).rejects.toThrow('journal append failed');
+    expect(queue.rollbackChatDeletion).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(sessions.has(SOURCE_CHAT_ID)).toBe(true);
+    expect(projectAgentTurnReceipt(
+      await ledger.getTurnRecord(SOURCE_CHAT_ID, 'turn-delete-failed'),
+    )).toMatchObject({
+      receipt: { state: 'interrupted', reason: 'user-stop' },
+    });
   });
 
   it('rejects deleting unknown chats', async () => {

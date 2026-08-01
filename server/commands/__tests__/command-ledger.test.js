@@ -172,6 +172,44 @@ describe('CommandLedger', () => {
     expect(record.publicTerminalAt).toBeUndefined();
   });
 
+  it('keeps terminal turns private until chat deletion is committed', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+    ledger.beginChatDeletion('chat-1');
+
+    await ledger.settleTerminal(accepted.record.key, 'finished');
+    await ledger.markPublicTerminal('chat-1', 'turn-1');
+    await ledger.markPublicTerminal('chat-1', 'turn-1', 'chat-deleted');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      status: 'finished',
+      interruptionReason: 'chat-deleted',
+    });
+    expect((await ledger.getTurnRecord('chat-1', 'turn-1')).publicTerminalAt).toBeUndefined();
+
+    await ledger.markChatInterrupted('chat-1', 'chat-deleted');
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      status: 'finished',
+      interruptionReason: 'chat-deleted',
+      publicTerminalAt: expect.any(String),
+    });
+  });
+
+  it('publishes an acknowledged stop as user-stop when deletion is rolled back', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
+    ledger.beginChatDeletion('chat-1');
+    await ledger.markPublicTerminal('chat-1', 'turn-1', 'chat-deleted');
+
+    await ledger.cancelChatDeletion('chat-1');
+
+    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
+      status: 'finished',
+      interruptionReason: 'user-stop',
+      publicTerminalAt: expect.any(String),
+    });
+  });
+
   it('discards an oversized result instead of retaining a truncated prefix', async () => {
     const ledger = new CommandLedger(undefined, { turnResultByteLimit: 5 });
     await ledger.accept(acceptedInput({ turnId: 'turn-large' }));

@@ -181,6 +181,7 @@ export class CommandLedger {
   readonly #steerIdentityLimit: number;
   #steerIdentityCount = 0;
   readonly #turnIndex = new Map<string, string>();
+  readonly #pendingChatDeletions = new Set<string>();
   readonly #recordLimit: number;
   readonly #turnResultByteLimit: number;
   readonly #totalTurnResultByteLimit: number;
@@ -289,23 +290,46 @@ export class CommandLedger {
     const record = this.#recordForTurn(chatId, turnId);
     if (!record) return null;
     if (record.publicTerminalAt) return cloneRecord(record);
-    const now = new Date().toISOString();
-    record.publicTerminalAt = now;
-    record.updatedAt = now;
-    record.payload = {};
     if (interruptionReason) {
       record.interruptionReason = interruptionReason;
       record.status = 'finished';
     }
+    if (this.#pendingChatDeletions.has(chatId)) return cloneRecord(record);
+    const now = new Date().toISOString();
+    record.publicTerminalAt = now;
+    record.updatedAt = now;
+    record.payload = {};
     this.#expireTerminalResults();
     this.#trimRecords();
     return cloneRecord(record);
+  }
+
+  beginChatDeletion(chatId: string): void {
+    this.#pendingChatDeletions.add(chatId);
+  }
+
+  async cancelChatDeletion(chatId: string): Promise<void> {
+    if (!this.#pendingChatDeletions.delete(chatId)) return;
+    for (const record of this.#records.values()) {
+      if (record.chatId !== chatId || !record.turnId || record.publicTerminalAt) continue;
+      if (record.interruptionReason === 'chat-deleted') {
+        record.interruptionReason = 'user-stop';
+      }
+      if (TERMINAL_COMMAND_STATUSES.has(record.status)) {
+        await this.markPublicTerminal(
+          chatId,
+          record.turnId,
+          record.interruptionReason,
+        );
+      }
+    }
   }
 
   async markChatInterrupted(
     chatId: string,
     reason: 'chat-deleted',
   ): Promise<void> {
+    this.#pendingChatDeletions.delete(chatId);
     for (const record of this.#records.values()) {
       if (record.chatId !== chatId || !record.turnId || record.publicTerminalAt) continue;
       await this.markPublicTerminal(chatId, record.turnId, reason);

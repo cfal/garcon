@@ -587,6 +587,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#abortForDeletion(chatId);
   }
 
+  rollbackChatDeletion(chatId: string): void {
+    this.#rollbackDeletion(chatId);
+  }
+
   #requestDrain(chatId: string, context: string): void {
     this.#ownership.requestDrain(chatId);
     void this.triggerDrain(chatId).catch((error: Error) => {

@@ -406,6 +406,60 @@ describe('server event wiring', () => {
     );
   });
 
+  it('does not publish a deletion receipt before the chat removal event', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+      payload: { command: 'work' },
+    });
+    ledger.beginChatDeletion('chat-1');
+    let stopRequested;
+    let chatExists = true;
+    const published = [];
+    const fixture = createWiringFixture({
+      commandLedgerInstance: ledger,
+      chatRegistry: { getChat: mock(() => (chatExists ? {} : null)) },
+      queue: {
+        onSessionStopRequested: mock((callback) => { stopRequested = callback; }),
+      },
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload).type)),
+      },
+    });
+    const turn = {
+      commandType: 'agent-run',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+    };
+
+    stopRequested('chat-1', 'stop-1', turn, 'chat-deletion');
+    fixture.queueListeners.sessionStopped(
+      'chat-1',
+      'interrupt-requested',
+      'chat-deletion',
+      'stop-1',
+      5,
+    );
+    fixture.agentListeners.finished('chat-1', 0, turn);
+    await fixture.wiring.waitForIdle();
+
+    expect(projectAgentTurnReceipt(await ledger.getTurnRecord('chat-1', 'turn-1')))
+      .toMatchObject({ receipt: { state: 'pending' } });
+
+    chatExists = false;
+    fixture.chatRegistryListeners.removed('chat-1', 'user-deletion');
+    await fixture.wiring.waitForIdle();
+
+    expect(published).toContain('chat-session-deleted');
+    expect(projectAgentTurnReceipt(await ledger.getTurnRecord('chat-1', 'turn-1')))
+      .toMatchObject({
+        receipt: { state: 'interrupted', reason: 'chat-deleted' },
+      });
+  });
+
   it('broadcasts chat deletion before publishing outstanding receipts', async () => {
     const timeline = [];
     const fixture = createWiringFixture({
