@@ -41,6 +41,8 @@ export interface CommandLedgerRecord {
     | 'expired';
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
+  retainedPrivateTerminal?: true;
+  terminalRetentionOrdinal?: number;
 }
 
 type SteerCommandTombstone = Omit<
@@ -189,6 +191,7 @@ export class CommandLedger {
   readonly #totalTurnResultMessageLimit: number;
   #resultBytes = 0;
   #resultMessages = 0;
+  #nextTerminalRetentionOrdinal = 0;
 
   constructor(_workspaceDir?: string, options: CommandLedgerOptions = {}) {
     this.#steerIdentityLimit = options.steerIdentityLimit ?? STEER_IDENTITY_LIMIT;
@@ -299,6 +302,7 @@ export class CommandLedger {
     record.publicTerminalAt = now;
     record.updatedAt = now;
     record.payload = {};
+    this.#assignTerminalRetentionOrdinal(record);
     this.#expireTerminalResults();
     this.#trimRecords();
     return cloneRecord(record);
@@ -414,6 +418,8 @@ export class CommandLedger {
           turnResultAvailability: 'available',
           interruptionReason: undefined,
           publicTerminalAt: undefined,
+          retainedPrivateTerminal: undefined,
+          terminalRetentionOrdinal: undefined,
         };
         this.#records.set(key, record);
         this.#indexTurn(record);
@@ -482,6 +488,7 @@ export class CommandLedger {
     const existing = this.#records.get(key);
     if (!existing) return null;
     const next = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    this.#assignTerminalRetentionOrdinal(next);
     this.#records.set(key, next);
     this.#trimRecords();
     return cloneRecord(next);
@@ -527,6 +534,7 @@ export class CommandLedger {
       updatedAt: new Date().toISOString(),
       payload: {},
     };
+    this.#assignTerminalRetentionOrdinal(record);
     this.#records.set(key, record);
     this.#trimRecords();
     return { kind: 'applied', record: cloneRecord(record) };
@@ -537,7 +545,10 @@ export class CommandLedger {
       .filter(([, record]) => (
         TERMINAL_COMMAND_STATUSES.has(record.status)
         && record.forkPreparation === undefined
-        && (!record.turnId || record.publicTerminalAt !== undefined)
+        && record.terminalRetentionOrdinal !== undefined
+      ))
+      .sort(([, left], [, right]) => (
+        left.terminalRetentionOrdinal! - right.terminalRetentionOrdinal!
       ));
     while (evictable.length > this.#recordLimit) {
       const oldest = evictable.shift();
@@ -592,16 +603,33 @@ export class CommandLedger {
     this.#records.delete(key);
   }
 
+  #assignTerminalRetentionOrdinal(record: CommandLedgerRecord): void {
+    if (
+      record.terminalRetentionOrdinal !== undefined
+      || !TERMINAL_COMMAND_STATUSES.has(record.status)
+      || (record.turnId && !record.publicTerminalAt && !record.retainedPrivateTerminal)
+    ) {
+      return;
+    }
+    this.#nextTerminalRetentionOrdinal += 1;
+    record.terminalRetentionOrdinal = this.#nextTerminalRetentionOrdinal;
+  }
+
   #expireTerminalResults(requiredBytes = 0, requiredMessages = 0): void {
     while (
       this.#resultBytes + requiredBytes > this.#totalTurnResultByteLimit
       || this.#resultMessages + requiredMessages > this.#totalTurnResultMessageLimit
     ) {
-      const oldest = [...this.#records.values()].find((record) => (
-        record.publicTerminalAt !== undefined
-        && record.turnResultAvailability === 'available'
-        && ((record.assistantBytes ?? 0) > 0 || (record.assistantMessages?.length ?? 0) > 0)
-      ));
+      const oldest = [...this.#records.values()]
+        .filter((record) => (
+          record.publicTerminalAt !== undefined
+          && record.terminalRetentionOrdinal !== undefined
+          && record.turnResultAvailability === 'available'
+          && ((record.assistantBytes ?? 0) > 0 || (record.assistantMessages?.length ?? 0) > 0)
+        ))
+        .sort((left, right) => (
+          left.terminalRetentionOrdinal! - right.terminalRetentionOrdinal!
+        ))[0];
       if (!oldest) return;
       this.#discardResult(oldest);
       oldest.turnResultAvailability = 'expired';
