@@ -7,6 +7,12 @@ import { randomUUID } from 'crypto';
 
 let testBasePath;
 let workspaceDir;
+const routeLogger = {
+  debug: mock(() => undefined),
+  info: mock(() => undefined),
+  warn: mock(() => undefined),
+  error: mock(() => undefined),
+};
 
 class MalformedJsonError extends Error {
   constructor() {
@@ -24,6 +30,10 @@ mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => testBasePath),
   getWorkspaceDir: mock(() => workspaceDir),
   isHttpCompressionEnabled: mock(() => true),
+}));
+
+mock.module('../../lib/log.js', () => ({
+  createLogger: mock(() => routeLogger),
 }));
 
 mock.module('../../chats/title-generator.js', () => ({
@@ -44,6 +54,7 @@ import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
 import {
   DomainError,
+  SteerDeliveryError,
   TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
 } from '../../lib/domain-error.js';
 import {
@@ -527,6 +538,10 @@ describe('REST chat command routes', () => {
     await fs.mkdir(workspaceDir, { recursive: true });
     parseJsonBody.mockClear();
     forkChatFileCopy.mockClear();
+    routeLogger.debug.mockClear();
+    routeLogger.info.mockClear();
+    routeLogger.warn.mockClear();
+    routeLogger.error.mockClear();
   });
 
   afterEach(async () => {
@@ -940,6 +955,23 @@ describe('REST chat command routes', () => {
 	    expect(agent.queue.deliverAcceptedSteer).toHaveBeenCalledOnce();
 	    expect(agent.routes['/api/v1/chats/active-input']).toBeUndefined();
 	  });
+
+  it('POST /steer does not duplicate command-boundary delivery logging', async () => {
+    const agent = createRouteAgent();
+    agent.queue.deliverAcceptedSteer.mockImplementationOnce(() => Promise.reject(
+      new SteerDeliveryError(new Error('transport closed'), 'unknown'),
+    ));
+
+    const result = await callJson(agent.routes['/api/v1/chats/steer'].POST, {
+      clientRequestId: 'req-steer-unknown',
+      clientMessageId: 'message-steer-unknown',
+      chatId: CHAT_ID,
+      content: 'focus here',
+    });
+
+    expect(result.response.status).toBe(500);
+    expect(routeLogger.error).not.toHaveBeenCalled();
+  });
 
   it('POST /queue/entries rejects conflicting retries', async () => {
     const agent = createRouteAgent();

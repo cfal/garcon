@@ -41,7 +41,6 @@ import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   GoalControlDeliveryError,
-  SteerDeliveryError,
   DomainError,
   transcriptUnavailableMessage,
   ValidationDomainError,
@@ -961,12 +960,6 @@ export default function createChatRoutes({
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (error instanceof SteerDeliveryError) {
-        logger.error('steer delivery failed:', {
-          outcome: error.outcome,
-          causeType: error.cause instanceof Error ? error.cause.name : typeof error.cause,
-        });
       }
       return jsonErrorFromUnknown(error);
     }
