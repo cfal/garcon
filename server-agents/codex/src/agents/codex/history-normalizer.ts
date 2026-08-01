@@ -230,8 +230,16 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
     case 'user_message': {
       const text = asString(rawPayload.message);
       if (text?.trim()) {
+        // Pinned Codex carries client_id into its legacy user-message event:
+        // https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/protocol/src/legacy_events.rs#L77-L94
+        const clientId = asString(rawPayload.client_id)?.trim();
         result.isCanonicalUser = true;
-        result.canonical.push(new UserMessage(ts, stripResolvedFileMentionContext(text)));
+        result.canonical.push(new UserMessage(
+          ts,
+          stripResolvedFileMentionContext(text),
+          undefined,
+          clientId ? { upstreamRequestId: clientId } : undefined,
+        ));
       }
       return result;
     }

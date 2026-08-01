@@ -163,6 +163,26 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(result.fallbackThinking).toEqual([]);
     });
 
+    it('preserves the native client id as reconciliation evidence', () => {
+      const result = normalizeCodexJsonlEntry({
+        type: 'event_msg',
+        timestamp: ts,
+        payload: {
+          type: 'user_message',
+          message: 'steered prompt',
+          client_id: 'message-steer-1',
+        },
+      });
+
+      expect(result.canonical).toEqual([{
+        type: 'user-message',
+        timestamp: ts,
+        content: 'steered prompt',
+        images: undefined,
+        metadata: { upstreamRequestId: 'message-steer-1' },
+      }]);
+    });
+
     it('skips empty user messages', () => {
       const entry = {
         type: 'event_msg',

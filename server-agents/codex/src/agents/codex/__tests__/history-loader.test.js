@@ -232,6 +232,28 @@ describe('loadCodexChatMessages', () => {
     expect(getNativeMessageSource(messages[0])).toEqual({ byteOffset: 0, lineNumber: 1 });
   });
 
+  it('loads legacy user-message client ids for exact pending-input reconciliation', async () => {
+    const messages = await withTempJsonl([
+      JSON.stringify({
+        type: 'event_msg',
+        timestamp: '2026-02-21T09:00:00.000Z',
+        payload: {
+          type: 'user_message',
+          message: 'steered prompt',
+          client_id: 'message-steer-legacy',
+        },
+      }),
+    ], (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages).toEqual([{
+      type: 'user-message',
+      timestamp: '2026-02-21T09:00:00.000Z',
+      content: 'steered prompt',
+      images: undefined,
+      metadata: { upstreamRequestId: 'message-steer-legacy' },
+    }]);
+  });
+
   it('prefers response_item assistant content over duplicate event_msg wrappers', async () => {
     const tsUser = '2026-02-21T10:00:00.000Z';
     const tsAssistant = '2026-02-21T10:00:01.000Z';
