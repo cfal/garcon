@@ -712,6 +712,31 @@ describe('ChatCommandService', () => {
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 
+  it('rejects a colliding chat ID before accepting a command ledger record', async () => {
+    const { service, ledger, queue } = makeService();
+
+    await expect(service.submitStart({
+      chatId: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start somewhere new',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-chat-id-collision',
+      clientMessageId: 'msg-chat-id-collision',
+    })).rejects.toMatchObject({
+      code: 'CHAT_ID_COLLISION',
+      status: 409,
+    });
+
+    expect(await ledger.getRecord(commandLedgerKey(
+      'chat-start',
+      SOURCE_CHAT_ID,
+      'req-chat-id-collision',
+    ))).toBeNull();
+    expect(queue.runInitialInput).not.toHaveBeenCalled();
+  });
+
   it('stores chat start tags normalized by the request boundary', async () => {
     const { service, chats, ledger } = makeService();
 
@@ -920,6 +945,30 @@ describe('ChatCommandService', () => {
       status: 'duplicate',
       chatId: TARGET_CHAT_ID,
       turnId: first.turnId,
+    });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays the original accepted start after its chat was deleted', async () => {
+    const { service, queue, sessions } = makeService({ session: null });
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start once',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-deleted-replay',
+      clientMessageId: 'msg-start-deleted-replay',
+    };
+
+    const first = await service.submitStart(input);
+    sessions.delete(TARGET_CHAT_ID);
+    const replay = await service.submitStart(input);
+
+    expect(replay).toEqual({
+      ...first,
+      status: 'duplicate',
     });
     expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
   });

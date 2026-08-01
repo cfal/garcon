@@ -119,6 +119,14 @@ export class StartCommands {
   }
 
   private async submitNormalizedStart(input: NormalizedChatStart): Promise<StartChatCommandResponse> {
+    const existing = this.deps.chats.getChat(input.chatId);
+    if (existing) {
+      throw new CommandValidationError(
+        'CHAT_ID_COLLISION',
+        `Session already exists: ${input.chatId}`,
+        409,
+      );
+    }
     const turnId = crypto.randomUUID();
     const ledger = await this.deps.ledger.accept({
       commandType: 'chat-start',
@@ -129,15 +137,7 @@ export class StartCommands {
     });
     this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate') {
-      return {
-        ...agentTurnResultFromRecord(ledger.record, 'duplicate'),
-        chat: await this.support.projectCommandChat(ledger.record.chatId),
-      };
-    }
-
-    const existing = this.deps.chats.getChat(input.chatId);
-    if (existing) {
-      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${input.chatId}`, 409);
+      return this.replayedStart(ledger.record);
     }
 
     await this.deps.queue.runInitialInput({
@@ -224,9 +224,11 @@ export class StartCommands {
       status: 'running',
       turnId,
     });
+    const chat = await this.support.projectCommandChat(input.chatId);
+    await this.deps.ledger.retainStartChatProjection(ledger.record.key, chat);
     return {
       ...agentTurnResultFromRecord(accepted ?? ledger.record),
-      chat: await this.support.projectCommandChat(input.chatId),
+      chat,
     };
   }
 
@@ -257,7 +259,8 @@ export class StartCommands {
   private async replayedStart(record: CommandLedgerRecord): Promise<StartChatCommandResponse> {
     return {
       ...agentTurnResultFromRecord(record, 'duplicate'),
-      chat: await this.support.projectCommandChat(record.chatId),
+      chat: record.startChatProjection
+        ?? await this.support.projectCommandChat(record.chatId),
     };
   }
 

@@ -17,6 +17,7 @@ import {
   validateExplicitModes,
 } from './catalog-selection.js';
 import { CliError } from './errors.js';
+import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 import {
   pollTurnReceipt,
@@ -37,6 +38,8 @@ export interface ConsultationDependencies {
   createChatId?: () => string;
   poller?: ReceiptPollerDependencies;
 }
+
+const START_CHAT_ID_ATTEMPTS = 3;
 
 function terminalResult(receipt: AgentTurnReceipt, output: CliOutput): void {
   if (receipt.state === 'completed') {
@@ -93,17 +96,33 @@ async function submitStart(
     permissionMode: invocation.permissionMode,
     thinkingMode: invocation.thinkingMode,
   });
-  const request: StartChatCommandRequest = {
-    clientRequestId: createId(),
-    clientMessageId: createId(),
-    chatId: createChatId(),
-    agentId: invocation.agentId,
-    projectPath: invocation.cwd,
-    ...selection,
-    command: prompt,
-    tags: ['cli'],
-  };
-  return client.startChat(request, signal);
+  let lastCollision: GarconHttpError | undefined;
+  for (let attempt = 0; attempt < START_CHAT_ID_ATTEMPTS; attempt += 1) {
+    const request: StartChatCommandRequest = {
+      clientRequestId: createId(),
+      clientMessageId: createId(),
+      chatId: createChatId(),
+      agentId: invocation.agentId,
+      projectPath: invocation.cwd,
+      ...selection,
+      command: prompt,
+      tags: ['cli'],
+    };
+    try {
+      return await client.startChat(request, signal);
+    } catch (error) {
+      if (!(error instanceof GarconHttpError) || error.errorCode !== 'CHAT_ID_COLLISION') {
+        throw error;
+      }
+      lastCollision = error;
+    }
+  }
+  throw new CliError(
+    'submission',
+    `could not allocate a unique chat ID after ${START_CHAT_ID_ATTEMPTS} attempts`,
+    3,
+    { cause: lastCollision },
+  );
 }
 
 async function submitResume(

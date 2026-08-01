@@ -11,6 +11,7 @@ import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
 import type { CliInvocation } from '../args.js';
 import { runConsultation, type ConsultationClient } from '../consultation.js';
 import { CliError } from '../errors.js';
+import { GarconHttpError } from '../garcon-client.js';
 import type { CliOutput } from '../output.js';
 
 const CHAT_ID = '1785337200123456';
@@ -103,6 +104,57 @@ describe('runConsultation', () => {
     });
     expect(testOutput.acceptedIds).toEqual([CHAT_ID]);
     expect(testOutput.messages).toEqual([['Done']]);
+  });
+
+  test('retries a server-reported chat ID collision with entirely new identities', async () => {
+    const chatIds = [CHAT_ID, '1785337200123457'];
+    const requestIds = ['request-1', 'message-1', 'request-2', 'message-2'];
+    const starts: StartChatCommandRequest[] = [];
+    const testClient = client({
+      async startChat(request) {
+        starts.push(request);
+        if (starts.length === 1) {
+          throw new GarconHttpError(
+            'submission',
+            'chat ID collision',
+            409,
+            'CHAT_ID_COLLISION',
+            false,
+          );
+        }
+        return {
+          ...accepted,
+          clientRequestId: request.clientRequestId,
+          chatId: request.chatId,
+        };
+      },
+      async getTurnReceipt(chatId, _turnId) {
+        return {
+          ...receipt,
+          chatId,
+          clientRequestId: 'request-2',
+        };
+      },
+    });
+    const invocation: CliInvocation = {
+      kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
+      agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
+    };
+
+    await runConsultation(invocation, 'Implement it', testClient, output(), undefined, {
+      createId: () => requestIds.shift()!,
+      createChatId: () => chatIds.shift()!,
+    });
+
+    expect(starts).toHaveLength(2);
+    expect(starts.map(({ chatId, clientRequestId, clientMessageId }) => ({
+      chatId,
+      clientRequestId,
+      clientMessageId,
+    }))).toEqual([
+      { chatId: CHAT_ID, clientRequestId: 'request-1', clientMessageId: 'message-1' },
+      { chatId: '1785337200123457', clientRequestId: 'request-2', clientMessageId: 'message-2' },
+    ]);
   });
 
   test('minimal resume delegates persisted selection to atomic server admission', async () => {
