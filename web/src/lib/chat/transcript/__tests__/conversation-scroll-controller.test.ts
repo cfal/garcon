@@ -18,9 +18,12 @@ function scrollState<T extends Partial<ConversationScrollState>>(
 		isUserScrolledUp: false,
 		isViewingInitialMessages: false,
 		invalidatePendingHistoryLoad: vi.fn(),
+		loadEarlierMessages: vi.fn(),
+		loadLaterMessages: vi.fn(async () => 'exhausted' as const),
 		loadMoreMessages: vi.fn(async () => 'exhausted' as const),
 		loadStatus: 'loaded' as const,
 		navigateToWindow: vi.fn(async () => 'loaded' as const),
+		visibleMessageCount: 100,
 		...overrides,
 	} satisfies ConversationScrollState;
 	return Object.assign(overrides, complete);
@@ -660,11 +663,12 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 	});
 
-	it('keeps the detached initial window unpinned at its geometric bottom', () => {
+	it('loads the next transcript page at the bottom of the detached initial window', () => {
 		const scroller = { scrollTop: 800, scrollHeight: 1_200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
 			isUserScrolledUp: false,
 			isViewingInitialMessages: true,
+			loadLaterMessages: vi.fn(async () => 'loaded' as const),
 		};
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
@@ -678,14 +682,57 @@ describe('ConversationScrollController', () => {
 
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
+		expect(chatState.loadLaterMessages).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('does not auto-fill or pin an underfilled detached initial window', async () => {
-		const scroller = { scrollTop: 0, scrollHeight: 300, clientHeight: 500 } as HTMLDivElement;
+	it('releases traversed history when a short final page stays near the live edge', async () => {
+		let scrollHeight = 1_200;
+		const scroller = { scrollTop: 800, clientHeight: 400 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = scrollState({
+			isUserScrolledUp: true,
+			compactToRecentMessages: vi.fn(() => true),
+		});
+		chatState.isViewingInitialMessages = true;
+		chatState.loadLaterMessages = vi.fn(async () => {
+			scrollHeight = 1_240;
+			chatState.isViewingInitialMessages = false;
+			return 'loaded' as const;
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(false);
+
+		controller.handleScroll();
+
+		await vi.waitFor(() => expect(chatState.compactToRecentMessages).toHaveBeenCalledOnce());
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+		expect(scroller.scrollTop).toBe(1_240);
+	});
+
+	it('fills an underfilled detached initial window without pinning it', async () => {
+		let scrollHeight = 300;
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
 		const chatState = {
 			hasMoreMessages: true,
 			isUserScrolledUp: false,
 			isViewingInitialMessages: true,
+			loadLaterMessages: vi.fn(async () => {
+				scrollHeight = 700;
+				return 'loaded' as const;
+			}),
 			loadMoreMessages: vi.fn(async () => 'loaded' as const),
 		};
 		const controller = new ConversationScrollController({
@@ -698,8 +745,47 @@ describe('ConversationScrollController', () => {
 
 		await controller.fillUnderfilledViewport();
 
+		expect(chatState.loadLaterMessages).toHaveBeenCalledOnce();
 		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
 		expect(scroller.scrollTop).toBe(0);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('retries a failed detached viewport fill after the viewport becomes visible', async () => {
+		let scrollHeight = 300;
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = scrollState({
+			isUserScrolledUp: true,
+			isViewingInitialMessages: true,
+			loadLaterMessages: vi
+				.fn()
+				.mockResolvedValueOnce('failed' as const)
+				.mockImplementationOnce(async () => {
+					scrollHeight = 700;
+					return 'loaded' as const;
+				}),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+		controller.setPinnedToBottom(false);
+
+		await controller.fillUnderfilledViewport();
+		expect(chatState.loadLaterMessages).toHaveBeenCalledOnce();
+
+		controller.setViewportVisible(false);
+		controller.setViewportVisible(true);
+
+		await vi.waitFor(() => expect(chatState.loadLaterMessages).toHaveBeenCalledTimes(2));
+		expect(scrollHeight).toBe(700);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
 	});
@@ -941,6 +1027,40 @@ describe('ConversationScrollController', () => {
 		expect(chatState.loadMoreMessages).toHaveBeenCalledTimes(2);
 		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
 		expect(scroller.scrollTop).toBe(800);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
+	it('reveals loaded rows before offering manual loading in an underfilled viewport', async () => {
+		let scrollHeight = 300;
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			displayMessageCount: 150,
+			hasMoreMessages: false,
+			isUserScrolledUp: false,
+			visibleMessageCount: 100,
+			loadEarlierMessages: vi.fn(() => {
+				chatState.visibleMessageCount = 200;
+				scrollHeight = 700;
+			}),
+			loadMoreMessages: vi.fn(async () => 'loaded' as const),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		await controller.fillUnderfilledViewport();
+
+		expect(chatState.loadEarlierMessages).toHaveBeenCalledOnce();
+		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
+		expect(scroller.scrollTop).toBe(700);
 		expect(chatState.isUserScrolledUp).toBe(false);
 		expect(controller.isPinnedToBottom).toBe(true);
 	});

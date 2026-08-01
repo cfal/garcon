@@ -2,7 +2,7 @@ import { UserMessage } from '$shared/chat-types';
 import type {
 	ChatDisplayRow,
 	ChatLoadStatus,
-	OlderMessagesLoadResult,
+	TranscriptPageLoadResult,
 } from './active-transcript-state.svelte.js';
 
 export interface UserMessageNavigatorItem {
@@ -41,7 +41,7 @@ export interface UserMessageNavigatorOptions {
 	getSelectedChatId: () => string | null;
 	reloadTranscript: (chatId: string) => Promise<void>;
 	restoreLatestTranscript: (chatId: string) => Promise<boolean>;
-	loadOlderMessages: (chatId: string) => Promise<OlderMessagesLoadResult>;
+	loadOlderMessages: (chatId: string) => Promise<TranscriptPageLoadResult>;
 	jumpToRow: (target: UserMessageNavigatorTarget) => Promise<boolean>;
 }
 
