@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
 import type { ChatSession } from '$lib/types/session';
 
@@ -83,6 +83,29 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['draft-1']?.status).toBe('running');
 		expect(store.startupByChatId['draft-1']).toBeUndefined();
+	});
+
+	it('updates draft tags without calling the server', async () => {
+		const setChatTags = vi.fn();
+		const store = new ChatSessionsStore({ setChatTags });
+		store.createDraft({
+			id: 'draft-1',
+			projectPath: '/repo',
+			startup: {
+				agentId: 'claude',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+				firstMessage: '',
+			},
+		});
+
+		await expect(store.setChatTags('draft-1', ['urgent'])).resolves.toBe(true);
+
+		expect(store.byId['draft-1'].tags).toEqual(['urgent']);
+		expect(store.startupByChatId['draft-1'].tags).toEqual(['urgent']);
+		expect(setChatTags).not.toHaveBeenCalled();
 	});
 
 	it('selectedChat derives from selectedChatId and byId', () => {

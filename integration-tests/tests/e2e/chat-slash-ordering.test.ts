@@ -3,7 +3,7 @@ import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 describe('Lightpanda chat slash ordering', () => {
-  test('renames and moves the full Manual order without reaching the provider', async () => {
+  test('renames, moves, and tags without reaching the provider', async () => {
     await withE2eFixture('chat-slash-ordering', async (fixture) => {
       const messages = ['plain-a', 'plain-b', 'filter-pair-c', 'filter-pair-d'];
       const chatIds = messages.map(() => fixture.integration.newChatId());
@@ -30,7 +30,7 @@ describe('Lightpanda chat slash ordering', () => {
 
       await app.clickSidebarChatContaining('plain-b');
       await app.waitForSelectedChat(chatB);
-      await app.sendComposer('/move-to-top');
+      await app.sendComposer('/move top');
       await app.waitForLocalNotice(
         'Moved this chat to the top of its section in Manual order.',
       );
@@ -42,7 +42,7 @@ describe('Lightpanda chat slash ordering', () => {
 
       await app.applySidebarSearch('filter-pair', chatC);
       expect(await app.sidebarChatIds('normal')).toEqual([chatD, chatC]);
-      await app.sendComposer('/move-to-bottom');
+      await app.sendComposer('/move bottom');
       await app.waitForLocalNotice(
         'Moved this chat to the bottom of its section in Manual order.',
       );
@@ -56,7 +56,7 @@ describe('Lightpanda chat slash ordering', () => {
       await app.setRecentActivitySort(true);
       await app.clickSidebarChatContaining('plain-a');
       await app.waitForSelectedChat(chatA);
-      await app.sendComposer('/move-to-top');
+      await app.sendComposer('/move top');
       await app.waitForLocalNotice(
         'Moved this chat to the top of its section in Manual order.',
       );
@@ -68,10 +68,20 @@ describe('Lightpanda chat slash ordering', () => {
       await app.setRecentActivitySort(false);
       await app.waitForSidebarChatIds('normal', manualOrder);
 
-      await app.sendComposer('/move-to-top extra');
-      await app.waitForLocalNotice(
-        '/move-to-top and /move-to-bottom do not accept arguments.',
-      );
+      await app.sendComposer('/tag add filter-pair urgent urgent');
+      await app.waitForLocalNotice('Added tags: filter-pair, urgent.');
+      expect((await fixture.integration.client.listChats()).sessions.find(
+        (chat) => chat.id === chatA,
+      )?.tags).toEqual(['filter-pair', 'urgent']);
+
+      await app.sendComposer('/tag rm missing filter-pair');
+      await app.waitForLocalNotice('Removed tags: filter-pair.');
+      expect((await fixture.integration.client.listChats()).sessions.find(
+        (chat) => chat.id === chatA,
+      )?.tags).toEqual(['urgent']);
+
+      await app.sendComposer('/move top extra');
+      await app.waitForLocalNotice('Use /move top or /move bottom.');
 
       const providerRequests = fixture.integration.fakeProviders.openAi.requests();
       expect(providerRequests).toHaveLength(providerRequestCount);

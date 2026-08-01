@@ -8,6 +8,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	setLastSelectedChat: vi.fn(),
 	generateChatTitle: vi.fn(),
 	reorderChat: vi.fn(),
+	setChatTags: vi.fn(),
 }));
 
 vi.mock('$lib/api/settings.js', () => ({
@@ -19,6 +20,7 @@ import {
 	generateChatTitle,
 	listChats,
 	reorderChat,
+	setChatTags,
 	setLastSelectedChat,
 } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
@@ -28,6 +30,7 @@ const mockDeleteChat = vi.mocked(deleteChat);
 const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
 const mockGenerateChatTitle = vi.mocked(generateChatTitle);
 const mockReorderChat = vi.mocked(reorderChat);
+const mockSetChatTags = vi.mocked(setChatTags);
 const mockUpdateSessionName = vi.mocked(updateSessionName);
 
 function deferred<T>() {
@@ -221,6 +224,89 @@ describe('ChatSessionsStore IO', () => {
 		await expect(store.moveChatToBoundary('chat-1', 'bottom')).resolves.toEqual(response);
 
 		expect(notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
+	});
+
+	it('persists tags and patches the server response into the chat record', async () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+		mockSetChatTags.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			tags: ['existing', 'urgent'],
+		});
+		mockListChats.mockResolvedValue({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing', 'urgent'] })],
+			total: 1,
+			lastSelectedChatId: 'chat-1',
+		});
+
+		await expect(store.setChatTags('chat-1', ['existing', 'urgent'])).resolves.toBe(true);
+
+		expect(mockSetChatTags).toHaveBeenCalledWith('chat-1', ['existing', 'urgent']);
+		expect(mockListChats).toHaveBeenCalledTimes(1);
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+	});
+
+	it('runs a follow-up refresh when an older chat-list fetch overlaps a tag mutation', async () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+		const staleFetch = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
+		mockListChats.mockReturnValueOnce(staleFetch.promise).mockResolvedValueOnce({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing', 'urgent'] })],
+			total: 1,
+			lastSelectedChatId: 'chat-1',
+		});
+		mockSetChatTags.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			tags: ['existing', 'urgent'],
+		});
+
+		const initialRefresh = store.quietRefreshChats();
+		const mutation = store.setChatTags('chat-1', ['existing', 'urgent']);
+		await Promise.resolve();
+		staleFetch.resolve({
+			sessions: [makeServerSession({ id: 'chat-1', tags: ['existing'] })],
+			total: 1,
+			lastSelectedChatId: 'chat-1',
+		});
+
+		await expect(Promise.all([initialRefresh, mutation])).resolves.toEqual([undefined, true]);
+		expect(mockListChats).toHaveBeenCalledTimes(2);
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+	});
+
+	it('preserves a successful tag mutation when its convergence refresh fails', async () => {
+		const notifyError = vi.fn();
+		const store = new ChatSessionsStore({ notifyError });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+		mockSetChatTags.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			tags: ['existing', 'urgent'],
+		});
+		mockListChats.mockRejectedValue(new Error('refresh failed'));
+
+		await expect(store.setChatTags('chat-1', ['existing', 'urgent'])).resolves.toBe(true);
+
+		expect(store.byId['chat-1'].tags).toEqual(['existing', 'urgent']);
+		expect(notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
+	});
+
+	it('reports a failed persisted tag mutation without changing local tags', async () => {
+		const notifyError = vi.fn();
+		const store = new ChatSessionsStore({ notifyError });
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
+		mockSetChatTags.mockRejectedValue(new Error('tag update failed'));
+
+		await expect(store.setChatTags('chat-1', ['urgent'])).resolves.toBe(false);
+
+		expect(notifyError).toHaveBeenCalledWith('Failed to update chat tags.');
+		expect(store.byId['chat-1'].tags).toEqual(['existing']);
 	});
 
 	it('generates a chat title from a message and patches local state', async () => {

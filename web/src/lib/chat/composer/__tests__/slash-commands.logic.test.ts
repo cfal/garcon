@@ -9,6 +9,7 @@ import {
 	parseScheduleInCommand,
 	parseSnippetCommand,
 	parseSteerCommand,
+	parseTagCommand,
 } from '$lib/chat/composer/slash-commands.js';
 
 describe('slash command helpers', () => {
@@ -64,8 +65,8 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
 		const steer = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'steer');
 		const rename = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'rename');
-		const moveToTop = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'move-to-top');
-		const moveToBottom = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'move-to-bottom');
+		const move = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'move');
+		const tag = BUILTIN_SLASH_COMMANDS.filter((command) => command.name === 'tag');
 		const snippet = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'snippet');
 		const snippetShort = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 's');
 		expect(compact).toBeDefined();
@@ -81,10 +82,13 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(steer?.description).toBeTruthy();
 		expect(rename?.source).toBe('command');
 		expect(rename?.description).toBeTruthy();
-		expect(moveToTop).toHaveLength(1);
-		expect(moveToTop[0].source).toBe('command');
-		expect(moveToBottom).toHaveLength(1);
-		expect(moveToBottom[0].source).toBe('command');
+		expect(move).toHaveLength(1);
+		expect(move[0].source).toBe('command');
+		expect(tag).toHaveLength(1);
+		expect(tag[0].source).toBe('command');
+		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name.startsWith('move-to-'))).toBe(
+			false,
+		);
 		expect(snippet?.source).toBe('command');
 		expect(snippet?.description).toBeTruthy();
 		expect(snippetShort?.source).toBe('command');
@@ -95,10 +99,10 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 
 describe('parseMoveChatBoundaryCommand', () => {
 	for (const [input, boundary] of [
-		['/move-to-top', 'top'],
-		['/MOVE-TO-TOP', 'top'],
-		['  /Move-To-Bottom  ', 'bottom'],
-		['/move-to-bottom ', 'bottom'],
+		['/move top', 'top'],
+		['/MOVE TOP', 'top'],
+		['  /Move Bottom  ', 'bottom'],
+		['/move bottom ', 'bottom'],
 	] as const) {
 		it(`parses ${JSON.stringify(input)}`, () => {
 			expect(parseMoveChatBoundaryCommand(input)).toEqual({ kind: 'valid', boundary });
@@ -106,9 +110,12 @@ describe('parseMoveChatBoundaryCommand', () => {
 	}
 
 	for (const input of [
-		'/move-to-top now',
-		'/move-to-bottom later',
-		'/move-to-top\nnow',
+		'/move',
+		'/move middle',
+		'/move top now',
+		'/move bottom later',
+		'/move\ntop',
+		'/move top\nnow',
 	]) {
 		it(`claims unsupported arguments in ${JSON.stringify(input)}`, () => {
 			expect(parseMoveChatBoundaryCommand(input)).toEqual({
@@ -119,13 +126,41 @@ describe('parseMoveChatBoundaryCommand', () => {
 	}
 
 	for (const input of [
-		'/move-to-topical',
-		'/move-to-bottomless',
-		'please /move-to-top',
-		'/other /move-to-top',
+		'/movement top',
+		'/move-to-top',
+		'/move-to-bottom',
+		'please /move top',
+		'/other /move top',
 	]) {
 		it(`does not claim ${JSON.stringify(input)}`, () => {
 			expect(parseMoveChatBoundaryCommand(input)).toEqual({ kind: 'not-command' });
+		});
+	}
+});
+
+describe('parseTagCommand', () => {
+	it('normalizes and deduplicates tags for both actions', () => {
+		expect(parseTagCommand('/tag add Review-Needed review-needed QA')).toEqual({
+			kind: 'valid',
+			action: 'add',
+			tags: ['qa', 'review-needed'],
+		});
+		expect(parseTagCommand(' /TAG RM missing Urgent ')).toEqual({
+			kind: 'valid',
+			action: 'rm',
+			tags: ['missing', 'urgent'],
+		});
+	});
+
+	for (const input of ['/tag', '/tag add', '/tag rm', '/tag remove urgent', '/tag add !!!']) {
+		it(`rejects invalid arguments in ${JSON.stringify(input)}`, () => {
+			expect(parseTagCommand(input)).toEqual({ kind: 'invalid' });
+		});
+	}
+
+	for (const input of ['/tags add urgent', '/tagged add urgent', 'please /tag add urgent']) {
+		it(`does not claim ${JSON.stringify(input)}`, () => {
+			expect(parseTagCommand(input)).toEqual({ kind: 'not-command' });
 		});
 	}
 });

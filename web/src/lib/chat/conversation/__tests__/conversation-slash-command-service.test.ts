@@ -95,30 +95,56 @@ function createServerEntry(id: string) {
 
 function createDeps(chat = createChat()) {
 	const cursor = { generationId: 'generation-1', lastSeq: 9 };
+	let inputText = 'original command';
+	let images: File[] = [];
+	let contentRevision = 0;
 	const composerState: ConversationSlashCommandDeps['composerState'] = {
-		inputText: 'original command',
-		images: [],
+		get inputText() {
+			return inputText;
+		},
+		set inputText(value: string) {
+			inputText = value;
+			contentRevision += 1;
+		},
+		get images() {
+			return images;
+		},
+		set images(value: File[]) {
+			images = value;
+			contentRevision += 1;
+		},
+		get contentRevision() {
+			return contentRevision;
+		},
 		clearAfterSubmit: vi.fn(() => {
-			composerState.inputText = '';
-			composerState.images = [];
+			inputText = '';
+			images = [];
+			contentRevision += 2;
 		}),
 		saveDraft: vi.fn(),
 	};
 	const appendLocalNotice = vi.fn();
+	const sessions = {
+		selectedChatId: chat.id,
+		byId: { [chat.id]: chat },
+		renameChat: vi.fn().mockResolvedValue(true),
+		moveChatToBoundary: vi.fn().mockResolvedValue({
+			success: true,
+			chatId: chat.id,
+			orderGroup: 'normal',
+			changed: true,
+		}),
+		setChatTags: vi.fn(async (chatId: string, tags: string[]) => {
+			const current = sessions.byId[chatId];
+			if (!current) return false;
+			sessions.byId[chatId] = { ...current, tags };
+			return true;
+		}),
+		upsertServerChat: vi.fn(),
+		setSelectedChatId: vi.fn(),
+	};
 	const deps = {
-		sessions: {
-			selectedChatId: chat.id,
-			byId: { [chat.id]: chat },
-			renameChat: vi.fn().mockResolvedValue(true),
-			moveChatToBoundary: vi.fn().mockResolvedValue({
-				success: true,
-				chatId: chat.id,
-				orderGroup: 'normal',
-				changed: true,
-			}),
-			upsertServerChat: vi.fn(),
-			setSelectedChatId: vi.fn(),
-		},
+		sessions,
 		chatState: {
 			activeChatId: chat.id,
 			entries: [{
@@ -196,6 +222,27 @@ describe('ConversationSlashCommandService', () => {
 		expect(composerState.saveDraft).not.toHaveBeenCalled();
 	});
 
+	it('does not restore a failed rename after a type-delete cycle', async () => {
+		const { deps, composerState } = createDeps();
+		const pending = deferred<boolean>();
+		deps.sessions.renameChat.mockReturnValueOnce(pending.promise);
+		const submission = new ConversationSlashCommandService(deps).submitRenameCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'Renamed chat',
+			[],
+			true,
+		);
+		composerState.inputText = 'temporary draft';
+		composerState.inputText = '';
+
+		pending.resolve(false);
+		await expect(submission).resolves.toBe('rejected');
+
+		expect(composerState.inputText).toBe('');
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
 	it('does not restore a failed rename after switching chats', async () => {
 		const { deps, composerState } = createDeps();
 		const pending = deferred<boolean>();
@@ -219,14 +266,14 @@ describe('ConversationSlashCommandService', () => {
 	it('claims a busy move command, clears immediately, and appends its source notice', async () => {
 		const chat = createChat({ isProcessing: true, processingPhase: 'running' });
 		const { deps, composerState, appendLocalNotice } = createDeps(chat);
-		composerState.inputText = '/move-to-top';
+		composerState.inputText = '/move top';
 		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
 		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 
 		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
 			chatId: chat.id,
 			chat,
-			text: '/move-to-top',
+			text: '/move top',
 			images: [],
 			ownsComposer: true,
 		});
@@ -260,7 +307,7 @@ describe('ConversationSlashCommandService', () => {
 		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
 			chatId: 'chat-1',
 			chat: deps.sessions.byId['chat-1'],
-			text: '/MOVE-TO-BOTTOM ',
+			text: '/MOVE BOTTOM ',
 			images: [],
 			ownsComposer: true,
 		});
@@ -276,10 +323,10 @@ describe('ConversationSlashCommandService', () => {
 
 	it('rejects move arguments, drafts, and attachments before clearing or mutating', async () => {
 		for (const input of [
-			{ text: '/move-to-top later', chat: createChat(), images: [] },
-			{ text: '/move-to-top', chat: createChat({ status: 'draft' }), images: [] },
+			{ text: '/move top later', chat: createChat(), images: [] },
+			{ text: '/move top', chat: createChat({ status: 'draft' }), images: [] },
 			{
-				text: '/move-to-bottom',
+				text: '/move bottom',
 				chat: createChat(),
 				images: [new File(['image'], 'test.png', { type: 'image/png' })],
 			},
@@ -303,7 +350,7 @@ describe('ConversationSlashCommandService', () => {
 
 	it('restores a failed move only while the source composer remains untouched', async () => {
 		const { deps, composerState } = createDeps();
-		composerState.inputText = '/move-to-top';
+		composerState.inputText = '/move top';
 		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
 
 		const result = await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
@@ -315,13 +362,13 @@ describe('ConversationSlashCommandService', () => {
 		);
 
 		expect(result).toBe('rejected');
-		expect(composerState.inputText).toBe('/move-to-top');
+		expect(composerState.inputText).toBe('/move top');
 		expect(composerState.saveDraft).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('does not restore a failed move over newly entered text', async () => {
 		const { deps, composerState } = createDeps();
-		composerState.inputText = '/move-to-top';
+		composerState.inputText = '/move top';
 		const pending = deferred<null>();
 		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 		const submission = new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
@@ -340,9 +387,45 @@ describe('ConversationSlashCommandService', () => {
 		expect(composerState.saveDraft).not.toHaveBeenCalled();
 	});
 
+	it('does not restore an older failed command after a newer submission clears the composer', async () => {
+		const { deps, composerState } = createDeps();
+		const first = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		const second = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
+		deps.sessions.moveChatToBoundary
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const service = new ConversationSlashCommandService(deps);
+
+		composerState.inputText = '/move top';
+		const firstSubmission = service.submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'top' },
+			[],
+			true,
+		);
+		composerState.inputText = '/move bottom';
+		const secondSubmission = service.submitMoveChatBoundaryCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			{ kind: 'valid', boundary: 'bottom' },
+			[],
+			true,
+		);
+
+		first.resolve(null);
+		await expect(firstSubmission).resolves.toBe('rejected');
+		expect(composerState.inputText).toBe('');
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+
+		second.resolve({ success: true, chatId: 'chat-1', orderGroup: 'normal', changed: true });
+		await expect(secondSubmission).resolves.toBe('accepted');
+		expect(composerState.inputText).toBe('');
+	});
+
 	it('does not restore or append a notice after switching away from the source chat', async () => {
 		const { deps, composerState, appendLocalNotice } = createDeps();
-		composerState.inputText = '/move-to-bottom';
+		composerState.inputText = '/move bottom';
 		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
 		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 		const service = new ConversationSlashCommandService(deps);
@@ -382,18 +465,252 @@ describe('ConversationSlashCommandService', () => {
 		expect(composerState.saveDraft).not.toHaveBeenCalled();
 	});
 
+	it('adds normalized unique tags without resending existing tags', async () => {
+		const chat = createChat({ tags: ['existing', 'review'] });
+		const { deps, composerState, appendLocalNotice } = createDeps(chat);
+		composerState.inputText = '/tag add existing Urgent urgent';
+
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id,
+			chat,
+			text: composerState.inputText,
+			images: [],
+			ownsComposer: true,
+		});
+
+		expect(dispatch.kind).toBe('handled');
+		if (dispatch.kind !== 'handled') throw new Error('tag command was not handled');
+		await expect(dispatch.outcome).resolves.toBe('accepted');
+		expect(deps.sessions.setChatTags).toHaveBeenCalledWith(chat.id, [
+			'existing',
+			'review',
+			'urgent',
+		]);
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: urgent.');
+		expect(composerState.inputText).toBe('');
+	});
+
+	it('accepts adding only existing tags without issuing a mutation', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps, appendLocalNotice } = createDeps(chat);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['existing'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('accepted');
+		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Tags are already up to date.');
+	});
+
+	it('serializes overlapping tag additions and rebases the second mutation', async () => {
+		const chat = createChat();
+		const { deps, composerState, appendLocalNotice } = createDeps(chat);
+		const first = deferred<boolean>();
+		deps.sessions.setChatTags
+			.mockImplementationOnce(async (chatId, tags) => {
+				const updated = await first.promise;
+				if (updated) deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return updated;
+			})
+			.mockImplementationOnce(async (chatId, tags) => {
+				deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return true;
+			});
+		const service = new ConversationSlashCommandService(deps);
+
+		composerState.inputText = '/tag add alpha';
+		const addAlpha = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['alpha'] },
+			[],
+			true,
+		);
+		composerState.inputText = '/tag add beta';
+		const addBeta = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['beta'] },
+			[],
+			true,
+		);
+
+		await Promise.resolve();
+		expect(deps.sessions.setChatTags).toHaveBeenCalledTimes(1);
+		first.resolve(true);
+		await expect(Promise.all([addAlpha, addBeta])).resolves.toEqual(['accepted', 'accepted']);
+		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['alpha', 'beta']);
+		expect(deps.sessions.byId[chat.id].tags).toEqual(['alpha', 'beta']);
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: alpha.');
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Added tags: beta.');
+	});
+
+	it('rebases a queued tag removal after an overlapping addition', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps } = createDeps(chat);
+		const first = deferred<boolean>();
+		deps.sessions.setChatTags
+			.mockImplementationOnce(async (chatId, tags) => {
+				const updated = await first.promise;
+				if (updated) deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return updated;
+			})
+			.mockImplementationOnce(async (chatId, tags) => {
+				deps.sessions.byId[chatId] = { ...deps.sessions.byId[chatId], tags };
+				return true;
+			});
+		const service = new ConversationSlashCommandService(deps);
+
+		const addition = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+		const removal = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'rm', tags: ['existing'] },
+			[],
+			true,
+		);
+
+		first.resolve(true);
+		await expect(Promise.all([addition, removal])).resolves.toEqual(['accepted', 'accepted']);
+		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['urgent']);
+		expect(deps.sessions.byId[chat.id].tags).toEqual(['urgent']);
+	});
+
+	it('continues a queued tag mutation after the preceding mutation fails', async () => {
+		const chat = createChat();
+		const { deps, composerState } = createDeps(chat);
+		const first = deferred<boolean>();
+		deps.sessions.setChatTags.mockImplementationOnce(() => first.promise);
+		const service = new ConversationSlashCommandService(deps);
+
+		composerState.inputText = '/tag add alpha';
+		const addAlpha = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['alpha'] },
+			[],
+			true,
+		);
+		composerState.inputText = '/tag add beta';
+		const addBeta = service.submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['beta'] },
+			[],
+			true,
+		);
+
+		first.resolve(false);
+		await expect(Promise.all([addAlpha, addBeta])).resolves.toEqual(['rejected', 'accepted']);
+		expect(deps.sessions.setChatTags).toHaveBeenNthCalledWith(2, chat.id, ['beta']);
+		expect(deps.sessions.byId[chat.id].tags).toEqual(['beta']);
+		expect(composerState.inputText).toBe('');
+		expect(composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('removes existing tags and ignores requested tags that are absent', async () => {
+		const chat = createChat({ tags: ['existing', 'urgent'] });
+		const { deps, appendLocalNotice } = createDeps(chat);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'rm', tags: ['existing', 'missing'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('accepted');
+		expect(deps.sessions.setChatTags).toHaveBeenCalledWith(chat.id, ['urgent']);
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Removed tags: existing.');
+	});
+
+	it('accepts removing only absent tags without issuing a mutation', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps, appendLocalNotice } = createDeps(chat);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'rm', tags: ['missing'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('accepted');
+		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledWith('info', 'Tags are already up to date.');
+	});
+
+	it('rejects invalid tag syntax and attachments before clearing or mutating', async () => {
+		for (const input of [
+			{ text: '/tag add', images: [] },
+			{
+				text: '/tag add urgent',
+				images: [new File(['image'], 'test.png', { type: 'image/png' })],
+			},
+		]) {
+			const { deps, composerState } = createDeps();
+			const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: 'chat-1',
+				chat: deps.sessions.byId['chat-1'],
+				text: input.text,
+				images: input.images,
+				ownsComposer: true,
+			});
+
+			expect(dispatch.kind).toBe('handled');
+			if (dispatch.kind !== 'handled') throw new Error('tag command was not handled');
+			await expect(dispatch.outcome).resolves.toBe('rejected');
+			expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
+			expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		}
+	});
+
+	it('restores a failed tag command while its composer remains untouched', async () => {
+		const chat = createChat({ tags: ['existing'] });
+		const { deps, composerState } = createDeps(chat);
+		composerState.inputText = '/tag add urgent';
+		deps.sessions.setChatTags.mockResolvedValueOnce(false);
+
+		const result = await new ConversationSlashCommandService(deps).submitTagCommand(
+			chat.id,
+			chat,
+			{ kind: 'valid', action: 'add', tags: ['urgent'] },
+			[],
+			true,
+		);
+
+		expect(result).toBe('rejected');
+		expect(composerState.inputText).toBe('/tag add urgent');
+		expect(composerState.saveDraft).toHaveBeenCalledWith(chat.id);
+	});
+
 	it('leaves a similar slash token for ordinary submission', () => {
 		const { deps } = createDeps();
 
-		expect(new ConversationSlashCommandService(deps).dispatchSubmission({
-			chatId: 'chat-1',
-			chat: deps.sessions.byId['chat-1'],
-			text: '/move-to-topical',
-			images: [],
-			ownsComposer: true,
-		})).toEqual({
+		expect(
+			new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: 'chat-1',
+				chat: deps.sessions.byId['chat-1'],
+				text: '/move-to-top',
+				images: [],
+				ownsComposer: true,
+			}),
+		).toEqual({
 			kind: 'continue',
-			content: '/move-to-topical',
+			content: '/move-to-top',
 			isActiveDeliveryInput: false,
 		});
 	});

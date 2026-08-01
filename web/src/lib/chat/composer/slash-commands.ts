@@ -8,6 +8,7 @@ import { hasLeadingSlashCommand } from '$shared/scheduled-prompts';
 import { parseScheduleDuration, type ScheduleDurationError } from '$shared/schedule-duration';
 import { SNIPPET_SHORT_NAME_PATTERN } from '$shared/snippets';
 import type { ChatOrderBoundary } from '$shared/chat-order-contracts';
+import { normalizeTags } from '$shared/tags';
 
 // Built-in commands surfaced in the composer menu even when agent discovery
 // misses them. Each command is handled by its owning submit or runtime path.
@@ -33,14 +34,14 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		description: 'Rename the current chat',
 	},
 	{
-		name: 'move-to-top',
+		name: 'move',
 		source: 'command',
-		description: 'Move this chat to the top of its section in Manual order',
+		description: 'Move this chat to the top or bottom of its section in Manual order',
 	},
 	{
-		name: 'move-to-bottom',
+		name: 'tag',
 		source: 'command',
-		description: 'Move this chat to the bottom of its section in Manual order',
+		description: 'Add or remove tags on this chat',
 	},
 	{
 		name: 'goal',
@@ -161,21 +162,37 @@ export type MoveChatBoundaryCommandParseResult =
 	| { kind: 'invalid'; error: 'arguments-not-supported' }
 	| { kind: 'valid'; boundary: ChatOrderBoundary };
 
-const MOVE_CHAT_BOUNDARY_RE =
-	/^\s*\/(move-to-top|move-to-bottom)(?=\s|$)(?:\s+([\s\S]*))?$/i;
+const MOVE_CHAT_BOUNDARY_RE = /^\s*\/move(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*))?$/i;
 
-export function parseMoveChatBoundaryCommand(
-	input: string,
-): MoveChatBoundaryCommandParseResult {
+export function parseMoveChatBoundaryCommand(input: string): MoveChatBoundaryCommandParseResult {
 	const match = MOVE_CHAT_BOUNDARY_RE.exec(input);
 	if (!match) return { kind: 'not-command' };
-	if ((match[2] ?? '').trim()) {
+	if (/[\r\n]/.test(input)) return { kind: 'invalid', error: 'arguments-not-supported' };
+	const boundary = (match[1] ?? '').toLowerCase();
+	if ((boundary !== 'top' && boundary !== 'bottom') || (match[2] ?? '').trim()) {
 		return { kind: 'invalid', error: 'arguments-not-supported' };
 	}
 	return {
 		kind: 'valid',
-		boundary: match[1].toLowerCase() === 'move-to-top' ? 'top' : 'bottom',
+		boundary,
 	};
+}
+
+export type TagCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid' }
+	| { kind: 'valid'; action: 'add' | 'rm'; tags: string[] };
+
+const TAG_COMMAND_RE = /^\s*\/tag(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*))?$/i;
+
+export function parseTagCommand(input: string): TagCommandParseResult {
+	const match = TAG_COMMAND_RE.exec(input);
+	if (!match) return { kind: 'not-command' };
+	const action = (match[1] ?? '').toLowerCase();
+	if (action !== 'add' && action !== 'rm') return { kind: 'invalid' };
+	const tags = normalizeTags((match[2] ?? '').split(/\s+/));
+	if (tags.length === 0) return { kind: 'invalid' };
+	return { kind: 'valid', action, tags };
 }
 
 export type ScheduleInCommandError =

@@ -13,6 +13,7 @@ import {
 	generateChatTitle,
 	listChats,
 	reorderChat as reorderChatApi,
+	setChatTags as setChatTagsApi,
 	setLastSelectedChat,
 } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
@@ -39,6 +40,7 @@ export interface ChatSessionsStoreDeps {
 	generateChatTitle?: typeof generateChatTitle;
 	updateSessionName?: typeof updateSessionName;
 	reorderChat?: typeof reorderChatApi;
+	setChatTags?: typeof setChatTagsApi;
 	notifyError?: (message: string) => void;
 }
 
@@ -55,6 +57,7 @@ export interface ChatSessionsPort {
 		chatId: string,
 		boundary: ChatOrderBoundary,
 	): Promise<ReorderChatResponse | null>;
+	setChatTags(chatId: string, tags: string[]): Promise<boolean>;
 	hasChat(chatId: string): boolean;
 	isDraft(chatId: string): boolean;
 	patchDraftStartup(chatId: string, patch: Partial<ChatStartupConfig>): void;
@@ -383,6 +386,29 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			console.error('[ChatSessionsStore] Reorder failed:', err);
 			this.#deps.notifyError?.(m.notifications_reorder_chats_failed());
 			return null;
+		}
+	}
+
+	async setChatTags(chatId: string, tags: string[]): Promise<boolean> {
+		const chat = this.byId[chatId];
+		if (!chat) return false;
+		if (chat.status === 'draft') {
+			this.patchDraftStartup(chatId, { tags });
+			this.patchChat(chatId, { tags });
+			return true;
+		}
+
+		try {
+			const setRemoteTags = this.#deps.setChatTags ?? setChatTagsApi;
+			const result = await setRemoteTags(chatId, tags);
+			if (!result.success) return false;
+			this.patchChat(chatId, { tags: result.tags });
+			await this.quietRefreshChats();
+			return true;
+		} catch (err) {
+			console.error('[ChatSessionsStore] Tag update failed:', err);
+			this.#deps.notifyError?.(m.notifications_update_chat_tags_failed());
+			return false;
 		}
 	}
 

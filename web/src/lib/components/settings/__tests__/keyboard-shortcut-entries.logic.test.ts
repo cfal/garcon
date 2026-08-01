@@ -41,6 +41,15 @@ describe('keyboard shortcut entries', () => {
 		);
 	});
 
+	it('documents persisted boundary moves and tag mutations', () => {
+		expect(SLASH_COMMANDS).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ command: '/move <top|bottom>' }),
+				expect.objectContaining({ command: '/tag <add|rm> <tag> [tag...]' }),
+			]),
+		);
+	});
+
 	it('documents both snippet command spellings', () => {
 		expect(SLASH_COMMANDS).toEqual(
 			expect.arrayContaining([

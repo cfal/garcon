@@ -307,12 +307,14 @@ function createDeps(chat = createRunningChat()) {
 				orderGroup: 'normal',
 				changed: true,
 			}),
+			setChatTags: vi.fn().mockResolvedValue(true),
 		},
 		chatState,
 		composerState: {
 			inputText: '',
 			images: [] as File[],
-			isSubmitting: false,
+			contentRevision: 0,
+			isSubmitting: false as boolean,
 			clearImages: vi.fn(),
 			clearAfterSubmit: vi.fn(),
 			saveDraft: vi.fn(),
@@ -482,7 +484,7 @@ describe('ConversationSessionController', () => {
 
 	it('moves the current chat in Manual order without sending or queueing the command', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		deps.composerState.inputText = '/move-to-top';
+		deps.composerState.inputText = '/move top';
 		const controller = new ConversationSessionController(deps);
 
 		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
@@ -491,6 +493,44 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('updates current-chat tags without sending or queueing the command', async () => {
+		const { deps } = createDeps(createRunningChat({ tags: ['existing'] }));
+		deps.composerState.inputText = '/tag add existing urgent';
+		const controller = new ConversationSessionController(deps);
+
+		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
+
+		expect(deps.sessions.setChatTags).toHaveBeenCalledWith('chat-1', ['existing', 'urgent']);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('updates tags on an idle draft without starting an agent turn', async () => {
+		const { deps } = createDeps(createRunningChat({ status: 'draft', orderGroup: null }));
+		deps.composerState.inputText = '/tag add urgent';
+		const controller = new ConversationSessionController(deps);
+
+		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
+
+		expect(deps.sessions.setChatTags).toHaveBeenCalledWith('chat-1', ['urgent']);
+		expect(mockStartChat).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
+	it('does not accept a tag mutation while a draft start is in flight', async () => {
+		const { deps } = createDeps(createRunningChat({ status: 'draft', orderGroup: null }));
+		deps.composerState.inputText = '/tag add urgent';
+		deps.composerState.isSubmitting = true;
+		const controller = new ConversationSessionController(deps);
+
+		await expect(controller.submitForChat('chat-1')).resolves.toBe('no-op');
+
+		expect(deps.sessions.setChatTags).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(mockStartChat).not.toHaveBeenCalled();
 	});
 
 	it('rejects rename commands without a title, on drafts, or with attachments', async () => {

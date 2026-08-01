@@ -84,6 +84,7 @@ type SessionComposerState = Pick<
 	ComposerState,
 	| 'inputText'
 	| 'images'
+	| 'contentRevision'
 	| 'isSubmitting'
 	| 'clearAfterSubmit'
 	| 'clearImages'
@@ -152,6 +153,7 @@ export interface SessionControllerDeps {
 		| 'setSelectedChatId'
 		| 'renameChat'
 		| 'moveChatToBoundary'
+		| 'setChatTags'
 	>;
 	chatState: SessionTranscriptState;
 	composerState: SessionComposerState;
@@ -462,6 +464,7 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
+		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
 		const text = messageOverride ?? deps.composerState.inputText.trim();
 		const submissionImages = imageOverride ?? deps.composerState.images;
 		if (!text && submissionImages.length === 0) return 'no-op';
@@ -497,7 +500,6 @@ export class ConversationSessionController {
 		}
 
 		if (route === 'draft') {
-			if (deps.composerState.isSubmitting) return 'no-op';
 			deps.composerState.isSubmitting = true;
 		}
 		let imagePayload: ChatImage[] = [];
