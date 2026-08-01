@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  COMMAND_CORRELATION_ID_MAX_BYTES,
   CommandRequestValidationError,
   parseAgentRunCommandRequest,
   parseForkChatCommandRequest,
@@ -96,6 +97,28 @@ describe('chat command request parsers', () => {
       chatId: CHAT_ID,
       content: 'focus here',
     })).toThrow(CommandRequestValidationError);
+  });
+
+  it('bounds command correlation identities by UTF-8 byte length', () => {
+    const base = {
+      clientRequestId: 'request-steer',
+      clientMessageId: 'message-steer',
+      chatId: CHAT_ID,
+      content: 'focus here',
+    };
+
+    expect(parseSteerCommandRequest({
+      ...base,
+      clientRequestId: 'x'.repeat(COMMAND_CORRELATION_ID_MAX_BYTES),
+    }).clientRequestId).toHaveLength(COMMAND_CORRELATION_ID_MAX_BYTES);
+    expect(() => parseSteerCommandRequest({
+      ...base,
+      clientRequestId: 'x'.repeat(COMMAND_CORRELATION_ID_MAX_BYTES + 1),
+    })).toThrow(`clientRequestId must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`);
+    expect(() => parseSteerCommandRequest({
+      ...base,
+      clientMessageId: '\u00e9'.repeat((COMMAND_CORRELATION_ID_MAX_BYTES / 2) + 1),
+    })).toThrow(`clientMessageId must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`);
   });
 
   it('keeps goal control on its request-only command identity', () => {

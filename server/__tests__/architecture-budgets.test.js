@@ -17,10 +17,10 @@ const MAX_LINES = 1000;
 // footprint grow while the subsystem is supposedly getting simpler. Strict
 // same-turn steering adds a separately reviewed 461-line command admission,
 // immutable target, delivery settlement, and pending-input increment. Its
-// adversarial-review corrections add 182 lines for bounded identity retention,
-// constant-time conflict lookup, deletion revalidation, opaque provider targets,
-// and complete command-outcome telemetry.
-const EXECUTION_FOOTPRINT_BUDGET = 7258;
+// adversarial-review corrections add 191 lines for bounded identity retention,
+// bounded correlation IDs, constant-time conflict lookup, deletion revalidation,
+// opaque provider targets, and complete command-outcome telemetry.
+const EXECUTION_FOOTPRINT_BUDGET = 7267;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

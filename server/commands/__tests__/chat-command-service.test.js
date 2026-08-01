@@ -24,6 +24,7 @@ import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import {
+  COMMAND_CORRELATION_ID_MAX_BYTES,
   parseForkChatCommandRequest,
   parseStartChatCommandRequest,
 } from '../../../common/chat-command-contracts.ts';
@@ -2444,6 +2445,25 @@ describe('ChatCommandService', () => {
       turnId: 'turn-active',
       entryId: undefined,
     });
+  });
+
+  it('rejects oversized steering identities before target capture or ledger admission', async () => {
+    const { service, queue, ledger } = makeService();
+    const clientRequestId = 'x'.repeat(COMMAND_CORRELATION_ID_MAX_BYTES + 1);
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'focus here',
+      clientRequestId,
+      clientMessageId: 'message-steer',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+      message: `clientRequestId must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`,
+    });
+
+    expect(queue.captureSteerTarget).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'steer', clientRequestId)).toBeNull();
   });
 
   it('captures the strict steering target before waiting for the chat mutation lock', async () => {

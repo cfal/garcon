@@ -18,6 +18,13 @@ import type { ChatStopOutcome } from './chat-types.js';
 
 export type CommandStatus = 'accepted' | 'duplicate';
 
+export const COMMAND_CORRELATION_ID_MAX_BYTES = 256;
+const commandCorrelationIdEncoder = new TextEncoder();
+
+export function isCommandCorrelationIdWithinLimit(value: string): boolean {
+  return commandCorrelationIdEncoder.encode(value).byteLength <= COMMAND_CORRELATION_ID_MAX_BYTES;
+}
+
 export type CommandErrorCode = Extract<
   ErrorCode,
   | 'VALIDATION_FAILED'
@@ -378,8 +385,8 @@ export class CommandRequestValidationError extends Error {
 export function parseStartChatCommandRequest(value: unknown): StartChatCommandRequest {
   const body = requestRecord(value);
   if ('options' in body) throw new CommandRequestValidationError('options is not supported');
-  const clientRequestId = requiredString(body, 'clientRequestId');
-  const clientMessageId = requiredString(body, 'clientMessageId');
+  const clientRequestId = requiredCommandCorrelationId(body, 'clientRequestId');
+  const clientMessageId = requiredCommandCorrelationId(body, 'clientMessageId');
   const chatId = requiredChatId(body, 'chatId');
   const agentId = requiredString(body, 'agentId');
   const images = optionalImages(body.images);
@@ -411,8 +418,8 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
   const body = requestRecord(value);
   const images = optionalImages(body.images);
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
-    clientMessageId: requiredString(body, 'clientMessageId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
+    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     command: contentOrImages(body, 'command', images),
     ...(images === undefined ? {} : { images }),
@@ -435,8 +442,8 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
     throw new CommandRequestValidationError('generationId requires upToSeq');
   }
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
-    clientMessageId: requiredString(body, 'clientMessageId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
+    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
     command: contentOrImages(body, 'command', images),
@@ -480,7 +487,7 @@ export function parseDeleteChatCommandRequest(value: unknown): DeleteChatCommand
 export function parseQueueEntryCreateCommandRequest(value: unknown): QueueEntryCreateCommandRequest {
   const body = requestRecord(value);
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     content: requiredContent(body, 'content'),
   };
@@ -492,7 +499,7 @@ export function parseQueueEntryReplaceCommandRequest(value: unknown): QueueEntry
     throw new CommandRequestValidationError('expectedRevision must be a positive integer');
   }
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     entryId: requiredString(body, 'entryId'),
     content: requiredContent(body, 'content'),
@@ -503,7 +510,7 @@ export function parseQueueEntryReplaceCommandRequest(value: unknown): QueueEntry
 export function parseQueueEntryDeleteCommandRequest(value: unknown): QueueEntryDeleteCommandRequest {
   const body = requestRecord(value);
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     entryId: requiredString(body, 'entryId'),
   };
@@ -538,7 +545,7 @@ export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMov
     );
   }
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     entryId,
     targetEntryId,
@@ -552,8 +559,8 @@ export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMov
 export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
   const body = requestRecord(value);
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
-    clientMessageId: requiredString(body, 'clientMessageId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
+    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     content: requiredContent(body, 'content'),
   };
@@ -562,7 +569,7 @@ export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
 export function parseGoalControlCommandRequest(value: unknown): GoalControlCommandRequest {
   const body = requestRecord(value);
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     content: requiredContent(body, 'content'),
   };
@@ -590,7 +597,7 @@ export function parsePermissionDecisionCommandRequest(value: unknown): Permissio
   }
   const response = optionalRecord(body.response, 'response');
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     permissionRequestId: requiredString(body, 'permissionRequestId'),
     allow: body.allow,
@@ -603,7 +610,7 @@ export function parseAgentStopCommandRequest(value: unknown): AgentStopCommandRe
   const body = requestRecord(value);
   const agentId = optionalString(body, 'agentId');
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     ...(agentId === undefined ? {} : { agentId }),
   };
@@ -617,7 +624,7 @@ export function parseCompactCommandRequest(value: unknown): CompactCommandReques
   const body = requestRecord(value);
   const instructions = optionalString(body, 'instructions', false);
   return {
-    clientRequestId: requiredString(body, 'clientRequestId'),
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
     ...(instructions === undefined ? {} : { instructions }),
   };
@@ -644,6 +651,16 @@ function requiredString(body: Record<string, unknown>, field: string): string {
     throw new CommandRequestValidationError(`${field} is required`);
   }
   return value.trim();
+}
+
+function requiredCommandCorrelationId(body: Record<string, unknown>, field: string): string {
+  const value = requiredString(body, field);
+  if (!isCommandCorrelationIdWithinLimit(value)) {
+    throw new CommandRequestValidationError(
+      `${field} must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`,
+    );
+  }
+  return value;
 }
 
 function requiredChatId(body: Record<string, unknown>, field: string): string {
