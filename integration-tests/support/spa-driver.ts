@@ -167,6 +167,114 @@ export class SpaDriver {
     await this.fill('input[placeholder="Search chats..."]', query);
   }
 
+  async applySidebarSearch(query: string, chatId: string): Promise<void> {
+    const chat = (await this.#integration.client.listChats()).sessions.find(
+      (entry) => entry.id === chatId,
+    );
+    if (!chat) throw new Error(`Missing chat for sidebar search: ${chatId}`);
+    await this.openChatSearch();
+    await this.searchChats(query);
+    await this.#page.waitForFunction(
+      (title) => [...document.querySelectorAll<HTMLElement>(
+        '[data-slot="search-dialog-results"] [role="option"]',
+      )].some((row) => row.innerText.includes(title)),
+      { timeout: 20_000 },
+      chat.title,
+    );
+    await this.#page.evaluate((title) => {
+      const option = [...document.querySelectorAll<HTMLButtonElement>(
+        '[data-slot="search-dialog-results"] [role="option"]',
+      )].find((row) => row.innerText.includes(title));
+      if (!option) throw new Error(`Missing sidebar search result: ${title}`);
+      option.click();
+    }, chat.title);
+    await this.waitForSelectedChat(chatId);
+    await this.#page.waitForSelector('[data-slot="active-search-banner"]');
+  }
+
+  async clearSidebarSearch(): Promise<void> {
+    await this.#page.evaluate(() => {
+      const banner = document.querySelector<HTMLElement>('[data-slot="active-search-banner"]');
+      const button = [...(banner?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (element) => (element.getAttribute('aria-label') ?? '') === 'Clear search',
+      );
+      if (!button) throw new Error('Missing Clear search button.');
+      button.click();
+    });
+    await this.#page.waitForFunction(
+      () => document.querySelector('[data-slot="active-search-banner"]') === null,
+      { timeout: 20_000 },
+    );
+  }
+
+  async setRecentActivitySort(enabled: boolean): Promise<void> {
+    const isActive = await this.#page.evaluate(
+      () => document.querySelector('[data-slot="sidebar-sort-indicator"]') !== null,
+    );
+    if (isActive !== enabled) {
+      await this.clickButton('More actions');
+      await this.#page.waitForFunction(
+        () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].some(
+          (element) => (element.getAttribute('aria-label') || element.textContent?.trim())
+            === 'Sort by recent activity',
+        ),
+        { timeout: 20_000 },
+      );
+      await this.#page.evaluate(() => {
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(
+          (element) => (element.getAttribute('aria-label') || element.textContent?.trim())
+            === 'Sort by recent activity',
+        );
+        if (!item) throw new Error('Missing Sort by recent activity menu item.');
+        item.click();
+      });
+    }
+    await this.#page.waitForFunction(
+      (expected) => (
+        document.querySelector('[data-slot="sidebar-sort-indicator"]') !== null
+      ) === expected,
+      { timeout: 20_000 },
+      enabled,
+    );
+  }
+
+  async sidebarChatIds(list: 'pinned' | 'normal' | 'archived'): Promise<string[]> {
+    return this.#page.$$eval(
+      `[data-sidebar-virtual-row][data-sidebar-virtual-list-row="${list}"]`,
+      (rows) => rows.map((row) => (row as HTMLElement).dataset.sidebarVirtualRow ?? ''),
+    );
+  }
+
+  async waitForSidebarChatIds(
+    list: 'pinned' | 'normal' | 'archived',
+    expected: string[],
+  ): Promise<void> {
+    await this.#page.waitForFunction(
+      ({ list, expected }) => {
+        const actual = [...document.querySelectorAll<HTMLElement>(
+          `[data-sidebar-virtual-row][data-sidebar-virtual-list-row="${list}"]`,
+        )].map((row) => row.dataset.sidebarVirtualRow ?? '');
+        return actual.length === expected.length
+          && actual.every((chatId, index) => chatId === expected[index]);
+      },
+      { timeout: 20_000 },
+      { list, expected },
+    );
+  }
+
+  async waitForLocalNotice(text: string): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => {
+        const log = document.querySelector('[role="log"][aria-label="Chat messages"]');
+        return [...(log?.querySelectorAll<HTMLElement>('span') ?? [])].some(
+          (element) => element.textContent?.trim() === expected,
+        );
+      },
+      { timeout: 20_000 },
+      text,
+    );
+  }
+
   async waitForTranscriptSearchResult(input: {
     count: number;
     snippet: string;

@@ -40,6 +40,11 @@ import type {
   MarkChatsReadResponse,
 } from '../../common/chat-list.js';
 import type { ChatSearchRequest, ChatSearchResponse } from '../../common/chat-search.js';
+import {
+  parseReorderChatResponse,
+  type ReorderChatRequest,
+  type ReorderChatResponse,
+} from '../../common/chat-order-contracts.js';
 import type {
   GenerateChatTitleRequest,
   GenerateChatTitleResponse,
@@ -441,6 +446,21 @@ export class GarconTestClient {
 
   listChats(): Promise<ChatListResponse> {
     return this.get<ChatListResponse>('/api/v1/chats');
+  }
+
+  async reorderChat(request: ReorderChatRequest): Promise<ReorderChatResponse> {
+    const response = await this.post<unknown>('/api/v1/chats/reorder', request);
+    const parsed = parseReorderChatResponse(response);
+    if (!parsed) throw new Error(`Invalid chat reorder response: ${JSON.stringify(response)}`);
+    return parsed;
+  }
+
+  togglePinned(chatId: string): Promise<{ success: boolean; isPinned: boolean }> {
+    return this.post('/api/v1/chats/pin', { chatId });
+  }
+
+  toggleArchive(chatId: string): Promise<{ success: boolean; isArchived: boolean }> {
+    return this.post('/api/v1/chats/archive', { chatId });
   }
 
   generateChatTitle(request: GenerateChatTitleRequest): Promise<GenerateChatTitleResponse> {
