@@ -8,7 +8,7 @@ export interface AgentTurnOutputAvailable {
 
 export interface AgentTurnOutputUnavailable {
   availability: 'unavailable';
-  reason: 'too-large' | 'retention-pressure';
+  reason: 'too-large' | 'retention-pressure' | 'recovery';
 }
 
 export type AgentTurnOutput = AgentTurnOutputAvailable | AgentTurnOutputUnavailable;
@@ -99,7 +99,11 @@ export function parseAgentTurnReceipt(value: unknown): AgentTurnReceipt {
 function parseOutput(value: unknown): AgentTurnOutput {
   const raw = record(value, 'turn output');
   if (raw.availability === 'unavailable') {
-    if (raw.reason !== 'too-large' && raw.reason !== 'retention-pressure') {
+    if (
+      raw.reason !== 'too-large'
+      && raw.reason !== 'retention-pressure'
+      && raw.reason !== 'recovery'
+    ) {
       throw new AgentTurnReceiptContractError('turn output reason is invalid');
     }
     return { availability: 'unavailable', reason: raw.reason };

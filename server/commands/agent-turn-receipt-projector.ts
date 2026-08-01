@@ -62,6 +62,9 @@ function projectOutput(record: CommandLedgerRecord): AgentTurnOutput {
   if (record.turnResultAvailability === 'retention-pressure') {
     return { availability: 'unavailable', reason: 'retention-pressure' };
   }
+  if (record.turnResultAvailability === 'recovery') {
+    return { availability: 'unavailable', reason: 'recovery' };
+  }
   return {
     availability: 'available',
     completeness: record.status === 'finished' && !record.interruptionReason

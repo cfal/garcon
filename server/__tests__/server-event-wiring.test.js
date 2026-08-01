@@ -65,6 +65,7 @@ function createWiringFixture(overrides = {}) {
   const commandLedger = overrides.commandLedgerInstance ?? {
     settleTerminal: mock(async () => undefined),
     appendAssistantMessages: mock(async () => undefined),
+    markTurnOutputUnavailable: mock(async () => undefined),
     markPublicTerminal: mock(async () => undefined),
     publishDeferredTerminal: mock(async () => undefined),
     markChatInterrupted: mock(async () => undefined),
@@ -97,7 +98,7 @@ function createWiringFixture(overrides = {}) {
     processing: overrides.processing ?? { phase: mock(() => null) },
     metadata,
     chatViews,
-    chatNativeReloader: {
+    chatNativeReloader: overrides.chatNativeReloader ?? {
       reloadFromNative: mock(async () => ({
         generationId: 'generation-2',
         messages: [],
@@ -293,6 +294,58 @@ describe('server event wiring', () => {
       'turn-1',
       undefined,
     );
+  });
+
+  it('makes recovered native output unavailable instead of reporting an empty success', async () => {
+    const ledger = new CommandLedger();
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+      payload: { command: 'work' },
+    });
+    const fixture = createWiringFixture({
+      commandLedgerInstance: ledger,
+      chatViews: {
+        appendAfterEnsuringGeneration: mock(async () => {
+          throw new Error('view append failed');
+        }),
+      },
+      chatNativeReloader: {
+        reloadFromNative: mock(async () => ({
+          mode: 'process-error',
+          generationId: 'generation-2',
+          messages: [{ seq: 1, message: new AssistantMessage(
+            '2026-06-01T00:00:00.000Z',
+            'recovered result',
+          ) }],
+          lastSeq: 1,
+          pageOldestSeq: 1,
+          hasMore: false,
+        })),
+      },
+    });
+    const turn = {
+      commandType: 'agent-run',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+    };
+
+    fixture.agentListeners.messages('chat-1', [
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'recovered result'),
+    ], turn);
+    fixture.agentListeners.finished('chat-1', 0, turn);
+    await fixture.wiring.waitForIdle();
+
+    const record = await ledger.getTurnRecord('chat-1', 'turn-1');
+    expect(projectAgentTurnReceipt(record)).toMatchObject({
+      kind: 'found',
+      receipt: {
+        state: 'completed',
+        output: { availability: 'unavailable', reason: 'recovery' },
+      },
+    });
   });
 
   it('publishes the Stop outcome before making an interrupted receipt public', async () => {

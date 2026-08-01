@@ -463,6 +463,13 @@ export function wireServerEvents({
           'chat-view: append failed; reloading from native:',
           errorMessage(err),
         );
+        if (turnMetadata?.turnId) {
+          await commandLedger.markTurnOutputUnavailable(
+            chatId,
+            turnMetadata.turnId,
+            'recovery',
+          );
+        }
         await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
       }
     });

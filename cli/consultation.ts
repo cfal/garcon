@@ -43,7 +43,9 @@ function terminalResult(receipt: AgentTurnReceipt, output: CliOutput): void {
     if (receipt.output.availability === 'unavailable') {
       const reason = receipt.output.reason === 'too-large'
         ? 'its result is too large for the CLI receipt'
-        : 'server retention pressure prevented the CLI from retaining its result';
+        : receipt.output.reason === 'retention-pressure'
+          ? 'server retention pressure prevented the CLI from retaining its result'
+          : 'server recovery rebuilt the transcript outside this turn receipt';
       throw new CliError(
         'receipt polling',
         `the turn completed, but ${reason}; view the complete transcript in Garcon`,

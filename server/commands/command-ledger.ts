@@ -33,7 +33,12 @@ export interface CommandLedgerRecord {
   stopOutcome?: ChatStopOutcome;
   assistantMessages?: string[];
   assistantBytes?: number;
-  turnResultAvailability?: 'available' | 'too-large' | 'retention-pressure' | 'expired';
+  turnResultAvailability?:
+    | 'available'
+    | 'too-large'
+    | 'retention-pressure'
+    | 'recovery'
+    | 'expired';
   interruptionReason?: 'user-stop' | 'chat-deleted';
   publicTerminalAt?: string;
 }
@@ -247,6 +252,19 @@ export class CommandLedger {
         this.#resultMessages += appended.length;
       }
     }
+    record.updatedAt = new Date().toISOString();
+    return cloneRecord(record);
+  }
+
+  async markTurnOutputUnavailable(
+    chatId: string,
+    turnId: string,
+    reason: 'recovery',
+  ): Promise<CommandLedgerRecord | null> {
+    const record = this.#recordForTurn(chatId, turnId);
+    if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
+    this.#discardResult(record);
+    record.turnResultAvailability = reason;
     record.updatedAt = new Date().toISOString();
     return cloneRecord(record);
   }

@@ -176,4 +176,18 @@ describe('runConsultation', () => {
       createId: () => 'request',
     })).rejects.toThrow('server retention pressure');
   });
+
+  test('reports native recovery without printing a false empty success', async () => {
+    const unavailable = {
+      ...receipt,
+      output: { availability: 'unavailable', reason: 'recovery' },
+    } as AgentTurnReceipt;
+
+    await expect(runConsultation({
+      kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
+      prompt: 'Continue', readsPromptFromStdin: false,
+    }, 'Continue', client({ async getTurnReceipt() { return unavailable; } }), output(), undefined, {
+      createId: () => 'request',
+    })).rejects.toThrow('server recovery rebuilt the transcript');
+  });
 });
