@@ -95,7 +95,9 @@ export function createClaudeForkTranscriptTransformer(
   const randomUUID = options.randomUUID ?? crypto.randomUUID;
   const now = options.now ?? (() => new Date().toISOString());
 
-  // Mirrors the graph rewrite used by the official Claude Agent SDK filesystem fork.
+  // The Agent SDK indexes the full selected graph before resolving parent links, so
+  // parentUuid may refer to a record that appears later in physical JSONL order.
+  // https://github.com/anthropics/claude-agent-sdk-python/blob/f8b9ec923982082a02c485924e0f60367949c3a1/src/claude_agent_sdk/_internal/session_mutations.py#L385-L418
   return (input) => {
     const forkTimestamp = now();
     const transcript = input.selectedEntries
@@ -103,7 +105,6 @@ export function createClaudeForkTranscriptTransformer(
       .filter((entry) => entry.isSidechain !== true);
     const byUuid = new Map(transcript.map((entry) => [entry.uuid as string, entry]));
     const uuidMap = new Map(transcript.map((entry) => [entry.uuid as string, randomUUID()]));
-    const writtenSourceUuids = new Set<string>();
     const messages = transcript
       .filter((entry) => entry.type !== 'progress')
       .map((entry) => {
@@ -115,7 +116,6 @@ export function createClaudeForkTranscriptTransformer(
             stringOrNull(entry.parentUuid),
             byUuid,
             uuidMap,
-            writtenSourceUuids,
           ),
           sessionId: input.targetAgentSessionId,
           isSidechain: false,
@@ -132,7 +132,6 @@ export function createClaudeForkTranscriptTransformer(
         }
         for (const field of CLAUDE_SOURCE_ONLY_FIELDS) delete rewritten[field];
         stripTaskActivation(rewritten);
-        writtenSourceUuids.add(sourceUuid);
         return rewritten;
       });
 
@@ -207,7 +206,6 @@ function remapClaudeParent(
   parentUuid: string | null,
   byUuid: ReadonlyMap<string, Record<string, unknown>>,
   uuidMap: ReadonlyMap<string, string>,
-  writtenSourceUuids: ReadonlySet<string>,
 ): string | null {
   const visited = new Set<string>();
   let current = parentUuid;
@@ -216,9 +214,6 @@ function remapClaudeParent(
     const parent = byUuid.get(current);
     if (!parent) return null;
     if (parent.type !== 'progress') {
-      if (!writtenSourceUuids.has(current)) {
-        throw unavailable('Claude transcript parent appears after its child');
-      }
       return uuidMap.get(current) ?? null;
     }
     current = stringOrNull(parent.parentUuid);
@@ -233,7 +228,15 @@ function assertClaudeForkGraph(
   allowedUuidCounts: ReadonlyMap<string, number>,
 ): void {
   const sourceUuids = new Set(sourceEntries.map((entry) => entry.uuid));
-  const writtenUuids = new Set<string>();
+  // The Agent SDK resolves parents from its complete UUID map rather than treating file
+  // order as a topological order. Validation therefore checks closure over all emitted nodes.
+  // https://github.com/anthropics/claude-agent-sdk-python/blob/f8b9ec923982082a02c485924e0f60367949c3a1/src/claude_agent_sdk/_internal/session_mutations.py#L396-L418
+  const emittedUuids = new Set(
+    entries
+      .filter((entry) => entry.type !== 'content-replacement')
+      .map((entry) => entry.uuid)
+      .filter((uuid): uuid is string => typeof uuid === 'string'),
+  );
   const emittedUuidCounts = new Map<string, number>();
   for (const entry of entries) {
     if (entry.type === 'content-replacement') continue;
@@ -248,10 +251,9 @@ function assertClaudeForkGraph(
     if (entry.sessionId !== targetSessionId) {
       throw unavailable('Claude fork contains inconsistent session identity');
     }
-    if (entry.parentUuid !== null && !writtenUuids.has(String(entry.parentUuid))) {
+    if (entry.parentUuid !== null && !emittedUuids.has(String(entry.parentUuid))) {
       throw unavailable('Claude fork contains an invalid parent graph');
     }
-    writtenUuids.add(entry.uuid);
   }
 }
 

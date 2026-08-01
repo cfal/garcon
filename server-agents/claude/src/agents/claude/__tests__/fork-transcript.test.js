@@ -296,16 +296,54 @@ describe('transformClaudeForkTranscript', () => {
     expect(result.expectedSemanticDigest).toStartWith('ordered-v1:');
   });
 
-  it('rejects a child whose retained parent appears later in the file', () => {
-    const transform = createClaudeForkTranscriptTransformer({ randomUUID: crypto.randomUUID });
-    expect(() => transform({
-      selectedEntries: [
-        { type: 'assistant', uuid: 'child', parentUuid: 'parent', sessionId: context.sourceAgentSessionId },
-        { type: 'user', uuid: 'parent', parentUuid: null, sessionId: context.sourceAgentSessionId },
-      ],
-      sourceEntries: [],
+  it('remaps a retained parent that appears later in physical file order', () => {
+    const sourceEntries = [
+      {
+        type: 'user', uuid: 'source-root', parentUuid: null,
+        sessionId: context.sourceAgentSessionId, timestamp: '2026-08-01T02:43:12.000Z',
+        message: { role: 'user', content: 'Inspect the repository.' },
+      },
+      {
+        type: 'attachment', uuid: 'source-hook-success', parentUuid: 'source-hook-error',
+        sessionId: context.sourceAgentSessionId, timestamp: '2026-08-01T02:43:12.324Z',
+        attachment: { type: 'hook_success' },
+      },
+      {
+        type: 'attachment', uuid: 'source-hook-error', parentUuid: 'source-root',
+        sessionId: context.sourceAgentSessionId, timestamp: '2026-08-01T02:43:12.262Z',
+        attachment: { type: 'hook_non_blocking_error' },
+      },
+      {
+        type: 'assistant', uuid: 'source-leaf', parentUuid: 'source-hook-success',
+        sessionId: context.sourceAgentSessionId, timestamp: '2026-08-01T02:43:13.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+      },
+    ];
+
+    const result = transformClaudeForkTranscript({
+      selectedEntries: sourceEntries,
+      sourceEntries,
       ...context,
-    })).toThrow('parent appears after its child');
+    });
+    const entriesBySourceUuid = new Map(result.entries.map((entry) => [
+      entry.forkedFrom?.messageUuid,
+      entry,
+    ]));
+    const hookSuccess = entriesBySourceUuid.get('source-hook-success');
+    const hookError = entriesBySourceUuid.get('source-hook-error');
+    expect(hookSuccess).toBeDefined();
+    expect(hookError).toBeDefined();
+    expect(result.entries.indexOf(hookSuccess)).toBeLessThan(result.entries.indexOf(hookError));
+    expect(hookSuccess.parentUuid).toBe(hookError.uuid);
+
+    const targetUuids = new Set(result.entries.map((entry) => entry.uuid));
+    const sourceUuids = new Set(sourceEntries.map((entry) => entry.uuid));
+    for (const entry of result.entries) {
+      expect(entry.sessionId).toBe(context.targetAgentSessionId);
+      expect(sourceUuids.has(entry.uuid)).toBe(false);
+      if (entry.parentUuid !== null) expect(targetUuids.has(entry.parentUuid)).toBe(true);
+    }
+    expect(result.expectedSemanticDigest).toStartWith('ordered-v1:');
   });
 });
 
