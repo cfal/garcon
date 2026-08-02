@@ -95,7 +95,6 @@ describe('UserMessageNavigatorController', () => {
 			entry(1, user('early prompt')),
 		]);
 		transcript.lastSeq = 100;
-		transcript.isViewingInitialMessages = true;
 		restoreLatestTranscript.mockImplementationOnce(async () => {
 			const restored = await pendingRestore.promise;
 			if (restored) {
@@ -104,8 +103,7 @@ describe('UserMessageNavigatorController', () => {
 					entry(100, assistant('recent response')),
 				];
 				transcript.oldestSeq = 99;
-				transcript.hasMoreMessages = true;
-				transcript.isViewingInitialMessages = false;
+				transcript.hasEarlierMessages = true;
 			}
 			return restored;
 		});
@@ -141,14 +139,14 @@ describe('UserMessageNavigatorController', () => {
 
 	it('appends user rows from older prepended history at the list bottom', async () => {
 		const { controller, transcript, loadOlderMessages } = setup([entry(3, user('recent'))]);
-		transcript.hasMoreMessages = true;
+		transcript.hasEarlierMessages = true;
 		loadOlderMessages.mockImplementationOnce(async () => {
 			transcript.entries = [
 				entry(1, user('oldest')),
 				entry(2, assistant('older reply')),
 				...transcript.entries,
 			];
-			transcript.hasMoreMessages = false;
+			transcript.hasEarlierMessages = false;
 			return 'loaded' as const;
 		});
 		controller.openForActiveChat();
@@ -161,7 +159,7 @@ describe('UserMessageNavigatorController', () => {
 	it('coalesces concurrent load requests and exposes a typed retryable failure', async () => {
 		const pendingLoad = deferred<'failed'>();
 		const { controller, transcript, loadOlderMessages } = setup();
-		transcript.hasMoreMessages = true;
+		transcript.hasEarlierMessages = true;
 		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce('loaded');
 		controller.openForActiveChat();
 
@@ -179,7 +177,7 @@ describe('UserMessageNavigatorController', () => {
 
 	it('does not report an invalidated older-page request as a failure', async () => {
 		const { controller, transcript, loadOlderMessages } = setup();
-		transcript.hasMoreMessages = true;
+		transcript.hasEarlierMessages = true;
 		loadOlderMessages.mockResolvedValueOnce('invalidated');
 		controller.openForActiveChat();
 
@@ -192,7 +190,7 @@ describe('UserMessageNavigatorController', () => {
 	it('ignores a late page result after the active chat changes', async () => {
 		const pendingLoad = deferred<'invalidated'>();
 		const { controller, transcript, loadOlderMessages, selectChat } = setup();
-		transcript.hasMoreMessages = true;
+		transcript.hasEarlierMessages = true;
 		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise);
 		controller.openForActiveChat();
 		const load = controller.loadOlder();
@@ -365,7 +363,7 @@ describe('UserMessageNavigatorController', () => {
 	it('does not retain an older-page loading state when a failed jump reopens', async () => {
 		const pendingLoad = deferred<'invalidated'>();
 		const { controller, transcript, loadOlderMessages, jumpToRow } = setup();
-		transcript.hasMoreMessages = true;
+		transcript.hasEarlierMessages = true;
 		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce('loaded');
 		jumpToRow.mockResolvedValueOnce(false);
 		controller.openForActiveChat();

@@ -29,6 +29,7 @@
 		canUseForkAtMessageAction,
 	} from '$lib/chat/actions/fork-at-message-action.js';
 	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
+	import TranscriptPageBoundary from './TranscriptPageBoundary.svelte';
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
@@ -42,6 +43,8 @@
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
+		onLoadEarlier?: () => void;
+		onLoadLater?: () => void;
 		reserveComposerTraySpace?: boolean;
 		reserveTopFloatingToolbar?: boolean;
 		isPreparingInitialScroll?: boolean;
@@ -60,6 +63,8 @@
 		onExitPlanMode,
 		pendingPermissionRequests = [],
 		onRetry,
+		onLoadEarlier = () => {},
+		onLoadLater = () => {},
 		reserveComposerTraySpace = false,
 		reserveTopFloatingToolbar = false,
 		isPreparingInitialScroll = false,
@@ -174,41 +179,12 @@
 				</div>
 			</div>
 		{/if}
-		{#if chatState.isLoadingMoreMessages}
-			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
-				<div class="h-px flex-1 bg-border/70"></div>
-				<Loader2 class="h-3.5 w-3.5 animate-spin" />
-				<span>{m.chat_chat_loading_older_messages()}</span>
-				<div class="h-px flex-1 bg-border/70"></div>
-			</div>
-		{/if}
-
-		{#if chatState.hasMoreMessages && !chatState.isLoadingMoreMessages}
-			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
-				<div class="h-px flex-1 bg-border/70"></div>
-				<span>{m.chat_chat_messages_scroll_to_load()}</span>
-				<div class="h-px flex-1 bg-border/70"></div>
-			</div>
-		{/if}
-
-		{#if !chatState.hasMoreMessages && !chatState.hasInitialMessagesToReveal && chatState.displayMessageCount > chatState.visibleMessageCount}
-			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
-				<div class="h-px flex-1 bg-border/70"></div>
-				<span>
-					{m.chat_chat_messages_showing_last({
-						count: chatState.visibleMessageCount,
-						total: chatState.displayMessageCount,
-					})}
-				</span>
-				<Button
-					variant="link"
-					class="text-primary hover:text-primary/80 underline p-0 h-auto text-xs"
-					onclick={() => chatState.loadEarlierMessages()}
-				>
-					{m.chat_chat_messages_load_earlier()}
-				</Button>
-				<div class="h-px flex-1 bg-border/70"></div>
-			</div>
+		{#if chatState.canLoadEarlier || chatState.pageStates.earlier.status !== 'idle'}
+			<TranscriptPageBoundary
+				direction="earlier"
+				pageState={chatState.pageStates.earlier}
+				onRequest={onLoadEarlier}
+			/>
 		{/if}
 
 		<ConversationTranscript
@@ -224,6 +200,13 @@
 			onForkChat={canShowForkAtMessage ? onForkChat : undefined}
 			{onGenerateTitleFromMessage}
 		/>
+		{#if chatState.canLoadLater || chatState.pageStates.later.status !== 'idle'}
+			<TranscriptPageBoundary
+				direction="later"
+				pageState={chatState.pageStates.later}
+				onRequest={onLoadLater}
+			/>
+		{/if}
 		{#if floatingPendingPermissionRequests.length > 0 && onPermissionDecision}
 			<div class="mt-2 flex w-full flex-col gap-2 sm:gap-3">
 				{#each floatingPendingPermissionRequests as request (request.permissionRequestId)}
@@ -255,7 +238,11 @@
 		onfocusin={handleMessagePaneFocusIntent}
 		tabindex={-1}
 		role="log"
-		aria-busy={chatState.isLoadingMessages || isPreparingInitialScroll}
+		aria-busy={chatState.isLoadingMessages ||
+			isPreparingInitialScroll ||
+			chatState.pageStates.earlier.status === 'loading' ||
+			chatState.pageStates.later.status === 'loading'}
+		aria-live={chatState.hasLaterMessages ? 'off' : 'polite'}
 		aria-label={m.chat_messages_region()}
 		class={feedViewportClass}
 	>
@@ -271,12 +258,6 @@
 				{/if}
 				{@render feedContent()}
 			</div>
-			<div
-				aria-hidden="true"
-				class="h-px"
-				data-chat-bottom-anchor
-				style="overflow-anchor: auto;"
-			></div>
 		</div>
 	</ScrollAreaPrimitive.Viewport>
 	<Scrollbar orientation="vertical" class="w-1.5" onpointerdown={onUserScrollIntent} />

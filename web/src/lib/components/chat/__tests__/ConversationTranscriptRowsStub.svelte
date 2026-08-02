@@ -8,6 +8,8 @@
 	let { rows }: Props = $props();
 </script>
 
-{#each rows as row (row.id)}
-	<div data-transcript-row-id={row.id}></div>
-{/each}
+<div data-conversation-transcript>
+	{#each rows as row (row.id)}
+		<div data-transcript-row-id={row.id}></div>
+	{/each}
+</div>

@@ -1,9 +1,5 @@
 import { applyChatViewMessages, type ChatViewMessage, type ChatViewPage } from '$shared/chat-view';
-import {
-	UserMessage,
-	type ChatMessage,
-	type UserMessageDeliveryStatus,
-} from '$shared/chat-types';
+import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -22,8 +18,19 @@ type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
+export type TranscriptPageDirection = 'earlier' | 'later';
+export type TranscriptPageStatus = 'idle' | 'loading' | 'error';
 export type TranscriptWindowLoadResult = 'loaded' | 'invalidated' | 'failed';
 export type TranscriptWindowTarget = 'initial' | 'latest';
+
+export interface TranscriptPageState {
+	status: TranscriptPageStatus;
+	error: string | null;
+}
+
+function idlePageState(): TranscriptPageState {
+	return { status: 'idle', error: null };
+}
 
 export interface ChatLoadMessagesOptions {
 	minimumLimit?: number;
@@ -96,24 +103,24 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	localNotices = $state<LocalNoticeRow[]>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
-	isLoadingMoreMessages = $state(false);
-	hasMoreMessages = $state(false);
+	hasEarlierMessages = $state(false);
+	pageStates = $state<Record<TranscriptPageDirection, TranscriptPageState>>({
+		earlier: idlePageState(),
+		later: idlePageState(),
+	});
 	totalMessages = $state(0);
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
-	isViewingInitialMessages = $state(false);
 	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
 	#loadEpoch = 0;
 	#pendingUserInputsRevision = 0;
 	#pendingUserInputsRevisionAtLoadStart = 0;
-	#loadMorePromise: Promise<TranscriptPageLoadResult> | null = null;
-	#loadingMoreChatId: string | null = null;
-	#loadLaterPromise: Promise<TranscriptPageLoadResult> | null = null;
-	#loadingLaterChatId: string | null = null;
-	#loadMoreOperationEpoch = 0;
+	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
+	#loadingPageChatId: string | null = null;
+	#loadingPageDirection: TranscriptPageDirection | null = null;
+	#pageLoadOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
-	#detachedWindowLastSeq = 0;
 	#initialRevealPhase = $state<InitialRevealPhase>('complete');
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
@@ -139,7 +146,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	});
 
 	#displayLocalNotices = $derived(
-		this.isViewingInitialMessages ? ([] as LocalNoticeRow[]) : this.localNotices,
+		this.hasLaterMessages ? ([] as LocalNoticeRow[]) : this.localNotices,
 	);
 
 	#displayRows = $derived.by(() => {
@@ -222,8 +229,42 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return this.#visibleMessages;
 	}
 
+	get newestLoadedSeq(): number {
+		return this.entries.at(-1)?.seq ?? 0;
+	}
+
+	get hasLaterMessages(): boolean {
+		return this.newestLoadedSeq > 0 && this.newestLoadedSeq < this.lastSeq;
+	}
+
+	get hasEarlierRowsToReveal(): boolean {
+		if (this.#initialRevealPhase !== 'complete') return false;
+		const firstVisibleSeq = this.#visibleRows.find(
+			(row): row is ChatTranscriptRow => row.kind === 'message' && row.seq !== undefined,
+		)?.seq;
+		return (
+			firstVisibleSeq !== undefined && (this.entries[0]?.seq ?? firstVisibleSeq) < firstVisibleSeq
+		);
+	}
+
+	get canLoadEarlier(): boolean {
+		return this.hasEarlierRowsToReveal || this.hasEarlierMessages;
+	}
+
+	get canAutoFillEarlier(): boolean {
+		return (
+			this.hasEarlierRowsToReveal ||
+			(this.hasEarlierMessages &&
+				this.entries.length + MESSAGES_PER_PAGE <= ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
+		);
+	}
+
+	get canLoadLater(): boolean {
+		return this.hasLaterMessages;
+	}
+
 	get visiblePendingInputs(): PendingUserInput[] {
-		if (this.isViewingInitialMessages) return [];
+		if (this.hasLaterMessages) return [];
 		return this.pendingUserInputs.filter(
 			(input) => !this.#echoedClientRequestIds.has(input.clientRequestId),
 		);
@@ -244,13 +285,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'applied';
 		}
 		if (this.generationId && generationId !== this.generationId) {
-			this.#invalidateLoadMoreOperation();
+			this.#invalidatePageLoad();
 			this.transcriptCache.markStale(chatId);
 			return 'generation-changed';
 		}
 		const result = this.transcriptCache.applyMessages(chatId, generationId, messages);
 		if (result.status === 'generation-changed') {
-			this.#invalidateLoadMoreOperation();
+			this.#invalidatePageLoad();
 			this.transcriptCache.markStale(chatId);
 			return 'generation-changed';
 		}
@@ -264,10 +305,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			return 'gap-detected';
 		}
-		if (this.isViewingInitialMessages) {
+		if (this.hasLaterMessages) {
 			this.generationId = generationId;
 			this.lastSeq = result.lastSeq;
-			this.#detachedWindowLastSeq = Math.max(this.#detachedWindowLastSeq, result.lastSeq);
 			if (result.changed) {
 				this.localNotices = [];
 			}
@@ -289,7 +329,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.lastSeq = applied.lastSeq;
 			this.oldestSeq = this.entries[0]?.seq ?? 0;
 			if (nextEntries.length < applied.messages.length) {
-				this.hasMoreMessages = true;
+				this.hasEarlierMessages = true;
 				this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 			}
 		} else {
@@ -333,7 +373,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			pendingUserInputs?: PendingUserInput[];
 		},
 	): void {
-		this.#invalidateLoadMoreOperation();
+		this.#invalidatePageLoad();
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
@@ -348,18 +388,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.entries = messages;
 		this.lastSeq = options.lastSeq;
 		this.oldestSeq = options.pageOldestSeq;
-		this.hasMoreMessages = options.hasMore;
+		this.hasEarlierMessages = options.hasMore;
 		this.totalMessages = messages.length;
 		this.#replacePendingUserInputs(options.pendingUserInputs ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.#initialRevealPhase = 'complete';
-		this.isViewingInitialMessages = false;
-		this.#detachedWindowLastSeq = 0;
 		this.localNotices = [];
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		this.isLoadingMoreMessages = false;
 	}
 
 	setFromPage(
@@ -382,18 +419,18 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			(batch) => batch.generationId !== page.generationId,
 		);
 		if (hasBufferedGenerationChange) {
-			this.#invalidateLoadMoreOperation();
+			this.#invalidatePageLoad();
 			this.isLoadingMessages = false;
 			return 'generation-changed';
 		}
 
-		this.#invalidateLoadMoreOperation();
+		this.#invalidatePageLoad();
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.generationId = page.generationId;
 		this.entries = page.messages;
 		this.lastSeq = page.lastSeq;
 		this.oldestSeq = page.pageOldestSeq;
-		this.hasMoreMessages = page.hasMore;
+		this.hasEarlierMessages = page.hasMore;
 		this.totalMessages = page.messages.length;
 		if (this.#pendingUserInputsRevision === this.#pendingUserInputsRevisionAtLoadStart) {
 			this.#replacePendingUserInputs(pendingInputsFromPage(page));
@@ -402,8 +439,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		this.isViewingInitialMessages = false;
-		this.#detachedWindowLastSeq = 0;
 		for (const batch of buffered) {
 			const result = this.applyMessages(chatId, batch.generationId, batch.messages);
 			if (result !== 'applied') return result;
@@ -450,166 +485,140 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		throw new Error(this.loadError);
 	}
 
-	async loadMoreMessages(chatId: string): Promise<TranscriptPageLoadResult> {
-		if (this.#loadMorePromise) {
-			return this.#loadingMoreChatId === chatId ? this.#loadMorePromise : 'invalidated';
-		}
-		if (!this.hasMoreMessages || !chatId) return 'exhausted';
-
-		const generationId = this.generationId;
-		const operationEpoch = this.#loadMoreOperationEpoch;
-		this.isLoadingMoreMessages = true;
-		const loadPromise = this.#performLoadMoreMessages(chatId, generationId, operationEpoch);
-		this.#loadMorePromise = loadPromise;
-		this.#loadingMoreChatId = chatId;
-		try {
-			return await loadPromise;
-		} finally {
-			if (this.#loadMorePromise === loadPromise) {
-				this.#loadMorePromise = null;
-				this.#loadingMoreChatId = null;
-				this.isLoadingMoreMessages = false;
-			}
-		}
+	async loadEarlierPage(chatId: string): Promise<TranscriptPageLoadResult> {
+		return this.#loadPage('earlier', chatId);
 	}
 
-	async #performLoadMoreMessages(
+	async loadLaterPage(chatId: string): Promise<TranscriptPageLoadResult> {
+		return this.#loadPage('later', chatId);
+	}
+
+	async #loadPage(
+		direction: TranscriptPageDirection,
 		chatId: string,
-		generationId: string,
-		operationEpoch: number,
 	): Promise<TranscriptPageLoadResult> {
-		try {
-			const page = await getChatMessages({
-				chatId,
-				limit: MESSAGES_PER_PAGE,
-				beforeSeq: this.oldestSeq,
-			});
-			if (!this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch)) {
-				return 'invalidated';
-			}
-			if (page.generationId !== generationId) {
-				await this.loadMessages(chatId);
-				return 'invalidated';
-			}
-			if (page.messages.length === 0) {
-				this.hasMoreMessages = false;
-				return 'exhausted';
-			}
-			this.entries = [...page.messages, ...this.entries];
-			this.oldestSeq = page.messages[0].seq;
-			this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
-			this.hasMoreMessages = page.hasMore;
-			this.totalMessages = this.entries.length;
-			this.visibleMessageCount += page.messages.length;
-			return 'loaded';
-		} catch (error) {
-			console.error('Error loading more messages:', error);
-			return 'failed';
+		if (this.#pageLoadPromise) {
+			return this.#loadingPageDirection === direction && this.#loadingPageChatId === chatId
+				? this.#pageLoadPromise
+				: 'invalidated';
 		}
-	}
-
-	async loadLaterMessages(chatId: string): Promise<TranscriptPageLoadResult> {
-		if (this.#loadLaterPromise) {
-			return this.#loadingLaterChatId === chatId ? this.#loadLaterPromise : 'invalidated';
-		}
-		if (!this.isViewingInitialMessages || !chatId) return 'exhausted';
-
-		const generationId = this.generationId;
-		const operationEpoch = this.#loadMoreOperationEpoch;
-		const newestSeq = this.entries.at(-1)?.seq ?? 0;
-		if (newestSeq >= this.#detachedWindowLastSeq) {
-			this.isViewingInitialMessages = false;
-			this.#detachedWindowLastSeq = 0;
+		if (!chatId || (direction === 'earlier' ? !this.hasEarlierMessages : !this.hasLaterMessages)) {
 			return 'exhausted';
 		}
 
-		const loadPromise = this.#performLoadLaterMessages(
+		const generationId = this.generationId;
+		const operationEpoch = this.#pageLoadOperationEpoch;
+		const newestSeq = this.newestLoadedSeq;
+		this.pageStates[direction] = { status: 'loading', error: null };
+		const loadPromise = this.#performPageLoad(
+			direction,
 			chatId,
 			generationId,
 			operationEpoch,
 			newestSeq,
 		);
-		this.#loadLaterPromise = loadPromise;
-		this.#loadingLaterChatId = chatId;
+		this.#pageLoadPromise = loadPromise;
+		this.#loadingPageChatId = chatId;
+		this.#loadingPageDirection = direction;
 		try {
 			return await loadPromise;
 		} finally {
-			if (this.#loadLaterPromise === loadPromise) {
-				this.#loadLaterPromise = null;
-				this.#loadingLaterChatId = null;
+			if (this.#pageLoadPromise === loadPromise) {
+				this.#pageLoadPromise = null;
+				this.#loadingPageChatId = null;
+				this.#loadingPageDirection = null;
+				if (this.pageStates[direction].status === 'loading') {
+					this.pageStates[direction] = idlePageState();
+				}
 			}
 		}
 	}
 
-	async #performLoadLaterMessages(
+	async #performPageLoad(
+		direction: TranscriptPageDirection,
 		chatId: string,
 		generationId: string,
 		operationEpoch: number,
 		newestSeq: number,
 	): Promise<TranscriptPageLoadResult> {
 		try {
-			const page = await getChatMessages({
-				chatId,
-				limit: MESSAGES_PER_PAGE,
-				beforeSeq: Math.min(newestSeq + MESSAGES_PER_PAGE + 1, this.#detachedWindowLastSeq + 1),
-			});
-			if (!this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch)) {
+			const page = await getChatMessages(
+				direction === 'earlier'
+					? { chatId, limit: MESSAGES_PER_PAGE, beforeSeq: this.oldestSeq }
+					: {
+							chatId,
+							limit: MESSAGES_PER_PAGE,
+							beforeSeq: Math.min(newestSeq + MESSAGES_PER_PAGE + 1, this.lastSeq + 1),
+						},
+			);
+			if (!this.#isCurrentPageLoad(chatId, generationId, operationEpoch)) {
 				return 'invalidated';
 			}
 			if (page.generationId !== generationId) {
 				await this.loadMessages(chatId);
 				return 'invalidated';
 			}
-
-			const previousEntryCount = this.entries.length;
-			const applied = applyChatViewMessages(this.entries, page.messages, newestSeq);
-			if (applied.status !== 'applied' || !applied.changed) return 'failed';
-
-			this.entries = applied.messages;
-			this.totalMessages = this.entries.length;
-			this.visibleMessageCount += this.entries.length - previousEntryCount;
-			this.#detachedWindowLastSeq = Math.max(
-				this.#detachedWindowLastSeq,
-				this.lastSeq,
-				page.lastSeq,
-			);
-
-			if ((this.entries.at(-1)?.seq ?? 0) >= this.#detachedWindowLastSeq) {
-				this.transcriptCache.replaceFromPage(chatId, page);
-				this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
-				this.isViewingInitialMessages = false;
-				this.#detachedWindowLastSeq = 0;
-			}
-			return 'loaded';
+			return direction === 'earlier'
+				? this.#applyEarlierPage(page)
+				: this.#applyLaterPage(page, newestSeq);
 		} catch (error) {
-			console.error('Error loading later messages:', error);
+			if (this.#isCurrentPageLoad(chatId, generationId, operationEpoch)) {
+				this.pageStates[direction] = {
+					status: 'error',
+					error: error instanceof Error ? error.message : 'Page load failed',
+				};
+			}
+			console.error(`Error loading ${direction} messages:`, error);
 			return 'failed';
 		}
 	}
 
-	invalidatePendingHistoryLoad(): void {
-		this.#invalidateLoadMoreOperation();
+	#applyEarlierPage(page: ChatPage): TranscriptPageLoadResult {
+		if (page.messages.length === 0) {
+			this.hasEarlierMessages = false;
+			return 'exhausted';
+		}
+		this.entries = [...page.messages, ...this.entries];
+		this.oldestSeq = page.messages[0].seq;
+		this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
+		this.hasEarlierMessages = page.hasMore;
+		this.totalMessages = this.entries.length;
+		this.visibleMessageCount += page.messages.length;
+		return 'loaded';
 	}
 
-	#isCurrentLoadMoreOperation(
-		chatId: string,
-		generationId: string,
-		operationEpoch: number,
-	): boolean {
+	#applyLaterPage(page: ChatPage, newestSeq: number): TranscriptPageLoadResult {
+		const previousEntryCount = this.entries.length;
+		const applied = applyChatViewMessages(this.entries, page.messages, newestSeq);
+		if (applied.status !== 'applied' || !applied.changed) {
+			throw new Error('Later transcript page did not advance the loaded window');
+		}
+
+		this.entries = applied.messages;
+		this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
+		this.totalMessages = this.entries.length;
+		this.visibleMessageCount += this.entries.length - previousEntryCount;
+		return 'loaded';
+	}
+
+	invalidatePendingHistoryLoad(): void {
+		this.#invalidatePageLoad();
+	}
+
+	#isCurrentPageLoad(chatId: string, generationId: string, operationEpoch: number): boolean {
 		return (
-			this.#loadMoreOperationEpoch === operationEpoch &&
+			this.#pageLoadOperationEpoch === operationEpoch &&
 			this.activeChatId === chatId &&
 			this.generationId === generationId
 		);
 	}
 
-	#invalidateLoadMoreOperation(): void {
-		this.#loadMoreOperationEpoch += 1;
-		this.#loadMorePromise = null;
-		this.#loadingMoreChatId = null;
-		this.#loadLaterPromise = null;
-		this.#loadingLaterChatId = null;
-		this.isLoadingMoreMessages = false;
+	#invalidatePageLoad(): void {
+		this.#pageLoadOperationEpoch += 1;
+		this.#pageLoadPromise = null;
+		this.#loadingPageChatId = null;
+		this.#loadingPageDirection = null;
+		this.pageStates = { earlier: idlePageState(), later: idlePageState() };
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
@@ -671,7 +680,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	clearMessages(): void {
-		this.#invalidateLoadMoreOperation();
+		this.#invalidatePageLoad();
 		this.#loadEpoch += 1;
 		this.entries = [];
 		this.generationId = '';
@@ -679,14 +688,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.oldestSeq = 0;
 		this.#replacePendingUserInputs([]);
 		this.localNotices = [];
-		this.hasMoreMessages = false;
+		this.hasEarlierMessages = false;
 		this.totalMessages = 0;
 		this.loadStatus = 'idle';
 		this.loadError = null;
 		this.#snapshotBuffer = null;
 		this.#initialRevealPhase = 'complete';
-		this.isViewingInitialMessages = false;
-		this.#detachedWindowLastSeq = 0;
 	}
 
 	compactToRecentMessages(): boolean {
@@ -694,13 +701,17 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.entries = this.entries.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		this.oldestSeq = this.entries[0]?.seq ?? 0;
 		this.totalMessages = this.entries.length;
-		this.hasMoreMessages = true;
+		this.hasEarlierMessages = true;
 		this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		return true;
 	}
 
-	loadEarlierMessages(): void {
-		this.visibleMessageCount += 100;
+	revealEarlierLoadedRows(): boolean {
+		const previousCount = this.visibleMessageCount;
+		this.visibleMessageCount = Math.min(this.displayMessageCount, previousCount + 100);
+		const changed = this.visibleMessageCount > previousCount;
+		if (changed) this.pageStates.earlier = idlePageState();
+		return changed;
 	}
 
 	get hasInitialMessagesToReveal(): boolean {
@@ -738,15 +749,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (this.#snapshotBuffer) return 'invalidated';
 		const alreadyAtTarget =
 			target === 'latest'
-				? !this.isViewingInitialMessages
-				: this.isViewingInitialMessages ||
+				? !this.hasLaterMessages
+				: this.hasLaterMessages ||
 					(this.oldestSeq === 1 &&
 						this.entries.length <= MESSAGES_PER_PAGE &&
 						this.entries.at(-1)?.seq === this.lastSeq);
 
 		const windowNavigationEpoch = ++this.#windowNavigationEpoch;
 		const loadEpoch = this.#beginLoadEpoch();
-		this.#invalidateLoadMoreOperation();
+		this.#invalidatePageLoad();
 		this.isLoadingMessages = false;
 		if (alreadyAtTarget) return 'loaded';
 
@@ -797,17 +808,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 			this.entries = page.messages;
 			this.oldestSeq = page.pageOldestSeq;
-			this.hasMoreMessages = false;
+			this.hasEarlierMessages = false;
 			this.totalMessages = page.messages.length;
 			this.visibleMessageCount = page.messages.length;
 			this.#initialRevealPhase = 'complete';
-			const initialWindowServerLastSeq = Math.max(this.lastSeq, page.lastSeq);
-			this.isViewingInitialMessages = (page.messages.at(-1)?.seq ?? 0) < initialWindowServerLastSeq;
-			if (this.isViewingInitialMessages) {
-				this.#detachedWindowLastSeq = initialWindowServerLastSeq;
+			if (this.hasLaterMessages) {
 				this.isUserScrolledUp = true;
-			} else {
-				this.#detachedWindowLastSeq = 0;
 			}
 			this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 			this.loadError = null;
@@ -850,7 +856,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastSeq = restored.lastSeq;
 		this.oldestSeq = restored.oldestSeq;
 		this.totalMessages = restored.messages.length;
-		this.hasMoreMessages = false;
+		this.hasEarlierMessages = false;
 		this.loadStatus = restored.messages.length === 0 ? 'empty' : 'loaded';
 		this.#resolvePendingInitialReveal();
 		return { count: restored.messages.length, stale: restored.stale };

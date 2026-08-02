@@ -119,7 +119,7 @@ describe('ActiveTranscriptState', () => {
 		expect(contentOf(chat.chatMessages[0])).toBe('message-52');
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: messageCount });
 		expect(chat.oldestSeq).toBe(52);
-		expect(chat.hasMoreMessages).toBe(true);
+		expect(chat.hasEarlierMessages).toBe(true);
 		expect(chat.visibleRows).toHaveLength(INITIAL_VISIBLE_MESSAGES);
 	});
 
@@ -153,7 +153,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		expect(contentOf(chat.chatMessages[0])).toBe('message-51');
 		expect(chat.oldestSeq).toBe(51);
-		expect(chat.hasMoreMessages).toBe(true);
+		expect(chat.hasEarlierMessages).toBe(true);
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 	});
 
@@ -411,7 +411,7 @@ describe('ActiveTranscriptState', () => {
 		},
 	);
 
-		it('installs pending inputs from HTTP snapshots and hides them after durable echo', () => {
+	it('installs pending inputs from HTTP snapshots and hides them after durable echo', () => {
 		const chat = new ActiveTranscriptState();
 		const epoch = chat.beginSnapshotLoad();
 
@@ -440,88 +440,98 @@ describe('ActiveTranscriptState', () => {
 		]);
 
 		expect(chat.visiblePendingInputs).toHaveLength(0);
-			expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
-		});
+		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+	});
 
-		it('renders byte-free attachment placeholders for restored pending inputs', () => {
-			const chat = new ActiveTranscriptState();
-			chat.setPendingUserInputs([
-				{
-					chatId: 'chat-1',
-					clientRequestId: 'req-attachment',
-					content: '',
-					createdAt: TS,
-					deliveryStatus: 'failed',
-					attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
-				},
-			]);
-
-			expect(chat.displayMessages).toHaveLength(1);
-			expect(chat.displayMessages[0]).toMatchObject({
-				type: 'user-message',
+	it('renders byte-free attachment placeholders for restored pending inputs', () => {
+		const chat = new ActiveTranscriptState();
+		chat.setPendingUserInputs([
+			{
+				chatId: 'chat-1',
+				clientRequestId: 'req-attachment',
 				content: '',
-				images: [{
+				createdAt: TS,
+				deliveryStatus: 'failed',
+				attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
+			},
+		]);
+
+		expect(chat.displayMessages).toHaveLength(1);
+		expect(chat.displayMessages[0]).toMatchObject({
+			type: 'user-message',
+			content: '',
+			images: [
+				{
 					name: 'context.pdf',
 					mimeType: 'application/octet-stream',
 					data: '',
-				}],
-				metadata: { deliveryStatus: 'failed' },
-			});
-		});
-
-		it('projects a failed pending status onto its durable user row without duplication', () => {
-			const chat = new ActiveTranscriptState();
-			chat.applyMessages('chat-1', 'generation-1', [
-				entry(1, user('pending', {
-					clientRequestId: 'req-1',
-					deliveryStatus: 'accepted',
-				})),
-			]);
-			chat.setPendingUserInputs([
-				{
-					chatId: 'chat-1',
-					clientRequestId: 'req-1',
-					content: 'pending',
-					createdAt: TS,
-					deliveryStatus: 'failed',
 				},
-			]);
-
-			expect(chat.visiblePendingInputs).toHaveLength(0);
-			expect(chat.displayMessages).toHaveLength(1);
-			expect(chat.displayMessages[0]).toMatchObject({
-				type: 'user-message',
-				metadata: { clientRequestId: 'req-1', deliveryStatus: 'failed' },
-			});
-			expect(chat.entries[0].message).toMatchObject({
-				metadata: { clientRequestId: 'req-1', deliveryStatus: 'accepted' },
-			});
-			expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
+			],
+			metadata: { deliveryStatus: 'failed' },
 		});
+	});
 
-		it('projects an unconfirmed pending status onto its durable user row without duplication', () => {
-			const chat = new ActiveTranscriptState();
-			chat.applyMessages('chat-1', 'generation-1', [
-				entry(1, user('pending', {
+	it('projects a failed pending status onto its durable user row without duplication', () => {
+		const chat = new ActiveTranscriptState();
+		chat.applyMessages('chat-1', 'generation-1', [
+			entry(
+				1,
+				user('pending', {
 					clientRequestId: 'req-1',
 					deliveryStatus: 'accepted',
-				})),
-			]);
-			chat.setPendingUserInputs([{
+				}),
+			),
+		]);
+		chat.setPendingUserInputs([
+			{
+				chatId: 'chat-1',
+				clientRequestId: 'req-1',
+				content: 'pending',
+				createdAt: TS,
+				deliveryStatus: 'failed',
+			},
+		]);
+
+		expect(chat.visiblePendingInputs).toHaveLength(0);
+		expect(chat.displayMessages).toHaveLength(1);
+		expect(chat.displayMessages[0]).toMatchObject({
+			type: 'user-message',
+			metadata: { clientRequestId: 'req-1', deliveryStatus: 'failed' },
+		});
+		expect(chat.entries[0].message).toMatchObject({
+			metadata: { clientRequestId: 'req-1', deliveryStatus: 'accepted' },
+		});
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
+	});
+
+	it('projects an unconfirmed pending status onto its durable user row without duplication', () => {
+		const chat = new ActiveTranscriptState();
+		chat.applyMessages('chat-1', 'generation-1', [
+			entry(
+				1,
+				user('pending', {
+					clientRequestId: 'req-1',
+					deliveryStatus: 'accepted',
+				}),
+			),
+		]);
+		chat.setPendingUserInputs([
+			{
 				chatId: 'chat-1',
 				clientRequestId: 'req-1',
 				content: 'pending',
 				createdAt: TS,
 				deliveryStatus: 'unconfirmed',
-			}]);
+			},
+		]);
 
-			expect(chat.visiblePendingInputs).toHaveLength(0);
-			expect(chat.displayMessages).toHaveLength(1);
-			expect(chat.displayMessages[0]).toMatchObject({
-				type: 'user-message',
-				metadata: { clientRequestId: 'req-1', deliveryStatus: 'unconfirmed' },
-			});
+		expect(chat.visiblePendingInputs).toHaveLength(0);
+		expect(chat.displayMessages).toHaveLength(1);
+		expect(chat.displayMessages[0]).toMatchObject({
+			type: 'user-message',
+			metadata: { clientRequestId: 'req-1', deliveryStatus: 'unconfirmed' },
 		});
+	});
 
 	it('clears pending overlays when a generation is replaced without snapshot pending inputs', () => {
 		const chat = new ActiveTranscriptState();
@@ -737,7 +747,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows).toHaveLength(50);
 		expect(chat.visibleRows[0]).toMatchObject({ kind: 'message', seq: 1 });
 		expect(chat.visibleRows.at(-1)).toMatchObject({ kind: 'message', seq: 50 });
-		expect(chat.isViewingInitialMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(true);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 6_044 });
 		expect(chat.transcriptCache.get('chat-1')?.messages[0]).toMatchObject({ seq: 5_995 });
 	});
@@ -790,7 +800,7 @@ describe('ActiveTranscriptState', () => {
 			});
 
 		await expect(chat.navigateToWindow('chat-1', 'initial')).resolves.toBe('loaded');
-		await expect(chat.loadLaterMessages('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
 
 		expect(getChatMessages).toHaveBeenNthCalledWith(2, {
 			chatId: 'chat-1',
@@ -799,9 +809,9 @@ describe('ActiveTranscriptState', () => {
 		});
 		expect(chat.entries).toHaveLength(100);
 		expect(chat.entries.at(-1)).toMatchObject({ seq: 100 });
-		expect(chat.isViewingInitialMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(true);
 
-		await expect(chat.loadLaterMessages('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
 
 		expect(getChatMessages).toHaveBeenNthCalledWith(3, {
 			chatId: 'chat-1',
@@ -810,7 +820,7 @@ describe('ActiveTranscriptState', () => {
 		});
 		expect(chat.entries).toHaveLength(120);
 		expect(chat.visibleRows).toHaveLength(120);
-		expect(chat.isViewingInitialMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 120 });
 		expect(chat.transcriptCache.get('chat-1')?.messages[0]).toMatchObject({ seq: 71 });
 	});
@@ -870,16 +880,16 @@ describe('ActiveTranscriptState', () => {
 			]),
 		).toBe('applied');
 
-		await expect(chat.loadLaterMessages('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
 		expect(chat.entries.at(-1)).toMatchObject({ seq: 100 });
-		expect(chat.isViewingInitialMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(true);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 102 });
 
-		await expect(chat.loadLaterMessages('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
 		expect(chat.entries.map((item) => item.seq)).toEqual(
 			Array.from({ length: 102 }, (_, index) => index + 1),
 		);
-		expect(chat.isViewingInitialMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 102 });
 	});
 
@@ -913,10 +923,11 @@ describe('ActiveTranscriptState', () => {
 			);
 
 		await expect(chat.navigateToWindow('chat-1', 'initial')).resolves.toBe('loaded');
-		const firstLoad = chat.loadLaterMessages('chat-1');
-		const secondLoad = chat.loadLaterMessages('chat-1');
+		const firstLoad = chat.loadLaterPage('chat-1');
+		const secondLoad = chat.loadLaterPage('chat-1');
 
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
+		expect(chat.pageStates.later.status).toBe('loading');
 		resolveForwardPage({
 			chatId: 'chat-1',
 			limit: 50,
@@ -933,7 +944,57 @@ describe('ActiveTranscriptState', () => {
 		await expect(Promise.all([firstLoad, secondLoad])).resolves.toEqual(['loaded', 'loaded']);
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
 		expect(chat.entries).toHaveLength(100);
-		expect(chat.isViewingInitialMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(false);
+		expect(chat.pageStates.later.status).toBe('idle');
+	});
+
+	it('keeps a failed later page directional and retryable', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) =>
+				entry(index + 51, assistant(`message-${index + 51}`)),
+			),
+			{ lastSeq: 100, pageOldestSeq: 51, hasMore: true },
+		);
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: Array.from({ length: 50 }, (_, index) =>
+						entry(index + 1, assistant(`message-${index + 1}`)),
+					),
+					lastSeq: 100,
+					pageOldestSeq: 1,
+				}),
+			})
+			.mockRejectedValueOnce(new Error('network unavailable'))
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: Array.from({ length: 50 }, (_, index) =>
+						entry(index + 51, assistant(`message-${index + 51}`)),
+					),
+					lastSeq: 100,
+					pageOldestSeq: 51,
+				}),
+			});
+
+		await chat.navigateToWindow('chat-1', 'initial');
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('failed');
+
+		expect(chat.pageStates.later).toEqual({
+			status: 'error',
+			error: 'network unavailable',
+		});
+		expect(chat.hasLaterMessages).toBe(true);
+
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
+		expect(chat.pageStates.later.status).toBe('idle');
+		expect(chat.hasLaterMessages).toBe(false);
 	});
 
 	it('keeps the reconnect cursor behind an unseen initial-window server head', async () => {
@@ -968,7 +1029,7 @@ describe('ActiveTranscriptState', () => {
 		});
 
 		await expect(initial).resolves.toBe('loaded');
-		expect(chat.isViewingInitialMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(true);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 100 });
 		expect(chat.transcriptCache.get('chat-1')?.lastSeq).toBe(100);
 
@@ -1014,7 +1075,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `latest-${index + 51}`),
 		);
-		expect(chat.isViewingInitialMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(false);
 	});
 
 	it('keeps the initial window when Initial supersedes a pending Bottom request', async () => {
@@ -1031,9 +1092,8 @@ describe('ActiveTranscriptState', () => {
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
 		chat.oldestSeq = 1;
-		chat.hasMoreMessages = false;
+		chat.hasEarlierMessages = false;
 		chat.visibleMessageCount = 50;
-		chat.isViewingInitialMessages = true;
 		let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages).mockReturnValueOnce(
 			new Promise((resolve) => {
@@ -1062,7 +1122,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `initial-${index + 1}`),
 		);
-		expect(chat.isViewingInitialMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(true);
 		expect(chat.isLoadingMessages).toBe(false);
 		expect(chat.loadStatus).toBe('loaded');
 		expect(chat.loadError).toBeNull();
@@ -1082,9 +1142,8 @@ describe('ActiveTranscriptState', () => {
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
 		chat.oldestSeq = 1;
-		chat.hasMoreMessages = false;
+		chat.hasEarlierMessages = false;
 		chat.visibleMessageCount = 50;
-		chat.isViewingInitialMessages = true;
 		let rejectLatest!: (reason: Error) => void;
 		vi.mocked(getChatMessages).mockReturnValueOnce(
 			new Promise((_resolve, reject) => {
@@ -1097,7 +1156,7 @@ describe('ActiveTranscriptState', () => {
 		rejectLatest(new Error('stale latest failure'));
 
 		await expect(latest).resolves.toBe('invalidated');
-		expect(chat.isViewingInitialMessages).toBe(true);
+		expect(chat.hasLaterMessages).toBe(true);
 		expect(chat.isLoadingMessages).toBe(false);
 		expect(chat.loadStatus).toBe('loaded');
 		expect(chat.loadError).toBeNull();
@@ -1162,7 +1221,7 @@ describe('ActiveTranscriptState', () => {
 		});
 		await chat.navigateToWindow('chat-1', 'latest');
 
-		expect(chat.isViewingInitialMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.visibleRows.at(-1)).toMatchObject({ kind: 'message', seq: 101 });
 	});
 
@@ -1180,9 +1239,8 @@ describe('ActiveTranscriptState', () => {
 			entry(index + 1, assistant(`initial-${index + 1}`)),
 		);
 		chat.oldestSeq = 1;
-		chat.hasMoreMessages = false;
+		chat.hasEarlierMessages = false;
 		chat.visibleMessageCount = 50;
-		chat.isViewingInitialMessages = true;
 		let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages).mockReturnValueOnce(
 			new Promise((resolve) => {
@@ -1273,9 +1331,8 @@ describe('ActiveTranscriptState', () => {
 				entry(index + 1, assistant(`initial-${index + 1}`)),
 			);
 			chat.oldestSeq = 1;
-			chat.hasMoreMessages = false;
+			chat.hasEarlierMessages = false;
 			chat.visibleMessageCount = 50;
-			chat.isViewingInitialMessages = true;
 			let resolveLatest!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 			vi.mocked(getChatMessages).mockReturnValueOnce(
 				new Promise((resolve) => {
@@ -1321,7 +1378,7 @@ describe('ActiveTranscriptState', () => {
 			}),
 		);
 
-		const load = chat.loadMoreMessages('chat-1');
+		const load = chat.loadEarlierPage('chat-1');
 		chat.invalidatePendingHistoryLoad();
 		resolvePage({
 			chatId: 'chat-1',
@@ -1340,7 +1397,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `message-${index + 51}`),
 		);
-		expect(chat.hasMoreMessages).toBe(true);
+		expect(chat.hasEarlierMessages).toBe(true);
 	});
 
 	it('does not replace another chat when an initial-page request settles', async () => {
@@ -1419,11 +1476,11 @@ describe('ActiveTranscriptState', () => {
 				}),
 			);
 
-		const oldLoad = chat.loadMoreMessages('chat-1');
-		expect(chat.isLoadingMoreMessages).toBe(true);
+		const oldLoad = chat.loadEarlierPage('chat-1');
+		expect(chat.pageStates.earlier.status).toBe('loading');
 
 		chat.activateChat('chat-2');
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 		chat.replaceGeneration(
 			'chat-2',
 			'generation-2',
@@ -1432,10 +1489,10 @@ describe('ActiveTranscriptState', () => {
 			),
 			{ lastSeq: 100, pageOldestSeq: 51, hasMore: true },
 		);
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 
-		const newLoad = chat.loadMoreMessages('chat-2');
-		expect(chat.isLoadingMoreMessages).toBe(true);
+		const newLoad = chat.loadEarlierPage('chat-2');
+		expect(chat.pageStates.earlier.status).toBe('loading');
 
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
 		resolveOldPage({
@@ -1454,7 +1511,7 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.activeChatId).toBe('chat-2');
 		expect(chat.chatMessages[0]).toMatchObject({ content: 'chat-2-message-51' });
-		expect(chat.isLoadingMoreMessages).toBe(true);
+		expect(chat.pageStates.earlier.status).toBe('loading');
 
 		resolveNewPage({
 			chatId: 'chat-2',
@@ -1474,7 +1531,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 100 }, (_, index) => `chat-2-message-${index + 1}`),
 		);
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 	});
 
 	it('loads a new chat initial page while the previous chat page request is pending', async () => {
@@ -1508,7 +1565,7 @@ describe('ActiveTranscriptState', () => {
 				}),
 			});
 
-		const oldLoad = chat.loadMoreMessages('chat-1');
+		const oldLoad = chat.loadEarlierPage('chat-1');
 		chat.activateChat('chat-2');
 		chat.replaceGeneration(
 			'chat-2',
@@ -1522,12 +1579,12 @@ describe('ActiveTranscriptState', () => {
 		await expect(chat.navigateToWindow('chat-2', 'initial')).resolves.toBe('loaded');
 
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
-		expect(chat.hasMoreMessages).toBe(false);
+		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.visibleRows).toHaveLength(50);
 		expect(chat.visibleRows[0]).toMatchObject({ kind: 'message', seq: 1 });
 		expect(chat.visibleRows.at(-1)).toMatchObject({ kind: 'message', seq: 50 });
-		expect(chat.isViewingInitialMessages).toBe(true);
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.hasLaterMessages).toBe(true);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 
 		resolveOldPage({
 			chatId: 'chat-1',
@@ -1545,7 +1602,7 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.activeChatId).toBe('chat-2');
 		expect(chat.visibleRows[0]).toMatchObject({ kind: 'message', seq: 1 });
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 	});
 
 	it('rejects an old page after switching away and back to the same chat generation', async () => {
@@ -1572,7 +1629,7 @@ describe('ActiveTranscriptState', () => {
 				}),
 			);
 
-		const oldLoad = chat.loadMoreMessages('chat-1');
+		const oldLoad = chat.loadEarlierPage('chat-1');
 		chat.activateChat('chat-2');
 		chat.replaceGeneration('chat-2', 'generation-2', [entry(1, assistant('chat-2'))], {
 			lastSeq: 1,
@@ -1585,7 +1642,7 @@ describe('ActiveTranscriptState', () => {
 			pageOldestSeq: 51,
 			hasMore: true,
 		});
-		const newLoad = chat.loadMoreMessages('chat-1');
+		const newLoad = chat.loadEarlierPage('chat-1');
 
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
 		resolveOldPage({
@@ -1605,7 +1662,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `chat-1-message-${index + 51}`),
 		);
-		expect(chat.isLoadingMoreMessages).toBe(true);
+		expect(chat.pageStates.earlier.status).toBe('loading');
 
 		resolveNewPage({
 			chatId: 'chat-1',
@@ -1624,7 +1681,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 100 }, (_, index) => `chat-1-message-${index + 1}`),
 		);
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 	});
 
 	it('does not share or apply a page request from a replaced generation', async () => {
@@ -1651,7 +1708,7 @@ describe('ActiveTranscriptState', () => {
 				}),
 			);
 
-		const oldLoad = chat.loadMoreMessages('chat-1');
+		const oldLoad = chat.loadEarlierPage('chat-1');
 		chat.replaceGeneration(
 			'chat-1',
 			'generation-2',
@@ -1660,7 +1717,7 @@ describe('ActiveTranscriptState', () => {
 			),
 			{ lastSeq: 100, pageOldestSeq: 51, hasMore: true },
 		);
-		const newLoad = chat.loadMoreMessages('chat-1');
+		const newLoad = chat.loadEarlierPage('chat-1');
 
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
 		resolveOldPage({
@@ -1680,7 +1737,7 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.generationId).toBe('generation-2');
 		expect(chat.chatMessages[0]).toMatchObject({ content: 'generation-2-message-51' });
-		expect(chat.isLoadingMoreMessages).toBe(true);
+		expect(chat.pageStates.earlier.status).toBe('loading');
 
 		resolveNewPage({
 			chatId: 'chat-1',
@@ -1700,7 +1757,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 100 }, (_, index) => `generation-2-message-${index + 1}`),
 		);
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 	});
 
 	it('detaches an earlier-page request when a buffered batch changes generation', async () => {
@@ -1727,7 +1784,7 @@ describe('ActiveTranscriptState', () => {
 				}),
 			);
 
-		const oldLoad = chat.loadMoreMessages('chat-1');
+		const oldLoad = chat.loadEarlierPage('chat-1');
 		const snapshotEpoch = chat.beginSnapshotLoad();
 		chat.applyMessages('chat-1', 'generation-2', [entry(1, assistant('new generation'))]);
 
@@ -1744,9 +1801,9 @@ describe('ActiveTranscriptState', () => {
 				snapshotEpoch,
 			),
 		).toBe('generation-changed');
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 
-		const newLoad = chat.loadMoreMessages('chat-1');
+		const newLoad = chat.loadEarlierPage('chat-1');
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
 
 		resolveOldPage({
@@ -1766,7 +1823,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(
 			Array.from({ length: 50 }, (_, index) => `message-${index + 51}`),
 		);
-		expect(chat.isLoadingMoreMessages).toBe(true);
+		expect(chat.pageStates.earlier.status).toBe('loading');
 
 		resolveNewPage({
 			chatId: 'chat-1',
@@ -1779,7 +1836,7 @@ describe('ActiveTranscriptState', () => {
 			}),
 		});
 		await expect(newLoad).resolves.toBe('exhausted');
-		expect(chat.isLoadingMoreMessages).toBe(false);
+		expect(chat.pageStates.earlier.status).toBe('idle');
 	});
 
 	it('keeps loaded earlier selected messages while the shared cache stays windowed', () => {

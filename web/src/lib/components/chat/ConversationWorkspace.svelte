@@ -367,7 +367,7 @@
 		getSelectedChatId: () => sessions.selectedChatId,
 		reloadTranscript: (chatId) => controller.loadChat(chatId),
 		restoreLatestTranscript: (chatId) => scroll.restoreLatestWindow(chatId),
-		loadOlderMessages: (chatId) => scroll.loadMoreMessagesForNavigator(chatId),
+		loadOlderMessages: (chatId) => scroll.loadEarlierPageForNavigator(chatId),
 		jumpToRow: (target) => scroll.jumpToMessageRow(target),
 	});
 
@@ -455,28 +455,32 @@
 		const node = scrollContainer;
 		if (!node) return;
 
-		const noteIntent = () => scroll.noteUserScrollIntent();
+		const handleWheel = (event: WheelEvent) => {
+			if (event.deltaY === 0) return;
+			scroll.noteUserScrollIntent(event.deltaY < 0 ? 'earlier' : 'later');
+		};
+		const handleTouchStart = () => scroll.noteUserScrollIntent();
 		const handleKeydown = (event: KeyboardEvent) => {
-			if (
-				event.key === 'ArrowUp' ||
-				event.key === 'ArrowDown' ||
-				event.key === 'PageUp' ||
-				event.key === 'PageDown' ||
-				event.key === 'Home' ||
-				event.key === 'End' ||
-				event.key === ' '
-			) {
-				scroll.noteUserScrollIntent();
+			if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
+				scroll.noteUserScrollIntent('earlier');
+				return;
+			}
+			if (event.key === ' ') {
+				scroll.noteUserScrollIntent(event.shiftKey ? 'earlier' : 'later');
+				return;
+			}
+			if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'End') {
+				scroll.noteUserScrollIntent('later');
 			}
 		};
 
-		node.addEventListener('wheel', noteIntent, { capture: true, passive: true });
-		node.addEventListener('touchstart', noteIntent, { capture: true, passive: true });
+		node.addEventListener('wheel', handleWheel, { capture: true, passive: true });
+		node.addEventListener('touchstart', handleTouchStart, { capture: true, passive: true });
 		node.addEventListener('keydown', handleKeydown, { capture: true });
 
 		return () => {
-			node.removeEventListener('wheel', noteIntent, { capture: true });
-			node.removeEventListener('touchstart', noteIntent, { capture: true });
+			node.removeEventListener('wheel', handleWheel, { capture: true });
+			node.removeEventListener('touchstart', handleTouchStart, { capture: true });
 			node.removeEventListener('keydown', handleKeydown, { capture: true });
 		};
 	});
@@ -637,6 +641,8 @@
 			bind:scrollContentContainer
 			onscroll={() => scroll.handleScroll()}
 			onUserScrollIntent={() => scroll.noteUserScrollIntent()}
+			onLoadEarlier={() => void scroll.requestPage('earlier', 'button')}
+			onLoadLater={() => void scroll.requestPage('later', 'button')}
 			onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 			onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
 			pendingPermissionRequests={conversationUi.pendingPermissionRequests}
@@ -747,13 +753,7 @@
 			onMove={async (source, target, placement, reorderRevision) => {
 				const chatId = queuedInputsDialogChatId;
 				if (!chatId) return;
-				await controller.moveQueueEntryForChat(
-					chatId,
-					source,
-					target,
-					placement,
-					reorderRevision,
-				);
+				await controller.moveQueueEntryForChat(chatId, source, target, placement, reorderRevision);
 			}}
 			onPause={async () => {
 				if (!queuedInputsDialogChatId) return;

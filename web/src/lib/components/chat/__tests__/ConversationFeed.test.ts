@@ -21,22 +21,24 @@ describe('ConversationFeed', () => {
 	it('renders the floating toolbar reservation inside scrollable feed content', () => {
 		const { container } = render(ConversationFeedTestHost, {
 			reserveTopFloatingToolbar: true,
+			transcriptScenario: 'row-ids',
 		});
 
 		const viewport = screen.getByRole('log');
 		const spacer = container.querySelector<HTMLElement>(
 			'[data-chat-feed-top-floating-toolbar-spacer]',
 		);
-		const bottomAnchor = container.querySelector<HTMLElement>('[data-chat-bottom-anchor]');
+		const transcript = container.querySelector<HTMLElement>('[data-conversation-transcript]');
 
 		expect(spacer).toBeTruthy();
-		expect(bottomAnchor).toBeTruthy();
+		expect(transcript).toBeTruthy();
 		expect(viewport.contains(spacer)).toBe(true);
-		expect(viewport.contains(bottomAnchor)).toBe(true);
+		expect(viewport.contains(transcript)).toBe(true);
 		expect(spacer?.classList.contains('h-[var(--workspace-floating-taskbar-inset)]')).toBe(true);
-		expect(spacer?.compareDocumentPosition(bottomAnchor as Node)).toBe(
+		expect(spacer?.compareDocumentPosition(transcript as Node)).toBe(
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);
+		expect(container.querySelector('[data-chat-bottom-anchor]')).toBeNull();
 	});
 
 	it('hides the local truncation control during the automatic initial reveal', () => {
@@ -45,10 +47,32 @@ describe('ConversationFeed', () => {
 		expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
 	});
 
-	it('still shows the local truncation control after the automatic reveal window', () => {
+	it('shows a directional earlier boundary after the automatic reveal window', () => {
 		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation' });
 
-		expect(screen.getByRole('button', { name: /load more/i })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
+		expect(screen.queryByText('Load more')).toBeNull();
+	});
+
+	it('renders later loading below the transcript without a native bottom anchor', () => {
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'loading-later',
+		});
+		const transcript = container.querySelector('[data-conversation-transcript]');
+		const boundary = container.querySelector('[data-transcript-page-boundary="later"]');
+
+		expect(screen.getByText('Loading later messages...')).toBeTruthy();
+		expect(screen.getByRole('log').getAttribute('aria-busy')).toBe('true');
+		expect(transcript?.compareDocumentPosition(boundary as Node)).toBe(
+			Node.DOCUMENT_POSITION_FOLLOWING,
+		);
+		expect(container.querySelector('[data-chat-bottom-anchor]')).toBeNull();
+	});
+
+	it('keeps an earlier failure in flow as a directional retry', () => {
+		render(ConversationFeedTestHost, { transcriptScenario: 'error-earlier' });
+
+		expect(screen.getByRole('button', { name: 'Retry earlier messages' })).toBeTruthy();
 	});
 
 	it('passes durable and pending row identities to the transcript renderer', () => {

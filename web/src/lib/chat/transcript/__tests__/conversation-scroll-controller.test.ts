@@ -9,21 +9,25 @@ function scrollState<T extends Partial<ConversationScrollState>>(
 ): T & ConversationScrollState {
 	const complete = {
 		compactToRecentMessages: vi.fn(() => false),
-		completeInitialMessagesReveal: vi.fn(),
+		canAutoFillEarlier: false,
+		canLoadEarlier: false,
+		canLoadLater: false,
 		displayMessageCount: 0,
 		generationId: 'generation-1',
 		hasInitialMessagesToReveal: false,
-		hasMoreMessages: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
-		isViewingInitialMessages: false,
+		hasLaterMessages: false,
 		invalidatePendingHistoryLoad: vi.fn(),
-		loadEarlierMessages: vi.fn(),
-		loadLaterMessages: vi.fn(async () => 'exhausted' as const),
-		loadMoreMessages: vi.fn(async () => 'exhausted' as const),
+		revealEarlierLoadedRows: vi.fn(() => false),
+		loadLaterPage: vi.fn(async () => 'exhausted' as const),
+		loadEarlierPage: vi.fn(async () => 'exhausted' as const),
 		loadStatus: 'loaded' as const,
 		navigateToWindow: vi.fn(async () => 'loaded' as const),
-		visibleMessageCount: 100,
+		pageStates: {
+			earlier: { status: 'idle' as const, error: null },
+			later: { status: 'idle' as const, error: null },
+		},
 		...overrides,
 	} satisfies ConversationScrollState;
 	return Object.assign(overrides, complete);
@@ -155,8 +159,10 @@ describe('ConversationScrollController', () => {
 	it('preserves the viewport anchor after older messages render', async () => {
 		const scroller = { scrollTop: 40, scrollHeight: 800, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
+			canAutoFillEarlier: true,
+			canLoadEarlier: true,
 			isUserScrolledUp: true,
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				Object.defineProperty(scroller, 'scrollHeight', { value: 1100, configurable: true });
 				return 'loaded' as const;
 			}),
@@ -170,9 +176,9 @@ describe('ConversationScrollController', () => {
 		});
 
 		controller.setPinnedToBottom(false);
-		await controller.loadMoreMessagesPreservingAnchor('chat-1', 800, 40);
+		await controller.requestPage('earlier', 'button');
 
-		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadEarlierPage).toHaveBeenCalledWith('chat-1');
 		expect(scroller.scrollTop).toBe(340);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
@@ -187,7 +193,7 @@ describe('ConversationScrollController', () => {
 		});
 		const chatState = {
 			isUserScrolledUp: false,
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				scrollHeight = 1_100;
 				return 'loaded' as const;
 			}),
@@ -200,7 +206,7 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(true);
 
-		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe('loaded');
+		expect(await controller.loadEarlierPageForNavigator('chat-1')).toBe('loaded');
 
 		expect(scroller.scrollTop).toBe(1_100);
 		expect(chatState.isUserScrolledUp).toBe(false);
@@ -215,8 +221,9 @@ describe('ConversationScrollController', () => {
 			configurable: true,
 		});
 		const chatState = {
+			canLoadEarlier: true,
 			isUserScrolledUp: true,
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				scrollHeight = 1_050;
 				return 'loaded' as const;
 			}),
@@ -229,7 +236,7 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(false);
 
-		expect(await controller.loadMoreMessagesForNavigator('chat-1')).toBe('loaded');
+		expect(await controller.loadEarlierPageForNavigator('chat-1')).toBe('loaded');
 
 		expect(scroller.scrollTop).toBe(410);
 		expect(chatState.isUserScrolledUp).toBe(true);
@@ -248,9 +255,9 @@ describe('ConversationScrollController', () => {
 			configurable: true,
 		});
 		const chatState = {
-			hasMoreMessages: false,
+			canLoadEarlier: false,
 			isUserScrolledUp: true,
-			loadMoreMessages: vi.fn(() => load),
+			loadEarlierPage: vi.fn(() => load),
 		};
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
@@ -260,7 +267,7 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(false);
 
-		const pagination = controller.loadMoreMessagesForNavigator('chat-1');
+		const pagination = controller.loadEarlierPageForNavigator('chat-1');
 		await controller.scrollToTop();
 		scrollHeight = 1_100;
 		resolveLoad('loaded');
@@ -296,7 +303,7 @@ describe('ConversationScrollController', () => {
 			invalidatePendingHistoryLoad: vi.fn(() => {
 				invalidated = true;
 			}),
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				await page;
 				if (invalidated) return 'invalidated' as const;
 				scrollHeight = 1_100;
@@ -312,7 +319,7 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(false);
 
-		const pagination = controller.loadMoreMessagesForNavigator('chat-1');
+		const pagination = controller.loadEarlierPageForNavigator('chat-1');
 		expect(
 			await controller.jumpToMessageRow({
 				chatId: 'chat-1',
@@ -378,7 +385,7 @@ describe('ConversationScrollController', () => {
 		const chatState = {
 			generationId: 'generation-1',
 			isUserScrolledUp: false,
-			isViewingInitialMessages: false,
+			hasLaterMessages: false,
 			navigateToWindow: vi.fn(async () => 'loaded' as const),
 		};
 		const controller = new ConversationScrollController({
@@ -469,7 +476,7 @@ describe('ConversationScrollController', () => {
 	it('treats scroll-to-top as an intentional user scroll', async () => {
 		const scroller = { scrollTop: 800, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
-			hasMoreMessages: false,
+			canLoadEarlier: false,
 			isUserScrolledUp: false,
 			navigateToWindow: vi.fn(async () => 'loaded' as const),
 		};
@@ -500,10 +507,10 @@ describe('ConversationScrollController', () => {
 		});
 		const chatState = {
 			isUserScrolledUp: true,
-			isViewingInitialMessages: true,
+			hasLaterMessages: true,
 			navigateToWindow: vi.fn(async (_chatId: string, target: 'initial' | 'latest') => {
 				expect(target).toBe('latest');
-				chatState.isViewingInitialMessages = false;
+				chatState.hasLaterMessages = false;
 				scrollHeight = 1_600;
 				return 'loaded' as const;
 			}),
@@ -528,7 +535,7 @@ describe('ConversationScrollController', () => {
 		const scroller = { scrollTop: 800, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
 			hasInitialMessagesToReveal: true,
-			hasMoreMessages: false,
+			canLoadEarlier: false,
 			isUserScrolledUp: true,
 			navigateToWindow: vi.fn(async () => 'loaded' as const),
 		};
@@ -613,7 +620,7 @@ describe('ConversationScrollController', () => {
 		});
 		const chatState = {
 			isUserScrolledUp: true,
-			isViewingInitialMessages: true,
+			hasLaterMessages: true,
 			navigateToWindow: vi.fn((_chatId: string, target: 'initial' | 'latest') =>
 				target === 'latest' ? latest : Promise.resolve('loaded' as const),
 			),
@@ -644,8 +651,8 @@ describe('ConversationScrollController', () => {
 		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
 			isUserScrolledUp: false,
-			hasMoreMessages: false,
-			loadMoreMessages: vi.fn(),
+			canLoadEarlier: false,
+			loadEarlierPage: vi.fn(),
 		};
 
 		const controller = new ConversationScrollController({
@@ -663,12 +670,13 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 	});
 
-	it('loads the next transcript page at the bottom of the detached initial window', () => {
+	it('loads one later page for a deliberate detached-window boundary encounter', () => {
 		const scroller = { scrollTop: 800, scrollHeight: 1_200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
+			canLoadLater: true,
 			isUserScrolledUp: false,
-			isViewingInitialMessages: true,
-			loadLaterMessages: vi.fn(async () => 'loaded' as const),
+			hasLaterMessages: true,
+			loadLaterPage: vi.fn(async () => 'loaded' as const),
 		};
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
@@ -678,15 +686,20 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(true);
 
+		controller.noteUserScrollIntent('later');
 		controller.handleScroll();
 
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
-		expect(chatState.loadLaterMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadLaterPage).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('releases traversed history when a short final page stays near the live edge', async () => {
+	it('does not follow or compact after a short final page reaches the live head', async () => {
 		let scrollHeight = 1_200;
+		let resolvePage!: (result: 'loaded') => void;
+		const page = new Promise<'loaded'>((resolve) => {
+			resolvePage = resolve;
+		});
 		const scroller = { scrollTop: 800, clientHeight: 400 } as HTMLDivElement;
 		Object.defineProperty(scroller, 'scrollHeight', {
 			get: () => scrollHeight,
@@ -694,13 +707,10 @@ describe('ConversationScrollController', () => {
 		});
 		const chatState = scrollState({
 			isUserScrolledUp: true,
+			hasLaterMessages: true as boolean,
+			canLoadLater: true as boolean,
 			compactToRecentMessages: vi.fn(() => true),
-		});
-		chatState.isViewingInitialMessages = true;
-		chatState.loadLaterMessages = vi.fn(async () => {
-			scrollHeight = 1_240;
-			chatState.isViewingInitialMessages = false;
-			return 'loaded' as const;
+			loadLaterPage: vi.fn(() => page),
 		});
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
@@ -710,12 +720,162 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setPinnedToBottom(false);
 
+		const pagination = controller.requestPage('later', 'button');
+		await vi.waitFor(() => expect(chatState.loadLaterPage).toHaveBeenCalledOnce());
+
+		scrollHeight = 1_240;
+		chatState.hasLaterMessages = false;
+		chatState.canLoadLater = false;
+		controller.noteUserScrollIntent('later');
+		controller.handleScroll();
+		resolvePage('loaded');
+		await expect(pagination).resolves.toBe('loaded');
 		controller.handleScroll();
 
-		await vi.waitFor(() => expect(chatState.compactToRecentMessages).toHaveBeenCalledOnce());
+		expect(chatState.compactToRecentMessages).not.toHaveBeenCalled();
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+		expect(scroller.scrollTop).toBe(800);
+
+		controller.noteUserScrollIntent('later');
+		controller.handleScroll();
+
+		await vi.waitFor(() => {
+			expect(chatState.compactToRecentMessages).toHaveBeenCalledOnce();
+			expect(scroller.scrollTop).toBe(1_240);
+		});
 		expect(chatState.isUserScrolledUp).toBe(false);
 		expect(controller.isPinnedToBottom).toBe(true);
-		expect(scroller.scrollTop).toBe(1_240);
+	});
+
+	it('preserves the same durable row when a later page is appended', async () => {
+		let scrollHeight = 1_200;
+		const scroller = {
+			scrollTop: 800,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 0 }),
+		} as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatAnchorId = 'generation-1:40';
+		const rowDocumentTop = 900;
+		row.getBoundingClientRect = () =>
+			({
+				top: rowDocumentTop - scroller.scrollTop,
+				bottom: rowDocumentTop - scroller.scrollTop + 40,
+			}) as DOMRect;
+		content.append(row);
+		const chatState = scrollState({
+			canLoadLater: true,
+			hasLaterMessages: true,
+			isUserScrolledUp: true,
+			loadLaterPage: vi.fn(async () => {
+				scrollHeight = 1_600;
+				return 'loaded' as const;
+			}),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		await controller.requestPage('later', 'button');
+
+		expect(scroller.scrollTop).toBe(800);
+		expect(row.getBoundingClientRect().top).toBe(100);
+		expect(chatState.isUserScrolledUp).toBe(true);
+	});
+
+	it('preserves the same durable row when an earlier page is prepended', async () => {
+		let scrollHeight = 1_200;
+		let rowDocumentTop = 900;
+		const scroller = {
+			scrollTop: 800,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 0 }),
+		} as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatAnchorId = 'generation-1:80';
+		row.getBoundingClientRect = () =>
+			({
+				top: rowDocumentTop - scroller.scrollTop,
+				bottom: rowDocumentTop - scroller.scrollTop + 40,
+			}) as DOMRect;
+		content.append(row);
+		const chatState = scrollState({
+			canLoadEarlier: true,
+			isUserScrolledUp: true,
+			loadEarlierPage: vi.fn(async () => {
+				scrollHeight = 1_500;
+				rowDocumentTop += 300;
+				return 'loaded' as const;
+			}),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		await controller.requestPage('earlier', 'button');
+
+		expect(scroller.scrollTop).toBe(1_100);
+		expect(row.getBoundingClientRect().top).toBe(100);
+		expect(chatState.isUserScrolledUp).toBe(true);
+	});
+
+	it('requires a later boundary to leave the activation zone before loading again', async () => {
+		let scrollHeight = 1_200;
+		const scroller = { scrollTop: 800, clientHeight: 400 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = scrollState({
+			canLoadLater: true,
+			hasLaterMessages: true,
+			isUserScrolledUp: true,
+			loadLaterPage: vi.fn(async () => {
+				scrollHeight += 40;
+				return 'loaded' as const;
+			}),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		await controller.requestPage('later', 'button');
+		expect(chatState.loadLaterPage).toHaveBeenCalledOnce();
+
+		controller.noteUserScrollIntent('later');
+		controller.handleScroll();
+		expect(chatState.loadLaterPage).toHaveBeenCalledOnce();
+
+		scroller.scrollTop = 600;
+		controller.noteUserScrollIntent('earlier');
+		controller.handleScroll();
+		scroller.scrollTop = 840;
+		controller.noteUserScrollIntent('later');
+		controller.handleScroll();
+
+		await vi.waitFor(() => expect(chatState.loadLaterPage).toHaveBeenCalledTimes(2));
 	});
 
 	it('fills an underfilled detached initial window without pinning it', async () => {
@@ -726,14 +886,15 @@ describe('ConversationScrollController', () => {
 			configurable: true,
 		});
 		const chatState = {
-			hasMoreMessages: true,
+			canLoadLater: true,
+			canLoadEarlier: true,
 			isUserScrolledUp: false,
-			isViewingInitialMessages: true,
-			loadLaterMessages: vi.fn(async () => {
+			hasLaterMessages: true,
+			loadLaterPage: vi.fn(async () => {
 				scrollHeight = 700;
 				return 'loaded' as const;
 			}),
-			loadMoreMessages: vi.fn(async () => 'loaded' as const),
+			loadEarlierPage: vi.fn(async () => 'loaded' as const),
 		};
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
@@ -745,8 +906,8 @@ describe('ConversationScrollController', () => {
 
 		await controller.fillUnderfilledViewport();
 
-		expect(chatState.loadLaterMessages).toHaveBeenCalledOnce();
-		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
+		expect(chatState.loadLaterPage).toHaveBeenCalledOnce();
+		expect(chatState.loadEarlierPage).not.toHaveBeenCalled();
 		expect(scroller.scrollTop).toBe(0);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
@@ -761,8 +922,8 @@ describe('ConversationScrollController', () => {
 		});
 		const chatState = scrollState({
 			isUserScrolledUp: true,
-			isViewingInitialMessages: true,
-			loadLaterMessages: vi
+			hasLaterMessages: true,
+			loadLaterPage: vi
 				.fn()
 				.mockResolvedValueOnce('failed' as const)
 				.mockImplementationOnce(async () => {
@@ -779,12 +940,12 @@ describe('ConversationScrollController', () => {
 		controller.setPinnedToBottom(false);
 
 		await controller.fillUnderfilledViewport();
-		expect(chatState.loadLaterMessages).toHaveBeenCalledOnce();
+		expect(chatState.loadLaterPage).toHaveBeenCalledOnce();
 
 		controller.setViewportVisible(false);
 		controller.setViewportVisible(true);
 
-		await vi.waitFor(() => expect(chatState.loadLaterMessages).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(chatState.loadLaterPage).toHaveBeenCalledTimes(2));
 		expect(scrollHeight).toBe(700);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
@@ -840,8 +1001,8 @@ describe('ConversationScrollController', () => {
 		const content = { offsetHeight: 800 } as HTMLDivElement;
 		const chatState = {
 			isUserScrolledUp: false,
-			hasMoreMessages: false,
-			loadMoreMessages: vi.fn(),
+			canLoadEarlier: false,
+			loadEarlierPage: vi.fn(),
 		};
 
 		const controller = new ConversationScrollController({
@@ -867,8 +1028,8 @@ describe('ConversationScrollController', () => {
 		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
 			isUserScrolledUp: false,
-			hasMoreMessages: false,
-			loadMoreMessages: vi.fn(),
+			canLoadEarlier: false,
+			loadEarlierPage: vi.fn(),
 		};
 
 		const controller = new ConversationScrollController({
@@ -887,25 +1048,13 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(false);
 	});
 
-	it('completes the initial reveal and paginates from one top-scroll event', async () => {
-		let scrollHeight = 800;
-		const scroller = { scrollTop: 40, clientHeight: 400 } as HTMLDivElement;
-		Object.defineProperty(scroller, 'scrollHeight', {
-			get: () => scrollHeight,
-			configurable: true,
-		});
+	it('does not paginate while the initial transcript reveal is incomplete', () => {
+		const scroller = { scrollTop: 40, scrollHeight: 800, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
 			hasInitialMessagesToReveal: true,
-			hasMoreMessages: true,
+			canLoadEarlier: false,
 			isUserScrolledUp: true,
-			completeInitialMessagesReveal: vi.fn(() => {
-				chatState.hasInitialMessagesToReveal = false;
-				scrollHeight = 1200;
-			}),
-			loadMoreMessages: vi.fn(async () => {
-				scrollHeight = 1500;
-				return 'loaded' as const;
-			}),
+			loadEarlierPage: vi.fn(async () => 'loaded' as const),
 		};
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
@@ -915,12 +1064,11 @@ describe('ConversationScrollController', () => {
 		});
 
 		controller.setPinnedToBottom(false);
+		controller.noteUserScrollIntent('earlier');
 		controller.handleScroll();
-		await vi.waitFor(() => expect(chatState.loadMoreMessages).toHaveBeenCalledOnce());
 
-		expect(chatState.completeInitialMessagesReveal).toHaveBeenCalledOnce();
-		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
-		expect(scroller.scrollTop).toBe(740);
+		expect(chatState.loadEarlierPage).not.toHaveBeenCalled();
+		expect(scroller.scrollTop).toBe(40);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
 	});
@@ -937,17 +1085,13 @@ describe('ConversationScrollController', () => {
 			configurable: true,
 		});
 		const chatState = {
-			hasInitialMessagesToReveal: true,
-			hasMoreMessages: true,
+			hasInitialMessagesToReveal: false,
+			canLoadEarlier: true,
 			isUserScrolledUp: true,
-			completeInitialMessagesReveal: vi.fn(() => {
-				chatState.hasInitialMessagesToReveal = false;
-				scrollHeight = 1200;
-			}),
-			loadMoreMessages: vi.fn(() => pageLoad),
+			loadEarlierPage: vi.fn(() => pageLoad),
 			navigateToWindow: vi.fn(async () => {
 				await pageLoad;
-				chatState.hasMoreMessages = false;
+				chatState.canLoadEarlier = false;
 				return 'loaded' as const;
 			}),
 		};
@@ -959,8 +1103,9 @@ describe('ConversationScrollController', () => {
 		});
 
 		controller.setPinnedToBottom(false);
+		controller.noteUserScrollIntent('earlier');
 		controller.handleScroll();
-		await vi.waitFor(() => expect(chatState.loadMoreMessages).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(chatState.loadEarlierPage).toHaveBeenCalledOnce());
 		const scrollToTop = controller.scrollToTop();
 		await vi.waitFor(() => expect(chatState.navigateToWindow).toHaveBeenCalledOnce());
 
@@ -978,8 +1123,9 @@ describe('ConversationScrollController', () => {
 		const scroller = { scrollTop: 40, scrollHeight: 800, clientHeight: 400 } as HTMLDivElement;
 		const sessions = { selectedChatId: 'chat-1' };
 		const chatState = {
+			canLoadEarlier: true,
 			isUserScrolledUp: true,
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				sessions.selectedChatId = 'chat-2';
 				Object.defineProperty(scroller, 'scrollHeight', { value: 1100, configurable: true });
 				return 'loaded' as const;
@@ -993,10 +1139,10 @@ describe('ConversationScrollController', () => {
 			sessions,
 		});
 
-		await controller.loadMoreMessagesPreservingAnchor('chat-1', 800, 40);
+		await controller.requestPage('earlier', 'button');
 
 		expect(scroller.scrollTop).toBe(40);
-		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadEarlierPage).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('loads older messages until an initially underfilled viewport can scroll', async () => {
@@ -1007,9 +1153,10 @@ describe('ConversationScrollController', () => {
 			configurable: true,
 		});
 		const chatState = {
-			hasMoreMessages: true,
+			canAutoFillEarlier: true,
+			canLoadEarlier: true,
 			isUserScrolledUp: false,
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				scrollHeight = scrollHeight === 300 ? 450 : 800;
 				return 'loaded' as const;
 			}),
@@ -1024,8 +1171,8 @@ describe('ConversationScrollController', () => {
 
 		await controller.fillUnderfilledViewport();
 
-		expect(chatState.loadMoreMessages).toHaveBeenCalledTimes(2);
-		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadEarlierPage).toHaveBeenCalledTimes(2);
+		expect(chatState.loadEarlierPage).toHaveBeenCalledWith('chat-1');
 		expect(scroller.scrollTop).toBe(800);
 		expect(chatState.isUserScrolledUp).toBe(false);
 		expect(controller.isPinnedToBottom).toBe(true);
@@ -1039,15 +1186,14 @@ describe('ConversationScrollController', () => {
 			configurable: true,
 		});
 		const chatState = {
-			displayMessageCount: 150,
-			hasMoreMessages: false,
+			canAutoFillEarlier: true,
+			canLoadEarlier: false,
 			isUserScrolledUp: false,
-			visibleMessageCount: 100,
-			loadEarlierMessages: vi.fn(() => {
-				chatState.visibleMessageCount = 200;
+			revealEarlierLoadedRows: vi.fn(() => {
 				scrollHeight = 700;
+				return true;
 			}),
-			loadMoreMessages: vi.fn(async () => 'loaded' as const),
+			loadEarlierPage: vi.fn(async () => 'loaded' as const),
 		};
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
@@ -1058,8 +1204,8 @@ describe('ConversationScrollController', () => {
 
 		await controller.fillUnderfilledViewport();
 
-		expect(chatState.loadEarlierMessages).toHaveBeenCalledOnce();
-		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
+		expect(chatState.revealEarlierLoadedRows).toHaveBeenCalledOnce();
+		expect(chatState.loadEarlierPage).not.toHaveBeenCalled();
 		expect(scroller.scrollTop).toBe(700);
 		expect(chatState.isUserScrolledUp).toBe(false);
 		expect(controller.isPinnedToBottom).toBe(true);
@@ -1073,10 +1219,11 @@ describe('ConversationScrollController', () => {
 			configurable: true,
 		});
 		const chatState = {
+			canAutoFillEarlier: true,
 			hasInitialMessagesToReveal: true,
-			hasMoreMessages: true,
+			canLoadEarlier: true,
 			isUserScrolledUp: false,
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				scrollHeight = 800;
 				return 'loaded' as const;
 			}),
@@ -1090,13 +1237,13 @@ describe('ConversationScrollController', () => {
 
 		await controller.fillUnderfilledViewport();
 
-		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
+		expect(chatState.loadEarlierPage).not.toHaveBeenCalled();
 
 		chatState.hasInitialMessagesToReveal = false;
 		await controller.fillUnderfilledViewport();
 
-		expect(chatState.loadMoreMessages).toHaveBeenCalledOnce();
-		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(chatState.loadEarlierPage).toHaveBeenCalledOnce();
+		expect(chatState.loadEarlierPage).toHaveBeenCalledWith('chat-1');
 		expect(scroller.scrollTop).toBe(800);
 	});
 
@@ -1109,9 +1256,10 @@ describe('ConversationScrollController', () => {
 		});
 		const sessions = { selectedChatId: 'chat-1' };
 		const chatState = {
-			hasMoreMessages: true,
+			canAutoFillEarlier: true,
+			canLoadEarlier: true,
 			isUserScrolledUp: false,
-			loadMoreMessages: vi.fn(async () => {
+			loadEarlierPage: vi.fn(async () => {
 				scrollHeight = 800;
 				sessions.selectedChatId = 'chat-2';
 				return 'loaded' as const;
@@ -1127,7 +1275,7 @@ describe('ConversationScrollController', () => {
 
 		await controller.fillUnderfilledViewport();
 
-		expect(chatState.loadMoreMessages).toHaveBeenCalledTimes(1);
+		expect(chatState.loadEarlierPage).toHaveBeenCalledTimes(1);
 		expect(scroller.scrollTop).toBe(0);
 	});
 
@@ -1184,7 +1332,7 @@ describe('ConversationScrollController', () => {
 		const controller = new ConversationScrollController({
 			getScrollContainer: () => scroller,
 			getQueueContainer: () => undefined,
-			chatState: scrollState({ isUserScrolledUp: false, hasMoreMessages: true }),
+			chatState: scrollState({ isUserScrolledUp: false, canLoadEarlier: true }),
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
@@ -1207,7 +1355,7 @@ describe('ConversationScrollController', () => {
 			getScrollContainer: () => scroller,
 			getScrollContentContainer: () => content,
 			getQueueContainer: () => undefined,
-			chatState: scrollState({ isUserScrolledUp: false, hasMoreMessages: false }),
+			chatState: scrollState({ isUserScrolledUp: false, canLoadEarlier: false }),
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
@@ -1231,7 +1379,7 @@ describe('ConversationScrollController', () => {
 			getScrollContainer: () => scroller,
 			getScrollContentContainer: () => content,
 			getQueueContainer: () => undefined,
-			chatState: scrollState({ isUserScrolledUp: true, hasMoreMessages: false }),
+			chatState: scrollState({ isUserScrolledUp: true, canLoadEarlier: false }),
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
@@ -1250,8 +1398,8 @@ describe('ConversationScrollController', () => {
 		const scroller = { scrollTop: 400, scrollHeight: 1000, clientHeight: 600 } as HTMLDivElement;
 		const chatState = {
 			isUserScrolledUp: false,
-			hasMoreMessages: false,
-			loadMoreMessages: vi.fn(),
+			canLoadEarlier: false,
+			loadEarlierPage: vi.fn(),
 		};
 
 		const controller = new ConversationScrollController({
@@ -1372,8 +1520,8 @@ describe('ConversationScrollController', () => {
 		const scroller = { scrollTop: 120, scrollHeight: 1000, clientHeight: 600 } as HTMLDivElement;
 		const chatState = {
 			isUserScrolledUp: true,
-			hasMoreMessages: false,
-			loadMoreMessages: vi.fn(),
+			canLoadEarlier: false,
+			loadEarlierPage: vi.fn(),
 		};
 
 		const controller = new ConversationScrollController({
@@ -1398,8 +1546,8 @@ describe('ConversationScrollController', () => {
 		const scroller = { scrollTop: 0, scrollHeight: 1000, clientHeight: 600 } as HTMLDivElement;
 		const chatState = {
 			isUserScrolledUp: false,
-			hasMoreMessages: true,
-			loadMoreMessages: vi.fn(),
+			canLoadEarlier: true,
+			loadEarlierPage: vi.fn(),
 		};
 
 		const controller = new ConversationScrollController({
@@ -1415,7 +1563,7 @@ describe('ConversationScrollController', () => {
 
 		expect(chatState.isUserScrolledUp).toBe(false);
 		expect(controller.isPinnedToBottom).toBe(true);
-		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
+		expect(chatState.loadEarlierPage).not.toHaveBeenCalled();
 	});
 
 	it('keeps Ctrl-U half-page scrolling without consuming Ctrl-D', () => {

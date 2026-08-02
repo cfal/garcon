@@ -66,7 +66,7 @@ describe('reloadChatFromNative', () => {
 		});
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 4 });
 		expect(chat.oldestSeq).toBe(3);
-		expect(chat.hasMoreMessages).toBe(true);
+		expect(chat.hasEarlierMessages).toBe(true);
 		expect(chat.chatMessages[0]).toBeInstanceOf(AssistantMessage);
 		expect(chat.chatMessages.map((message) => (message as AssistantMessage).content)).toEqual([
 			'three',
@@ -74,7 +74,7 @@ describe('reloadChatFromNative', () => {
 		]);
 		expect(chat.transcriptCache.get('chat-1')?.lastSeq).toBe(4);
 
-		await expect(chat.loadMoreMessages('chat-1')).resolves.toBe('loaded');
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
 
 		expect(getChatMessages).toHaveBeenCalledWith({
 			chatId: 'chat-1',
@@ -87,7 +87,7 @@ describe('reloadChatFromNative', () => {
 			'three',
 			'four',
 		]);
-		expect(chat.hasMoreMessages).toBe(false);
+		expect(chat.hasEarlierMessages).toBe(false);
 	});
 
 	it('rejects unexpected reload responses', async () => {

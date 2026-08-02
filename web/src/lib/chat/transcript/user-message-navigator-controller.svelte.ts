@@ -29,9 +29,9 @@ export interface UserMessageNavigatorTranscriptPort {
 	readonly activeChatId: string | null;
 	readonly generationId: string;
 	readonly displayRows: readonly ChatDisplayRow[];
-	readonly hasMoreMessages: boolean;
+	readonly hasEarlierMessages: boolean;
 	readonly isLoadingMessages: boolean;
-	readonly isViewingInitialMessages: boolean;
+	readonly hasLaterMessages: boolean;
 	readonly loadStatus: ChatLoadStatus;
 	revealAllLoadedMessages(): void;
 }
@@ -94,7 +94,7 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 	}
 
 	get hasMore(): boolean {
-		return this.open && this.options.transcript.hasMoreMessages;
+		return this.open && this.options.transcript.hasEarlierMessages;
 	}
 
 	get isInitialLoading(): boolean {
@@ -117,7 +117,7 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		if (!chatId || this.options.transcript.activeChatId !== chatId) return;
 
 		const lifecycleEpoch = ++this.#lifecycleEpoch;
-		if (this.options.transcript.isViewingInitialMessages) {
+		if (this.options.transcript.hasLaterMessages) {
 			const restored = await this.options.restoreLatestTranscript(chatId);
 			if (
 				!restored ||
@@ -180,7 +180,7 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 			!chatId ||
 			!generationId ||
 			this.isLoadingOlder ||
-			!this.options.transcript.hasMoreMessages
+			!this.options.transcript.hasEarlierMessages
 		) {
 			return;
 		}

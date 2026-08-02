@@ -14,7 +14,13 @@
 
 	interface Props {
 		reserveTopFloatingToolbar?: boolean;
-		transcriptScenario?: 'empty' | 'initial-reveal' | 'local-truncation' | 'row-ids';
+		transcriptScenario?:
+			| 'empty'
+			| 'initial-reveal'
+			| 'local-truncation'
+			| 'loading-later'
+			| 'error-earlier'
+			| 'row-ids';
 	}
 
 	const { reserveTopFloatingToolbar = false, transcriptScenario = 'empty' }: Props = $props();
@@ -46,7 +52,11 @@
 			attachments: [],
 		});
 	} else if (initialTranscriptScenario !== 'empty') {
-		const messageCount = initialTranscriptScenario === 'initial-reveal' ? 100 : 120;
+		const messageCount =
+			initialTranscriptScenario === 'initial-reveal' ||
+			initialTranscriptScenario === 'loading-later'
+				? 50
+				: 120;
 		const messages = Array.from({ length: messageCount }, (_, index) => ({
 			seq: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
@@ -62,10 +72,16 @@
 			chatState.activateChat('chat-1');
 		} else {
 			chatState.replaceGeneration('chat-1', 'generation-1', messages, {
-				lastSeq: messageCount,
+				lastSeq: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
 				pageOldestSeq: 1,
 				hasMore: false,
 			});
+			if (initialTranscriptScenario === 'loading-later') {
+				chatState.pageStates.later = { status: 'loading', error: null };
+			}
+			if (initialTranscriptScenario === 'error-earlier') {
+				chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
+			}
 		}
 	}
 	setActiveTranscriptState(chatState);
