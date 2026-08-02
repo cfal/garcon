@@ -190,6 +190,11 @@ async function seedDirectChat(
       ).type,
     ).toBe("agent-run-finished");
   }
+  const seededTranscript = await fixture.integration.client.getMessages(
+    chatId,
+    { limit: 1 },
+  );
+  expect(seededTranscript.lastSeq).toBe(turns.length * 2);
   return chatId;
 }
 
@@ -451,6 +456,7 @@ describe("Lightpanda transcript scrolling", () => {
       const initialWindow = await evaluateInPage<{
         anchorCount: number;
         clientHeight: number;
+        hasNativeBottomAnchor: boolean;
         hasNextPageMarker: boolean;
         scrollHeight: number;
       }>(
@@ -461,12 +467,14 @@ describe("Lightpanda transcript scrolling", () => {
 					return {
 						anchorCount: feed.querySelectorAll('[data-chat-anchor-id]').length,
 						clientHeight: feed.clientHeight,
+						hasNativeBottomAnchor: Boolean(feed.querySelector('[data-chat-bottom-anchor]')),
 						hasNextPageMarker: feed.innerText.includes(${JSON.stringify(turnMarkers[60])}),
 						scrollHeight: feed.scrollHeight,
 					};
 				})()`,
       );
       expect(initialWindow.anchorCount).toBe(50);
+      expect(initialWindow.hasNativeBottomAnchor).toBe(false);
       expect(initialWindow.hasNextPageMarker).toBe(false);
       expect(initialWindow.scrollHeight).toBeGreaterThan(
         initialWindow.clientHeight,
@@ -546,6 +554,20 @@ describe("Lightpanda transcript scrolling", () => {
         requestsBeforeEarlierPage + 1,
       );
       expect(await app.hasButton("Load more")).toBe(false);
+
+      const submittedPrompt = "submit-from-detached-transcript";
+      const submittedRequest =
+        fixture.integration.fakeProviders.openAi.waitForRequest(
+          { lastUserText: submittedPrompt },
+          { timeoutMs: 20_000 },
+        );
+      await app.fill("[data-composer] textarea", submittedPrompt);
+      await app.clickButton("Send message");
+      await submittedRequest;
+      await waitForFeedText(submittedPrompt);
+      await waitForFeedText(`echo:${submittedPrompt}`);
+      await app.waitForChatProcessing(false);
+      expect(await app.hasButton("Load later messages")).toBe(false);
       fixture.assertNoBrowserErrors();
     });
   });
