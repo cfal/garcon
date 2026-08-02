@@ -5,6 +5,7 @@ import path from 'path';
 import {
   advertisedServerUrl,
   createServerRuntimeState,
+  listeningServerUrl,
   publishServerRuntime,
   removeServerRuntime,
 } from '../server-runtime.js';
@@ -47,5 +48,10 @@ describe('server runtime publication', () => {
   it('advertises wildcard listeners through loopback', () => {
     expect(advertisedServerUrl('0.0.0.0', 8080)).toBe('http://127.0.0.1:8080');
     expect(advertisedServerUrl('::', 8080)).toBe('http://127.0.0.1:8080');
+  });
+
+  it('reports the actual listener address', () => {
+    expect(listeningServerUrl('0.0.0.0', 8080)).toBe('http://0.0.0.0:8080');
+    expect(listeningServerUrl('::', 8080)).toBe('http://[::]:8080');
   });
 });

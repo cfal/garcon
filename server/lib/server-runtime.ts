@@ -42,6 +42,11 @@ export function createServerRuntimeProof(
 export function advertisedServerUrl(bindAddress: string, port: number): string {
   let hostname = bindAddress;
   if (hostname === '0.0.0.0' || hostname === '::' || hostname === '[::]') hostname = '127.0.0.1';
+  return listeningServerUrl(hostname, port);
+}
+
+export function listeningServerUrl(bindAddress: string, port: number): string {
+  let hostname = bindAddress;
   if (hostname.includes(':') && !hostname.startsWith('[')) hostname = `[${hostname}]`;
   return `http://${hostname}:${port}`;
 }
