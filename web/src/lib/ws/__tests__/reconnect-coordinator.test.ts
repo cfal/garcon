@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { render } from '@testing-library/svelte';
 
 import {
 	ChatReconnectCoordinator,
@@ -6,11 +7,18 @@ import {
 	type ReconnectTranscriptState,
 } from '../reconnect-coordinator.svelte';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
+import ReconnectCoordinatorTestHost from './ReconnectCoordinatorTestHost.svelte';
+import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+import type { WsMessageConsumer } from '../connection.svelte.js';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
-function controlState(paused: boolean): ChatExecutionControlState {
+function controlState(
+	paused: boolean,
+	serverInstanceId = 'server-instance-test',
+): ChatExecutionControlState {
 	return {
+		serverInstanceId,
 		queue: {
 			entries: paused
 				? [
@@ -44,10 +52,12 @@ function reconnectStateResponse(
 	runningIds: string[] = [],
 	chatIds: string[] = [],
 	controlStates: Record<string, ChatExecutionControlState> | undefined = {},
+	serverInstanceId = 'server-instance-test',
 ) {
 	return {
 		type: 'reconnect-state',
 		clientRequestId: 'req-reconnect',
+		serverInstanceId,
 		processing: {
 			outcome: 'snapshot',
 			chats: runningIds.map((chatId) => ({ chatId, phase: 'running' })),
@@ -167,10 +177,13 @@ function createReconnectDeps(
 		executionControlChatIds: options.controlChatIds ?? [],
 		removeExecutionControl: vi.fn(),
 		setExecutionControlFromRefresh: vi.fn(),
+		markExecutionControlSocketDisconnected: vi.fn(),
+		confirmExecutionControlSocketInstance: vi.fn(),
 	};
+	const addMessageConsumer = vi.fn<(consumer: WsMessageConsumer) => () => void>(() => vi.fn());
 
 	return {
-		ws: { isConnected: true, sendRequest },
+		ws: { isConnected: true as boolean, sendRequest, addMessageConsumer },
 		chatState,
 		conversationUi,
 		sessions: {
@@ -203,6 +216,8 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.chatState.transcriptCache.markValidated,
 		deps.conversationUi.removeExecutionControl,
 		deps.conversationUi.setExecutionControlFromRefresh,
+		deps.conversationUi.markExecutionControlSocketDisconnected,
+		deps.conversationUi.confirmExecutionControlSocketInstance,
 		deps.getExecutionControl,
 		deps.sessions.quietRefreshChats,
 		deps.getBackgroundCursors,
@@ -228,6 +243,83 @@ async function reconnectAfterFirstConnection(
 }
 
 describe('ChatReconnectCoordinator', () => {
+	it('confirms identified pongs and unregisters the authority consumer on cleanup', async () => {
+		const deps = createReconnectDeps();
+		deps.ws.isConnected = false;
+		const view = render(ReconnectCoordinatorTestHost, { options: deps });
+		await vi.waitFor(() => expect(deps.ws.addMessageConsumer).toHaveBeenCalledOnce());
+		deps.conversationUi.confirmExecutionControlSocketInstance.mockClear();
+		const consumer = deps.ws.addMessageConsumer.mock.calls[0]?.[0];
+		if (!consumer) throw new Error('Reconnect authority consumer was not registered.');
+		expect(
+			consumer(
+				{
+					type: 'ws-pong',
+					clientRequestId: 'probe-malformed',
+					sentAt: 1,
+					serverTime: TS,
+					processing: { outcome: 'snapshot', chats: [] },
+				},
+				{},
+			),
+		).toBe(false);
+		expect(deps.conversationUi.confirmExecutionControlSocketInstance).not.toHaveBeenCalled();
+
+		expect(
+			consumer(
+				{
+					type: 'ws-pong',
+					clientRequestId: 'probe-1',
+					sentAt: 1,
+					serverTime: TS,
+					serverInstanceId: 'server-b',
+					processing: { outcome: 'snapshot', chats: [] },
+				},
+				{},
+			),
+		).toBe(false);
+		expect(deps.conversationUi.confirmExecutionControlSocketInstance).toHaveBeenCalledWith(
+			'server-b',
+		);
+
+		const removeConsumer = deps.ws.addMessageConsumer.mock.results[0]?.value;
+		view.unmount();
+		expect(removeConsumer).toHaveBeenCalledOnce();
+	});
+
+	it('lets a correlated pong replace provisional controls with the current socket instance', async () => {
+		const conversationUi = new ConversationUiState();
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', controlState(true, 'server-b'));
+		const deps = createReconnectDeps();
+		deps.ws.isConnected = false;
+		const view = render(ReconnectCoordinatorTestHost, {
+			options: { ...deps, conversationUi },
+		});
+		await vi.waitFor(() => expect(deps.ws.addMessageConsumer).toHaveBeenCalledOnce());
+		const consumer = deps.ws.addMessageConsumer.mock.calls[0]?.[0];
+		if (!consumer) throw new Error('Reconnect authority consumer was not registered.');
+
+		consumer(
+			{
+				type: 'ws-pong',
+				clientRequestId: 'probe-1',
+				sentAt: 1,
+				serverTime: TS,
+				serverInstanceId: 'server-c',
+				processing: { outcome: 'snapshot', chats: [] },
+			},
+			{},
+		);
+
+		expect(conversationUi.getExecutionControl('chat-1')).toBeNull();
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', controlState(false, 'server-c'));
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', controlState(true, 'server-d'));
+		expect(conversationUi.getExecutionControl('chat-1')).toEqual(controlState(false, 'server-c'));
+		warn.mockRestore();
+		view.unmount();
+	});
+
 	it('reconciles control state without transcript replay on first connection', async () => {
 		const deps = createReconnectDeps({ runningIds: ['chat-1'] });
 		const coordinator = new ChatReconnectCoordinator(deps);
@@ -242,6 +334,9 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
 			controlState(false),
+		);
+		expect(deps.conversationUi.confirmExecutionControlSocketInstance).toHaveBeenCalledWith(
+			'server-instance-test',
 		);
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalledOnce();
 		expect(deps.ws.sendRequest).not.toHaveBeenCalledWith(
@@ -460,6 +555,7 @@ describe('ChatReconnectCoordinator', () => {
 					return {
 						type: 'reconnect-state',
 						clientRequestId: 'req-reconnect',
+						serverInstanceId: 'server-instance-test',
 						processing: { outcome: 'snapshot', chats: [] },
 						controlResults: [
 							{ chatId: 'chat-1', outcome: 'snapshot', control: controlState(true) },
@@ -502,6 +598,7 @@ describe('ChatReconnectCoordinator', () => {
 					return {
 						type: 'reconnect-state',
 						clientRequestId: 'req-reconnect',
+						serverInstanceId: 'server-instance-test',
 						processing: { outcome: 'unavailable' },
 						controlResults: [
 							{ chatId: 'chat-1', outcome: 'snapshot', control: controlState(true) },
@@ -535,6 +632,7 @@ describe('ChatReconnectCoordinator', () => {
 		clearConnectionCalls(deps);
 
 		await coordinator.handleConnectionState(false);
+		expect(deps.conversationUi.markExecutionControlSocketDisconnected).toHaveBeenCalledOnce();
 		deps.ws.sendRequest.mockImplementation(async (request: object) => {
 			if (!('type' in request)) throw new Error('Request is missing a type');
 			if (request.type === 'reconnect-state-query') {
@@ -548,6 +646,53 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalledOnce();
 	});
 
+	it('lets fallback C clear provisional B after the reconnect envelope fails', async () => {
+		const conversationUi = new ConversationUiState();
+		conversationUi.confirmExecutionControlSocketInstance('server-a');
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', controlState(true, 'server-a'));
+		const deps = createReconnectDeps();
+		deps.ws.sendRequest.mockImplementation(async (request: object) => {
+			if ('type' in request && request.type === 'reconnect-state-query') {
+				throw new Error('reconnect state unavailable');
+			}
+			throw new Error('Unexpected request');
+		});
+		deps.getExecutionControl.mockResolvedValue({
+			control: controlState(false, 'server-c'),
+		});
+		const coordinator = new ChatReconnectCoordinator({ ...deps, conversationUi });
+
+		await coordinator.handleConnectionState(false);
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', controlState(true, 'server-b'));
+		await coordinator.handleConnectionState(true);
+
+		expect(conversationUi.getExecutionControl('chat-1')).toEqual(controlState(false, 'server-c'));
+	});
+
+	it('does not apply fallback results that straddle a newer socket epoch', async () => {
+		const firstFallback = deferred<{ control: ChatExecutionControlState }>();
+		const conversationUi = new ConversationUiState();
+		conversationUi.confirmExecutionControlSocketInstance('server-a');
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', controlState(true, 'server-a'));
+		const deps = createReconnectDeps();
+		deps.ws.sendRequest.mockRejectedValue(new Error('reconnect state unavailable'));
+		deps.getExecutionControl
+			.mockImplementationOnce(() => firstFallback.promise)
+			.mockResolvedValueOnce({ control: controlState(false, 'server-c') });
+		const coordinator = new ChatReconnectCoordinator({ ...deps, conversationUi });
+
+		await coordinator.handleConnectionState(false);
+		const first = coordinator.handleConnectionState(true);
+		await flushUntil(() => deps.getExecutionControl.mock.calls.length === 1);
+		await coordinator.handleConnectionState(false);
+		const second = coordinator.handleConnectionState(true);
+		await second;
+		firstFallback.resolve({ control: controlState(true, 'server-b') });
+		await first;
+
+		expect(conversationUi.getExecutionControl('chat-1')).toEqual(controlState(false, 'server-c'));
+	});
+
 	it('falls back queue reads but preserves processing state when reconnect control data is malformed', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
@@ -558,6 +703,7 @@ describe('ChatReconnectCoordinator', () => {
 				if (request.type === 'reconnect-state-query') {
 					return {
 						type: 'reconnect-state',
+						serverInstanceId: 'server-instance-test',
 						processing: {
 							outcome: 'snapshot',
 							chats: [{ chatId: 42, phase: 'running' }],
@@ -583,6 +729,33 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			controlState(true),
 		);
+	});
+
+	it('falls back without confirming a mixed-instance reconnect envelope', async () => {
+		const deps = createReconnectDeps();
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		clearConnectionCalls(deps);
+		await coordinator.handleConnectionState(false);
+		deps.conversationUi.confirmExecutionControlSocketInstance.mockClear();
+		deps.ws.sendRequest.mockImplementation(async (request: object) => {
+			if (!('type' in request)) throw new Error('Request is missing a type');
+			if (request.type === 'reconnect-state-query') {
+				return reconnectStateResponse(
+					[],
+					['chat-1'],
+					{ 'chat-1': controlState(true, 'server-a') },
+					'server-b',
+				);
+			}
+			if (request.type === 'chat-subscribe') return deltaResponse('chat-1');
+			throw new Error(`Unexpected request: ${String(request.type)}`);
+		});
+
+		await coordinator.handleConnectionState(true);
+
+		expect(deps.conversationUi.confirmExecutionControlSocketInstance).not.toHaveBeenCalled();
+		expect(deps.getExecutionControl).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('does not block transcript resume on the reconnect control-state request', async () => {

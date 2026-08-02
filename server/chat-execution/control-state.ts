@@ -29,6 +29,7 @@ export interface StoredAppliedQueueCommand {
 }
 
 export interface StoredChatExecutionControlState {
+  serverInstanceId: string;
   entries: StoredQueueEntry[];
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   appliedCommands: StoredAppliedQueueCommand[];
@@ -41,8 +42,11 @@ export interface StoredChatExecutionControlState {
 
 export const MAX_STORED_APPLIED_QUEUE_COMMANDS = 1000;
 
-export function emptyStoredChatExecutionControl(): StoredChatExecutionControlState {
+export function emptyStoredChatExecutionControl(
+  serverInstanceId: string,
+): StoredChatExecutionControlState {
   return {
+    serverInstanceId,
     entries: [],
     recentlyDispatched: [],
     appliedCommands: [],
@@ -78,6 +82,7 @@ export function toClientChatExecutionControlState(
   control: StoredChatExecutionControlState,
 ): ChatExecutionControlState {
   return {
+    serverInstanceId: control.serverInstanceId,
     queue: {
       entries: control.entries
         .filter((entry) => entry.status === 'queued')

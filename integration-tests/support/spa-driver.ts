@@ -10,6 +10,7 @@ interface ClickOptions {
 
 type QueueRowAction = 'Edit queued message' | 'Remove from queue';
 type QueueMoveDirection = 'up' | 'down';
+type ComposerAction = 'Send message' | 'Queue message';
 
 export class SpaDriver {
   readonly #page: Page;
@@ -318,6 +319,40 @@ export class SpaDriver {
     }, { timeout: 20_000 }).then((handle) => handle.jsonValue());
     if (typeof title !== 'string') throw new Error('Composer send action did not become available.');
     await this.clickButton(title);
+  }
+
+  async waitForComposerAction(action: ComposerAction): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => [...document.querySelectorAll('button')].some((element) => {
+        const name = element.getAttribute('aria-label') || element.textContent?.trim();
+        return !element.closest('[aria-hidden="true"]') && name === expected;
+      }),
+      { timeout: 20_000 },
+      action,
+    );
+  }
+
+  async submitComposerWithEnter(content: string, expectedAction: ComposerAction): Promise<void> {
+    const selector = 'textarea[placeholder="Reply..."]';
+    await this.fill(selector, content);
+    await this.#page.waitForFunction(
+      (expected) => [...document.querySelectorAll('button')].some((element) => {
+        const name = element.getAttribute('aria-label') || element.textContent?.trim();
+        return !element.closest('[aria-hidden="true"]')
+          && name === expected
+          && !(element as HTMLButtonElement).disabled;
+      }),
+      { timeout: 20_000 },
+      expectedAction,
+    );
+    await this.#page.$eval(selector, (element) => {
+      (element as HTMLTextAreaElement).focus();
+      element.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
   }
 
   async fill(selector: string, value: string): Promise<void> {

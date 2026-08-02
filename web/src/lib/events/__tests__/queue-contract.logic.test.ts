@@ -5,6 +5,7 @@ const installedAt = '2026-07-18T00:00:00.000Z';
 
 function control(overrides: Record<string, unknown> = {}) {
 	return {
+		serverInstanceId: 'server-instance-test',
 		queue: {
 			entries: [],
 			dispatchingEntryId: null,

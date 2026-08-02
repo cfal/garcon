@@ -13,9 +13,11 @@ export interface ChatExecutionControlRepository {
 export class InMemoryChatExecutionControlRepository implements ChatExecutionControlRepository {
   readonly #controlsByChatId = new Map<string, StoredChatExecutionControlState>();
 
+  constructor(readonly serverInstanceId: string) {}
+
   async load(chatId: string): Promise<StoredChatExecutionControlState> {
     return cloneStoredChatExecutionControl(
-      this.#controlsByChatId.get(chatId) ?? emptyStoredChatExecutionControl(),
+      this.#controlsByChatId.get(chatId) ?? emptyStoredChatExecutionControl(this.serverInstanceId),
     );
   }
 
@@ -23,6 +25,9 @@ export class InMemoryChatExecutionControlRepository implements ChatExecutionCont
     chatId: string,
     control: StoredChatExecutionControlState,
   ): Promise<StoredChatExecutionControlState> {
+    if (control.serverInstanceId !== this.serverInstanceId) {
+      throw new Error('Cannot save execution controls from another server instance');
+    }
     const saved = cloneStoredChatExecutionControl(control);
     this.#controlsByChatId.set(chatId, saved);
     return cloneStoredChatExecutionControl(saved);

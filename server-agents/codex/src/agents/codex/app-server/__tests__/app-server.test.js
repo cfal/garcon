@@ -14,6 +14,7 @@ import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
 import { ChatExecutionCoordinator } from '../../../../../../../server/chat-execution/chat-execution-coordinator.ts';
+import { InMemoryChatExecutionControlRepository } from '../../../../../../../server/chat-execution/chat-execution-control-repository.ts';
 import { PendingUserInputService } from '../../../../../../../server/chats/pending-user-input-service.ts';
 import {
   buildThreadForkParams,
@@ -1544,6 +1545,7 @@ describe('CodexAppServerRuntime', () => {
         ampAgentMode: 'default',
       }),
       () => true,
+      new InMemoryChatExecutionControlRepository('server-instance-test'),
     );
   }
 
@@ -4690,6 +4692,7 @@ describe('CodexAppServerRuntime', () => {
         ampAgentMode: 'default',
       }),
       () => true,
+      new InMemoryChatExecutionControlRepository('server-instance-test'),
     );
 
     const result = await queue.deliverGoalControlInput('chat-1', 'Steer from the queue', {

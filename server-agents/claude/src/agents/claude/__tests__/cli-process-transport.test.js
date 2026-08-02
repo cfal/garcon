@@ -240,6 +240,83 @@ describe('ClaudeProcessTransport', () => {
     expect(fake.failures).toEqual([{ kind: 'write', message: 'flush exploded' }]);
   });
 
+  it('marks the native attempt immediately before write and preserves FIFO hooks', async () => {
+    const fake = createTransport();
+    const order = [];
+    fake.process.stdin.write.mockImplementation((line) => {
+      order.push(`write:${JSON.parse(line).order}`);
+      fake.writes.push(line);
+    });
+    fake.process.stdin.flush.mockImplementation(() => order.push('flush'));
+
+    await Promise.all([
+      fake.transport.writeLine('{"order":1}', {
+        beforeWrite: () => order.push('attempt:1'),
+      }),
+      fake.transport.writeLine('{"order":2}', {
+        beforeWrite: () => order.push('attempt:2'),
+      }),
+    ]);
+
+    expect(order).toEqual([
+      'attempt:1',
+      'write:1',
+      'flush',
+      'attempt:2',
+      'write:2',
+      'flush',
+    ]);
+  });
+
+  it('does not mark or kill a strict write that fails before the attempt', async () => {
+    const fake = createTransport();
+    const beforeWrite = mock(() => undefined);
+    fake.process.stdin = null;
+
+    await expect(fake.transport.writeLine('{"order":1}', {
+      beforeWrite,
+      killProcessAfterAttemptFailure: true,
+    })).rejects.toThrow('no writable stdin');
+    expect(beforeWrite).not.toHaveBeenCalled();
+    expect(fake.process.kill).not.toHaveBeenCalled();
+  });
+
+  it('kills before reporting a strict attempted write failure', async () => {
+    let killedWhenReported = false;
+    const fake = createTransport({
+      onFailure: (failure) => {
+        killedWhenReported = fake.process.killed;
+        fake.failures.push(failure);
+      },
+    });
+    fake.process.stdin.write.mockImplementationOnce(() => {
+      throw new Error('strict write exploded');
+    });
+
+    await expect(fake.transport.writeLine('{"order":1}', {
+      beforeWrite: () => undefined,
+      killProcessAfterAttemptFailure: true,
+    })).rejects.toThrow('strict write exploded');
+    expect(killedWhenReported).toBe(true);
+    expect(fake.process.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('times out and kills a stalled strict write', async () => {
+    const fake = createTransport();
+    fake.process.stdin.write.mockImplementationOnce(() => new Promise(() => {}));
+
+    await expect(fake.transport.writeLine('{"order":1}', {
+      beforeWrite: () => undefined,
+      attemptTimeoutMs: 1,
+      killProcessAfterAttemptFailure: true,
+    })).rejects.toThrow('stdin write timed out');
+    expect(fake.process.kill).toHaveBeenCalledTimes(1);
+    expect(fake.failures).toEqual([{
+      kind: 'write',
+      message: 'Claude CLI stdin write timed out',
+    }]);
+  });
+
   it('closes stdin and awaits natural exit during retirement', async () => {
     const fake = createTransport();
 

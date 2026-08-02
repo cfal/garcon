@@ -195,7 +195,7 @@ describe('SlashCommandMenu', () => {
 		});
 
 		expect(screen.getByText('/steer')).toBeTruthy();
-		expect(screen.getByText('Send guidance to the active turn immediately')).toBeTruthy();
+		expect(screen.getByText('Send guidance to the active turn')).toBeTruthy();
 		unmount();
 
 		render(SlashCommandMenuTestHost, {

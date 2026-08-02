@@ -4,6 +4,10 @@ import type {
 	PermissionMode,
 	ChatExecutionControlState,
 } from '$lib/types/chat';
+import {
+	ExecutionControlInstanceAuthority,
+	type ExecutionControlInstanceDecision,
+} from './execution-control-instance-authority.js';
 
 export type PendingPermissionRequestUpdate =
 	| PendingPermissionRequest[]
@@ -11,10 +15,6 @@ export type PendingPermissionRequestUpdate =
 
 export interface ExecutionControlPruningOptions {
 	getActiveChatIds: () => Set<string>;
-}
-
-function controlVersion(control: ChatExecutionControlState | null): number {
-	return control?.version ?? -1;
 }
 
 export interface ConversationUiPort {
@@ -28,8 +28,10 @@ export interface ConversationUiPort {
 	setPendingViewChat(chat: PendingViewChat | null): void;
 	setPreviousPermissionMode(mode: PermissionMode | null): void;
 	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
-	setExecutionControl(chatId: string, control: ChatExecutionControlState | null): void;
-	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState | null): void;
+	markExecutionControlSocketDisconnected(): void;
+	confirmExecutionControlSocketInstance(serverInstanceId: string): void;
+	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
+	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
 	removeExecutionControl(chatId: string): void;
 	pruneExecutionControls(activeChatIds: Set<string>): void;
 }
@@ -38,7 +40,8 @@ export class ConversationUiState implements ConversationUiPort {
 	pendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
 	pendingViewChat = $state<PendingViewChat | null>(null);
 	previousPermissionMode = $state<PermissionMode | null>(null);
-	private executionControlByChatId = $state<Record<string, ChatExecutionControlState | null>>({});
+	private executionControlByChatId = $state<Record<string, ChatExecutionControlState>>({});
+	private readonly executionControlAuthority = new ExecutionControlInstanceAuthority();
 
 	get executionControlChatIds(): string[] {
 		return Object.keys(this.executionControlByChatId);
@@ -72,16 +75,58 @@ export class ConversationUiState implements ConversationUiPort {
 		return this.executionControlByChatId[chatId] ?? null;
 	}
 
-	setExecutionControl(chatId: string, control: ChatExecutionControlState | null): void {
+	markExecutionControlSocketDisconnected(): void {
+		this.executionControlAuthority.markSocketDisconnected();
+	}
+
+	confirmExecutionControlSocketInstance(serverInstanceId: string): void {
+		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId);
+		if (decision.kind === 'replace') this.executionControlByChatId = {};
+	}
+
+	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void {
+		const decision = this.executionControlAuthority.classifyNonAuthoritativeInstance(
+			control.serverInstanceId,
+		);
+		if (this.#handleExecutionControlInstanceDecision(decision, chatId, control)) return;
 		const current = this.executionControlByChatId[chatId] ?? null;
-		if (controlVersion(control) < controlVersion(current)) return;
+		if (current && control.version < current.version) return;
 		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
 	}
 
-	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState | null): void {
+	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void {
+		const decision = this.executionControlAuthority.classifyNonAuthoritativeInstance(
+			control.serverInstanceId,
+		);
+		if (this.#handleExecutionControlInstanceDecision(decision, chatId, control)) return;
 		const current = this.executionControlByChatId[chatId] ?? null;
-		if (current && controlVersion(control) <= controlVersion(current)) return;
+		if (current && control.version <= current.version) return;
 		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
+	}
+
+	#handleExecutionControlInstanceDecision(
+		decision: ExecutionControlInstanceDecision,
+		chatId: string,
+		control: ChatExecutionControlState,
+	): boolean {
+		if (decision.kind === 'reject') {
+			const cached = this.executionControlByChatId[chatId] ?? null;
+			console.warn('[ConversationUiState] Rejected execution control instance', {
+				reason: decision.reason,
+				chatId,
+				incomingInstanceId: control.serverInstanceId,
+				currentInstanceId: decision.currentInstanceId,
+				confirmedSocketInstanceId: decision.confirmedSocketInstanceId,
+				incomingVersion: control.version,
+				cachedVersion: cached?.version ?? null,
+			});
+			return true;
+		}
+		if (decision.kind === 'replace') {
+			this.executionControlByChatId = { [chatId]: control };
+			return true;
+		}
+		return false;
 	}
 
 	removeExecutionControl(chatId: string): void {

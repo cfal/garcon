@@ -52,6 +52,7 @@ type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Prom
 type ChatIdRequest = { type: string; chatId?: string | null };
 
 interface ChatHandlerDeps {
+  serverInstanceId: string;
   processing: Pick<ChatProcessingActivity, 'snapshot'>;
   chatViews: ChatViewsDep;
   nativeReloader: NativeReloaderDep;
@@ -109,6 +110,7 @@ function reloadErrorCode(error: unknown): ClientRequestErrorCode {
 }
 
 export class ChatHandler {
+  #serverInstanceId: string;
   #processing: Pick<ChatProcessingActivity, 'snapshot'>;
   #chatViews: ChatViewsDep;
   #nativeReloader: NativeReloaderDep;
@@ -118,6 +120,7 @@ export class ChatHandler {
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
   constructor({
+    serverInstanceId,
     processing,
     chatViews,
     nativeReloader,
@@ -125,6 +128,7 @@ export class ChatHandler {
     pendingInputs,
     registry,
   }: ChatHandlerDeps) {
+    this.#serverInstanceId = serverInstanceId;
     this.#processing = processing;
     this.#chatViews = chatViews;
     this.#nativeReloader = nativeReloader;
@@ -187,6 +191,7 @@ export class ChatHandler {
       writer.send(new ReconnectStateMessage(
         processing,
         controlResults,
+        this.#serverInstanceId,
         data.clientRequestId ?? undefined,
       ));
     } catch (error: unknown) {
@@ -215,6 +220,7 @@ export class ChatHandler {
       data.sentAt,
       new Date().toISOString(),
       readProcessingSnapshot(this.#processing),
+      this.#serverInstanceId,
     ));
   }
 

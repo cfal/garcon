@@ -112,7 +112,8 @@ describe('PrimaryWsHandler', () => {
       detachTerminal: mock(() => undefined),
     };
     const chat = new ChatHandler({
-      agents: { getRunningChatIdsSnapshot: () => [] },
+      serverInstanceId: 'server-instance-test',
+      processing: { snapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
       queue: { readChatExecutionControl: async () => ({}) },
@@ -167,6 +168,7 @@ describe('PrimaryWsHandler', () => {
       type: 'ws-pong',
       clientRequestId: 'ping-1',
       sentAt: 42,
+      serverInstanceId: 'server-instance-test',
     });
     expect(socket.closes).toEqual([]);
     expect(terminalManager.detachPeer).toHaveBeenCalledTimes(1);
@@ -184,7 +186,8 @@ describe('PrimaryWsHandler', () => {
       detachTerminal: mock(() => undefined),
     };
     const chat = new ChatHandler({
-      agents: { getRunningChatIdsSnapshot: () => [] },
+      serverInstanceId: 'server-instance-test',
+      processing: { snapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
       queue: { readChatExecutionControl: async () => ({}) },

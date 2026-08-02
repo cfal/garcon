@@ -40,8 +40,9 @@ const chatViewMessage = {
 	message: { type: 'assistant-message', timestamp: '2025-01-01T00:00:00Z', content: 'hi' },
 };
 
-function emptyExecutionControl(version = 4) {
+function emptyExecutionControl(version = 4, serverInstanceId = 'server-instance-test') {
 	return {
+		serverInstanceId,
 		queue: {
 			entries: [],
 			dispatchingEntryId: null,
@@ -342,6 +343,7 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'reconnect-state',
 				clientRequestId: 'req-reconnect',
+				serverInstanceId: 'server-instance-test',
 				processing: {
 					outcome: 'snapshot',
 					chats: [{ chatId: 'running-1', phase: 'running' }],
@@ -518,6 +520,7 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({
 				type: 'ws-pong',
 				clientRequestId: 'req-ping',
+				serverInstanceId: 'server-instance-test',
 				sentAt: 1234,
 				serverTime: '2026-06-17T00:00:00.000Z',
 				processing: { outcome: 'snapshot', chats: [] },
@@ -571,6 +574,7 @@ describe('parseServerWsMessage', () => {
 		const snapshot = parseServerWsMessage({
 			type: 'reconnect-state',
 			clientRequestId: 'req-reconnect',
+			serverInstanceId: 'server-instance-test',
 			processing: {
 				outcome: 'snapshot',
 				chats: [
@@ -589,9 +593,11 @@ describe('parseServerWsMessage', () => {
 			],
 		});
 		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
+		expect((snapshot as ReconnectStateMessage).serverInstanceId).toBe('server-instance-test');
 
 		const emptySnapshot = parseServerWsMessage({
 			type: 'reconnect-state',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'snapshot', chats: [] },
 			controlResults: [],
 		});
@@ -602,6 +608,7 @@ describe('parseServerWsMessage', () => {
 
 		const unavailable = parseServerWsMessage({
 			type: 'reconnect-state',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'unavailable' },
 			controlResults: [],
 		});
@@ -612,6 +619,7 @@ describe('parseServerWsMessage', () => {
 		const pong = parseServerWsMessage({
 			type: 'ws-pong',
 			clientRequestId: 'req-ping',
+			serverInstanceId: 'server-instance-test',
 			sentAt: 42,
 			serverTime: '2026-07-27T00:00:00.000Z',
 			processing: {
@@ -624,9 +632,11 @@ describe('parseServerWsMessage', () => {
 			outcome: 'snapshot',
 			chats: [{ chatId: 'chat-a', phase: 'stopping' }],
 		});
+		expect((pong as WsPongMessage).serverInstanceId).toBe('server-instance-test');
 		const unavailablePong = parseServerWsMessage({
 			type: 'ws-pong',
 			clientRequestId: 'req-ping-unavailable',
+			serverInstanceId: 'server-instance-test',
 			sentAt: 43,
 			serverTime: '2026-07-27T00:00:00.000Z',
 			processing: { outcome: 'unavailable' },
@@ -635,6 +645,56 @@ describe('parseServerWsMessage', () => {
 		expect((unavailablePong as WsPongMessage).processing).toEqual({
 			outcome: 'unavailable',
 		});
+	});
+
+	it('rejects missing, malformed, and mixed execution-control instance identities', () => {
+		const reconnect = {
+			type: 'reconnect-state',
+			serverInstanceId: 'server-a',
+			processing: { outcome: 'snapshot', chats: [] },
+			controlResults: [
+				{ chatId: 'chat-1', outcome: 'snapshot', control: emptyExecutionControl(1, 'server-a') },
+			],
+		};
+		const pong = {
+			type: 'ws-pong',
+			clientRequestId: 'req-ping',
+			sentAt: 42,
+			serverTime: '2026-07-27T00:00:00.000Z',
+			processing: { outcome: 'snapshot', chats: [] },
+			serverInstanceId: 'server-a',
+		};
+
+		for (const serverInstanceId of [
+			undefined,
+			null,
+			'',
+			' server-a',
+			'server-a ',
+			'x'.repeat(129),
+		]) {
+			expect(parseServerWsMessage({ ...reconnect, serverInstanceId })).toBeNull();
+			expect(parseServerWsMessage({ ...pong, serverInstanceId })).toBeNull();
+		}
+		expect(
+			parseServerWsMessage({
+				type: 'reconnect-state',
+				processing: { outcome: 'snapshot', chats: [] },
+				controlResults: [],
+			}),
+		).toBeNull();
+		expect(
+			parseServerWsMessage({
+				...reconnect,
+				controlResults: [
+					{
+						chatId: 'chat-1',
+						outcome: 'snapshot',
+						control: emptyExecutionControl(1, 'server-b'),
+					},
+				],
+			}),
+		).toBeNull();
 	});
 
 	it('rejects malformed reconnect processing data and legacy session payloads', () => {
@@ -663,6 +723,7 @@ describe('parseServerWsMessage', () => {
 			expect(
 				parseServerWsMessage({
 					type: 'reconnect-state',
+					serverInstanceId: 'server-instance-test',
 					processing,
 					controlResults: [],
 				}),
@@ -671,6 +732,7 @@ describe('parseServerWsMessage', () => {
 				parseServerWsMessage({
 					type: 'ws-pong',
 					clientRequestId: 'req-ping',
+					serverInstanceId: 'server-instance-test',
 					sentAt: 42,
 					serverTime: '2026-07-27T00:00:00.000Z',
 					processing,
@@ -681,6 +743,7 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'reconnect-state',
+				serverInstanceId: 'server-instance-test',
 				sessions: { claude: [{ id: 'running-1' }] },
 				controlResults: [],
 			}),
@@ -715,6 +778,7 @@ describe('parseServerWsMessage', () => {
 		expect(
 			parseServerWsMessage({
 				type: 'reconnect-state',
+				serverInstanceId: 'server-instance-test',
 				processing: { outcome: 'snapshot', chats: [] },
 				controlResults: [{ chatId: 'c-1', outcome: 'snapshot' }],
 			}),

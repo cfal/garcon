@@ -39,7 +39,7 @@ function createHarness() {
 	};
 	const lifecycle = { currentChatId: 'chat-1' as string | null };
 	const conversationUi = {
-		setExecutionControl: vi.fn(),
+		setExecutionControlFromLiveUpdate: vi.fn(),
 		setExecutionControlFromRefresh: vi.fn(),
 	};
 	const acceptedInputs = {
@@ -54,7 +54,7 @@ function createHarness() {
 				status: 'accepted' as const,
 				acceptedAt: '2026-07-20T00:00:00.000Z',
 				entryId: 'entry-1',
-				control: emptyChatExecutionControlState(),
+				control: emptyChatExecutionControlState('server-instance-test'),
 			})),
 		})),
 	};
@@ -118,7 +118,7 @@ describe('ConversationQueueController', () => {
 
 	it('applies refreshed execution control through the version-aware store method', async () => {
 		const { controller, conversationUi } = createHarness();
-		const control = emptyChatExecutionControlState();
+		const control = emptyChatExecutionControlState('server-instance-test');
 		vi.mocked(getChatExecutionControl).mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
@@ -133,7 +133,7 @@ describe('ConversationQueueController', () => {
 
 	it('moves queue entries with stable identity and explicit concurrency preconditions', async () => {
 		const { controller, conversationUi } = createHarness();
-		const control = emptyChatExecutionControlState();
+		const control = emptyChatExecutionControlState('server-instance-test');
 		vi.mocked(moveQueuedInput).mockResolvedValueOnce({
 			success: true,
 			commandType: 'queue-entry-move',
@@ -163,12 +163,15 @@ describe('ConversationQueueController', () => {
 			expectedSourceRevision: 4,
 			expectedTargetRevision: 3,
 		});
-		expect(conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', control);
+		expect(conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
+			'chat-1',
+			control,
+		);
 	});
 
 	it('retries an ambiguous move once with the same client request id', async () => {
 		const { controller } = createHarness();
-		const control = emptyChatExecutionControlState();
+		const control = emptyChatExecutionControlState('server-instance-test');
 		vi.mocked(moveQueuedInput)
 			.mockRejectedValueOnce(new ApiError(500, 'Connection lost'))
 			.mockResolvedValueOnce({
@@ -199,7 +202,7 @@ describe('ConversationQueueController', () => {
 
 	it('refreshes the latest queue after an unconfirmed move outcome', async () => {
 		const { controller, conversationUi } = createHarness();
-		const control = emptyChatExecutionControlState();
+		const control = emptyChatExecutionControlState('server-instance-test');
 		vi.mocked(moveQueuedInput)
 			.mockRejectedValueOnce(new Error('network failure'))
 			.mockRejectedValueOnce(new Error('network failure'));

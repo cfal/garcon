@@ -45,9 +45,9 @@ function storedEntry(id, status = 'queued', revision = 1) {
 
 describe('chat execution control transitions', () => {
   it('creates, replaces, dispatches, returns, and removes one entry without mutating inputs', () => {
-    const initial = emptyStoredChatExecutionControl();
+    const initial = emptyStoredChatExecutionControl('server-instance-test');
     const created = createQueueEntry(initial, { content: 'first' }, context());
-    expect(initial).toEqual(emptyStoredChatExecutionControl());
+    expect(initial).toEqual(emptyStoredChatExecutionControl('server-instance-test'));
     expect(created.next).toMatchObject({ version: 1, entries: [{ content: 'first', revision: 1 }] });
 
     const entryId = value(created).entryId;
@@ -79,7 +79,7 @@ describe('chat execution control transitions', () => {
 
   it('returns typed mutation rejections with the input state unchanged', () => {
     const created = createQueueEntry(
-      emptyStoredChatExecutionControl(),
+      emptyStoredChatExecutionControl('server-instance-test'),
       { content: 'first' },
       context(),
     );
@@ -106,7 +106,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('retains unresolved receipts while enforcing the receipt bound', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.appliedCommands = Array.from(
       { length: MAX_STORED_APPLIED_QUEUE_COMMANDS + 3 },
       (_, index) => ({
@@ -133,7 +133,7 @@ describe('chat execution control transitions', () => {
   it('replays queue command receipts without applying a mutation twice', () => {
     const command = { key: 'queue:create:request', entryId: 'entry-1' };
     const first = createQueueEntry(
-      emptyStoredChatExecutionControl(),
+      emptyStoredChatExecutionControl('server-instance-test'),
       { content: 'first', command },
       context(0, new Set([command.key])),
     );
@@ -148,7 +148,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('moves entries by stable target identity without changing entry revisions', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.entries = [
       storedEntry('a', 'queued', 2),
       storedEntry('b'),
@@ -173,7 +173,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('records no-op moves and rejects stale reorder revisions', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.entries = [storedEntry('a'), storedEntry('b'), storedEntry('c')];
     const noOp = moveQueueEntry(current, {
       entryId: 'b',
@@ -217,7 +217,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('rebases past a dispatching target while preserving its retry priority', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.entries = [
       storedEntry('target', 'sending'),
       storedEntry('a'),
@@ -252,7 +252,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('rebases past a completed target only when its dispatched revision still matches', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.entries = [storedEntry('a'), storedEntry('source'), storedEntry('b')];
     current.recentlyDispatched = [{
       entryId: 'target',
@@ -291,7 +291,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('rejects moved entries or targets whose content changed', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.entries = [storedEntry('a', 'queued', 2), storedEntry('b', 'queued', 3)];
     const sourceConflict = moveQueueEntry(current, {
       entryId: 'b',
@@ -321,7 +321,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('restores pause stacks and rejects stale pause identities', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.entries.push({
       id: 'entry-1',
       content: 'queued',
@@ -341,7 +341,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('applies stage-specific queue compensation without changing delivery identity', () => {
-    const current = emptyStoredChatExecutionControl();
+    const current = emptyStoredChatExecutionControl('server-instance-test');
     current.entries.push({
       id: 'entry-1',
       content: 'queued',
@@ -375,7 +375,7 @@ describe('chat execution control transitions', () => {
   });
 
   it('stages only the queue head with the supplied active delivery identity', () => {
-    const initial = emptyStoredChatExecutionControl();
+    const initial = emptyStoredChatExecutionControl('server-instance-test');
     const first = createQueueEntry(initial, {
       content: 'first',
       command: { key: 'first-command', entryId: 'first-entry' },
@@ -417,7 +417,7 @@ describe('chat execution control transitions', () => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       return seed;
     };
-    let control = emptyStoredChatExecutionControl();
+    let control = emptyStoredChatExecutionControl('server-instance-test');
     let ordinal = 0;
     const knownIds = [];
 

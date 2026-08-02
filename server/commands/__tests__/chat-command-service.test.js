@@ -21,6 +21,7 @@ import {
   QueueEntryMutationError,
   ChatExecutionCoordinator,
 } from '../../chat-execution/chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from '../../chat-execution/chat-execution-control-repository.ts';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
@@ -639,6 +640,7 @@ function makeRealQueue(pendingInputsService, turnRunnerOverrides = {}) {
     { appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })) },
     () => ({}),
     () => true,
+    new InMemoryChatExecutionControlRepository('server-instance-test'),
   );
 }
 

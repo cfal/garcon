@@ -86,7 +86,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands: NonNullable<AgentIntegration['commands']>;
   readonly forking;
-  readonly steering = null;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
   readonly endpoints: NonNullable<AgentIntegration['endpoints']>;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
@@ -198,6 +198,10 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       semanticDigest: claudeForkSemanticDigest,
       allowUnmaterializedWholeSession: true,
     });
+    this.steering = {
+      captureTarget: request => runtime.captureSteerTarget(request.agentSessionId),
+      steer: request => runtime.steer(request),
+    };
     this.endpoints = {
       async validate(selection) {
         if (selection.protocol !== 'anthropic-messages') {

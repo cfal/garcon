@@ -12,6 +12,29 @@ import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.j
 
 const TS = '2026-05-14T00:00:01.000Z';
 
+function executionControl(serverInstanceId: string, version: number, content: string) {
+	return {
+		serverInstanceId,
+		queue: {
+			entries: [
+				{
+					id: `entry-${serverInstanceId}`,
+					content,
+					revision: 1,
+					createdAt: TS,
+					updatedAt: TS,
+				},
+			],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+			reorderRevision: 0,
+		},
+		version,
+		updatedAt: TS,
+	};
+}
+
 function chatRecord(): ChatSessionRecord {
 	return {
 		id: 'chat-a',
@@ -306,6 +329,35 @@ describe('event router integration', () => {
 			'chat-a',
 			'queued message',
 		);
+	});
+
+	it('does not let a retained old-socket control demote the confirmed instance', () => {
+		const stores = createStores();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const current = executionControl('server-b', 1, 'current');
+		stores.conversationUi.confirmExecutionControlSocketInstance('server-b');
+		stores.conversationUi.setExecutionControlFromLiveUpdate('chat-a', current);
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-execution-control-updated',
+					chatId: 'chat-a',
+					control: executionControl('server-a', 99, 'retained-old-socket'),
+				},
+			],
+			stores,
+		);
+
+		expect(stores.conversationUi.getExecutionControl('chat-a')).toEqual(current);
+		expect(warn).toHaveBeenCalledWith(
+			'[ConversationUiState] Rejected execution control instance',
+			expect.objectContaining({
+				reason: 'confirmed-socket-mismatch',
+				incomingInstanceId: 'server-a',
+			}),
+		);
+		warn.mockRestore();
 	});
 
 	it('warms visible split-pane previews before background chat filtering skips them', () => {

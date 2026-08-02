@@ -2,9 +2,11 @@ import crypto from 'node:crypto';
 import type { CompactionTrigger } from '@garcon/common/chat-types';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { ClaudeTurnState } from './cli-protocol.js';
+import { ClaudeTurnSteeringState } from './steering.js';
 
 export class ClaudeActiveTurn {
   readonly protocol: ClaudeTurnState;
+  readonly steering = new ClaudeTurnSteeringState();
   readonly startedAt = Date.now();
   readonly completion: Promise<void>;
   readonly preStartAbortConfirmation: Promise<void>;
@@ -29,6 +31,7 @@ export class ClaudeActiveTurn {
   }
 
   finish(): void {
+    this.steering.clear();
     this.#resolve?.();
     this.#resolve = null;
   }
