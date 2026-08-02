@@ -7,6 +7,82 @@ import {
 } from '../../support/accepted-response-loss.js';
 
 describe('Lightpanda queue workflow', () => {
+	test('clears stale controls and shows an Enter-queued message after restart', async () => {
+		await withE2eFixture('queue-controls-after-restart', async (fixture) => {
+			const app = new SpaDriver(fixture.page, fixture.integration);
+			const before = fixture.integration.fakeProviders.openAi.holdNext({
+				lastUserText: 'before-restart-active',
+			});
+			await app.open();
+			await fixture.waitForSpaWebSocket();
+			await app.startOpenAiDirectChat('before-restart-active');
+			await before.received;
+
+			await app.sendComposer('before-restart-queued');
+			await app.waitForQueuedPreview('before-restart-queued');
+			const chat = (await fixture.integration.client.listChats()).sessions.find(
+				(entry) => entry.preview.firstMessage === 'before-restart-active',
+			);
+			if (!chat) throw new Error('Restart queue chat was not listed.');
+			await fixture.integration.client.pauseQueue(chat.id);
+			await app.waitForText('Resume queue');
+
+			const terminalCursor = fixture.integration.client.markEvents();
+			before.releaseEcho();
+			await fixture.integration.client.waitForProcessing(chat.id, false, {
+				afterIndex: terminalCursor,
+			});
+			const priorConnectionCount = await fixture.spaWebSocketConnectionCount();
+			expect(fixture.browserErrors).toEqual([]);
+			const errorsBeforeCrash = fixture.browserErrors.length;
+
+			await fixture.integration.crashAndRestartGarcon({ reusePort: true });
+			await fixture.page.evaluate((previousCount) => {
+				const scope = globalThis as typeof globalThis & {
+					__garconSpaWsOpenCount?: number;
+				};
+				if ((scope.__garconSpaWsOpenCount ?? 0) <= previousCount) {
+					globalThis.dispatchEvent(new Event('online'));
+				}
+			}, priorConnectionCount);
+			await fixture.waitForSpaWebSocket({ afterConnectionCount: priorConnectionCount });
+			const errorsAfterReconnect = fixture.browserErrors.length;
+			await fixture.page.waitForFunction(
+				() => document.querySelector('[data-queue-preview]') === null,
+				{ timeout: 20_000 },
+			);
+			await app.waitForTextAbsent('Resume queue');
+			await app.waitForComposerAction('Send message');
+
+			const after = fixture.integration.fakeProviders.openAi.holdNext({
+				lastUserText: 'after-restart-active',
+			});
+			await app.sendComposer('after-restart-active');
+			await after.received;
+			await app.submitComposerWithEnter('after-restart-queued', 'Queue message');
+
+			await app.waitForQueuedPreview('after-restart-queued');
+			const control = await fixture.integration.client.getExecutionControl(chat.id);
+			expect(control.queue.entries.map((entry) => entry.content)).toEqual([
+				'after-restart-queued',
+			]);
+
+			const afterTerminalCursor = fixture.integration.client.markEvents();
+			after.releaseEcho();
+			await fixture.integration.client.waitForProcessing(chat.id, false, {
+				afterIndex: afterTerminalCursor,
+			});
+			const reconnectWindowErrors = fixture.browserErrors.slice(
+				errorsBeforeCrash,
+				errorsAfterReconnect,
+			);
+			expect(reconnectWindowErrors.filter(
+				(message) => !message.startsWith('console.error: WebSocket error:'),
+			)).toEqual([]);
+			expect(fixture.browserErrors.slice(errorsAfterReconnect)).toEqual([]);
+		});
+	});
+
 	test('moves queued messages with buttons and executes the authoritative order', async () => {
 		await withE2eFixture('queue-reorder-workflow', async (fixture) => {
 			const app = new SpaDriver(fixture.page, fixture.integration);
