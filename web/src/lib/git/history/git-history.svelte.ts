@@ -26,6 +26,27 @@ export interface GitHistoryRevertTarget {
 	subject: string;
 }
 
+export interface GitHistoryListPosition {
+	scrollTop: number;
+	anchorHash: string | null;
+	anchorOffset: number;
+	activeHash: string | null;
+}
+
+export type GitHistoryListChangeKind = 'replace' | 'append' | 'reset';
+
+export interface GitHistoryListChange {
+	revision: number;
+	kind: GitHistoryListChangeKind;
+}
+
+export const EMPTY_GIT_HISTORY_LIST_POSITION: GitHistoryListPosition = {
+	scrollTop: 0,
+	anchorHash: null,
+	anchorOffset: 0,
+	activeHash: null,
+};
+
 interface HistoryLoadGuard {
 	generation: number;
 	projectPath: string;
@@ -51,7 +72,8 @@ export class GitHistoryController {
 	commitSnapshot = $state<GitCommitSnapshotReady | null>(null);
 	commitLoading = $state(false);
 	commitError = $state<string | null>(null);
-	listScrollTop = $state(0);
+	listPosition = $state<GitHistoryListPosition>({ ...EMPTY_GIT_HISTORY_LIST_POSITION });
+	listChange = $state<GitHistoryListChange>({ revision: 0, kind: 'reset' });
 
 	private listAbort: AbortController | null = null;
 	private commitAbort: AbortController | null = null;
@@ -143,6 +165,7 @@ export class GitHistoryController {
 				if (!this.isCurrentListRequest(generation, projectPath, controller.signal)) return;
 				this.commits = result.commits;
 				this.nextOffset = result.nextOffset;
+				this.markListChange('replace');
 				this.listInitialized = true;
 			})
 			.catch((error) => {
@@ -157,6 +180,7 @@ export class GitHistoryController {
 				});
 				this.commits = [];
 				this.nextOffset = null;
+				this.markListChange('replace');
 				this.listInitialized = true;
 			})
 			.finally(() => {
@@ -204,6 +228,7 @@ export class GitHistoryController {
 					...result.commits.filter((commit) => !existing.has(commit.hash)),
 				];
 				this.nextOffset = result.nextOffset;
+				this.markListChange('append');
 			})
 			.catch((error) => {
 				if (
@@ -274,8 +299,13 @@ export class GitHistoryController {
 		this.document.setFileFilter(value);
 	}
 
-	saveListScrollTop(value: number): void {
-		this.listScrollTop = value;
+	saveListPosition(position: GitHistoryListPosition): void {
+		this.listPosition = {
+			scrollTop: Number.isFinite(position.scrollTop) ? Math.max(0, position.scrollTop) : 0,
+			anchorHash: position.anchorHash,
+			anchorOffset: Number.isFinite(position.anchorOffset) ? position.anchorOffset : 0,
+			activeHash: position.activeHash,
+		};
 	}
 
 	retryCommit(projectPath: string): void {
@@ -305,7 +335,15 @@ export class GitHistoryController {
 		this.commitLoading = false;
 		this.commitError = null;
 		this.documentRecoveryAttempted = false;
-		this.listScrollTop = 0;
+		this.listPosition = { ...EMPTY_GIT_HISTORY_LIST_POSITION };
+		this.markListChange('reset');
+	}
+
+	private markListChange(kind: GitHistoryListChangeKind): void {
+		this.listChange = {
+			revision: this.listChange.revision + 1,
+			kind,
+		};
 	}
 
 	private loadCommitSnapshot(

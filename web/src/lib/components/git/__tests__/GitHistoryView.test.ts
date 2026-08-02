@@ -230,7 +230,7 @@ describe('GitHistoryView', () => {
 
 	it('navigates from commit list to details and back', async () => {
 		const history = createHistory();
-		render(GitHistoryView, {
+		const { container } = render(GitHistoryView, {
 			props: {
 				history,
 				comparisonSelection,
@@ -246,6 +246,8 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
+		const list = container.querySelector('[data-git-history-commit-list]');
+		expect(list?.contains(screen.getByRole('button', { name: 'Select commits' }))).toBe(false);
 		const commitRow = screen.getByRole('button', { name: 'Open commit List commit' });
 		expect(commitRow.hasAttribute('data-git-history-commit-row')).toBe(true);
 		expect(commitRow.parentElement?.classList.contains('select-none')).toBe(true);
@@ -272,6 +274,129 @@ describe('GitHistoryView', () => {
 
 		expect(await screen.findByText('List commit')).toBeTruthy();
 		expect(history.screen).toBe('list');
+	});
+
+	it('loads the next commit page automatically near the bottom', async () => {
+		const nextPage = deferred<Awaited<ReturnType<typeof getGitHistoryCommits>>>();
+		vi.mocked(getGitHistoryCommits)
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commitListItem()],
+				nextOffset: 50,
+			})
+			.mockReturnValueOnce(nextPage.promise);
+		const history = createHistory();
+		const { container } = render(GitHistoryView, {
+			props: {
+				history,
+				comparisonSelection,
+				onOpenSelectedComparison: vi.fn(),
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				presentation: 'main',
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		const list = container.querySelector<HTMLDivElement>('[data-git-history-commit-list]');
+		expect(list).toBeTruthy();
+		if (!list) return;
+		Object.defineProperties(list, {
+			clientHeight: { configurable: true, value: 200 },
+			scrollHeight: { configurable: true, value: 1_000 },
+		});
+
+		list.scrollTop = 650;
+		await fireEvent.scroll(list);
+		expect(getGitHistoryCommits).toHaveBeenCalledOnce();
+
+		list.scrollTop = 710;
+		await fireEvent.scroll(list);
+		await fireEvent.scroll(list);
+		await waitFor(() => expect(getGitHistoryCommits).toHaveBeenCalledTimes(2));
+		expect(getGitHistoryCommits).toHaveBeenLastCalledWith(
+			'/project',
+			expect.objectContaining({ offset: 50 }),
+		);
+		expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
+		expect(screen.getByText('Loading more commits...')).toBeTruthy();
+
+		nextPage.resolve({
+			project: '/project',
+			ref: 'HEAD',
+			commits: [
+				{
+					...commitListItem(),
+					hash: '1234567890abcdef',
+					shortHash: '1234567',
+					subject: 'Older commit',
+				},
+			],
+			nextOffset: null,
+		});
+
+		expect(await screen.findByText('Older commit')).toBeTruthy();
+		await waitFor(() => expect(screen.queryByText('Loading more commits...')).toBeNull());
+	});
+
+	it('offers an explicit retry instead of repeatedly auto-loading a failed page', async () => {
+		vi.mocked(getGitHistoryCommits)
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commitListItem()],
+				nextOffset: 50,
+			})
+			.mockRejectedValueOnce(new Error('network unavailable'))
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [],
+				nextOffset: null,
+			});
+		const history = createHistory();
+		const { container } = render(GitHistoryView, {
+			props: {
+				history,
+				comparisonSelection,
+				onOpenSelectedComparison: vi.fn(),
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				presentation: 'main',
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		const list = container.querySelector<HTMLDivElement>('[data-git-history-commit-list]');
+		expect(list).toBeTruthy();
+		if (!list) return;
+		Object.defineProperties(list, {
+			clientHeight: { configurable: true, value: 200 },
+			scrollHeight: { configurable: true, value: 1_000 },
+		});
+		list.scrollTop = 710;
+		await fireEvent.scroll(list);
+
+		const retry = await screen.findByRole('button', { name: 'Retry loading commits' });
+		expect(screen.getByText('Failed to load more commits: network unavailable')).toBeTruthy();
+		await fireEvent.scroll(list);
+		await Promise.resolve();
+		expect(getGitHistoryCommits).toHaveBeenCalledTimes(2);
+
+		await fireEvent.click(retry);
+		await waitFor(() => expect(getGitHistoryCommits).toHaveBeenCalledTimes(3));
+		await waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Retry loading commits' })).toBeNull(),
+		);
 	});
 
 	it('resizes, hides, and restores the wide changed-file tree', async () => {
@@ -621,7 +746,7 @@ describe('GitHistoryView', () => {
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
 	});
 
-	it('reports list row revert requests without opening the commit', async () => {
+	it('shows Revert only after opening commit details', async () => {
 		render(GitHistoryView, {
 			props: {
 				history: createHistory(),
@@ -638,14 +763,13 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
-		await fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
-
-		expect(onRevertCommit).toHaveBeenCalledWith({
-			hash: 'abcdef1234567890',
-			shortHash: 'abcdef1',
-			subject: 'List commit',
-		});
+		expect(screen.queryByRole('button', { name: 'Revert' })).toBeNull();
 		expect(getGitCommitSnapshot).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open commit List commit' }));
+
+		await screen.findByText('Commit detail');
+		expect(screen.getByRole('button', { name: 'Revert' })).toBeTruthy();
 	});
 
 	it('removes generic comparison launchers from the list and commit details', async () => {
@@ -712,7 +836,12 @@ describe('GitHistoryView', () => {
 
 	it('renders selected revisions inside History and returns to the preserved selection', async () => {
 		const history = createHistory();
-		history.listScrollTop = 240;
+		history.saveListPosition({
+			scrollTop: 0,
+			anchorHash: commitListItem().hash,
+			anchorOffset: 0,
+			activeHash: commitListItem().hash,
+		});
 		comparisonSelection.begin();
 		comparisonSelection.select('older');
 		comparisonSelection.select('newer');
@@ -767,7 +896,10 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
 
 		expect(await screen.findByText('List commit')).toBeTruthy();
-		expect(history.listScrollTop).toBe(240);
+		expect(history.listPosition).toMatchObject({
+			anchorHash: commitListItem().hash,
+			activeHash: commitListItem().hash,
+		});
 		expect(comparisonSelection).toMatchObject({
 			active: true,
 			from: 'older',
