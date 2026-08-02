@@ -34,7 +34,6 @@ export function handleClaudeInterruptReceipt(
   value: unknown,
   handlers: ClaudeInterruptReceiptHandlers,
 ): boolean {
-  const turnIsCurrent = session.activeTurn === activeTurn;
   const receipt = record(value);
   const cancelled = stringArray(receipt.cancelled);
   const stillQueued = stringArray(receipt.still_queued);
@@ -43,6 +42,7 @@ export function handleClaudeInterruptReceipt(
     stillQueued,
   });
   if (steeringReceipt.cancelledCount > 0) handlers.flushDeferredIdle();
+  const turnIsCurrent = session.activeTurn === activeTurn;
   const inputUuid = activeTurn.protocol.inputUuid;
   const details = {
     chatId: session.chatId,

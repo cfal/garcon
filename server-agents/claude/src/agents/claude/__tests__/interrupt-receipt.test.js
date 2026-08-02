@@ -9,7 +9,7 @@ const logger = {
   error() {},
 };
 
-function createFixture() {
+function createFixture({ settleOnFlush = false } = {}) {
   const activeTurn = new ClaudeActiveTurn({ turnId: 'turn-1' }, 0);
   const session = {
     id: 'session-1',
@@ -23,7 +23,10 @@ function createFixture() {
     finish: () => calls.push('finish'),
     clearAbortTimer: () => calls.push('clear'),
     armCompletionFallback: () => calls.push('arm'),
-    flushDeferredIdle: () => calls.push('flush'),
+    flushDeferredIdle: () => {
+      calls.push('flush');
+      if (settleOnFlush) session.activeTurn = null;
+    },
   };
   return { activeTurn, session, calls, handlers };
 }
@@ -102,6 +105,26 @@ describe('handleClaudeInterruptReceipt', () => {
     )).toBe(true);
     expect(fixture.activeTurn.steering.blocksIdleSettlement).toBe(false);
     expect(fixture.calls).toEqual(['flush', 'arm']);
+  });
+
+  it('does not arm a fallback after cancellation flush settles the turn', () => {
+    const fixture = createFixture({ settleOnFlush: true });
+    startInput(fixture.activeTurn);
+    fixture.activeTurn.protocol.recordAcceptedResult({
+      type: 'result',
+      user_message_uuid: fixture.activeTurn.protocol.inputUuid,
+    });
+    fixture.activeTurn.steering.markSubmitted('steer-1');
+    fixture.activeTurn.steering.rememberProviderIdle();
+
+    expect(handleClaudeInterruptReceipt(
+      fixture.session,
+      fixture.activeTurn,
+      { cancelled: ['steer-1'] },
+      fixture.handlers,
+    )).toBe(true);
+    expect(fixture.session.activeTurn).toBeNull();
+    expect(fixture.calls).toEqual(['flush']);
   });
 
   it('retains a steering fence reported still queued', () => {
