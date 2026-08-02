@@ -834,7 +834,12 @@ describe('GitHistoryView', () => {
 
 	it('renders selected revisions inside History and returns to the preserved selection', async () => {
 		const history = createHistory();
-		history.listScrollTop = 240;
+		history.saveListPosition({
+			scrollTop: 240,
+			anchorHash: null,
+			anchorOffset: 0,
+			activeHash: null,
+		});
 		comparisonSelection.begin();
 		comparisonSelection.select('older');
 		comparisonSelection.select('newer');
@@ -889,7 +894,7 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
 
 		expect(await screen.findByText('List commit')).toBeTruthy();
-		expect(history.listScrollTop).toBe(240);
+		expect(history.listPosition.scrollTop).toBe(240);
 		expect(comparisonSelection).toMatchObject({
 			active: true,
 			from: 'older',
