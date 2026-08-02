@@ -6,7 +6,6 @@
 	import History from '@lucide/svelte/icons/history';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import type { GitHistoryCommitListItem } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -18,7 +17,6 @@
 		isMobile: boolean;
 		scrollTop: number;
 		onOpenCommit: (hash: string) => void;
-		onRevertCommit: (commit: GitHistoryCommitListItem) => void;
 		onLoadMore: () => void;
 		onScrollSave: (top: number) => void;
 		comparisonSelectionActive: boolean;
@@ -40,7 +38,6 @@
 		isMobile,
 		scrollTop,
 		onOpenCommit,
-		onRevertCommit,
 		onLoadMore,
 		onScrollSave,
 		comparisonSelectionActive,
@@ -235,18 +232,6 @@
 						</button>
 						<ChevronRight class="self-center h-4 w-4 shrink-0 text-muted-foreground" />
 					</div>
-					{#if !comparisonSelectionActive}<div
-							class="pointer-events-none relative z-[1] mt-2 flex justify-end"
-						>
-							<button
-								type="button"
-								class="pointer-events-auto inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								onclick={() => onRevertCommit(commit)}
-							>
-								<Undo2 class="h-3.5 w-3.5" />
-								Revert
-							</button>
-						</div>{/if}
 				</div>
 			{/each}
 		</div>

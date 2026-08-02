@@ -621,7 +621,7 @@ describe('GitHistoryView', () => {
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
 	});
 
-	it('reports list row revert requests without opening the commit', async () => {
+	it('shows Revert only after opening commit details', async () => {
 		render(GitHistoryView, {
 			props: {
 				history: createHistory(),
@@ -638,14 +638,13 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
-		await fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
-
-		expect(onRevertCommit).toHaveBeenCalledWith({
-			hash: 'abcdef1234567890',
-			shortHash: 'abcdef1',
-			subject: 'List commit',
-		});
+		expect(screen.queryByRole('button', { name: 'Revert' })).toBeNull();
 		expect(getGitCommitSnapshot).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open commit List commit' }));
+
+		await screen.findByText('Commit detail');
+		expect(screen.getByRole('button', { name: 'Revert' })).toBeTruthy();
 	});
 
 	it('removes generic comparison launchers from the list and commit details', async () => {
