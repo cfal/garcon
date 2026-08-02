@@ -8,6 +8,73 @@ import {
 } from '../cli-protocol.js';
 import { convertClaudePermissionTool } from '../permission-tool-converter.js';
 import { AskUserQuestionToolUseMessage, BashToolUseMessage, ExitPlanModeToolUseMessage } from '@garcon/common/chat-types';
+import {
+  buildClaudeInitialUserContent,
+  buildClaudeUserInputFrame,
+} from '../user-input.js';
+
+describe('Claude SDK user input', () => {
+  it('builds the existing stream-json user frame', () => {
+    expect(JSON.parse(buildClaudeUserInputFrame({
+      content: 'hello',
+      sessionId: 'session-1',
+      uuid: 'input-1',
+    }))).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'hello' },
+      parent_tool_use_id: null,
+      session_id: 'session-1',
+      uuid: 'input-1',
+    });
+  });
+
+  it('keeps image, document, and text attachment content in canonical order', () => {
+    const text = Buffer.from('notes').toString('base64');
+    expect(buildClaudeInitialUserContent('prompt', [
+      {
+        kind: 'image',
+        name: 'screen.png',
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,aW1hZ2U=',
+      },
+      {
+        kind: 'image',
+        name: 'spec.pdf',
+        mimeType: 'application/pdf',
+        data: 'data:application/pdf;base64,cGRm',
+      },
+      {
+        kind: 'image',
+        name: 'notes.txt',
+        mimeType: 'text/plain',
+        data: `data:text/plain;base64,${text}`,
+      },
+    ])).toEqual([
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' },
+      },
+      {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: 'cGRm' },
+        title: 'spec.pdf',
+      },
+      {
+        type: 'text',
+        text: 'prompt\n\n<attached-file name="notes.txt" mime="text/plain">\nnotes\n\n</attached-file>',
+      },
+    ]);
+  });
+
+  it('preserves the content-block shape when a rich attachment has invalid data', () => {
+    expect(buildClaudeInitialUserContent('prompt', [{
+      kind: 'image',
+      name: 'broken.png',
+      mimeType: 'image/png',
+      data: 'not-a-data-url',
+    }])).toEqual([{ type: 'text', text: 'prompt' }]);
+  });
+});
 
 describe('buildClaudeCLIArgs', () => {
 

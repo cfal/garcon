@@ -1,0 +1,90 @@
+import { describe, expect, it } from 'bun:test';
+import { ClaudeActiveTurn } from '../active-turn.js';
+import { handleClaudeInterruptReceipt } from '../interrupt-receipt.js';
+
+const logger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+};
+
+function createFixture() {
+  const activeTurn = new ClaudeActiveTurn({ turnId: 'turn-1' }, 0);
+  const session = {
+    id: 'session-1',
+    chatId: 'chat-1',
+    activeTurn,
+    process: { pid: 42 },
+  };
+  const calls = [];
+  const handlers = {
+    logger,
+    finish: () => calls.push('finish'),
+    clearAbortTimer: () => calls.push('clear'),
+    armCompletionFallback: () => calls.push('arm'),
+  };
+  return { activeTurn, session, calls, handlers };
+}
+
+function startInput(activeTurn) {
+  activeTurn.protocol.observeInput({
+    type: 'command_lifecycle',
+    command_uuid: activeTurn.protocol.inputUuid,
+    state: 'started',
+  });
+}
+
+describe('handleClaudeInterruptReceipt', () => {
+  it('finishes a current pre-start input confirmed cancelled', () => {
+    const fixture = createFixture();
+
+    expect(handleClaudeInterruptReceipt(
+      fixture.session,
+      fixture.activeTurn,
+      { cancelled: [fixture.activeTurn.protocol.inputUuid] },
+      fixture.handlers,
+    )).toBe(true);
+    expect(fixture.calls).toEqual(['finish']);
+  });
+
+  it('rejects a pre-start receipt that leaves the input queued', () => {
+    const fixture = createFixture();
+
+    expect(handleClaudeInterruptReceipt(
+      fixture.session,
+      fixture.activeTurn,
+      { still_queued: [fixture.activeTurn.protocol.inputUuid] },
+      fixture.handlers,
+    )).toBe(false);
+    expect(fixture.calls).toEqual(['clear']);
+    expect(fixture.activeTurn.protocol.abortRequested).toBe(false);
+  });
+
+  it('arms the completion fallback for an acknowledged started input', () => {
+    const fixture = createFixture();
+    startInput(fixture.activeTurn);
+
+    expect(handleClaudeInterruptReceipt(
+      fixture.session,
+      fixture.activeTurn,
+      { cancelled: [], still_queued: [] },
+      fixture.handlers,
+    )).toBe(true);
+    expect(fixture.calls).toEqual(['arm']);
+  });
+
+  it('does not mutate a replacement active turn', () => {
+    const fixture = createFixture();
+    startInput(fixture.activeTurn);
+    fixture.session.activeTurn = new ClaudeActiveTurn({ turnId: 'turn-2' }, 0);
+
+    expect(handleClaudeInterruptReceipt(
+      fixture.session,
+      fixture.activeTurn,
+      { cancelled: [], still_queued: [] },
+      fixture.handlers,
+    )).toBe(true);
+    expect(fixture.calls).toEqual([]);
+  });
+});
