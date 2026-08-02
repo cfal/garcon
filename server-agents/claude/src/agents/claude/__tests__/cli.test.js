@@ -141,7 +141,7 @@ describe('ClaudeTurnSteeringState', () => {
       command_uuid: 'steer-1',
       state: 'started',
     })).toMatchObject({ kind: 'started', uuid: 'steer-1', source: 'lifecycle' });
-    expect(steering.hasDeferredIdle).toBe(false);
+    expect(steering.hasDeferredIdle).toBe(true);
     expect(steering.activeCount).toBe(1);
     expect(steering.observe({
       type: 'user',
@@ -175,6 +175,27 @@ describe('ClaudeTurnSteeringState', () => {
       isReplay: true,
     })).toMatchObject({ kind: 'started', source: 'replay' });
     expect(steering.activeCount).toBe(1);
+  });
+
+  it('keeps deferred idle fenced when one of several native inputs starts', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.markSubmitted('steer-2');
+    steering.rememberProviderIdle();
+    steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'queued',
+    });
+    steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'started',
+    });
+
+    expect(steering.hasDeferredIdle).toBe(true);
+    expect(steering.activeCount).toBe(1);
+    expect(steering.submittedCount).toBe(1);
   });
 
   it('rejects replay without prior queue acceptance', () => {

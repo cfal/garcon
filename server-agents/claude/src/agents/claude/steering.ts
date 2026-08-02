@@ -83,7 +83,6 @@ export class ClaudeTurnSteeringState {
       if (!input || input.phase === 'active') return null;
       const waitMs = Date.now() - input.submittedAt;
       this.#inputs.set(uuid, { ...input, phase: 'active' });
-      this.clearDeferredIdle();
       return { kind: 'started', uuid, source: 'lifecycle', waitMs };
     }
 
@@ -95,7 +94,6 @@ export class ClaudeTurnSteeringState {
       }
       const waitMs = Date.now() - input.submittedAt;
       this.#inputs.set(uuid, { ...input, phase: 'active' });
-      this.clearDeferredIdle();
       return { kind: 'started', uuid, source: 'replay', waitMs };
     }
 

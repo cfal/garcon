@@ -1927,7 +1927,7 @@ describe('ClaudeCliRuntime steering', () => {
     }
   });
 
-  it('defers provider idle across preparation and settles after steering completes', async () => {
+  it('settles deferred provider idle after steering completes without a new state frame', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
     Bun.spawn = mock(() => fake.proc);
@@ -1970,14 +1970,12 @@ describe('ClaudeCliRuntime steering', () => {
         command_uuid: nativeId,
         state: 'started',
       });
-      enqueueProviderState(fake, 'running');
       enqueueAssistantAndResult(fake, nativeId, 'steered reply');
       enqueueCliMessage(fake, {
         type: 'command_lifecycle',
         command_uuid: nativeId,
         state: 'completed',
       });
-      enqueueProviderState(fake, 'idle');
 
       await run;
       expect(failures).toEqual([]);
