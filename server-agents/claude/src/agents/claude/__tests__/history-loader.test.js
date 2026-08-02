@@ -149,6 +149,72 @@ describe('Claude pending-input evidence', () => {
 });
 
 describe('Claude steering history projection', () => {
+  it('preserves exact recognized steering text and bypasses provider-owned filters', async () => {
+    const spaced = '  keep boundary whitespace  ';
+    const filtered = 'Caveat: keep the existing fallback';
+    const entries = [
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'following-batch',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}${spaced}` },
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}${filtered}` },
+          ],
+        },
+      },
+      {
+        sessionId: 'session',
+        type: 'attachment',
+        uuid: 'inline-steer',
+        timestamp: '2026-07-21T14:00:02.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          prompt: [{
+            type: 'text',
+            text: `${CLAUDE_STEERING_PROMPT_PREFIX}<system-reminder>literal guidance</system-reminder>`,
+          }],
+        },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages.map((message) => message.content)).toEqual([
+        spaced,
+        filtered,
+        '<system-reminder>literal guidance</system-reminder>',
+      ]);
+
+      const service = new PendingUserInputService({
+        loadNativeMessages: () => loadClaudeChatMessages(filePath),
+        getRetainedHistoryMessages: () => [],
+      });
+      await service.register('chat-1', spaced, {
+        clientRequestId: 'request-spaced',
+        createdAt: '2026-07-21T14:00:00.500Z',
+        deliveryStatus: 'accepted',
+      });
+      await service.register('chat-1', filtered, {
+        clientRequestId: 'request-filtered',
+        createdAt: '2026-07-21T14:00:00.500Z',
+        deliveryStatus: 'accepted',
+      });
+      await service.reconcileNativeHistory('chat-1');
+      expect(service.listForChat('chat-1')).toEqual([]);
+
+      const preview = await getClaudePreviewFromNativePath(filePath);
+      expect(preview).toMatchObject({
+        firstMessage: spaced,
+        lastMessage: '> <system-reminder>literal guidance</system-reminder>',
+      });
+    });
+  });
+
   it('projects following-command batches and inline queued commands as separate inputs', async () => {
     const entries = [
       {

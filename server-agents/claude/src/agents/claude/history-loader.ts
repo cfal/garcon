@@ -162,10 +162,20 @@ function getMessageText(content: unknown): string {
   return '';
 }
 
-function claudeUserTexts(content: unknown): readonly string[] {
+interface ClaudeUserText {
+  readonly text: string;
+  readonly steering: boolean;
+}
+
+function claudeUserTexts(content: unknown): readonly ClaudeUserText[] {
   const steeringInputs = claudeSteeringInputsFromNativeContent(content);
-  const values = steeringInputs ?? [getMessageText(content)];
-  return values.map((value) => value.trim()).filter(Boolean);
+  if (steeringInputs) {
+    return steeringInputs
+      .filter((text) => text.trim().length > 0)
+      .map((text) => ({ text, steering: true }));
+  }
+  const text = getMessageText(content);
+  return text ? [{ text, steering: false }] : [];
 }
 
 function isSystemUserMessage(text: string): boolean {
@@ -197,8 +207,8 @@ function queuedCommandPrompts(entry: Record<string, unknown>): readonly string[]
   const attachment = asRecord(entry.attachment);
   if (attachment.type !== 'queued_command' || attachment.commandMode !== 'prompt') return [];
   return claudeUserTexts(attachment.prompt)
-    .filter((prompt) => !isProviderOwnedUserMessage(entry, prompt))
-    .map(stripResolvedFileMentionContext);
+    .filter((prompt) => prompt.steering || !isProviderOwnedUserMessage(entry, prompt.text))
+    .map((prompt) => stripResolvedFileMentionContext(prompt.text));
 }
 
 function isSystemAssistantMessage(text: string): boolean {
@@ -355,9 +365,12 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
         }
       }
 
-      for (const text of claudeUserTexts(content)) {
-        if (!isProviderOwnedUserMessage(entry, text)) {
-          pushMessage(entry, new UserMessage(ts, stripResolvedFileMentionContext(text)));
+      for (const userText of claudeUserTexts(content)) {
+        if (userText.steering || !isProviderOwnedUserMessage(entry, userText.text)) {
+          pushMessage(entry, new UserMessage(
+            ts,
+            stripResolvedFileMentionContext(userText.text),
+          ));
         }
       }
       continue;
@@ -691,9 +704,12 @@ async function readFirstUserMessage(filePath: string): Promise<{
       }
       const message = asRecord(entry.message);
       if (message.role === 'user') {
-        for (const text of claudeUserTexts(message.content)) {
-          if (!firstMessage && !isProviderOwnedUserMessage(entry, text)) {
-            firstMessage = text;
+        for (const userText of claudeUserTexts(message.content)) {
+          if (
+            !firstMessage
+            && (userText.steering || !isProviderOwnedUserMessage(entry, userText.text))
+          ) {
+            firstMessage = userText.text;
           }
         }
       } else if (!firstMessage) {
@@ -757,10 +773,12 @@ export async function getClaudePreviewFromNativePath(
       const role = message.role;
       if (role === 'user') {
         const text = claudeUserTexts(message.content)
-          .filter((candidate) => !isProviderOwnedUserMessage(entry, candidate))
+          .filter((candidate) => (
+            candidate.steering || !isProviderOwnedUserMessage(entry, candidate.text)
+          ))
           .at(-1);
         if (!text) continue;
-        lastMessage = '> ' + text;
+        lastMessage = '> ' + text.text;
       } else if (role === 'assistant' && entry.isApiErrorMessage !== true) {
         const text = getMessageText(message.content);
         if (!text || isSystemAssistantMessage(text)) {
