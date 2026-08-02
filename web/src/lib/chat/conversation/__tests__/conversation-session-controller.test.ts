@@ -408,7 +408,7 @@ function createDeps(chat = createRunningChat()) {
 			]),
 			supportsFork: vi.fn(() => true),
 			supportsForkWhileRunning: vi.fn(() => false),
-			supportsSteering: vi.fn((agentId: string) => agentId === 'codex'),
+			supportsSteering: vi.fn((agentId: string) => agentId === 'claude' || agentId === 'codex'),
 			supportsGoals: vi.fn((agentId: string) => agentId === 'codex'),
 		},
 		readReceiptOutbox: {
