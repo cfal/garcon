@@ -32,15 +32,13 @@ describe('scripted Claude strict steering', () => {
     const firstPrompt = marker('FIRST_PROMPT');
     const steerPrompt = `/review\n${marker('STEER_PROMPT')}`;
     const futurePrompt = marker('FUTURE_PROMPT');
-    const firstReply = marker('FIRST_REPLY');
     const steerReply = marker('STEER_REPLY');
     const futureReply = marker('FUTURE_REPLY');
     const toolMarker = marker('TOOL_OUTPUT');
     const requestCursor = testEnvironment.model.markRequests();
-    testEnvironment.model.scriptTurn([
+    const held = testEnvironment.model.scriptHeldTurn([
       claudeToolUse('toolu_steer_context', 'Bash', { command: `printf %s ${toolMarker}` }),
     ]);
-    const held = testEnvironment.model.scriptHeldTurn([claudeText(firstReply)]);
     testEnvironment.model.scriptTurn([claudeText(steerReply)]);
     testEnvironment.model.scriptTurn([claudeText(futureReply)]);
 
@@ -92,16 +90,19 @@ describe('scripted Claude strict steering', () => {
       })).type);
 
       const activeRequests = testEnvironment.model.requestsSince(requestCursor);
-      expect(activeRequests).toHaveLength(3);
+      expect(activeRequests).toHaveLength(2);
       const steeredModelRequest = activeRequests.at(-1);
       if (!steeredModelRequest) throw new Error('Claude did not make the steered model request.');
-      expect(steeredModelRequest.lastUserText).toBe(`${STEERING_PREFIX}${steerPrompt}`);
-      expect(steeredModelRequest.toolResults).toContainEqual(expect.objectContaining({
-        toolUseId: 'toolu_steer_context',
-        content: expect.stringContaining(toolMarker),
-      }));
+      const steeredToolResult = steeredModelRequest.toolResults.find(
+        (result) => result.toolUseId === 'toolu_steer_context',
+      );
+      if (!steeredToolResult) throw new Error('Claude omitted the steering tool result.');
+      expect(steeredToolResult.content).toContain(toolMarker);
+      expect(steeredToolResult.content).toContain(`${STEERING_PREFIX}${steerPrompt}`);
+      expect(steeredToolResult.content.indexOf(toolMarker))
+        .toBeLessThan(steeredToolResult.content.indexOf(`${STEERING_PREFIX}${steerPrompt}`));
       expect(activeRequests.filter((record) =>
-        record.userTexts.some((text) => text.includes(steerPrompt)))).toHaveLength(1);
+        record.toolResults.some((result) => result.content.includes(steerPrompt)))).toHaveLength(1);
 
       const stillPaused = await fixture.client.getExecutionControl(chatId);
       expect(stillPaused).toEqual(beforeSteer);
@@ -135,7 +136,6 @@ describe('scripted Claude strict steering', () => {
       expect(userContents(transcript.messages)).toEqual([firstPrompt, steerPrompt, futurePrompt]);
       expect(JSON.stringify(transcript.messages)).not.toContain(STEERING_PREFIX);
       const assistants = assistantContents(transcript.messages);
-      expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
       expect(assistants.some((content) => content.includes(steerReply))).toBe(true);
       expect(assistants.some((content) => content.includes(futureReply))).toBe(true);
       testEnvironment.model.assertSettled();
