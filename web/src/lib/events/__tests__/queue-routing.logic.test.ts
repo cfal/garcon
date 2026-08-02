@@ -5,17 +5,18 @@ import { filterByChat } from '../chat-filter';
 import { handleExecutionControlUpdated, type QueueContext } from '../handlers/queue';
 
 function makeContext(
-	setExecutionControl: (chatId: string, control: ChatExecutionControlState | null) => void,
+	setExecutionControlFromLiveUpdate: (chatId: string, control: ChatExecutionControlState) => void,
 ): QueueContext {
 	return {
-		conversationUi: { setExecutionControl },
+		conversationUi: { setExecutionControlFromLiveUpdate },
 	};
 }
 
 describe('queue routing integration', () => {
 	it('applies execution-control updates for background chats through filter + handler path', () => {
-		const setExecutionControl = vi.fn();
+		const setExecutionControlFromLiveUpdate = vi.fn();
 		const control = {
+			serverInstanceId: 'server-instance-test',
 			queue: {
 				entries: [],
 				dispatchingEntryId: null,
@@ -34,10 +35,10 @@ describe('queue routing integration', () => {
 		});
 
 		if (filterResult.action === 'process') {
-			handleExecutionControlUpdated(message, makeContext(setExecutionControl));
+			handleExecutionControlUpdated(message, makeContext(setExecutionControlFromLiveUpdate));
 		}
 
 		expect(filterResult).toEqual({ action: 'process' });
-		expect(setExecutionControl).toHaveBeenCalledWith('chat-b', control);
+		expect(setExecutionControlFromLiveUpdate).toHaveBeenCalledWith('chat-b', control);
 	});
 });

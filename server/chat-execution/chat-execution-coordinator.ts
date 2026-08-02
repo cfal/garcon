@@ -24,10 +24,7 @@ import {
   type StoredChatExecutionControlState,
   type StoredQueueEntry,
 } from './control-state.ts';
-import {
-  InMemoryChatExecutionControlRepository,
-  type ChatExecutionControlRepository,
-} from './chat-execution-control-repository.ts';
+import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
 import {
   type QueueCommandIdentity,
 } from './chat-execution-control-transitions.ts';
@@ -131,7 +128,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     chatMessages: ChatMessagesPort,
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
-    controls: ChatExecutionControlRepository = new InMemoryChatExecutionControlRepository(),
+    controls: ChatExecutionControlRepository,
     unsettledQueueReceiptKeys: (chatId: string) => ReadonlySet<string> = () => new Set(),
   ) {
     super();
@@ -143,6 +140,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (!chatMessages) throw new Error('ChatExecutionCoordinator requires chat message storage');
     if (!getDrainOptions) throw new Error('ChatExecutionCoordinator requires a drain option resolver');
     if (!chatExists) throw new Error('ChatExecutionCoordinator requires a chat existence resolver');
+    if (!controls) {
+      throw new Error('ChatExecutionCoordinator requires an execution control repository');
+    }
     this.#turnRunner = turnRunner;
     this.#pendingInputs = pendingInputs;
     this.#getDrainOptions = getDrainOptions;

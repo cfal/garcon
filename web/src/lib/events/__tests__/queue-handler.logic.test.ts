@@ -7,20 +7,21 @@ import {
 
 function makeQueueContext(overrides: Partial<QueueContext> = {}): {
 	ctx: QueueContext;
-	setExecutionControl: ReturnType<typeof vi.fn>;
+	setExecutionControlFromLiveUpdate: ReturnType<typeof vi.fn>;
 } {
-	const setExecutionControl = vi.fn();
+	const setExecutionControlFromLiveUpdate = vi.fn();
 	const ctx: QueueContext = {
-		conversationUi: { setExecutionControl },
+		conversationUi: { setExecutionControlFromLiveUpdate },
 		...overrides,
 	};
-	return { ctx, setExecutionControl };
+	return { ctx, setExecutionControlFromLiveUpdate };
 }
 
 describe('queue handler', () => {
 	it('caches execution-control updates by chat id regardless of selection', () => {
-		const { ctx, setExecutionControl } = makeQueueContext();
+		const { ctx, setExecutionControlFromLiveUpdate } = makeQueueContext();
 		const control = {
+			serverInstanceId: 'server-instance-test',
 			queue: {
 				entries: [],
 				dispatchingEntryId: null,
@@ -34,6 +35,6 @@ describe('queue handler', () => {
 
 		handleExecutionControlUpdated(new ChatExecutionControlUpdatedMessage('chat-b', control), ctx);
 
-		expect(setExecutionControl).toHaveBeenCalledWith('chat-b', control);
+		expect(setExecutionControlFromLiveUpdate).toHaveBeenCalledWith('chat-b', control);
 	});
 });

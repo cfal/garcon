@@ -51,6 +51,7 @@ const mockPendingInputs = {
 
 function storedQueue() {
   return {
+    serverInstanceId: 'server-instance-test',
     entries: [],
     recentlyDispatched: [],
     appliedCommands: [],
@@ -74,6 +75,7 @@ const moduleMocks = [sendWebSocketJson];
 
 function createHandler() {
   const instance = new ChatHandler({
+    serverInstanceId: 'server-instance-test',
     processing: mockProcessing,
     chatViews: mockChatViews,
     nativeReloader: mockNativeReloader,
@@ -153,6 +155,7 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload()).toEqual({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-1',
+      serverInstanceId: 'server-instance-test',
       processing: {
         outcome: 'snapshot',
         chats: [{ chatId: 'chat-running', phase: 'running' }],
@@ -208,6 +211,7 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload()).toEqual({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-empty',
+      serverInstanceId: 'server-instance-test',
       processing: { outcome: 'snapshot', chats: [] },
       controlResults: [],
     });
@@ -234,6 +238,7 @@ describe('chat WebSocket handler', () => {
     expect(mockQueue.readChatExecutionControl).toHaveBeenCalledTimes(2);
     expect(lastSentPayload()).toMatchObject({
       type: 'reconnect-state',
+      serverInstanceId: 'server-instance-test',
       processing: {
         outcome: 'snapshot',
         chats: [{ chatId: 'chat-running', phase: 'running' }],
@@ -270,6 +275,7 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload()).toMatchObject({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-processing-unavailable',
+      serverInstanceId: 'server-instance-test',
       processing: { outcome: 'unavailable' },
       controlResults: [
         { chatId: 'chat-1', outcome: 'snapshot' },
@@ -299,6 +305,7 @@ describe('chat WebSocket handler', () => {
 
     expect(lastSentPayload()).toMatchObject({
       type: 'reconnect-state',
+      serverInstanceId: 'server-instance-test',
       processing: {
         outcome: 'snapshot',
         chats: [{ chatId: 'chat-after', phase: 'stopping' }],
@@ -358,6 +365,7 @@ describe('chat WebSocket handler', () => {
       type: 'ws-pong',
       clientRequestId: 'req-ping-1',
       sentAt: 1234,
+      serverInstanceId: 'server-instance-test',
       processing: {
         outcome: 'snapshot',
         chats: [{ chatId: 'chat-running', phase: 'running' }],

@@ -8,7 +8,7 @@ function input(
 	return {
 		isDraft: false,
 		isProcessing: false,
-		control: emptyChatExecutionControlState(),
+		control: emptyChatExecutionControlState('server-instance-test'),
 		hasAttachments: false,
 		...overrides,
 	};
@@ -23,9 +23,9 @@ describe('classifySubmission', () => {
 			'queued predecessor',
 			input({
 				control: {
-					...emptyChatExecutionControlState(),
+					...emptyChatExecutionControlState('server-instance-test'),
 					queue: {
-						...emptyChatExecutionControlState().queue,
+						...emptyChatExecutionControlState('server-instance-test').queue,
 						entries: [
 							{
 								id: 'entry-1',
@@ -44,9 +44,9 @@ describe('classifySubmission', () => {
 			'paused queue',
 			input({
 				control: {
-					...emptyChatExecutionControlState(),
+					...emptyChatExecutionControlState('server-instance-test'),
 					queue: {
-						...emptyChatExecutionControlState().queue,
+						...emptyChatExecutionControlState('server-instance-test').queue,
 						pause: {
 							id: 'pause-1',
 							kind: 'manual',

@@ -15,7 +15,10 @@ import type {
 } from './pending-user-input';
 import { normalizePendingUserInput } from './pending-user-input';
 import type { ChatExecutionControlState } from './chat-execution-control';
-import { parseChatExecutionControlState } from './chat-execution-control';
+import {
+  parseChatExecutionControlState,
+  parseExecutionControlServerInstanceId,
+} from './chat-execution-control';
 import type { RemoteSettingsSnapshot } from './settings';
 import type { ErrorCode } from './error-codes';
 import { normalizeRemoteSettingsSnapshot } from './settings';
@@ -172,6 +175,7 @@ export class ReconnectStateMessage {
   constructor(
     public processing: ChatProcessingSnapshotResult,
     public controlResults: ReconnectControlResult[],
+    public serverInstanceId: string,
     public clientRequestId?: string,
   ) {}
 }
@@ -211,6 +215,7 @@ export class WsPongMessage {
     public sentAt: number,
     public serverTime: string,
     public processing: ChatProcessingSnapshotResult,
+    public serverInstanceId: string,
   ) {}
 }
 
@@ -636,10 +641,23 @@ export function parseServerWsMessage(
     case 'reconnect-state': {
       const processing = chatProcessingSnapshotResult(data.processing);
       const controlResults = reconnectControlResults(data.controlResults);
-      if (!processing || !controlResults) return null;
+      const serverInstanceId = parseExecutionControlServerInstanceId(data.serverInstanceId);
+      if (
+        !processing ||
+        !controlResults ||
+        !serverInstanceId ||
+        controlResults.some(
+          (result) =>
+            result.outcome === 'snapshot' &&
+            result.control.serverInstanceId !== serverInstanceId,
+        )
+      ) {
+        return null;
+      }
       return new ReconnectStateMessage(
         processing,
         controlResults,
+        serverInstanceId,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
           : undefined,
@@ -682,8 +700,15 @@ export function parseServerWsMessage(
           : null;
       const serverTime = requiredStr(data.serverTime);
       const processing = chatProcessingSnapshotResult(data.processing);
-      return clientRequestId && sentAt !== null && serverTime && processing
-        ? new WsPongMessage(clientRequestId, sentAt, serverTime, processing)
+      const serverInstanceId = parseExecutionControlServerInstanceId(data.serverInstanceId);
+      return clientRequestId && sentAt !== null && serverTime && processing && serverInstanceId
+        ? new WsPongMessage(
+            clientRequestId,
+            sentAt,
+            serverTime,
+            processing,
+            serverInstanceId,
+          )
         : null;
     }
     case 'chat-title-updated': {

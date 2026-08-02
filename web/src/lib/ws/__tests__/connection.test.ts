@@ -329,6 +329,7 @@ describe('WsConnection', () => {
 			clientRequestId: ping.clientRequestId,
 			sentAt: ping.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'snapshot', chats: [] },
 		});
 		await flushPromises();
@@ -363,6 +364,7 @@ describe('WsConnection', () => {
 			clientRequestId: ping.clientRequestId,
 			sentAt: ping.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
 			processing: {
 				outcome: 'snapshot',
 				chats: [{ chatId: 'chat-1', phase: 'stopping' }],
@@ -396,6 +398,7 @@ describe('WsConnection', () => {
 			clientRequestId: fresh.clientRequestId,
 			sentAt: fresh.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'snapshot', chats: [] },
 		});
 		await expect(probe).resolves.toEqual({ outcome: 'snapshot', chats: [] });
@@ -418,6 +421,7 @@ describe('WsConnection', () => {
 			clientRequestId: ping.clientRequestId,
 			sentAt: ping.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'snapshot', chats: [] },
 		});
 		await expect(probe).resolves.toEqual({ outcome: 'snapshot', chats: [] });
@@ -445,6 +449,7 @@ describe('WsConnection', () => {
 			clientRequestId: ping.clientRequestId,
 			sentAt: ping.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'snapshot', chats: [] },
 		});
 		await probe;
@@ -477,6 +482,7 @@ describe('WsConnection', () => {
 			clientRequestId: ping.clientRequestId,
 			sentAt: ping.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
 			processing: {
 				outcome: 'snapshot',
 				chats: [{ chatId: 'chat-1', phase: 'unknown' }],
@@ -489,6 +495,35 @@ describe('WsConnection', () => {
 			'[WsConnection] Malformed processing snapshot response',
 			{ source: 'stop-probe' },
 		);
+		protocolError.mockRestore();
+		reconciler.destroy();
+		connection.disconnect();
+	});
+
+	it('rejects a pong without an instance identity before applying processing', async () => {
+		const connection = new WsConnection();
+		const processing = processingHarness();
+		const reconciler = new ChatProcessingReconciler(connection, processing.sessions);
+		const protocolError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		const probe = connection.requestProcessingSnapshot();
+		const ping = lastSentPayload(socket);
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: ping.clientRequestId,
+			sentAt: ping.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			processing: {
+				outcome: 'snapshot',
+				chats: [{ chatId: 'chat-1', phase: 'running' }],
+			},
+		});
+
+		await expect(probe).rejects.toThrow('Malformed processing snapshot response');
+		expect(processing.order).toEqual([]);
 		protocolError.mockRestore();
 		reconciler.destroy();
 		connection.disconnect();
@@ -524,6 +559,7 @@ describe('WsConnection', () => {
 			clientRequestId: ping.clientRequestId,
 			sentAt: ping.sentAt,
 			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
 			processing: { outcome: 'snapshot', chats: [] },
 		});
 		await flushPromises();

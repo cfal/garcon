@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { UserMessage } from '../../common/chat-types.js';
 import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from '../chat-execution/chat-execution-control-repository.ts';
 import { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { ChatRunningError } from '../chats/errors.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
@@ -22,6 +23,10 @@ function deferred() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function controlRepository(serverInstanceId = 'server-instance-test') {
+  return new InMemoryChatExecutionControlRepository(serverInstanceId);
 }
 
 describe('queue and transcript stability', () => {
@@ -89,6 +94,7 @@ describe('queue and transcript stability', () => {
         { appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })) },
         () => ({}),
         () => true,
+        controlRepository(),
       );
       const settled = deferred();
       queue.onTurnSettled((chatId, turn) => settled.resolve({ chatId, turn }));
@@ -198,6 +204,7 @@ describe('queue and transcript stability', () => {
         },
         () => ({}),
         () => true,
+        controlRepository(),
       );
       queue.onSessionStopRequested((requestedChatId, stopId, turn) => {
         coordinator.onStopRequested(requestedChatId, stopId, turn);
@@ -296,6 +303,7 @@ describe('queue and transcript stability', () => {
         },
         () => ({}),
         () => true,
+        controlRepository(),
       );
       queue.onSessionStopRequested((requestedChatId, stopId, turn) => {
         coordinator.onStopRequested(requestedChatId, stopId, turn);
@@ -386,6 +394,7 @@ describe('queue and transcript stability', () => {
         },
         () => ({}),
         () => true,
+        controlRepository(),
       );
       executionCoordinator = queue;
       const reloader = new ChatNativeReloader(
@@ -455,7 +464,11 @@ describe('queue and transcript stability', () => {
         () => ({}),
         () => true,
       ];
-      const queue = new ChatExecutionCoordinator(workspaceDir, ...queueDeps);
+      const queue = new ChatExecutionCoordinator(
+        workspaceDir,
+        ...queueDeps,
+        controlRepository('server-instance-a'),
+      );
       await queue.createChatQueueEntry(chatId, 'discard on restart');
       await queue.popNextChat(chatId);
 
@@ -470,8 +483,14 @@ describe('queue and transcript stability', () => {
       expect(accepted.kind).toBe('accepted');
       await ledger.update(accepted.record.key, { status: 'scheduled' });
 
-      const restartedQueue = new ChatExecutionCoordinator(workspaceDir, ...queueDeps);
-      expect((await restartedQueue.readChatExecutionControl(chatId)).entries).toEqual([]);
+      const restartedQueue = new ChatExecutionCoordinator(
+        workspaceDir,
+        ...queueDeps,
+        controlRepository('server-instance-b'),
+      );
+      const restartedControl = await restartedQueue.readChatExecutionControl(chatId);
+      expect(restartedControl.serverInstanceId).toBe('server-instance-b');
+      expect(restartedControl.entries).toEqual([]);
 
       const restartedLedger = new CommandLedger(workspaceDir);
       const duplicate = await restartedLedger.accept(ledgerInput);

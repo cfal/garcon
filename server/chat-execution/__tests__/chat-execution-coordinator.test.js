@@ -4,6 +4,7 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
 import { GOAL_CONTROL_NOT_DELIVERED_MESSAGE, GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
 
 let workspaceDir = '';
@@ -56,6 +57,10 @@ function emptyDrainOptions() {
   return {};
 }
 
+function createControlRepository(serverInstanceId = 'server-instance-test') {
+  return new InMemoryChatExecutionControlRepository(serverInstanceId);
+}
+
 function deferred() {
   let resolve;
   let reject;
@@ -76,6 +81,7 @@ beforeEach(async () => {
     createChatMessages(),
     emptyDrainOptions,
     () => true,
+    createControlRepository(),
   );
 });
 
@@ -108,6 +114,7 @@ describe('transcript snapshot ownership', () => {
       createChatMessages(),
       emptyDrainOptions,
       () => true,
+      createControlRepository(),
     );
     await queue.createChatQueueEntry('snapshot-chat', 'queued input');
     const snapshot = queue.reserveTranscriptSnapshot('snapshot-chat');
@@ -563,6 +570,18 @@ describe('queue invariants', () => {
   it('requires execution dependencies at construction', () => {
     expect(() => new ChatExecutionCoordinator(workspaceDir)).toThrow('ChatExecutionCoordinator requires an agent turn runner');
   });
+
+  it('requires an explicitly identified control repository', () => {
+    expect(() => new ChatExecutionCoordinator(
+      workspaceDir,
+      createStateOnlyAgents(),
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+      () => true,
+      undefined,
+    )).toThrow('requires an execution control repository');
+  });
 });
 
 describe('queue-updated event', () => {
@@ -655,6 +674,7 @@ describe('orchestration', () => {
       mockChatMessages,
       mockDrainOptions,
       () => true,
+      createControlRepository(),
     );
   });
 
@@ -783,6 +803,7 @@ describe('orchestration', () => {
         createChatMessages(),
         emptyDrainOptions,
         () => chatExists,
+        createControlRepository(),
       );
       const reservation = deletingQueue.reserveDirectTurn('deleted');
       const turn = deletingQueue.runReservedTurn(reservation, 'running', {});
@@ -2744,6 +2765,7 @@ describe('orchestration', () => {
         createChatMessages(),
         emptyDrainOptions,
         () => chatExists,
+        createControlRepository(),
       );
       await deletingQueue.createChatQueueEntry('deleted', 'queued');
 
@@ -2868,9 +2890,17 @@ describe('orchestration', () => {
     });
 
     it('pauses and requeues when queued turn option resolution fails', async () => {
-      const failingQueue = new ChatExecutionCoordinator(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, () => {
-        throw new Error('settings unavailable');
-      }, () => true);
+      const failingQueue = new ChatExecutionCoordinator(
+        workspaceDir,
+        mockAgents,
+        mockPendingInputs,
+        mockChatMessages,
+        () => {
+          throw new Error('settings unavailable');
+        },
+        () => true,
+        createControlRepository(),
+      );
       await failingQueue.createChatQueueEntry('c1', 'will fail before registration');
       const dispatches = [];
       const failures = [];

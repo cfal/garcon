@@ -43,7 +43,7 @@ export interface ConversationQueueControllerOptions {
 	get lifecycle(): Pick<SessionControllerDeps['lifecycle'], 'currentChatId'>;
 	get conversationUi(): Pick<
 		SessionControllerDeps['conversationUi'],
-		'setExecutionControl' | 'setExecutionControlFromRefresh'
+		'setExecutionControlFromLiveUpdate' | 'setExecutionControlFromRefresh'
 	>;
 	get acceptedInputs(): Pick<AcceptedInputSubmissionService, 'enqueue'>;
 }
@@ -144,13 +144,13 @@ export class ConversationQueueController {
 
 	async pauseForChat(chatId: string): Promise<void> {
 		const result = await pauseChatQueue(chatId);
-		this.options.conversationUi.setExecutionControl(chatId, result.control);
+		this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 	}
 
 	async resumeForChat(chatId: string, pauseId: string): Promise<void> {
 		try {
 			const result = await resumeChatQueue(chatId, pauseId);
-			this.options.conversationUi.setExecutionControl(chatId, result.control);
+			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
 			throw error;
@@ -161,7 +161,7 @@ export class ConversationQueueController {
 		const submission = this.options.acceptedInputs.enqueue({ chatId, content });
 		try {
 			const result = await submission.submit();
-			this.options.conversationUi.setExecutionControl(chatId, result.control);
+			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
 			throw error;
@@ -182,7 +182,7 @@ export class ConversationQueueController {
 				content,
 				expectedRevision,
 			});
-			this.options.conversationUi.setExecutionControl(chatId, result.control);
+			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
 			throw error;
@@ -196,7 +196,7 @@ export class ConversationQueueController {
 				chatId,
 				entryId,
 			});
-			this.options.conversationUi.setExecutionControl(chatId, result.control);
+			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
 			throw error;
@@ -222,7 +222,7 @@ export class ConversationQueueController {
 		};
 		try {
 			const result = await submitIdempotentCommand(() => moveQueuedInput(request));
-			this.options.conversationUi.setExecutionControl(chatId, result.control);
+			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
 			if (error instanceof CommandOutcomeUnknownError) {
@@ -248,7 +248,7 @@ export class ConversationQueueController {
 
 	#applyMutationErrorControl(chatId: string, error: unknown): void {
 		const control = controlFromMutationError(error);
-		if (control) this.options.conversationUi.setExecutionControl(chatId, control);
+		if (control) this.options.conversationUi.setExecutionControlFromRefresh(chatId, control);
 	}
 }
 
