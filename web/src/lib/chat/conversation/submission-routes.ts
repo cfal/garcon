@@ -20,6 +20,7 @@ type RouteDeps = Pick<
 	| 'lifecycle'
 	| 'conversationUi'
 	| 'startupCoordinator'
+	| 'scrollToBottom'
 >;
 
 export interface SubmissionContext {
@@ -127,7 +128,7 @@ export async function submitSteerRoute(
 			submission.clientMessageId,
 		),
 	);
-	deps.chatState.isUserScrolledUp = false;
+	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	let clearedComposerRevision: number | null = null;
 	if (context.restoreComposerOnFailure) {
 		deps.composerState.clearAfterSubmit(context.chatId);
@@ -247,7 +248,7 @@ function beginOptimisticInput(
 	deps.chatState.upsertPendingUserInput(
 		pendingUserInput(context.chatId, context.text, context.images, clientRequestId, clientMessageId),
 	);
-	deps.chatState.isUserScrolledUp = false;
+	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
 	deps.composerState.isSubmitting = true;
 }

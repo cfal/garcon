@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	captureViewportAnchor,
 	restoreEarlierHeightFallback,
@@ -40,7 +40,37 @@ describe('viewport anchors', () => {
 			viewportOffset: -10,
 			previousScrollHeight: 1_200,
 			previousScrollTop: 400,
+			element: visible,
 		});
+	});
+
+	it('reuses a visible durable row without rescanning the transcript', () => {
+		const scroller = document.createElement('div');
+		const content = document.createElement('div');
+		scroller.getBoundingClientRect = () => rect(100, 500);
+		Object.defineProperty(scroller, 'clientHeight', { value: 500, configurable: true });
+		Object.defineProperty(scroller, 'scrollHeight', { value: 1_200, configurable: true });
+		scroller.scrollTop = 410;
+		const row = document.createElement('div');
+		row.dataset.chatAnchorId = 'generation-1:11';
+		row.getBoundingClientRect = () => rect(80, 40);
+		content.append(row);
+		const scan = vi.spyOn(content, 'querySelectorAll');
+
+		const anchor = captureViewportAnchor(scroller, content, {
+			rowId: 'generation-1:11',
+			viewportOffset: -10,
+			previousScrollHeight: 1_200,
+			previousScrollTop: 400,
+			element: row,
+		});
+
+		expect(anchor).toMatchObject({
+			rowId: 'generation-1:11',
+			viewportOffset: -20,
+			previousScrollTop: 410,
+		});
+		expect(scan).not.toHaveBeenCalled();
 	});
 
 	it('restores a durable row to its previous viewport offset', () => {

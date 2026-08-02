@@ -1248,6 +1248,7 @@ describe('ConversationSessionController', () => {
 		expect(pending.clientRequestId).toEqual(expect.any(String));
 		expect(pending.clientMessageId).toEqual(expect.any(String));
 		expect(pending.deliveryStatus).toBe('submitting');
+		expect(deps.scrollToBottom).toHaveBeenCalledOnce();
 		expect(mockRunChat).toHaveBeenCalledWith(
 			expect.objectContaining({
 				clientRequestId: pending.clientRequestId,

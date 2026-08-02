@@ -97,6 +97,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	activeChatId = $state<string | null>(null);
 	entries = $state<ChatViewMessage[]>([]);
 	generationId = $state('');
+	windowRevision = $state(0);
 	lastSeq = $state(0);
 	oldestSeq = $state(0);
 	pendingUserInputs = $state<PendingUserInput[]>([]);
@@ -384,6 +385,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			pageOldestSeq: options.pageOldestSeq,
 			hasMore: options.hasMore,
 		});
+		this.windowRevision += 1;
 		this.generationId = generationId;
 		this.entries = messages;
 		this.lastSeq = options.lastSeq;
@@ -426,6 +428,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 		this.#invalidatePageLoad();
 		this.transcriptCache.replaceFromPage(chatId, page);
+		this.windowRevision += 1;
 		this.generationId = page.generationId;
 		this.entries = page.messages;
 		this.lastSeq = page.lastSeq;
@@ -682,6 +685,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	clearMessages(): void {
 		this.#invalidatePageLoad();
 		this.#loadEpoch += 1;
+		this.windowRevision += 1;
 		this.entries = [];
 		this.generationId = '';
 		this.lastSeq = 0;
@@ -806,6 +810,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					: 'invalidated';
 			}
 
+			this.windowRevision += 1;
 			this.entries = page.messages;
 			this.oldestSeq = page.pageOldestSeq;
 			this.hasEarlierMessages = false;

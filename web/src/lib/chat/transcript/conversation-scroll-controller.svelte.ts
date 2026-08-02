@@ -48,6 +48,7 @@ export type ConversationScrollState = Pick<
 	| 'navigateToWindow'
 	| 'pageStates'
 	| 'revealEarlierLoadedRows'
+	| 'windowRevision'
 >;
 
 export interface ScrollControllerDeps {
@@ -133,7 +134,6 @@ export class ConversationScrollController {
 			direction,
 			receivedAt: performance.now(),
 		};
-		this.#readingAnchor = null;
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
@@ -355,17 +355,27 @@ export class ConversationScrollController {
 		if (!chatId || !scroller) return 'invalidated';
 
 		const operationEpoch = ++this.#anchorOperationEpoch;
+		const windowRevision = this.deps.chatState.windowRevision;
 		const content = this.deps.getScrollContentContainer?.() ?? null;
 		const anchor = content ? captureViewportAnchor(scroller, content) : null;
 		const previousScrollHeight = scroller.scrollHeight;
 		const previousScrollTop = scroller.scrollTop;
 		const result = await mutate();
-		if (result === 'invalidated' || !this.#isCurrentAnchorOperation(chatId, operationEpoch)) {
+		if (
+			result === 'invalidated' ||
+			this.deps.chatState.windowRevision !== windowRevision ||
+			!this.#isCurrentAnchorOperation(chatId, operationEpoch)
+		) {
 			return 'invalidated';
 		}
 
 		await tick();
-		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return 'invalidated';
+		if (
+			this.deps.chatState.windowRevision !== windowRevision ||
+			!this.#isCurrentAnchorOperation(chatId, operationEpoch)
+		) {
+			return 'invalidated';
+		}
 		const updatedScroller = this.deps.getScrollContainer();
 		const updatedContent = this.deps.getScrollContentContainer?.() ?? null;
 		if (!updatedScroller) return 'invalidated';
@@ -405,7 +415,8 @@ export class ConversationScrollController {
 	#captureReadingAnchor(): void {
 		const scroller = this.deps.getScrollContainer();
 		const content = this.deps.getScrollContentContainer?.();
-		this.#readingAnchor = scroller && content ? captureViewportAnchor(scroller, content) : null;
+		this.#readingAnchor =
+			scroller && content ? captureViewportAnchor(scroller, content, this.#readingAnchor) : null;
 	}
 
 	async jumpToMessageRow(target: UserMessageNavigatorTarget): Promise<boolean> {
@@ -479,7 +490,7 @@ export class ConversationScrollController {
 
 		this.#isAutoFillingViewport = true;
 		try {
-			while (this.deps.sessions.selectedChatId === chatId) {
+			while (this.deps.sessions.selectedChatId === chatId && this.#isViewportVisible) {
 				await tick();
 				const container = this.deps.getScrollContainer();
 				if (!container) return;
@@ -508,7 +519,11 @@ export class ConversationScrollController {
 
 		this.#isAutoFillingViewport = true;
 		try {
-			while (this.deps.sessions.selectedChatId === chatId && this.deps.chatState.hasLaterMessages) {
+			while (
+				this.deps.sessions.selectedChatId === chatId &&
+				this.#isViewportVisible &&
+				this.deps.chatState.hasLaterMessages
+			) {
 				await tick();
 				const container = this.deps.getScrollContainer();
 				if (!container) return;

@@ -3,6 +3,7 @@ export interface ViewportAnchor {
 	viewportOffset: number;
 	previousScrollHeight: number;
 	previousScrollTop: number;
+	element?: HTMLElement;
 }
 
 const ANCHOR_SELECTOR = '[data-chat-anchor-id]';
@@ -10,11 +11,23 @@ const ANCHOR_SELECTOR = '[data-chat-anchor-id]';
 export function captureViewportAnchor(
 	scroller: HTMLElement,
 	content: HTMLElement,
+	preferredAnchor?: ViewportAnchor | null,
 ): ViewportAnchor | null {
 	const viewportTop = scroller.getBoundingClientRect().top;
-	const row = Array.from(content.querySelectorAll<HTMLElement>(ANCHOR_SELECTOR)).find(
-		(candidate) => candidate.getBoundingClientRect().bottom > viewportTop,
-	);
+	const viewportBottom = viewportTop + scroller.clientHeight;
+	const preferred = preferredAnchor?.element;
+	const preferredRect = preferred?.getBoundingClientRect();
+	const row =
+		preferred &&
+		preferredRect &&
+		content.contains(preferred) &&
+		preferred.dataset.chatAnchorId === preferredAnchor.rowId &&
+		preferredRect.bottom > viewportTop &&
+		preferredRect.top < viewportBottom
+			? preferred
+			: Array.from(content.querySelectorAll<HTMLElement>(ANCHOR_SELECTOR)).find(
+					(candidate) => candidate.getBoundingClientRect().bottom > viewportTop,
+				);
 	const rowId = row?.dataset.chatAnchorId;
 	if (!row || !rowId) return null;
 
@@ -23,6 +36,7 @@ export function captureViewportAnchor(
 		viewportOffset: row.getBoundingClientRect().top - viewportTop,
 		previousScrollHeight: scroller.scrollHeight,
 		previousScrollTop: scroller.scrollTop,
+		element: row,
 	};
 }
 
@@ -31,9 +45,15 @@ export function restoreViewportAnchor(
 	scroller: HTMLElement,
 	content: HTMLElement,
 ): boolean {
-	const row = Array.from(content.querySelectorAll<HTMLElement>(ANCHOR_SELECTOR)).find(
-		(candidate) => candidate.dataset.chatAnchorId === anchor.rowId,
-	);
+	const anchoredElement = anchor.element;
+	const row =
+		anchoredElement &&
+		content.contains(anchoredElement) &&
+		anchoredElement.dataset.chatAnchorId === anchor.rowId
+			? anchoredElement
+			: Array.from(content.querySelectorAll<HTMLElement>(ANCHOR_SELECTOR)).find(
+					(candidate) => candidate.dataset.chatAnchorId === anchor.rowId,
+				);
 	if (!row) return false;
 
 	const viewportTop = scroller.getBoundingClientRect().top;
@@ -42,10 +62,7 @@ export function restoreViewportAnchor(
 	return true;
 }
 
-export function restoreEarlierHeightFallback(
-	anchor: ViewportAnchor,
-	scroller: HTMLElement,
-): void {
+export function restoreEarlierHeightFallback(anchor: ViewportAnchor, scroller: HTMLElement): void {
 	scroller.scrollTop =
 		anchor.previousScrollTop + (scroller.scrollHeight - anchor.previousScrollHeight);
 }

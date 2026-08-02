@@ -14,6 +14,7 @@ function scrollState<T extends Partial<ConversationScrollState>>(
 		canLoadLater: false,
 		displayMessageCount: 0,
 		generationId: 'generation-1',
+		windowRevision: 0,
 		hasInitialMessagesToReveal: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
@@ -838,6 +839,41 @@ describe('ConversationScrollController', () => {
 		expect(chatState.isUserScrolledUp).toBe(true);
 	});
 
+	it('does not restore a reveal anchor after the transcript window is replaced', async () => {
+		let rowDocumentTop = 100;
+		const scroller = {
+			scrollTop: 0,
+			scrollHeight: 600,
+			clientHeight: 400,
+			getBoundingClientRect: () => ({ top: 0 }),
+		} as HTMLDivElement;
+		const content = document.createElement('div');
+		const row = document.createElement('div');
+		row.dataset.chatAnchorId = 'generation-1:80';
+		row.getBoundingClientRect = () =>
+			({ top: rowDocumentTop - scroller.scrollTop, bottom: rowDocumentTop + 40 }) as DOMRect;
+		content.append(row);
+		const chatState = scrollState({
+			canLoadEarlier: true,
+			isUserScrolledUp: true,
+			revealEarlierLoadedRows: vi.fn(() => true),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		const reveal = controller.requestPage('earlier', 'button');
+		rowDocumentTop = 400;
+		chatState.windowRevision += 1;
+
+		await expect(reveal).resolves.toBe('invalidated');
+		expect(scroller.scrollTop).toBe(0);
+	});
+
 	it('requires a later boundary to leave the activation zone before loading again', async () => {
 		let scrollHeight = 1_200;
 		const scroller = { scrollTop: 800, clientHeight: 400 } as HTMLDivElement;
@@ -911,6 +947,78 @@ describe('ConversationScrollController', () => {
 		expect(scroller.scrollTop).toBe(0);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('stops detached underfill when the viewport becomes hidden', async () => {
+		let scrollHeight = 300;
+		let resolvePage!: (result: 'loaded') => void;
+		const firstPage = new Promise<'loaded'>((resolve) => {
+			resolvePage = resolve;
+		});
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = scrollState({
+			isUserScrolledUp: true,
+			hasLaterMessages: true,
+			loadLaterPage: vi
+				.fn()
+				.mockReturnValueOnce(firstPage)
+				.mockResolvedValue('loaded' as const),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		const fill = controller.fillUnderfilledViewport();
+		await vi.waitFor(() => expect(chatState.loadLaterPage).toHaveBeenCalledOnce());
+		controller.setViewportVisible(false);
+		scrollHeight = 350;
+		resolvePage('loaded');
+		await fill;
+
+		expect(chatState.loadLaterPage).toHaveBeenCalledOnce();
+	});
+
+	it('stops live underfill when the viewport becomes hidden', async () => {
+		let scrollHeight = 300;
+		let resolvePage!: (result: 'loaded') => void;
+		const firstPage = new Promise<'loaded'>((resolve) => {
+			resolvePage = resolve;
+		});
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = scrollState({
+			canAutoFillEarlier: true,
+			isUserScrolledUp: false,
+			loadEarlierPage: vi
+				.fn()
+				.mockReturnValueOnce(firstPage)
+				.mockResolvedValue('loaded' as const),
+		});
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		const fill = controller.fillUnderfilledViewport();
+		await vi.waitFor(() => expect(chatState.loadEarlierPage).toHaveBeenCalledOnce());
+		controller.setViewportVisible(false);
+		scrollHeight = 350;
+		resolvePage('loaded');
+		await fill;
+
+		expect(chatState.loadEarlierPage).toHaveBeenCalledOnce();
 	});
 
 	it('retries a failed detached viewport fill after the viewport becomes visible', async () => {
