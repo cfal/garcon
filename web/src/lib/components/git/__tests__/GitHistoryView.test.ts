@@ -274,6 +274,129 @@ describe('GitHistoryView', () => {
 		expect(history.screen).toBe('list');
 	});
 
+	it('loads the next commit page automatically near the bottom', async () => {
+		const nextPage = deferred<Awaited<ReturnType<typeof getGitHistoryCommits>>>();
+		vi.mocked(getGitHistoryCommits)
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commitListItem()],
+				nextOffset: 50,
+			})
+			.mockReturnValueOnce(nextPage.promise);
+		const history = createHistory();
+		const { container } = render(GitHistoryView, {
+			props: {
+				history,
+				comparisonSelection,
+				onOpenSelectedComparison: vi.fn(),
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				presentation: 'main',
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		const list = container.querySelector<HTMLDivElement>('[data-git-history-commit-list]');
+		expect(list).toBeTruthy();
+		if (!list) return;
+		Object.defineProperties(list, {
+			clientHeight: { configurable: true, value: 200 },
+			scrollHeight: { configurable: true, value: 1_000 },
+		});
+
+		list.scrollTop = 650;
+		await fireEvent.scroll(list);
+		expect(getGitHistoryCommits).toHaveBeenCalledOnce();
+
+		list.scrollTop = 710;
+		await fireEvent.scroll(list);
+		await fireEvent.scroll(list);
+		await waitFor(() => expect(getGitHistoryCommits).toHaveBeenCalledTimes(2));
+		expect(getGitHistoryCommits).toHaveBeenLastCalledWith(
+			'/project',
+			expect.objectContaining({ offset: 50 }),
+		);
+		expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
+		expect(screen.getByText('Loading more commits...')).toBeTruthy();
+
+		nextPage.resolve({
+			project: '/project',
+			ref: 'HEAD',
+			commits: [
+				{
+					...commitListItem(),
+					hash: '1234567890abcdef',
+					shortHash: '1234567',
+					subject: 'Older commit',
+				},
+			],
+			nextOffset: null,
+		});
+
+		expect(await screen.findByText('Older commit')).toBeTruthy();
+		await waitFor(() => expect(screen.queryByText('Loading more commits...')).toBeNull());
+	});
+
+	it('offers an explicit retry instead of repeatedly auto-loading a failed page', async () => {
+		vi.mocked(getGitHistoryCommits)
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commitListItem()],
+				nextOffset: 50,
+			})
+			.mockRejectedValueOnce(new Error('network unavailable'))
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [],
+				nextOffset: null,
+			});
+		const history = createHistory();
+		const { container } = render(GitHistoryView, {
+			props: {
+				history,
+				comparisonSelection,
+				onOpenSelectedComparison: vi.fn(),
+				onOpenChat: vi.fn(),
+				projectPath: '/project',
+				presentation: 'main',
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		const list = container.querySelector<HTMLDivElement>('[data-git-history-commit-list]');
+		expect(list).toBeTruthy();
+		if (!list) return;
+		Object.defineProperties(list, {
+			clientHeight: { configurable: true, value: 200 },
+			scrollHeight: { configurable: true, value: 1_000 },
+		});
+		list.scrollTop = 710;
+		await fireEvent.scroll(list);
+
+		const retry = await screen.findByRole('button', { name: 'Retry loading commits' });
+		expect(screen.getByText('Failed to load more commits: network unavailable')).toBeTruthy();
+		await fireEvent.scroll(list);
+		await Promise.resolve();
+		expect(getGitHistoryCommits).toHaveBeenCalledTimes(2);
+
+		await fireEvent.click(retry);
+		await waitFor(() => expect(getGitHistoryCommits).toHaveBeenCalledTimes(3));
+		await waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Retry loading commits' })).toBeNull(),
+		);
+	});
+
 	it('resizes, hides, and restores the wide changed-file tree', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {

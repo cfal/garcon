@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import Copy from '@lucide/svelte/icons/copy';
@@ -8,6 +9,8 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitHistoryCommitListItem } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
+
+	const LOAD_THRESHOLD_PX = 96;
 
 	interface GitCommitListScreenProps {
 		commits: GitHistoryCommitListItem[];
@@ -66,6 +69,22 @@
 		});
 	});
 
+	$effect(() => {
+		const element = listRef;
+		const commitCount = commits.length;
+		if (!element || commitCount === 0 || isLoading || error || nextOffset === null) return;
+		let cancelled = false;
+
+		void tick().then(() => {
+			if (cancelled || listRef !== element || commits.length < commitCount) return;
+			maybeLoadMore();
+		});
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
 	function formatDate(value: string): string {
 		const date = new Date(value);
 		if (Number.isNaN(date.getTime())) return value;
@@ -86,12 +105,28 @@
 			if (copiedHash === hash) copiedHash = null;
 		}, 1200);
 	}
+
+	function isNearListBottom(): boolean {
+		if (!listRef || listRef.clientHeight <= 0) return false;
+		return listRef.scrollHeight - listRef.scrollTop - listRef.clientHeight < LOAD_THRESHOLD_PX;
+	}
+
+	function maybeLoadMore(): void {
+		if (isLoading || error || nextOffset === null || !isNearListBottom()) return;
+		onLoadMore();
+	}
+
+	function handleScroll(event: Event & { currentTarget: HTMLDivElement }): void {
+		onScrollSave(event.currentTarget.scrollTop);
+		maybeLoadMore();
+	}
 </script>
 
 <div
 	bind:this={listRef}
 	class="flex-1 overflow-y-auto bg-background {isMobile ? 'pb-16' : ''}"
-	onscroll={(event) => onScrollSave(event.currentTarget.scrollTop)}
+	onscroll={handleScroll}
+	data-git-history-commit-list
 >
 	<div class="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-2 backdrop-blur">
 		{#if comparisonSelectionActive}
@@ -146,7 +181,7 @@
 			</div>
 		{/if}
 	</div>
-	{#if error}
+	{#if error && commits.length === 0}
 		<div
 			class="m-3 rounded border border-status-error-border bg-status-error/10 px-3 py-2 text-sm text-status-error-foreground"
 		>
@@ -235,20 +270,26 @@
 				</div>
 			{/each}
 		</div>
-		<div class="flex justify-center px-3 py-3">
-			{#if nextOffset !== null}
-				<button
-					type="button"
-					class="inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					disabled={isLoading}
-					onclick={onLoadMore}
-				>
-					{#if isLoading}
-						<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-					{/if}
-					Load more
-				</button>
-			{/if}
-		</div>
+		{#if nextOffset !== null && (isLoading || error)}
+			<div class="flex h-9 items-center gap-2 px-3 py-1 text-xs text-muted-foreground">
+				<div class="h-px flex-1 bg-border/70"></div>
+				{#if isLoading}
+					<div class="flex h-7 items-center gap-1.5 px-2" role="status" aria-live="polite">
+						<LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
+						{m.git_history_loading_more_commits()}
+					</div>
+				{:else if error}
+					<button
+						type="button"
+						class="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded px-2 text-xs font-medium text-status-error-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						onclick={onLoadMore}
+					>
+						<RefreshCw class="size-3.5" aria-hidden="true" />
+						{m.git_history_retry_more_commits()}
+					</button>
+				{/if}
+				<div class="h-px flex-1 bg-border/70"></div>
+			</div>
+		{/if}
 	{/if}
 </div>
