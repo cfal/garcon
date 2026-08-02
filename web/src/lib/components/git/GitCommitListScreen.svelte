@@ -1,14 +1,12 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
-	import Copy from '@lucide/svelte/icons/copy';
-	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import History from '@lucide/svelte/icons/history';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitHistoryCommitListItem } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import GitCommitListRow from './GitCommitListRow.svelte';
 
 	const LOAD_THRESHOLD_PX = 96;
 
@@ -56,8 +54,6 @@
 
 	let listRef = $state<HTMLDivElement | null>(null);
 	let restoredScroll = false;
-	let copiedHash = $state<string | null>(null);
-	let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	$effect(() => {
 		const element = listRef;
@@ -84,27 +80,6 @@
 			cancelled = true;
 		};
 	});
-
-	function formatDate(value: string): string {
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return value;
-		return new Intl.DateTimeFormat(undefined, {
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-		}).format(date);
-	}
-
-	async function copyCommitHash(event: MouseEvent, hash: string): Promise<void> {
-		event.stopPropagation();
-		await navigator.clipboard?.writeText(hash);
-		copiedHash = hash;
-		if (copyTimeout) clearTimeout(copyTimeout);
-		copyTimeout = setTimeout(() => {
-			if (copiedHash === hash) copiedHash = null;
-		}, 1200);
-	}
 
 	function isNearListBottom(): boolean {
 		if (!listRef || listRef.clientHeight <= 0) return false;
@@ -201,73 +176,20 @@
 	{:else}
 		<div class="divide-y divide-border">
 			{#each commits as commit (commit.hash)}
-				<div
-					class="group relative cursor-pointer select-none px-3 py-2 hover:bg-muted/40 {comparisonFrom ===
-						commit.hash || comparisonTo === commit.hash
-						? 'bg-interactive-accent/10'
-						: ''}"
-				>
-					<button
-						type="button"
-						class="absolute inset-0 z-0 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
-						aria-pressed={comparisonSelectionActive
-							? comparisonFrom === commit.hash || comparisonTo === commit.hash
-							: undefined}
-						aria-label={comparisonSelectionActive
-							? m.git_compare_select_commit_for({
-									commit: commit.subject || commit.shortHash,
-									endpoint:
-										comparisonSelectionSlot === 'from' ? m.git_compare_from() : m.git_compare_to(),
-								})
-							: m.git_history_open_commit({
-									commit: commit.subject || commit.shortHash,
-								})}
-						data-git-history-commit-row
-						onclick={() =>
-							comparisonSelectionActive
-								? onSelectComparisonCommit(commit.hash)
-								: onOpenCommit(commit.hash)}
-					></button>
-					<div class="pointer-events-none relative z-[1] flex items-stretch gap-2">
-						<div class="min-w-0 flex-1 text-left">
-							<div class="flex min-w-0 items-center gap-2">
-								<span class="min-w-0 truncate text-sm font-medium text-foreground">
-									{commit.subject || commit.shortHash}
-								</span>
-								{#if commit.parents.length > 1}
-									<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-										merge
-									</span>
-								{/if}
-							</div>
-							<div
-								class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
-							>
-								<span class="truncate">{commit.author}</span>
-								<span>{formatDate(commit.authorDate)}</span>
-								<span class="font-mono">{commit.shortHash}</span>
-								{#if commit.refs.length > 0}
-									<span
-										class="inline-flex min-w-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5"
-									>
-										<GitBranch class="h-3 w-3 shrink-0" />
-										<span class="truncate">{commit.refs.join(', ')}</span>
-									</span>
-								{/if}
-							</div>
-						</div>
-						<button
-							type="button"
-							class="pointer-events-auto self-center rounded p-1 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-							title={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
-							aria-label={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
-							onclick={(event) => copyCommitHash(event, commit.hash)}
-						>
-							<Copy class="h-3.5 w-3.5" />
-						</button>
-						<ChevronRight class="self-center h-4 w-4 shrink-0 text-muted-foreground" />
-					</div>
-				</div>
+				<GitCommitListRow
+					{commit}
+					{comparisonSelectionActive}
+					{comparisonSelectionSlot}
+					selectedForComparison={comparisonFrom === commit.hash || comparisonTo === commit.hash}
+					active={true}
+					onActivate={() => undefined}
+					onOpenOrSelect={() =>
+						comparisonSelectionActive
+							? onSelectComparisonCommit(commit.hash)
+							: onOpenCommit(commit.hash)}
+					onNavigate={() => undefined}
+					onFocusWithinChange={() => undefined}
+				/>
 			{/each}
 		</div>
 		{#if nextOffset !== null && (isLoading || error)}
