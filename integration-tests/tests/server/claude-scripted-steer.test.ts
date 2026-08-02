@@ -2,56 +2,64 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import {
-  codexAssistantMessage,
-  codexExecCommandCall,
-} from '../../support/fake-codex-model.js';
+  claudeText,
+  claudeToolUse,
+} from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { expectFinished, LIVE_TURN_TIMEOUT_MS } from '../../support/live-agent.js';
-import { liveCodexStartRequest } from '../../support/live-codex.js';
+import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import {
-  startScriptedCodexTestEnvironment,
-  type ScriptedCodexTestEnvironment,
-} from '../../support/scripted-codex.js';
+  startScriptedClaudeTestEnvironment,
+  type ScriptedClaudeTestEnvironment,
+} from '../../support/scripted-claude.js';
 
-describe('scripted Codex strict steering', () => {
-  let environment: ScriptedCodexTestEnvironment | undefined;
+const STEERING_PREFIX = 'The user sent steering guidance for the active task:\n\n';
+
+describe('scripted Claude strict steering', () => {
+  let environment: ScriptedClaudeTestEnvironment | undefined;
 
   beforeAll(async () => {
-    environment = await startScriptedCodexTestEnvironment();
+    environment = await startScriptedClaudeTestEnvironment();
   });
 
-  afterAll(async () => {
-    await environment?.dispose();
+  afterAll(() => {
+    environment?.dispose();
   });
 
-  test('steers the active turn once ahead of a paused future queue', async () => {
-    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+  test('keeps next-priority guidance in one turn ahead of a paused future queue', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const firstPrompt = marker('FIRST_PROMPT');
-    const steerPrompt = marker('STEER_PROMPT');
+    const steerPrompt = `/review\n${marker('STEER_PROMPT')}`;
     const futurePrompt = marker('FUTURE_PROMPT');
     const firstReply = marker('FIRST_REPLY');
     const steerReply = marker('STEER_REPLY');
     const futureReply = marker('FUTURE_REPLY');
     const toolMarker = marker('TOOL_OUTPUT');
+    const requestCursor = testEnvironment.model.markRequests();
     testEnvironment.model.scriptTurn([
-      codexExecCommandCall('call_steer_context', `printf ${toolMarker}`),
+      claudeToolUse('toolu_steer_context', 'Bash', { command: `printf %s ${toolMarker}` }),
     ]);
-    const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(firstReply)]);
-    testEnvironment.model.scriptTurn([codexAssistantMessage(steerReply)]);
-    testEnvironment.model.scriptTurn([codexAssistantMessage(futureReply)]);
+    const held = testEnvironment.model.scriptHeldTurn([claudeText(firstReply)]);
+    testEnvironment.model.scriptTurn([claudeText(steerReply)]);
+    testEnvironment.model.scriptTurn([claudeText(futureReply)]);
 
-    await withIntegrationFixture('codex-scripted-steer', async (fixture) => {
+    await withIntegrationFixture('claude-scripted-steer', async (fixture) => {
+      const catalog = await fixture.client.listAgentCatalog();
+      expect(catalog.agents.find((agent) => agent.id === 'claude')).toMatchObject({
+        supportsSteering: true,
+      });
+
       const chatId = fixture.newChatId();
       const firstCursor = fixture.client.markEvents();
-      const first = await fixture.client.startChat(liveCodexStartRequest({
+      const first = await fixture.client.startChat(liveClaudeStartRequest({
         chatId,
         projectPath: fixture.dirs.project,
         command: firstPrompt,
         permissionMode: 'bypassPermissions',
       }));
       const firstTurnId = first.turnId;
-      if (!firstTurnId) throw new Error('Scripted Codex start did not return a turn identity.');
+      if (!firstTurnId) throw new Error('Scripted Claude start did not return a turn identity.');
       await held.requested;
 
       await fixture.client.enqueueNew(chatId, futurePrompt);
@@ -72,6 +80,10 @@ describe('scripted Codex strict steering', () => {
       expect(steered.turnId).toBe(firstTurnId);
       expect(duplicate).toMatchObject({ status: 'duplicate', turnId: firstTurnId });
       expect(await fixture.client.getExecutionControl(chatId)).toEqual(beforeSteer);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([
+        firstPrompt,
+        steerPrompt,
+      ]);
 
       held.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, firstTurnId, {
@@ -79,21 +91,29 @@ describe('scripted Codex strict steering', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
-      const activeRequests = testEnvironment.model.requests();
+      const activeRequests = testEnvironment.model.requestsSince(requestCursor);
       expect(activeRequests).toHaveLength(3);
-      const steeredModelRequest = activeRequests[2];
-      if (!steeredModelRequest) throw new Error('Codex did not make the steered model request.');
-      expect(steeredModelRequest.lastUserText).toContain(steerPrompt);
-      expect(steeredModelRequest.functionCallOutputs).toContainEqual(expect.objectContaining({
-        callId: 'call_steer_context',
-        output: expect.stringContaining(toolMarker),
+      const steeredModelRequest = activeRequests.at(-1);
+      if (!steeredModelRequest) throw new Error('Claude did not make the steered model request.');
+      expect(steeredModelRequest.lastUserText).toBe(`${STEERING_PREFIX}${steerPrompt}`);
+      expect(steeredModelRequest.toolResults).toContainEqual(expect.objectContaining({
+        toolUseId: 'toolu_steer_context',
+        content: expect.stringContaining(toolMarker),
       }));
-      expect(activeRequests.filter((requestRecord) =>
-        requestRecord.lastUserText.includes(steerPrompt))).toHaveLength(1);
+      expect(activeRequests.filter((record) =>
+        record.userTexts.some((text) => text.includes(steerPrompt)))).toHaveLength(1);
 
       const stillPaused = await fixture.client.getExecutionControl(chatId);
-      expect(stillPaused.queue.entries.map((entry) => entry.content)).toEqual([futurePrompt]);
-      expect(stillPaused.queue.pause?.kind).toBe('manual');
+      expect(stillPaused).toEqual(beforeSteer);
+      const activeTranscript = await fixture.client.getMessages(chatId);
+      expect(userContents(activeTranscript.messages)).toEqual([firstPrompt, steerPrompt]);
+      expect(JSON.stringify(activeTranscript.messages)).not.toContain(STEERING_PREFIX);
+      const activePreview = (await fixture.client.listChats()).sessions.find(
+        (entry) => entry.id === chatId,
+      )?.preview.lastMessage;
+      expect(activePreview).toContain(steerReply);
+      expect(activePreview).not.toContain(STEERING_PREFIX);
+
       const futureCursor = fixture.client.markEvents();
       await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
       const futureInput = await fixture.client.waitForEvent(
@@ -102,9 +122,10 @@ describe('scripted Codex strict steering', () => {
           && event.input.chatId === chatId
           && event.input.content === futurePrompt
           && typeof event.input.turnId === 'string',
-        'scripted Codex future queued turn identity',
+        'scripted Claude future queued turn identity',
         { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
+      expect(futureInput.input.turnId).not.toBe(firstTurnId);
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, futureInput.input.turnId, {
         afterIndex: futureCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -112,6 +133,7 @@ describe('scripted Codex strict steering', () => {
 
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual([firstPrompt, steerPrompt, futurePrompt]);
+      expect(JSON.stringify(transcript.messages)).not.toContain(STEERING_PREFIX);
       const assistants = assistantContents(transcript.messages);
       expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
       expect(assistants.some((content) => content.includes(steerReply))).toBe(true);
@@ -119,12 +141,11 @@ describe('scripted Codex strict steering', () => {
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
-      prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   }, 120_000);
 
-  test('delivers two FIFO steers during an in-flight model request', async () => {
-    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+  test('delivers two FIFO steers despite a reused Garcon message identity', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const firstPrompt = marker('BATCH_FIRST_PROMPT');
     const firstSteer = marker('BATCH_FIRST_STEER');
@@ -132,37 +153,41 @@ describe('scripted Codex strict steering', () => {
     const firstReply = marker('BATCH_FIRST_REPLY');
     const steeredReply = marker('BATCH_STEERED_REPLY');
     const requestCursor = testEnvironment.model.markRequests();
-    const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(firstReply)]);
-    testEnvironment.model.scriptTurn([codexAssistantMessage(steeredReply)]);
+    const held = testEnvironment.model.scriptHeldTurn([claudeText(firstReply)]);
+    testEnvironment.model.scriptTurn([claudeText(steeredReply)]);
 
-    await withIntegrationFixture('codex-scripted-steer-batch', async (fixture) => {
+    await withIntegrationFixture('claude-scripted-steer-batch', async (fixture) => {
       const chatId = fixture.newChatId();
       const eventCursor = fixture.client.markEvents();
-      const first = await fixture.client.startChat(liveCodexStartRequest({
+      const first = await fixture.client.startChat(liveClaudeStartRequest({
         chatId,
         projectPath: fixture.dirs.project,
         command: firstPrompt,
         permissionMode: 'bypassPermissions',
       }));
-      if (!first.turnId) throw new Error('Scripted Codex start did not return a turn identity.');
+      if (!first.turnId) throw new Error('Scripted Claude start did not return a turn identity.');
       await held.requested;
 
+      const sharedMessageId = crypto.randomUUID();
       const [firstResult, secondResult] = await Promise.all([
         fixture.client.steer({
           clientRequestId: crypto.randomUUID(),
-          clientMessageId: crypto.randomUUID(),
+          clientMessageId: sharedMessageId,
           chatId,
           content: firstSteer,
         }),
         fixture.client.steer({
           clientRequestId: crypto.randomUUID(),
-          clientMessageId: crypto.randomUUID(),
+          clientMessageId: sharedMessageId,
           chatId,
           content: secondSteer,
         }),
       ]);
       expect(firstResult).toMatchObject({ status: 'accepted', turnId: first.turnId });
       expect(secondResult).toMatchObject({ status: 'accepted', turnId: first.turnId });
+      expect((await fixture.client.listChats()).sessions.find(
+        (entry) => entry.id === chatId,
+      )).toMatchObject({ isProcessing: true });
 
       held.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
@@ -173,25 +198,27 @@ describe('scripted Codex strict steering', () => {
       const requests = testEnvironment.model.requestsSince(requestCursor);
       expect(requests).toHaveLength(2);
       const steeredRequest = requests.at(-1);
-      if (!steeredRequest) throw new Error('Codex did not make the batched steering request.');
-      const firstIndex = steeredRequest.userTexts.indexOf(firstSteer);
-      const secondIndex = steeredRequest.userTexts.indexOf(secondSteer);
-      expect(firstIndex).toBeGreaterThanOrEqual(0);
-      expect(secondIndex).toBeGreaterThan(firstIndex);
+      if (!steeredRequest) throw new Error('Claude did not make the batched steering request.');
+      expect(steeredRequest.lastUserText).toBe([
+        `${STEERING_PREFIX}${firstSteer}`,
+        `${STEERING_PREFIX}${secondSteer}`,
+      ].join('\n'));
+      expect(steeredRequest.lastUserText.indexOf(firstSteer))
+        .toBeLessThan(steeredRequest.lastUserText.indexOf(secondSteer));
 
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual([firstPrompt, firstSteer, secondSteer]);
+      expect(JSON.stringify(transcript.messages)).not.toContain(STEERING_PREFIX);
       const assistants = assistantContents(transcript.messages);
       expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
       expect(assistants.some((content) => content.includes(steeredReply))).toBe(true);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
-      prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   }, 120_000);
 });
 
 function marker(label: string): string {
-  return `SCRIPTED_CODEX_STEER_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
+  return `SCRIPTED_CLAUDE_STEER_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
