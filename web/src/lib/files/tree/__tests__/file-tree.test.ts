@@ -335,6 +335,24 @@ describe('FileTreeStore', () => {
 		);
 	});
 
+	it('keeps focus on the parent row so repeated upward navigation works', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project/src'))
+			.mockResolvedValueOnce(response('/workspace/project'))
+			.mockResolvedValueOnce(response('/workspace'));
+		store.setProjectState(availableProject('/workspace/project/src'));
+		store.activate();
+		await tick();
+
+		await store.goToParent();
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
+
+		await store.goToParent();
+		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
+	});
+
 	it('navigates to parent and directly back to the chat project', async () => {
 		vi.mocked(filesApi.getTree)
 			.mockResolvedValueOnce(response('/workspace/project'))

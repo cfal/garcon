@@ -374,6 +374,9 @@ export class FileTreeStore {
 		});
 	}
 
+	// Focus stays on the parent row rather than the directory just left. Focusing
+	// that directory scrolls it into view, which slides a sibling row under the
+	// pointer so the next click enters it instead of continuing upward.
 	async goToParent(): Promise<void> {
 		const response = this.readyResponse;
 		const parentPath = response?.directory.parentPath;
@@ -384,7 +387,7 @@ export class FileTreeStore {
 			label: breadcrumbs.at(-1)?.name ?? parentPath,
 			breadcrumbs,
 			reason: 'parent-row',
-			focusPathOnSuccess: response.directory.path,
+			focusPathOnSuccess: FILE_TREE_PARENT_ROW_KEY,
 		});
 	}
 
