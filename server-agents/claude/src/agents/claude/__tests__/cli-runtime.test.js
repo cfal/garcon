@@ -26,10 +26,12 @@ function createRuntime(logger = createLogger(), overrides = {}) {
 
 function deferred() {
   let resolve;
-  const promise = new Promise((res) => {
+  let reject;
+  const promise = new Promise((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function createFakeClaudeProcess(options = {}) {
@@ -2086,6 +2088,161 @@ describe('ClaudeCliRuntime steering', () => {
         metadata: { turnId: 'turn-active' },
       }]);
       expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('releases an idle reservation when delivery preparation fails', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime();
+      const finishes = [];
+      runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const original = await enqueueInputStarted(fake);
+      const preparation = deferred();
+      const steering = runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+        { prepareDelivery: async () => preparation.promise },
+      ));
+
+      enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
+      enqueueProviderState(fake, 'idle');
+      await Bun.sleep(1);
+      expect(finishes).toEqual([]);
+
+      const preparationError = new Error('delivery preparation failed');
+      preparation.reject(preparationError);
+      await expect(steering).rejects.toBe(preparationError);
+      await run;
+      expect(finishes).toMatchObject([{ turnId: 'turn-active' }]);
+      expect(writtenUserMessages(fake)).toHaveLength(1);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('classifies attempted write failure as unknown and kills the process', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime();
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      await enqueueInputStarted(fake);
+      fake.proc.stdin.write.mockImplementationOnce(() => {
+        throw new Error('steering write failed');
+      });
+
+      await expect(runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+      ))).resolves.toEqual({
+        kind: 'failed',
+        outcome: 'unknown',
+        message: 'Claude steering delivery could not be confirmed',
+      });
+      await run;
+      expect(fake.proc.kill).toHaveBeenCalledTimes(1);
+      expect(runtime.captureSteerTarget('expected-session')).toBeNull();
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('fails a replay that was never accepted into Claude command lifecycle', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime();
+      const failures = [];
+      runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const original = await enqueueInputStarted(fake);
+      await expect(runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+      ))).resolves.toEqual({ kind: 'accepted' });
+      const steeringFrame = writtenUserMessages(fake).at(-1);
+
+      enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
+      enqueueProviderState(fake, 'idle');
+      enqueueCliMessage(fake, {
+        type: 'user',
+        uuid: steeringFrame.uuid,
+        isReplay: true,
+        message: steeringFrame.message,
+      });
+      await run;
+
+      expect(failures).toMatchObject([{
+        message: 'Claude CLI replayed steering input without accepting it into the command queue.',
+        metadata: { turnId: 'turn-active' },
+      }]);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('removes queued steering input from the interrupt receipt before stopping', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime();
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const original = await enqueueInputStarted(fake);
+      await expect(runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+      ))).resolves.toEqual({ kind: 'accepted' });
+      const steeringFrame = writtenUserMessages(fake).at(-1);
+
+      const abort = runtime.abortClaudeInternalSession('expected-session');
+      let interrupt;
+      for (let attempt = 0; attempt < 100 && !interrupt; attempt += 1) {
+        interrupt = fake.proc.stdin.write.mock.calls
+          .map(([line]) => JSON.parse(line))
+          .find((message) =>
+            message.type === 'control_request'
+            && message.request?.subtype === 'interrupt');
+        if (!interrupt) await Promise.resolve();
+      }
+      if (!interrupt) throw new Error('Claude interrupt request was not written.');
+      enqueueCliMessage(fake, {
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: interrupt.request_id,
+          response: { cancelled: [steeringFrame.uuid], still_queued: [] },
+        },
+      });
+      await expect(abort).resolves.toBe(true);
+
+      enqueueCliMessage(fake, {
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        terminal_reason: 'aborted_streaming',
+        user_message_uuid: original.uuid,
+      });
+      enqueueProviderState(fake, 'idle');
+      await run;
+      expect(fake.proc.killed).toBe(false);
+      expect(runtime.captureSteerTarget('expected-session')).toBeNull();
     } finally {
       await runtime?.shutdown();
       Bun.spawn = originalSpawn;
