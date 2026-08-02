@@ -92,6 +92,22 @@ describe('CodeEditorController', () => {
 		controller.dispose();
 	});
 
+	it('floors touch font size while preserving the configured fine-pointer size', () => {
+		const { session, controller } = createController();
+		session.editorState = null;
+		const host = parent();
+		controller.attach(host);
+		const content = host.querySelector<HTMLElement>('.cm-content');
+		if (!content) throw new Error('Expected CodeMirror content');
+
+		const styleRules = [...document.querySelectorAll('style')]
+			.map((style) => style.textContent ?? '')
+			.join('\n');
+		expect(styleRules).toMatch(/\.cm-content, [^{]*\.cm-gutters \{font-size: 16px;/);
+		expect(styleRules).toMatch(/@media \(pointer: fine\).*font-size: 12px/s);
+		controller.dispose();
+	});
+
 	it('compares editor documents without materializing content on every transaction', () => {
 		const { session, controller } = createController();
 		const host = parent();
