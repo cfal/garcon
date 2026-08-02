@@ -230,7 +230,7 @@ describe('GitHistoryView', () => {
 
 	it('navigates from commit list to details and back', async () => {
 		const history = createHistory();
-		render(GitHistoryView, {
+		const { container } = render(GitHistoryView, {
 			props: {
 				history,
 				comparisonSelection,
@@ -246,6 +246,8 @@ describe('GitHistoryView', () => {
 		});
 
 		await screen.findByText('List commit');
+		const list = container.querySelector('[data-git-history-commit-list]');
+		expect(list?.contains(screen.getByRole('button', { name: 'Select commits' }))).toBe(false);
 		const commitRow = screen.getByRole('button', { name: 'Open commit List commit' });
 		expect(commitRow.hasAttribute('data-git-history-commit-row')).toBe(true);
 		expect(commitRow.parentElement?.classList.contains('select-none')).toBe(true);
@@ -835,10 +837,10 @@ describe('GitHistoryView', () => {
 	it('renders selected revisions inside History and returns to the preserved selection', async () => {
 		const history = createHistory();
 		history.saveListPosition({
-			scrollTop: 240,
-			anchorHash: null,
+			scrollTop: 0,
+			anchorHash: commitListItem().hash,
 			anchorOffset: 0,
-			activeHash: null,
+			activeHash: commitListItem().hash,
 		});
 		comparisonSelection.begin();
 		comparisonSelection.select('older');
@@ -894,7 +896,10 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
 
 		expect(await screen.findByText('List commit')).toBeTruthy();
-		expect(history.listPosition.scrollTop).toBe(240);
+		expect(history.listPosition).toMatchObject({
+			anchorHash: commitListItem().hash,
+			activeHash: commitListItem().hash,
+		});
 		expect(comparisonSelection).toMatchObject({
 			active: true,
 			from: 'older',

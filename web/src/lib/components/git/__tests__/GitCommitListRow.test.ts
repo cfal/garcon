@@ -61,11 +61,12 @@ afterEach(() => {
 
 describe('GitCommitListRow', () => {
 	it('opens the commit from a full-row button without allowing text selection', async () => {
-		const { container, onOpenOrSelect } = renderRow();
+		const { onActivate, onOpenOrSelect } = renderRow();
 		const open = screen.getByRole('button', { name: 'Open commit List commit' });
 
 		await fireEvent.click(open);
 
+		expect(onActivate).toHaveBeenCalledOnce();
 		expect(onOpenOrSelect).toHaveBeenCalledOnce();
 		expect(open.closest('[data-git-history-commit-hash]')?.className).toContain('select-none');
 	});

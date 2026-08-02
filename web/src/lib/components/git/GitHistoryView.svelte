@@ -72,14 +72,11 @@
 		error={history.listError}
 		nextOffset={history.nextOffset}
 		{isMobile}
-		scrollTop={history.listPosition.scrollTop}
+		position={history.listPosition}
+		collectionChange={history.listChange}
 		onOpenCommit={(hash) => history.openCommit(projectPath, hash)}
 		onLoadMore={() => history.loadMore(projectPath)}
-		onScrollSave={(top) =>
-			history.saveListPosition({
-				...history.listPosition,
-				scrollTop: top,
-			})}
+		onPositionSave={(position) => history.saveListPosition(position)}
 		comparisonSelectionActive={comparisonSelection.active}
 		comparisonSelectionSlot={comparisonSelection.slot}
 		comparisonFrom={comparisonSelection.from}

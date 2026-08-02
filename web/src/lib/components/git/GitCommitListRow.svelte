@@ -58,6 +58,11 @@
 		onFocusWithinChange(true);
 	}
 
+	function handleOpenOrSelect(): void {
+		onActivate();
+		onOpenOrSelect();
+	}
+
 	function handleFocusOut(event: FocusEvent & { currentTarget: HTMLDivElement }): void {
 		if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))
 			return;
@@ -76,7 +81,6 @@
 		? 'bg-interactive-accent/10'
 		: ''}"
 	data-git-history-commit-hash={commit.hash}
-	onpointerdown={onActivate}
 	onfocusin={handleFocusIn}
 	onfocusout={handleFocusOut}
 >
@@ -94,7 +98,8 @@
 					commit: commit.subject || commit.shortHash,
 				})}
 		data-git-history-commit-row
-		onclick={onOpenOrSelect}
+		onpointerdown={onActivate}
+		onclick={handleOpenOrSelect}
 		onkeydown={onNavigate}
 	></button>
 	<div class="pointer-events-none relative z-[1] flex items-stretch gap-2">
@@ -129,6 +134,7 @@
 			tabindex={active ? 0 : -1}
 			title={copied ? 'Copied commit hash' : 'Copy commit hash'}
 			aria-label={copied ? 'Copied commit hash' : 'Copy commit hash'}
+			onpointerdown={onActivate}
 			onclick={copyCommitHash}
 		>
 			<Copy class="h-3.5 w-3.5" />
