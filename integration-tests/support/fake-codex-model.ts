@@ -27,6 +27,7 @@ export interface HeldCodexTurn {
 export interface RecordedCodexModelRequest {
   readonly id: number;
   readonly body: Record<string, unknown>;
+  readonly userTexts: readonly string[];
   readonly lastUserText: string;
   readonly functionCallOutputs: ReadonlyArray<{ callId: string; output: string }>;
   readonly receivedAt: number;
@@ -58,20 +59,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function lastUserText(body: Record<string, unknown>): string {
-  if (!Array.isArray(body.input)) return '';
-  for (let index = body.input.length - 1; index >= 0; index -= 1) {
-    const item = body.input[index];
+function userTexts(body: Record<string, unknown>): string[] {
+  if (!Array.isArray(body.input)) return [];
+  const texts: string[] = [];
+  for (const item of body.input) {
     if (!isRecord(item) || item.type !== 'message' || item.role !== 'user') continue;
-    if (typeof item.content === 'string') return item.content;
+    if (typeof item.content === 'string') {
+      if (item.content.length > 0) texts.push(item.content);
+      continue;
+    }
     if (!Array.isArray(item.content)) continue;
-    return item.content
+    const text = item.content
       .filter((part): part is Record<string, unknown> =>
         isRecord(part) && part.type === 'input_text' && typeof part.text === 'string')
       .map((part) => String(part.text))
       .join('\n');
+    if (text.length > 0) texts.push(text);
   }
-  return '';
+  return texts;
 }
 
 function functionCallOutputs(
@@ -206,6 +211,14 @@ export class FakeCodexModel {
     return this.#requests.slice();
   }
 
+  markRequests(): number {
+    return this.#requests.length;
+  }
+
+  requestsSince(index: number): readonly RecordedCodexModelRequest[] {
+    return this.#requests.slice(index);
+  }
+
   issues(): readonly string[] {
     return this.#issues.slice();
   }
@@ -254,10 +267,12 @@ export class FakeCodexModel {
       this.#issues.push('Responses request body was not an object');
       return sseResponse(failedEvents('invalid request body'));
     }
+    const recordedUserTexts = userTexts(body);
     const recorded: RecordedCodexModelRequest = {
       id: ++this.#requestId,
       body,
-      lastUserText: lastUserText(body),
+      userTexts: recordedUserTexts,
+      lastUserText: recordedUserTexts.at(-1) ?? '',
       functionCallOutputs: functionCallOutputs(body),
       receivedAt: Date.now(),
     };

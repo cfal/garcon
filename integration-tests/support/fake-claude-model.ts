@@ -33,6 +33,7 @@ export interface HeldClaudeTurn {
 export interface RecordedClaudeModelRequest {
   readonly id: number;
   readonly body: Record<string, unknown>;
+  readonly userTexts: readonly string[];
   readonly lastUserText: string;
   readonly toolResults: ReadonlyArray<{ toolUseId: string; content: string }>;
   readonly receivedAt: number;
@@ -64,15 +65,15 @@ function textFromContent(content: unknown): string {
     .join('\n');
 }
 
-function lastUserText(body: Record<string, unknown>): string {
-  if (!Array.isArray(body.messages)) return '';
-  for (let index = body.messages.length - 1; index >= 0; index -= 1) {
-    const message = body.messages[index];
+function userTexts(body: Record<string, unknown>): string[] {
+  if (!Array.isArray(body.messages)) return [];
+  const texts: string[] = [];
+  for (const message of body.messages) {
     if (!isRecord(message) || message.role !== 'user') continue;
     const text = textFromContent(message.content);
-    if (text.length > 0) return text;
+    if (text.length > 0) texts.push(text);
   }
-  return '';
+  return texts;
 }
 
 function toolResults(
@@ -275,6 +276,14 @@ export class FakeClaudeModel {
     return this.#requests.slice();
   }
 
+  markRequests(): number {
+    return this.#requests.length;
+  }
+
+  requestsSince(index: number): readonly RecordedClaudeModelRequest[] {
+    return this.#requests.slice(index);
+  }
+
   // Non-messages traffic the CLI generated, kept for inspection rather than failure: telemetry
   // and auxiliary endpoints are the CLI's business, not the conversation contract.
   otherRequests(): readonly string[] {
@@ -329,10 +338,12 @@ export class FakeClaudeModel {
       this.#issues.push('Messages request body was not an object');
       return sseResponse(errorEvents('invalid request body'));
     }
+    const recordedUserTexts = userTexts(body);
     const recorded: RecordedClaudeModelRequest = {
       id: ++this.#requestId,
       body,
-      lastUserText: lastUserText(body),
+      userTexts: recordedUserTexts,
+      lastUserText: recordedUserTexts.at(-1) ?? '',
       toolResults: toolResults(body),
       receivedAt: Date.now(),
     };
