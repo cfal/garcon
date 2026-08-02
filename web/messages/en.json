@@ -237,7 +237,7 @@
 	"chat_notice_steer_prompt_required": "Add guidance after /steer.",
 	"chat_notice_steer_unsupported": "/steer is not supported by this agent.",
 	"chat_notice_steer_attachments_unavailable": "Remove attachments before steering the active turn.",
-	"chat_notice_steer_turn_unavailable": "There is no active turn to steer.",
+	"chat_notice_steer_turn_unavailable": "There isn't a turn ready for steering.",
 	"chat_notice_steer_turn_changed": "The active turn changed before steering could be applied.",
 	"chat_notice_steer_turn_not_steerable": "This kind of active turn cannot be steered.",
 	"chat_notice_steer_capacity_exhausted": "Steering is temporarily unavailable until the server restarts.",

@@ -9,9 +9,13 @@ import {
 import { convertClaudePermissionTool } from '../permission-tool-converter.js';
 import { AskUserQuestionToolUseMessage, BashToolUseMessage, ExitPlanModeToolUseMessage } from '@garcon/common/chat-types';
 import {
+  CLAUDE_STEERING_PROMPT_PREFIX,
   buildClaudeInitialUserContent,
+  buildClaudeSteeringUserContent,
   buildClaudeUserInputFrame,
+  claudeSteeringInputsFromNativeContent,
 } from '../user-input.js';
+import { ClaudeTurnSteeringState } from '../steering.js';
 
 describe('Claude SDK user input', () => {
   it('builds the existing stream-json user frame', () => {
@@ -73,6 +77,161 @@ describe('Claude SDK user input', () => {
       mimeType: 'image/png',
       data: 'not-a-data-url',
     }])).toEqual([{ type: 'text', text: 'prompt' }]);
+  });
+
+  it('builds an explicit next-priority steering frame with literal slash input', () => {
+    expect(JSON.parse(buildClaudeUserInputFrame({
+      content: buildClaudeSteeringUserContent('/review the failing test'),
+      sessionId: 'session-1',
+      uuid: 'native-steer-1',
+      priority: 'next',
+    }))).toEqual({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: `${CLAUDE_STEERING_PROMPT_PREFIX}/review the failing test`,
+        }],
+      },
+      parent_tool_use_id: null,
+      session_id: 'session-1',
+      uuid: 'native-steer-1',
+      priority: 'next',
+    });
+  });
+
+  it('extracts only complete provider-owned steering block arrays', () => {
+    const content = [
+      { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}first` },
+      { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}/second` },
+    ];
+    expect(claudeSteeringInputsFromNativeContent(content)).toEqual(['first', '/second']);
+    expect(claudeSteeringInputsFromNativeContent('first')).toBeNull();
+    expect(claudeSteeringInputsFromNativeContent([
+      content[0],
+      { type: 'text', text: 'ordinary' },
+    ])).toBeNull();
+  });
+});
+
+describe('ClaudeTurnSteeringState', () => {
+  it('holds idempotent delivery reservations', () => {
+    const steering = new ClaudeTurnSteeringState();
+    const release = steering.reserveDelivery();
+    expect(steering.blocksIdleSettlement).toBe(true);
+    expect(steering.reservationCount).toBe(1);
+    release();
+    release();
+    expect(steering.blocksIdleSettlement).toBe(false);
+    expect(steering.reservationCount).toBe(0);
+  });
+
+  it('tracks queued, started, replay, and terminal lifecycle idempotently', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.rememberProviderIdle();
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'queued',
+    })).toEqual({ kind: 'queued', uuid: 'steer-1' });
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'started',
+    })).toMatchObject({ kind: 'started', uuid: 'steer-1', source: 'lifecycle' });
+    expect(steering.hasDeferredIdle).toBe(false);
+    expect(steering.activeCount).toBe(1);
+    expect(steering.observe({
+      type: 'user',
+      uuid: 'steer-1',
+      isReplay: true,
+    })).toBeNull();
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'completed',
+    })).toEqual({
+      kind: 'terminal',
+      uuid: 'steer-1',
+      phase: 'after-start',
+      state: 'completed',
+    });
+    expect(steering.blocksIdleSettlement).toBe(false);
+  });
+
+  it('accepts queued replay as a start fallback', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'queued',
+    });
+    expect(steering.observe({
+      type: 'user',
+      uuid: 'steer-1',
+      isReplay: true,
+    })).toMatchObject({ kind: 'started', source: 'replay' });
+    expect(steering.activeCount).toBe(1);
+  });
+
+  it('rejects replay without prior queue acceptance', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    expect(steering.observe({
+      type: 'user',
+      uuid: 'steer-1',
+      isReplay: true,
+    })).toEqual({ kind: 'duplicate-replay', uuid: 'steer-1' });
+    expect(steering.blocksIdleSettlement).toBe(false);
+  });
+
+  it('reports terminal lifecycle before start and keeps other inputs fenced', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('steer-1');
+    steering.markSubmitted('steer-2');
+    expect(steering.observe({
+      type: 'command_lifecycle',
+      command_uuid: 'steer-1',
+      state: 'discarded',
+    })).toEqual({
+      kind: 'terminal',
+      uuid: 'steer-1',
+      phase: 'before-start',
+      state: 'discarded',
+    });
+    expect(steering.submittedCount).toBe(1);
+    expect(steering.blocksIdleSettlement).toBe(true);
+  });
+
+  it('intersects interrupt receipts with owned native UUIDs', () => {
+    const steering = new ClaudeTurnSteeringState();
+    steering.markSubmitted('cancelled');
+    steering.markSubmitted('survivor');
+    expect(steering.observeInterruptReceipt({
+      cancelled: ['cancelled', 'provider-owned'],
+      stillQueued: ['survivor'],
+    })).toEqual({ cancelledCount: 1, stillQueuedCount: 1 });
+    expect(steering.submittedCount).toBe(1);
+  });
+
+  it('bounds deferred idle only while native work remains', async () => {
+    const steering = new ClaudeTurnSteeringState();
+    let timedOut = 0;
+    const release = steering.reserveDelivery();
+    steering.deferIdle(() => timedOut += 1, 1);
+    await Bun.sleep(5);
+    expect(timedOut).toBe(0);
+
+    steering.markSubmitted('steer-1');
+    release();
+    steering.deferIdle(() => timedOut += 1, 1);
+    await Bun.sleep(5);
+    expect(timedOut).toBe(1);
+    steering.clear();
+    expect(steering.blocksIdleSettlement).toBe(false);
   });
 });
 

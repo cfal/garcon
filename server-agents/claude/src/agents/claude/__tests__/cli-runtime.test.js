@@ -13,13 +13,14 @@ function createLogger() {
   };
 }
 
-function createRuntime(logger = createLogger()) {
+function createRuntime(logger = createLogger(), overrides = {}) {
   return new ClaudeCliRuntime({
     binary: () => 'claude',
     logger,
     versionProbe: {
       assertCompatible: mock(() => Promise.resolve([2, 1, 220])),
     },
+    ...overrides,
   });
 }
 
@@ -144,6 +145,44 @@ function writtenUserMessage(fake) {
     .map(([line]) => JSON.parse(line))
     .filter((message) => message.type === 'user');
   return writes.at(-1);
+}
+
+function writtenUserMessages(fake) {
+  return fake.proc.stdin.write.mock.calls
+    .map(([line]) => JSON.parse(line))
+    .filter((message) => message.type === 'user');
+}
+
+function enqueueCliMessage(fake, message) {
+  fake.stdout.enqueue(encoder.encode(`${JSON.stringify(message)}\n`));
+}
+
+function steerRequest(target, overrides = {}) {
+  return {
+    chatId: 'chat-1',
+    projectPath: '/tmp',
+    agentSessionId: 'expected-session',
+    nativeSession: null,
+    target,
+    input: 'focus on the failing test',
+    clientMessageId: 'message-steer',
+    prepareDelivery: async () => undefined,
+    ...overrides,
+  };
+}
+
+function enqueueAssistantAndResult(fake, inputUuid, text) {
+  enqueueCliMessage(fake, {
+    type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'text', text }] },
+  });
+  enqueueCliMessage(fake, {
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: text,
+    user_message_uuid: inputUuid,
+  });
 }
 
 const startedInputByFake = new WeakMap();
@@ -1799,6 +1838,256 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       globalThis.setTimeout = originalSetTimeout;
       fake.exit(137);
       runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+});
+
+describe('ClaudeCliRuntime steering', () => {
+  it('captures only a started input and prepares before one next-priority write', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    const logger = createLogger();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime(logger);
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      await waitForWrittenUserMessage(fake);
+      expect(runtime.captureSteerTarget('expected-session')).toBeNull();
+
+      const original = await enqueueInputStarted(fake);
+      const target = runtime.captureSteerTarget('expected-session');
+      expect(target).not.toBeNull();
+      expect(Object.isFrozen(target)).toBe(true);
+      expect(Object.keys(target)).toEqual([]);
+
+      const preparation = deferred();
+      let prepareCalls = 0;
+      const steering = runtime.steer(steerRequest(target, {
+        input: '/review\nCheck cafe',
+        prepareDelivery: async () => {
+          prepareCalls += 1;
+          await preparation.promise;
+        },
+      }));
+      await Promise.resolve();
+      expect(prepareCalls).toBe(1);
+      expect(writtenUserMessages(fake)).toHaveLength(1);
+
+      preparation.resolve();
+      await expect(steering).resolves.toEqual({ kind: 'accepted' });
+      const frame = writtenUserMessages(fake).at(-1);
+      expect(frame).toMatchObject({
+        priority: 'next',
+        session_id: 'expected-session',
+        message: {
+          content: [{
+            type: 'text',
+            text: 'The user sent steering guidance for the active task:\n\n/review\nCheck cafe',
+          }],
+        },
+      });
+      expect(frame.uuid).toMatch(/^[0-9a-f-]{36}$/);
+      expect(frame.uuid).not.toBe('message-steer');
+      expect(frame.uuid).not.toBe(original.uuid);
+      expect(JSON.stringify(Object.values(logger).flatMap((entry) => entry.mock.calls)))
+        .not.toContain('/review\nCheck cafe');
+
+      await expect(runtime.steer(steerRequest(target))).resolves.toMatchObject({
+        kind: 'rejected',
+        reason: 'no-active-turn',
+      });
+
+      enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: frame.uuid,
+        state: 'queued',
+      });
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: frame.uuid,
+        state: 'started',
+      });
+      enqueueAssistantAndResult(fake, frame.uuid, 'steered reply');
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: frame.uuid,
+        state: 'completed',
+      });
+      enqueueProviderState(fake, 'idle');
+      await expect(run).resolves.toBe('expected-session');
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('defers provider idle across preparation and settles after steering completes', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime();
+      const finishes = [];
+      const failures = [];
+      runtime.onFinished((chatId, exitCode, metadata) => {
+        finishes.push({ chatId, exitCode, metadata });
+      });
+      runtime.onFailed((chatId, message, metadata) => {
+        failures.push({ chatId, message, metadata });
+      });
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const original = await enqueueInputStarted(fake);
+      const preparation = deferred();
+      const steering = runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+        { prepareDelivery: async () => preparation.promise },
+      ));
+
+      enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
+      enqueueProviderState(fake, 'idle');
+      await Bun.sleep(1);
+      expect(finishes).toEqual([]);
+      expect(failures).toEqual([]);
+
+      preparation.resolve();
+      await expect(steering).resolves.toEqual({ kind: 'accepted' });
+      const nativeId = writtenUserMessages(fake).at(-1).uuid;
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: nativeId,
+        state: 'queued',
+      });
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: nativeId,
+        state: 'started',
+      });
+      enqueueProviderState(fake, 'running');
+      enqueueAssistantAndResult(fake, nativeId, 'steered reply');
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: nativeId,
+        state: 'completed',
+      });
+      enqueueProviderState(fake, 'idle');
+
+      await run;
+      expect(failures).toEqual([]);
+      expect(finishes).toMatchObject([{
+        chatId: 'chat-1',
+        exitCode: 0,
+        metadata: { turnId: 'turn-active' },
+      }]);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('keeps two native steering UUIDs fenced through their terminal lifecycle', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime();
+      const finishes = [];
+      runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const original = await enqueueInputStarted(fake);
+      const first = runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+        { input: 'first', clientMessageId: 'shared-message' },
+      ));
+      const second = runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+        { input: 'second', clientMessageId: 'shared-message' },
+      ));
+      await expect(Promise.all([first, second])).resolves.toEqual([
+        { kind: 'accepted' },
+        { kind: 'accepted' },
+      ]);
+      const [, firstFrame, secondFrame] = writtenUserMessages(fake);
+      expect(firstFrame.uuid).not.toBe(secondFrame.uuid);
+      expect(firstFrame.uuid).not.toBe('shared-message');
+      expect(secondFrame.uuid).not.toBe('shared-message');
+
+      enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
+      for (const frame of [firstFrame, secondFrame]) {
+        enqueueCliMessage(fake, {
+          type: 'command_lifecycle',
+          command_uuid: frame.uuid,
+          state: 'queued',
+        });
+      }
+      for (const frame of [firstFrame, secondFrame]) {
+        enqueueCliMessage(fake, {
+          type: 'command_lifecycle',
+          command_uuid: frame.uuid,
+          state: 'started',
+        });
+      }
+      enqueueAssistantAndResult(fake, secondFrame.uuid, 'batched reply');
+      enqueueProviderState(fake, 'idle');
+      await Bun.sleep(1);
+      expect(finishes).toEqual([]);
+
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: firstFrame.uuid,
+        state: 'completed',
+      });
+      await Bun.sleep(1);
+      expect(finishes).toEqual([]);
+      enqueueCliMessage(fake, {
+        type: 'command_lifecycle',
+        command_uuid: secondFrame.uuid,
+        state: 'completed',
+      });
+
+      await run;
+      expect(finishes).toMatchObject([{ turnId: 'turn-active' }]);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('fails and retires when accepted steering remains idle without starting', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    let runtime;
+
+    try {
+      runtime = createRuntime(createLogger(), { steerIdleFenceTimeoutMs: 2 });
+      const failures = [];
+      runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
+      const run = runtime.startClaudeCliSession(startOptions({ turnId: 'turn-active' }));
+      const original = await enqueueInputStarted(fake);
+      await expect(runtime.steer(steerRequest(
+        runtime.captureSteerTarget('expected-session'),
+      ))).resolves.toEqual({ kind: 'accepted' });
+
+      enqueueAssistantAndResult(fake, original.uuid, 'initial reply');
+      enqueueProviderState(fake, 'idle');
+      await Bun.sleep(10);
+      await run;
+
+      expect(failures).toMatchObject([{
+        message: 'Claude CLI did not make progress on accepted steering input.',
+        metadata: { turnId: 'turn-active' },
+      }]);
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime?.shutdown();
       Bun.spawn = originalSpawn;
     }
   });

@@ -2334,6 +2334,26 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
+	it('uses a provider-neutral notice when a turn is not ready for steering', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'claude', isProcessing: true }));
+		deps.composerState.inputText = '/steer Keep the current turn';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockSteerChat.mockRejectedValueOnce(new ApiError(
+			409,
+			'No active turn',
+			'STEER_TURN_UNAVAILABLE',
+		));
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: "There isn't a turn ready for steering.",
+		});
+	});
+
 	it('explains when the server has exhausted retained steering identities', async () => {
 		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
 		deps.composerState.inputText = '/steer Keep the current turn';

@@ -30,6 +30,7 @@ import {
 } from '@garcon/server-agent-common/lib/transcript-revision';
 import { deterministicTranscriptTimestamp } from '@garcon/server-agent-common/shared/transcript-timestamp';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
+import { claudeSteeringInputsFromNativeContent } from './user-input.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -161,6 +162,12 @@ function getMessageText(content: unknown): string {
   return '';
 }
 
+function claudeUserTexts(content: unknown): readonly string[] {
+  const steeringInputs = claudeSteeringInputsFromNativeContent(content);
+  const values = steeringInputs ?? [getMessageText(content)];
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
 function isSystemUserMessage(text: string): boolean {
   return (
     text.startsWith('<command-name>') ||
@@ -185,14 +192,13 @@ function isProviderOwnedUserMessage(
   return asRecord(entry.origin).kind === 'task-notification' || isSystemUserMessage(text);
 }
 
-function queuedCommandPrompt(entry: Record<string, unknown>): string | null {
-  if (entry.type !== 'attachment') return null;
+function queuedCommandPrompts(entry: Record<string, unknown>): readonly string[] {
+  if (entry.type !== 'attachment') return [];
   const attachment = asRecord(entry.attachment);
-  if (attachment.type !== 'queued_command' || attachment.commandMode !== 'prompt') return null;
-  const prompt = asString(attachment.prompt)?.trim();
-  return prompt && !isProviderOwnedUserMessage(entry, prompt)
-    ? stripResolvedFileMentionContext(prompt)
-    : null;
+  if (attachment.type !== 'queued_command' || attachment.commandMode !== 'prompt') return [];
+  return claudeUserTexts(attachment.prompt)
+    .filter((prompt) => !isProviderOwnedUserMessage(entry, prompt))
+    .map(stripResolvedFileMentionContext);
 }
 
 function isSystemAssistantMessage(text: string): boolean {
@@ -289,10 +295,12 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
       continue;
     }
 
-    const queuedPrompt = queuedCommandPrompt(entry);
-    if (queuedPrompt) {
+    const queuedPrompts = queuedCommandPrompts(entry);
+    if (queuedPrompts.length > 0) {
       const attachmentTimestamp = asString(asRecord(entry.attachment).timestamp);
-      pushMessage(entry, new UserMessage(attachmentTimestamp || ts, queuedPrompt));
+      for (const prompt of queuedPrompts) {
+        pushMessage(entry, new UserMessage(attachmentTimestamp || ts, prompt));
+      }
       continue;
     }
 
@@ -347,9 +355,10 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
         }
       }
 
-      const text = getMessageText(content);
-      if (text && !isProviderOwnedUserMessage(entry, text)) {
-        pushMessage(entry, new UserMessage(ts, stripResolvedFileMentionContext(text)));
+      for (const text of claudeUserTexts(content)) {
+        if (!isProviderOwnedUserMessage(entry, text)) {
+          pushMessage(entry, new UserMessage(ts, stripResolvedFileMentionContext(text)));
+        }
       }
       continue;
     }
@@ -682,12 +691,13 @@ async function readFirstUserMessage(filePath: string): Promise<{
       }
       const message = asRecord(entry.message);
       if (message.role === 'user') {
-        const text = getMessageText(message.content);
-        if (!firstMessage && text && !isProviderOwnedUserMessage(entry, text)) {
-          firstMessage = text;
+        for (const text of claudeUserTexts(message.content)) {
+          if (!firstMessage && !isProviderOwnedUserMessage(entry, text)) {
+            firstMessage = text;
+          }
         }
       } else if (!firstMessage) {
-        firstMessage = queuedCommandPrompt(entry);
+        firstMessage = queuedCommandPrompts(entry)[0] ?? null;
       }
       if (firstMessage && firstTimestamp) break;
     }
@@ -746,10 +756,10 @@ export async function getClaudePreviewFromNativePath(
       const message = asRecord(entry.message);
       const role = message.role;
       if (role === 'user') {
-        const text = getMessageText(message.content);
-        if (!text || isProviderOwnedUserMessage(entry, text)) {
-          continue;
-        }
+        const text = claudeUserTexts(message.content)
+          .filter((candidate) => !isProviderOwnedUserMessage(entry, candidate))
+          .at(-1);
+        if (!text) continue;
         lastMessage = '> ' + text;
       } else if (role === 'assistant' && entry.isApiErrorMessage !== true) {
         const text = getMessageText(message.content);
@@ -758,7 +768,7 @@ export async function getClaudePreviewFromNativePath(
         }
         lastMessage = text;
       } else {
-        const prompt = queuedCommandPrompt(entry);
+        const prompt = queuedCommandPrompts(entry).at(-1);
         if (prompt) lastMessage = '> ' + prompt;
       }
     }

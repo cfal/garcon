@@ -13,6 +13,7 @@ export interface ClaudeInterruptReceiptHandlers {
   readonly finish: () => void;
   readonly clearAbortTimer: () => void;
   readonly armCompletionFallback: () => void;
+  readonly flushDeferredIdle: () => void;
 }
 
 function stringArray(value: unknown): string[] {
@@ -37,6 +38,11 @@ export function handleClaudeInterruptReceipt(
   const receipt = record(value);
   const cancelled = stringArray(receipt.cancelled);
   const stillQueued = stringArray(receipt.still_queued);
+  const steeringReceipt = activeTurn.steering.observeInterruptReceipt({
+    cancelled,
+    stillQueued,
+  });
+  if (steeringReceipt.cancelledCount > 0) handlers.flushDeferredIdle();
   const inputUuid = activeTurn.protocol.inputUuid;
   const details = {
     chatId: session.chatId,
@@ -46,6 +52,8 @@ export function handleClaudeInterruptReceipt(
     inputId: inputUuid.slice(0, 8),
     cancelledCount: cancelled.length,
     stillQueuedCount: stillQueued.length,
+    steeringCancelledCount: steeringReceipt.cancelledCount,
+    steeringStillQueuedCount: steeringReceipt.stillQueuedCount,
   };
 
   if (!activeTurn.protocol.inputStarted && cancelled.includes(inputUuid)) {
@@ -67,6 +75,14 @@ export function handleClaudeInterruptReceipt(
     }
     handlers.logger.warn('Claude CLI interrupt left the submitted input queued', details);
     return false;
+  }
+  if (steeringReceipt.stillQueuedCount > 0) {
+    handlers.logger.warn('Claude CLI interrupt left steering input queued', details);
+    if (turnIsCurrent) {
+      handlers.clearAbortTimer();
+      handlers.armCompletionFallback();
+    }
+    return true;
   }
   handlers.logger.debug('Claude CLI acknowledged interrupt', details);
   if (turnIsCurrent && activeTurn.protocol.inputStarted) {

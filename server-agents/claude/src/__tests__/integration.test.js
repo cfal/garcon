@@ -37,6 +37,10 @@ describe('ClaudeAgentIntegration', () => {
       supportsAtMessage: true,
       supportsWhileRunning: true,
     });
+    expect(integration.steering).toEqual({
+      captureTarget: expect.any(Function),
+      steer: expect.any(Function),
+    });
     expect(integration.auth).toBeDefined();
     expect(integration.commands).toBeDefined();
     expect(integration.endpoints).toBeDefined();

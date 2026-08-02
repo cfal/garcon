@@ -11,6 +11,7 @@ import type {
   ForkTranscriptTransformResult,
 } from '@garcon/server-agent-common/forking/fork-jsonl';
 import { convertClaudeEntries, sortClaudeEntries } from './history-loader.js';
+import { claudeSteeringInputsFromNativeContent } from './user-input.js';
 
 const CLAUDE_TRANSCRIPT_TYPES = new Set([
   'user',
@@ -67,6 +68,13 @@ export function projectClaudeForkEntry(
   }
 
   if (message.role === 'user') {
+    const steeringInputs = claudeSteeringInputsFromNativeContent(content);
+    if (steeringInputs && retainedMessageCount <= steeringInputs.length) {
+      return {
+        ...entry,
+        message: { ...message, content: content.slice(0, retainedMessageCount) },
+      };
+    }
     const toolResults = content.filter((part) => isRecord(part) && part.type === 'tool_result');
     if (retainedMessageCount <= toolResults.length) {
       return {

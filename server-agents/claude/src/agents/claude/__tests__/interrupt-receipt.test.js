@@ -23,6 +23,7 @@ function createFixture() {
     finish: () => calls.push('finish'),
     clearAbortTimer: () => calls.push('clear'),
     armCompletionFallback: () => calls.push('arm'),
+    flushDeferredIdle: () => calls.push('flush'),
   };
   return { activeTurn, session, calls, handlers };
 }
@@ -86,5 +87,35 @@ describe('handleClaudeInterruptReceipt', () => {
       fixture.handlers,
     )).toBe(true);
     expect(fixture.calls).toEqual([]);
+  });
+
+  it('cancels only steering UUIDs owned by the active turn', () => {
+    const fixture = createFixture();
+    startInput(fixture.activeTurn);
+    fixture.activeTurn.steering.markSubmitted('steer-1');
+
+    expect(handleClaudeInterruptReceipt(
+      fixture.session,
+      fixture.activeTurn,
+      { cancelled: ['steer-1', 'provider-internal'] },
+      fixture.handlers,
+    )).toBe(true);
+    expect(fixture.activeTurn.steering.blocksIdleSettlement).toBe(false);
+    expect(fixture.calls).toEqual(['flush', 'arm']);
+  });
+
+  it('retains a steering fence reported still queued', () => {
+    const fixture = createFixture();
+    startInput(fixture.activeTurn);
+    fixture.activeTurn.steering.markSubmitted('steer-1');
+
+    expect(handleClaudeInterruptReceipt(
+      fixture.session,
+      fixture.activeTurn,
+      { still_queued: ['steer-1'] },
+      fixture.handlers,
+    )).toBe(true);
+    expect(fixture.activeTurn.steering.blocksIdleSettlement).toBe(true);
+    expect(fixture.calls).toEqual(['clear', 'arm']);
   });
 });

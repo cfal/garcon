@@ -9,7 +9,12 @@ import {
   AgentEventEmitterRuntime,
   type RuntimeEventMetadata,
 } from '@garcon/server-agent-common/shared/event-emitter-runtime';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import type {
+  AgentLogger,
+  AgentSteerRequest,
+  AgentSteerResult,
+  AgentSteerTarget,
+} from '@garcon/server-agent-interface';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import {
   assertClaudeExecutionOpen,
@@ -48,13 +53,22 @@ import {
   type ClaudeProviderSessionState,
   type ClaudeTurnTerminalState,
 } from './cli-protocol.js';
-import { handleClaudeProviderLifecycleMessage } from './cli-session-state.js';
+import {
+  flushDeferredClaudeProviderIdle,
+  handleClaudeProviderLifecycleMessage,
+  type ClaudeProviderStateHandlers,
+} from './cli-session-state.js';
 import { ClaudeActiveTurn } from './active-turn.js';
 import {
   buildClaudeInitialUserContent,
   buildClaudeUserInputFrame,
 } from './user-input.js';
 import { handleClaudeInterruptReceipt } from './interrupt-receipt.js';
+import {
+  CLAUDE_STEER_IDLE_FENCE_TIMEOUT_MS,
+  CLAUDE_STEER_WRITE_TIMEOUT_MS,
+  ClaudeSteeringController,
+} from './steering.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -103,6 +117,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #processRetirements = new ClaudeProcessRetirementTracker();
   #pendingPermissions = new Map<string, PendingPermission>();
   #controlBroker: ClaudeControlBroker;
+  #steering: ClaudeSteeringController;
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
   #shuttingDown = false;
   readonly #dependencies: ClaudeCliDependencies;
@@ -113,6 +128,17 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.#controlBroker = new ClaudeControlBroker(
       (agentSessionId, jsonl) => this.#writeToCLI(agentSessionId, jsonl),
     );
+    this.#steering = new ClaudeSteeringController({
+      session: agentSessionId => this.#runningSessions.get(agentSessionId) ?? null,
+      isShuttingDown: () => this.#shuttingDown,
+      logger: dependencies.logger,
+      writeTimeoutMs: dependencies.steerWriteTimeoutMs ?? CLAUDE_STEER_WRITE_TIMEOUT_MS,
+      flushDeferredIdle: (session, activeTurn) => {
+        const runningSession = this.#runningSessions.get(session.id);
+        if (!runningSession || runningSession.activeTurn !== activeTurn) return;
+        this.#flushDeferredProviderIdle(runningSession, runningSession.activeTurn);
+      },
+    });
     this.#idlePurger = new IdleSessionPurger({
       sessions: () => this.#runningSessions.entries(),
       isRunning: (session) => session.activeTurn !== null,
@@ -184,6 +210,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     } else if (inputEvent?.type === 'terminal-before-start') {
       this.#handleInputTerminalBeforeStart(session, inputEvent.state);
       return;
+    }
+    const steeringEvent = activeTurn?.steering.observe(msg) ?? null;
+    if (steeringEvent) {
+      this.#steering.handleObservation(session, activeTurn!, steeringEvent);
     }
 
     switch (msg.type) {
@@ -257,12 +287,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #handleSystemMessage(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
-    if (handleClaudeProviderLifecycleMessage(msg, session, {
-      logger: this.#dependencies.logger,
-      finish: () => this.#finishTurn(session),
-      fail: message => this.#failSession(session, message),
-      retire: () => this.#retireSessionProcessInBackground(session),
-    })) return;
+    if (handleClaudeProviderLifecycleMessage(
+      msg,
+      session,
+      this.#providerStateHandlers(session),
+    )) return;
 
     const activeTurn = session.activeTurn;
     if (msg.subtype === 'init') {
@@ -312,6 +341,25 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       if (!activeTurn?.protocol.inputStarted) return;
       activeTurn.pendingCompaction = parseCompactMetadata(msg.compact_metadata);
     }
+  }
+
+  #providerStateHandlers(session: ClaudeRunningSession): ClaudeProviderStateHandlers {
+    return {
+      logger: this.#dependencies.logger,
+      finish: () => this.#finishTurn(session),
+      fail: message => this.#failSession(session, message),
+      retire: () => this.#retireSessionProcessInBackground(session),
+      steeringIdleFenceTimeoutMs:
+        this.#dependencies.steerIdleFenceTimeoutMs ?? CLAUDE_STEER_IDLE_FENCE_TIMEOUT_MS,
+    };
+  }
+
+  #flushDeferredProviderIdle(
+    session: ClaudeRunningSession,
+    activeTurn: ClaudeActiveTurn,
+  ): void {
+    if (session.activeTurn !== activeTurn) return;
+    flushDeferredClaudeProviderIdle(session, this.#providerStateHandlers(session));
   }
 
   // Folds the post-compaction summary (delivered as a synthetic user message)
@@ -761,6 +809,14 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       sessionId: session.id || '',
       uuid: activeTurn.protocol.inputUuid,
     }));
+  }
+
+  captureSteerTarget(agentSessionId: string): AgentSteerTarget | null {
+    return this.#steering.captureTarget(agentSessionId);
+  }
+
+  steer(request: AgentSteerRequest): Promise<AgentSteerResult> {
+    return this.#steering.steer(request);
   }
 
   #waitForTurnComplete(activeTurn: ClaudeActiveTurn): Promise<void> {
@@ -1289,6 +1345,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
           INTERRUPT_COMPLETION_TIMEOUT_MS,
           'completion',
         ),
+        flushDeferredIdle: () => this.#flushDeferredProviderIdle(session, activeTurn),
       });
     } catch (error) {
       if (session.activeTurn !== activeTurn) {
