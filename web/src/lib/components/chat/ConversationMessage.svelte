@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy, tick } from 'svelte';
 	import {
 		UserMessage,
 		AssistantMessage,
@@ -43,6 +44,10 @@
 		askUserQuestionTerminalFromResult,
 		type PermissionTerminalState,
 	} from '$lib/chat/transcript/conversation-feed-items.js';
+	import type {
+		ConversationDisclosureStatePort,
+		PermissionQuestionDraft,
+	} from './ConversationFeedItemState.svelte.js';
 
 	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
 	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =
@@ -69,6 +74,10 @@
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
+		disclosureState?: ConversationDisclosureStatePort;
+		permissionDraft?: (permissionRequestId: string) => PermissionQuestionDraft;
+		onPermissionDraftChange?: (permissionRequestId: string, draft: PermissionQuestionDraft) => void;
+		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
 	let {
@@ -88,6 +97,10 @@
 		onForkChat,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
+		disclosureState,
+		permissionDraft,
+		onPermissionDraftChange,
+		acquireTransientActivity,
 	}: Props = $props();
 
 	const sessions = getChatSessions();
@@ -222,6 +235,27 @@
 	let selectTextDialogOpen = $state(false);
 	let messageLongPressTimer: ReturnType<typeof setTimeout> | null = null;
 	let suppressNextMenuButtonClick = false;
+	let releaseMessageMenu: (() => void) | null = null;
+	let releaseSelectionDialog: (() => void) | null = null;
+
+	async function releaseAfterPortalClose(release: (() => void) | null): Promise<void> {
+		if (!release) return;
+		await tick();
+		release();
+	}
+
+	function handleMessageMenuOpenChange(open: boolean): void {
+		if (open) {
+			releaseMessageMenu ??=
+				acquireTransientActivity?.(() => handleMessageMenuOpenChange(false)) ?? null;
+			messageMenuOpen = true;
+			return;
+		}
+		messageMenuOpen = false;
+		const release = releaseMessageMenu;
+		releaseMessageMenu = null;
+		void releaseAfterPortalClose(release);
+	}
 
 	function openContextMenuFromButton(e: MouseEvent) {
 		e.preventDefault();
@@ -293,11 +327,11 @@
 		suppressNextMenuButtonClick =
 			event.target instanceof Element &&
 			Boolean(event.target.closest('.chat-message-menu-button, .chat-message-action-button'));
-		messageMenuOpen = false;
+		handleMessageMenuOpenChange(false);
 	}
 
 	function closeMessageMenuFromInteractOutside(): void {
-		messageMenuOpen = false;
+		handleMessageMenuOpenChange(false);
 	}
 
 	// Closes touch context menus on pointerdown because Bits UI defers touch dismissal to click.
@@ -349,6 +383,7 @@
 
 	function openSelectTextDialog(): void {
 		if (!messageMenuText) return;
+		releaseSelectionDialog ??= acquireTransientActivity?.(closeSelectTextDialog) ?? null;
 		selectTextDialogOpen = true;
 	}
 
@@ -359,6 +394,9 @@
 
 	function closeSelectTextDialog(): void {
 		selectTextDialogOpen = false;
+		const release = releaseSelectionDialog;
+		releaseSelectionDialog = null;
+		void releaseAfterPortalClose(release);
 	}
 
 	/** Routes a file-like markdown link to the viewer overlay. */
@@ -403,7 +441,22 @@
 		});
 	}
 
-	let thinkingOpen = $state(true);
+	let localThinkingOpen = $state(true);
+	let thinkingOpen = $derived(
+		disclosureState?.open('thinking', 'thinking', true) ?? localThinkingOpen,
+	);
+
+	function toggleThinking(): void {
+		const next = !thinkingOpen;
+		if (disclosureState) disclosureState.setOpen('thinking', 'thinking', next, true);
+		else localThinkingOpen = next;
+	}
+
+	onDestroy(() => {
+		clearMessageLongPressTimer();
+		releaseMessageMenu?.();
+		releaseSelectionDialog?.();
+	});
 </script>
 
 {#snippet floatingMessageMenuButton(positionClass: string)}
@@ -427,7 +480,7 @@
 				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
 				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
 			>
-				<ContextMenu bind:open={messageMenuOpen}>
+				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 					<ContextMenuTrigger
 						bind:ref={messageMenuTriggerRef}
 						class="user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground data-[state=open]:bg-user-bubble-selected rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
@@ -439,6 +492,7 @@
 									variant="user"
 									fileLinkBasePath={projectBasePath}
 									onLinkNavigate={handleLinkNavigate}
+									{acquireTransientActivity}
 								/>
 							</div>
 							{#if asUser.images && asUser.images.length > 0}
@@ -537,6 +591,12 @@
 							onDecision={onPermissionDecision ?? (() => {})}
 							{onExitPlanMode}
 							{chatContext}
+							draft={permissionDraft?.(exitPlanPermissionRequest.permissionRequestId)}
+							{acquireTransientActivity}
+							onDraftChange={onPermissionDraftChange
+								? (draft) =>
+										onPermissionDraftChange(exitPlanPermissionRequest.permissionRequestId, draft)
+								: undefined}
 						/>
 					{:else if askUserQuestionPermissionRequest}
 						<PermissionRequestRow
@@ -544,6 +604,15 @@
 							terminal={askUserQuestionTerminal}
 							onDecision={onPermissionDecision ?? (() => {})}
 							{chatContext}
+							draft={permissionDraft?.(askUserQuestionPermissionRequest.permissionRequestId)}
+							{acquireTransientActivity}
+							onDraftChange={onPermissionDraftChange
+								? (draft) =>
+										onPermissionDraftChange(
+											askUserQuestionPermissionRequest.permissionRequestId,
+											draft,
+										)
+								: undefined}
 						/>
 					{:else if asToolUse}
 						<ChatToolEventRenderer
@@ -556,6 +625,8 @@
 							onFileOpen={handleToolFileOpen}
 							{projectBasePath}
 							{chatProjectPath}
+							{disclosureState}
+							{acquireTransientActivity}
 						/>
 					{:else if asThinking}
 						<ChatEventCard variant="thinking" compact>
@@ -563,9 +634,7 @@
 								<button
 									type="button"
 									class="flex w-full items-center gap-2 text-left cursor-pointer"
-									onclick={() => {
-										thinkingOpen = !thinkingOpen;
-									}}
+									onclick={toggleThinking}
 									aria-expanded={thinkingOpen}
 								>
 									<span class="text-xs font-medium text-muted-foreground"
@@ -582,13 +651,14 @@
 											variant="thinking"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{acquireTransientActivity}
 										/>
 									</div>
 								{/if}
 							{/snippet}
 						</ChatEventCard>
 					{:else if asAssistant}
-						<ContextMenu bind:open={messageMenuOpen}>
+						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger
 								bind:ref={messageMenuTriggerRef}
 								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
@@ -600,6 +670,7 @@
 											variant="assistant"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{acquireTransientActivity}
 										/>
 									</div>
 									{@render floatingMessageMenuButton('-bottom-1 right-1')}
@@ -633,6 +704,11 @@
 							message={asCompaction}
 							{projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{acquireTransientActivity}
+							open={disclosureState?.open('compaction', 'compaction', false)}
+							onOpenChange={disclosureState
+								? (open) => disclosureState.setOpen('compaction', 'compaction', open, false)
+								: undefined}
 						/>
 					{:else if asAgentSwitch}
 						<AgentSwitchRow message={asAgentSwitch} />
@@ -643,6 +719,11 @@
 							onDecision={onPermissionDecision}
 							{onExitPlanMode}
 							{chatContext}
+							draft={permissionDraft?.(asPermissionRequest.permissionRequestId)}
+							{acquireTransientActivity}
+							onDraftChange={onPermissionDraftChange
+								? (draft) => onPermissionDraftChange(asPermissionRequest.permissionRequestId, draft)
+								: undefined}
 						/>
 					{/if}
 				</div>

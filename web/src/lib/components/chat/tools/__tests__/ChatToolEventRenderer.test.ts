@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
+import type { ConversationDisclosureStatePort } from '../../ConversationFeedItemState.svelte.js';
 import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
@@ -84,6 +85,34 @@ describe('ChatToolEventRenderer', () => {
 		});
 
 		expect(screen.getByText('const a = 2;')).toBeTruthy();
+	});
+
+	it('delegates controlled disclosure changes to the virtual row owner', async () => {
+		const disclosureState = {
+			open: vi.fn(() => true),
+			setOpen: vi.fn(),
+		} satisfies ConversationDisclosureStatePort;
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-controlled',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			disclosureState,
+		});
+
+		const trigger = screen.getByRole('button', { name: /example\.ts/i });
+		expect(trigger.getAttribute('aria-expanded')).toBe('true');
+		await fireEvent.click(trigger);
+		expect(disclosureState.setOpen).toHaveBeenCalledWith(
+			'tool-input',
+			'tool-controlled',
+			false,
+			false,
+		);
 	});
 
 	it('renders streaming Edit without diff as non-expandable single row', () => {

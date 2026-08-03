@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { BashToolUseMessage } from '$shared/chat-types';
 	import HighlightedCodeText from '../HighlightedCodeText.svelte';
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
@@ -16,6 +17,7 @@
 	let { rows }: Props = $props();
 
 	let copied = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 	const messages = $derived(rows.map((row) => row.message));
 	const commandCount = $derived(messages.length);
 	const commandLabel = $derived(`${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`);
@@ -27,10 +29,16 @@
 		const didCopy = await copyToClipboard(combinedCommands);
 		if (!didCopy) return;
 		copied = true;
-		setTimeout(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => {
 			copied = false;
+			copyTimer = null;
 		}, 2000);
 	}
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 </script>
 
 <div class="group my-0.5">
@@ -57,10 +65,7 @@
 			<div class="divide-y divide-border/70">
 				{#each renderItems as item, index (item.key)}
 					{@const message = item.message}
-					<div
-						class="py-1 first:pt-0 last:pb-0"
-						data-chat-anchor-id={rows[index]?.id}
-					>
+					<div class="py-1 first:pt-0 last:pb-0" data-chat-anchor-id={rows[index]?.id}>
 						<code
 							class="code-highlight block whitespace-pre-wrap break-all text-xs text-foreground font-mono"
 						>

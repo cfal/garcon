@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	// LCS-based line diff viewer with color-coded additions/removals.
 
 	import Copy from '@lucide/svelte/icons/copy';
@@ -88,12 +89,21 @@
 	let diffLines = $derived(computeDiff(oldContent ?? '', newContent ?? ''));
 
 	let pathCopied = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 	async function handleCopyPath() {
 		const didCopy = await copyToClipboard(filePath);
 		if (!didCopy) return;
 		pathCopied = true;
-		setTimeout(() => (pathCopied = false), 2000);
+		if (copyTimer) clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => {
+			pathCopied = false;
+			copyTimer = null;
+		}, 2000);
 	}
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 </script>
 
 <div class="border border-border rounded overflow-hidden">

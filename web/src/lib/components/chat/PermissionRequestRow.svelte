@@ -29,6 +29,7 @@
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
 	import { getChatSessions, getFileSessions, getAppShell } from '$lib/context';
+	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
 
@@ -41,9 +42,21 @@
 		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: PlanExitChoice, plan: string) => void;
 		chatContext?: ConversationMessageChatContext | null;
+		draft?: PermissionQuestionDraft;
+		onDraftChange?: (draft: PermissionQuestionDraft) => void;
+		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
-	let { request, terminal, onDecision, onExitPlanMode, chatContext = null }: Props = $props();
+	let {
+		request,
+		terminal,
+		onDecision,
+		onExitPlanMode,
+		chatContext = null,
+		draft: controlledDraft,
+		onDraftChange,
+		acquireTransientActivity,
+	}: Props = $props();
 
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
@@ -144,8 +157,28 @@
 		return m.chat_permission_permission_cancelled();
 	});
 
-	let selectedQuestionOptions = $state<Record<string, string[]>>({});
+	let localDraft = $state<PermissionQuestionDraft>({
+		selectedQuestionOptions: {},
+		rawInputOpen: false,
+	});
+	let effectiveDraft = $derived(controlledDraft ?? localDraft);
+	let selectedQuestionOptions = $derived(effectiveDraft.selectedQuestionOptions);
 	const terminalQuestionOptions = $derived(terminal?.selectedQuestionOptions ?? {});
+
+	function setDraft(next: PermissionQuestionDraft): void {
+		if (onDraftChange) onDraftChange(next);
+		else localDraft = next;
+	}
+
+	function setSelectedOptions(questionId: string, selected: string[]): void {
+		setDraft({
+			...effectiveDraft,
+			selectedQuestionOptions: {
+				...effectiveDraft.selectedQuestionOptions,
+				[questionId]: selected,
+			},
+		});
+	}
 
 	const canAnswerAskUserQuestion = $derived.by(() => {
 		const questions = askUserQuestionRequest?.questions ?? [];
@@ -205,10 +238,10 @@
 			const current = new Set(selectedOptionsFor(question.id));
 			if (checked) current.add(optionId);
 			else current.delete(optionId);
-			selectedQuestionOptions[question.id] = Array.from(current);
+			setSelectedOptions(question.id, Array.from(current));
 			return;
 		}
-		selectedQuestionOptions[question.id] = checked ? [optionId] : [];
+		setSelectedOptions(question.id, checked ? [optionId] : []);
 	}
 
 	function selectedQuestionPreview(question: AskUserQuestionPrompt): string | undefined {
@@ -253,10 +286,10 @@
 			const current = new Set(selectedOptionsFor(question.id));
 			if (checked) current.add(optionId);
 			else current.delete(optionId);
-			selectedQuestionOptions[question.id] = Array.from(current);
+			setSelectedOptions(question.id, Array.from(current));
 			return;
 		}
-		selectedQuestionOptions[question.id] = checked ? [optionId] : [];
+		setSelectedOptions(question.id, checked ? [optionId] : []);
 	}
 
 	function cursorQuestionResponse(outcome: 'answered' | 'skipped'): Record<string, unknown> {
@@ -335,6 +368,7 @@
 							source={plan}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{acquireTransientActivity}
 						/>
 					</div>
 				</div>
@@ -639,6 +673,7 @@
 									source={cursorCreatePlanRequest.plan}
 									fileLinkBasePath={projectBasePath}
 									onLinkNavigate={handleLinkNavigate}
+									{acquireTransientActivity}
 								/>
 							</div>
 						</div>
@@ -734,7 +769,15 @@
 
 		{#snippet body()}
 			{#if rawInput}
-				<details class="mt-1">
+				<details
+					class="mt-1"
+					open={effectiveDraft.rawInputOpen}
+					ontoggle={(event) => {
+						const open = event.currentTarget.open;
+						if (open === effectiveDraft.rawInputOpen) return;
+						setDraft({ ...effectiveDraft, rawInputOpen: open });
+					}}
+				>
 					<summary class="cursor-pointer text-xs opacity-80 flex items-center gap-1 select-none">
 						<ChevronDown class="w-3.5 h-3.5" />
 						{m.chat_permission_view_tool_input()}

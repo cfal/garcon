@@ -48,6 +48,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 		fileLinkBasePath?: string;
 		/** Called when a link is clicked. Return true to prevent default navigation. */
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
+		acquireTransientActivity?: (close: () => void) => () => void;
 	}
 
 	const VARIANT_STYLES: Record<
@@ -89,6 +90,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 		class: className = '',
 		fileLinkBasePath,
 		onLinkNavigate,
+		acquireTransientActivity,
 	}: Props = $props();
 
 	const parserOptions = $derived(
@@ -114,7 +116,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 		{#snippet code({ lang, text })}
 			{#if lang === 'mermaid'}
 				<svelte:boundary>
-					<MermaidBlock {text} />
+					<MermaidBlock {text} {acquireTransientActivity} />
 					{#snippet failed()}
 						<CodeBlock lang="mermaid" {text} />
 					{/snippet}

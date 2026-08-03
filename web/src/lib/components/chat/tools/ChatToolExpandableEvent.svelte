@@ -10,6 +10,8 @@
 		toolId?: string;
 		title: string;
 		defaultOpen?: boolean;
+		open?: boolean;
+		onOpenChange?: (open: boolean) => void;
 		onTitleClick?: () => void;
 		children: Snippet;
 		class?: string;
@@ -20,6 +22,8 @@
 		toolId,
 		title,
 		defaultOpen = false,
+		open,
+		onOpenChange,
 		onTitleClick,
 		children,
 		class: className = '',
@@ -27,11 +31,15 @@
 
 	let userToggled = $state(false);
 	let localOpen = $state(false);
-	let isOpen = $derived(userToggled ? localOpen : defaultOpen);
+	let isOpen = $derived(open ?? (userToggled ? localOpen : defaultOpen));
 
 	function handleToggle() {
-		userToggled = true;
-		localOpen = !isOpen;
+		const next = !isOpen;
+		if (onOpenChange) onOpenChange(next);
+		else {
+			userToggled = true;
+			localOpen = next;
+		}
 	}
 </script>
 

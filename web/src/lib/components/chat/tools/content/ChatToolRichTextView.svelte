@@ -7,6 +7,7 @@
 		projectBasePath?: string | null;
 		chatProjectPath?: string | null;
 		onFileOpen?: (filePath: string) => void;
+		acquireTransientActivity?: (close: () => void) => () => void;
 		class?: string;
 	}
 
@@ -15,6 +16,7 @@
 		projectBasePath = null,
 		chatProjectPath = null,
 		onFileOpen,
+		acquireTransientActivity,
 		class: className = '',
 	}: MarkdownContentProps = $props();
 
@@ -32,4 +34,5 @@
 	fileLinkBasePath={fileLinkBasePath ?? undefined}
 	onLinkNavigate={handleLinkNavigate}
 	class={className}
+	{acquireTransientActivity}
 />

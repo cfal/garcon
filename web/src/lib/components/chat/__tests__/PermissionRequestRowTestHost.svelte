@@ -4,6 +4,7 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { PermissionRequestMessage } from '$shared/chat-types';
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
+	import type { PermissionQuestionDraft } from '../ConversationFeedItemState.svelte.js';
 
 	interface Props {
 		request: PermissionRequestMessage;
@@ -12,9 +13,11 @@
 			permissionRequestId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
+		draft?: PermissionQuestionDraft;
+		onDraftChange?: (draft: PermissionQuestionDraft) => void;
 	}
 
-	let { request, terminal, onDecision }: Props = $props();
+	let { request, terminal, onDecision, draft, onDraftChange }: Props = $props();
 
 	setChatSessions({
 		get selectedChat() {
@@ -31,4 +34,4 @@
 	} as never);
 </script>
 
-<PermissionRequestRow {request} {terminal} {onDecision} />
+<PermissionRequestRow {request} {terminal} {onDecision} {draft} {onDraftChange} />

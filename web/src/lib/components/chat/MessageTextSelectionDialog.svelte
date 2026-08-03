@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -17,6 +18,7 @@
 
 	let textSurfaceRef = $state<HTMLElement | null>(null);
 	let copied = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function handleOpenChange(nextOpen: boolean): void {
 		if (!nextOpen) onClose();
@@ -43,10 +45,16 @@
 		const didCopy = await copyToClipboard(text, container);
 		if (!didCopy) return;
 		copied = true;
-		setTimeout(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+		copyTimer = setTimeout(() => {
 			copied = false;
+			copyTimer = null;
 		}, 2000);
 	}
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>

@@ -23,26 +23,31 @@
 	import ChatToolTodoListView from './content/ChatToolTodoListView.svelte';
 	import CodeBlock from '../CodeBlock.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
 
 	interface ToolRendererProps {
 		toolMessage: ToolUseChatMessage;
-			toolResult?: Record<string, unknown>;
-			mode: 'input' | 'result';
-			onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
-			projectBasePath?: string | null;
-			chatProjectPath?: string | null;
-			autoExpandTools?: boolean;
-		}
+		toolResult?: Record<string, unknown>;
+		mode: 'input' | 'result';
+		onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
+		projectBasePath?: string | null;
+		chatProjectPath?: string | null;
+		autoExpandTools?: boolean;
+		disclosureState?: ConversationDisclosureStatePort;
+		acquireTransientActivity?: (close: () => void) => () => void;
+	}
 
 	let {
 		toolMessage,
 		toolResult,
-			mode,
-			onFileOpen,
-			projectBasePath,
-			chatProjectPath,
-			autoExpandTools = false,
-		}: ToolRendererProps = $props();
+		mode,
+		onFileOpen,
+		projectBasePath,
+		chatProjectPath,
+		autoExpandTools = false,
+		disclosureState,
+		acquireTransientActivity,
+	}: ToolRendererProps = $props();
 
 	const toolName = $derived(getToolDisplayLabel(toolMessage));
 	const toolId = $derived(toolMessage.toolId);
@@ -79,11 +84,11 @@
 	let contentProps = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return {};
 		return (
-				displayConfig.getContentProps?.(parsedData, {
-					projectPath: chatProjectPath,
-					onFileOpen,
-				}) || {}
-			);
+			displayConfig.getContentProps?.(parsedData, {
+				projectPath: chatProjectPath,
+				onFileOpen,
+			}) || {}
+		);
 	});
 
 	let shouldRenderCollapsedAsInline = $derived.by(() => {
@@ -198,6 +203,8 @@
 	});
 
 	let inputAnchorId = $derived(mode === 'input' ? `tool-input-${toolId}` : undefined);
+	let inputOpen = $derived(disclosureState?.open('tool-input', toolId, collapsibleDefaultOpen));
+	let resultOpen = $derived(disclosureState?.open('tool-result', toolId, resultDefaultOpen));
 </script>
 
 {#if displayConfig && displayConfig.mode !== 'hidden'}
@@ -238,6 +245,10 @@
 					{toolId}
 					title={collapsibleTitle}
 					defaultOpen={collapsibleDefaultOpen}
+					open={inputOpen}
+					onOpenChange={disclosureState
+						? (open) => disclosureState.setOpen('tool-input', toolId, open, collapsibleDefaultOpen)
+						: undefined}
 					onTitleClick={handleTitleClick}
 				>
 					{#snippet children()}
@@ -266,13 +277,14 @@
 										: undefined}
 								/>
 							{/if}
-							{:else if displayConfig.contentKind === 'markdown'}
-								<ChatToolRichTextView
-									content={(contentProps.content as string) || ''}
-									{projectBasePath}
-									{chatProjectPath}
-									{onFileOpen}
-								/>
+						{:else if displayConfig.contentKind === 'markdown'}
+							<ChatToolRichTextView
+								content={(contentProps.content as string) || ''}
+								{projectBasePath}
+								{chatProjectPath}
+								{onFileOpen}
+								{acquireTransientActivity}
+							/>
 						{:else if displayConfig.contentKind === 'fileList'}
 							<ChatToolFileListView
 								files={(contentProps.files as string[]) || []}
@@ -319,20 +331,25 @@
 			{toolId}
 			title={resultTitle}
 			defaultOpen={resultDefaultOpen}
+			open={resultOpen}
+			onOpenChange={disclosureState
+				? (open) => disclosureState.setOpen('tool-result', toolId, open, resultDefaultOpen)
+				: undefined}
 		>
-				{#snippet children()}
-					{#if resultConfig.contentKind === 'code'}
-						<CodeBlock
-							text={(resultContentProps.content as string) || ''}
-							lang={(resultContentProps.language as string) || ''}
-						/>
-					{:else if resultConfig.contentKind === 'markdown'}
-						<ChatToolRichTextView
-							content={(resultContentProps.content as string) || ''}
-							{projectBasePath}
-							{chatProjectPath}
-							{onFileOpen}
-						/>
+			{#snippet children()}
+				{#if resultConfig.contentKind === 'code'}
+					<CodeBlock
+						text={(resultContentProps.content as string) || ''}
+						lang={(resultContentProps.language as string) || ''}
+					/>
+				{:else if resultConfig.contentKind === 'markdown'}
+					<ChatToolRichTextView
+						content={(resultContentProps.content as string) || ''}
+						{projectBasePath}
+						{chatProjectPath}
+						{onFileOpen}
+						{acquireTransientActivity}
+					/>
 				{:else if resultConfig.contentKind === 'fileList'}
 					<ChatToolFileListView
 						files={(resultContentProps.files as string[]) || []}

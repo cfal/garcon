@@ -38,6 +38,7 @@
 	"chat_empty_press_new_chat": "Press New Chat to start.",
 	"chat_feed_failed_to_load": "Failed to load messages",
 	"chat_feed_failed_to_refresh": "Failed to refresh messages",
+	"chat_feed_new_response_available": "New response available",
 	"chat_feed_retry": "Retry",
 	"chat_workspace_select_project": "Select a project to start chatting",
 	"chat_chat_loading_chat_messages": "Loading messages...",

@@ -10,6 +10,8 @@
 		setActiveTranscriptState,
 		setLocalSettings,
 		setModelCatalog,
+		setChatSessions,
+		setFileSessions,
 	} from '$lib/context';
 
 	interface Props {
@@ -53,10 +55,11 @@
 		});
 	} else if (initialTranscriptScenario !== 'empty') {
 		const messageCount =
-			initialTranscriptScenario === 'initial-reveal' ||
-			initialTranscriptScenario === 'loading-later'
+			initialTranscriptScenario === 'initial-reveal'
 				? 50
-				: 120;
+				: initialTranscriptScenario === 'loading-later'
+					? 5
+					: 120;
 		const messages = Array.from({ length: messageCount }, (_, index) => ({
 			seq: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
@@ -89,6 +92,7 @@
 	setLocalSettings({
 		chatMaxWidth: 'medium',
 		showThinking: true,
+		hiddenToolTypes: [],
 	} as never);
 	setAppShell({
 		projectBasePath: '/workspace',
@@ -102,6 +106,15 @@
 			return false;
 		},
 	} as never);
+	setChatSessions({ selectedChat: null } as never);
+	setFileSessions({
+		async open() {},
+	} as never);
 </script>
 
-<ConversationFeed {reserveTopFloatingToolbar} />
+<ConversationFeed
+	{reserveTopFloatingToolbar}
+	isVisible={true}
+	pinnedToBottom={true}
+	surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.generationId}`}
+/>

@@ -286,7 +286,13 @@
 			canRenderConversation &&
 			(!isSplitWorkspaceActive || Boolean(focusedOverlayRect)),
 	);
+	let prepareConversationHide: (() => void) | null = $state(null);
 	const conversationWorkspaceTextScale = $derived(isSplitWorkspaceActive ? splitPaneTextScale : 1);
+
+	$effect.pre(() => {
+		if (conversationWorkspaceVisible) return;
+		untrack(() => prepareConversationHide?.());
+	});
 
 	// Keeps sessions.selectedChatId in sync with the split layout's focused pane.
 	// Handles sidebar clicks (which only update sessions) by navigating the focused
@@ -415,6 +421,7 @@
 					{subagentToolbar}
 					onRegisterSubmit={handleRegisterSubmit}
 					onRegisterUserMessageNavigator={handleRegisterUserMessageNavigator}
+					onRegisterPrepareHide={(prepare) => (prepareConversationHide = prepare)}
 					onRegisterAppendToDraft={handleRegisterAppendToDraft}
 					{onRegisterReload}
 					transcriptCache={chatTranscriptCache}

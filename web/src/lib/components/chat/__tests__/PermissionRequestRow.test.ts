@@ -113,4 +113,22 @@ describe('PermissionRequestRow', () => {
 		expect(screen.queryByRole('button', { name: /skip/i })).toBeNull();
 		expect(onDecision).not.toHaveBeenCalled();
 	});
+
+	it('reports immutable controlled drafts without losing the caller-owned value', async () => {
+		const onDraftChange = vi.fn();
+		const draft = { selectedQuestionOptions: {}, rawInputOpen: false };
+		render(PermissionRequestRowTestHost, {
+			request: askUserQuestionRequest(),
+			onDecision: vi.fn(),
+			draft,
+			onDraftChange,
+		});
+
+		await fireEvent.click(screen.getByRole('radio', { name: /Careful/ }));
+		expect(onDraftChange).toHaveBeenCalledWith({
+			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
+			rawInputOpen: false,
+		});
+		expect(draft).toEqual({ selectedQuestionOptions: {}, rawInputOpen: false });
+	});
 });

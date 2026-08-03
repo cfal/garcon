@@ -72,6 +72,25 @@ describe('MermaidBlock', () => {
 		expect(screen.getByText('100%')).toBeTruthy();
 	});
 
+	it('retains its virtual owner until the portalled viewer closes', async () => {
+		const release = vi.fn();
+		const acquireTransientActivity = vi.fn(() => release);
+		render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			acquireTransientActivity,
+		});
+
+		const expandButton = await screen.findByRole('button', { name: 'Expand diagram' });
+		await waitFor(() => expect((expandButton as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(expandButton);
+		expect(acquireTransientActivity).toHaveBeenCalledOnce();
+		expect(release).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close (Escape)' }));
+		await tick();
+		expect(release).toHaveBeenCalledOnce();
+	});
+
 	it('isolates drag ownership and releases it after capture loss and close', async () => {
 		render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
 

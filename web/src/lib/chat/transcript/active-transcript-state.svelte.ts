@@ -5,11 +5,20 @@ import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { createRandomId } from '$lib/utils/random-id';
-import {
-	EMPTY_CONVERSATION_FEED_MUTATION_REVISIONS,
-	type ConversationFeedMutationClock,
-	type ConversationFeedMutationKind,
-} from './conversation-feed-mutations.js';
+import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
+import type { ConversationFeedMutationKind } from './conversation-feed-mutations.js';
+import type {
+	ActiveTranscriptPort,
+	ChatCursor,
+	ChatLoadMessagesOptions,
+	ChatRestoreResult,
+} from './active-transcript-port.js';
+export type {
+	ActiveTranscriptPort,
+	ChatCursor,
+	ChatLoadMessagesOptions,
+	ChatRestoreResult,
+} from './active-transcript-port.js';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
@@ -38,20 +47,6 @@ function idlePageState(): TranscriptPageState {
 	return { status: 'idle', error: null };
 }
 
-export interface ChatLoadMessagesOptions {
-	minimumLimit?: number;
-}
-
-export interface ChatRestoreResult {
-	count: number;
-	stale: boolean;
-}
-
-export interface ChatCursor {
-	generationId: string;
-	lastSeq: number;
-}
-
 export interface ChatTranscriptRow {
 	kind: 'message';
 	id: string;
@@ -66,32 +61,6 @@ function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): Pendi
 			.map(normalizePendingUserInput)
 			.filter((input): input is PendingUserInput => Boolean(input)),
 	);
-}
-
-export interface ActiveTranscriptPort {
-	readonly transcriptCache: ChatTranscriptCache;
-	activeChatId: string | null;
-	readonly entries: readonly ChatViewMessage[];
-	readonly chatMessages: ChatMessage[];
-	readonly feedMutationClock: ConversationFeedMutationClock;
-	isUserScrolledUp: boolean;
-	getCursor(): ChatCursor;
-	applyMessages(
-		chatId: string,
-		generationId: string,
-		messages: ChatViewMessage[],
-	): MessageApplyResult;
-	loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]>;
-	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
-	clearLocalNotices(): void;
-	setPendingUserInputs(inputs: PendingUserInput[]): void;
-	upsertPendingUserInput(input: PendingUserInput): void;
-	clearPendingUserInput(clientRequestId: string): void;
-	updatePendingUserInputDeliveryStatus(
-		clientRequestId: string,
-		deliveryStatus: UserMessageDeliveryStatus,
-	): void;
-	activateChat(chatId: string | null): ChatRestoreResult | null;
 }
 
 export class ActiveTranscriptState implements ActiveTranscriptPort {
@@ -127,8 +96,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#pageLoadOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
 	#initialRevealPhase = $state<InitialRevealPhase>('complete');
-	#feedDataRevision = $state(0);
-	#feedLastRevisionByKind = $state.raw({ ...EMPTY_CONVERSATION_FEED_MUTATION_REVISIONS });
+	#feedMutations = new ConversationFeedMutationState();
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
 		this.transcriptCache = transcriptCache;
@@ -212,11 +180,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return this.#renderEntries.map((entry) => entry.message);
 	}
 
-	get feedMutationClock(): ConversationFeedMutationClock {
-		return {
-			dataRevision: this.#feedDataRevision,
-			lastRevisionByKind: this.#feedLastRevisionByKind,
-		};
+	get feedMutationClock() {
+		return this.#feedMutations.clock;
 	}
 
 	get displayMessages(): ChatMessage[] {
@@ -942,12 +907,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	#recordFeedMutation(kind: ConversationFeedMutationKind): void {
-		const revision = this.#feedDataRevision + 1;
-		this.#feedDataRevision = revision;
-		this.#feedLastRevisionByKind = {
-			...this.#feedLastRevisionByKind,
-			[kind]: revision,
-		};
+		this.#feedMutations.record(kind);
 	}
 }
 

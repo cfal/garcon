@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	// Compact single-line tool display with action buttons.
 	// Renders as a card surface instead of a rail/border-l treatment.
 
@@ -53,17 +54,26 @@
 	}: OneLineDisplayProps = $props();
 
 	let copied = $state(false);
+	let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function handleAction() {
 		if (action === 'copyValue' && value) {
 			const didCopy = await copyToClipboard(value);
 			if (!didCopy) return;
 			copied = true;
-			setTimeout(() => (copied = false), 2000);
+			if (copyTimer) clearTimeout(copyTimer);
+			copyTimer = setTimeout(() => {
+				copied = false;
+				copyTimer = null;
+			}, 2000);
 		} else if (onAction) {
 			onAction();
 		}
 	}
+
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 
 	let isTerminal = $derived(style === 'terminal');
 	let displayName = $derived(value.split('/').pop() || value);

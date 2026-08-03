@@ -1,15 +1,45 @@
-import { cleanup, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('$lib/components/chat/ConversationTranscript.svelte', async () => ({
-	default: (await import('./ConversationTranscriptRowsStub.svelte')).default,
-}));
+import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
 
 describe('ConversationFeed', () => {
+	const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+		HTMLElement.prototype,
+		'offsetHeight',
+	);
+
+	beforeEach(() => {
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+			this: HTMLElement,
+		) {
+			const height = this.hasAttribute('data-scroll-area-viewport') ? 720 : 100;
+			return {
+				x: 0,
+				y: 0,
+				top: 0,
+				left: 0,
+				right: 900,
+				bottom: height,
+				width: 900,
+				height,
+				toJSON: () => ({}),
+			} as DOMRect;
+		});
+		Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+			configurable: true,
+			get() {
+				return this.hasAttribute('data-chat-virtual-item') ? 100 : 0;
+			},
+		});
+	});
+
 	afterEach(() => {
 		cleanup();
+		vi.restoreAllMocks();
+		if (originalOffsetHeight) {
+			Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
+		}
 	});
 
 	it('omits the top floating toolbar spacer by default', () => {
@@ -18,17 +48,20 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-feed-top-floating-toolbar-spacer]')).toBeNull();
 	});
 
-	it('renders the floating toolbar reservation inside scrollable feed content', () => {
+	it('renders the floating toolbar reservation inside scrollable feed content', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			reserveTopFloatingToolbar: true,
 			transcriptScenario: 'row-ids',
 		});
 
-		const viewport = screen.getByRole('log');
+		const viewport = screen.getByRole('region', { name: 'Chat messages' });
+		await waitFor(() =>
+			expect(container.querySelector('[data-chat-feed-top-floating-toolbar-spacer]')).toBeTruthy(),
+		);
 		const spacer = container.querySelector<HTMLElement>(
 			'[data-chat-feed-top-floating-toolbar-spacer]',
 		);
-		const transcript = container.querySelector<HTMLElement>('[data-conversation-transcript]');
+		const transcript = container.querySelector<HTMLElement>('[data-chat-row-id]');
 
 		expect(spacer).toBeTruthy();
 		expect(transcript).toBeTruthy();
@@ -47,42 +80,64 @@ describe('ConversationFeed', () => {
 		expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
 	});
 
-	it('shows a directional earlier boundary after the automatic reveal window', () => {
+	it('shows a directional earlier boundary after the automatic reveal window', async () => {
 		render(ConversationFeedTestHost, { transcriptScenario: 'local-truncation' });
 
-		expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'Load earlier messages' })).toBeTruthy();
 		expect(screen.queryByText('Load more')).toBeNull();
 	});
 
-	it('renders later loading below the transcript without a native bottom anchor', () => {
+	it('renders later loading below the transcript without a native bottom anchor', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'loading-later',
 		});
-		const transcript = container.querySelector('[data-conversation-transcript]');
+		const transcript = container.querySelector('[data-chat-row-id]');
 		const boundary = container.querySelector('[data-transcript-page-boundary="later"]');
 
-		expect(screen.getByText('Loading later messages...')).toBeTruthy();
-		expect(screen.getByRole('log').getAttribute('aria-busy')).toBe('true');
+		expect(await screen.findByText('Loading later messages...')).toBeTruthy();
+		expect(screen.getByRole('region', { name: 'Chat messages' }).getAttribute('aria-busy')).toBe(
+			'true',
+		);
 		expect(transcript?.compareDocumentPosition(boundary as Node)).toBe(
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);
 		expect(container.querySelector('[data-chat-bottom-anchor]')).toBeNull();
 	});
 
-	it('keeps an earlier failure in flow as a directional retry', () => {
+	it('keeps an earlier failure in flow as a directional retry', async () => {
 		render(ConversationFeedTestHost, { transcriptScenario: 'error-earlier' });
 
-		expect(screen.getByRole('button', { name: 'Retry earlier messages' })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'Retry earlier messages' })).toBeTruthy();
 	});
 
-	it('passes durable and pending row identities to the transcript renderer', () => {
+	it('passes durable and pending row identities to mounted virtual rows', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
 
-		expect(
-			Array.from(
-				container.querySelectorAll<HTMLElement>('[data-transcript-row-id]'),
-				(row) => row.dataset.transcriptRowId,
-			),
-		).toEqual(['generation-1:1', 'pending:request-1']);
+		await waitFor(() =>
+			expect(
+				Array.from(
+					container.querySelectorAll<HTMLElement>('[data-chat-row-id]'),
+					(row) => row.dataset.chatRowId,
+				),
+			).toEqual(['generation-1:1', 'pending:request-1']),
+		);
+	});
+
+	it('uses a non-live browsing region and a stable dedicated announcer', () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
+		const viewport = screen.getByRole('region', { name: 'Chat messages' });
+		const announcer = container.querySelector('[role="status"]');
+
+		expect(viewport.getAttribute('aria-live')).toBe('off');
+		expect(announcer?.getAttribute('aria-live')).toBe('polite');
+		expect(announcer?.closest('[data-chat-virtual-sizer]')).toBeNull();
+	});
+
+	it('renders a bounded virtual range instead of every loaded transcript row', () => {
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'local-truncation',
+		});
+		expect(container.querySelectorAll('[data-chat-virtual-item]').length).toBeLessThan(120);
+		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
 	});
 });

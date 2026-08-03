@@ -32,6 +32,7 @@
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import {
 		UserMessageNavigatorController,
 		type UserMessageNavigatorRegistration,
@@ -85,6 +86,7 @@
 		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
+		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		subagentToolbar: SubagentToolbarState;
 		transcriptCache?: ChatTranscriptCache;
 		reserveTopFloatingToolbar?: boolean;
@@ -111,6 +113,7 @@
 		onRegisterAppendToDraft,
 		onRegisterReload,
 		onRegisterUserMessageNavigator,
+		onRegisterPrepareHide,
 		subagentToolbar,
 		transcriptCache: providedTranscriptCache,
 		reserveTopFloatingToolbar = false,
@@ -290,8 +293,11 @@
 	});
 
 	let scrollContainer: HTMLDivElement | null = $state(null);
-	let scrollContentContainer: HTMLDivElement | null = $state(null);
+	let conversationViewport: ConversationViewportPort | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
+	const conversationSurfaceIdentity = $derived(
+		`${chatState.activeChatId ?? 'none'}:${chatState.generationId}`,
+	);
 
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
@@ -330,17 +336,13 @@
 	// Scroll controller.
 	const scroll = new ConversationScrollController({
 		getScrollContainer: () => scrollContainer,
-		getScrollContentContainer: () => scrollContentContainer,
+		getViewport: () => conversationViewport,
 		getQueueContainer: () => queueControlsContainer,
 		chatState,
 		sessions,
 	});
 	function scrollToBottomAndFill(): void {
 		void scroll.scrollToLatest().then(() => scroll.fillUnderfilledViewport());
-	}
-	function reconcilePinnedBottom(): void {
-		scroll.scrollToBottom();
-		void scroll.fillUnderfilledViewport();
 	}
 
 	// Session controller.
@@ -435,21 +437,12 @@
 		scroll.isPreparingInitialScroll && localSettings.autoScrollToBottom,
 	);
 
-	// Scrolls to bottom when the bottom row changes, including same-count replacements.
-	$effect(() => {
-		const _isVisible = isVisible;
-		const _bottomRowId = chatState.bottomVisibleRowId;
-		const _reserveComposerTraySpace = reserveComposerTraySpace;
-		if (_isVisible && !chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			reconcilePinnedBottom();
-			scroll.completeInitialBottomRestore();
-		}
-	});
-
 	$effect(() => {
 		const _chatId = sessions.selectedChatId;
 		const _loadStatus = chatState.loadStatus;
 		const _displayMessageCount = chatState.displayMessageCount;
+		const _feedDataRevision = chatState.feedMutationClock.dataRevision;
+		const _viewport = conversationViewport;
 		const _autoScroll = localSettings.autoScrollToBottom;
 		scroll.reconcileInitialBottomRestore(_autoScroll);
 	});
@@ -528,14 +521,6 @@
 		return scroll.observeScrollContainerResize();
 	});
 
-	// Content height can settle after messages mount, especially code and
-	// markdown blocks. Keeps bottom-pinned chats pinned through that settling.
-	$effect(() => {
-		const _content = scrollContentContainer;
-		const _scroller = scrollContainer;
-		return scroll.observeScrollContentResize();
-	});
-
 	function handleWorkspaceShortcut(event: KeyboardEvent): boolean {
 		if (!isVisible) return false;
 		if (
@@ -583,7 +568,7 @@
 	}
 
 	function jumpToToolInput(anchorId: string): void {
-		document.getElementById(anchorId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		void scroll.jumpToDomAnchor(anchorId);
 	}
 
 	async function generateTitleFromMessage(message: string, messageSeq?: number): Promise<void> {
@@ -648,7 +633,6 @@
 	<div class="relative flex-1 min-h-0">
 		<ConversationFeed
 			bind:scrollContainer
-			bind:scrollContentContainer
 			onscroll={() => scroll.handleScroll()}
 			onUserScrollIntent={() => scroll.noteUserScrollIntent()}
 			onLoadEarlier={() => void scroll.requestPage('earlier', 'button')}
@@ -668,6 +652,12 @@
 			reserveComposerTraySpace={composerCapSpace.feed}
 			reserveTopFloatingToolbar={reserveFeedTopFloatingToolbar}
 			{isPreparingInitialScroll}
+			{isVisible}
+			pinnedToBottom={scroll.isPinnedToBottom}
+			surfaceIdentity={conversationSurfaceIdentity}
+			onViewportPortChange={(port) => (conversationViewport = port)}
+			{onRegisterPrepareHide}
+			onInitialEndRestored={() => scroll.completeInitialBottomRestore()}
 			isProcessing={selectedIsProcessing}
 			{textScale}
 		/>
