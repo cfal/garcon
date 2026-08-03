@@ -32,7 +32,9 @@ const MAX_LINES = 1000;
 // client projection, and rejection of foreign-instance state.
 // Atomic queue-sourced steering adds 823 lines for head reservation, delivery
 // settlement, idempotent recovery, and provider-neutral pending-input cleanup.
-const EXECUTION_FOOTPRINT_BUDGET = 8761;
+// Follow-up hardening adds 8 lines for uncertainty-token invalidation
+// and post-commit pending-status publication isolation.
+const EXECUTION_FOOTPRINT_BUDGET = 8769;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

@@ -339,6 +339,23 @@ describe('PendingUserInputService', () => {
     expect(service.listForChat('chat-1')).toEqual([]);
   });
 
+  it('keeps a committed delivery status when its publication listener throws', async () => {
+    const service = new PendingUserInputService({
+      loadNativeMessages: mock(async () => []),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    await service.register('chat-1', 'possibly delivered', { clientRequestId: 'req-1' });
+    service.store.onStatusUpdated(() => {
+      throw new Error('status publication failed');
+    });
+
+    expect(() => service.markUnconfirmed('chat-1', 'req-1')).not.toThrow();
+    expect(service.listForChat('chat-1')).toMatchObject([{
+      clientRequestId: 'req-1',
+      deliveryStatus: 'unconfirmed',
+    }]);
+  });
+
   it('settles a stopped-turn cohort from native evidence and leaves later inputs untouched', async () => {
     let messages = [new UserMessage(
       '2026-06-01T00:00:00.100Z',

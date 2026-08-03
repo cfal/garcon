@@ -555,6 +555,8 @@ export function requeueAndPause(
   const entry = next.entries.find((candidate) => candidate.id === input.entryId);
   if (entry) {
     entry.status = 'queued';
+    entry.revision += 1;
+    entry.updatedAt = context.now;
     next.recentlyDispatched = next.recentlyDispatched.filter(
       (candidate) => candidate.entryId !== input.entryId,
     );

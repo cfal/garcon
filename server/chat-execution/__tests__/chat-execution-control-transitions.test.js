@@ -510,9 +510,23 @@ describe('chat execution control transitions', () => {
     }, context());
     expect(uncertain.next.entries[0]).toMatchObject({
       status: 'queued',
+      revision: 2,
+      updatedAt: context().now,
       delivery: current.entries[0].delivery,
     });
     expect(uncertain.next.pause?.kind).toBe('completion-uncertain');
+    expect(reserveQueueSteer(uncertain.next, {
+      entryId: 'entry-1',
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    }, context(1)).outcome).toEqual({
+      status: 'rejected',
+      rejection: {
+        code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+        entryId: 'entry-1',
+        actualRevision: 2,
+      },
+    });
 
     const stopped = restoreStoppedQueueEntry(current, 'entry-1', context());
     expect(stopped.next.pause?.kind).toBe('manual');

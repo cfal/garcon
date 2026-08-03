@@ -99,4 +99,30 @@ describe('submitIdempotentCommand', () => {
 		expect(rejection.cause).toBe(firstError);
 		expect(submit).toHaveBeenCalledTimes(2);
 	});
+
+	it('does not downgrade a lost first response after a replacement server rejects retry', async () => {
+		const firstError = new TypeError('connection reset after send');
+		const submit = vi
+			.fn()
+			.mockRejectedValueOnce(firstError)
+			.mockRejectedValueOnce(
+				new ApiError(404, 'Queued entry not found', 'QUEUE_ENTRY_NOT_FOUND', undefined, false, {
+					success: false,
+					error: 'Queued entry not found',
+					errorCode: 'QUEUE_ENTRY_NOT_FOUND',
+					retryable: false,
+					deliveryOutcome: 'not-sent',
+					control: { serverInstanceId: 'replacement-server' },
+				}),
+			);
+
+		const rejection = await submitIdempotentCommand(submit).catch((error) => error);
+
+		expect(rejection).toBeInstanceOf(CommandOutcomeUnknownError);
+		if (!(rejection instanceof CommandOutcomeUnknownError)) {
+			throw new Error('Expected an unknown command outcome');
+		}
+		expect(rejection.cause).toBe(firstError);
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
 });
