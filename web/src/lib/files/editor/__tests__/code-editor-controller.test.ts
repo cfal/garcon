@@ -97,14 +97,27 @@ describe('CodeEditorController', () => {
 		session.editorState = null;
 		const host = parent();
 		controller.attach(host);
-		const content = host.querySelector<HTMLElement>('.cm-content');
-		if (!content) throw new Error('Expected CodeMirror content');
+		const editor = host.querySelector<HTMLElement>('.cm-editor');
+		if (!editor) throw new Error('Expected CodeMirror editor');
 
 		const styleRules = [...document.querySelectorAll('style')]
 			.map((style) => style.textContent ?? '')
 			.join('\n');
-		expect(styleRules).toMatch(/\.cm-content, [^{]*\.cm-gutters \{font-size: 16px;/);
-		expect(styleRules).toMatch(/@media \(pointer: fine\).*font-size: 12px/s);
+		const matchingScope = [...editor.classList]
+			.filter((className) => className !== 'cm-editor')
+			.map((className) => {
+				const scope = `.${className}`;
+				return {
+					floorIndex: styleRules.indexOf(
+						`${scope} .cm-content, ${scope} .cm-gutters {font-size: 16px;`,
+					),
+					configuredIndex: styleRules.indexOf(
+						`@media (pointer: fine) {${scope} .cm-content, ${scope} .cm-gutters {font-size: 12px;`,
+					),
+				};
+			})
+			.find(({ floorIndex, configuredIndex }) => floorIndex >= 0 && configuredIndex > floorIndex);
+		expect(matchingScope).toBeDefined();
 		controller.dispose();
 	});
 
