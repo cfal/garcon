@@ -179,6 +179,65 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
 	});
 
+	it('deduplicates overlapping earlier pages before extending the loaded window', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) =>
+				entry(index + 51, assistant(`message-${index + 51}`)),
+			),
+			{ lastSeq: 100, pageOldestSeq: 51, hasMore: true },
+		);
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: [
+					entry(50, assistant('message-50')),
+					entry(50, assistant('duplicate-50')),
+					entry(51, assistant('overlap-51')),
+				],
+				lastSeq: 100,
+				pageOldestSeq: 50,
+				hasMore: false,
+			}),
+		});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
+		expect(chat.entries.map((message) => message.seq)).toEqual(
+			Array.from({ length: 51 }, (_, index) => index + 50),
+		);
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES + 1);
+	});
+
+	it('fails an earlier page that claims more history without advancing', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
+			lastSeq: 100,
+			pageOldestSeq: 51,
+			hasMore: true,
+		});
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: [entry(51, assistant('duplicate-51'))],
+				lastSeq: 100,
+				pageOldestSeq: 51,
+				hasMore: true,
+			}),
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
+		expect(chat.pageStates.earlier).toMatchObject({
+			status: 'error',
+			error: 'Earlier transcript page did not advance the loaded window',
+		});
+		expect(chat.chatMessages).toHaveLength(1);
+	});
+
 	it('signals generation changes without replacing the current generation', () => {
 		const chat = new ActiveTranscriptState();
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('old'))]);

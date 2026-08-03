@@ -13,6 +13,7 @@ import type {
 	ChatLoadMessagesOptions,
 	ChatRestoreResult,
 } from './active-transcript-port.js';
+import { collectEarlierTranscriptMessages } from './transcript-page-progress.js';
 export type {
 	ActiveTranscriptPort,
 	ChatCursor,
@@ -582,12 +583,19 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.hasEarlierMessages = false;
 			return 'exhausted';
 		}
-		this.entries = [...page.messages, ...this.entries];
-		this.oldestSeq = page.messages[0].seq;
+		const addedMessages = collectEarlierTranscriptMessages(this.oldestSeq, page.messages);
+		if (addedMessages.length === 0) {
+			if (page.hasMore)
+				throw new Error('Earlier transcript page did not advance the loaded window');
+			this.hasEarlierMessages = false;
+			return 'exhausted';
+		}
+		this.entries = [...addedMessages, ...this.entries];
+		this.oldestSeq = addedMessages[0].seq;
 		this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
 		this.hasEarlierMessages = page.hasMore;
 		this.totalMessages = this.entries.length;
-		this.visibleMessageCount += page.messages.length;
+		this.visibleMessageCount += addedMessages.length;
 		this.#recordFeedMutation('history-earlier');
 		return 'loaded';
 	}

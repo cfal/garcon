@@ -408,9 +408,13 @@ export function visiblePendingPermissionRequests(
 		}
 	}
 
+	const visiblePermissionIds = new Set<string>();
 	return pendingPermissionRequests.filter((request) => {
-		if (renderedPermissionIds.has(request.permissionRequestId)) return false;
-		if (terminalPermissionIds.has(request.permissionRequestId)) return false;
+		const id = request.permissionRequestId;
+		if (renderedPermissionIds.has(id)) return false;
+		if (terminalPermissionIds.has(id)) return false;
+		if (visiblePermissionIds.has(id)) return false;
+		visiblePermissionIds.add(id);
 		return true;
 	});
 }

@@ -175,10 +175,7 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(items).toHaveLength(3);
 		expect(items[1]).toMatchObject({ kind: 'read-group' });
 		if (items[1].kind !== 'read-group') throw new Error('expected read group');
-		expect(items[1].rows.map((row) => row.message.filePath)).toEqual([
-			'/tmp/a.ts',
-			'/tmp/b.ts',
-		]);
+		expect(items[1].rows.map((row) => row.message.filePath)).toEqual(['/tmp/a.ts', '/tmp/b.ts']);
 		expect(items[2]).toMatchObject({ kind: 'message', prevMessage: messages[2] });
 	});
 
@@ -421,5 +418,12 @@ describe('visiblePendingPermissionRequests', () => {
 		]);
 
 		expect(visiblePendingPermissionRequests(visibleRows, pending)).toEqual([]);
+	});
+
+	it('deduplicates replayed pending requests by permission id', () => {
+		const first = pendingPermission('perm-1');
+		const replay = pendingPermission('perm-1');
+
+		expect(visiblePendingPermissionRequests([], [first, replay])).toEqual([first]);
 	});
 });
