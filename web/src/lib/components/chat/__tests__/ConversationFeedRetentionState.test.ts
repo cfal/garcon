@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte';
 
 describe('ConversationFeedRetentionState', () => {
+	afterEach(() => vi.restoreAllMocks());
+
 	it('reference-counts leases by key and reason', () => {
 		const retention = new ConversationFeedRetentionState();
 		const releaseFocus = retention.acquire('row-1', 'focus');

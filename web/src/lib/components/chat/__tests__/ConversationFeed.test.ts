@@ -188,7 +188,9 @@ describe('ConversationFeed', () => {
 			transcriptScenario: 'local-truncation',
 		});
 		const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
+		const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 		expect(mountedItems).toBeGreaterThan(0);
+		expect(mountedTranscriptRows).toBeGreaterThan(0);
 		expect(mountedItems).toBeLessThan(120);
 		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
 	});
@@ -202,7 +204,9 @@ describe('ConversationFeed', () => {
 				const sizer = container.querySelector('[data-chat-virtual-sizer]');
 				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('20002');
 				const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
+				const mountedTranscriptRows = container.querySelectorAll('[data-chat-row-id]').length;
 				expect(mountedItems).toBeGreaterThan(0);
+				expect(mountedTranscriptRows).toBeGreaterThan(0);
 				expect(mountedItems).toBeLessThan(60);
 			},
 			{ timeout: 10_000 },

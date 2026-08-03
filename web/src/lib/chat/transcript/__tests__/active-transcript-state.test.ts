@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 	ActiveTranscriptState,
@@ -75,6 +75,8 @@ describe('ActiveTranscriptState', () => {
 		localStorage.clear();
 		vi.mocked(getChatMessages).mockReset();
 	});
+
+	afterEach(() => vi.restoreAllMocks());
 
 	it('starts with an empty generation cursor', () => {
 		const chat = new ActiveTranscriptState();
