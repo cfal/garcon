@@ -402,6 +402,7 @@ export class QueueCommands {
     if (
       record.errorCode !== 'QUEUE_ENTRY_NOT_FOUND'
       && record.errorCode !== 'QUEUE_ENTRY_ALREADY_SENT'
+      && record.errorCode !== 'QUEUE_ENTRY_IN_FLIGHT'
       && record.errorCode !== 'QUEUE_ENTRY_REVISION_CONFLICT'
       && record.errorCode !== 'QUEUE_ENTRY_REORDER_CONFLICT'
     ) {

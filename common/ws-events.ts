@@ -685,7 +685,6 @@ export function parseServerWsMessage(
       const clientRequestId = requiredStr(data.clientRequestId);
       const reason = data.reason === 'chat-removed'
         || data.reason === 'persisted'
-        || data.reason === 'queue-source-not-sent'
         ? data.reason
         : null;
       return chatId && clientRequestId && reason

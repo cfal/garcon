@@ -2878,6 +2878,27 @@ describe('ChatCommandService', () => {
     });
     expect(queue.moveChatQueueEntry).toHaveBeenCalledOnce();
 
+    queue.replaceChatQueueEntry.mockRejectedValue(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_IN_FLIGHT',
+        'This queued message is already being steered',
+        latestQueue,
+      ),
+    );
+    const inFlightInput = {
+      ...replaceInput,
+      content: 'blocked replacement',
+      clientRequestId: 'request-rejected-in-flight-replace',
+    };
+    await expect(service.submitQueueEntryReplace(inFlightInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_IN_FLIGHT',
+    });
+    await expect(service.submitQueueEntryReplace(inFlightInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_IN_FLIGHT',
+      control: expect.objectContaining({ version: 3 }),
+    });
+    expect(queue.replaceChatQueueEntry).toHaveBeenCalledTimes(2);
+
     expect(await readLedgerRecord(
       ledger,
       'queue-entry-replace',
@@ -2893,6 +2914,11 @@ describe('ChatCommandService', () => {
       'queue-entry-move',
       moveInput.clientRequestId,
     )).toMatchObject({ status: 'rejected', errorCode: 'QUEUE_ENTRY_REORDER_CONFLICT' });
+    expect(await readLedgerRecord(
+      ledger,
+      'queue-entry-replace',
+      inFlightInput.clientRequestId,
+    )).toMatchObject({ status: 'rejected', errorCode: 'QUEUE_ENTRY_IN_FLIGHT' });
   });
 
   it('completes handled goal control without exposing a synthetic queue entry', async () => {
@@ -3042,6 +3068,64 @@ describe('ChatCommandService', () => {
       turnId: 'turn-active',
       entryId: 'entry-head',
     });
+  });
+
+  it('serializes Stop behind queued steering acknowledgement without deadlocking', async () => {
+    const events = [];
+    const deliveryEntered = deferred();
+    const releaseDelivery = deferred();
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const queued = storedQueue([
+      queueEntry('entry-head', 'authoritative content', 'queued', 1),
+    ]);
+    const consumed = storedQueue([], {
+      version: 2,
+      recentlyDispatched: [{
+        entryId: 'entry-head',
+        revision: 1,
+        dispatchedAt: '2026-08-02T00:00:01.000Z',
+      }],
+    });
+    const stopActiveTurn = mock(async () => {
+      events.push('stop');
+      return { outcome: 'interrupt-requested', control: consumed };
+    });
+    const { service } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => target),
+        readChatExecutionControl: mock(async () => queued),
+        deliverAcceptedQueueEntrySteer: mock(async (accepted) => {
+          events.push('steer-entered');
+          deliveryEntered.resolve();
+          await releaseDelivery.promise;
+          await accepted.settlement.markScheduled(accepted.command, target.identity.turnId);
+          await accepted.settlement.settleSteerSuccess(accepted.command, target.identity.turnId);
+          events.push('steer-finished');
+          return { turnId: target.identity.turnId, control: consumed };
+        }),
+        stopActiveTurn,
+      },
+    });
+    const steering = service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-before-stop',
+      clientMessageId: 'message-queue-steer-before-stop',
+      entryId: 'entry-head',
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    });
+    await deliveryEntered.promise;
+
+    const stop = service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-stop-during-queue-steer',
+    });
+    await Promise.resolve();
+    expect(stopActiveTurn).not.toHaveBeenCalled();
+
+    releaseDelivery.resolve();
+    await Promise.all([steering, stop]);
+    expect(events).toEqual(['steer-entered', 'steer-finished', 'stop']);
   });
 
   it('rejects a changed queued-steer identity without another native delivery', async () => {
@@ -4365,6 +4449,24 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
     queue.readChatExecutionControl.mockResolvedValueOnce(storedQueue([
       queueEntry('queued-1', 'continue', 'queued'),
+    ]));
+
+    await expect(
+      service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      }),
+    ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects project path updates while a queued entry is steering', async () => {
+    const { service, queue, agents } = makeService();
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    queue.readChatExecutionControl.mockResolvedValueOnce(storedQueue([
+      queueEntry('steering-1', 'continue', 'steering'),
     ]));
 
     await expect(

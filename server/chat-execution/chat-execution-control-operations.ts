@@ -441,7 +441,11 @@ export class ChatExecutionControlOperations {
       throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
     }
     const result = await this.repository.save(chatId, control);
-    this.host.publish(chatId, result);
+    try {
+      this.host.publish(chatId, result);
+    } catch (error) {
+      logger.warn(`execution-control publication failed after commit for ${chatId}:`, error);
+    }
     return result;
   }
 

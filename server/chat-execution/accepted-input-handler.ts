@@ -417,11 +417,7 @@ export class AcceptedInputHandler {
   ): Promise<QueueEntrySteerError> {
     try {
       const control = await this.#controls.releaseSteer(input.command.chatId, input.command.entryId);
-      this.#pendingInputs.clear(
-        input.command.chatId,
-        input.command.clientRequestId,
-        'queue-source-not-sent',
-      );
+      this.#pendingInputs.markFailed(input.command.chatId, input.command.clientRequestId);
       this.#coordinator.requestDrain(input.command.chatId, 'rejected queued steer released');
       const wrapped = this.#queueSteerError(error, 'not-sent', control);
       await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
@@ -438,11 +434,7 @@ export class AcceptedInputHandler {
           input.command.entryId,
           'completion-uncertain',
         );
-        this.#pendingInputs.clear(
-          input.command.chatId,
-          input.command.clientRequestId,
-          'queue-source-not-sent',
-        );
+        this.#pendingInputs.markFailed(input.command.chatId, input.command.clientRequestId);
         const wrapped = this.#queueSteerError(error, 'not-sent', control);
         await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
         return wrapped;

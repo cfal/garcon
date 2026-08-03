@@ -17,7 +17,7 @@ export interface PendingUserInput {
   attachments?: PendingUserInputAttachment[];
 }
 
-export type PendingUserInputClearReason = 'chat-removed' | 'persisted' | 'queue-source-not-sent';
+export type PendingUserInputClearReason = 'chat-removed' | 'persisted';
 
 function isChatImage(value: unknown): value is ChatImage {
   if (!value || typeof value !== 'object') return false;

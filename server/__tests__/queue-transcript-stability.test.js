@@ -31,6 +31,92 @@ function controlRepository(serverInstanceId = 'server-instance-test') {
 
 describe('queue and transcript stability', () => {
 
+  it('keeps definitely rejected queued steering visibly failed while retaining its source', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-steer-rejected-'));
+    try {
+      const chatId = 'chat-rejected-steer';
+      const views = new ChatViewStore(() => true);
+      const pendingInputs = new PendingUserInputService({
+        loadNativeMessages: mock(async () => []),
+        getRetainedHistoryMessages: (requestedChatId) => (
+          views.getRetainedHistoryMessages(requestedChatId)
+        ),
+      });
+      const queue = new ChatExecutionCoordinator(
+        workspaceDir,
+        {
+          runAgentTurn: mock(async () => undefined),
+          captureSteerTarget: mock(() => ({ provider: 'target' })),
+          steerInput: mock(async (_chatId, _content, _options, _target, prepareDelivery) => {
+            await prepareDelivery();
+            return { kind: 'rejected', reason: 'turn-not-steerable' };
+          }),
+          abortSession: mock(async () => false),
+          isChatRunning: mock(() => false),
+          waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
+        },
+        pendingInputs,
+        {
+          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
+            requestedChatId,
+            async () => [],
+            messages,
+          ),
+        },
+        () => ({}),
+        () => true,
+        controlRepository(),
+      );
+      const reservation = queue.reserveDirectTurn(chatId, {
+        clientRequestId: 'request-active',
+        turnId: 'turn-active',
+      });
+      const source = await queue.createChatQueueEntry(chatId, 'rejected guidance');
+      const target = queue.captureSteerTarget(chatId);
+      const settlement = {
+        markScheduled: mock(async () => undefined),
+        settleSteerSuccess: mock(async () => undefined),
+        settleSteerFailure: mock(async () => undefined),
+      };
+
+      await expect(queue.deliverAcceptedQueueEntrySteer({
+        command: {
+          key: 'queue-steer-command',
+          chatId,
+          clientRequestId: 'request-steer',
+          entryId: source.entryId,
+        },
+        content: 'rejected guidance',
+        providerContent: 'rejected guidance',
+        clientMessageId: 'message-steer',
+        target,
+        expectedRevision: 1,
+        expectedReorderRevision: 0,
+        settlement,
+      })).rejects.toMatchObject({
+        code: 'STEER_TURN_NOT_STEERABLE',
+        deliveryOutcome: 'not-sent',
+      });
+
+      expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([
+        expect.objectContaining({ id: source.entryId, content: 'rejected guidance', status: 'queued' }),
+      ]);
+      expect(pendingInputs.listForChat(chatId)).toEqual([
+        expect.objectContaining({
+          clientRequestId: 'request-steer',
+          content: 'rejected guidance',
+          deliveryStatus: 'failed',
+        }),
+      ]);
+      expect(views.readPage(chatId, 20).messages).toEqual([
+        expect.objectContaining({ message: expect.objectContaining({ content: 'rejected guidance' }) }),
+      ]);
+      await queue.releaseDirectTurn(reservation);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('settles an aborted nonblocking direct start before admitting its successor', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-direct-abort-'));
     const streamResult = deferred();

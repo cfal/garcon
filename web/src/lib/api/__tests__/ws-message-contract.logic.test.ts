@@ -437,14 +437,6 @@ describe('parseServerWsMessage', () => {
 		).toBeInstanceOf(PendingUserInputClearedMessage);
 		expect(
 			parseServerWsMessage({
-				type: 'pending-user-input-cleared',
-				chatId: 'c-1',
-				clientRequestId: 'req',
-				reason: 'queue-source-not-sent',
-			}),
-		).toBeInstanceOf(PendingUserInputClearedMessage);
-		expect(
-			parseServerWsMessage({
 				type: 'pending-user-input-status-updated',
 				chatId: 'c-1',
 				clientRequestId: 'req',

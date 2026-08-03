@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { SteerDeliveryError } from '../../lib/domain-error.ts';
+import { QueueEntrySteerError, SteerDeliveryError } from '../../lib/domain-error.ts';
 import { CommandValidationError } from '../../lib/command-validation-error.ts';
 import { logSteerOutcome } from '../steer-commands.ts';
 
@@ -77,6 +77,38 @@ describe('steer outcome logging', () => {
       source: 'inline',
       errorCode: 'STEER_OUTCOME_UNKNOWN',
       sendAttempted: true,
+    });
+  });
+
+  it('records queued steering source identity and delivery outcome', () => {
+    const outcomeLogger = logger();
+
+    logSteerOutcome(outcomeLogger, {
+      chatId: 'chat-1',
+      clientRequestId: 'request-1',
+      integrationId: 'codex',
+      turnId: 'turn-1',
+      source: 'queue-entry',
+      entryId: 'entry-1',
+    }, {
+      kind: 'failed',
+      error: new QueueEntrySteerError(
+        'STEER_OUTCOME_UNKNOWN',
+        'Steering delivery could not be confirmed',
+        500,
+        'unknown',
+      ),
+    });
+
+    expect(outcomeLogger.error).toHaveBeenCalledWith('steer failed', {
+      chatId: 'chat-1',
+      clientRequestId: 'request-1',
+      integrationId: 'codex',
+      turnId: 'turn-1',
+      source: 'queue-entry',
+      entryId: 'entry-1',
+      errorCode: 'STEER_OUTCOME_UNKNOWN',
+      deliveryOutcome: 'unknown',
     });
   });
 });

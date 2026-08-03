@@ -259,7 +259,6 @@ export interface PendingInputsPort {
     },
   ): Promise<unknown>;
   discard(chatId: string, clientRequestId: string): boolean;
-  clear(chatId: string, clientRequestId: string, reason: 'queue-source-not-sent'): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
   markUnconfirmed(chatId: string, clientRequestId: string): boolean;
 }

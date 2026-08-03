@@ -262,6 +262,7 @@ export class SteerCommands {
         );
         outcomeTurnId = ledger.record.turnId;
         if (ledger.kind === 'duplicate') return this.#duplicateQueueResponse(ledger.record);
+        outcomeTurnId = target?.identity.turnId;
 
         const command = {
           key: ledger.record.key,
@@ -534,6 +535,9 @@ export function logSteerOutcome(
     errorCode,
     ...(outcome.error instanceof SteerDeliveryError
       ? { sendAttempted: outcome.error.outcome === 'unknown' }
+      : {}),
+    ...(outcome.error instanceof QueueEntrySteerError
+      ? { deliveryOutcome: outcome.error.deliveryOutcome }
       : {}),
   };
   if (

@@ -1331,6 +1331,71 @@ describe('orchestration', () => {
       await orchQueue.releaseDirectTurn(reservation);
     });
 
+    it('re-requests drain when the active turn completes during queued steering', async () => {
+      const reservation = orchQueue.reserveDirectTurn('c1', {
+        clientRequestId: 'request-active',
+        turnId: 'turn-active',
+      });
+      const source = await orchQueue.createChatQueueEntry('c1', 'steer this');
+      await orchQueue.createChatQueueEntry('c1', 'future input');
+      const target = orchQueue.captureSteerTarget('c1');
+      const prepared = deferred();
+      const acknowledgement = deferred();
+      const idleChats = [];
+      orchQueue.onChatIdle((chatId) => idleChats.push(chatId));
+      mockAgents.steerInput = mock(async (
+        _chatId,
+        _content,
+        _options,
+        _target,
+        prepareDelivery,
+      ) => {
+        await prepareDelivery();
+        prepared.resolve();
+        await acknowledgement.promise;
+        return { kind: 'accepted' };
+      });
+      const settlement = {
+        markScheduled: mock(async () => undefined),
+        settleSteerSuccess: mock(async () => undefined),
+        settleSteerFailure: mock(async () => undefined),
+      };
+
+      const steering = orchQueue.deliverAcceptedQueueEntrySteer({
+        command: {
+          key: 'queue-steer-command',
+          chatId: 'c1',
+          clientRequestId: 'request-steer',
+          entryId: source.entryId,
+        },
+        content: 'steer this',
+        providerContent: 'steer this',
+        clientMessageId: 'message-steer',
+        target,
+        expectedRevision: 1,
+        expectedReorderRevision: 0,
+        settlement,
+      });
+      await prepared.promise;
+
+      await orchQueue.completeDirectTurn(reservation);
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      expect(idleChats).toEqual([]);
+
+      acknowledgement.resolve();
+      await expect(steering).resolves.toMatchObject({ turnId: 'turn-active' });
+      await orchQueue.waitForDispatches();
+
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
+        'c1',
+        'future input',
+        expect.any(Object),
+      );
+      expect((await orchQueue.readChatExecutionControl('c1')).entries).toEqual([]);
+      expect(idleChats).toContain('c1');
+    });
+
     it('rejects a target whose execution attempt changed before delivery', async () => {
       const original = orchQueue.reserveDirectTurn('c1', {
         clientRequestId: 'request-a',
@@ -2928,7 +2993,7 @@ describe('orchestration', () => {
       ]);
     });
 
-    it('records completion-uncertain without requeueing an entry whose removal committed', async () => {
+    it('continues draining after a publication listener fails for committed removal', async () => {
       const first = await orchQueue.createChatQueueEntry('c1', 'first');
       const second = await orchQueue.createChatQueueEntry('c1', 'second');
       const failures = [];
@@ -2942,17 +3007,13 @@ describe('orchestration', () => {
       await orchQueue.triggerDrain('c1');
 
       const result = await orchQueue.readChatExecutionControl('c1');
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
-      expect(result.entries).toEqual([
-        expect.objectContaining({ id: second.entry.id, status: 'queued' }),
-      ]);
-      expect(result.pause).toMatchObject({
-        kind: 'completion-uncertain',
-        entryId: first.entry.id,
-      });
-      expect(result.recentlyDispatched).toContainEqual(
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(2);
+      expect(result.entries).toEqual([]);
+      expect(result.pause).toBeNull();
+      expect(result.recentlyDispatched).toEqual(expect.arrayContaining([
         expect.objectContaining({ entryId: first.entry.id }),
-      );
+        expect.objectContaining({ entryId: second.entry.id }),
+      ]));
       expect(failures).toEqual([]);
     });
 

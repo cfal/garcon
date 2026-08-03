@@ -110,7 +110,6 @@ function scaffold(overrides = {}) {
       pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
     })),
     read: mock(async () => control()),
-    clearPending: mock(() => true),
     markFailed: mock(() => false),
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
@@ -139,7 +138,7 @@ function scaffold(overrides = {}) {
       requeueAndPause: m.requeueAndPause,
       read: m.read,
     },
-    pendingInputs: { clear: m.clearPending, markFailed: m.markFailed },
+    pendingInputs: { markFailed: m.markFailed },
     coordinator: {
       requestDrain: m.requestDrain,
       reserveDirect: m.reserveDirect,
@@ -449,10 +448,10 @@ describe('AcceptedInputHandler', () => {
 
     expect(events).toEqual(['reserved', 'scheduled', 'delivered', 'consumed', 'drain', 'settled']);
     expect(m.releaseSteer).not.toHaveBeenCalled();
-    expect(m.clearPending).not.toHaveBeenCalled();
+    expect(m.markFailed).not.toHaveBeenCalled();
   });
 
-  test('releases and clears the queue source after definite non-delivery', async () => {
+  test('releases the queue source and marks its transcript row failed after definite non-delivery', async () => {
     const deliveryError = new SteerDeliveryError(new Error('provider unavailable'), 'not-sent');
     const settle = settlement();
     const released = control({
@@ -473,11 +472,7 @@ describe('AcceptedInputHandler', () => {
       control: released,
     });
     expect(m.releaseSteer).toHaveBeenCalledWith('chat-1', 'entry-1');
-    expect(m.clearPending).toHaveBeenCalledWith(
-      'chat-1',
-      'request-1',
-      'queue-source-not-sent',
-    );
+    expect(m.markFailed).toHaveBeenCalledWith('chat-1', 'request-1');
     expect(m.requestDrain).toHaveBeenCalledWith('chat-1', 'rejected queued steer released');
     expect(m.consumeSteer).not.toHaveBeenCalled();
     expect(settle.settleSteerFailure).toHaveBeenCalledWith(
