@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import type { GitComparisonSnapshotReady } from '$lib/api/git-comparison.js';
 import GitComparisonScreen from '../GitComparisonScreen.svelte';
 import {
@@ -29,11 +30,15 @@ describe('GitComparisonScreen', () => {
 
 	beforeEach(() => {
 		restoreResizeObserver = installResizeObserverHarness();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
 
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
+		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
 
 	it('shows initialization as loading instead of a comparison error', () => {
