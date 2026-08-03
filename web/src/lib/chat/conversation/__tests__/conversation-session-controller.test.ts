@@ -288,8 +288,8 @@ function createDeps(chat = createRunningChat()) {
 			conversationUi.previousPermissionMode = mode;
 		}),
 		getExecutionControl: vi.fn((): ChatExecutionControlState | null => null),
-		setExecutionControlFromLiveUpdate: vi.fn(),
-		setExecutionControlFromRefresh: vi.fn(),
+		setExecutionControlFromLiveUpdate: vi.fn(() => true),
+		setExecutionControlFromRefresh: vi.fn(() => true),
 	};
 	const deps = {
 		sessions: {

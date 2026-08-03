@@ -5,7 +5,7 @@ import { filterByChat } from '../chat-filter';
 import { handleExecutionControlUpdated, type QueueContext } from '../handlers/queue';
 
 function makeContext(
-	setExecutionControlFromLiveUpdate: (chatId: string, control: ChatExecutionControlState) => void,
+	setExecutionControlFromLiveUpdate: (chatId: string, control: ChatExecutionControlState) => boolean,
 ): QueueContext {
 	return {
 		conversationUi: { setExecutionControlFromLiveUpdate },
@@ -14,7 +14,7 @@ function makeContext(
 
 describe('queue routing integration', () => {
 	it('applies execution-control updates for background chats through filter + handler path', () => {
-		const setExecutionControlFromLiveUpdate = vi.fn();
+		const setExecutionControlFromLiveUpdate = vi.fn(() => true);
 		const control = {
 			serverInstanceId: 'server-instance-test',
 			queue: {
