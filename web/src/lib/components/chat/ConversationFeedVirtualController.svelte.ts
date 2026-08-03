@@ -25,6 +25,7 @@ import type { ConversationFeedRetentionState } from './ConversationFeedRetention
 export const CHAT_VIRTUAL_OVERSCAN = 6;
 export const CHAT_GEOMETRY_END_THRESHOLD_PX = 1;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
+const CHAT_MIN_USABLE_VIEWPORT_HEIGHT = 24;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
@@ -130,6 +131,13 @@ export function attainableConversationTargetOffset(input: {
 	maximumOffset: number;
 }): number {
 	return Math.max(0, Math.min(input.maximumOffset, input.currentOffset + input.alignmentDelta));
+}
+
+export function resolveConversationViewportRect(previous: Rect, observed: Rect): Rect {
+	// Retains usable geometry across hidden transitions and incomplete layout observations.
+	return observed.width > 0 && observed.height >= CHAT_MIN_USABLE_VIEWPORT_HEIGHT
+		? observed
+		: previous;
 }
 
 export function isConversationTargetLayoutReady(node: HTMLElement): boolean {
@@ -979,7 +987,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		callback: (rect: Rect) => void,
 	): (() => void) => {
 		const cleanup = observeElementRect(instance, (rect) => {
-			if (rect.height > 0 && rect.width > 0) this.#lastViewportRect = rect;
+			this.#lastViewportRect = resolveConversationViewportRect(this.#lastViewportRect, rect);
 			callback(this.#lastViewportRect);
 		});
 		return cleanup ?? (() => {});

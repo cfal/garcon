@@ -5,6 +5,7 @@ import {
 	attainableConversationTargetOffset,
 	isConversationTargetLayoutReady,
 	retainedConversationRange,
+	resolveConversationViewportRect,
 	shouldPreserveConversationVirtualEdge,
 } from '../ConversationFeedVirtualController.svelte';
 
@@ -136,6 +137,16 @@ describe('ConversationFeedVirtualController helpers', () => {
 				maximumOffset: 900,
 			}),
 		).toBe(375);
+	});
+
+	it('retains the last usable viewport rect across pathological observations', () => {
+		const previous = { width: 1_024, height: 720 };
+		expect(resolveConversationViewportRect(previous, { width: 5, height: 5 })).toBe(previous);
+		expect(resolveConversationViewportRect(previous, { width: 0, height: 600 })).toBe(previous);
+		expect(resolveConversationViewportRect(previous, { width: 390, height: 24 })).toEqual({
+			width: 390,
+			height: 24,
+		});
 	});
 
 	it('waits for pending rich content and image dimensions before settling a target', () => {
