@@ -238,7 +238,7 @@ describe('FileTreeVirtualRows', () => {
 		});
 		const wrappers = [...container.querySelectorAll<HTMLElement>('[data-file-tree-virtual-row]')];
 		expect(wrappers.length).toBeLessThan(80);
-		expect(treegrid.getAttribute('aria-rowcount')).toBe('100001');
+		expect(treegrid.getAttribute('aria-rowcount')).toBe('100002');
 
 		const rowIndexes = [
 			...container.querySelectorAll<HTMLElement>('[role="row"][aria-rowindex]'),
@@ -281,12 +281,12 @@ describe('FileTreeVirtualRows', () => {
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		mockFinePointerViewport(treegrid);
-		treegrid.scrollTop = 27_392;
+		treegrid.scrollTop = 27_420;
 		await fireEvent.scroll(treegrid);
 
 		await setViewMode('details');
 
-		await waitFor(() => expect(treegrid.scrollTop).toBe(43_360));
+		await waitFor(() => expect(treegrid.scrollTop).toBe(43_404));
 	});
 
 	it('preserves the physical end when details rows shrink into columns', async () => {
@@ -298,12 +298,12 @@ describe('FileTreeVirtualRows', () => {
 		await waitFor(() =>
 			expect(treegrid.style.getPropertyValue('--file-tree-row-height')).toBe('44px'),
 		);
-		treegrid.scrollTop = 43_360;
+		treegrid.scrollTop = 43_404;
 		await fireEvent.scroll(treegrid);
 
 		await setViewMode('columns');
 
-		await waitFor(() => expect(treegrid.scrollTop).toBe(27_392));
+		await waitFor(() => expect(treegrid.scrollTop).toBe(27_420));
 	});
 
 	it('preserves a deep anchor instead of treating a shrinking geometry as the end', async () => {

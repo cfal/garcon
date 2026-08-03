@@ -65,9 +65,29 @@ describe('file tree render rows', () => {
 			childErrors: new Map([[source.entry.path, new Error('failed')]]),
 		});
 
-		expect(loading.rows[1]?.key).toBe(failed.rows[1]?.key);
-		expect(isFileTreeRenderRowFocusable(loading.rows[1])).toBe(false);
-		expect(isFileTreeRenderRowFocusable(failed.rows[1])).toBe(true);
+		const loadingStatus = loading.rows.find((item) => item.kind === 'child-status');
+		const failedStatus = failed.rows.find((item) => item.kind === 'child-status');
+		expect(loadingStatus?.key).toBe(failedStatus?.key);
+		expect(isFileTreeRenderRowFocusable(loadingStatus)).toBe(false);
+		expect(isFileTreeRenderRowFocusable(failedStatus)).toBe(true);
+	});
+
+	it('keeps an inert parent row at the root boundary', () => {
+		const model = buildFileTreeRenderModel({
+			rows: [row('src', 'directory')],
+			parentPath: null,
+			expandedDirectories: new Set(),
+			loadingDirectories: new Set(),
+			childErrors: new Map(),
+		});
+
+		expect(model.rows[0]).toEqual({
+			kind: 'parent',
+			key: FILE_TREE_PARENT_ROW_KEY,
+			level: 1,
+			path: null,
+		});
+		expect(isFileTreeRenderRowFocusable(model.rows[0])).toBe(true);
 	});
 
 	it('does not add state rows for collapsed or non-directory entries', () => {
@@ -81,7 +101,7 @@ describe('file tree render rows', () => {
 			childErrors: new Map(),
 		});
 
-		expect(model.rows).toEqual([source, readme]);
+		expect(model.rows.slice(1)).toEqual([source, readme]);
 	});
 
 	it('indexes 100,000 entry rows without recursion or duplicate keys', () => {
@@ -94,8 +114,8 @@ describe('file tree render rows', () => {
 			childErrors: new Map(),
 		});
 
-		expect(model.rows).toHaveLength(100_000);
-		expect(model.renderIndexByKey.size).toBe(100_000);
-		expect(model.renderIndexByKey.get('/workspace/file-99999.ts')).toBe(99_999);
+		expect(model.rows).toHaveLength(100_001);
+		expect(model.renderIndexByKey.size).toBe(100_001);
+		expect(model.renderIndexByKey.get('/workspace/file-99999.ts')).toBe(100_000);
 	});
 });

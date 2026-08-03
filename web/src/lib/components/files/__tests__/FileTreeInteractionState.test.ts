@@ -131,6 +131,39 @@ describe('FileTreeInteractionState', () => {
 		expect(goToParent).toHaveBeenCalledOnce();
 	});
 
+	it('reaches the inert root boundary with ArrowLeft', () => {
+		store.navigation = {
+			kind: 'ready',
+			response: {
+				...response([source.entry, readme.entry]),
+				directory: {
+					path: '/workspace',
+					relativePath: '',
+					parentPath: null,
+					breadcrumbs: [{ name: 'workspace', path: '/workspace' }],
+				},
+			},
+		};
+		currentModel = project([source, readme], store);
+		const boundary = currentModel.rows[0]!;
+		const goToParent = vi.spyOn(store, 'goToParent');
+
+		interaction.setFocusedKey(readme.key);
+		interaction.handleRowKeydown(
+			new KeyboardEvent('keydown', { key: 'ArrowLeft', cancelable: true }),
+			readme,
+		);
+		expect(interaction.focusedKey).toBe(FILE_TREE_PARENT_ROW_KEY);
+
+		interaction.activateRow(boundary);
+		interaction.handleRowKeydown(
+			new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }),
+			boundary,
+		);
+
+		expect(goToParent).not.toHaveBeenCalled();
+	});
+
 	it('enters an expanded child error and retries it from the keyboard', () => {
 		currentModel = project([source, readme], store, 'error');
 		const errorRow = currentModel.rows.find((item) => item.kind === 'child-status');

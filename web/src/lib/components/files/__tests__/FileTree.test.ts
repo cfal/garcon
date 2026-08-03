@@ -200,6 +200,33 @@ describe('FileTree', () => {
 		});
 	});
 
+	it('keeps focus on an inert parent row after navigating to the root', async () => {
+		const rootChild = entry('project', 'directory', '/workspace', {
+			relativePath: 'project',
+		});
+		vi.mocked(filesApi.getTree).mockResolvedValueOnce(response([rootChild], '/workspace'));
+		const { container, store } = renderReady([entry('README.md', 'file')]);
+		store.activate();
+		const parentRow = container.querySelector<HTMLElement>('[data-file-tree-parent-row]');
+		if (!parentRow) throw new Error('Expected parent row');
+
+		await fireEvent.click(parentRow);
+
+		await waitFor(() => expect(store.currentDirectoryPath).toBe('/workspace'));
+		const rootBoundary = container.querySelector<HTMLElement>('[data-file-tree-parent-row]');
+		const viewport = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!rootBoundary || !viewport) throw new Error('Expected root file tree');
+		await waitFor(() => expect(document.activeElement).toBe(rootBoundary));
+		expect(rootBoundary.getAttribute('aria-disabled')).toBe('true');
+		expect(viewport.scrollTop).toBe(0);
+
+		await fireEvent.click(rootBoundary);
+		await fireEvent.keyDown(rootBoundary, { key: 'Enter' });
+
+		expect(filesApi.getTree).toHaveBeenCalledOnce();
+		expect(store.currentDirectoryPath).toBe('/workspace');
+	});
+
 	it('supports treegrid keyboard expansion and activation', async () => {
 		const src = entry('src', 'directory');
 		const { container, store } = renderReady([src]);

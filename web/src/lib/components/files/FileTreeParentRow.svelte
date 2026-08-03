@@ -16,7 +16,7 @@
 		onKeydown,
 	}: {
 		rowKey: string;
-		path: string;
+		path: string | null;
 		gridTemplate: string;
 		fillerColumnKeys: readonly FileTreeColumnKey[];
 		showIcons: boolean;
@@ -33,16 +33,19 @@
 	tabindex={focused ? 0 : -1}
 	aria-level="1"
 	aria-rowindex={ariaRowIndex}
+	aria-disabled={path === null}
 	data-file-tree-row
 	data-file-tree-row-key={rowKey}
 	data-file-tree-parent-row
-	class="file-tree-virtual-row-content grid min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+	class="file-tree-virtual-row-content grid min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+	class:hover:bg-accent={path !== null}
+	class:text-muted-foreground={path === null}
 	style={`grid-template-columns: ${gridTemplate}`}
-	onclick={onActivate}
+	onclick={path === null ? undefined : onActivate}
 	onfocus={onFocus}
 	onkeydown={onKeydown}
 >
-	<div role="rowheader" class="flex min-w-0 items-center" title={path}>
+	<div role="rowheader" class="flex min-w-0 items-center" title={path ?? undefined}>
 		<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
 		{#if showIcons}
 			<FolderUp class="file-tree-entry-icon mr-2 shrink-0 text-file-icon-folder" />
