@@ -403,9 +403,18 @@ export class SpaDriver {
   }
 
   async setViewport(width: number, height: number): Promise<void> {
+    const workspaceMounted = await this.#page.$(
+      '[role="region"][aria-label="Workspace"]',
+    ) !== null;
     await this.#page.setViewport({ width, height, isMobile: width <= 768 });
     await this.#page.waitForFunction(
       (expected) => matchMedia('(max-width: 768px)').matches === expected,
+      { timeout: 20_000 },
+      width <= 768,
+    );
+    if (!workspaceMounted) return;
+    await this.#page.waitForFunction(
+      (expected) => document.querySelector('.mobile-shell') !== null === expected,
       { timeout: 20_000 },
       width <= 768,
     );

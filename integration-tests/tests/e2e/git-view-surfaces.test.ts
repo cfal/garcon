@@ -82,11 +82,13 @@ describe('Lightpanda standalone Git views', () => {
       expect(await fixture.page.evaluate(
         () => matchMedia('(max-width: 768px)').matches,
       )).toBe(true);
+      expect(await fixture.page.$('.mobile-shell')).not.toBeNull();
 
       await app.setViewport(1_440, 900);
       expect(await fixture.page.evaluate(
         () => matchMedia('(max-width: 768px)').matches,
       )).toBe(false);
+      expect(await fixture.page.$('.mobile-shell')).toBeNull();
       fixture.assertNoBrowserErrors();
     });
   });
