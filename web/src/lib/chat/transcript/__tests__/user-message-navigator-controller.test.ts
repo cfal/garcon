@@ -47,7 +47,9 @@ function setup(messages: ChatViewMessage[] = [entry(1, user('first'))]) {
 	const loadOlderMessages = vi.fn<UserMessageNavigatorOptions['loadOlderMessages']>(
 		async () => 'loaded',
 	);
-	const jumpToRow = vi.fn(async (_target: UserMessageNavigatorTarget) => true);
+	const jumpToRow = vi.fn<UserMessageNavigatorOptions['jumpToRow']>(
+		async (_target: UserMessageNavigatorTarget) => 'completed',
+	);
 	const controller = new UserMessageNavigatorController({
 		transcript,
 		getSelectedChatId: () => selectedChatId,
@@ -215,7 +217,7 @@ describe('UserMessageNavigatorController', () => {
 			reloadTranscript: vi.fn(async () => undefined),
 			restoreLatestTranscript: vi.fn(async () => true),
 			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
-			jumpToRow: vi.fn(async () => false),
+			jumpToRow: vi.fn(async () => 'unavailable' as const),
 		});
 
 		controller.openForActiveChat();
@@ -240,7 +242,7 @@ describe('UserMessageNavigatorController', () => {
 			reloadTranscript: vi.fn(async () => undefined),
 			restoreLatestTranscript: vi.fn(async () => true),
 			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
-			jumpToRow: vi.fn(async () => false),
+			jumpToRow: vi.fn(async () => 'unavailable' as const),
 		});
 
 		controller.openForActiveChat();
@@ -261,7 +263,7 @@ describe('UserMessageNavigatorController', () => {
 			deliveryStatus: 'submitting',
 			attachments: [],
 		});
-		const jumpToRow = vi.fn(async () => true);
+		const jumpToRow = vi.fn(async () => 'completed' as const);
 		const controller = new UserMessageNavigatorController({
 			transcript,
 			getSelectedChatId: () => 'chat-1',
@@ -293,7 +295,7 @@ describe('UserMessageNavigatorController', () => {
 			reloadTranscript,
 			restoreLatestTranscript: vi.fn(async () => true),
 			loadOlderMessages: vi.fn(async () => 'exhausted' as const),
-			jumpToRow: vi.fn(async () => false),
+			jumpToRow: vi.fn(async () => 'unavailable' as const),
 		});
 		controller.openForActiveChat();
 
@@ -319,7 +321,7 @@ describe('UserMessageNavigatorController', () => {
 		const reveal = vi.spyOn(transcript, 'revealAllLoadedMessages');
 		jumpToRow.mockImplementationOnce(async () => {
 			expect(reveal).toHaveBeenCalledOnce();
-			return true;
+			return 'completed' as const;
 		});
 		controller.openForActiveChat();
 
@@ -336,7 +338,7 @@ describe('UserMessageNavigatorController', () => {
 
 	it('reopens with an error when the target remains active but cannot be found', async () => {
 		const { controller, jumpToRow } = setup();
-		jumpToRow.mockResolvedValueOnce(false);
+		jumpToRow.mockResolvedValueOnce('unavailable');
 		controller.openForActiveChat();
 
 		await controller.select(controller.items[0]);
@@ -345,15 +347,27 @@ describe('UserMessageNavigatorController', () => {
 		expect(controller.selectionError).toBe('target-unavailable');
 	});
 
+	it('closes without an error when user intent cancels the jump', async () => {
+		const { controller, jumpToRow } = setup();
+		jumpToRow.mockResolvedValueOnce('cancelled');
+		controller.openForActiveChat();
+
+		await controller.select(controller.items[0]);
+
+		expect(controller.open).toBe(false);
+		expect(controller.selectionError).toBeNull();
+		expect(controller.openedChatId).toBeNull();
+	});
+
 	it('does not let a stale selection result overwrite a newly opened lifecycle', async () => {
-		const pendingJump = deferred<boolean>();
+		const pendingJump = deferred<'completed'>();
 		const { controller, jumpToRow } = setup();
 		jumpToRow.mockReturnValueOnce(pendingJump.promise);
 		controller.openForActiveChat();
 		const selection = controller.select(controller.items[0]);
 		controller.openForActiveChat();
 
-		pendingJump.resolve(false);
+		pendingJump.resolve('completed');
 		await selection;
 
 		expect(controller.open).toBe(true);
@@ -365,7 +379,7 @@ describe('UserMessageNavigatorController', () => {
 		const { controller, transcript, loadOlderMessages, jumpToRow } = setup();
 		transcript.hasEarlierMessages = true;
 		loadOlderMessages.mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce('loaded');
-		jumpToRow.mockResolvedValueOnce(false);
+		jumpToRow.mockResolvedValueOnce('unavailable');
 		controller.openForActiveChat();
 		const load = controller.loadOlder();
 

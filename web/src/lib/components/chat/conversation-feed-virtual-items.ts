@@ -155,12 +155,13 @@ export function estimateConversationFeedItemSize(
 
 	const renderItem = item.item;
 	const scale = Math.max(0.5, Math.min(textScale, 2));
-	if (renderItem.kind === 'local-notice') return 52 * scale;
+	const spacing = item.spacingAfter === 'scaled-transcript' ? 12 * scale : 0;
+	if (renderItem.kind === 'local-notice') return 52 * scale + spacing;
 	if (renderItem.kind === 'bash-group' || renderItem.kind === 'read-group') {
-		return (44 + renderItem.rows.length * 34) * scale;
+		return (44 + renderItem.rows.length * 34) * scale + spacing;
 	}
-	if (renderItem.message.type === 'user-message') return 112 * scale;
-	if (renderItem.message.type === 'assistant-message') return 180 * scale;
-	if (renderItem.message.type === 'thinking') return 160 * scale;
-	return 96 * scale;
+	if (renderItem.message.type === 'user-message') return 112 * scale + spacing;
+	if (renderItem.message.type === 'assistant-message') return 180 * scale + spacing;
+	if (renderItem.message.type === 'thinking') return 160 * scale + spacing;
+	return 96 * scale + spacing;
 }

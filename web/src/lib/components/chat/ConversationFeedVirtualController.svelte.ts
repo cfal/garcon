@@ -15,6 +15,7 @@ import type {
 	ConversationViewportFillResult,
 	ConversationViewportPort,
 	ConversationViewportTarget,
+	ConversationViewportTargetResult,
 	HiddenReadingRestoreResult,
 } from '$lib/chat/transcript/conversation-viewport-port.js';
 import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProjectionState.svelte.js';
@@ -25,6 +26,7 @@ export const CHAT_VIRTUAL_OVERSCAN = 6;
 export const CHAT_GEOMETRY_END_THRESHOLD_PX = 1;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
+const MAX_TARGET_SETTLE_ITERATIONS = 60;
 const OFFSET_TOLERANCE_PX = 0.5;
 const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
 
@@ -139,9 +141,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#layoutMutationToken = 0;
 	#targetToken = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
+	#hiddenScrollOffset: number | null = null;
 	#pendingReadingAnchor: ConversationVirtualAnchor | null = null;
 	#measureOnShow = false;
 	#pendingEndScroll = false;
+	#programmaticScrollActive = false;
+	#programmaticScrollEpoch = 0;
+	#userIntentEpoch = 0;
 	#scrollMargin = 0;
 	#lastViewportRect: Rect = { width: 0, height: CHAT_FALLBACK_VIEWPORT_HEIGHT };
 	#destroyed = false;
@@ -195,6 +201,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#virtualScrollElement = null;
 		this.#instance().setOptions({
@@ -206,7 +213,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	prepareForHide(): void {
 		if (this.#destroyed || !this.#configuredVisible) return;
-		if (!this.options.pinned) this.#hiddenAnchor = this.#captureVirtualAnchor();
+		if (!this.options.pinned) {
+			this.#hiddenAnchor = this.#captureVirtualAnchor();
+			this.#hiddenScrollOffset = this.options.viewport?.scrollTop ?? null;
+		}
+		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#configuredVisible = false;
 		this.#virtualScrollElement = null;
@@ -224,15 +235,18 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const viewport = this.options.viewport;
 		return Boolean(
 			this.isReady() &&
-				viewport &&
-				viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= threshold,
+			viewport &&
+			viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= threshold,
 		);
 	}
 
 	scrollToStart(): void {
 		if (!this.isReady()) return;
+		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		this.#instance().scrollToOffset(0, { behavior: 'auto' });
+		void this.#completeSimpleScroll(operationEpoch, this.#layoutMutationToken);
 	}
 
 	scrollToEnd(options: { behavior?: 'auto' | 'instant' } = {}): void {
@@ -240,6 +254,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#pendingEndScroll = true;
 			return;
 		}
+		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		if (this.#measureOnShow) {
 			this.#instance().measure();
@@ -247,14 +262,29 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		this.#hiddenAnchor = null;
 		this.#pendingEndScroll = false;
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		this.#instance().scrollToEnd({ behavior: options.behavior ?? 'auto' });
-		void this.#completeEndRestore(this.#layoutMutationToken);
+		void this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
+	}
+
+	restoreInitialEnd(): void {
+		if (!this.isReady()) {
+			this.#pendingEndScroll = true;
+			return;
+		}
+		this.#cancelTargetScroll();
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
+		this.#instance().scrollToEnd({ behavior: 'auto' });
+		void this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
 	}
 
 	scrollBy(delta: number): void {
 		if (!this.isReady()) return;
+		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		this.#instance().scrollBy(delta, { behavior: 'auto' });
+		void this.#completeSimpleScroll(operationEpoch, this.#layoutMutationToken);
 	}
 
 	async waitForLayout(
@@ -288,58 +318,101 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (keys.length === 0) return 'underfilled';
 		const token = this.#layoutMutationToken;
 		const restoreEnd = this.options.pinned;
+		const readingAnchor = restoreEnd ? null : this.#captureVirtualAnchor();
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
 
-		for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-			await tick();
-			await nextAnimationFrame();
-			if (token !== this.#layoutMutationToken || !this.isReady()) return 'unsettled';
-			const viewport = this.options.viewport;
-			if (!viewport) return 'unsettled';
-			const instance = this.#instance();
-			const classification = classifyMeasuredConversationViewportFill({
-				keys,
-				measuredSizes: instance.itemSizeCache,
-				leadingSize: this.#scrollMargin,
-				viewportHeight: viewport.clientHeight,
-			});
-			if (classification) {
-				if (restoreEnd) instance.scrollToEnd({ behavior: 'auto' });
-				return classification;
+		try {
+			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
+				await tick();
+				await nextAnimationFrame();
+				if (token !== this.#layoutMutationToken || !this.isReady()) return 'unsettled';
+				const viewport = this.options.viewport;
+				if (!viewport) return 'unsettled';
+				const instance = this.#instance();
+				const classification = classifyMeasuredConversationViewportFill({
+					keys,
+					measuredSizes: instance.itemSizeCache,
+					leadingSize: this.#scrollMargin,
+					viewportHeight: viewport.clientHeight,
+				});
+				if (classification) {
+					if (restoreEnd) instance.scrollToEnd({ behavior: 'auto' });
+					else if (
+						readingAnchor &&
+						!(await this.#restoreVirtualAnchor(readingAnchor, false, false))
+					) {
+						return 'unsettled';
+					}
+					return classification;
+				}
+				const nextUnmeasuredIndex = keys.findIndex((key) => !instance.itemSizeCache.has(key));
+				if (nextUnmeasuredIndex < 0) return 'unsettled';
+				instance.scrollToIndex(nextUnmeasuredIndex, { align: 'start', behavior: 'auto' });
 			}
-			const nextUnmeasuredIndex = keys.findIndex((key) => !instance.itemSizeCache.has(key));
-			if (nextUnmeasuredIndex < 0) return 'unsettled';
-			instance.scrollToIndex(nextUnmeasuredIndex, { align: 'start', behavior: 'auto' });
+			if (restoreEnd && this.isReady()) this.#instance().scrollToEnd({ behavior: 'auto' });
+			else if (readingAnchor) await this.#restoreVirtualAnchor(readingAnchor, false, false);
+			return 'unsettled';
+		} finally {
+			this.#finishProgrammaticScrollOperation(operationEpoch);
 		}
-		if (restoreEnd && this.isReady()) this.#instance().scrollToEnd({ behavior: 'auto' });
-		return 'unsettled';
 	}
 
 	async restoreHiddenReadingPosition(): Promise<HiddenReadingRestoreResult> {
 		const anchor = this.#hiddenAnchor;
+		const scrollOffset = this.#hiddenScrollOffset;
 		this.#hiddenAnchor = null;
+		this.#hiddenScrollOffset = null;
 		if (!this.isReady()) return 'not-ready';
 		const clearMeasurements = this.#measureOnShow;
+		const userIntentEpoch = this.#userIntentEpoch;
 		this.#measureOnShow = false;
 		if (!anchor) {
 			if (clearMeasurements) this.#instance().measure();
+			if (scrollOffset !== null) {
+				this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
+				return 'restored';
+			}
 			return 'missing-anchor';
 		}
-		return (await this.#restoreVirtualAnchor(anchor, clearMeasurements, false))
-			? 'restored'
-			: 'missing-anchor';
+		if (await this.#restoreVirtualAnchor(anchor, clearMeasurements, false)) return 'restored';
+		if (!this.isReady() || scrollOffset === null || userIntentEpoch !== this.#userIntentEpoch) {
+			return 'missing-anchor';
+		}
+		this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
+		return 'restored';
 	}
 
 	cancelPendingLayoutMutation(): void {
 		this.#layoutMutationToken += 1;
-		this.#targetToken += 1;
 		this.#pendingReadingAnchor = null;
+		this.#programmaticScrollActive = false;
+		this.#programmaticScrollEpoch += 1;
+	}
+
+	cancelForUserIntent(): void {
+		this.#userIntentEpoch += 1;
+		this.#cancelTargetScroll();
+		const shouldSupersedeCore = this.#programmaticScrollActive;
+		const viewport = this.options.viewport;
+		this.cancelPendingLayoutMutation();
+		if (shouldSupersedeCore && viewport && this.isReady()) {
+			this.#instance().scrollToOffset(viewport.scrollTop, { behavior: 'auto' });
+		}
+		this.options.onInitialEndRestored?.();
 	}
 
 	async scrollToTarget(
 		target: ConversationViewportTarget,
 		options: { align?: 'center' | 'start' | 'end' } = {},
-	): Promise<boolean> {
-		if (!this.isReady()) return false;
+	): Promise<ConversationViewportTargetResult> {
+		if (!this.isReady()) return 'not-ready';
+		this.#cancelTargetScroll();
+		this.cancelPendingLayoutMutation();
+		const token = this.#targetToken;
+		await tick();
+		await nextAnimationFrame();
+		if (token !== this.#targetToken) return 'cancelled';
+		if (!this.isReady()) return 'not-ready';
 		this.cancelPendingLayoutMutation();
 		const model = this.options.model;
 		const resolved =
@@ -349,29 +422,50 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 						return index === undefined ? undefined : { index, innerRowId: target.id };
 					})()
 				: model.targetByDomAnchorId.get(target.id);
-		if (!resolved) return false;
+		if (!resolved) return 'target-missing';
 		const key = model.items[resolved.index]?.key;
-		if (!key) return false;
+		if (!key) return 'target-missing';
 
-		const token = ++this.#targetToken;
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		const releaseTarget = this.options.retention.acquire(key, 'target');
 		try {
 			this.#instance().scrollToIndex(resolved.index, {
 				align: options.align ?? 'center',
 				behavior: 'auto',
 			});
-			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-				const layout = await this.waitForLayout({ targetKey: key });
-				if (layout !== 'settled' || token !== this.#targetToken) return false;
+			let previousRect: { top: number; height: number } | null = null;
+			let stableFrames = 0;
+			for (let attempt = 0; attempt < MAX_TARGET_SETTLE_ITERATIONS; attempt += 1) {
+				await tick();
+				await nextAnimationFrame();
+				if (token !== this.#targetToken) return 'cancelled';
+				if (!this.isReady()) return 'not-ready';
 				const node = this.#findTargetNode(resolved.innerRowId);
 				if (!node) continue;
-				if ((options.align ?? 'center') === 'center') this.#centerNode(node);
-				await nextAnimationFrame();
-				if (token === this.#targetToken) return true;
+				const delta = this.#targetAlignmentDelta(node, options.align ?? 'center');
+				if (Math.abs(delta) > CHAT_GEOMETRY_END_THRESHOLD_PX) {
+					this.#instance().scrollBy(delta, { behavior: 'auto' });
+					previousRect = null;
+					stableFrames = 0;
+					continue;
+				}
+				const viewport = this.options.viewport;
+				if (!viewport) return 'not-ready';
+				const nodeRect = node.getBoundingClientRect();
+				const viewportRect = viewport.getBoundingClientRect();
+				const currentRect = { top: nodeRect.top - viewportRect.top, height: nodeRect.height };
+				const stable =
+					previousRect !== null &&
+					Math.abs(currentRect.top - previousRect.top) <= OFFSET_TOLERANCE_PX &&
+					Math.abs(currentRect.height - previousRect.height) <= OFFSET_TOLERANCE_PX;
+				stableFrames = stable ? stableFrames + 1 : 0;
+				previousRect = currentRect;
+				if (stableFrames >= 2) return 'completed';
 			}
-			return false;
+			return 'not-ready';
 		} finally {
 			releaseTarget();
+			this.#finishProgrammaticScrollOperation(operationEpoch);
 		}
 	}
 
@@ -393,7 +487,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		const restorePolicyEnd =
 			snapshot.endBehavior === 'restore-if-pinned' && untrack(() => this.options.pinned);
-		const resetMeasurements = snapshot.measurementReset === 'all';
+		const resetMeasurements =
+			snapshot.measurementReset === 'all' || keys.length < this.#configuredKeys.length;
 		const preserveEdgeReadingPosition = shouldPreserveConversationVirtualEdge({
 			structure,
 			endBehavior: snapshot.endBehavior,
@@ -435,7 +530,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			rangeExtractor: (range) => retainedConversationRange(range, retainedIndexes),
 		});
 		instance.getVirtualItems();
-		const intendedOffset = instance.scrollOffset;
 
 		this.#configuredGeometryRevision = snapshot.geometryRevision;
 		this.#configuredSurfaceIdentity = snapshot.surfaceIdentity;
@@ -455,18 +549,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (resetMeasurements && preservationAnchor) {
 			this.#scheduleReadingRestore(preservationAnchor, true, restorePolicyEnd);
 		} else if (resetMeasurements) {
-			instance.measure();
-			if (restorePolicyEnd) void this.#restorePolicyEndAfterCommit(layoutToken, snapshot);
+			void this.#resetMeasurementsAfterCommit(layoutToken, snapshot, restorePolicyEnd);
 		} else if (restorePolicyEnd) {
 			void this.#restorePolicyEndAfterCommit(layoutToken, snapshot);
 		} else if (preservationAnchor) {
 			this.#scheduleReadingRestore(preservationAnchor, false, false);
-		} else if (
-			snapshot.endBehavior !== 'explicit-navigation' &&
-			structure === 'edge-qualified' &&
-			intendedOffset !== null
-		) {
-			void this.#reconcileAdapterOffset(intendedOffset, layoutToken);
 		}
 	}
 
@@ -491,7 +578,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		if (!visible && this.#configuredVisible && !this.options.pinned) {
 			this.#hiddenAnchor = this.#captureVirtualAnchor();
+			this.#hiddenScrollOffset = this.options.viewport?.scrollTop ?? null;
 		}
+		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#configuredVisible = visible;
 		this.#virtualScrollElement = viewport;
@@ -529,6 +618,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#detachAndResetOldSurface(): void {
+		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#virtualScrollElement = null;
 		this.#instance().setOptions({
@@ -537,6 +627,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		this.options.retention.clear();
 		this.#hiddenAnchor = null;
+		this.#hiddenScrollOffset = null;
 		this.#pendingEndScroll = false;
 		this.#measureOnShow = false;
 		this.#instance().measure();
@@ -544,7 +635,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	#captureVirtualAnchor(preferTranscript = false): ConversationVirtualAnchor | null {
 		const instance = this.#instance();
-		const offset = instance.scrollOffset ?? this.options.viewport?.scrollTop ?? 0;
+		const offset = this.options.viewport?.scrollTop ?? instance.scrollOffset ?? 0;
 		const itemAtOffset = instance.getVirtualItemForOffset(offset);
 		// Prefix controls occupy offset zero, so history prepends preserve the nearest message instead.
 		const item = preferTranscript
@@ -562,12 +653,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					})[0]
 			: itemAtOffset;
 		if (!item || typeof item.key !== 'string') return null;
-		const index = this.options.model.indexByKey.get(item.key);
+		const index = this.#configuredKeys.indexOf(item.key);
 		const fallbackKeys: string[] = [];
-		if (index !== undefined) {
+		if (index >= 0) {
 			for (let distance = 1; distance <= HIDDEN_ANCHOR_FALLBACK_RADIUS; distance += 1) {
-				const before = this.options.model.items[index - distance]?.key;
-				const after = this.options.model.items[index + distance]?.key;
+				const before = this.#configuredKeys[index - distance];
+				const after = this.#configuredKeys[index + distance];
 				if (before) fallbackKeys.push(before);
 				if (after) fallbackKeys.push(after);
 			}
@@ -587,14 +678,16 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		);
 		if (!key) return false;
 		const release = this.options.retention.acquire(key, 'target');
+		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		try {
 			if (clearMeasurements) this.#instance().measure();
-				if (restoreEnd) {
-					await tick();
-					if (token !== this.#layoutMutationToken || !this.isReady()) return false;
-					this.scrollToEnd();
-					return true;
-				}
+			if (restoreEnd) {
+				await tick();
+				if (token !== this.#layoutMutationToken || !this.isReady()) return false;
+				this.#instance().scrollToEnd({ behavior: 'auto' });
+				await this.#completeEndRestore(token, operationEpoch);
+				return token === this.#layoutMutationToken;
+			}
 			const index = model.indexByKey.get(key);
 			if (index === undefined) return false;
 			this.#instance().scrollToIndex(index, { align: 'start', behavior: 'auto' });
@@ -613,10 +706,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				const settledItem = this.#instance()
 					.getVirtualItems()
 					.find((candidate) => candidate.key === key);
-				const settledOffset = this.#instance().scrollOffset ?? this.options.viewport?.scrollTop;
+				const settledOffset = this.options.viewport?.scrollTop ?? this.#instance().scrollOffset;
 				if (
 					settledItem &&
-					settledOffset !== undefined &&
+					settledOffset != null &&
 					Math.abs(settledOffset - (settledItem.start + offset)) <= OFFSET_TOLERANCE_PX
 				) {
 					return true;
@@ -625,6 +718,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return false;
 		} finally {
 			release();
+			this.#finishProgrammaticScrollOperation(operationEpoch);
 		}
 	}
 
@@ -658,29 +752,64 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.scrollToEnd();
 	}
 
-	async #completeEndRestore(token: number): Promise<void> {
-		for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
-			await tick();
-			await nextAnimationFrame();
-			if (token !== this.#layoutMutationToken || !this.isReady()) return;
-			if (this.isAtEnd()) {
-				this.options.onInitialEndRestored?.();
-				return;
-			}
-			this.#instance().scrollToEnd({ behavior: 'auto' });
+	async #resetMeasurementsAfterCommit(
+		token: number,
+		snapshot: ConversationVirtualGeometrySnapshot,
+		restorePolicyEnd: boolean,
+	): Promise<void> {
+		await tick();
+		await nextAnimationFrame();
+		if (!this.isReady() || this.options.geometry.geometryRevision !== snapshot.geometryRevision) {
+			return;
+		}
+		this.#instance().measure();
+		if (
+			restorePolicyEnd &&
+			token === this.#layoutMutationToken &&
+			this.options.pinned &&
+			this.options.geometry.endBehavior === 'restore-if-pinned'
+		) {
+			this.scrollToEnd();
 		}
 	}
 
-	async #reconcileAdapterOffset(intendedOffset: number, token: number): Promise<void> {
+	async #completeEndRestore(token: number, operationEpoch: number): Promise<void> {
+		try {
+			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
+				await tick();
+				await nextAnimationFrame();
+				if (token !== this.#layoutMutationToken || !this.isReady()) return;
+				if (this.isAtEnd()) {
+					this.options.onInitialEndRestored?.();
+					return;
+				}
+				this.#instance().scrollToEnd({ behavior: 'auto' });
+			}
+			if (token !== this.#layoutMutationToken || !this.isReady()) return;
+			this.#instance().scrollToEnd({ behavior: 'auto' });
+			this.options.onInitialEndRestored?.();
+		} finally {
+			this.#finishProgrammaticScrollOperation(operationEpoch);
+		}
+	}
+
+	async #completeSimpleScroll(operationEpoch: number, token: number): Promise<void> {
+		let previousOffset: number | null = null;
 		for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
 			await tick();
 			await nextAnimationFrame();
-			if (token !== this.#layoutMutationToken || !this.isReady()) return;
+			if (token !== this.#layoutMutationToken || !this.isReady()) break;
 			const viewport = this.options.viewport;
-			if (!viewport) return;
-			if (Math.abs(viewport.scrollTop - intendedOffset) <= OFFSET_TOLERANCE_PX) return;
-			this.#instance().scrollToOffset(intendedOffset, { behavior: 'auto' });
+			if (!viewport) break;
+			if (
+				previousOffset !== null &&
+				Math.abs(previousOffset - viewport.scrollTop) <= OFFSET_TOLERANCE_PX
+			) {
+				break;
+			}
+			previousOffset = viewport.scrollTop;
 		}
+		this.#finishProgrammaticScrollOperation(operationEpoch);
 	}
 
 	#isKeyMeasured(key: string): boolean {
@@ -706,13 +835,28 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		return null;
 	}
 
-	#centerNode(node: HTMLElement): void {
+	#targetAlignmentDelta(node: HTMLElement, align: 'center' | 'start' | 'end'): number {
 		const viewport = this.options.viewport;
-		if (!viewport) return;
+		if (!viewport) return 0;
 		const viewportRect = viewport.getBoundingClientRect();
 		const nodeRect = node.getBoundingClientRect();
-		const delta = nodeRect.top + nodeRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
-		this.#instance().scrollBy(delta, { behavior: 'auto' });
+		if (align === 'start') return nodeRect.top - viewportRect.top;
+		if (align === 'end') return nodeRect.bottom - viewportRect.bottom;
+		return nodeRect.top + nodeRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
+	}
+
+	#beginProgrammaticScrollOperation(): number {
+		this.#programmaticScrollActive = true;
+		return ++this.#programmaticScrollEpoch;
+	}
+
+	#finishProgrammaticScrollOperation(epoch: number): void {
+		if (epoch !== this.#programmaticScrollEpoch) return;
+		this.#programmaticScrollActive = false;
+	}
+
+	#cancelTargetScroll(): void {
+		this.#targetToken += 1;
 	}
 
 	#getScrollElement = (): HTMLDivElement | null => this.#virtualScrollElement;

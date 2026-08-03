@@ -6,7 +6,10 @@ import type {
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
-import type { UserMessageNavigatorTarget } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
+import type {
+	UserMessageNavigatorSelectionResult,
+	UserMessageNavigatorTarget,
+} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 
 const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 const PAGE_BOUNDARY_THRESHOLD_PX = 100;
@@ -109,10 +112,15 @@ export class ConversationScrollController {
 
 	setPinnedToBottom(isPinned: boolean): void {
 		this.isPinnedToBottom = isPinned;
+		this.deps.chatState.isUserScrolledUp = !isPinned;
+	}
+
+	reconcilePinnedProjection(): void {
+		this.deps.chatState.isUserScrolledUp = !this.isPinnedToBottom;
 	}
 
 	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
-		this.deps.getViewport()?.cancelPendingLayoutMutation();
+		this.deps.getViewport()?.cancelForUserIntent();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
 		this.#userScrollIntent = {
 			epoch: this.#userScrollIntent.epoch + 1,
@@ -130,7 +138,6 @@ export class ConversationScrollController {
 	completeInitialBottomRestore(): void {
 		if (this.#initialBottomRestoreChatId !== this.deps.sessions.selectedChatId) return;
 		if (this.deps.chatState.displayMessageCount === 0) return;
-		if (this.deps.chatState.hasInitialMessagesToReveal) return;
 		this.#initialBottomRestoreChatId = null;
 	}
 
@@ -145,7 +152,7 @@ export class ConversationScrollController {
 			this.#initialBottomRestoreChatId = null;
 			return;
 		}
-		this.deps.getViewport()?.scrollToEnd();
+		this.deps.getViewport()?.restoreInitialEnd();
 	}
 
 	async scrollToTop(): Promise<void> {
@@ -269,34 +276,54 @@ export class ConversationScrollController {
 		return 'loaded';
 	}
 
-	async jumpToMessageRow(target: UserMessageNavigatorTarget): Promise<boolean> {
+	async jumpToMessageRow(
+		target: UserMessageNavigatorTarget,
+	): Promise<UserMessageNavigatorSelectionResult> {
 		if (
 			this.deps.sessions.selectedChatId !== target.chatId ||
 			this.deps.chatState.generationId !== target.generationId
 		) {
-			return false;
+			return 'unavailable';
+		}
+		this.deps.chatState.invalidatePendingHistoryLoad();
+		await tick();
+		if (
+			this.deps.sessions.selectedChatId !== target.chatId ||
+			this.deps.chatState.generationId !== target.generationId
+		) {
+			return 'cancelled';
 		}
 		const operationEpoch = ++this.#viewportOperationEpoch;
-		this.deps.chatState.invalidatePendingHistoryLoad();
-		const didScroll = await this.deps
-			.getViewport()
-			?.scrollToTarget({ kind: 'row', id: target.rowId }, { align: 'center' });
-		if (!didScroll || !this.#isCurrentViewportOperation(target.chatId, operationEpoch))
-			return false;
-		const atLiveEnd = this.deps.getViewport()?.isAtEnd() ?? false;
+		const viewport = this.deps.getViewport();
+		if (!viewport) return 'unavailable';
+		const wasPinned = this.isPinnedToBottom;
+		this.#preserveHistoryBrowsing();
+		const result = await viewport.scrollToTarget(
+			{ kind: 'row', id: target.rowId },
+			{ align: 'center' },
+		);
+		if (!this.#isCurrentViewportOperation(target.chatId, operationEpoch)) return 'cancelled';
+		if (result === 'cancelled') return 'cancelled';
+		if (result !== 'completed') {
+			if (wasPinned && viewport.isAtEnd()) this.setPinnedToBottom(true);
+			return 'unavailable';
+		}
+		const atLiveEnd = viewport.isAtEnd();
 		this.deps.chatState.isUserScrolledUp = !atLiveEnd;
 		this.setPinnedToBottom(atLiveEnd);
-		return true;
+		return 'completed';
 	}
 
 	async jumpToDomAnchor(anchorId: string): Promise<boolean> {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId) return false;
 		const operationEpoch = ++this.#viewportOperationEpoch;
-		const didScroll = await this.deps
+		const result = await this.deps
 			.getViewport()
 			?.scrollToTarget({ kind: 'dom-anchor', id: anchorId }, { align: 'center' });
-		return Boolean(didScroll && this.#isCurrentViewportOperation(chatId, operationEpoch));
+		return Boolean(
+			result === 'completed' && this.#isCurrentViewportOperation(chatId, operationEpoch),
+		);
 	}
 
 	async fillUnderfilledViewport(): Promise<void> {
@@ -546,7 +573,7 @@ export class ConversationScrollController {
 		if (!this.#isViewportVisible) return;
 		const viewport = this.deps.getViewport();
 		if (!viewport?.isReady()) return;
-		if (this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp) {
+		if (this.isPinnedToBottom) {
 			viewport.scrollToEnd();
 			void this.fillUnderfilledViewport();
 			return;

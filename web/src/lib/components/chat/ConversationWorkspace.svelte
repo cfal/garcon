@@ -6,6 +6,7 @@
 
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import ConversationFeed from './ConversationFeed.svelte';
+	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
 	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
@@ -293,6 +294,7 @@
 	});
 
 	let scrollContainer: HTMLDivElement | null = $state(null);
+	let initializedScrollContainer = false;
 	let conversationViewport: ConversationViewportPort | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
 	const conversationSurfaceIdentity = $derived(
@@ -444,6 +446,7 @@
 		const _feedDataRevision = chatState.feedMutationClock.dataRevision;
 		const _viewport = conversationViewport;
 		const _autoScroll = localSettings.autoScrollToBottom;
+		scroll.reconcilePinnedProjection();
 		scroll.reconcileInitialBottomRestore(_autoScroll);
 	});
 
@@ -493,14 +496,11 @@
 	// calls from loadChat fire against an undefined container.
 	$effect(() => {
 		const _container = scrollContainer;
-		const _isVisible = isVisible;
+		if (!_container) return;
 		untrack(() => {
-			if (
-				_isVisible &&
-				_container &&
-				chatState.displayMessageCount > 0 &&
-				localSettings.autoScrollToBottom
-			) {
+			if (initializedScrollContainer) return;
+			initializedScrollContainer = true;
+			if (isVisible && chatState.displayMessageCount > 0 && localSettings.autoScrollToBottom) {
 				scrollToBottomAndFill();
 			}
 		});
@@ -631,36 +631,41 @@
 
 <div class="h-full flex flex-col">
 	<div class="relative flex-1 min-h-0">
-		<ConversationFeed
-			bind:scrollContainer
-			onscroll={() => scroll.handleScroll()}
-			onUserScrollIntent={() => scroll.noteUserScrollIntent()}
-			onLoadEarlier={() => void scroll.requestPage('earlier', 'button')}
-			onLoadLater={() => void scroll.requestPage('later', 'button')}
-			onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
-			onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
-			pendingPermissionRequests={conversationUi.pendingPermissionRequests}
-			onRetry={() => {
-				const chatId = sessions.selectedChatId;
-				if (chatId) controller.loadChat(chatId);
-			}}
-			onForkChat={(upToSeq) => {
-				const chatId = sessions.selectedChatId;
-				if (chatId) void controller.forkChat(chatId, upToSeq);
-			}}
-			onGenerateTitleFromMessage={generateTitleFromMessage}
-			reserveComposerTraySpace={composerCapSpace.feed}
-			reserveTopFloatingToolbar={reserveFeedTopFloatingToolbar}
-			{isPreparingInitialScroll}
-			{isVisible}
-			pinnedToBottom={scroll.isPinnedToBottom}
-			surfaceIdentity={conversationSurfaceIdentity}
-			onViewportPortChange={(port) => (conversationViewport = port)}
-			{onRegisterPrepareHide}
-			onInitialEndRestored={() => scroll.completeInitialBottomRestore()}
-			isProcessing={selectedIsProcessing}
-			{textScale}
-		/>
+		<svelte:boundary>
+			<ConversationFeed
+				bind:scrollContainer
+				onscroll={() => scroll.handleScroll()}
+				onUserScrollIntent={() => scroll.noteUserScrollIntent()}
+				onLoadEarlier={() => void scroll.requestPage('earlier', 'button')}
+				onLoadLater={() => void scroll.requestPage('later', 'button')}
+				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
+				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
+				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
+				onRetry={() => {
+					const chatId = sessions.selectedChatId;
+					if (chatId) controller.loadChat(chatId);
+				}}
+				onForkChat={(upToSeq) => {
+					const chatId = sessions.selectedChatId;
+					if (chatId) void controller.forkChat(chatId, upToSeq);
+				}}
+				onGenerateTitleFromMessage={generateTitleFromMessage}
+				reserveComposerTraySpace={composerCapSpace.feed}
+				reserveTopFloatingToolbar={reserveFeedTopFloatingToolbar}
+				{isPreparingInitialScroll}
+				{isVisible}
+				pinnedToBottom={scroll.isPinnedToBottom}
+				surfaceIdentity={conversationSurfaceIdentity}
+				onViewportPortChange={(port) => (conversationViewport = port)}
+				{onRegisterPrepareHide}
+				onInitialEndRestored={() => scroll.completeInitialBottomRestore()}
+				isProcessing={selectedIsProcessing}
+				{textScale}
+			/>
+			{#snippet failed(error)}
+				<MessageRenderFallback {error} />
+			{/snippet}
+		</svelte:boundary>
 
 		{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 			<Button

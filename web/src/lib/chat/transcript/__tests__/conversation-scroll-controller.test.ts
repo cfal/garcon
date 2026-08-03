@@ -53,6 +53,7 @@ interface FakeViewport extends ConversationViewportPort {
 	isAtEnd: ReturnType<typeof vi.fn<(threshold?: number) => boolean>>;
 	scrollToStart: ReturnType<typeof vi.fn<() => void>>;
 	scrollToEnd: ReturnType<typeof vi.fn<ConversationViewportPort['scrollToEnd']>>;
+	restoreInitialEnd: ReturnType<typeof vi.fn<() => void>>;
 	scrollBy: ReturnType<typeof vi.fn<(delta: number) => void>>;
 	waitForLayout: ReturnType<typeof vi.fn<ConversationViewportPort['waitForLayout']>>;
 	measureViewportFill: ReturnType<typeof vi.fn<ConversationViewportPort['measureViewportFill']>>;
@@ -60,6 +61,7 @@ interface FakeViewport extends ConversationViewportPort {
 		typeof vi.fn<ConversationViewportPort['restoreHiddenReadingPosition']>
 	>;
 	cancelPendingLayoutMutation: ReturnType<typeof vi.fn<() => void>>;
+	cancelForUserIntent: ReturnType<typeof vi.fn<() => void>>;
 	scrollToTarget: ReturnType<typeof vi.fn<ConversationViewportPort['scrollToTarget']>>;
 }
 
@@ -69,12 +71,14 @@ function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeVi
 		isAtEnd: vi.fn(() => false),
 		scrollToStart: vi.fn(),
 		scrollToEnd: vi.fn(),
+		restoreInitialEnd: vi.fn(),
 		scrollBy: vi.fn(),
 		waitForLayout: vi.fn(async () => 'settled'),
 		measureViewportFill: vi.fn(async () => 'overflow'),
 		restoreHiddenReadingPosition: vi.fn(async () => 'restored'),
 		cancelPendingLayoutMutation: vi.fn(),
-		scrollToTarget: vi.fn(async () => true),
+		cancelForUserIntent: vi.fn(),
+		scrollToTarget: vi.fn(async () => 'completed'),
 		...overrides,
 	} as FakeViewport;
 }
@@ -166,7 +170,7 @@ describe('ConversationScrollController', () => {
 	it('cancels pending layout work before recording every user gesture', () => {
 		const { controller, viewport } = controllerFixture();
 		controller.noteUserScrollIntent('earlier');
-		expect(viewport.cancelPendingLayoutMutation).toHaveBeenCalledOnce();
+		expect(viewport.cancelForUserIntent).toHaveBeenCalledOnce();
 	});
 
 	it('requires fresh downward intent to repin inside the later threshold', () => {
@@ -284,18 +288,25 @@ describe('ConversationScrollController', () => {
 	});
 
 	it('routes message and DOM-anchor navigation through the virtual target index', async () => {
+		const observed: { controller: ConversationScrollController | null } = { controller: null };
 		const viewport = fakeViewport({
 			isAtEnd: vi.fn(() => false),
-			scrollToTarget: vi.fn(async () => true),
+			scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>(async () => {
+				expect(observed.controller?.isPinnedToBottom).toBe(false);
+				return 'completed';
+			}),
 		});
-		const { controller, state } = controllerFixture({ viewport });
+		const fixture = controllerFixture({ viewport });
+		const { controller } = fixture;
+		observed.controller = controller;
+		const { state } = fixture;
 		expect(
 			await controller.jumpToMessageRow({
 				chatId: 'chat-1',
 				generationId: 'generation-1',
 				rowId: 'generation-1:7',
 			}),
-		).toBe(true);
+		).toBe('completed');
 		expect(viewport.scrollToTarget).toHaveBeenNthCalledWith(
 			1,
 			{ kind: 'row', id: 'generation-1:7' },
@@ -318,8 +329,43 @@ describe('ConversationScrollController', () => {
 				generationId: 'generation-2',
 				rowId: 'generation-2:1',
 			}),
-		).toBe(false);
+		).toBe('unavailable');
 		expect(viewport.scrollToTarget).not.toHaveBeenCalled();
+	});
+
+	it('reports user-cancelled target navigation without treating it as missing', async () => {
+		const viewport = fakeViewport({
+			scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>(async () => 'cancelled'),
+		});
+		const { controller } = controllerFixture({ viewport });
+
+		await expect(
+			controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-1',
+				rowId: 'generation-1:7',
+			}),
+		).resolves.toBe('cancelled');
+	});
+
+	it('restores live following when target navigation is unavailable at the end', async () => {
+		const viewport = fakeViewport({
+			isAtEnd: vi.fn(() => true),
+			scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>(
+				async () => 'target-missing',
+			),
+		});
+		const { controller, state } = controllerFixture({ viewport });
+
+		await expect(
+			controller.jumpToMessageRow({
+				chatId: 'chat-1',
+				generationId: 'generation-1',
+				rowId: 'generation-1:7',
+			}),
+		).resolves.toBe('unavailable');
+		expect(controller.isPinnedToBottom).toBe(true);
+		expect(state.isUserScrolledUp).toBe(false);
 	});
 
 	it('reveals earlier rows until measured content overflows', async () => {
@@ -420,24 +466,19 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPreparingInitialScroll).toBe(false);
 	});
 
-	it('keeps restoring the end until the initial reveal completes', () => {
-		let hasInitialMessagesToReveal = true;
+	it('completes restoration after the first settled end even when older rows remain', () => {
 		const { controller, viewport, state } = controllerFixture();
 		Object.defineProperty(state, 'hasInitialMessagesToReveal', {
 			configurable: true,
-			get: () => hasInitialMessagesToReveal,
+			get: () => true,
 		});
 		controller.prepareInitialBottomRestore('chat-1');
 		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
-		controller.completeInitialBottomRestore();
-		expect(controller.isPreparingInitialScroll).toBe(true);
-
-		hasInitialMessagesToReveal = false;
-		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.scrollToEnd).toHaveBeenCalledTimes(2);
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 		controller.completeInitialBottomRestore();
 		expect(controller.isPreparingInitialScroll).toBe(false);
+		controller.reconcileInitialBottomRestore(true);
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 	});
 
 	it('clears initial restoration when loading ends empty', () => {

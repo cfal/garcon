@@ -22,6 +22,7 @@ export interface UserMessageNavigatorTarget {
 export type UserMessageNavigatorLoadError = 'older-page-failed';
 export type UserMessageNavigatorInitialLoadError = 'initial-load-failed';
 export type UserMessageNavigatorSelectionError = 'target-unavailable';
+export type UserMessageNavigatorSelectionResult = 'completed' | 'cancelled' | 'unavailable';
 export type UserMessageNavigatorCommand = () => void;
 export type UserMessageNavigatorRegistration = UserMessageNavigatorCommand | null;
 
@@ -42,7 +43,7 @@ export interface UserMessageNavigatorOptions {
 	reloadTranscript: (chatId: string) => Promise<void>;
 	restoreLatestTranscript: (chatId: string) => Promise<boolean>;
 	loadOlderMessages: (chatId: string) => Promise<TranscriptPageLoadResult>;
-	jumpToRow: (target: UserMessageNavigatorTarget) => Promise<boolean>;
+	jumpToRow: (target: UserMessageNavigatorTarget) => Promise<UserMessageNavigatorSelectionResult>;
 }
 
 export interface UserMessageNavigatorDialogController {
@@ -215,9 +216,12 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		this.options.transcript.revealAllLoadedMessages();
 		this.open = false;
 
-		const jumped = await this.options.jumpToRow(target);
+		const result = await this.options.jumpToRow(target);
 		if (lifecycleEpoch !== this.#lifecycleEpoch) return;
-		if (jumped || !this.#matchesActiveTranscript(target.chatId, target.generationId)) {
+		if (
+			result !== 'unavailable' ||
+			!this.#matchesActiveTranscript(target.chatId, target.generationId)
+		) {
 			this.#clearIdentity();
 			return;
 		}
