@@ -54,82 +54,89 @@ jobs:
           retention-days: 7
 
   claude-live:
-    name: Live Claude conformance (DeepSeek V4 Pro)
+    name: Live Claude conformance
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      CLAUDE_TESTING_BASE_URL: https://api.deepseek.com/anthropic
-      CLAUDE_TESTING_MODEL: deepseek-v4-pro
 
     steps:
-      - name: Check for Claude testing key
-        id: claude-key
+      - name: Check for Claude testing configuration
+        id: claude-config
         shell: bash
         env:
           CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
+          CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
+          CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: |
-          if [ -n "$CLAUDE_TESTING_KEY" ]; then
+          if [ -n "$CLAUDE_TESTING_KEY" ] && [ -n "$CLAUDE_TESTING_BASE_URL" ] && [ -n "$CLAUDE_TESTING_MODEL" ]; then
             echo "::add-mask::$CLAUDE_TESTING_KEY"
+            echo "::add-mask::$CLAUDE_TESTING_BASE_URL"
+            echo "::add-mask::$CLAUDE_TESTING_MODEL"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "CLAUDE_TESTING_KEY is unavailable; skipping live Claude tests."
+            echo "Claude testing configuration is unavailable; skipping live Claude tests."
           fi
 
       - name: Check out repository
-        if: steps.claude-key.outputs.available == 'true'
+        if: steps.claude-config.outputs.available == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Bun
-        if: steps.claude-key.outputs.available == 'true'
+        if: steps.claude-config.outputs.available == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
       - name: Install server dependencies
-        if: steps.claude-key.outputs.available == 'true'
+        if: steps.claude-config.outputs.available == 'true'
         working-directory: server
         run: bun install --frozen-lockfile
 
       - name: Install integration-test dependencies
-        if: steps.claude-key.outputs.available == 'true'
+        if: steps.claude-config.outputs.available == 'true'
         working-directory: integration-tests
         run: bun install --frozen-lockfile
 
       - name: Run live Claude conformance tests
-        if: steps.claude-key.outputs.available == 'true'
+        if: steps.claude-config.outputs.available == 'true'
         env:
           CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
+          CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
+          CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: bun run test:live:claude
 
-      - name: Verify Claude diagnostics contain no testing credential
+      - name: Verify Claude diagnostics contain no testing configuration
         id: claude-diagnostics-audit
-        if: always() && steps.claude-key.outputs.available == 'true'
+        if: always() && steps.claude-config.outputs.available == 'true'
         shell: bash
         env:
           CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
+          CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
+          CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: |
-          echo "::add-mask::$CLAUDE_TESTING_KEY"
           if [ -d integration-tests/artifacts/server ]; then
-            set +e
-            grep --recursive --fixed-strings --files-with-matches \
-              -- "$CLAUDE_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
-            audit_status=$?
-            set -e
-            if [ "$audit_status" -eq 0 ]; then
-              echo "safe=false" >> "$GITHUB_OUTPUT"
-              echo "::error::Live Claude diagnostics contain the testing credential and will not be uploaded."
-              exit 1
-            fi
-            if [ "$audit_status" -ne 1 ]; then
-              echo "safe=false" >> "$GITHUB_OUTPUT"
-              echo "::error::Live Claude diagnostics could not be audited and will not be uploaded."
-              exit 1
-            fi
+            for value in "$CLAUDE_TESTING_KEY" "$CLAUDE_TESTING_BASE_URL" "$CLAUDE_TESTING_MODEL"; do
+              echo "::add-mask::$value"
+              set +e
+              grep --recursive --fixed-strings --files-with-matches \
+                -- "$value" integration-tests/artifacts/server >/dev/null 2>&1
+              audit_status=$?
+              set -e
+              if [ "$audit_status" -eq 0 ]; then
+                echo "safe=false" >> "$GITHUB_OUTPUT"
+                echo "::error::Live Claude diagnostics contain testing configuration and will not be uploaded."
+                exit 1
+              fi
+              if [ "$audit_status" -ne 1 ]; then
+                echo "safe=false" >> "$GITHUB_OUTPUT"
+                echo "::error::Live Claude diagnostics could not be audited and will not be uploaded."
+                exit 1
+              fi
+            done
           fi
           echo "safe=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload live Claude diagnostics
-        if: failure() && steps.claude-key.outputs.available == 'true' && steps.claude-diagnostics-audit.outputs.safe == 'true'
+        if: failure() && steps.claude-config.outputs.available == 'true' && steps.claude-diagnostics-audit.outputs.safe == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: claude-live-integration-diagnostics
