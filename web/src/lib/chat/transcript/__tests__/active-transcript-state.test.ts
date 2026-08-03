@@ -323,11 +323,12 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.applyMessages('chat-1', 'generation-1', [entry(2, assistant('live'))])).toBe(
 			'applied',
 		);
+		chat.appendLocalNotice('error', 'newer notice');
 		rejectSnapshot(new Error('snapshot unavailable'));
 
 		await expect(snapshotLoad).rejects.toThrow('snapshot unavailable');
 		expect(chat.chatMessages.map(contentOf)).toEqual(['existing', 'live']);
-		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'live']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'live', 'newer notice']);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 		expect(chat.loadStatus).toBe('error');
 		expect(chat.loadError).toBe('snapshot unavailable');
@@ -377,6 +378,76 @@ describe('ActiveTranscriptState', () => {
 			expect.objectContaining({ content: 'live' }),
 		]);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+	});
+
+	it('preserves notices created after a superseding snapshot starts', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		let resolveFirstSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		let resolveSecondSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveFirstSnapshot = resolve;
+				}),
+			)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveSecondSnapshot = resolve;
+				}),
+			);
+
+		const firstLoad = chat.loadMessages('chat-1');
+		const secondLoad = chat.loadMessages('chat-1');
+		resolveFirstSnapshot({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({ messages: [entry(1, assistant('existing'))], lastSeq: 1 }),
+		});
+		await firstLoad;
+		chat.appendLocalNotice('error', 'newer notice');
+		resolveSecondSnapshot({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({ messages: [entry(1, assistant('existing'))], lastSeq: 1 }),
+		});
+
+		await secondLoad;
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'newer notice']);
+	});
+
+	it('clears loading state when switching away from an active snapshot load', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		let resolveSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveSnapshot = resolve;
+			}),
+		);
+
+		const snapshotLoad = chat.loadMessages('chat-1');
+		expect(chat.isLoadingMessages).toBe(true);
+		chat.activateChat('chat-draft');
+		expect(chat.isLoadingMessages).toBe(false);
+		resolveSnapshot({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({ messages: [entry(1, assistant('existing'))], lastSeq: 1 }),
+		});
+
+		await snapshotLoad;
+		expect(chat.activeChatId).toBe('chat-draft');
+		expect(chat.loadStatus).toBe('idle');
+		expect(chat.isLoadingMessages).toBe(false);
 	});
 
 	it('does not let a stale snapshot failure overwrite the active chat load state', async () => {

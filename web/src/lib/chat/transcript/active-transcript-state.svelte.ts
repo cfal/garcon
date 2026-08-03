@@ -12,6 +12,7 @@ export const INITIAL_SWITCH_VISIBLE_MESSAGES = 20;
 export const ACTIVE_TRANSCRIPT_RETENTION_LIMIT = 200;
 const SWITCH_REVEAL_BATCH_SIZE = 20;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
+type SnapshotBatch = { generationId: string; messages: ChatViewMessage[]; noticeRevision: number };
 export type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
 type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
@@ -54,11 +55,6 @@ export interface ChatTranscriptRow {
 }
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
-
-function localMessageId(): string {
-	return createRandomId();
-}
-
 function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): PendingUserInput[] {
 	return sortPendingInputs(
 		page.pendingUserInputs
@@ -101,7 +97,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	lastSeq = $state(0);
 	oldestSeq = $state(0);
 	pendingUserInputs = $state<PendingUserInput[]>([]);
-	localNotices = $state<LocalNoticeRow[]>([]);
+	localNotices = $state<(LocalNoticeRow & { revision: number })[]>([]);
 	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	hasEarlierMessages = $state(false);
@@ -113,8 +109,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	isUserScrolledUp = $state(false);
 	loadStatus = $state<ChatLoadStatus>('idle');
 	loadError = $state<string | null>(null);
-	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
+	#snapshotBuffer: SnapshotBatch[] | null = null;
 	#loadEpoch = 0;
+	#localNoticeRevision = 0;
+	#localNoticeRevisionAtLoadStart = 0;
 	#pendingUserInputsRevision = 0;
 	#pendingUserInputsRevisionAtLoadStart = 0;
 	#pageLoadPromise: Promise<TranscriptPageLoadResult> | null = null;
@@ -279,10 +277,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
+		noticeRevision = this.#localNoticeRevision,
 	): MessageApplyResult {
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, generationId, messages);
-			this.#snapshotBuffer.push({ generationId, messages });
+			this.#snapshotBuffer.push({ generationId, messages, noticeRevision });
 			return 'applied';
 		}
 		if (this.generationId && generationId !== this.generationId) {
@@ -310,7 +309,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.generationId = generationId;
 			this.lastSeq = result.lastSeq;
 			if (result.changed) {
-				this.localNotices = [];
+				this.clearLocalNotices(noticeRevision);
 			}
 			if (this.entries.length > 0 && this.loadStatus !== 'error') {
 				this.loadStatus = 'loaded';
@@ -318,9 +317,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'applied';
 		}
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
-		let visibleChanged = false;
+		const visibleChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
-			visibleChanged = applied.changed;
 			const shouldCompact =
 				!this.isUserScrolledUp && this.visibleMessageCount <= INITIAL_VISIBLE_MESSAGES;
 			const nextEntries =
@@ -344,7 +342,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.oldestSeq = restored.oldestSeq;
 		}
 		if (result.changed || visibleChanged) {
-			this.localNotices = [];
+			this.clearLocalNotices(noticeRevision);
 		}
 		this.totalMessages = this.entries.length;
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
@@ -355,7 +353,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	beginSnapshotLoad(): number {
 		const epoch = this.#beginLoadEpoch();
-		// Carries live events into a superseding snapshot load.
 		this.#snapshotBuffer ??= [];
 		this.isLoadingMessages = true;
 		this.loadStatus = 'loading';
@@ -379,9 +376,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const buffered = this.#snapshotBuffer ?? [];
 		this.#snapshotBuffer = null;
 		this.isLoadingMessages = false;
-		// Replays live batches already accepted into the cache so a failed snapshot cannot hide them.
 		for (const batch of buffered) {
-			if (this.applyMessages(chatId, batch.generationId, batch.messages) !== 'applied') break;
+			if (
+				this.applyMessages(chatId, batch.generationId, batch.messages, batch.noticeRevision) !==
+				'applied'
+			)
+				break;
 		}
 		return true;
 	}
@@ -458,7 +458,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (this.#pendingUserInputsRevision === this.#pendingUserInputsRevisionAtLoadStart) {
 			this.#replacePendingUserInputs(pendingInputsFromPage(page));
 		}
-		this.localNotices = [];
+		this.clearLocalNotices(this.#localNoticeRevisionAtLoadStart);
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
@@ -650,16 +650,17 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			...this.localNotices,
 			{
 				kind: 'local-notice',
-				id: `local_${localMessageId()}`,
+				id: `local_${createRandomId()}`,
 				noticeType,
 				content,
 				timestamp: new Date().toISOString(),
+				revision: ++this.#localNoticeRevision,
 			},
 		];
 	}
 
-	clearLocalNotices(): void {
-		this.localNotices = [];
+	clearLocalNotices(throughRevision = this.#localNoticeRevision): void {
+		this.localNotices = this.localNotices.filter((notice) => notice.revision > throughRevision);
 	}
 
 	setPendingUserInputs(inputs: PendingUserInput[]): void {
@@ -717,6 +718,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = 0;
 		this.loadStatus = 'idle';
 		this.loadError = null;
+		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
 		this.#initialRevealPhase = 'complete';
 	}
@@ -860,6 +862,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	#beginLoadEpoch(): number {
 		this.#pendingUserInputsRevisionAtLoadStart = this.#pendingUserInputsRevision;
+		this.#localNoticeRevisionAtLoadStart = this.#localNoticeRevision;
 		return ++this.#loadEpoch;
 	}
 
