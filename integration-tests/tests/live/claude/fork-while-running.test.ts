@@ -154,7 +154,10 @@ describe('live Claude fork while running', () => {
         marker: resumedMarker,
         afterIndex: resumedCursor,
       });
-    }, { serverEnvironment });
+    }, {
+      redactSensitiveDiagnostics: true,
+      serverEnvironment,
+    });
   }, 240_000);
 });
 

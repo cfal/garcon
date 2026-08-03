@@ -553,8 +553,17 @@ describe('GitHistoryView', () => {
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
 
 		ResizeObserverHarness.emit(details, 560);
-		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('compact'));
+		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
+		expect(container.querySelector('[data-git-history-segmented-navigation]')).toBeTruthy();
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(diffPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
+
+		ResizeObserverHarness.emit(details, 840);
+		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('wide'));
 		expect(container.querySelector('[data-git-history-segmented-navigation]')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Hide file tree' })).toBeTruthy();
+		expect(screen.getByRole('slider', { name: /Resize file tree/ })).toBeTruthy();
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(diffPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
