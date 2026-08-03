@@ -178,6 +178,54 @@ describe('QueueControls', () => {
 		await waitFor(() => expect(steer.getAttribute('aria-busy')).toBeNull());
 	});
 
+	it('pins local steering feedback to its source while live queue order changes', async () => {
+		const pending = deferred<void>();
+		const view = renderControls(makeQueueWithIds(['q0', 'q1']), {
+			canSteer: true,
+			onSteer: vi.fn(() => pending.promise),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_steer() }));
+		await view.rerender({ queue: makeQueueWithIds(['q1', 'q0']) });
+
+		expect(screen.getByText('queued q0')).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy')).toBe(
+			'true',
+		);
+
+		await view.rerender({ queue: makeQueueWithIds(['q1']) });
+		const nextHeadSteer = screen.getByRole('button', { name: m.chat_queue_steer() });
+		expect(screen.getByText('queued q1')).toBeTruthy();
+		expect(nextHeadSteer.getAttribute('aria-busy')).toBeNull();
+		expect(nextHeadSteer.hasAttribute('disabled')).toBe(true);
+
+		pending.resolve();
+		await waitFor(() => expect(nextHeadSteer.hasAttribute('disabled')).toBe(false));
+	});
+
+	it('keeps pending queue actions scoped to their originating chat', async () => {
+		const pending = deferred<void>();
+		const onSteer = vi.fn((entry: QueueEntry) =>
+			entry.id === 'a0' ? pending.promise : Promise.resolve(),
+		);
+		const view = renderControls(makeQueueWithIds(['a0']), { canSteer: true, onSteer });
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_steer() }));
+		await view.rerender({ chatId: 'chat-2', queue: makeQueueWithIds(['b0']) });
+
+		const chatBSteer = screen.getByRole('button', { name: m.chat_queue_steer() });
+		expect(chatBSteer.getAttribute('aria-busy')).toBeNull();
+		expect(chatBSteer.getAttribute('aria-disabled')).toBeNull();
+		await fireEvent.click(chatBSteer);
+		expect(onSteer).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'b0' }), 0);
+
+		await view.rerender({ chatId: 'chat-1', queue: makeQueueWithIds(['a0']) });
+		expect(screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy')).toBe(
+			'true',
+		);
+		pending.resolve();
+	});
+
 	it('uses authoritative steering state to block every conflicting queue affordance', async () => {
 		const queue = makeQueueWithIds(['q0', 'q1']);
 		queue.steeringEntryId = 'q0';

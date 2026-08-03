@@ -39,7 +39,7 @@ export interface ConversationQueueControllerOptions {
 	get sessions(): Pick<SessionControllerDeps['sessions'], 'selectedChatId'>;
 	get chatState(): Pick<
 		SessionControllerDeps['chatState'],
-		'clearLocalNotices' | 'appendLocalNotice' | 'upsertPendingUserInput'
+		'activeChatId' | 'clearLocalNotices' | 'appendLocalNotice' | 'upsertPendingUserInput'
 	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
@@ -255,8 +255,8 @@ export class ConversationQueueController {
 			const result = await submission.submit();
 			if (result.control) {
 				this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+				this.#upsertSteeredInput(chatId, entry.content, submission, 'accepted');
 			}
-			this.#upsertSteeredInput(chatId, entry.content, submission, 'accepted');
 		} catch (error) {
 			const failure = queueEntrySteerFailure(error);
 			if (failure.control) {
@@ -316,6 +316,7 @@ export class ConversationQueueController {
 		},
 		deliveryStatus: 'accepted' | 'unconfirmed',
 	): void {
+		if (this.options.chatState.activeChatId !== chatId) return;
 		this.options.chatState.upsertPendingUserInput({
 			...pendingUserInput(
 				chatId,

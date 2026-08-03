@@ -51,14 +51,28 @@
 		chatId: string;
 		entryId: string;
 	}
+	type DispatchMutationKind = 'pausing' | 'resuming' | 'interrupting' | 'steering';
+	interface DispatchMutation {
+		token: number;
+		kind: DispatchMutationKind;
+		chatId: string;
+		entryId?: string;
+	}
 
 	let previewSelection = $state<QueuePreviewSelection | null>(null);
+	let dispatchMutationToken = 0;
+	let dispatchMutations = $state<Record<string, DispatchMutation>>({});
 	const entries = $derived(queue?.entries ?? []);
 	const queuedEntryCount = $derived(entries.length);
+	const dispatchMutation = $derived(chatId ? (dispatchMutations[chatId] ?? null) : null);
+	const localSteeringEntryId = $derived(
+		dispatchMutation?.kind === 'steering' ? (dispatchMutation.entryId ?? null) : null,
+	);
 	const previewIndex = $derived.by(() => {
 		if (entries.length === 0) return -1;
-		const steeringIndex = queue?.steeringEntryId
-			? entries.findIndex((entry) => entry.id === queue?.steeringEntryId)
+		const steeringEntryId = queue?.steeringEntryId ?? localSteeringEntryId;
+		const steeringIndex = steeringEntryId
+			? entries.findIndex((entry) => entry.id === steeringEntryId)
 			: -1;
 		if (steeringIndex >= 0) return steeringIndex;
 		if (!chatId || previewSelection?.chatId !== chatId) return 0;
@@ -71,7 +85,9 @@
 	const canBrowseNext = $derived(previewIndex >= 0 && previewIndex < queuedEntryCount - 1);
 	const showQueueManager = $derived(queuedEntryCount > 1);
 	const queueSteering = $derived(queue?.steeringEntryId != null);
-	const previewSteering = $derived(queue?.steeringEntryId === previewEntry?.id);
+	const previewSteering = $derived(
+		queue?.steeringEntryId === previewEntry?.id || localSteeringEntryId === previewEntry?.id,
+	);
 	const showSteerAction = $derived(
 		((previewIndex === 0 && canSteer) || previewSteering) && Boolean(onSteer),
 	);
@@ -79,10 +95,7 @@
 		previewIndex === 0 && !queue?.pause && !queueSteering && canInterrupt && Boolean(onInterrupt),
 	);
 	let deletingEntryIds = $state<Set<string>>(new Set());
-	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting' | 'steering'>(
-		'idle',
-	);
-	const queueActionPending = $derived(dispatchMutation !== 'idle');
+	const queueActionPending = $derived(dispatchMutation !== null);
 	const queueMutationsBlocked = $derived(queueActionPending || queueSteering);
 	const queueActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
@@ -92,7 +105,7 @@
 		if (showSteerAction && onSteer && previewEntry && queue) {
 			const observedEntry = previewEntry;
 			const expectedReorderRevision = queue.reorderRevision;
-			const steerBusy = dispatchMutation === 'steering' || previewSteering;
+			const steerBusy = previewSteering;
 			actions.push({
 				id: 'steer',
 				label: m.chat_queue_steer(),
@@ -101,9 +114,13 @@
 				iconClass: steerBusy ? 'animate-spin' : undefined,
 				onclick: () => {
 					if (previewSteering) return;
-					void mutateDispatch('steering', () => onSteer(observedEntry, expectedReorderRevision));
+					void mutateDispatch(
+						'steering',
+						() => onSteer(observedEntry, expectedReorderRevision),
+						observedEntry.id,
+					);
 				},
-				disabled: queueActionPending && dispatchMutation !== 'steering',
+				disabled: queueActionPending && !steerBusy,
 				busy: steerBusy,
 				priority: 1,
 				showLabel: true,
@@ -116,11 +133,11 @@
 				id: 'send-now',
 				label: m.chat_queue_interrupt_and_send(),
 				title: m.chat_queue_interrupt_and_send_queue(),
-				icon: dispatchMutation === 'interrupting' ? Loader2 : FastForward,
-				iconClass: dispatchMutation === 'interrupting' ? 'animate-spin' : undefined,
+				icon: dispatchMutation?.kind === 'interrupting' ? Loader2 : FastForward,
+				iconClass: dispatchMutation?.kind === 'interrupting' ? 'animate-spin' : undefined,
 				onclick: () => void mutateDispatch('interrupting', onInterrupt),
 				disabled: queueMutationsBlocked,
-				busy: dispatchMutation === 'interrupting',
+				busy: dispatchMutation?.kind === 'interrupting',
 				priority: 0,
 				showLabel: true,
 				buttonClass: neutralButtonClass,
@@ -145,11 +162,11 @@
 				id: 'resume-queue',
 				label: m.chat_queue_resume(),
 				title: m.chat_queue_resume_queue(),
-				icon: dispatchMutation === 'resuming' ? Loader2 : Play,
-				iconClass: dispatchMutation === 'resuming' ? 'animate-spin' : undefined,
+				icon: dispatchMutation?.kind === 'resuming' ? Loader2 : Play,
+				iconClass: dispatchMutation?.kind === 'resuming' ? 'animate-spin' : undefined,
 				onclick: () => void mutateDispatch('resuming', () => onResume(queue.pause!.id)),
 				disabled: queueMutationsBlocked,
-				busy: dispatchMutation === 'resuming',
+				busy: dispatchMutation?.kind === 'resuming',
 				priority: 2,
 				showLabel: true,
 				buttonClass:
@@ -160,11 +177,11 @@
 				id: 'pause-queue',
 				label: m.chat_queue_pause(),
 				title: m.chat_queue_pause_queue(),
-				icon: dispatchMutation === 'pausing' ? Loader2 : Pause,
-				iconClass: dispatchMutation === 'pausing' ? 'animate-spin' : undefined,
+				icon: dispatchMutation?.kind === 'pausing' ? Loader2 : Pause,
+				iconClass: dispatchMutation?.kind === 'pausing' ? 'animate-spin' : undefined,
 				onclick: () => void mutateDispatch('pausing', onPause),
 				disabled: queueMutationsBlocked,
-				busy: dispatchMutation === 'pausing',
+				busy: dispatchMutation?.kind === 'pausing',
 				priority: 2,
 				showLabel: true,
 				buttonClass: neutralButtonClass,
@@ -194,19 +211,29 @@
 	}
 
 	async function mutateDispatch(
-		mutation: Exclude<typeof dispatchMutation, 'idle'>,
+		kind: DispatchMutationKind,
 		action: () => void | Promise<void>,
+		entryId?: string,
 	): Promise<void> {
-		if (dispatchMutation !== 'idle' || queueSteering) return;
-		dispatchMutation = mutation;
+		if (!chatId || dispatchMutation || queueSteering) return;
+		const operation: DispatchMutation = {
+			token: ++dispatchMutationToken,
+			kind,
+			chatId,
+			...(entryId ? { entryId } : {}),
+		};
+		dispatchMutations = { ...dispatchMutations, [operation.chatId]: operation };
 		try {
 			await action();
 		} catch (error) {
-			if (mutation === 'pausing' || mutation === 'resuming') {
-				onQueueControlError(mutation === 'pausing' ? 'pause' : 'resume', error);
+			if (kind === 'pausing' || kind === 'resuming') {
+				onQueueControlError(kind === 'pausing' ? 'pause' : 'resume', error);
 			}
 		} finally {
-			if (dispatchMutation === mutation) dispatchMutation = 'idle';
+			if (dispatchMutations[operation.chatId]?.token === operation.token) {
+				const { [operation.chatId]: _completed, ...remaining } = dispatchMutations;
+				dispatchMutations = remaining;
+			}
 		}
 	}
 </script>

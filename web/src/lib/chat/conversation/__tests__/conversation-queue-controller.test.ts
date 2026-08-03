@@ -29,6 +29,7 @@ function queueEntry(id: string, revision: number) {
 function createHarness() {
 	const sessions = { selectedChatId: 'chat-1' as string | null };
 	const chatState = {
+		activeChatId: 'chat-1' as string | null,
 		clearLocalNotices: vi.fn(),
 		appendLocalNotice: vi.fn(),
 		upsertPendingUserInput: vi.fn(),
@@ -306,6 +307,28 @@ describe('ConversationQueueController', () => {
 		expect(scrollToBottom).toHaveBeenCalledOnce();
 	});
 
+	it('does not recreate a pending row when deleted-chat replay omits control', async () => {
+		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
+		acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: vi.fn(async () => ({
+				success: true as const,
+				commandType: 'steer' as const,
+				clientRequestId: 'request-steer',
+				chatId: 'chat-1',
+				status: 'duplicate' as const,
+				acceptedAt: '2026-08-02T00:00:00.000Z',
+				turnId: 'turn-active',
+			})),
+		});
+
+		await controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7);
+
+		expect(conversationUi.setExecutionControlFromLiveUpdate).not.toHaveBeenCalled();
+		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+	});
+
 	it('consumes an explicitly unknown queued steer into one unconfirmed pending row', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');
@@ -378,7 +401,7 @@ describe('ConversationQueueController', () => {
 		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
 	});
 
-	it('updates a background chat without leaking notice or scroll state after a switch', async () => {
+	it('does not write a late queued-steer result into the active transcript after a switch', async () => {
 		const { controller, acceptedInputs, chatState, sessions, scrollToBottom } = createHarness();
 		const error = queueSteerError('STEER_OUTCOME_UNKNOWN', 'unknown');
 		acceptedInputs.steerQueuedEntry.mockReturnValue({
@@ -386,6 +409,7 @@ describe('ConversationQueueController', () => {
 			clientMessageId: 'message-steer',
 			submit: vi.fn(async () => {
 				sessions.selectedChatId = 'chat-2';
+				chatState.activeChatId = 'chat-2';
 				throw error;
 			}),
 		});
@@ -394,11 +418,7 @@ describe('ConversationQueueController', () => {
 			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
-		expect(chatState.upsertPendingUserInput).toHaveBeenCalledWith(
-			expect.objectContaining({
-				chatId: 'chat-1',
-			}),
-		);
+		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 		expect(chatState.appendLocalNotice).not.toHaveBeenCalled();
 		expect(scrollToBottom).not.toHaveBeenCalled();
 	});

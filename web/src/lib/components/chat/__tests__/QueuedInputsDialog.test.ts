@@ -403,6 +403,25 @@ describe('QueuedInputsDialog', () => {
 		expect(onReplace).toHaveBeenCalledWith('entry-0', 'Keep this steering draft', 1);
 	});
 
+	it('blocks an open sibling editor while another queued entry is steering', async () => {
+		const { component, onReplace } = renderDialog(queue([entry(0), entry(1)]));
+		await fireEvent.click(screen.getAllByRole('button', { name: m.chat_queue_edit_message() })[1]);
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		await fireEvent.input(textarea, { target: { value: 'Sibling draft' } });
+
+		component.setQueue(queue([entry(0), entry(1)], { steeringEntryId: 'entry-0' }));
+
+		await waitFor(() => expect((textarea as HTMLTextAreaElement).disabled).toBe(true));
+		const save = screen.getByRole('button', { name: m.chat_queue_save_edit() });
+		expect((save as HTMLButtonElement).disabled).toBe(true);
+		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+		expect(onReplace).not.toHaveBeenCalled();
+
+		component.setQueue(queue([entry(0), entry(1)]));
+		await waitFor(() => expect((textarea as HTMLTextAreaElement).disabled).toBe(false));
+		expect((save as HTMLButtonElement).disabled).toBe(false);
+	});
+
 	it('ignores a late save result after a newer editor session begins', async () => {
 		const pendingSave = deferred<void>();
 		const { component, onReplace } = renderDialog(queue([entry(0), entry(1)]));

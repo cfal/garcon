@@ -41,9 +41,13 @@ export class QueuedInputEditorState {
 		}
 		return 'removed';
 	});
+	mutationBlocked = $derived.by(() => this.options.queue?.steeringEntryId != null);
 
 	canSave = $derived(
-		this.phase === 'editable' && this.mutation === 'idle' && this.draft.trim().length > 0,
+		this.phase === 'editable' &&
+			!this.mutationBlocked &&
+			this.mutation === 'idle' &&
+			this.draft.trim().length > 0,
 	);
 
 	constructor(private readonly options: QueuedInputEditorOptions) {}
