@@ -460,6 +460,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.windowRevision += 1;
 		if (page.generationId !== this.generationId) {
 			this.#preserveExpandedVisibleWindow = false;
+			this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		}
 		this.generationId = page.generationId;
 		this.entries = page.messages;
@@ -970,7 +971,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	#rememberExpandedVisibleWindow(): void {
 		if (
-			this.visibleMessageCount > INITIAL_VISIBLE_MESSAGES &&
+			this.#renderEntries.length > INITIAL_VISIBLE_MESSAGES &&
 			this.visibleMessageCount >= this.#renderEntries.length
 		) {
 			this.#preserveExpandedVisibleWindow = true;

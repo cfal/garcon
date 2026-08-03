@@ -1045,7 +1045,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 	});
 
-	it('does not carry expanded-window growth into a replacement generation snapshot', () => {
+	it('does not re-arm expanded-window growth from replacement-generation count slack', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(
 			'chat-1',
@@ -1062,21 +1062,72 @@ describe('ActiveTranscriptState', () => {
 				page({
 					generationId: 'generation-2',
 					messages: Array.from({ length: 50 }, (_, index) =>
-						entry(index + 1, assistant(`new-${index + 1}`)),
+						entry(index + 51, assistant(`new-${index + 51}`)),
 					),
-					lastSeq: 50,
+					lastSeq: 100,
+					pageOldestSeq: 51,
+					hasMore: true,
 				}),
 				epoch,
 			),
 		).toBe('applied');
+		expect(chat.visibleMessageCount).toBe(INITIAL_VISIBLE_MESSAGES);
+
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				generationId: 'generation-2',
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 1, assistant(`new-${index + 1}`)),
+				),
+				lastSeq: 100,
+				pageOldestSeq: 1,
+				hasMore: false,
+			}),
+		});
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('loaded');
 		chat.applyMessages(
 			'chat-1',
 			'generation-2',
-			Array.from({ length: 126 }, (_, index) => entry(index + 51, assistant(`new-${index + 51}`))),
+			Array.from({ length: 126 }, (_, index) =>
+				entry(index + 101, assistant(`new-${index + 101}`)),
+			),
 		);
 
-		expect(chat.visibleRows).toHaveLength(175);
-		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-2:2', seq: 2 });
+		expect(chat.visibleRows).toHaveLength(150);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-2:77', seq: 77 });
+	});
+
+	it('retains expanded-window growth across a same-generation snapshot', () => {
+		const chat = new ActiveTranscriptState();
+		const messages = Array.from({ length: 175 }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq: 175,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.revealAllLoadedMessages();
+		const epoch = chat.beginSnapshotLoad();
+
+		expect(
+			chat.setFromPage(
+				'chat-1',
+				page({
+					generationId: 'generation-1',
+					messages,
+					lastSeq: 175,
+					pageOldestSeq: 1,
+				}),
+				epoch,
+			),
+		).toBe('applied');
+		chat.applyMessages('chat-1', 'generation-1', [entry(176, assistant('message-176'))]);
+
+		expect(chat.visibleRows).toHaveLength(176);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 	});
 
 	it.each([0, 20])(
