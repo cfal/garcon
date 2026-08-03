@@ -6,6 +6,11 @@ import { ConversationFeedProjectionState } from '../ConversationFeedProjectionSt
 import { estimateConversationFeedItemSize } from '../conversation-feed-virtual-items.js';
 
 const TS = '2026-08-03T00:00:00.000Z';
+type TranscriptMessageRow = Extract<ChatDisplayRow, { kind: 'message' }>;
+type ProjectionInput = Parameters<ConversationFeedProjectionState['reconcile']>[0];
+
+const NO_HIDDEN_TOOL_TYPES: ProjectionInput['hiddenToolTypes'] = [];
+const NO_FLOATING_PERMISSIONS: ProjectionInput['floatingPermissions'] = [];
 
 function clock(
 	dataRevision: number,
@@ -34,13 +39,13 @@ function rows(content = 'hello'): ChatDisplayRow[] {
 }
 
 function input(
-	overrides: Partial<Parameters<ConversationFeedProjectionState['reconcile']>[0]> = {},
-): Parameters<ConversationFeedProjectionState['reconcile']>[0] {
+	overrides: Partial<ProjectionInput> = {},
+): ProjectionInput {
 	return {
 		surfaceIdentity: 'chat-1:generation-1',
 		rows: rows(),
 		mutationClock: clock(1, { replacement: 1 }),
-		hiddenToolTypes: [],
+		hiddenToolTypes: NO_HIDDEN_TOOL_TYPES,
 		showThinking: true,
 		textScale: 1,
 		isLiveWindow: true,
@@ -49,7 +54,7 @@ function input(
 		showEarlierBoundary: false,
 		showLaterBoundary: false,
 		reserveComposerTraySpace: false,
-		floatingPermissions: [],
+		floatingPermissions: NO_FLOATING_PERMISSIONS,
 		...overrides,
 	};
 }
@@ -80,7 +85,7 @@ describe('ConversationFeedProjectionState', () => {
 
 	it('reconciles a streamed tail without rebuilding a deep transcript', () => {
 		const projections = new ConversationFeedProjectionState();
-		const deepRows = Array.from({ length: 20_000 }, (_, index): ChatDisplayRow => ({
+		const deepRows = Array.from({ length: 20_000 }, (_, index): TranscriptMessageRow => ({
 			kind: 'message',
 			id: `generation-1:${index + 1}`,
 			seq: index + 1,
@@ -111,7 +116,7 @@ describe('ConversationFeedProjectionState', () => {
 
 	it('extends deep transcript indexes incrementally for assistant appends', () => {
 		const projections = new ConversationFeedProjectionState();
-		const deepRows = Array.from({ length: 20_000 }, (_, index): ChatDisplayRow => ({
+		const deepRows = Array.from({ length: 20_000 }, (_, index): TranscriptMessageRow => ({
 			kind: 'message',
 			id: `generation-1:${index + 1}`,
 			seq: index + 1,
