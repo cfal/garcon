@@ -165,6 +165,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#pendingEndScroll = false;
 	#programmaticScrollActive = false;
 	#programmaticScrollEpoch = 0;
+	#activeTargetScrolls = 0;
 	#userIntentEpoch = 0;
 	#scrollMargin = 0;
 	#lastViewportRect: Rect = { width: 0, height: CHAT_FALLBACK_VIEWPORT_HEIGHT };
@@ -291,7 +292,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return;
 		}
 		this.#cancelTargetScroll();
-		this.cancelPendingLayoutMutation();
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		void this.#restoreInitialEndAfterCommit(operationEpoch);
 	}
@@ -435,81 +435,86 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		options: { align?: 'center' | 'start' | 'end' } = {},
 	): Promise<ConversationViewportTargetResult> {
 		if (!this.isReady()) return 'not-ready';
-		this.#cancelTargetScroll();
-		this.cancelPendingLayoutMutation();
-		const token = this.#targetToken;
-		await tick();
-		await nextAnimationFrame();
-		if (token !== this.#targetToken) return 'cancelled';
-		if (!this.isReady()) return 'not-ready';
-		this.cancelPendingLayoutMutation();
-		const model = this.options.model;
-		const resolved =
-			target.kind === 'row'
-				? (() => {
-						const index = model.indexByRowId.get(target.id);
-						return index === undefined ? undefined : { index, innerRowId: target.id };
-					})()
-				: model.targetByDomAnchorId.get(target.id);
-		if (!resolved) return 'target-missing';
-		const key = model.items[resolved.index]?.key;
-		if (!key) return 'target-missing';
-
-		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		const releaseTarget = this.options.retention.acquire(key, 'target');
+		this.#activeTargetScrolls += 1;
 		try {
-			this.#instance().scrollToIndex(resolved.index, {
-				align: options.align ?? 'center',
-				behavior: 'auto',
-			});
-			let previousRect: { top: number; height: number } | null = null;
-			let stableFrames = 0;
-			for (let attempt = 0; attempt < MAX_TARGET_SETTLE_ITERATIONS; attempt += 1) {
-				await tick();
-				await nextAnimationFrame();
-				if (
-					token !== this.#targetToken ||
-					!this.#isCurrentProgrammaticScrollOperation(operationEpoch)
-				) {
-					return 'cancelled';
-				}
-				if (!this.isReady()) return 'not-ready';
-				const node = this.#findTargetNode(resolved.innerRowId);
-				if (!node) continue;
-				if (!isConversationTargetLayoutReady(node)) {
-					previousRect = null;
-					stableFrames = 0;
-					continue;
-				}
-				const viewport = this.options.viewport;
-				if (!viewport) return 'not-ready';
-				const attainableOffset = attainableConversationTargetOffset({
-					currentOffset: viewport.scrollTop,
-					alignmentDelta: this.#targetAlignmentDelta(node, options.align ?? 'center'),
-					maximumOffset: Math.max(viewport.scrollHeight - viewport.clientHeight, 0),
+			this.#cancelTargetScroll();
+			this.cancelPendingLayoutMutation();
+			const token = this.#targetToken;
+			await tick();
+			await nextAnimationFrame();
+			if (token !== this.#targetToken) return 'cancelled';
+			if (!this.isReady()) return 'not-ready';
+			this.cancelPendingLayoutMutation();
+			const model = this.options.model;
+			const resolved =
+				target.kind === 'row'
+					? (() => {
+							const index = model.indexByRowId.get(target.id);
+							return index === undefined ? undefined : { index, innerRowId: target.id };
+						})()
+					: model.targetByDomAnchorId.get(target.id);
+			if (!resolved) return 'target-missing';
+			const key = model.items[resolved.index]?.key;
+			if (!key) return 'target-missing';
+
+			const operationEpoch = this.#beginProgrammaticScrollOperation();
+			const releaseTarget = this.options.retention.acquire(key, 'target');
+			try {
+				this.#instance().scrollToIndex(resolved.index, {
+					align: options.align ?? 'center',
+					behavior: 'auto',
 				});
-				const offsetDelta = attainableOffset - viewport.scrollTop;
-				if (Math.abs(offsetDelta) > CHAT_GEOMETRY_END_THRESHOLD_PX) {
-					this.#instance().scrollToOffset(attainableOffset, { behavior: 'auto' });
-					previousRect = null;
-					stableFrames = 0;
-					continue;
+				let previousRect: { top: number; height: number } | null = null;
+				let stableFrames = 0;
+				for (let attempt = 0; attempt < MAX_TARGET_SETTLE_ITERATIONS; attempt += 1) {
+					await tick();
+					await nextAnimationFrame();
+					if (
+						token !== this.#targetToken ||
+						!this.#isCurrentProgrammaticScrollOperation(operationEpoch)
+					) {
+						return 'cancelled';
+					}
+					if (!this.isReady()) return 'not-ready';
+					const node = this.#findTargetNode(resolved.innerRowId);
+					if (!node) continue;
+					if (!isConversationTargetLayoutReady(node)) {
+						previousRect = null;
+						stableFrames = 0;
+						continue;
+					}
+					const viewport = this.options.viewport;
+					if (!viewport) return 'not-ready';
+					const attainableOffset = attainableConversationTargetOffset({
+						currentOffset: viewport.scrollTop,
+						alignmentDelta: this.#targetAlignmentDelta(node, options.align ?? 'center'),
+						maximumOffset: Math.max(viewport.scrollHeight - viewport.clientHeight, 0),
+					});
+					const offsetDelta = attainableOffset - viewport.scrollTop;
+					if (Math.abs(offsetDelta) > CHAT_GEOMETRY_END_THRESHOLD_PX) {
+						this.#instance().scrollToOffset(attainableOffset, { behavior: 'auto' });
+						previousRect = null;
+						stableFrames = 0;
+						continue;
+					}
+					const nodeRect = node.getBoundingClientRect();
+					const viewportRect = viewport.getBoundingClientRect();
+					const currentRect = { top: nodeRect.top - viewportRect.top, height: nodeRect.height };
+					const stable =
+						previousRect !== null &&
+						Math.abs(currentRect.top - previousRect.top) <= OFFSET_TOLERANCE_PX &&
+						Math.abs(currentRect.height - previousRect.height) <= OFFSET_TOLERANCE_PX;
+					stableFrames = stable ? stableFrames + 1 : 0;
+					previousRect = currentRect;
+					if (stableFrames >= 2) return 'completed';
 				}
-				const nodeRect = node.getBoundingClientRect();
-				const viewportRect = viewport.getBoundingClientRect();
-				const currentRect = { top: nodeRect.top - viewportRect.top, height: nodeRect.height };
-				const stable =
-					previousRect !== null &&
-					Math.abs(currentRect.top - previousRect.top) <= OFFSET_TOLERANCE_PX &&
-					Math.abs(currentRect.height - previousRect.height) <= OFFSET_TOLERANCE_PX;
-				stableFrames = stable ? stableFrames + 1 : 0;
-				previousRect = currentRect;
-				if (stableFrames >= 2) return 'completed';
+				return 'not-ready';
+			} finally {
+				releaseTarget();
+				this.#finishProgrammaticScrollOperation(operationEpoch);
 			}
-			return 'not-ready';
 		} finally {
-			releaseTarget();
-			this.#finishProgrammaticScrollOperation(operationEpoch);
+			this.#activeTargetScrolls -= 1;
 		}
 	}
 
@@ -540,6 +545,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		const shouldCaptureReadingPosition =
 			this.options.visible &&
+			this.#activeTargetScrolls === 0 &&
 			(structure === 'interior-only' || resetMeasurements || preserveEdgeReadingPosition) &&
 			snapshot.endBehavior !== 'explicit-navigation' &&
 			!identityChanged;
@@ -588,6 +594,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const layoutToken = ++this.#layoutMutationToken;
 		if (!this.options.visible) {
 			if (resetMeasurements) this.#measureOnShow = true;
+			return;
+		}
+		if (this.#activeTargetScrolls > 0) {
+			if (resetMeasurements) {
+				void this.#resetMeasurementsAfterCommit(layoutToken, snapshot, false);
+			}
 			return;
 		}
 
@@ -809,6 +821,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (
 			token !== this.#layoutMutationToken ||
 			!this.isReady() ||
+			this.#activeTargetScrolls > 0 ||
 			!this.options.pinned ||
 			this.options.geometry.geometryRevision !== snapshot.geometryRevision ||
 			this.options.geometry.endBehavior !== 'restore-if-pinned'
@@ -831,6 +844,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#instance().measure();
 		if (
 			restorePolicyEnd &&
+			this.#activeTargetScrolls === 0 &&
 			token === this.#layoutMutationToken &&
 			this.options.pinned &&
 			this.options.geometry.endBehavior === 'restore-if-pinned'

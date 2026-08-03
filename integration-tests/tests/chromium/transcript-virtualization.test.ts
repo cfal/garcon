@@ -494,17 +494,19 @@ async function selectAndVerifyEdgeNavigatorTarget(
 async function installDelayedTargetGrowth(page: Page, rowId: string): Promise<void> {
   await page.evaluate((expectedRowId) => {
     const browserGlobal = globalThis as typeof globalThis & {
+      __chatDelayedTargetGrowthFrame?: number;
       __stopDelayedTargetGrowth?: () => void;
     };
     browserGlobal.__stopDelayedTargetGrowth?.();
     let cancelled = false;
     let observer: MutationObserver | null = null;
     let growingRow: HTMLElement | null = null;
+    browserGlobal.__chatDelayedTargetGrowthFrame = 0;
     browserGlobal.__stopDelayedTargetGrowth = () => {
       cancelled = true;
       observer?.disconnect();
       growingRow?.style.removeProperty('padding-bottom');
-      growingRow?.removeAttribute('data-chat-layout-pending');
+      delete browserGlobal.__chatDelayedTargetGrowthFrame;
     };
     const growTarget = (): boolean => {
       const row = [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
@@ -512,11 +514,11 @@ async function installDelayedTargetGrowth(page: Page, rowId: string): Promise<vo
       );
       if (!row) return false;
       growingRow = row;
-      row.dataset.chatLayoutPending = 'true';
       let frame = 0;
       const grow = () => {
         if (cancelled || frame >= 60 || !row.isConnected) return;
         frame += 1;
+        browserGlobal.__chatDelayedTargetGrowthFrame = frame;
         row.style.paddingBottom = `${frame * 40}px`;
         requestAnimationFrame(grow);
       };
@@ -530,6 +532,66 @@ async function installDelayedTargetGrowth(page: Page, rowId: string): Promise<vo
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }, rowId);
+}
+
+async function installHeldTargetCompletion(page: Page, rowId: string): Promise<void> {
+  await page.evaluate((expectedRowId) => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __completeHeldChatTarget?: () => void;
+    };
+    const holdTarget = (): boolean => {
+      const row = [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
+        (candidate) => candidate.dataset.chatRowId === expectedRowId,
+      );
+      if (!row) return false;
+      row.dataset.chatLayoutPending = 'true';
+      browserGlobal.__completeHeldChatTarget = () => {
+        row.removeAttribute('data-chat-layout-pending');
+        delete browserGlobal.__completeHeldChatTarget;
+      };
+      return true;
+    };
+    if (holdTarget()) return;
+    const observer = new MutationObserver(() => {
+      if (!holdTarget()) return;
+      observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }, rowId);
+}
+
+async function selectNavigatorTargetDuringAppend(
+  fixture: ChromiumFixture,
+  chatId: string,
+  marker: string,
+): Promise<void> {
+  await openMainWorkspaceActions(fixture.page);
+  await clickMenuItem(fixture.page, 'Jump to user message');
+  await fixture.page.getByText('User messages', { exact: true }).waitFor();
+  const rowId = await userMessageNavigatorRowIdContaining(fixture.page, marker);
+  const modelCount = await waitForModelCount(fixture.page, 1);
+  await installHeldTargetCompletion(fixture.page, rowId);
+  await clickUserMessageNavigatorRowContaining(fixture.page, marker);
+  await fixture.page.waitForFunction(
+    (expectedRowId) =>
+      [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].some(
+        (candidate) => candidate.dataset.chatRowId === expectedRowId,
+      ),
+    rowId,
+    { timeout: 20_000 },
+  );
+
+  await appendTurn(fixture.integration, chatId, 'chromium-target-concurrent-append');
+  await waitForModelCount(fixture.page, modelCount + 2);
+  await fixture.page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __completeHeldChatTarget?: () => void;
+    };
+    browserGlobal.__completeHeldChatTarget?.();
+  });
+
+  await waitForRowCentered(fixture.page, rowId);
+  await fixture.page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
 }
 
 async function installDelayedTargetCompletion(page: Page, rowId: string): Promise<void> {
@@ -608,14 +670,24 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
     rowId,
     { timeout: 20_000 },
   );
+  const writesAtMount = await page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatProgrammaticScrollWrites?: number[];
+    };
+    return browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
+  });
   await page.waitForFunction(
-    () => {
+    (minimumWrites) => {
       const browserGlobal = globalThis as typeof globalThis & {
+        __chatDelayedTargetGrowthFrame?: number;
         __chatProgrammaticScrollWrites?: number[];
       };
-      return (browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0) > 0;
+      return (
+        (browserGlobal.__chatDelayedTargetGrowthFrame ?? 0) >= 5 &&
+        (browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0) > minimumWrites
+      );
     },
-    undefined,
+    writesAtMount,
     { timeout: 20_000 },
   );
   const writesBeforeIntent = await page.evaluate(() => {
@@ -631,6 +703,7 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
   const writes = await page.evaluate(async () => {
     const browserGlobal = globalThis as typeof globalThis & {
       __chatProgrammaticScrollWrites?: number[];
+      __chatDelayedTargetGrowthFrame?: number;
       __restoreChatScrollTo?: () => void;
       __stopDelayedTargetGrowth?: () => void;
     };
@@ -646,9 +719,14 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
     browserGlobal.__stopDelayedTargetGrowth?.();
     delete browserGlobal.__restoreChatScrollTo;
     delete browserGlobal.__stopDelayedTargetGrowth;
-    return { afterCancellation, final };
+    return {
+      afterCancellation,
+      final,
+      growthFrames: browserGlobal.__chatDelayedTargetGrowthFrame ?? 0,
+    };
   });
-  expect(writesBeforeIntent).toBeGreaterThan(0);
+  expect(writesBeforeIntent).toBeGreaterThan(writesAtMount);
+  expect(writes.growthFrames).toBeGreaterThanOrEqual(5);
   expect(writes.final).toBe(writes.afterCancellation);
   await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
 }
@@ -768,6 +846,7 @@ describe('Chromium transcript virtualization', () => {
         await fixture.page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
         await waitForRowCentered(fixture.page, targetRowId);
         await selectAndVerifyDelayedNavigatorTarget(fixture.page, 'chromium-virtual-turn-38');
+        await selectNavigatorTargetDuringAppend(fixture, chatId, 'chromium-virtual-turn-36');
         await selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-virtual-turn-11', 'start');
         await selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-generation-prime', 'end');
         await interruptNavigatorJump(fixture.page, 'chromium-virtual-turn-40');

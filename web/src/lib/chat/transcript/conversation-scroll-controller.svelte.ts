@@ -16,6 +16,7 @@ const PAGE_BOUNDARY_THRESHOLD_PX = 100;
 const LATER_BOUNDARY_THRESHOLD_PX = 50;
 
 type PageRequestReason = 'scroll' | 'button';
+type WindowNavigationResult = 'settled' | 'committed-unsettled' | 'invalidated';
 
 interface UserScrollIntent {
 	epoch: number;
@@ -58,6 +59,7 @@ export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
 	isScrollingToTop = $state(false);
 	#isAutoFillingViewport = false;
+	#refillViewportAfterCurrentFill = false;
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
 	#userScrollIntent: UserScrollIntent = { epoch: 0, direction: null, receivedAt: 0 };
@@ -68,6 +70,7 @@ export class ConversationScrollController {
 	#viewportOperationEpoch = 0;
 	#isPageMutationInProgress = false;
 	#activeTargetNavigations = 0;
+	#resumeAutoFillAfterTargets = false;
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -100,15 +103,19 @@ export class ConversationScrollController {
 			this.deps.chatState.compactToRecentMessages();
 			return;
 		}
-		if (!(await this.#navigateToWindow(chatId, 'latest'))) return;
+		const result = await this.#navigateToWindow(chatId, 'latest', () =>
+			this.setPinnedToBottom(true),
+		);
+		if (result === 'invalidated') return;
 		this.scrollToBottom();
 		this.deps.chatState.compactToRecentMessages();
 	}
 
 	async restoreLatestWindow(chatId: string): Promise<boolean> {
-		if (!(await this.#navigateToWindow(chatId, 'latest'))) return false;
-		this.#preserveHistoryBrowsing();
-		return true;
+		return (
+			(await this.#navigateToWindow(chatId, 'latest', () => this.#preserveHistoryBrowsing())) !==
+			'invalidated'
+		);
 	}
 
 	setPinnedToBottom(isPinned: boolean): void {
@@ -144,6 +151,7 @@ export class ConversationScrollController {
 
 	reconcileInitialBottomRestore(autoScrollToBottom: boolean): void {
 		if (this.#initialBottomRestoreChatId !== this.deps.sessions.selectedChatId) return;
+		if (this.#isAutoFillingViewport || this.#activeTargetNavigations > 0) return;
 		if (
 			!autoScrollToBottom ||
 			this.deps.chatState.loadStatus === 'empty' ||
@@ -162,8 +170,10 @@ export class ConversationScrollController {
 
 		this.isScrollingToTop = true;
 		try {
-			if (!(await this.#navigateToWindow(chatId, 'initial'))) return;
-			this.#preserveHistoryBrowsing();
+			const result = await this.#navigateToWindow(chatId, 'initial', () =>
+				this.#preserveHistoryBrowsing(),
+			);
+			if (result === 'invalidated') return;
 			this.noteUserScrollIntent('earlier');
 			this.deps.getViewport()?.scrollToStart();
 			await this.fillUnderfilledViewport();
@@ -287,6 +297,7 @@ export class ConversationScrollController {
 			return 'unavailable';
 		}
 		const wasPinned = this.isPinnedToBottom;
+		let shouldResumeAutoFill = false;
 		this.#activeTargetNavigations += 1;
 		try {
 			this.deps.chatState.invalidatePendingHistoryLoad();
@@ -316,22 +327,31 @@ export class ConversationScrollController {
 			}
 			const atLiveEnd = viewport.isAtEnd();
 			this.setPinnedToBottom(atLiveEnd);
+			shouldResumeAutoFill = true;
 			return 'completed';
 		} finally {
-			this.#activeTargetNavigations -= 1;
+			this.#finishTargetNavigation(shouldResumeAutoFill);
 		}
 	}
 
 	async jumpToDomAnchor(anchorId: string): Promise<boolean> {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId) return false;
-		const operationEpoch = ++this.#viewportOperationEpoch;
-		const result = await this.deps
-			.getViewport()
-			?.scrollToTarget({ kind: 'dom-anchor', id: anchorId }, { align: 'center' });
-		return Boolean(
-			result === 'completed' && this.#isCurrentViewportOperation(chatId, operationEpoch),
-		);
+		let shouldResumeAutoFill = false;
+		this.#activeTargetNavigations += 1;
+		try {
+			const operationEpoch = ++this.#viewportOperationEpoch;
+			const result = await this.deps
+				.getViewport()
+				?.scrollToTarget({ kind: 'dom-anchor', id: anchorId }, { align: 'center' });
+			const completed = Boolean(
+				result === 'completed' && this.#isCurrentViewportOperation(chatId, operationEpoch),
+			);
+			shouldResumeAutoFill = completed;
+			return completed;
+		} finally {
+			this.#finishTargetNavigation(shouldResumeAutoFill);
+		}
 	}
 
 	async fillUnderfilledViewport(): Promise<void> {
@@ -369,10 +389,10 @@ export class ConversationScrollController {
 					if (!this.#canRequestPage('later')) return;
 					result = await this.#mutatePage('later', () => this.deps.chatState.loadLaterPage(chatId));
 				} else if (this.deps.chatState.canAutoFillEarlier) {
+					if (!this.#canRequestPage('earlier')) return;
 					if (this.deps.chatState.revealEarlierLoadedRows()) {
 						result = await this.#waitForCurrentLayout('loaded');
 					} else {
-						if (!this.#canRequestPage('earlier')) return;
 						result = await this.#mutatePage('earlier', () =>
 							this.deps.chatState.loadEarlierPage(chatId),
 						);
@@ -385,6 +405,10 @@ export class ConversationScrollController {
 			}
 		} finally {
 			this.#isAutoFillingViewport = false;
+			if (this.#refillViewportAfterCurrentFill) {
+				this.#refillViewportAfterCurrentFill = false;
+				void this.fillUnderfilledViewport();
+			}
 		}
 	}
 
@@ -396,7 +420,7 @@ export class ConversationScrollController {
 			const nextHeight = entries[0]?.contentRect.height ?? host.offsetHeight;
 			const delta = nextHeight - previousHeight;
 			previousHeight = nextHeight;
-			if (!this.#isViewportVisible || delta === 0) return;
+			if (!this.#isViewportVisible || this.#activeTargetNavigations > 0 || delta === 0) return;
 			const viewport = this.deps.getViewport();
 			if (!viewport) return;
 			if (this.isPinnedToBottom) viewport.scrollToEnd();
@@ -414,7 +438,7 @@ export class ConversationScrollController {
 			const nextHeight = entries[0]?.contentRect.height ?? scroller.clientHeight;
 			if (nextHeight <= 0 || nextHeight === previousHeight) return;
 			previousHeight = nextHeight;
-			if (this.#isViewportVisible && this.isPinnedToBottom) {
+			if (this.#isViewportVisible && this.#activeTargetNavigations === 0 && this.isPinnedToBottom) {
 				this.deps.getViewport()?.scrollToEnd();
 			}
 		});
@@ -550,6 +574,18 @@ export class ConversationScrollController {
 		);
 	}
 
+	#finishTargetNavigation(shouldResumeAutoFill: boolean): void {
+		this.#resumeAutoFillAfterTargets ||= shouldResumeAutoFill;
+		this.#activeTargetNavigations -= 1;
+		if (this.#activeTargetNavigations > 0 || !this.#resumeAutoFillAfterTargets) return;
+		this.#resumeAutoFillAfterTargets = false;
+		if (this.#isAutoFillingViewport) {
+			this.#refillViewportAfterCurrentFill = true;
+		} else {
+			void this.fillUnderfilledViewport();
+		}
+	}
+
 	async #compactAtLiveEdge(chatId: string | null): Promise<void> {
 		if (!chatId || !this.deps.chatState.compactToRecentMessages()) return;
 		await tick();
@@ -558,19 +594,24 @@ export class ConversationScrollController {
 		this.scrollToBottom();
 	}
 
-	async #navigateToWindow(chatId: string, target: TranscriptWindowTarget): Promise<boolean> {
-		if (this.deps.sessions.selectedChatId !== chatId) return false;
+	async #navigateToWindow(
+		chatId: string,
+		target: TranscriptWindowTarget,
+		onCommitted: () => void,
+	): Promise<WindowNavigationResult> {
+		if (this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
 		const operationEpoch = ++this.#viewportOperationEpoch;
 		const result = await this.deps.chatState.navigateToWindow(chatId, target);
-		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch))
-			return false;
+		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
+			return 'invalidated';
+		}
+		onCommitted();
+		this.#resetPagingContext();
 		const layout = await this.deps.getViewport()?.waitForLayout({
 			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
 		});
-		if (layout !== 'settled' || !this.#isCurrentViewportOperation(chatId, operationEpoch))
-			return false;
-		this.#resetPagingContext();
-		return true;
+		if (!this.#isCurrentViewportOperation(chatId, operationEpoch)) return 'invalidated';
+		return layout === 'settled' ? 'settled' : 'committed-unsettled';
 	}
 
 	#resetPagingContext(): void {

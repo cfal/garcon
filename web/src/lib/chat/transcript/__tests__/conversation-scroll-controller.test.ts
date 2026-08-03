@@ -401,7 +401,7 @@ describe('ConversationScrollController', () => {
 		const viewport = fakeViewport({ measureViewportFill });
 		const { controller } = controllerFixture({
 			viewport,
-			state: { canAutoFillEarlier: true, revealEarlierLoadedRows },
+			state: { canAutoFillEarlier: true, canLoadEarlier: true, revealEarlierLoadedRows },
 		});
 		await controller.fillUnderfilledViewport();
 		expect(revealEarlierLoadedRows).toHaveBeenCalledOnce();
@@ -463,17 +463,51 @@ describe('ConversationScrollController', () => {
 		expect(loadEarlierPage).not.toHaveBeenCalled();
 	});
 
+	it('does not reveal loaded rows to bypass an earlier-page error latch', async () => {
+		const revealEarlierLoadedRows = vi.fn(() => true);
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const { controller } = controllerFixture({
+			viewport: fakeViewport({
+				measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
+					async () => 'underfilled',
+				),
+			}),
+			state: {
+				canAutoFillEarlier: true,
+				canLoadEarlier: true,
+				loadEarlierPage,
+				pageStates: {
+					earlier: { status: 'error', error: 'network unavailable' },
+					later: { status: 'idle', error: null },
+				},
+				revealEarlierLoadedRows,
+			},
+		});
+
+		await controller.fillUnderfilledViewport();
+		expect(revealEarlierLoadedRows).not.toHaveBeenCalled();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
 	it('does not let viewport autofill cancel an explicit target navigation', async () => {
 		let resolveFill!: (result: 'underfilled') => void;
 		let resolveTarget!: (result: 'completed') => void;
-		const measureViewportFill = vi.fn(
-			() => new Promise<'underfilled'>((resolve) => (resolveFill = resolve)),
-		);
+		const measureViewportFill = vi
+			.fn<ConversationViewportPort['measureViewportFill']>()
+			.mockImplementationOnce(
+				() => new Promise<'underfilled'>((resolve) => (resolveFill = resolve)),
+			)
+			.mockResolvedValueOnce('underfilled')
+			.mockResolvedValueOnce('overflow');
 		const scrollToTarget = vi.fn<ConversationViewportPort['scrollToTarget']>(
 			() => new Promise<'completed'>((resolve) => (resolveTarget = resolve)),
 		);
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
-		const viewport = fakeViewport({ measureViewportFill, scrollToTarget });
+		const viewport = fakeViewport({
+			isAtEnd: vi.fn(() => true),
+			measureViewportFill,
+			scrollToTarget,
+		});
 		const { controller } = controllerFixture({
 			viewport,
 			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
@@ -493,6 +527,33 @@ describe('ConversationScrollController', () => {
 		expect(loadEarlierPage).not.toHaveBeenCalled();
 		resolveTarget('completed');
 		await expect(navigation).resolves.toBe('completed');
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+	});
+
+	it('does not let viewport autofill cancel a DOM-anchor navigation', async () => {
+		let resolveTarget!: (result: 'completed') => void;
+		const scrollToTarget = vi.fn<ConversationViewportPort['scrollToTarget']>(
+			() => new Promise<'completed'>((resolve) => (resolveTarget = resolve)),
+		);
+		const measureViewportFill = vi
+			.fn<ConversationViewportPort['measureViewportFill']>()
+			.mockResolvedValueOnce('underfilled')
+			.mockResolvedValueOnce('overflow');
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const { controller } = controllerFixture({
+			viewport: fakeViewport({ measureViewportFill, scrollToTarget }),
+			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
+		});
+
+		const navigation = controller.jumpToDomAnchor('tool-input-9');
+		await vi.waitFor(() => expect(scrollToTarget).toHaveBeenCalledOnce());
+		await controller.fillUnderfilledViewport();
+
+		expect(measureViewportFill).not.toHaveBeenCalled();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		resolveTarget('completed');
+		await expect(navigation).resolves.toBe(true);
+		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
 	});
 
 	it('reconciles queue height through the viewport without row geometry', () => {
@@ -507,6 +568,29 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 		cleanup?.();
 		expect(ResizeObserverStub.instances[0].disconnected).toBe(true);
+	});
+
+	it('defers automatic queue compensation during target navigation', async () => {
+		let resolveTarget!: (result: 'completed') => void;
+		const viewport = fakeViewport({
+			scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>(
+				() => new Promise<'completed'>((resolve) => (resolveTarget = resolve)),
+			),
+		});
+		const { controller } = controllerFixture({ viewport, queue: { offsetHeight: 100 } });
+		controller.setPinnedToBottom(false);
+		controller.observeQueueResize();
+		const navigation = controller.jumpToDomAnchor('tool-input-9');
+		await vi.waitFor(() => expect(viewport.scrollToTarget).toHaveBeenCalledOnce());
+
+		ResizeObserverStub.instances[0].emit(140);
+		expect(viewport.scrollBy).not.toHaveBeenCalled();
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+
+		resolveTarget('completed');
+		await navigation;
+		ResizeObserverStub.instances[0].emit(160);
+		expect(viewport.scrollBy).toHaveBeenCalledWith(20);
 	});
 
 	it('restores only pinned viewports after a viewport resize', () => {
@@ -560,6 +644,30 @@ describe('ConversationScrollController', () => {
 		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 	});
 
+	it('does not supersede active viewport autofill with initial-end reconciliation', async () => {
+		let resolveLayout!: (result: 'settled') => void;
+		const viewport = fakeViewport({
+			waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>(
+				() => new Promise<'settled'>((resolve) => (resolveLayout = resolve)),
+			),
+			measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
+				async () => 'overflow',
+			),
+		});
+		const { controller } = controllerFixture({ viewport });
+		controller.prepareInitialBottomRestore('chat-1');
+		const fill = controller.fillUnderfilledViewport();
+		await vi.waitFor(() => expect(viewport.waitForLayout).toHaveBeenCalledOnce());
+
+		controller.reconcileInitialBottomRestore(true);
+		expect(viewport.restoreInitialEnd).not.toHaveBeenCalled();
+
+		resolveLayout('settled');
+		await fill;
+		controller.reconcileInitialBottomRestore(true);
+		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
+	});
+
 	it('clears initial restoration when loading ends empty', () => {
 		const { controller } = controllerFixture({
 			state: { displayMessageCount: 0, isLoadingMessages: false, loadStatus: 'empty' },
@@ -580,6 +688,33 @@ describe('ConversationScrollController', () => {
 		expect(state.isUserScrolledUp).toBe(true);
 	});
 
+	it('preserves committed initial-window policy when layout settling is superseded', async () => {
+		const observed: {
+			controller: ConversationScrollController | null;
+			state: ConversationScrollState | null;
+		} = { controller: null, state: null };
+		const navigateToWindow = vi.fn(async () => {
+			if (!observed.state || !observed.controller) throw new Error('Fixture is not ready.');
+			observed.state.isUserScrolledUp = true;
+			observed.controller.reconcilePinnedProjection();
+			return 'loaded' as const;
+		});
+		const fixture = controllerFixture({
+			viewport: fakeViewport({
+				waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>(async () => 'superseded'),
+			}),
+			state: { navigateToWindow },
+		});
+		observed.controller = fixture.controller;
+		observed.state = fixture.state;
+
+		await fixture.controller.scrollToTop();
+
+		expect(fixture.state.isUserScrolledUp).toBe(true);
+		expect(fixture.controller.isPinnedToBottom).toBe(false);
+		expect(fixture.viewport.scrollToStart).toHaveBeenCalledOnce();
+	});
+
 	it('navigates to latest and compacts expanded history', async () => {
 		const compactToRecentMessages = vi.fn(() => true);
 		const navigateToWindow = vi.fn(async () => 'loaded' as const);
@@ -590,6 +725,34 @@ describe('ConversationScrollController', () => {
 		expect(navigateToWindow).toHaveBeenCalledWith('chat-1', 'latest');
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 		expect(compactToRecentMessages).toHaveBeenCalledOnce();
+	});
+
+	it('finishes committed latest navigation when layout settling is superseded', async () => {
+		const observed: {
+			controller: ConversationScrollController | null;
+			state: ConversationScrollState | null;
+		} = { controller: null, state: null };
+		const navigateToWindow = vi.fn(async () => {
+			if (!observed.state || !observed.controller) throw new Error('Fixture is not ready.');
+			observed.state.isUserScrolledUp = false;
+			observed.controller.reconcilePinnedProjection();
+			return 'loaded' as const;
+		});
+		const fixture = controllerFixture({
+			viewport: fakeViewport({
+				waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>(async () => 'superseded'),
+			}),
+			state: { hasLaterMessages: true, isUserScrolledUp: true, navigateToWindow },
+		});
+		observed.controller = fixture.controller;
+		observed.state = fixture.state;
+		fixture.controller.setPinnedToBottom(false);
+
+		await fixture.controller.scrollToLatest();
+
+		expect(fixture.state.isUserScrolledUp).toBe(false);
+		expect(fixture.controller.isPinnedToBottom).toBe(true);
+		expect(fixture.viewport.scrollToEnd).toHaveBeenCalledOnce();
 	});
 
 	it('keeps Ctrl-U half-page scrolling on the viewport port', () => {
