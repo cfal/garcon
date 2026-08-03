@@ -54,62 +54,65 @@ jobs:
           retention-days: 7
 
   claude-live:
-    name: Live Claude conformance
+    name: Live Claude conformance (DeepSeek V4 Pro)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CLAUDE_TESTING_BASE_URL: https://api.deepseek.com/anthropic
+      CLAUDE_TESTING_MODEL: deepseek-v4-pro
 
     steps:
-      - name: Check for Anthropic testing key
-        id: anthropic-key
+      - name: Check for Claude testing key
+        id: claude-key
         shell: bash
         env:
-          ANTHROPIC_TESTING_KEY: ${{ secrets.ANTHROPIC_TESTING_KEY }}
+          CLAUDE_TESTING_API_KEY: ${{ secrets.CLAUDE_TESTING_API_KEY }}
         run: |
-          if [ -n "$ANTHROPIC_TESTING_KEY" ]; then
-            echo "::add-mask::$ANTHROPIC_TESTING_KEY"
+          if [ -n "$CLAUDE_TESTING_API_KEY" ]; then
+            echo "::add-mask::$CLAUDE_TESTING_API_KEY"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "ANTHROPIC_TESTING_KEY is unavailable; skipping live Claude tests."
+            echo "CLAUDE_TESTING_API_KEY is unavailable; skipping live Claude tests."
           fi
 
       - name: Check out repository
-        if: steps.anthropic-key.outputs.available == 'true'
+        if: steps.claude-key.outputs.available == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Bun
-        if: steps.anthropic-key.outputs.available == 'true'
+        if: steps.claude-key.outputs.available == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
       - name: Install server dependencies
-        if: steps.anthropic-key.outputs.available == 'true'
+        if: steps.claude-key.outputs.available == 'true'
         working-directory: server
         run: bun install --frozen-lockfile
 
       - name: Install integration-test dependencies
-        if: steps.anthropic-key.outputs.available == 'true'
+        if: steps.claude-key.outputs.available == 'true'
         working-directory: integration-tests
         run: bun install --frozen-lockfile
 
       - name: Run live Claude conformance tests
-        if: steps.anthropic-key.outputs.available == 'true'
+        if: steps.claude-key.outputs.available == 'true'
         env:
-          ANTHROPIC_TESTING_KEY: ${{ secrets.ANTHROPIC_TESTING_KEY }}
+          CLAUDE_TESTING_API_KEY: ${{ secrets.CLAUDE_TESTING_API_KEY }}
         run: bun run test:live:claude
 
       - name: Verify Claude diagnostics contain no testing credential
         id: claude-diagnostics-audit
-        if: always() && steps.anthropic-key.outputs.available == 'true'
+        if: always() && steps.claude-key.outputs.available == 'true'
         shell: bash
         env:
-          ANTHROPIC_TESTING_KEY: ${{ secrets.ANTHROPIC_TESTING_KEY }}
+          CLAUDE_TESTING_API_KEY: ${{ secrets.CLAUDE_TESTING_API_KEY }}
         run: |
-          echo "::add-mask::$ANTHROPIC_TESTING_KEY"
+          echo "::add-mask::$CLAUDE_TESTING_API_KEY"
           if [ -d integration-tests/artifacts/server ]; then
             set +e
             grep --recursive --fixed-strings --files-with-matches \
-              -- "$ANTHROPIC_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+              -- "$CLAUDE_TESTING_API_KEY" integration-tests/artifacts/server >/dev/null 2>&1
             audit_status=$?
             set -e
             if [ "$audit_status" -eq 0 ]; then
@@ -126,7 +129,7 @@ jobs:
           echo "safe=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload live Claude diagnostics
-        if: failure() && steps.anthropic-key.outputs.available == 'true' && steps.claude-diagnostics-audit.outputs.safe == 'true'
+        if: failure() && steps.claude-key.outputs.available == 'true' && steps.claude-diagnostics-audit.outputs.safe == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: claude-live-integration-diagnostics
