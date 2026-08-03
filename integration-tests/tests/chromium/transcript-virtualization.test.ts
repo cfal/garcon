@@ -838,41 +838,54 @@ async function diagnostics(fixture: ChromiumFixture): Promise<unknown> {
   };
 }
 
-describe('Chromium transcript virtualization', () => {
-  test('bounds mounted rows and preserves prepend, detached append, and pinned append geometry', async () => {
-    await withChromiumFixture(
-      'transcript-virtualization',
-      async (fixture) => {
-        const chatId = await seedTranscript(fixture.integration, 60);
-        const response = await fixture.page.goto(
-          `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
-          { waitUntil: 'domcontentloaded' },
-        );
-        if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
+async function prepareTranscript(fixture: ChromiumFixture): Promise<{
+  chatId: string;
+  initialModelCount: number;
+}> {
+  const chatId = await seedTranscript(fixture.integration, 60);
+  const response = await fixture.page.goto(
+    `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
 
-        await waitForTranscriptReady(fixture.page);
-        const initialSurfaceIdentity = await surfaceIdentity(fixture.page);
-        await appendTurn(fixture.integration, chatId, 'chromium-generation-prime');
-        await fixture.page
-          .locator(FEED_SELECTOR)
-          .getByText('echo:chromium-generation-prime', { exact: true })
-          .waitFor();
-        await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
-        await waitForTranscriptReady(fixture.page);
-        const initialModelCount = await waitForModelCount(fixture.page, 50);
+  await waitForTranscriptReady(fixture.page);
+  const initialSurfaceIdentity = await surfaceIdentity(fixture.page);
+  await appendTurn(fixture.integration, chatId, 'chromium-generation-prime');
+  await fixture.page
+    .locator(FEED_SELECTOR)
+    .getByText('echo:chromium-generation-prime', { exact: true })
+    .waitFor();
+  await waitForSurfaceIdentityChange(fixture.page, initialSurfaceIdentity);
+  await waitForTranscriptReady(fixture.page);
+  return { chatId, initialModelCount: await waitForModelCount(fixture.page, 50) };
+}
+
+async function revealEarlierTranscript(
+  page: Page,
+  initialModelCount: number,
+): Promise<ReadingAnchor> {
+  await scrollToPosition(page, 'middle');
+  await signalScrollIntent(page, 'later');
+  await scrollToPosition(page, 'start', false);
+  const loadEarlier = page.locator('[data-transcript-page-boundary="earlier"] button');
+  await loadEarlier.waitFor({ state: 'visible' });
+  const anchor = await readingAnchor(page);
+  await loadEarlier.click();
+  await waitForModelCount(page, initialModelCount + 50);
+  return anchor;
+}
+
+describe('Chromium transcript virtualization', () => {
+  test('bounds mounted rows and preserves prepend geometry', async () => {
+    await withChromiumFixture(
+      'transcript-virtualization-prepend',
+      async (fixture) => {
+        const { initialModelCount } = await prepareTranscript(fixture);
         await scrollToPosition(fixture.page, 'end');
         await waitForDistanceFromEnd(fixture.page, 1);
         await verifyDetachedNearEndGrowth(fixture.page);
-        await scrollToPosition(fixture.page, 'middle');
-        await signalScrollIntent(fixture.page, 'later');
-        await scrollToPosition(fixture.page, 'start', false);
-        const loadEarlier = fixture.page.locator(
-          '[data-transcript-page-boundary="earlier"] button',
-        );
-        await loadEarlier.waitFor({ state: 'visible' });
-        const prependAnchor = await readingAnchor(fixture.page);
-        await loadEarlier.click();
-        await waitForModelCount(fixture.page, initialModelCount + 50);
+        const prependAnchor = await revealEarlierTranscript(fixture.page, initialModelCount);
         const restoredPrependAnchor = await anchorByKey(fixture.page, prependAnchor.key);
         expect(Math.abs(restoredPrependAnchor.offset - prependAnchor.offset)).toBeLessThanOrEqual(
           1,
@@ -884,6 +897,19 @@ describe('Chromium transcript virtualization', () => {
         expect(expandedGeometry.itemCount).toBeLessThan(60);
         expect(expandedGeometry.overlaps).toEqual([]);
         expect(expandedGeometry.horizontalOverflow).toEqual([]);
+
+        fixture.assertNoBrowserErrors();
+      },
+      diagnostics,
+    );
+  }, 180_000);
+
+  test('navigates virtualized rows through growth and user cancellation', async () => {
+    await withChromiumFixture(
+      'transcript-virtualization-navigation',
+      async (fixture) => {
+        const { chatId, initialModelCount } = await prepareTranscript(fixture);
+        await revealEarlierTranscript(fixture.page, initialModelCount);
 
         await openMainWorkspaceActions(fixture.page);
         await clickMenuItem(fixture.page, 'Jump to user message');
@@ -900,6 +926,18 @@ describe('Chromium transcript virtualization', () => {
         await selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-virtual-turn-11', 'start');
         await selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-generation-prime', 'end');
         await interruptNavigatorJump(fixture.page, 'chromium-virtual-turn-40');
+
+        fixture.assertNoBrowserErrors();
+      },
+      diagnostics,
+    );
+  }, 180_000);
+
+  test('preserves detached, hidden, and pinned append geometry', async () => {
+    await withChromiumFixture(
+      'transcript-virtualization-append',
+      async (fixture) => {
+        const { chatId } = await prepareTranscript(fixture);
 
         await scrollToPosition(fixture.page, 'middle');
         const detachedAnchor = await readingAnchor(fixture.page);
@@ -950,5 +988,5 @@ describe('Chromium transcript virtualization', () => {
       },
       diagnostics,
     );
-  }, 120_000);
+  }, 180_000);
 });
