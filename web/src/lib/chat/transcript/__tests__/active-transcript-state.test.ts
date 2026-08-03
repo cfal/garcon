@@ -1045,6 +1045,40 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 	});
 
+	it('does not carry expanded-window growth into a replacement generation snapshot', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 175 }, (_, index) => entry(index + 1, assistant(`old-${index + 1}`))),
+			{ lastSeq: 175, pageOldestSeq: 1, hasMore: false },
+		);
+		chat.revealAllLoadedMessages();
+		const epoch = chat.beginSnapshotLoad();
+
+		expect(
+			chat.setFromPage(
+				'chat-1',
+				page({
+					generationId: 'generation-2',
+					messages: Array.from({ length: 50 }, (_, index) =>
+						entry(index + 1, assistant(`new-${index + 1}`)),
+					),
+					lastSeq: 50,
+				}),
+				epoch,
+			),
+		).toBe('applied');
+		chat.applyMessages(
+			'chat-1',
+			'generation-2',
+			Array.from({ length: 126 }, (_, index) => entry(index + 51, assistant(`new-${index + 51}`))),
+		);
+
+		expect(chat.visibleRows).toHaveLength(175);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-2:2', seq: 2 });
+	});
+
 	it.each([0, 20])(
 		'permanently completes an initially loaded %i-message snapshot before later growth',
 		(messageCount) => {

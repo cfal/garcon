@@ -458,6 +458,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#invalidatePageLoad();
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.windowRevision += 1;
+		if (page.generationId !== this.generationId) {
+			this.#preserveExpandedVisibleWindow = false;
+		}
 		this.generationId = page.generationId;
 		this.entries = page.messages;
 		this.lastSeq = page.lastSeq;
