@@ -34,6 +34,10 @@ function isAmbiguousCommandFailure(error: unknown): boolean {
 	return error.status >= 500;
 }
 
+function isStructuredOutcomeUnknownFailure(error: unknown): boolean {
+	return error instanceof ApiError && OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode ?? '');
+}
+
 /** Retries one ambiguous transport outcome with the caller's unchanged command identity. */
 export async function submitIdempotentCommand<T>(submit: () => Promise<T>): Promise<T> {
 	try {
@@ -44,7 +48,10 @@ export async function submitIdempotentCommand<T>(submit: () => Promise<T>): Prom
 			return await submit();
 		} catch (secondError) {
 			throw new CommandOutcomeUnknownError({
-				cause: isAmbiguousCommandFailure(secondError) ? secondError : firstError,
+				cause:
+					isStructuredOutcomeUnknownFailure(firstError) || !isAmbiguousCommandFailure(secondError)
+						? firstError
+						: secondError,
 			});
 		}
 	}

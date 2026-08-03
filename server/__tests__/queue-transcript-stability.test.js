@@ -117,6 +117,90 @@ describe('queue and transcript stability', () => {
     }
   });
 
+  it('keeps unknown queued steering consumed when a status listener throws a non-error', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-steer-unknown-listener-'));
+    try {
+      const chatId = 'chat-unknown-steer-listener';
+      const views = new ChatViewStore(() => true);
+      const pendingInputs = new PendingUserInputService({
+        loadNativeMessages: mock(async () => []),
+        getRetainedHistoryMessages: (requestedChatId) => (
+          views.getRetainedHistoryMessages(requestedChatId)
+        ),
+      });
+      pendingInputs.store.onStatusUpdated(() => { throw null; });
+      const steerInput = mock(async (_chatId, _content, _options, _target, prepareDelivery) => {
+        await prepareDelivery();
+        throw new Error('provider acknowledgement lost');
+      });
+      const queue = new ChatExecutionCoordinator(
+        workspaceDir,
+        {
+          runAgentTurn: mock(async () => undefined),
+          captureSteerTarget: mock(() => ({ provider: 'target' })),
+          steerInput,
+          abortSession: mock(async () => false),
+          isChatRunning: mock(() => false),
+          waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
+        },
+        pendingInputs,
+        {
+          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
+            requestedChatId,
+            async () => [],
+            messages,
+          ),
+        },
+        () => ({}),
+        () => true,
+        controlRepository(),
+      );
+      const reservation = queue.reserveDirectTurn(chatId, {
+        clientRequestId: 'request-active',
+        turnId: 'turn-active',
+      });
+      const source = await queue.createChatQueueEntry(chatId, 'possibly delivered guidance');
+      const target = queue.captureSteerTarget(chatId);
+      const settlement = {
+        markScheduled: mock(async () => undefined),
+        settleSteerSuccess: mock(async () => undefined),
+        settleSteerFailure: mock(async () => undefined),
+      };
+
+      await expect(queue.deliverAcceptedQueueEntrySteer({
+        command: {
+          key: 'queue-steer-command',
+          chatId,
+          clientRequestId: 'request-steer',
+          entryId: source.entryId,
+        },
+        content: 'possibly delivered guidance',
+        providerContent: 'possibly delivered guidance',
+        clientMessageId: 'message-steer',
+        target,
+        expectedRevision: 1,
+        expectedReorderRevision: 0,
+        settlement,
+      })).rejects.toMatchObject({
+        code: 'STEER_OUTCOME_UNKNOWN',
+        deliveryOutcome: 'unknown',
+      });
+
+      expect(steerInput).toHaveBeenCalledOnce();
+      expect((await queue.readChatExecutionControl(chatId)).entries).toEqual([]);
+      expect(pendingInputs.listForChat(chatId)).toEqual([
+        expect.objectContaining({
+          clientRequestId: 'request-steer',
+          content: 'possibly delivered guidance',
+          deliveryStatus: 'unconfirmed',
+        }),
+      ]);
+      await queue.releaseDirectTurn(reservation);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('settles an aborted nonblocking direct start before admitting its successor', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-direct-abort-'));
     const streamResult = deferred();

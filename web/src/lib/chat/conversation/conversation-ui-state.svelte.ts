@@ -30,8 +30,10 @@ export interface ConversationUiPort {
 	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
 	markExecutionControlSocketDisconnected(): void;
 	confirmExecutionControlSocketInstance(serverInstanceId: string): void;
-	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
-	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
+	/** Reports whether the incoming control belongs to the authoritative server instance. */
+	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): boolean;
+	/** Reports whether the incoming control belongs to the authoritative server instance. */
+	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): boolean;
 	removeExecutionControl(chatId: string): void;
 	pruneExecutionControls(activeChatIds: Set<string>): void;
 }
@@ -84,31 +86,35 @@ export class ConversationUiState implements ConversationUiPort {
 		if (decision.kind === 'replace') this.executionControlByChatId = {};
 	}
 
-	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void {
+	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): boolean {
 		const decision = this.executionControlAuthority.classifyNonAuthoritativeInstance(
 			control.serverInstanceId,
 		);
-		if (this.#handleExecutionControlInstanceDecision(decision, chatId, control)) return;
+		const instanceAccepted = this.#handleExecutionControlInstanceDecision(decision, chatId, control);
+		if (instanceAccepted !== null) return instanceAccepted;
 		const current = this.executionControlByChatId[chatId] ?? null;
-		if (current && control.version < current.version) return;
+		if (current && control.version < current.version) return true;
 		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
+		return true;
 	}
 
-	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void {
+	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): boolean {
 		const decision = this.executionControlAuthority.classifyNonAuthoritativeInstance(
 			control.serverInstanceId,
 		);
-		if (this.#handleExecutionControlInstanceDecision(decision, chatId, control)) return;
+		const instanceAccepted = this.#handleExecutionControlInstanceDecision(decision, chatId, control);
+		if (instanceAccepted !== null) return instanceAccepted;
 		const current = this.executionControlByChatId[chatId] ?? null;
-		if (current && control.version <= current.version) return;
+		if (current && control.version <= current.version) return true;
 		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
+		return true;
 	}
 
 	#handleExecutionControlInstanceDecision(
 		decision: ExecutionControlInstanceDecision,
 		chatId: string,
 		control: ChatExecutionControlState,
-	): boolean {
+	): boolean | null {
 		if (decision.kind === 'reject') {
 			const cached = this.executionControlByChatId[chatId] ?? null;
 			console.warn('[ConversationUiState] Rejected execution control instance', {
@@ -120,13 +126,13 @@ export class ConversationUiState implements ConversationUiPort {
 				incomingVersion: control.version,
 				cachedVersion: cached?.version ?? null,
 			});
-			return true;
+			return false;
 		}
 		if (decision.kind === 'replace') {
 			this.executionControlByChatId = { [chatId]: control };
 			return true;
 		}
-		return false;
+		return null;
 	}
 
 	removeExecutionControl(chatId: string): void {

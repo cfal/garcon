@@ -6,6 +6,8 @@ import {
 	ConversationQueueController,
 	type ConversationQueueControllerOptions,
 } from '../conversation-queue-controller.svelte.js';
+import { ConversationUiState } from '../conversation-ui-state.svelte.js';
+import { submitIdempotentCommand } from '../idempotent-command.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	deleteQueuedInput: vi.fn(),
@@ -41,8 +43,8 @@ function createHarness() {
 	};
 	const lifecycle = { currentChatId: 'chat-1' as string | null };
 	const conversationUi = {
-		setExecutionControlFromLiveUpdate: vi.fn(),
-		setExecutionControlFromRefresh: vi.fn(),
+		setExecutionControlFromLiveUpdate: vi.fn(() => true),
+		setExecutionControlFromRefresh: vi.fn(() => true),
 	};
 	const acceptedInputs = {
 		enqueue: vi.fn(() => ({
@@ -90,10 +92,40 @@ function createHarness() {
 		sessions,
 		chatState,
 		composerState,
+		lifecycle,
 		conversationUi,
 		acceptedInputs,
 		scrollToBottom,
 	};
+}
+
+function controllerWithConversationUi(
+	harness: ReturnType<typeof createHarness>,
+	conversationUi: ConversationUiState,
+): ConversationQueueController {
+	return new ConversationQueueController({
+		get sessions() {
+			return harness.sessions;
+		},
+		get chatState() {
+			return harness.chatState;
+		},
+		get composerState() {
+			return harness.composerState;
+		},
+		get lifecycle() {
+			return harness.lifecycle;
+		},
+		get conversationUi() {
+			return conversationUi;
+		},
+		get acceptedInputs() {
+			return harness.acceptedInputs;
+		},
+		get scrollToBottom() {
+			return harness.scrollToBottom;
+		},
+	} satisfies ConversationQueueControllerOptions);
 }
 
 function queueSteerError(
@@ -352,6 +384,98 @@ describe('ConversationQueueController', () => {
 			}),
 		);
 		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
+	});
+
+	it('retains a structured unknown queued-steer outcome through an ambiguous retry', async () => {
+		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
+		const control = emptyChatExecutionControlState('server-instance-test');
+		const structuredError = queueSteerError('STEER_OUTCOME_UNKNOWN', 'unknown', control);
+		let attempts = 0;
+		acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: () =>
+				submitIdempotentCommand(async () => {
+					attempts += 1;
+					if (attempts === 1) throw structuredError;
+					throw new TypeError('retry response was lost');
+				}),
+		});
+
+		await expect(
+			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+		).rejects.toMatchObject({ name: 'CommandOutcomeUnknownError' });
+
+		expect(attempts).toBe(2);
+		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
+		expect(chatState.upsertPendingUserInput).toHaveBeenCalledWith(
+			expect.objectContaining({ deliveryStatus: 'unconfirmed' }),
+		);
+		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
+	});
+
+	it('ignores a successful queued-steer response from a superseded server instance', async () => {
+		const harness = createHarness();
+		const conversationUi = new ConversationUiState();
+		const controller = controllerWithConversationUi(harness, conversationUi);
+		const serverAControl = emptyChatExecutionControlState('server-a');
+		const serverBControl = emptyChatExecutionControlState('server-b');
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', serverAControl);
+		conversationUi.confirmExecutionControlSocketInstance('server-b');
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', serverBControl);
+		harness.acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: vi.fn(async () => ({
+				success: true as const,
+				commandType: 'steer' as const,
+				clientRequestId: 'request-steer',
+				chatId: 'chat-1',
+				status: 'accepted' as const,
+				acceptedAt: '2026-08-02T00:00:00.000Z',
+				turnId: 'turn-active',
+				control: serverAControl,
+			})),
+		});
+
+		await controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7);
+
+		expect(conversationUi.getExecutionControl('chat-1')).toEqual(serverBControl);
+		expect(harness.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+		expect(harness.chatState.appendLocalNotice).not.toHaveBeenCalled();
+		expect(harness.scrollToBottom).not.toHaveBeenCalled();
+		warn.mockRestore();
+	});
+
+	it('ignores an unknown queued-steer response from a superseded server instance', async () => {
+		const harness = createHarness();
+		const conversationUi = new ConversationUiState();
+		const controller = controllerWithConversationUi(harness, conversationUi);
+		const serverAControl = emptyChatExecutionControlState('server-a');
+		const serverBControl = emptyChatExecutionControlState('server-b');
+		const error = queueSteerError('STEER_OUTCOME_UNKNOWN', 'unknown', serverAControl);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', serverAControl);
+		conversationUi.confirmExecutionControlSocketInstance('server-b');
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', serverBControl);
+		harness.acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: vi.fn(async () => {
+				throw error;
+			}),
+		});
+
+		await expect(
+			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+		).rejects.toBe(error);
+
+		expect(conversationUi.getExecutionControl('chat-1')).toEqual(serverBControl);
+		expect(harness.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+		expect(harness.chatState.appendLocalNotice).not.toHaveBeenCalled();
+		expect(harness.scrollToBottom).not.toHaveBeenCalled();
+		warn.mockRestore();
 	});
 
 	it('keeps definite queue conflicts out of the pending transcript', async () => {

@@ -345,9 +345,7 @@ describe('PendingUserInputService', () => {
       getRetainedHistoryMessages: mock(() => []),
     });
     await service.register('chat-1', 'possibly delivered', { clientRequestId: 'req-1' });
-    service.store.onStatusUpdated(() => {
-      throw new Error('status publication failed');
-    });
+    service.store.onStatusUpdated(() => { throw null; });
 
     expect(() => service.markUnconfirmed('chat-1', 'req-1')).not.toThrow();
     expect(service.listForChat('chat-1')).toMatchObject([{

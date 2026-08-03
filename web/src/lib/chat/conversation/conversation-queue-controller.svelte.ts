@@ -253,18 +253,25 @@ export class ConversationQueueController {
 
 		try {
 			const result = await submission.submit();
-			if (result.control) {
-				this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+			if (
+				result.control &&
+				this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control)
+			) {
 				this.#upsertSteeredInput(chatId, entry.content, submission, 'accepted');
 			}
 		} catch (error) {
 			const failure = queueEntrySteerFailure(error);
+			let instanceAccepted = true;
 			if (failure.control) {
-				this.options.conversationUi.setExecutionControlFromRefresh(chatId, failure.control);
+				instanceAccepted = this.options.conversationUi.setExecutionControlFromRefresh(
+					chatId,
+					failure.control,
+				);
 			} else {
 				await this.settleControlRefresh(this.startControlRefresh(chatId));
 			}
 			if (
+				instanceAccepted &&
 				failure.structured &&
 				failure.errorCode !== 'SESSION_NOT_FOUND' &&
 				(failure.deliveryOutcome === 'unknown' || failure.deliveryOutcome === 'accepted')
@@ -276,7 +283,7 @@ export class ConversationQueueController {
 					failure.deliveryOutcome === 'accepted' ? 'accepted' : 'unconfirmed',
 				);
 			}
-			if (this.options.sessions.selectedChatId === chatId) {
+			if (instanceAccepted && this.options.sessions.selectedChatId === chatId) {
 				this.options.chatState.appendLocalNotice(
 					'error',
 					failure.deliveryOutcome === 'unknown' || !failure.structured
