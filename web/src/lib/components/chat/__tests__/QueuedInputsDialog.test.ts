@@ -214,6 +214,16 @@ describe('QueuedInputsDialog', () => {
 		expect(screen.getByRole('dialog').querySelector('.touch-none')).toBeNull();
 	});
 
+	it('keeps the queue editor large enough to avoid iPhone focus zoom', async () => {
+		renderDialog(queue([entry(0)]));
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
+
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		expect(textarea.classList.contains('text-base')).toBe(true);
+		expect(textarea.classList.contains('text-sm')).toBe(false);
+		expect(textarea.classList.contains('sm:pointer-fine:text-sm')).toBe(true);
+	});
+
 	it('enables drag handles only while a fine pointer media query matches', async () => {
 		const listeners = new Set<() => void>();
 		const media = {

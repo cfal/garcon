@@ -215,6 +215,68 @@ describe('GitHistoryController', () => {
 				offset: 0,
 			}),
 		);
+		expect(history.listChange).toEqual({ revision: 2, kind: 'replace' });
+	});
+
+	it('signals append pages and deduplicates their commit hashes', async () => {
+		vi.mocked(getGitHistoryCommits)
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commit('newest123', 'newest')],
+				nextOffset: 50,
+			})
+			.mockResolvedValueOnce({
+				project: '/project',
+				ref: 'HEAD',
+				commits: [commit('newest123', 'duplicate'), commit('older1234', 'older')],
+				nextOffset: null,
+			});
+		const history = new GitHistoryController();
+		history.loadInitial('/project');
+		await flushPromises();
+		const replacementRevision = history.listChange.revision;
+
+		history.loadMore('/project');
+		await flushPromises();
+
+		expect(history.commits.map((entry) => entry.subject)).toEqual(['newest', 'older']);
+		expect(history.listChange).toEqual({
+			revision: replacementRevision + 1,
+			kind: 'append',
+		});
+		expect(getGitHistoryCommits).toHaveBeenLastCalledWith(
+			'/project',
+			expect.objectContaining({ limit: 50, offset: 50 }),
+		);
+	});
+
+	it('validates saved list positions and resets them with the target', () => {
+		const history = new GitHistoryController();
+		history.saveListPosition({
+			scrollTop: Number.NaN,
+			anchorHash: 'anchor',
+			anchorOffset: Number.POSITIVE_INFINITY,
+			activeHash: 'active',
+		});
+
+		expect(history.listPosition).toEqual({
+			scrollTop: 0,
+			anchorHash: 'anchor',
+			anchorOffset: 0,
+			activeHash: 'active',
+		});
+		const revision = history.listChange.revision;
+
+		history.resetForProject('/next-project');
+
+		expect(history.listPosition).toEqual({
+			scrollTop: 0,
+			anchorHash: null,
+			anchorOffset: 0,
+			activeHash: null,
+		});
+		expect(history.listChange).toEqual({ revision: revision + 1, kind: 'reset' });
 	});
 
 	it('preserves loaded pages when the History view remounts', async () => {
@@ -372,7 +434,12 @@ describe('GitHistoryController', () => {
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(comparisonSnapshot());
 		const history = new GitHistoryController();
 		history.resetForProject('/project');
-		history.listScrollTop = 320;
+		history.saveListPosition({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
 
 		history.openComparison(
 			'/project',
@@ -399,7 +466,12 @@ describe('GitHistoryController', () => {
 		history.backToList();
 
 		expect(history.screen).toBe('list');
-		expect(history.listScrollTop).toBe(320);
+		expect(history.listPosition).toEqual({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
 		expect(history.comparison.snapshot).toBeNull();
 		expect(history.activeDocument).toBe(history.document);
 	});
@@ -475,7 +547,12 @@ describe('GitHistoryController', () => {
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(commitSnapshot);
 		const history = new GitHistoryController();
 		history.resetForProject('/project');
-		history.listScrollTop = 320;
+		history.saveListPosition({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
 
 		history.openCommit('/project', 'abcdef123');
 		await flushPromises();
@@ -489,6 +566,11 @@ describe('GitHistoryController', () => {
 
 		expect(getGitCommitFileBodies).toHaveBeenCalled();
 		expect(history.screen).toBe('list');
-		expect(history.listScrollTop).toBe(320);
+		expect(history.listPosition).toEqual({
+			scrollTop: 320,
+			anchorHash: 'anchor',
+			anchorOffset: -12,
+			activeHash: 'active',
+		});
 	});
 });

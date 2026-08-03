@@ -131,7 +131,7 @@
 			onkeydown={handleEditorKeydown}
 			disabled={editor.mutation !== 'idle'}
 			rows="4"
-			class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+			class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-base leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70 sm:pointer-fine:text-sm"
 		></textarea>
 	</label>
 

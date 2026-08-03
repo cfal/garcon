@@ -30,6 +30,8 @@ export interface EditorPresentationSettings {
 	readonly fontSize: number;
 }
 
+const MIN_TOUCH_EDITOR_FONT_SIZE = 16;
+
 function normalizedDocument(content: string): Text {
 	return Text.of(content.split(/\r\n?|\n/));
 }
@@ -236,11 +238,15 @@ export class CodeEditorController {
 	}
 
 	private dynamicExtensions(): Extension[] {
+		const configuredFontSize = this.settings.fontSize;
 		const extensions: Extension[] = [
 			EditorView.theme({
-				'&': { fontSize: `${this.settings.fontSize}px` },
 				'.cm-content, .cm-gutters': {
+					fontSize: `${Math.max(MIN_TOUCH_EDITOR_FONT_SIZE, configuredFontSize)}px`,
 					fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+				},
+				'@media (pointer: fine)': {
+					'.cm-content, .cm-gutters': { fontSize: `${configuredFontSize}px` },
 				},
 			}),
 		];

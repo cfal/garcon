@@ -51,7 +51,7 @@
 	}: GitHistoryViewProps = $props();
 	const isMobile = $derived(presentation === 'mobile');
 
-	function revertListCommit(commit: { hash: string; shortHash: string; subject: string }): void {
+	function requestRevertCommit(commit: GitHistoryRevertTarget): void {
 		onRevertCommit({
 			hash: commit.hash,
 			shortHash: commit.shortHash,
@@ -72,11 +72,11 @@
 		error={history.listError}
 		nextOffset={history.nextOffset}
 		{isMobile}
-		scrollTop={history.listScrollTop}
+		position={history.listPosition}
+		collectionChange={history.listChange}
 		onOpenCommit={(hash) => history.openCommit(projectPath, hash)}
-		onRevertCommit={revertListCommit}
 		onLoadMore={() => history.loadMore(projectPath)}
-		onScrollSave={(top) => history.saveListScrollTop(top)}
+		onPositionSave={(position) => history.saveListPosition(position)}
 		comparisonSelectionActive={comparisonSelection.active}
 		comparisonSelectionSlot={comparisonSelection.slot}
 		comparisonFrom={comparisonSelection.from}
@@ -107,7 +107,7 @@
 		onRetry={() => history.retryCommit(projectPath)}
 		onSelectParent={(parent) => history.selectParent(projectPath, parent)}
 		onRevertCommit={() => {
-			if (history.commitSnapshot) revertListCommit(history.commitSnapshot.commit);
+			if (history.commitSnapshot) requestRevertCommit(history.commitSnapshot.commit);
 		}}
 		{onSetDiffMode}
 		{onSetContextLines}
