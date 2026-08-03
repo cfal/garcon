@@ -10,7 +10,6 @@ function clock(
 ): ConversationFeedMutationClock {
 	return {
 		dataRevision: Math.max(...Object.values(lastRevisionByKind)),
-		lastResponseRevision: 0,
 		lastResponseRevisionByMessageType: {},
 		lastRevisionByKind,
 	};

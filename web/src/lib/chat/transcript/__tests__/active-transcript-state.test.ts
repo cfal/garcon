@@ -5,7 +5,13 @@ import {
 	INITIAL_VISIBLE_MESSAGES,
 } from '../active-transcript-state.svelte.js';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
-import { AssistantMessage, ErrorMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
+import {
+	AssistantMessage,
+	BashToolUseMessage,
+	ErrorMessage,
+	UserMessage,
+	type ChatMessage,
+} from '$shared/chat-types';
 import type { ChatViewMessage } from '$shared/chat-view';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -92,7 +98,6 @@ describe('ActiveTranscriptState', () => {
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('hello'))]);
 		const liveRevision = chat.feedMutationClock.dataRevision;
 		expect(chat.feedMutationClock.lastRevisionByKind['live-append']).toBe(liveRevision);
-		expect(chat.feedMutationClock.lastResponseRevision).toBe(liveRevision);
 		expect(chat.feedMutationClock.lastResponseRevisionByMessageType).toEqual({
 			'assistant-message': liveRevision,
 		});
@@ -100,9 +105,16 @@ describe('ActiveTranscriptState', () => {
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('duplicate'))]);
 		expect(chat.feedMutationClock.dataRevision).toBe(liveRevision);
 		chat.applyMessages('chat-1', 'generation-1', [entry(2, user('next prompt'))]);
-		expect(chat.feedMutationClock.lastResponseRevision).toBe(liveRevision);
 		expect(chat.feedMutationClock.lastResponseRevisionByMessageType).toEqual({
 			'assistant-message': liveRevision,
+		});
+		chat.applyMessages('chat-1', 'generation-1', [
+			entry(3, new BashToolUseMessage(TS, 'tool-1', 'pwd')),
+		]);
+		const toolRevision = chat.feedMutationClock.dataRevision;
+		expect(chat.feedMutationClock.lastResponseRevisionByMessageType).toEqual({
+			'assistant-message': liveRevision,
+			'bash-tool-use': toolRevision,
 		});
 
 		chat.appendLocalNotice('warning', 'notice');

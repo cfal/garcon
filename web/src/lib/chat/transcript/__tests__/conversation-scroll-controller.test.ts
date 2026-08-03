@@ -11,7 +11,6 @@ import { mountInitialBottomRestoreEffect } from './conversation-scroll-controlle
 function mutationClock(dataRevision = 0): ConversationFeedMutationClock {
 	return {
 		dataRevision,
-		lastResponseRevision: 0,
 		lastResponseRevisionByMessageType: {},
 		lastRevisionByKind: {
 			initial: 0,

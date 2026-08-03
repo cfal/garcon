@@ -6,14 +6,12 @@ import {
 
 export class ConversationFeedMutationState {
 	#dataRevision = $state(0);
-	#lastResponseRevision = $state(0);
 	#lastResponseRevisionByMessageType = $state.raw<Record<string, number>>({});
 	#lastRevisionByKind = $state.raw({ ...EMPTY_CONVERSATION_FEED_MUTATION_REVISIONS });
 
 	get clock(): ConversationFeedMutationClock {
 		return {
 			dataRevision: this.#dataRevision,
-			lastResponseRevision: this.#lastResponseRevision,
 			lastResponseRevisionByMessageType: this.#lastResponseRevisionByMessageType,
 			lastRevisionByKind: this.#lastRevisionByKind,
 		};
@@ -24,7 +22,6 @@ export class ConversationFeedMutationState {
 		this.#dataRevision = revision;
 		const uniqueResponseTypes = new Set(responseMessageTypes);
 		if (uniqueResponseTypes.size > 0) {
-			this.#lastResponseRevision = revision;
 			this.#lastResponseRevisionByMessageType = {
 				...this.#lastResponseRevisionByMessageType,
 				...Object.fromEntries([...uniqueResponseTypes].map((type) => [type, revision])),

@@ -22,15 +22,13 @@ function clock(
 	dataRevision: number,
 	liveAppendRevision = 0,
 	presentationRevision = 0,
-	responseRevision = liveAppendRevision,
-	responseMessageTypes: readonly string[] = responseRevision > 0 ? ['assistant-message'] : [],
+	responseRevisions: Readonly<Record<string, number>> = liveAppendRevision > 0
+		? { 'assistant-message': liveAppendRevision }
+		: {},
 ): ConversationFeedMutationClock {
 	return {
 		dataRevision,
-		lastResponseRevision: responseRevision,
-		lastResponseRevisionByMessageType: Object.fromEntries(
-			responseMessageTypes.map((messageType) => [messageType, responseRevision]),
-		),
+		lastResponseRevisionByMessageType: responseRevisions,
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': liveAppendRevision,
@@ -238,7 +236,7 @@ describe('ConversationFeedAnnouncerState', () => {
 			announcer.reconcile({
 				surfaceIdentity: 'chat:generation',
 				rows: olderRows,
-				mutationClock: clock(2, 2, 0, 2, ['wait-tool-use']),
+				mutationClock: clock(2, 2, 0, { 'wait-tool-use': 2 }),
 				...enabled,
 				pinnedToBottom: false,
 				isLiveWindow: false,
@@ -248,7 +246,7 @@ describe('ConversationFeedAnnouncerState', () => {
 			announcer.reconcile({
 				surfaceIdentity: 'chat:generation',
 				rows: olderRows,
-				mutationClock: clock(3, 3, 0, 3, ['bash-tool-use']),
+				mutationClock: clock(3, 3, 0, { 'bash-tool-use': 3 }),
 				...enabled,
 				pinnedToBottom: false,
 				isLiveWindow: false,
@@ -259,7 +257,105 @@ describe('ConversationFeedAnnouncerState', () => {
 			announcer.reconcile({
 				surfaceIdentity: 'chat:generation',
 				rows: olderRows,
-				mutationClock: clock(4, 4, 0, 4, ['bash-tool-use']),
+				mutationClock: clock(4, 4, 0, { 'bash-tool-use': 4 }),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBe('New response available');
+	});
+
+	it.each([
+		'wait-tool-use',
+		'unknown-tool-use',
+		'external-tool-use',
+		'mcp-tool-use',
+		'thinking',
+		'error',
+	])('does not announce suppressed historical response type %s', (messageType) => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const olderRows = [assistantRow('1', 'older response')];
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(1),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+		});
+
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(2, 2, 0, { [messageType]: 2 }),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBeNull();
+	});
+
+	it('checks each historical response type against its own revision', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const olderRows = [assistantRow('1', 'older response')];
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(2, 0, 0, { 'assistant-message': 1 }),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+		});
+
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(3, 3, 0, {
+					'assistant-message': 1,
+					'wait-tool-use': 3,
+				}),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBeNull();
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(4, 4, 0, {
+					'assistant-message': 4,
+					'wait-tool-use': 3,
+				}),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBe('New response available');
+	});
+
+	it('announces a historical batch containing suppressed and visible response types', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const olderRows = [assistantRow('1', 'older response')];
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(1),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+		});
+
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(2, 2, 0, {
+					'assistant-message': 2,
+					'wait-tool-use': 2,
+				}),
 				...enabled,
 				pinnedToBottom: false,
 				isLiveWindow: false,
