@@ -66,13 +66,13 @@ jobs:
         id: claude-key
         shell: bash
         env:
-          CLAUDE_TESTING_API_KEY: ${{ secrets.CLAUDE_TESTING_API_KEY }}
+          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
         run: |
-          if [ -n "$CLAUDE_TESTING_API_KEY" ]; then
-            echo "::add-mask::$CLAUDE_TESTING_API_KEY"
+          if [ -n "$CLAUDE_TESTING_KEY" ]; then
+            echo "::add-mask::$CLAUDE_TESTING_KEY"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "CLAUDE_TESTING_API_KEY is unavailable; skipping live Claude tests."
+            echo "CLAUDE_TESTING_KEY is unavailable; skipping live Claude tests."
           fi
 
       - name: Check out repository
@@ -98,7 +98,7 @@ jobs:
       - name: Run live Claude conformance tests
         if: steps.claude-key.outputs.available == 'true'
         env:
-          CLAUDE_TESTING_API_KEY: ${{ secrets.CLAUDE_TESTING_API_KEY }}
+          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
         run: bun run test:live:claude
 
       - name: Verify Claude diagnostics contain no testing credential
@@ -106,13 +106,13 @@ jobs:
         if: always() && steps.claude-key.outputs.available == 'true'
         shell: bash
         env:
-          CLAUDE_TESTING_API_KEY: ${{ secrets.CLAUDE_TESTING_API_KEY }}
+          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
         run: |
-          echo "::add-mask::$CLAUDE_TESTING_API_KEY"
+          echo "::add-mask::$CLAUDE_TESTING_KEY"
           if [ -d integration-tests/artifacts/server ]; then
             set +e
             grep --recursive --fixed-strings --files-with-matches \
-              -- "$CLAUDE_TESTING_API_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+              -- "$CLAUDE_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
             audit_status=$?
             set -e
             if [ "$audit_status" -eq 0 ]; then
@@ -147,13 +147,13 @@ jobs:
         id: openai-key
         shell: bash
         env:
-          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
         run: |
-          if [ -n "$OPENAI_TESTING_KEY" ]; then
-            echo "::add-mask::$OPENAI_TESTING_KEY"
+          if [ -n "$CODEX_TESTING_KEY" ]; then
+            echo "::add-mask::$CODEX_TESTING_KEY"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "OPENAI_TESTING_KEY is unavailable; skipping live Codex tests."
+            echo "CODEX_TESTING_KEY is unavailable; skipping live Codex tests."
           fi
 
       - name: Check out repository
@@ -179,7 +179,7 @@ jobs:
       - name: Run live Codex conformance tests
         if: steps.openai-key.outputs.available == 'true'
         env:
-          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
         run: bun run test:live:codex
 
       - name: Verify Codex diagnostics contain no testing credential
@@ -187,13 +187,13 @@ jobs:
         if: always() && steps.openai-key.outputs.available == 'true'
         shell: bash
         env:
-          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
         run: |
-          echo "::add-mask::$OPENAI_TESTING_KEY"
+          echo "::add-mask::$CODEX_TESTING_KEY"
           if [ -d integration-tests/artifacts/server ]; then
             set +e
             grep --recursive --fixed-strings --files-with-matches \
-              -- "$OPENAI_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+              -- "$CODEX_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
             audit_status=$?
             set -e
             if [ "$audit_status" -eq 0 ]; then
