@@ -23,6 +23,29 @@ describe('MermaidBlock', () => {
 		vi.restoreAllMocks();
 	});
 
+	it('treats empty source as settled without invoking the renderer', async () => {
+		const { container } = render(MermaidBlock, { text: '' });
+
+		await waitFor(() => {
+			expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
+		});
+		expect(mockedRenderMermaid).not.toHaveBeenCalled();
+	});
+
+	it('publishes layout readiness while rendering settles', async () => {
+		let resolveRender!: (svg: string) => void;
+		mockedRenderMermaid.mockReturnValue(
+			new Promise<string>((resolve) => (resolveRender = resolve)),
+		);
+		const { container } = render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
+
+		expect(container.querySelector('[data-chat-layout-pending="true"]')).toBeTruthy();
+		resolveRender('<svg viewBox="0 0 100 100"></svg>');
+		await waitFor(() => {
+			expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
+		});
+	});
+
 	it('opens an expanded viewer with translated zoom and fit controls', async () => {
 		render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
 

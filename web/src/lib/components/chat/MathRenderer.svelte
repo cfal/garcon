@@ -49,6 +49,7 @@ Preserves escaped source while loading or when rendering fails.
 
 <span
 	class="markdown-math not-prose"
+	data-chat-layout-pending={renderStatus === 'loading' ? 'true' : undefined}
 	data-display={displayMode ? 'true' : 'false'}
 	data-render-status={renderStatus}
 	title={renderFailed ? m.markdown_math_render_failed() : undefined}

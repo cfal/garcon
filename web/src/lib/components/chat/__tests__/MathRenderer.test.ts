@@ -29,6 +29,7 @@ describe('MathRenderer', () => {
 		expect(container.querySelector('code')?.textContent).toBe(raw);
 		expect(container.querySelector('img')).toBeNull();
 		expect(container.querySelector('[data-render-status="loading"]')).toBeTruthy();
+		expect(container.querySelector('[data-chat-layout-pending="true"]')).toBeTruthy();
 	});
 
 	it('reconstructs a safe fallback when raw source is unavailable', () => {
@@ -51,6 +52,7 @@ describe('MathRenderer', () => {
 			expect(container.querySelector('.katex')).toBeTruthy();
 		});
 		expect(container.querySelector('[data-render-status="rendered"]')).toBeTruthy();
+		expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
 		expect(renderMath).toHaveBeenCalledWith('x^2', false);
 	});
 
@@ -79,6 +81,7 @@ describe('MathRenderer', () => {
 		await waitFor(() => {
 			expect(container.querySelector('[data-render-status="failed"]')).toBeTruthy();
 		});
+		expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
 		const fallback = container.querySelector('code');
 		expect(fallback?.textContent).toBe('$\\unknownmacro{x}$');
 		expect(fallback?.className).toContain('text-destructive');

@@ -56,7 +56,12 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	}
 
 	$effect(() => {
-		if (!text) return;
+		if (!text) {
+			loading = false;
+			renderedSvg = '';
+			renderError = '';
+			return;
+		}
 
 		const currentText = text;
 		loading = true;
