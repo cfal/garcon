@@ -143,8 +143,8 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Check for OpenAI testing key
-        id: openai-key
+      - name: Check for Codex testing key
+        id: codex-key
         shell: bash
         env:
           CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
@@ -157,34 +157,34 @@ jobs:
           fi
 
       - name: Check out repository
-        if: steps.openai-key.outputs.available == 'true'
+        if: steps.codex-key.outputs.available == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Bun
-        if: steps.openai-key.outputs.available == 'true'
+        if: steps.codex-key.outputs.available == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
       - name: Install server dependencies
-        if: steps.openai-key.outputs.available == 'true'
+        if: steps.codex-key.outputs.available == 'true'
         working-directory: server
         run: bun install --frozen-lockfile
 
       - name: Install integration-test dependencies
-        if: steps.openai-key.outputs.available == 'true'
+        if: steps.codex-key.outputs.available == 'true'
         working-directory: integration-tests
         run: bun install --frozen-lockfile
 
       - name: Run live Codex conformance tests
-        if: steps.openai-key.outputs.available == 'true'
+        if: steps.codex-key.outputs.available == 'true'
         env:
           CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
         run: bun run test:live:codex
 
       - name: Verify Codex diagnostics contain no testing credential
         id: codex-diagnostics-audit
-        if: always() && steps.openai-key.outputs.available == 'true'
+        if: always() && steps.codex-key.outputs.available == 'true'
         shell: bash
         env:
           CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
@@ -210,7 +210,7 @@ jobs:
           echo "safe=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload live Codex diagnostics
-        if: failure() && steps.openai-key.outputs.available == 'true' && steps.codex-diagnostics-audit.outputs.safe == 'true'
+        if: failure() && steps.codex-key.outputs.available == 'true' && steps.codex-diagnostics-audit.outputs.safe == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: codex-live-integration-diagnostics
