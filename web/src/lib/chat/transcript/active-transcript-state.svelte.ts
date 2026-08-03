@@ -1,5 +1,14 @@
 import { applyChatViewMessages, type ChatViewMessage, type ChatViewPage } from '$shared/chat-view';
-import { UserMessage, type ChatMessage, type UserMessageDeliveryStatus } from '$shared/chat-types';
+import {
+	AssistantMessage,
+	ErrorMessage,
+	PermissionRequestMessage,
+	ThinkingMessage,
+	UserMessage,
+	isToolUseMessage,
+	type ChatMessage,
+	type UserMessageDeliveryStatus,
+} from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -260,6 +269,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		messages: ChatViewMessage[],
 		noticeRevision = this.#localNoticeRevision,
 	): MessageApplyResult {
+		const previousLastSeq = this.lastSeq;
 		if (this.#snapshotBuffer) {
 			this.transcriptCache.applyMessages(chatId, generationId, messages);
 			this.#snapshotBuffer.push({ generationId, messages, noticeRevision });
@@ -286,6 +296,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			return 'gap-detected';
 		}
+		const responseUpdated = messages.some(
+			(entry) => entry.seq > previousLastSeq && isResponseMessage(entry.message),
+		);
 		if (this.hasLaterMessages) {
 			this.generationId = generationId;
 			this.lastSeq = result.lastSeq;
@@ -295,7 +308,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (this.entries.length > 0 && this.loadStatus !== 'error') {
 				this.loadStatus = 'loaded';
 			}
-			if (result.changed) this.#recordFeedMutation('live-append');
+			if (result.changed) {
+				this.#recordFeedMutation('live-append', responseUpdated);
+			}
 			return 'applied';
 		}
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
@@ -331,7 +346,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
 		}
-		if (result.changed) this.#recordFeedMutation('live-append');
+		if (result.changed) {
+			this.#recordFeedMutation('live-append', responseUpdated);
+		}
 		return 'applied';
 	}
 
@@ -921,9 +938,19 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.transcriptCache.remove(chatId);
 	}
 
-	#recordFeedMutation(kind: ConversationFeedMutationKind): void {
-		this.#feedMutations.record(kind);
+	#recordFeedMutation(kind: ConversationFeedMutationKind, responseUpdated = false): void {
+		this.#feedMutations.record(kind, responseUpdated);
 	}
+}
+
+function isResponseMessage(message: ChatMessage): boolean {
+	return (
+		message instanceof AssistantMessage ||
+		message instanceof ThinkingMessage ||
+		message instanceof ErrorMessage ||
+		message instanceof PermissionRequestMessage ||
+		isToolUseMessage(message)
+	);
 }
 
 function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {

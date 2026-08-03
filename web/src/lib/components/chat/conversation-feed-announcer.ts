@@ -77,43 +77,45 @@ export class ConversationFeedAnnouncerState {
 	#detachedStatusAnnounced = false;
 
 	reconcile(input: ConversationFeedAnnouncerInput): string | null {
+		const tailRows = input.rows.slice(-ANNOUNCEMENT_LINEAGE_LIMIT);
 		if (input.surfaceIdentity !== this.#surfaceIdentity) {
 			this.#surfaceIdentity = input.surfaceIdentity;
-			this.#contentByRowId = this.#visibleContentByRowId(input.rows);
-			this.#rowIds = new Set(input.rows.map((row) => row.id));
-			this.#tailRowId = input.rows.at(-1)?.id ?? null;
+			this.#contentByRowId = this.#visibleContentByRowId(tailRows);
+			this.#rowIds = new Set(tailRows.map((row) => row.id));
+			this.#tailRowId = tailRows.at(-1)?.id ?? null;
 			this.#floatingPermissionIds = new Set(input.floatingPermissionIds);
-			this.#observedUserRequestIds = this.#userRequestIds(input.rows);
-			this.#observedPermissionIds = this.#permissionIds(input.rows, input.floatingPermissionIds);
+			this.#observedUserRequestIds = this.#userRequestIds(tailRows);
+			this.#observedPermissionIds = this.#permissionIds(tailRows, input.floatingPermissionIds);
 			this.#dataRevision = input.mutationClock.dataRevision;
 			this.#detachedStatusAnnounced = false;
 			return '';
 		}
 
-		const kinds = conversationFeedMutationKindsSince(input.mutationClock, this.#dataRevision);
+		const previousDataRevision = this.#dataRevision;
+		const kinds = conversationFeedMutationKindsSince(input.mutationClock, previousDataRevision);
 		const priorContent = this.#contentByRowId;
 		const priorRowIds = this.#rowIds;
 		const priorTailIndex = this.#tailRowId
-			? input.rows.findIndex((row) => row.id === this.#tailRowId)
+			? tailRows.findIndex((row) => row.id === this.#tailRowId)
 			: -1;
 		const appendedRows =
 			priorTailIndex >= 0
-				? input.rows.slice(priorTailIndex + 1)
+				? tailRows.slice(priorTailIndex + 1)
 				: (() => {
 						let lastKnownIndex = -1;
-						for (let index = input.rows.length - 1; index >= 0; index -= 1) {
-							if (priorRowIds.has(input.rows[index].id)) {
+						for (let index = tailRows.length - 1; index >= 0; index -= 1) {
+							if (priorRowIds.has(tailRows[index].id)) {
 								lastKnownIndex = index;
 								break;
 							}
 						}
-						const newRows = input.rows
+						const newRows = tailRows
 							.slice(lastKnownIndex + 1)
 							.filter((row) => !priorRowIds.has(row.id));
 						return lastKnownIndex >= 0 ? newRows : newRows.slice(-1);
 					})();
-		const nextContent = this.#visibleContentByRowId(input.rows);
-		const streamedRows = input.rows.filter((row) => {
+		const nextContent = this.#visibleContentByRowId(tailRows);
+		const streamedRows = tailRows.filter((row) => {
 			const prior = priorContent.get(row.id);
 			const next = nextContent.get(row.id);
 			return prior !== undefined && next !== undefined && next !== prior;
@@ -123,16 +125,34 @@ export class ConversationFeedAnnouncerState {
 			(id) => !this.#floatingPermissionIds.has(id),
 		);
 		this.#contentByRowId = nextContent;
-		this.#rowIds = new Set(input.rows.map((row) => row.id));
-		this.#tailRowId = input.rows.at(-1)?.id ?? null;
+		this.#rowIds = new Set(tailRows.map((row) => row.id));
+		this.#tailRowId = tailRows.at(-1)?.id ?? null;
 		this.#floatingPermissionIds = nextFloatingPermissionIds;
 		this.#dataRevision = input.mutationClock.dataRevision;
 		const resumedLiveEnd =
 			this.#detachedStatusAnnounced && input.visible && input.isLiveWindow && input.pinnedToBottom;
 		if (resumedLiveEnd) this.#detachedStatusAnnounced = false;
-		if (!input.visible || !input.isLiveWindow) {
-			this.#rememberLineages(input.rows, input.floatingPermissionIds);
+		const responseUpdatedOutsideWindow =
+			!input.isLiveWindow && input.mutationClock.lastResponseRevision > previousDataRevision;
+		const addedPermissionAnnouncements = addedFloatingPermissionIds.filter((permissionId) => {
+			if (this.#observedPermissionIds.has(permissionId)) return false;
+			rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
+			return true;
+		});
+		if (!input.visible) {
+			this.#rememberLineages(tailRows, input.floatingPermissionIds);
 			return '';
+		}
+		if (!input.isLiveWindow) {
+			this.#rememberLineages(tailRows, input.floatingPermissionIds);
+			if (
+				this.#detachedStatusAnnounced ||
+				(!responseUpdatedOutsideWindow && addedPermissionAnnouncements.length === 0)
+			) {
+				return null;
+			}
+			this.#detachedStatusAnnounced = true;
+			return input.detachedStatus;
 		}
 		const hasRowAppend = kinds.has('live-append') || kinds.has('presentation-structure');
 		if (!hasRowAppend && addedFloatingPermissionIds.length === 0) {
@@ -155,11 +175,6 @@ export class ConversationFeedAnnouncerState {
 				if (this.#observedPermissionIds.has(permissionId)) return false;
 				rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
 			}
-			return true;
-		});
-		const addedPermissionAnnouncements = addedFloatingPermissionIds.filter((permissionId) => {
-			if (this.#observedPermissionIds.has(permissionId)) return false;
-			rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
 			return true;
 		});
 		const responseUpdated =

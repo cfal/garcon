@@ -22,9 +22,11 @@ function clock(
 	dataRevision: number,
 	liveAppendRevision = 0,
 	presentationRevision = 0,
+	responseRevision = liveAppendRevision,
 ): ConversationFeedMutationClock {
 	return {
 		dataRevision,
+		lastResponseRevision: responseRevision,
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': liveAppendRevision,
@@ -159,6 +161,61 @@ describe('ConversationFeedAnnouncerState', () => {
 				...enabled,
 			}),
 		).toBe('');
+	});
+
+	it('announces live responses and permissions while viewing an older window', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const olderRows = [assistantRow('1', 'older response')];
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(1),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+		});
+
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(2, 2),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBe('New response available');
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(3, 3),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBeNull();
+
+		const permissionAnnouncer = new ConversationFeedAnnouncerState();
+		permissionAnnouncer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(1),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+		});
+		expect(
+			permissionAnnouncer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(1),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+				floatingPermissionIds: ['permission-1'],
+			}),
+		).toBe('New response available');
 	});
 
 	it('treats visible tool output as a detached response update', () => {

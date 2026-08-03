@@ -11,6 +11,7 @@ export type ConversationFeedEndBehavior =
 
 export interface ConversationFeedMutationClock {
 	dataRevision: number;
+	lastResponseRevision: number;
 	lastRevisionByKind: Readonly<Record<ConversationFeedMutationKind, number>>;
 }
 

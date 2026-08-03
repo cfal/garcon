@@ -92,9 +92,12 @@ describe('ActiveTranscriptState', () => {
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('hello'))]);
 		const liveRevision = chat.feedMutationClock.dataRevision;
 		expect(chat.feedMutationClock.lastRevisionByKind['live-append']).toBe(liveRevision);
+		expect(chat.feedMutationClock.lastResponseRevision).toBe(liveRevision);
 
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('duplicate'))]);
 		expect(chat.feedMutationClock.dataRevision).toBe(liveRevision);
+		chat.applyMessages('chat-1', 'generation-1', [entry(2, user('next prompt'))]);
+		expect(chat.feedMutationClock.lastResponseRevision).toBe(liveRevision);
 
 		chat.appendLocalNotice('warning', 'notice');
 		expect(chat.feedMutationClock.lastRevisionByKind['presentation-structure']).toBe(
