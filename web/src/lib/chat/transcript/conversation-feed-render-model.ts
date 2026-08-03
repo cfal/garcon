@@ -23,11 +23,6 @@ export type ConversationFeedRenderModelChange =
 	| { kind: 'rebuilt' }
 	| { kind: 'unchanged' }
 	| {
-			kind: 'tail-replaced';
-			previousItem: ReconciledConversationFeedRenderItem;
-			nextItem: ReconciledConversationFeedRenderItem;
-	  }
-	| {
 			kind: 'tail-appended';
 			appendedItems: ReconciledConversationFeedRenderItem[];
 	  };
@@ -83,9 +78,6 @@ export class ConversationFeedRenderModelController {
 				this.#rows = rows;
 				return { model: this.#model, change: { kind: 'unchanged' } };
 			}
-
-			const replaced = this.#replaceAssistantTail(rows);
-			if (replaced) return replaced;
 
 			const appended = this.#appendAssistantTail(rows);
 			if (appended) return appended;
@@ -158,38 +150,6 @@ export class ConversationFeedRenderModelController {
 			}
 		}
 		return true;
-	}
-
-	#replaceAssistantTail(rows: ChatDisplayRow[]): ConversationFeedRenderModelReconciliation | null {
-		if (!this.#model || rows.length === 0 || rows.length !== this.#rows.length) return null;
-		if (!this.#samePrefix(rows, rows.length - 1)) return null;
-		const previousRow = this.#rows.at(-1);
-		const nextRow = rows.at(-1);
-		const previousItem = this.#model.items.at(-1);
-		if (
-			previousRow?.kind !== 'message' ||
-			nextRow?.kind !== 'message' ||
-			previousRow.id !== nextRow.id ||
-			previousRow.seq !== nextRow.seq ||
-			!(previousRow.message instanceof AssistantMessage) ||
-			!(nextRow.message instanceof AssistantMessage) ||
-			previousItem?.kind !== 'message' ||
-			previousItem.rowIds[0] !== nextRow.id
-		) {
-			return null;
-		}
-
-		const nextItem: ReconciledConversationFeedRenderItem = {
-			...previousItem,
-			message: nextRow.message,
-			seq: nextRow.seq,
-		};
-		const items = this.#model.items.slice();
-		items[items.length - 1] = nextItem;
-		const model = { ...this.#model, items };
-		this.#rows = rows;
-		this.#model = model;
-		return { model, change: { kind: 'tail-replaced', previousItem, nextItem } };
 	}
 
 	#appendAssistantTail(rows: ChatDisplayRow[]): ConversationFeedRenderModelReconciliation | null {

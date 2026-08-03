@@ -171,27 +171,6 @@ export function buildConversationVirtualFeedModel(
 	};
 }
 
-export function replaceConversationVirtualTranscriptTail(
-	model: ConversationVirtualFeedModel,
-	item: ReconciledConversationFeedRenderItem,
-): ConversationVirtualFeedModel | null {
-	if (item.rowIds.length !== 1) return null;
-	const index = model.indexByRowId.get(item.rowIds[0]);
-	const previous = index === undefined ? undefined : model.items[index];
-	if (
-		index === undefined ||
-		index !== model.transcriptEndIndex - 1 ||
-		previous?.kind !== 'transcript' ||
-		previous.item.virtualKey !== item.virtualKey
-	) {
-		return null;
-	}
-
-	const items = model.items.slice();
-	items[index] = { ...previous, item };
-	return { ...model, items };
-}
-
 export function appendConversationVirtualTranscriptTail(
 	model: ConversationVirtualFeedModel,
 	surfaceIdentity: string,
@@ -217,26 +196,32 @@ export function appendConversationVirtualTranscriptTail(
 	}
 	items.splice(insertIndex, 0, ...appendedVirtualItems);
 
+	const indexByKey = new Map(model.indexByKey);
+	const indexByRowId = new Map(model.indexByRowId);
+	const targetByDomAnchorId = new Map(model.targetByDomAnchorId);
 	for (let index = insertIndex; index < items.length; index += 1) {
-		model.indexByKey.set(items[index].key, index);
+		indexByKey.set(items[index].key, index);
 	}
 	for (const [offset, virtualItem] of appendedVirtualItems.entries()) {
 		if (virtualItem.kind !== 'transcript') continue;
 		const index = insertIndex + offset;
 		for (const rowId of virtualItem.item.rowIds) {
-			model.indexByRowId.set(rowId, index);
-			model.targetByDomAnchorId.set(rowId, { index, innerRowId: rowId });
+			indexByRowId.set(rowId, index);
+			targetByDomAnchorId.set(rowId, { index, innerRowId: rowId });
 		}
 		for (const member of toolMembers(virtualItem.item)) {
 			const target = { index, innerRowId: member.rowId };
-			model.targetByDomAnchorId.set(`tool-input-${member.toolId}`, target);
-			model.targetByDomAnchorId.set(`tool-result-${member.toolId}`, target);
+			targetByDomAnchorId.set(`tool-input-${member.toolId}`, target);
+			targetByDomAnchorId.set(`tool-result-${member.toolId}`, target);
 		}
 	}
 
 	return {
 		...model,
 		items,
+		indexByKey,
+		indexByRowId,
+		targetByDomAnchorId,
 		transcriptEndIndex: insertIndex + appendedVirtualItems.length,
 	};
 }

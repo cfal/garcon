@@ -17,7 +17,6 @@ import {
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
 	appendConversationVirtualTranscriptTail,
-	replaceConversationVirtualTranscriptTail,
 	type ConversationVirtualFeedModel,
 } from './conversation-feed-virtual-items.js';
 
@@ -193,13 +192,6 @@ export class ConversationFeedProjectionState {
 		let geometry = previous.geometry;
 		if (reconciliation.change.kind === 'unchanged') {
 			model = previous.model;
-		} else if (reconciliation.change.kind === 'tail-replaced') {
-			const replaced = replaceConversationVirtualTranscriptTail(
-				previous.model,
-				reconciliation.change.nextItem,
-			);
-			if (!replaced) return null;
-			model = replaced;
 		} else if (reconciliation.change.kind === 'tail-appended') {
 			const appended = appendConversationVirtualTranscriptTail(
 				previous.model,
@@ -208,6 +200,7 @@ export class ConversationFeedProjectionState {
 			);
 			if (!appended) return null;
 			model = appended;
+			if (mutationKinds.size === 0) mutationKinds.add('presentation-structure');
 			const keys = previous.geometry.keys.slice();
 			const estimates = previous.geometry.estimates.slice();
 			const insertIndex = previous.model.transcriptEndIndex;

@@ -136,6 +136,8 @@ describe('conversation virtual feed model', () => {
 			transcriptItems: [userItem(1)],
 			floatingPermissions: [permission],
 		});
+		const priorEndKey = model.items.at(-1)!.key;
+		const priorEndIndex = model.items.length - 1;
 
 		const appended = appendConversationVirtualTranscriptTail(model, 'chat-1:generation-1', [
 			userItem(2),
@@ -150,6 +152,13 @@ describe('conversation virtual feed model', () => {
 			'viewport-end-spacer',
 		]);
 		expect(appended?.items[1]).toMatchObject({ spacingAfter: 'scaled-transcript' });
+		expect(appended?.indexByKey).not.toBe(model.indexByKey);
+		expect(appended?.indexByRowId).not.toBe(model.indexByRowId);
+		expect(appended?.targetByDomAnchorId).not.toBe(model.targetByDomAnchorId);
+		expect(model.indexByRowId.has('generation-1:2')).toBe(false);
+		expect(model.targetByDomAnchorId.has('generation-1:2')).toBe(false);
+		expect(model.indexByKey.get(priorEndKey)).toBe(priorEndIndex);
+		expect(appended?.indexByKey.get(priorEndKey)).toBe(priorEndIndex + 1);
 		expect(appended?.indexByRowId.get('generation-1:2')).toBe(2);
 		for (const [index, item] of appended?.items.entries() ?? []) {
 			expect(appended?.indexByKey.get(item.key)).toBe(index);
