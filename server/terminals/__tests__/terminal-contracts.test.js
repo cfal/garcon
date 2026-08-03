@@ -185,6 +185,7 @@ describe('terminal contracts', () => {
         sentAt: 42,
         serverTime: '2026-07-16T00:00:00.000Z',
         processing: { outcome: 'snapshot', chats: [] },
+        serverInstanceId: 'server-instance-test',
       }),
     ).toMatchObject({ type: 'ws-pong', clientRequestId: 'request-1' });
   });

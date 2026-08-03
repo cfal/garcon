@@ -12,6 +12,7 @@ import {
 import { PendingUserInputService } from '../../../../../../server/chats/pending-user-input-service.js';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { transcriptRevision } from '@garcon/server-agent-common/lib/transcript-revision';
+import { CLAUDE_STEERING_PROMPT_PREFIX } from '../user-input.js';
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-load-test-'));
@@ -143,6 +144,168 @@ describe('Claude pending-input evidence', () => {
         entryId: 'normal-user',
         lineNumber: 5,
       });
+    });
+  });
+});
+
+describe('Claude steering history projection', () => {
+  it('preserves exact recognized steering text and bypasses provider-owned filters', async () => {
+    const spaced = '  keep boundary whitespace  ';
+    const filtered = 'Caveat: keep the existing fallback';
+    const entries = [
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'following-batch',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}${spaced}` },
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}${filtered}` },
+          ],
+        },
+      },
+      {
+        sessionId: 'session',
+        type: 'attachment',
+        uuid: 'inline-steer',
+        timestamp: '2026-07-21T14:00:02.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          prompt: [{
+            type: 'text',
+            text: `${CLAUDE_STEERING_PROMPT_PREFIX}<system-reminder>literal guidance</system-reminder>`,
+          }],
+        },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages.map((message) => message.content)).toEqual([
+        spaced,
+        filtered,
+        '<system-reminder>literal guidance</system-reminder>',
+      ]);
+
+      const service = new PendingUserInputService({
+        loadNativeMessages: () => loadClaudeChatMessages(filePath),
+        getRetainedHistoryMessages: () => [],
+      });
+      await service.register('chat-1', spaced, {
+        clientRequestId: 'request-spaced',
+        createdAt: '2026-07-21T14:00:00.500Z',
+        deliveryStatus: 'accepted',
+      });
+      await service.register('chat-1', filtered, {
+        clientRequestId: 'request-filtered',
+        createdAt: '2026-07-21T14:00:00.500Z',
+        deliveryStatus: 'accepted',
+      });
+      await service.reconcileNativeHistory('chat-1');
+      expect(service.listForChat('chat-1')).toEqual([]);
+
+      const preview = await getClaudePreviewFromNativePath(filePath);
+      expect(preview).toMatchObject({
+        firstMessage: spaced,
+        lastMessage: '> <system-reminder>literal guidance</system-reminder>',
+      });
+    });
+  });
+
+  it('projects following-command batches and inline queued commands as separate inputs', async () => {
+    const entries = [
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'original',
+        timestamp: '2026-07-21T14:00:00.000Z',
+        message: { role: 'user', content: 'original prompt' },
+      },
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'following-batch',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}first steer` },
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}/second steer` },
+          ],
+        },
+      },
+      {
+        sessionId: 'session',
+        type: 'attachment',
+        uuid: 'inline-steer',
+        timestamp: '2026-07-21T14:00:02.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          prompt: [{
+            type: 'text',
+            text: `${CLAUDE_STEERING_PROMPT_PREFIX}inline steer`,
+          }],
+          timestamp: '2026-07-21T14:00:02.500Z',
+        },
+      },
+    ];
+    const original = structuredClone(entries);
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      expect(messages.map((message) => [message.type, message.content])).toEqual([
+        ['user-message', 'original prompt'],
+        ['user-message', 'first steer'],
+        ['user-message', '/second steer'],
+        ['user-message', 'inline steer'],
+      ]);
+
+      const page = await loadClaudeChatMessagePage(filePath, 2, 1);
+      expect(page.messages.map((message) => message.content)).toEqual([
+        'first steer',
+        '/second steer',
+      ]);
+      expect(page.total).toBe(4);
+    });
+    expect(entries).toEqual(original);
+  });
+
+  it('normalizes steering previews without changing ordinary strings', async () => {
+    const ordinaryPrefixText = `${CLAUDE_STEERING_PROMPT_PREFIX}ordinary string`;
+    const entries = [
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'ordinary',
+        timestamp: '2026-07-21T14:00:00.000Z',
+        message: { role: 'user', content: ordinaryPrefixText },
+      },
+      {
+        sessionId: 'session',
+        type: 'user',
+        uuid: 'steering-batch',
+        timestamp: '2026-07-21T14:00:01.000Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}first` },
+            { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}last` },
+          ],
+        },
+      },
+    ];
+
+    await withTempJsonl(entries.map(JSON.stringify), async (filePath) => {
+      const preview = await getClaudePreviewFromNativePath(filePath);
+      expect(preview).toMatchObject({
+        firstMessage: ordinaryPrefixText.trim(),
+        lastMessage: '> last',
+      });
+      expect(preview.lastMessage).not.toContain(CLAUDE_STEERING_PROMPT_PREFIX);
     });
   });
 });

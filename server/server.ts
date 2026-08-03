@@ -30,6 +30,7 @@ import { SettingsStore } from './settings/store.js';
 import {
   ChatExecutionCoordinator,
 } from './chat-execution/chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';
 import { queueDrainOptions } from './chats/chat-execution-options.js';
 import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
@@ -102,6 +103,7 @@ import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-leas
 import {
   advertisedServerUrl,
   createServerRuntimeState,
+  listeningServerUrl,
   publishServerRuntime,
   removeServerRuntime,
 } from './lib/server-runtime.js';
@@ -433,7 +435,7 @@ export async function startServer(): Promise<void> {
       chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
       (chatId) => Boolean(chatRegistry.getChat(chatId)),
-      undefined,
+      new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
     );
     executionCoordinator = queue;
@@ -584,6 +586,7 @@ export async function startServer(): Promise<void> {
     });
 
     const chatHandler = new ChatHandler({
+      serverInstanceId: runtimeState.identity.instanceId,
       processing: chatProcessingActivity,
       chatViews: {
         ...chatViewPages,
@@ -720,14 +723,15 @@ export async function startServer(): Promise<void> {
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
     webSocketPublisher = server;
-    const baseUrl = advertisedServerUrl(bindAddress, server.port ?? listenPort);
+    const actualPort = server.port ?? listenPort;
+    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort);
     let runtimeFilePath: string | null = null;
     if (config.workspaceName !== null) {
       try {
-        const publishedRuntime = await publishServerRuntime(runtimeState, baseUrl);
+        const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl);
         runtimeFilePath = publishedRuntime.filePath;
         logger.info(
-          `Published workspace ${config.workspaceName} runtime at ${runtimeFilePath} (${baseUrl})`,
+          `Published workspace ${config.workspaceName} runtime at ${runtimeFilePath} (${runtimeBaseUrl})`,
         );
       } catch (error) {
         await server.stop(true);
@@ -811,7 +815,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGINT', shutdown);
 
     logger.info(
-      `Started at ${baseUrl}`,
+      `Started at ${listeningServerUrl(bindAddress, actualPort)}`,
     );
     logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
     if (

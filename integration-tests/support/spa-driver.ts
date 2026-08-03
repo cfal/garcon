@@ -10,6 +10,7 @@ interface ClickOptions {
 
 type QueueRowAction = 'Edit queued message' | 'Remove from queue';
 type QueueMoveDirection = 'up' | 'down';
+type ComposerAction = 'Send message' | 'Queue message';
 
 export class SpaDriver {
   readonly #page: Page;
@@ -320,6 +321,40 @@ export class SpaDriver {
     await this.clickButton(title);
   }
 
+  async waitForComposerAction(action: ComposerAction): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => [...document.querySelectorAll('button')].some((element) => {
+        const name = element.getAttribute('aria-label') || element.textContent?.trim();
+        return !element.closest('[aria-hidden="true"]') && name === expected;
+      }),
+      { timeout: 20_000 },
+      action,
+    );
+  }
+
+  async submitComposerWithEnter(content: string, expectedAction: ComposerAction): Promise<void> {
+    const selector = 'textarea[placeholder="Reply..."]';
+    await this.fill(selector, content);
+    await this.#page.waitForFunction(
+      (expected) => [...document.querySelectorAll('button')].some((element) => {
+        const name = element.getAttribute('aria-label') || element.textContent?.trim();
+        return !element.closest('[aria-hidden="true"]')
+          && name === expected
+          && !(element as HTMLButtonElement).disabled;
+      }),
+      { timeout: 20_000 },
+      expectedAction,
+    );
+    await this.#page.$eval(selector, (element) => {
+      (element as HTMLTextAreaElement).focus();
+      element.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+  }
+
   async fill(selector: string, value: string): Promise<void> {
     await this.#page.$eval(selector, (element, nextValue) => {
       const input = element as HTMLInputElement | HTMLTextAreaElement;
@@ -368,9 +403,18 @@ export class SpaDriver {
   }
 
   async setViewport(width: number, height: number): Promise<void> {
+    const workspaceMounted = await this.#page.$(
+      '[role="region"][aria-label="Workspace"]',
+    ) !== null;
     await this.#page.setViewport({ width, height, isMobile: width <= 768 });
     await this.#page.waitForFunction(
       (expected) => matchMedia('(max-width: 768px)').matches === expected,
+      { timeout: 20_000 },
+      width <= 768,
+    );
+    if (!workspaceMounted) return;
+    await this.#page.waitForFunction(
+      (expected) => document.querySelector('.mobile-shell') !== null === expected,
       { timeout: 20_000 },
       width <= 768,
     );

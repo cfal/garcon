@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
+import { FakeClaudeModel } from '../../support/fake-claude-model.js';
+import { FakeCodexModel } from '../../support/fake-codex-model.js';
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
@@ -225,6 +227,77 @@ describe('integration support contracts', () => {
       });
       expect(fake.requests()[0].lastUserText).toBe('hello');
       fake.assertNoProtocolViolations();
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test('projects ordered Claude user text and cursor-relative requests', async () => {
+    const fake = FakeClaudeModel.start();
+    try {
+      fake.scriptTurn([]);
+      const cursor = fake.markRequests();
+      const response = await fetch(`${fake.baseUrl}/v1/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'scripted',
+          messages: [
+            { role: 'user', content: 'first' },
+            { role: 'assistant', content: 'reply' },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'second' },
+                { type: 'text', text: 'third' },
+              ],
+            },
+          ],
+        }),
+      });
+      await response.text();
+
+      expect(fake.requestsSince(cursor)).toHaveLength(1);
+      expect(fake.requestsSince(cursor)[0]).toMatchObject({
+        userTexts: ['first', 'second\nthird'],
+        lastUserText: 'second\nthird',
+      });
+      fake.assertSettled();
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test('projects ordered Codex user text and cursor-relative requests', async () => {
+    const fake = FakeCodexModel.start();
+    try {
+      fake.scriptTurn([]);
+      const cursor = fake.markRequests();
+      const response = await fetch(fake.responsesUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'scripted',
+          input: [
+            { type: 'message', role: 'user', content: 'first' },
+            { type: 'message', role: 'assistant', content: 'reply' },
+            {
+              type: 'message',
+              role: 'user',
+              content: [
+                { type: 'input_text', text: 'second' },
+                { type: 'input_text', text: 'third' },
+              ],
+            },
+          ],
+        }),
+      });
+      await response.text();
+
+      expect(fake.requestsSince(cursor)).toHaveLength(1);
+      expect(fake.requestsSince(cursor)[0]).toMatchObject({
+        userTexts: ['first', 'second\nthird'],
+        lastUserText: 'second\nthird',
+      });
+      fake.assertSettled();
     } finally {
       fake.stop();
     }

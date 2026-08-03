@@ -84,6 +84,7 @@ function pong(chats: Array<{ chatId: string; phase: ChatProcessingPhase }> = [],
 		clientRequestId: 'probe-1',
 		sentAt,
 		serverTime: '2026-07-27T00:00:00.000Z',
+		serverInstanceId: 'server-instance-test',
 		processing: { outcome: 'snapshot', chats },
 	};
 }
@@ -202,6 +203,7 @@ describe('ChatProcessingReconciler', () => {
 			socket.consume({
 				type: 'reconnect-state',
 				clientRequestId: 'reconnect-1',
+				serverInstanceId: 'server-instance-test',
 				processing: { outcome: 'unavailable' },
 				controlResults: [],
 			});

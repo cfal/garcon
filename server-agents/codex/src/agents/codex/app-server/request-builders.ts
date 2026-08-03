@@ -50,15 +50,18 @@ export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandb
   return CODEX_SANDBOX[effectivePermissionMode] ?? CODEX_SANDBOX.default;
 }
 
-// Preserves the established interactive mapping. One-shot generation owns its
-// stricter exact-effort mapping in run-single-query.ts.
-export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
+// Preserves xhigh compatibility for older models while allowing GPT-5.6 to use
+// the max effort introduced for that model family.
+export function mapThinkingModeToCodexEffort(
+  thinkingMode: ThinkingMode | undefined,
+  model?: string,
+): string | undefined {
   switch (thinkingMode) {
     case 'low': return 'low';
     case 'medium': return 'medium';
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
-    case 'max': return 'xhigh';
+    case 'max': return model === 'gpt-5.6' || model?.startsWith('gpt-5.6-') ? 'max' : 'xhigh';
     case 'ultra': return 'ultra';
     default: return undefined;
   }
@@ -156,7 +159,7 @@ export function buildTurnStartParams(request: {
     model: request.model,
   };
   if (request.clientMessageId) params.clientUserMessageId = request.clientMessageId;
-  const effort = mapThinkingModeToCodexEffort(request.thinkingMode);
+  const effort = mapThinkingModeToCodexEffort(request.thinkingMode, request.model);
   if (effort) params.effort = effort;
   return params;
 }

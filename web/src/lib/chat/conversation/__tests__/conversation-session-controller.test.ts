@@ -147,6 +147,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 
 function emptyControl(): ChatExecutionControlState {
 	return {
+		serverInstanceId: 'server-instance-test',
 		queue: {
 			entries: [],
 			dispatchingEntryId: null,
@@ -283,7 +284,7 @@ function createDeps(chat = createRunningChat()) {
 			conversationUi.previousPermissionMode = mode;
 		}),
 		getExecutionControl: vi.fn((): ChatExecutionControlState | null => null),
-		setExecutionControl: vi.fn(),
+		setExecutionControlFromLiveUpdate: vi.fn(),
 		setExecutionControlFromRefresh: vi.fn(),
 	};
 	const deps = {
@@ -407,7 +408,7 @@ function createDeps(chat = createRunningChat()) {
 			]),
 			supportsFork: vi.fn(() => true),
 			supportsForkWhileRunning: vi.fn(() => false),
-			supportsSteering: vi.fn((agentId: string) => agentId === 'codex'),
+			supportsSteering: vi.fn((agentId: string) => agentId === 'claude' || agentId === 'codex'),
 			supportsGoals: vi.fn((agentId: string) => agentId === 'codex'),
 		},
 		readReceiptOutbox: {
@@ -829,6 +830,7 @@ describe('ConversationSessionController', () => {
 	it('applies the paused queue snapshot returned by Stop', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		const control: ChatExecutionControlState = {
+			serverInstanceId: 'server-instance-test',
 			queue: {
 				entries: [
 					{
@@ -864,7 +866,10 @@ describe('ConversationSessionController', () => {
 
 		await controller.handleAbort();
 
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', control);
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
+			'chat-1',
+			control,
+		);
 		expect(deps.lifecycle.beginStopping).toHaveBeenCalledWith('chat-1', expect.any(String));
 		expect(deps.requestProcessingSnapshot).toHaveBeenCalledOnce();
 		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
@@ -1685,7 +1690,7 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
 		expect(deps.chatState.clearLocalNotices).toHaveBeenCalledOnce();
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
 			'chat-1',
 			expect.objectContaining({
 				queue: expect.objectContaining({
@@ -2030,7 +2035,10 @@ describe('ConversationSessionController', () => {
 
 		expect(mockCreateQueuedInput).toHaveBeenCalledTimes(2);
 		expect(mockCreateQueuedInput.mock.calls[1][0]).toEqual(mockCreateQueuedInput.mock.calls[0][0]);
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', nextControl);
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
+			'chat-1',
+			nextControl,
+		);
 	});
 
 	it('replaces and deletes queued entries by ID through separate commands', async () => {
@@ -2079,7 +2087,7 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			entryId: 'entry-3',
 		});
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledTimes(2);
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledTimes(2);
 	});
 
 	it('applies a conflict queue snapshot before rethrowing the edit error', async () => {
@@ -2124,7 +2132,10 @@ describe('ConversationSessionController', () => {
 		await expect(
 			controller.replaceQueueEntryForChat('chat-1', 'entry-1', 'local draft', 1),
 		).rejects.toBe(error);
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', conflictControl);
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
+			'chat-1',
+			conflictControl,
+		);
 	});
 
 	it('reconciles a departed inline delete without showing a failure notice', async () => {
@@ -2167,7 +2178,10 @@ describe('ConversationSessionController', () => {
 
 		await controller.handleDeleteQueuedInput('entry-1');
 
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', latestControl);
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
+			'chat-1',
+			latestControl,
+		);
 		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 
@@ -2197,12 +2211,12 @@ describe('ConversationSessionController', () => {
 
 		expect(mockPauseChatQueue).toHaveBeenCalledWith('chat-1');
 		expect(mockResumeChatQueue).toHaveBeenCalledWith('chat-1', 'pause-rendered');
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenNthCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenNthCalledWith(
 			1,
 			'chat-1',
 			pausedControl,
 		);
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenNthCalledWith(
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenNthCalledWith(
 			2,
 			'chat-1',
 			expect.objectContaining({ version: 3 }),
@@ -2237,7 +2251,10 @@ describe('ConversationSessionController', () => {
 
 		await expect(controller.handleQueueResume('pause-stale')).rejects.toBe(error);
 
-		expect(deps.conversationUi.setExecutionControl).toHaveBeenCalledWith('chat-1', latestControl);
+		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
+			'chat-1',
+			latestControl,
+		);
 	});
 
 	it('steers through the capability without reading or mutating a paused queue', async () => {
@@ -2291,7 +2308,7 @@ describe('ConversationSessionController', () => {
 		});
 		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 		expect(deps.conversationUi.getExecutionControl).not.toHaveBeenCalled();
-		expect(deps.conversationUi.setExecutionControl).not.toHaveBeenCalled();
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).not.toHaveBeenCalled();
 	});
 
 	it('restores untouched steering text after a definitive turn-state failure', async () => {
@@ -2314,6 +2331,26 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
 			content: 'The active turn changed before steering could be applied.',
+		});
+	});
+
+	it('uses a provider-neutral notice when a turn is not ready for steering', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'claude', isProcessing: true }));
+		deps.composerState.inputText = '/steer Keep the current turn';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockSteerChat.mockRejectedValueOnce(new ApiError(
+			409,
+			'No active turn',
+			'STEER_TURN_UNAVAILABLE',
+		));
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: "There isn't a turn ready for steering.",
 		});
 	});
 

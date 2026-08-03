@@ -5,6 +5,7 @@ import { untrack } from 'svelte';
 import {
 	ChatSubscribedMessage,
 	ReconnectStateMessage,
+	WsPongMessage,
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
@@ -14,10 +15,12 @@ import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcrip
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { getChatExecutionControl } from '$lib/api/chats.js';
+import type { WsMessageConsumer } from './connection.svelte.js';
 
 export interface ReconnectWsPort {
 	isConnected: boolean;
 	sendRequest(message: object): Promise<Record<string, unknown>>;
+	addMessageConsumer(consumer: WsMessageConsumer): () => void;
 }
 
 export type ReconnectTranscriptState = Pick<
@@ -32,7 +35,11 @@ export type ReconnectTranscriptState = Pick<
 
 export type ReconnectConversationUiState = Pick<
 	ConversationUiPort,
-	'executionControlChatIds' | 'removeExecutionControl' | 'setExecutionControlFromRefresh'
+	| 'executionControlChatIds'
+	| 'removeExecutionControl'
+	| 'setExecutionControlFromRefresh'
+	| 'markExecutionControlSocketDisconnected'
+	| 'confirmExecutionControlSocketInstance'
 >;
 
 export interface ChatReconnectCoordinatorOptions {
@@ -75,6 +82,15 @@ export class ChatReconnectCoordinator {
 	constructor(private readonly options: ChatReconnectCoordinatorOptions) {}
 
 	mount(): void {
+		$effect(() =>
+			this.options.ws.addMessageConsumer((data) => {
+				if (data.type !== 'ws-pong') return false;
+				const message = parseServerWsMessage(data);
+				if (!(message instanceof WsPongMessage)) return false;
+				this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId);
+				return false;
+			}),
+		);
 		$effect(() => {
 			const connected = this.options.ws.isConnected;
 			untrack(() => {
@@ -87,6 +103,7 @@ export class ChatReconnectCoordinator {
 		if (!connected) {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
+			this.options.conversationUi.markExecutionControlSocketDisconnected();
 			return;
 		}
 		if (this.#wasConnected) return;
@@ -165,6 +182,7 @@ export class ChatReconnectCoordinator {
 			if (!(message instanceof ReconnectStateMessage) || epoch !== this.#reconnectEpoch) {
 				throw new Error('Unexpected reconnect-state response');
 			}
+			this.options.conversationUi.confirmExecutionControlSocketInstance(message.serverInstanceId);
 
 			const requestedChatIds = new Set(controlChatIds);
 			const returnedChatIds = new Set<string>();

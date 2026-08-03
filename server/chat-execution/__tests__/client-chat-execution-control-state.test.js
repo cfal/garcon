@@ -17,6 +17,7 @@ function entry(id, status, revision = 1) {
 
 function control(entries, overrides = {}) {
   return {
+    serverInstanceId: 'server-instance-test',
     entries,
     recentlyDispatched: [],
     appliedCommands: [],
@@ -45,6 +46,7 @@ describe('chat execution-control projection', () => {
     expect(result.queue.entries[0]).not.toHaveProperty('delivery');
     expect(result.queue.dispatchingEntryId).toBe('s1');
     expect(result.queue.reorderRevision).toBe(2);
+    expect(result.serverInstanceId).toBe('server-instance-test');
     expect(result.version).toBe(4);
   });
 

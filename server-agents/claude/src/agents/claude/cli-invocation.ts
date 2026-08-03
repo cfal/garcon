@@ -43,6 +43,8 @@ export interface ClaudeCliDependencies {
   readonly binary: () => string;
   readonly logger: AgentLogger;
   readonly versionProbe: ClaudeCliVersionProbe;
+  readonly steerWriteTimeoutMs?: number;
+  readonly steerIdleFenceTimeoutMs?: number;
 }
 
 function defaultClaudeCliDependencies(): ClaudeCliDependencies {

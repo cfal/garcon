@@ -28,7 +28,9 @@ const MAX_LINES = 1000;
 // 564-line ledger, projection, result budget, terminal-race handling, ordered
 // deletion publication, replay-safe admission, and atomic resume-admission
 // increment for the consultation CLI.
-const EXECUTION_FOOTPRINT_BUDGET = 7929;
+// Runtime-scoped execution controls add 9 lines for repository identity injection,
+// client projection, and rejection of foreign-instance state.
+const EXECUTION_FOOTPRINT_BUDGET = 7938;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

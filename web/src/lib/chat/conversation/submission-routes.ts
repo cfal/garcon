@@ -54,7 +54,7 @@ export async function submitQueueRoute(
 	const submission = acceptedInputs.enqueue({ chatId: context.chatId, content: context.content });
 	try {
 		const result = await submission.submit();
-		deps.conversationUi.setExecutionControl(context.chatId, result.control);
+		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
 		return 'accepted';
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {
@@ -89,7 +89,7 @@ export async function submitGoalControlRoute(
 	});
 	try {
 		const result = await submission.submit();
-		deps.conversationUi.setExecutionControl(context.chatId, result.control);
+		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
 		return 'accepted';
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {

@@ -76,6 +76,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			success: true,
 			chatId: 'chat-1',
 			control: {
+				serverInstanceId: 'server-instance-test',
 				queue: {
 					entries: [],
 					dispatchingEntryId: null,
@@ -95,6 +96,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			status: 'accepted',
 			acceptedAt: '2026-01-01T00:00:00.000Z',
 			control: {
+				serverInstanceId: 'server-instance-test',
 				queue: {
 					entries: [],
 					dispatchingEntryId: null,

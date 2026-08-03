@@ -51,7 +51,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{
 		name: 'steer',
 		source: 'command',
-		description: 'Send guidance to the active turn immediately',
+		description: 'Send guidance to the active turn',
 	},
 	{
 		name: 's',

@@ -6,12 +6,12 @@ import type {
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
 export interface QueueContext {
-	conversationUi: Pick<ConversationUiPort, 'setExecutionControl'>;
+	conversationUi: Pick<ConversationUiPort, 'setExecutionControlFromLiveUpdate'>;
 }
 
 export function handleExecutionControlUpdated(
 	msg: ChatExecutionControlUpdatedMessage,
 	ctx: QueueContext,
 ) {
-	ctx.conversationUi.setExecutionControl(msg.chatId, msg.control);
+	ctx.conversationUi.setExecutionControlFromLiveUpdate(msg.chatId, msg.control);
 }

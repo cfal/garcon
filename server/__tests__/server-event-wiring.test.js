@@ -3,6 +3,7 @@ import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
 import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.ts';
 import { CommandLedger } from '../commands/command-ledger.ts';
+import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { wireServerEvents } from '../server-event-wiring.js';
 
 function deferred() {
@@ -35,7 +36,7 @@ function createWiringFixture(overrides = {}) {
     settleTurn: mock(() => undefined),
   };
   const queue = {
-    onExecutionControlUpdated: noOpSubscription,
+    onExecutionControlUpdated: mock((callback) => { queueListeners.executionControl = callback; }),
     onSessionStopRequested: noOpSubscription,
     onDispatching: noOpSubscription,
     onChatIdle: noOpSubscription,
@@ -130,6 +131,36 @@ function createWiringFixture(overrides = {}) {
 }
 
 describe('server event wiring', () => {
+  it('broadcasts the server instance with execution control updates', () => {
+    const published = [];
+    const fixture = createWiringFixture({
+      server: {
+        publish: mock((_topic, payload) => published.push(JSON.parse(payload))),
+      },
+    });
+    const control = emptyStoredChatExecutionControl('server-instance-a');
+    control.version = 3;
+
+    fixture.queueListeners.executionControl('chat-1', control);
+
+    expect(published).toEqual([{
+      type: 'chat-execution-control-updated',
+      chatId: 'chat-1',
+      control: {
+        serverInstanceId: 'server-instance-a',
+        queue: {
+          entries: [],
+          dispatchingEntryId: null,
+          recentlyDispatched: [],
+          pause: null,
+          reorderRevision: 0,
+        },
+        version: 3,
+        updatedAt: null,
+      },
+    }]);
+  });
+
   it('broadcasts the generic chat reorder invalidation', () => {
     const published = [];
     const fixture = createWiringFixture({

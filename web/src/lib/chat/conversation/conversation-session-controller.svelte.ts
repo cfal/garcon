@@ -129,7 +129,7 @@ type SessionConversationUiState = Pick<
 	| 'previousPermissionMode'
 	| 'clearPendingPermissionRequests'
 	| 'getExecutionControl'
-	| 'setExecutionControl'
+	| 'setExecutionControlFromLiveUpdate'
 	| 'setExecutionControlFromRefresh'
 	| 'setPendingPermissionRequests'
 	| 'setPreviousPermissionMode'
@@ -570,14 +570,14 @@ export class ConversationSessionController {
 	handleAbort(): Promise<void> {
 		const { conversationUi } = this.deps;
 		return this.#requestTurnStop(stopChat, (chatId, result) => {
-			conversationUi.setExecutionControl(chatId, result.control);
+			conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		});
 	}
 
 	handleInterruptAndSend(): Promise<void> {
 		const { conversationUi } = this.deps;
 		return this.#requestTurnStop(interruptAndSendChat, (chatId, result) => {
-			conversationUi.setExecutionControl(chatId, result.control);
+			conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		});
 	}
 

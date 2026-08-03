@@ -6,6 +6,7 @@ import {
   transformClaudeForkTranscript,
 } from '../fork-transcript.js';
 import { convertClaudeEntries } from '../history-loader.js';
+import { CLAUDE_STEERING_PROMPT_PREFIX } from '../user-input.js';
 
 const context = {
   sourceAgentSessionId: '11111111-1111-1111-1111-111111111111',
@@ -71,6 +72,30 @@ describe('projectClaudeForkEntry', () => {
       ...context,
       retainedMessageCount: 0,
     })).toEqual({ ...entry, isMeta: true });
+  });
+
+  it('splits a batched steering entry while preserving native prefixes', () => {
+    const entry = {
+      sessionId: context.sourceAgentSessionId,
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}first` },
+          { type: 'text', text: `${CLAUDE_STEERING_PROMPT_PREFIX}second` },
+        ],
+      },
+    };
+
+    const projected = projectClaudeForkEntry(entry, {
+      ...context,
+      retainedMessageCount: 1,
+    });
+    expect(projected.message.content).toEqual([entry.message.content[0]]);
+    expect(convertClaudeEntries([projected])).toMatchObject([{
+      type: 'user-message',
+      content: 'first',
+    }]);
   });
 });
 

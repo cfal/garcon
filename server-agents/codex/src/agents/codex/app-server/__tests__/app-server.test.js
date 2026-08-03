@@ -14,6 +14,7 @@ import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
 import { ChatExecutionCoordinator } from '../../../../../../../server/chat-execution/chat-execution-coordinator.ts';
+import { InMemoryChatExecutionControlRepository } from '../../../../../../../server/chat-execution/chat-execution-control-repository.ts';
 import { PendingUserInputService } from '../../../../../../../server/chats/pending-user-input-service.ts';
 import {
   buildThreadForkParams,
@@ -672,15 +673,31 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('medium')).toBe('medium');
     expect(mapThinkingModeToCodexEffort('high')).toBe('high');
     expect(mapThinkingModeToCodexEffort('xhigh')).toBe('xhigh');
-    expect(mapThinkingModeToCodexEffort('max')).toBe('xhigh');
+    expect(mapThinkingModeToCodexEffort('max', 'gpt-5.5')).toBe('xhigh');
+    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+      expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
+    }
     expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
   });
 
-  it('preserves the interactive max effort mapping in turn params', () => {
+  it('uses max effort for GPT-5.6 turn params', () => {
     const params = buildTurnStartParams({
       threadId: 'thread-1',
       command: 'hello',
-      model: 'gpt-5.4-codex',
+      model: 'gpt-5.6-luna',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'max',
+    });
+
+    expect(params.effort).toBe('max');
+  });
+
+  it('keeps max compatible with models that only support xhigh', () => {
+    const params = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'hello',
+      model: 'gpt-5.5',
       projectPath: '/repo',
       permissionMode: 'default',
       thinkingMode: 'max',
@@ -1544,6 +1561,7 @@ describe('CodexAppServerRuntime', () => {
         ampAgentMode: 'default',
       }),
       () => true,
+      new InMemoryChatExecutionControlRepository('server-instance-test'),
     );
   }
 
@@ -4690,6 +4708,7 @@ describe('CodexAppServerRuntime', () => {
         ampAgentMode: 'default',
       }),
       () => true,
+      new InMemoryChatExecutionControlRepository('server-instance-test'),
     );
 
     const result = await queue.deliverGoalControlInput('chat-1', 'Steer from the queue', {

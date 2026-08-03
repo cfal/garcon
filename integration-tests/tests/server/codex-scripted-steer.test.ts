@@ -122,6 +122,74 @@ describe('scripted Codex strict steering', () => {
       prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   }, 120_000);
+
+  test('delivers two FIFO steers during an in-flight model request', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    const firstPrompt = marker('BATCH_FIRST_PROMPT');
+    const firstSteer = marker('BATCH_FIRST_STEER');
+    const secondSteer = `/review\n${marker('BATCH_SECOND_STEER')}`;
+    const firstReply = marker('BATCH_FIRST_REPLY');
+    const steeredReply = marker('BATCH_STEERED_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
+    const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(firstReply)]);
+    testEnvironment.model.scriptTurn([codexAssistantMessage(steeredReply)]);
+
+    await withIntegrationFixture('codex-scripted-steer-batch', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const eventCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(liveCodexStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: firstPrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      if (!first.turnId) throw new Error('Scripted Codex start did not return a turn identity.');
+      await held.requested;
+
+      const [firstResult, secondResult] = await Promise.all([
+        fixture.client.steer({
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          chatId,
+          content: firstSteer,
+        }),
+        fixture.client.steer({
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          chatId,
+          content: secondSteer,
+        }),
+      ]);
+      expect(firstResult).toMatchObject({ status: 'accepted', turnId: first.turnId });
+      expect(secondResult).toMatchObject({ status: 'accepted', turnId: first.turnId });
+
+      held.release();
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
+        afterIndex: eventCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).type);
+
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(2);
+      const steeredRequest = requests.at(-1);
+      if (!steeredRequest) throw new Error('Codex did not make the batched steering request.');
+      const firstIndex = steeredRequest.userTexts.indexOf(firstSteer);
+      const secondIndex = steeredRequest.userTexts.indexOf(secondSteer);
+      expect(firstIndex).toBeGreaterThanOrEqual(0);
+      expect(secondIndex).toBeGreaterThan(firstIndex);
+
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(userContents(transcript.messages)).toEqual([firstPrompt, firstSteer, secondSteer]);
+      const assistants = assistantContents(transcript.messages);
+      expect(assistants.some((content) => content.includes(firstReply))).toBe(true);
+      expect(assistants.some((content) => content.includes(steeredReply))).toBe(true);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      prepareWorkspace: testEnvironment.prepareWorkspace,
+    });
+  }, 120_000);
 });
 
 function marker(label: string): string {

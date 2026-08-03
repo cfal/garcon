@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -32,6 +33,65 @@ async function createHistoryFixture(projectPath: string): Promise<void> {
   await writeFile(join(projectPath, 'review.txt'), 'working tree revision\n', 'utf8');
 }
 
+
+async function appendEmptyHistoryCommits(projectPath: string, count: number): Promise<void> {
+  const parent = await runGit(projectPath, ['rev-parse', 'HEAD']);
+  const startTime = Math.floor(Date.now() / 1_000) - count;
+  const chunks: string[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const mark = index + 1;
+    const message = `virtual history commit ${String(mark).padStart(4, '0')}`;
+    chunks.push(
+      [
+        'commit refs/heads/main',
+        `mark :${mark}`,
+        `author E2E Test <test@example.com> ${startTime + index} +0000`,
+        `committer E2E Test <test@example.com> ${startTime + index} +0000`,
+        `data ${Buffer.byteLength(message)}`,
+        message,
+        `from ${index === 0 ? parent : `:${index}`}`,
+        '',
+      ].join('\n'),
+    );
+  }
+
+  const process = Bun.spawn(['git', 'fast-import', '--quiet'], {
+    cwd: projectPath,
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (!process.stdin) throw new Error('git fast-import did not expose stdin');
+  process.stdin.write(chunks.join('\n'));
+  process.stdin.end();
+  const [stderr, exitCode] = await Promise.all([
+    new Response(process.stderr).text(),
+    process.exited,
+  ]);
+  if (exitCode !== 0) throw new Error(`git fast-import failed: ${stderr.trim()}`);
+}
+
+async function loadDeepHistoryPages(page: Page, viewportSelector: string): Promise<void> {
+  for (const expectedPosition of [100, 150, 200, 250, 262]) {
+    await page.$eval(viewportSelector, (element) => {
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForFunction(
+      (selector, minimumPosition) => {
+        const virtualList = document.querySelector<HTMLElement>(
+          `${selector} [data-git-history-virtual-spacer]`,
+        );
+        return Number(virtualList?.dataset.gitHistoryLoadedCount) >= minimumPosition;
+      },
+      { timeout: 20_000 },
+      viewportSelector,
+      expectedPosition,
+    );
+  }
+}
+
 describe('Lightpanda standalone Git views', () => {
   test('applies responsive viewport changes before mobile workflow assertions', async () => {
     await withE2eFixture('git-view-viewport', async (fixture) => {
@@ -43,11 +103,13 @@ describe('Lightpanda standalone Git views', () => {
       expect(await fixture.page.evaluate(
         () => matchMedia('(max-width: 768px)').matches,
       )).toBe(true);
+      expect(await fixture.page.$('.mobile-shell')).not.toBeNull();
 
       await app.setViewport(1_440, 900);
       expect(await fixture.page.evaluate(
         () => matchMedia('(max-width: 768px)').matches,
       )).toBe(false);
+      expect(await fixture.page.$('.mobile-shell')).toBeNull();
       fixture.assertNoBrowserErrors();
     });
   });
@@ -164,6 +226,125 @@ describe('Lightpanda standalone Git views', () => {
     });
   });
 
+  test('virtualizes deep History pages and restores the visible commit', async () => {
+    await withE2eFixture('git-view-virtual-history', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      await createHistoryFixture(project);
+      await appendEmptyHistoryCommits(project, 260);
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-view-virtual-history-seed');
+      await app.waitForText('echo:git-view-virtual-history-seed');
+      await app.selectMainWorkspaceSurface('Open Git History');
+
+      await fixture.page.waitForSelector(
+        '[id="main-panel-singleton:git-history"][aria-hidden="false"]',
+      );
+      const panelSelector = '[data-workspace-surface-id="singleton:git-history"]';
+      const viewportSelector = `${panelSelector} [data-git-history-commit-list]`;
+      await fixture.page.waitForSelector(`${viewportSelector} [data-git-history-virtual-row]`);
+
+      await loadDeepHistoryPages(fixture.page, viewportSelector);
+
+      const mountedDesktopRows = await fixture.page.$$eval(
+        `${viewportSelector} [data-git-history-virtual-row]`,
+        (rows) => rows.length,
+      );
+      expect(mountedDesktopRows).toBeLessThan(60);
+      await fixture.page.$eval(viewportSelector, (element) => {
+        const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
+        element.scrollTop = Math.floor(maximum * 0.6);
+        element.dispatchEvent(new Event('scroll'));
+      });
+      await fixture.page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+
+      const anchor = await fixture.page.$eval(viewportSelector, (element) => {
+        const rowStart = (row: HTMLElement) =>
+          Number.parseFloat(row.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? '0');
+        const row = element
+          .querySelector<HTMLElement>('[data-git-history-commit-row][tabindex="0"]')
+          ?.closest<HTMLElement>('[data-git-history-virtual-row]');
+        const hash = row?.querySelector<HTMLElement>('[data-git-history-commit-hash]')?.dataset
+          .gitHistoryCommitHash;
+        if (!row || !hash) throw new Error('Expected a visible History commit');
+        return {
+          hash,
+          offset: rowStart(row) - element.scrollTop,
+        };
+      });
+      await fixture.page.$eval(
+        `${viewportSelector} [data-git-history-commit-hash="${anchor.hash}"]` +
+          ' [data-git-history-commit-row]',
+        (element) => (element as HTMLButtonElement).click(),
+      );
+      await app.waitForButton('Back to commit history');
+      await app.clickButton('Back to commit history');
+      await fixture.page.waitForFunction(
+        (selector, hash, offset) => {
+          const viewport = document.querySelector<HTMLElement>(selector);
+          const row = viewport
+            ?.querySelector<HTMLElement>(`[data-git-history-commit-hash="${hash}"]`)
+            ?.closest<HTMLElement>('[data-git-history-virtual-row]');
+          if (!viewport || !row) return false;
+          const rowStart = Number.parseFloat(
+            row.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? '0',
+          );
+          return Math.abs(rowStart - viewport.scrollTop - offset) <= 1;
+        },
+        { timeout: 20_000 },
+        viewportSelector,
+        anchor.hash,
+        anchor.offset,
+      );
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('virtualizes deep History pages in the mobile view', async () => {
+    await withE2eFixture('git-view-virtual-history-mobile', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      await createHistoryFixture(project);
+      await appendEmptyHistoryCommits(project, 260);
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-view-virtual-history-mobile-seed');
+      await app.waitForText('echo:git-view-virtual-history-mobile-seed');
+      await app.setViewport(390, 844);
+      await fixture.page.waitForSelector('nav[aria-label="Workspace navigation"]');
+      await app.waitForButton('Settings');
+      await app.clickButton('Settings');
+      await app.waitForMenuItemEnabled('Open Git History');
+      await app.clickMenuItem('Open Git History');
+
+      const viewportSelector =
+        '[data-workspace-surface-id="singleton:git-history"]'
+        + ' [data-git-history-commit-list]';
+      await fixture.page.waitForSelector(`${viewportSelector} [data-git-history-virtual-row]`);
+      await loadDeepHistoryPages(fixture.page, viewportSelector);
+      expect(await fixture.page.$eval(
+        `${viewportSelector} [data-git-history-virtual-spacer]`,
+        (element) => Number(element.getAttribute('data-git-history-loaded-count')),
+      )).toBe(262);
+      const mountedMobileRows = await fixture.page.$$eval(
+        `${viewportSelector} [data-git-history-virtual-row]`,
+        (rows) => rows.length,
+      );
+      expect(mountedMobileRows).toBeLessThan(60);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('keeps Compare on a repository selected independently from the active chat', async () => {
     await withE2eFixture('git-view-compare-target', async (fixture) => {
       const chatProject = fixture.integration.dirs.project;
@@ -249,6 +430,7 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-mobile-seed');
       await app.waitForText('echo:git-view-mobile-seed');
       await app.setViewport(390, 844);
+      await fixture.page.waitForSelector('nav[aria-label="Workspace navigation"]');
       await app.waitForButton('Settings');
 
       await app.clickButton('Settings');

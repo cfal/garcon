@@ -41,6 +41,12 @@ interface ClaudeProcessTransportOptions<Message> {
   readonly maxStdoutFrameBytes?: number;
 }
 
+export interface ClaudeWriteLineOptions {
+  readonly beforeWrite?: () => void;
+  readonly attemptTimeoutMs?: number;
+  readonly killProcessAfterAttemptFailure?: boolean;
+}
+
 interface StderrSummary {
   bytes: number;
   lines: number;
@@ -141,6 +147,30 @@ async function drainStderr(
   if (remainder) onChunk(remainder);
 }
 
+async function writeAndFlushWithTimeout(
+  stdin: import('bun').FileSink,
+  frame: string,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('Claude CLI stdin write timed out'));
+    }, timeoutMs);
+  });
+  try {
+    await Promise.race([
+      (async () => {
+        await stdin.write(frame);
+        await stdin.flush();
+      })(),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export class ClaudeProcessTransport<Message> {
   readonly process: ClaudeSubprocess;
   readonly #options: ClaudeProcessTransportOptions<Message>;
@@ -160,16 +190,29 @@ export class ClaudeProcessTransport<Message> {
     this.#startReaders();
   }
 
-  writeLine(jsonl: string): Promise<void> {
+  writeLine(jsonl: string, options: ClaudeWriteLineOptions = {}): Promise<void> {
+    let attemptBegan = false;
     const write = this.#writeTail.then(async () => {
       if (this.#retiring || this.process.killed) {
         throw new Error('Claude CLI process is not writable');
       }
       const stdin = this.process.stdin as import('bun').FileSink;
       if (!stdin?.write) throw new Error('Claude CLI process has no writable stdin');
-      await stdin.write(jsonl + '\n');
-      await stdin.flush();
+      options.beforeWrite?.();
+      attemptBegan = true;
+      const frame = jsonl + '\n';
+      if (options.attemptTimeoutMs !== undefined) {
+        await writeAndFlushWithTimeout(stdin, frame, options.attemptTimeoutMs);
+      } else {
+        await stdin.write(frame);
+        await stdin.flush();
+      }
     }).catch((error: unknown) => {
+      if (
+        options.killProcessAfterAttemptFailure
+        && attemptBegan
+        && !this.process.killed
+      ) this.process.kill();
       this.#reportFailure({ kind: 'write', message: errorMessage(error) });
       throw error;
     });

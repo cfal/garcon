@@ -60,17 +60,19 @@ describe('file tree virtual anchor', () => {
 	it('resolves an exact stable key after rows are inserted above it', () => {
 		const a = row('a');
 		const b = row('b');
-		const anchor = { key: b.key, previousIndex: 1, offsetFromContentViewport: -5 };
-		expect(resolveFileTreeAnchorIndex(anchor, [a, b], model([row('new'), a, b]))).toBe(2);
+		const previous = model([a, b]);
+		const anchor = { key: b.key, previousIndex: 2, offsetFromContentViewport: -5 };
+		expect(resolveFileTreeAnchorIndex(anchor, previous.rows, model([row('new'), a, b]))).toBe(3);
 	});
 
 	it('falls back to the nearest surviving predecessor and then the first row', () => {
 		const a = row('a');
 		const b = row('b');
 		const c = row('c');
-		const anchor = { key: c.key, previousIndex: 2, offsetFromContentViewport: 0 };
-		expect(resolveFileTreeAnchorIndex(anchor, [a, b, c], model([a]))).toBe(0);
-		expect(resolveFileTreeAnchorIndex(anchor, [a, b, c], model([]))).toBeNull();
+		const previous = model([a, b, c]);
+		const anchor = { key: c.key, previousIndex: 3, offsetFromContentViewport: 0 };
+		expect(resolveFileTreeAnchorIndex(anchor, previous.rows, model([a]))).toBe(1);
+		expect(resolveFileTreeAnchorIndex(anchor, previous.rows, model([]))).toBe(0);
 	});
 
 	it('maps a column-layout anchor into details-layout coordinates', () => {

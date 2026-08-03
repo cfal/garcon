@@ -61,6 +61,7 @@ describe('chats API contract', () => {
 
 	function emptyControl() {
 		return {
+			serverInstanceId: 'server-instance-test',
 			queue: {
 				entries: [],
 				dispatchingEntryId: null,
@@ -663,6 +664,28 @@ describe('chats API contract', () => {
 			chatId: 'c/1',
 			pauseId: 'pause/1',
 		});
+	});
+
+	it('rejects queue controls without a bounded opaque server instance ID', async () => {
+		for (const serverInstanceId of [
+			undefined,
+			null,
+			'',
+			' server-a',
+			'server-a ',
+			'x'.repeat(129),
+		]) {
+			fetchMock.mockResolvedValueOnce(
+				jsonResponse({
+					success: true,
+					chatId: 'chat-1',
+					control: { ...emptyControl(), serverInstanceId },
+				}),
+			);
+			await expect(getChatExecutionControl('chat-1')).rejects.toThrow(
+				'Invalid chat execution control response',
+			);
+		}
 	});
 
 	it('settings, model, project path, and history helpers use REST endpoints', async () => {

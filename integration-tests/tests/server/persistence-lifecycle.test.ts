@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { randomBytes } from 'node:crypto';
+import { parseServerRuntimeProbe } from '../../../common/server-runtime.js';
 import type { ChatViewMessage } from '../../../common/chat-view.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
@@ -7,6 +9,13 @@ import {
   userContents,
 } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+
+async function getRuntimeInstanceId(baseUrl: string): Promise<string> {
+  const challenge = randomBytes(32).toString('base64url');
+  const response = await fetch(`${baseUrl}/api/v1/runtime?challenge=${challenge}`);
+  expect(response.ok).toBe(true);
+  return parseServerRuntimeProbe(await response.json()).instanceId;
+}
 
 describe('persistence lifecycle', () => {
   test('restores an idle direct chat and provider configuration after graceful restart', async () => {
@@ -77,11 +86,20 @@ describe('persistence lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await held.received;
+      const initialInstanceId = await getRuntimeInstanceId(fixture.garcon.baseUrl);
       await fixture.client.enqueueNew(chatId, 'discard-on-restart');
       const paused = await fixture.client.pauseQueue(chatId);
+      expect(paused.control.serverInstanceId).toBe(initialInstanceId);
       expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual(['discard-on-restart']);
       expect(paused.control.queue.pause?.kind).toBe('manual');
-      expect((await fixture.client.reconnectState([chatId])).processing).toEqual({
+      const initialReconnect = await fixture.client.reconnectState([chatId]);
+      expect(initialReconnect.serverInstanceId).toBe(initialInstanceId);
+      const initialControl = initialReconnect.controlResults[0];
+      if (!initialControl || initialControl.outcome !== 'snapshot') {
+        throw new Error('Initial reconnect did not return the queue snapshot.');
+      }
+      expect(initialControl.control.serverInstanceId).toBe(initialInstanceId);
+      expect(initialReconnect.processing).toEqual({
         outcome: 'snapshot',
         chats: [{ chatId, phase: 'running' }],
       });
@@ -99,7 +117,10 @@ describe('persistence lifecycle', () => {
       await activeAborted;
       held.releaseTruncatedStream();
 
+      const restartedInstanceId = await getRuntimeInstanceId(fixture.garcon.baseUrl);
+      expect(restartedInstanceId).not.toBe(initialInstanceId);
       const restarted = await fixture.client.reconnectState([chatId]);
+      expect(restarted.serverInstanceId).toBe(restartedInstanceId);
       expect(restarted.processing).toEqual({
         outcome: 'snapshot',
         chats: [],
@@ -108,6 +129,7 @@ describe('persistence lifecycle', () => {
         chatId,
         outcome: 'snapshot',
         control: {
+          serverInstanceId: restartedInstanceId,
           queue: {
             entries: [],
             dispatchingEntryId: null,
@@ -120,6 +142,7 @@ describe('persistence lifecycle', () => {
         },
       }]);
       expect(await fixture.client.getExecutionControl(chatId)).toEqual({
+        serverInstanceId: restartedInstanceId,
         queue: {
           entries: [],
           dispatchingEntryId: null,
