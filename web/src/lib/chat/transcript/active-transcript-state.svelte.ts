@@ -622,6 +622,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#invalidatePageLoad();
 	}
 
+	invalidatePendingWindowNavigation(): void {
+		this.#windowNavigationEpoch += 1;
+	}
+
 	#isCurrentPageLoad(chatId: string, generationId: string, operationEpoch: number): boolean {
 		return (
 			this.#pageLoadOperationEpoch === operationEpoch &&

@@ -1432,6 +1432,45 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasLaterMessages).toBe(false);
 	});
 
+	it('discards a pending window navigation after explicit invalidation', async () => {
+		const chat = new ActiveTranscriptState();
+		const latestWindow = Array.from({ length: 50 }, (_, index) =>
+			entry(index + 51, assistant(`latest-${index + 51}`)),
+		);
+		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+			lastSeq: 100,
+			pageOldestSeq: 51,
+			hasMore: true,
+		});
+		let resolveInitial!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveInitial = resolve;
+			}),
+		);
+
+		const initial = chat.navigateToWindow('chat-1', 'initial');
+		chat.invalidatePendingWindowNavigation();
+		resolveInitial({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 1, assistant(`initial-${index + 1}`)),
+				),
+				lastSeq: 100,
+				pageOldestSeq: 1,
+				hasMore: false,
+			}),
+		});
+
+		await expect(initial).resolves.toBe('invalidated');
+		expect(chat.chatMessages.map(contentOf)).toEqual(
+			Array.from({ length: 50 }, (_, index) => `latest-${index + 51}`),
+		);
+		expect(chat.hasLaterMessages).toBe(false);
+	});
+
 	it('keeps the initial window when Initial supersedes a pending Bottom request', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration(

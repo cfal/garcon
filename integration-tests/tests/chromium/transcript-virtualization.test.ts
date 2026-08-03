@@ -589,7 +589,6 @@ async function selectNavigatorTargetDuringAppend(
   const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({
     lastUserText: appendedContent,
   });
-  const dataRevision = await virtualDataRevision(fixture.page);
   await installHeldTargetCompletion(fixture.page, rowId);
   await clickUserMessageNavigatorRowContaining(fixture.page, marker);
   await fixture.page.waitForFunction(
@@ -600,6 +599,7 @@ async function selectNavigatorTargetDuringAppend(
     rowId,
     { timeout: 20_000 },
   );
+  const dataRevision = await virtualDataRevision(fixture.page);
 
   let turnId: string | null = null;
   try {
@@ -616,6 +616,14 @@ async function selectNavigatorTargetDuringAppend(
         .locator(`[data-chat-row-id="${rowId}"]`)
         .getAttribute('data-chat-layout-pending'),
     ).toBe('true');
+    expect(await fixture.page.locator(FEED_SELECTOR).getAttribute('data-chat-pinned-to-bottom')).toBe(
+      'false',
+    );
+    const detachedGeometry = await fixture.page.locator(FEED_SELECTOR).evaluate((feed) => ({
+      distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
+      viewportHeight: feed.clientHeight,
+    }));
+    expect(detachedGeometry.distanceFromEnd).toBeGreaterThan(detachedGeometry.viewportHeight);
     await fixture.page.evaluate(() => {
       const browserGlobal = globalThis as typeof globalThis & {
         __completeHeldChatTarget?: () => void;
@@ -632,6 +640,7 @@ async function selectNavigatorTargetDuringAppend(
   expect((await fixture.integration.client.waitForTurnTerminal(chatId, turnId)).type).toBe(
     'agent-run-finished',
   );
+  await waitForRowCentered(fixture.page, rowId);
 }
 
 async function installDelayedTargetCompletion(page: Page, rowId: string): Promise<void> {

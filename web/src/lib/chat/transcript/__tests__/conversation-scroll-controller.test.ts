@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import {
 	ConversationScrollController,
 	type ConversationScrollState,
 } from '../conversation-scroll-controller.svelte';
 import type { ConversationFeedMutationClock } from '../conversation-feed-mutations';
 import type { ConversationViewportPort } from '../conversation-viewport-port';
+import { mountInitialBottomRestoreEffect } from './conversation-scroll-controller-effect-harness.svelte';
 
 function mutationClock(dataRevision = 0): ConversationFeedMutationClock {
 	return {
@@ -34,6 +36,7 @@ function scrollState(overrides: Partial<ConversationScrollState> = {}): Conversa
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
 		invalidatePendingHistoryLoad: vi.fn(),
+		invalidatePendingWindowNavigation: vi.fn(),
 		loadEarlierPage: vi.fn(async () => 'exhausted' as const),
 		loadLaterPage: vi.fn(async () => 'exhausted' as const),
 		loadStatus: 'loaded',
@@ -541,7 +544,7 @@ describe('ConversationScrollController', () => {
 			.mockResolvedValueOnce('overflow');
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const { controller } = controllerFixture({
-			viewport: fakeViewport({ measureViewportFill, scrollToTarget }),
+			viewport: fakeViewport({ isAtEnd: vi.fn(() => true), measureViewportFill, scrollToTarget }),
 			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
 		});
 
@@ -554,6 +557,28 @@ describe('ConversationScrollController', () => {
 		resolveTarget('completed');
 		await expect(navigation).resolves.toBe(true);
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledOnce());
+	});
+
+	it('detaches a completed DOM-anchor jump away from the live end', async () => {
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const viewport = fakeViewport({
+			isAtEnd: vi.fn(() => false),
+			measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
+				async () => 'underfilled',
+			),
+		});
+		const { controller, state } = controllerFixture({
+			viewport,
+			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
+		});
+
+		await expect(controller.jumpToDomAnchor('tool-input-9')).resolves.toBe(true);
+		await tick();
+
+		expect(controller.isPinnedToBottom).toBe(false);
+		expect(state.isUserScrolledUp).toBe(true);
+		expect(viewport.measureViewportFill).not.toHaveBeenCalled();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
 	});
 
 	it('reconciles queue height through the viewport without row geometry', () => {
@@ -644,7 +669,7 @@ describe('ConversationScrollController', () => {
 		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
 	});
 
-	it('does not supersede active viewport autofill with initial-end reconciliation', async () => {
+	it('retries initial-end reconciliation after viewport autofill finishes', async () => {
 		let resolveLayout!: (result: 'settled') => void;
 		const viewport = fakeViewport({
 			waitForLayout: vi.fn<ConversationViewportPort['waitForLayout']>(
@@ -658,14 +683,44 @@ describe('ConversationScrollController', () => {
 		controller.prepareInitialBottomRestore('chat-1');
 		const fill = controller.fillUnderfilledViewport();
 		await vi.waitFor(() => expect(viewport.waitForLayout).toHaveBeenCalledOnce());
+		const dispose = mountInitialBottomRestoreEffect(controller);
+		try {
+			await tick();
+			expect(viewport.restoreInitialEnd).not.toHaveBeenCalled();
 
-		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.restoreInitialEnd).not.toHaveBeenCalled();
+			resolveLayout('settled');
+			await fill;
+			await tick();
+			expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
+		} finally {
+			dispose();
+		}
+	});
 
-		resolveLayout('settled');
-		await fill;
-		controller.reconcileInitialBottomRestore(true);
-		expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
+	it('retries initial-end reconciliation after target navigation finishes', async () => {
+		let resolveTarget!: (result: 'completed') => void;
+		const viewport = fakeViewport({
+			isAtEnd: vi.fn(() => false),
+			scrollToTarget: vi.fn(
+				() => new Promise<'completed'>((resolve) => (resolveTarget = resolve)),
+			),
+		});
+		const { controller } = controllerFixture({ viewport });
+		controller.prepareInitialBottomRestore('chat-1');
+		const navigation = controller.jumpToDomAnchor('tool-input-9');
+		await vi.waitFor(() => expect(viewport.scrollToTarget).toHaveBeenCalledOnce());
+		const dispose = mountInitialBottomRestoreEffect(controller);
+		try {
+			await tick();
+			expect(viewport.restoreInitialEnd).not.toHaveBeenCalled();
+
+			resolveTarget('completed');
+			await navigation;
+			await tick();
+			expect(viewport.restoreInitialEnd).toHaveBeenCalledOnce();
+		} finally {
+			dispose();
+		}
 	});
 
 	it('clears initial restoration when loading ends empty', () => {
@@ -753,6 +808,27 @@ describe('ConversationScrollController', () => {
 		expect(fixture.state.isUserScrolledUp).toBe(false);
 		expect(fixture.controller.isPinnedToBottom).toBe(true);
 		expect(fixture.viewport.scrollToEnd).toHaveBeenCalledOnce();
+	});
+
+	it('lets user intent cancel a pending latest-window navigation', async () => {
+		let resolveNavigation!: (result: 'loaded') => void;
+		const navigateToWindow = vi.fn(
+			() => new Promise<'loaded'>((resolve) => (resolveNavigation = resolve)),
+		);
+		const fixture = controllerFixture({
+			state: { hasLaterMessages: true, isUserScrolledUp: true, navigateToWindow },
+		});
+		fixture.controller.setPinnedToBottom(false);
+
+		const navigation = fixture.controller.scrollToLatest();
+		await vi.waitFor(() => expect(navigateToWindow).toHaveBeenCalledOnce());
+		fixture.controller.noteUserScrollIntent('earlier');
+		resolveNavigation('loaded');
+		await navigation;
+
+		expect(fixture.viewport.scrollToEnd).not.toHaveBeenCalled();
+		expect(fixture.state.compactToRecentMessages).not.toHaveBeenCalled();
+		expect(fixture.state.invalidatePendingWindowNavigation).toHaveBeenCalledTimes(2);
 	});
 
 	it('keeps Ctrl-U half-page scrolling on the viewport port', () => {

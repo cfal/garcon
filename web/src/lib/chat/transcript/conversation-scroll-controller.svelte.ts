@@ -38,6 +38,7 @@ export type ConversationScrollState = Pick<
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
 	| 'invalidatePendingHistoryLoad'
+	| 'invalidatePendingWindowNavigation'
 	| 'loadEarlierPage'
 	| 'loadLaterPage'
 	| 'loadStatus'
@@ -58,7 +59,7 @@ export interface ScrollControllerDeps {
 export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
 	isScrollingToTop = $state(false);
-	#isAutoFillingViewport = false;
+	#isAutoFillingViewport = $state(false);
 	#refillViewportAfterCurrentFill = false;
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
@@ -69,7 +70,7 @@ export class ConversationScrollController {
 	#previousScrollTop: number | null = null;
 	#viewportOperationEpoch = 0;
 	#isPageMutationInProgress = false;
-	#activeTargetNavigations = 0;
+	#activeTargetNavigations = $state(0);
 	#resumeAutoFillAfterTargets = false;
 
 	constructor(private deps: ScrollControllerDeps) {}
@@ -129,6 +130,7 @@ export class ConversationScrollController {
 
 	noteUserScrollIntent(direction: TranscriptPageDirection | null = null): void {
 		this.deps.getViewport()?.cancelForUserIntent();
+		this.#cancelViewportOperations();
 		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
 		this.#userScrollIntent = {
 			epoch: this.#userScrollIntent.epoch + 1,
@@ -138,7 +140,7 @@ export class ConversationScrollController {
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
-		this.#viewportOperationEpoch += 1;
+		this.#cancelViewportOperations();
 		this.#resetPagingContext();
 		this.#initialBottomRestoreChatId = chatId;
 	}
@@ -265,7 +267,7 @@ export class ConversationScrollController {
 	async loadEarlierPageForNavigator(chatId: string): Promise<TranscriptPageLoadResult> {
 		const viewport = this.deps.getViewport();
 		if (!viewport || this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
-		const operationEpoch = ++this.#viewportOperationEpoch;
+		const operationEpoch = this.#beginViewportOperation();
 		const shouldRemainPinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 		const result = await this.deps.chatState.loadEarlierPage(chatId);
 		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
@@ -308,7 +310,7 @@ export class ConversationScrollController {
 			) {
 				return 'cancelled';
 			}
-			const operationEpoch = ++this.#viewportOperationEpoch;
+			const operationEpoch = this.#beginViewportOperation();
 			const viewport = this.deps.getViewport();
 			if (!viewport) return 'unavailable';
 			this.#preserveHistoryBrowsing();
@@ -336,17 +338,20 @@ export class ConversationScrollController {
 
 	async jumpToDomAnchor(anchorId: string): Promise<boolean> {
 		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId) return false;
+		const viewport = this.deps.getViewport();
+		if (!chatId || !viewport) return false;
 		let shouldResumeAutoFill = false;
 		this.#activeTargetNavigations += 1;
 		try {
-			const operationEpoch = ++this.#viewportOperationEpoch;
-			const result = await this.deps
-				.getViewport()
-				?.scrollToTarget({ kind: 'dom-anchor', id: anchorId }, { align: 'center' });
+			const operationEpoch = this.#beginViewportOperation();
+			const result = await viewport.scrollToTarget(
+				{ kind: 'dom-anchor', id: anchorId },
+				{ align: 'center' },
+			);
 			const completed = Boolean(
 				result === 'completed' && this.#isCurrentViewportOperation(chatId, operationEpoch),
 			);
+			if (completed) this.setPinnedToBottom(viewport.isAtEnd());
 			shouldResumeAutoFill = completed;
 			return completed;
 		} finally {
@@ -449,7 +454,7 @@ export class ConversationScrollController {
 	setViewportVisible(isVisible: boolean): void {
 		if (isVisible === this.#isViewportVisible) return;
 		this.#isViewportVisible = isVisible;
-		this.#viewportOperationEpoch += 1;
+		this.#cancelViewportOperations();
 		if (!isVisible) return;
 		void this.#restoreVisibleViewport();
 	}
@@ -473,7 +478,7 @@ export class ConversationScrollController {
 		const chatId = this.deps.sessions.selectedChatId;
 		const viewport = this.deps.getViewport();
 		if (!chatId || !viewport) return 'invalidated';
-		const operationEpoch = ++this.#viewportOperationEpoch;
+		const operationEpoch = this.#beginViewportOperation();
 		const windowRevision = this.deps.chatState.windowRevision;
 		const result = await mutate();
 		if (
@@ -574,6 +579,16 @@ export class ConversationScrollController {
 		);
 	}
 
+	#beginViewportOperation(): number {
+		this.deps.chatState.invalidatePendingWindowNavigation();
+		return ++this.#viewportOperationEpoch;
+	}
+
+	#cancelViewportOperations(): void {
+		this.deps.chatState.invalidatePendingWindowNavigation();
+		this.#viewportOperationEpoch += 1;
+	}
+
 	#finishTargetNavigation(shouldResumeAutoFill: boolean): void {
 		this.#resumeAutoFillAfterTargets ||= shouldResumeAutoFill;
 		this.#activeTargetNavigations -= 1;
@@ -600,7 +615,7 @@ export class ConversationScrollController {
 		onCommitted: () => void,
 	): Promise<WindowNavigationResult> {
 		if (this.deps.sessions.selectedChatId !== chatId) return 'invalidated';
-		const operationEpoch = ++this.#viewportOperationEpoch;
+		const operationEpoch = this.#beginViewportOperation();
 		const result = await this.deps.chatState.navigateToWindow(chatId, target);
 		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
 			return 'invalidated';
