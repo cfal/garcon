@@ -131,6 +131,7 @@ type SessionConversationUiState = Pick<
 	| 'getExecutionControl'
 	| 'setExecutionControlFromLiveUpdate'
 	| 'setExecutionControlFromRefresh'
+	| 'isExecutionControlSocketInstanceConfirmed'
 	| 'setPendingPermissionRequests'
 	| 'setPreviousPermissionMode'
 >;
@@ -238,7 +239,6 @@ export class ConversationSessionController {
 			get lifecycle() { return deps.lifecycle; },
 			get conversationUi() { return deps.conversationUi; },
 			get acceptedInputs() { return acceptedInputs; },
-			get scrollToBottom() { return deps.scrollToBottom; },
 		});
 		this.#settings = new ConversationSettingsController({
 			get sessions() { return deps.sessions; },

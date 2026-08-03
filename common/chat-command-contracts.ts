@@ -238,6 +238,7 @@ export interface QueueEntrySteerCommandRequest {
 }
 
 export interface QueueEntrySteerCommandResponse extends SteerCommandResponse {
+  serverInstanceId: string;
   control?: ChatExecutionControlState;
 }
 
@@ -246,6 +247,7 @@ export type SteerDeliveryOutcome = 'not-sent' | 'unknown' | 'accepted';
 export interface QueueEntrySteerErrorResponse extends HttpErrorResponse {
   errorCode: CommandErrorCode;
   deliveryOutcome: SteerDeliveryOutcome;
+  serverInstanceId: string;
   control?: ChatExecutionControlState;
 }
 

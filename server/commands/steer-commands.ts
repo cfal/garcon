@@ -319,6 +319,7 @@ export class SteerCommands {
           commandType: 'steer' as const,
           chatId: input.chatId,
           turnId: outcome.turnId,
+          serverInstanceId: outcome.control.serverInstanceId,
           control: toClientChatExecutionControlState(outcome.control),
         };
       });
@@ -425,15 +426,15 @@ export class SteerCommands {
     record: CommandLedgerRecord,
   ): Promise<QueueEntrySteerCommandResponse> {
     const chatExists = Boolean(this.deps.chats.getChat(record.chatId));
-    const control = chatExists
-      ? await this.deps.queue.readChatExecutionControl(record.chatId)
-      : undefined;
+    const currentControl = await this.deps.queue.readChatExecutionControl(record.chatId);
+    const control = chatExists ? currentControl : undefined;
     if (record.status === 'finished' && record.turnId) {
       return {
         ...commandResultFromRecord(record, 'duplicate'),
         commandType: 'steer',
         chatId: record.chatId,
         turnId: record.turnId,
+        serverInstanceId: currentControl.serverInstanceId,
         ...(control ? { control: toClientChatExecutionControlState(control) } : {}),
       };
     }

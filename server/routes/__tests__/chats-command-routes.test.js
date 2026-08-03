@@ -87,6 +87,7 @@ function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
 
 function storedQueue(entries = [], overrides = {}) {
   return {
+    serverInstanceId: 'server-instance-test',
     entries,
     recentlyDispatched: [],
     appliedCommands: [],
@@ -1025,12 +1026,14 @@ describe('REST chat command routes', () => {
       commandType: 'steer',
       status: 'accepted',
       turnId: 'turn-active',
+      serverInstanceId: 'server-instance-test',
       control: { queue: { entries: [], steeringEntryId: null } },
     });
     expect(duplicate.response.status).toBe(202);
     expect(duplicate.body).toMatchObject({
       status: 'duplicate',
       turnId: 'turn-active',
+      serverInstanceId: 'server-instance-test',
       control: { queue: { entries: [], steeringEntryId: null } },
     });
     expect(agent.queue.deliverAcceptedQueueEntrySteer).toHaveBeenCalledOnce();
@@ -1050,6 +1053,28 @@ describe('REST chat command routes', () => {
     expect(result.response.status).toBe(400);
     expect(result.body.errorCode).toBe('VALIDATION_FAILED');
     expect(agent.queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
+  it('POST /queue/entries/steer identifies control-free errors by server instance', async () => {
+    const agent = createRouteAgent();
+    agent.registry.getChat.mockReturnValue(null);
+
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-missing-chat',
+      clientMessageId: 'message-queue-steer-missing-chat',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    });
+
+    expect(result.response.status).toBe(404);
+    expect(result.body).toMatchObject({
+      errorCode: 'SESSION_NOT_FOUND',
+      deliveryOutcome: 'not-sent',
+      serverInstanceId: 'server-instance-test',
+    });
+    expect(result.body.control).toBeUndefined();
   });
 
   it('POST /queue/entries/steer rejects oversized source identities before command delivery', async () => {
@@ -1106,6 +1131,7 @@ describe('REST chat command routes', () => {
       success: false,
       errorCode: 'QUEUE_STEER_FINALIZATION_FAILED',
       deliveryOutcome: 'accepted',
+      serverInstanceId: 'server-instance-test',
       control: {
         queue: {
           entries: [{ id: 'entry-head' }],

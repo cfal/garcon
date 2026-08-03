@@ -45,6 +45,7 @@ function createHarness() {
 	const conversationUi = {
 		setExecutionControlFromLiveUpdate: vi.fn(() => true),
 		setExecutionControlFromRefresh: vi.fn(() => true),
+		isExecutionControlSocketInstanceConfirmed: vi.fn(() => true),
 	};
 	const acceptedInputs = {
 		enqueue: vi.fn(() => ({
@@ -83,9 +84,6 @@ function createHarness() {
 		get acceptedInputs() {
 			return acceptedInputs;
 		},
-		get scrollToBottom() {
-			return scrollToBottom;
-		},
 	} satisfies ConversationQueueControllerOptions;
 	return {
 		controller: new ConversationQueueController(options),
@@ -122,16 +120,15 @@ function controllerWithConversationUi(
 		get acceptedInputs() {
 			return harness.acceptedInputs;
 		},
-		get scrollToBottom() {
-			return harness.scrollToBottom;
-		},
 	} satisfies ConversationQueueControllerOptions);
 }
 
 function queueSteerError(
 	errorCode: string,
 	deliveryOutcome: 'not-sent' | 'unknown' | 'accepted',
-	control = emptyChatExecutionControlState('server-instance-test'),
+	control: ReturnType<typeof emptyChatExecutionControlState> | null =
+		emptyChatExecutionControlState('server-instance-test'),
+	serverInstanceId = control?.serverInstanceId ?? 'server-instance-test',
 ): ApiError {
 	return new ApiError(500, 'queued steer failed', errorCode, undefined, false, {
 		success: false,
@@ -139,7 +136,8 @@ function queueSteerError(
 		errorCode,
 		retryable: false,
 		deliveryOutcome,
-		control,
+		serverInstanceId,
+		...(control ? { control } : {}),
 	});
 }
 
@@ -294,7 +292,7 @@ describe('ConversationQueueController', () => {
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
 	});
 
-	it('applies accepted queued steering to the originating queue and pending transcript', async () => {
+	it('applies accepted queued steering control without duplicating pending event state', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi, scrollToBottom } =
 			createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');
@@ -306,6 +304,7 @@ describe('ConversationQueueController', () => {
 			status: 'accepted' as const,
 			acceptedAt: '2026-08-02T00:00:00.000Z',
 			turnId: 'turn-active',
+			serverInstanceId: 'server-instance-test',
 			control,
 		}));
 		acceptedInputs.steerQueuedEntry.mockReturnValue({
@@ -327,16 +326,8 @@ describe('ConversationQueueController', () => {
 			'chat-1',
 			control,
 		);
-		expect(chatState.upsertPendingUserInput).toHaveBeenCalledWith(
-			expect.objectContaining({
-				chatId: 'chat-1',
-				content: 'entry-head',
-				clientRequestId: 'request-steer',
-				clientMessageId: 'message-steer',
-				deliveryStatus: 'accepted',
-			}),
-		);
-		expect(scrollToBottom).toHaveBeenCalledOnce();
+		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+		expect(scrollToBottom).not.toHaveBeenCalled();
 	});
 
 	it('does not recreate a pending row when deleted-chat replay omits control', async () => {
@@ -352,6 +343,7 @@ describe('ConversationQueueController', () => {
 				status: 'duplicate' as const,
 				acceptedAt: '2026-08-02T00:00:00.000Z',
 				turnId: 'turn-active',
+				serverInstanceId: 'server-instance-test',
 			})),
 		});
 
@@ -361,7 +353,7 @@ describe('ConversationQueueController', () => {
 		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 	});
 
-	it('consumes an explicitly unknown queued steer into one unconfirmed pending row', async () => {
+	it('leaves an explicitly unknown queued steer pending row to server events', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');
 		const error = queueSteerError('STEER_OUTCOME_UNKNOWN', 'unknown', control);
@@ -378,11 +370,7 @@ describe('ConversationQueueController', () => {
 		).rejects.toBe(error);
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
-		expect(chatState.upsertPendingUserInput).toHaveBeenCalledWith(
-			expect.objectContaining({
-				deliveryStatus: 'unconfirmed',
-			}),
-		);
+		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
 	});
 
@@ -408,9 +396,7 @@ describe('ConversationQueueController', () => {
 
 		expect(attempts).toBe(2);
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
-		expect(chatState.upsertPendingUserInput).toHaveBeenCalledWith(
-			expect.objectContaining({ deliveryStatus: 'unconfirmed' }),
-		);
+		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
 	});
 
@@ -435,6 +421,7 @@ describe('ConversationQueueController', () => {
 				status: 'accepted' as const,
 				acceptedAt: '2026-08-02T00:00:00.000Z',
 				turnId: 'turn-active',
+				serverInstanceId: 'server-a',
 				control: serverAControl,
 			})),
 		});
@@ -499,7 +486,7 @@ describe('ConversationQueueController', () => {
 		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
 	});
 
-	it('refreshes after an unstructured ambiguous failure without inventing a pending row', async () => {
+	it('refreshes after an unstructured ambiguous failure without inventing client state', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');
 		const error = new Error('transport failed twice');
@@ -522,7 +509,98 @@ describe('ConversationQueueController', () => {
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
 		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+		expect(chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('accepts a control-free error notice only from the confirmed socket instance', async () => {
+		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
+		const control = emptyChatExecutionControlState('server-instance-test');
+		const error = queueSteerError('QUEUE_STEER_RECOVERY_FAILED', 'not-sent', null);
+		acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: vi.fn(async () => {
+				throw error;
+			}),
+		});
+		vi.mocked(getChatExecutionControl).mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			control,
+		});
+
+		await expect(
+			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+		).rejects.toBe(error);
+
+		expect(conversationUi.isExecutionControlSocketInstanceConfirmed).toHaveBeenCalledWith(
+			'server-instance-test',
+		);
 		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
+	});
+
+	it('rejects a queued-steer error whose envelope and control instances differ', async () => {
+		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
+		const control = emptyChatExecutionControlState('server-instance-test');
+		const error = queueSteerError(
+			'STEER_OUTCOME_UNKNOWN',
+			'unknown',
+			control,
+			'server-other',
+		);
+		acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: vi.fn(async () => {
+				throw error;
+			}),
+		});
+		vi.mocked(getChatExecutionControl).mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			control,
+		});
+
+		await expect(
+			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+		).rejects.toBe(error);
+
+		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
+		expect(conversationUi.isExecutionControlSocketInstanceConfirmed).not.toHaveBeenCalled();
+		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+		expect(chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('suppresses a delayed error while socket authority is provisional', async () => {
+		const harness = createHarness();
+		const conversationUi = new ConversationUiState();
+		const controller = controllerWithConversationUi(harness, conversationUi);
+		const serverAControl = emptyChatExecutionControlState('server-a');
+		const serverBControl = emptyChatExecutionControlState('server-b');
+		conversationUi.confirmExecutionControlSocketInstance('server-a');
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', serverAControl);
+		conversationUi.markExecutionControlSocketDisconnected();
+		conversationUi.setExecutionControlFromLiveUpdate('chat-1', serverBControl);
+		const error = queueSteerError('STEER_OUTCOME_UNKNOWN', 'unknown', serverAControl);
+		harness.acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: vi.fn(async () => {
+				throw error;
+			}),
+		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+		await expect(
+			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+		).rejects.toBe(error);
+
+		expect(harness.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+		expect(harness.chatState.appendLocalNotice).not.toHaveBeenCalled();
+		expect(harness.scrollToBottom).not.toHaveBeenCalled();
+		conversationUi.confirmExecutionControlSocketInstance('server-b');
+		expect(conversationUi.getExecutionControl('chat-1')).toEqual(serverBControl);
+		warn.mockRestore();
 	});
 
 	it('does not write a late queued-steer result into the active transcript after a switch', async () => {

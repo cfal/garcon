@@ -94,6 +94,7 @@ function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
 
 function storedQueue(entries = [], overrides = {}) {
   return {
+    serverInstanceId: 'server-instance-test',
     entries,
     recentlyDispatched: [],
     appliedCommands: [],
@@ -3053,12 +3054,14 @@ describe('ChatCommandService', () => {
       commandType: 'steer',
       status: 'accepted',
       turnId: 'turn-active',
+      serverInstanceId: 'server-instance-test',
       control: { queue: { entries: [{ id: 'entry-next' }], steeringEntryId: null } },
     });
     await expect(service.submitQueueEntrySteer(input)).resolves.toMatchObject({
       commandType: 'steer',
       status: 'duplicate',
       turnId: 'turn-active',
+      serverInstanceId: 'server-instance-test',
       control: { queue: { entries: [{ id: 'entry-next' }], steeringEntryId: null } },
     });
 
@@ -3069,6 +3072,46 @@ describe('ChatCommandService', () => {
       turnId: 'turn-active',
       entryId: 'entry-head',
     });
+  });
+
+  it('identifies a queued-steer replay after chat deletion without returning control', async () => {
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const queued = storedQueue([
+      queueEntry('entry-head', 'authoritative content', 'queued', 1),
+    ]);
+    const consumed = storedQueue([], { version: 2 });
+    let currentControl = queued;
+    const { service, queue, sessions } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => target),
+        readChatExecutionControl: mock(async () => currentControl),
+        deliverAcceptedQueueEntrySteer: mock(async (accepted) => {
+          await accepted.settlement.markScheduled(accepted.command, target.identity.turnId);
+          currentControl = consumed;
+          await accepted.settlement.settleSteerSuccess(accepted.command, target.identity.turnId);
+          return { turnId: target.identity.turnId, control: consumed };
+        }),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-deleted-replay',
+      clientMessageId: 'message-queue-steer-deleted-replay',
+      entryId: 'entry-head',
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    };
+
+    await service.submitQueueEntrySteer(input);
+    sessions.delete(SOURCE_CHAT_ID);
+    const replay = await service.submitQueueEntrySteer(input);
+
+    expect(replay).toMatchObject({
+      status: 'duplicate',
+      serverInstanceId: 'server-instance-test',
+    });
+    expect(replay.control).toBeUndefined();
+    expect(queue.deliverAcceptedQueueEntrySteer).toHaveBeenCalledOnce();
   });
 
   it('serializes Stop behind queued steering acknowledgement without deadlocking', async () => {

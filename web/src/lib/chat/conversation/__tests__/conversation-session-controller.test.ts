@@ -290,6 +290,7 @@ function createDeps(chat = createRunningChat()) {
 		getExecutionControl: vi.fn((): ChatExecutionControlState | null => null),
 		setExecutionControlFromLiveUpdate: vi.fn(() => true),
 		setExecutionControlFromRefresh: vi.fn(() => true),
+		isExecutionControlSocketInstanceConfirmed: vi.fn(() => true),
 	};
 	const deps = {
 		sessions: {
@@ -2203,6 +2204,7 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-08-02T00:00:00.000Z',
 			turnId: 'turn-active',
+			serverInstanceId: control.serverInstanceId,
 			control,
 		});
 		const controller = new ConversationSessionController(deps);
@@ -2227,13 +2229,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.inputText).toBe('draft stays here');
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
-		expect(deps.chatState.upsertPendingUserInput).toHaveBeenCalledWith(
-			expect.objectContaining({
-				chatId: 'chat-1',
-				content: 'queued guidance',
-				deliveryStatus: 'accepted',
-			}),
-		);
+		expect(deps.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 	});
 
 	it('applies authoritative pause and resume snapshots using the rendered pause ID', async () => {

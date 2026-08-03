@@ -19,6 +19,10 @@ export class ExecutionControlInstanceAuthority {
 		this.#confirmedSocketInstanceId = null;
 	}
 
+	isSocketInstanceConfirmed(serverInstanceId: string): boolean {
+		return this.#confirmedSocketInstanceId === serverInstanceId;
+	}
+
 	confirmSocketInstance(serverInstanceId: string): ExecutionControlInstanceAcceptance {
 		this.#confirmedSocketInstanceId = serverInstanceId;
 		if (this.#currentInstanceId === serverInstanceId) return { kind: 'current' };

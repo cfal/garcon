@@ -6,8 +6,10 @@ describe('ExecutionControlInstanceAuthority', () => {
 		const authority = new ExecutionControlInstanceAuthority();
 
 		expect(authority.classifyNonAuthoritativeInstance('server-a')).toEqual({ kind: 'replace' });
+		expect(authority.isSocketInstanceConfirmed('server-a')).toBe(false);
 		expect(authority.classifyNonAuthoritativeInstance('server-a')).toEqual({ kind: 'current' });
 		expect(authority.confirmSocketInstance('server-a')).toEqual({ kind: 'current' });
+		expect(authority.isSocketInstanceConfirmed('server-a')).toBe(true);
 		expect(authority.classifyNonAuthoritativeInstance('server-b')).toMatchObject({
 			kind: 'reject',
 			reason: 'confirmed-socket-mismatch',
@@ -20,6 +22,7 @@ describe('ExecutionControlInstanceAuthority', () => {
 		const authority = new ExecutionControlInstanceAuthority();
 		authority.confirmSocketInstance('server-a');
 		authority.markSocketDisconnected();
+		expect(authority.isSocketInstanceConfirmed('server-a')).toBe(false);
 		expect(authority.classifyNonAuthoritativeInstance('server-b')).toEqual({ kind: 'replace' });
 		expect(authority.classifyNonAuthoritativeInstance('server-a')).toMatchObject({
 			kind: 'reject',

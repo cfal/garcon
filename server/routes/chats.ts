@@ -976,21 +976,27 @@ export default function createChatRoutes({
   }
 
   async function postQueueEntrySteer(body: unknown): Promise<Response> {
+    let chatId: string | null = null;
     try {
       const input = parseCommandRequest(parseQueueEntrySteerCommandRequest, body);
+      chatId = input.chatId;
       const result = await commands.submitQueueEntrySteer(input);
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof QueueEntrySteerError) {
+      if (error instanceof QueueEntrySteerError && chatId) {
+        const control = error.control
+          ? toClientChatExecutionControlState(error.control)
+          : undefined;
+        const serverInstanceId = control?.serverInstanceId
+          ?? (await queue.readChatExecutionControl(chatId)).serverInstanceId;
         const response: QueueEntrySteerErrorResponse = {
           success: false,
           error: error.message,
           errorCode: error.code,
           retryable: error.retryable,
           deliveryOutcome: error.deliveryOutcome,
-          ...(error.control
-            ? { control: toClientChatExecutionControlState(error.control) }
-            : {}),
+          serverInstanceId,
+          ...(control ? { control } : {}),
         };
         return Response.json(response, { status: error.status });
       }

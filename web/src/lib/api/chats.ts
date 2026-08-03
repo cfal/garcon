@@ -68,6 +68,7 @@ import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search'
 import type { ChatDetailsResponse } from '$shared/chat-details';
 import {
 	parseChatExecutionControlState,
+	parseExecutionControlServerInstanceId,
 	type ChatExecutionControlState,
 } from '$shared/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '$shared/chat-types';
@@ -262,10 +263,15 @@ export async function steerQueuedEntry(
 		'/api/v1/chats/queue/entries/steer',
 		params,
 	);
-	if (!response.control) return response;
+	const serverInstanceId = parseExecutionControlServerInstanceId(response.serverInstanceId);
+	if (!serverInstanceId) throw new Error('Invalid queued steer server instance response');
+	if (!response.control) return { ...response, serverInstanceId };
 	const control = parseChatExecutionControlState(response.control);
 	if (!control) throw new Error('Invalid queued steer execution control response');
-	return { ...response, control };
+	if (control.serverInstanceId !== serverInstanceId) {
+		throw new Error('Mismatched queued steer server instance response');
+	}
+	return { ...response, serverInstanceId, control };
 }
 
 export async function getChatExecutionControl(

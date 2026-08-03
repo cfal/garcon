@@ -680,6 +680,7 @@ describe('chats API contract', () => {
 					status: 'accepted',
 					acceptedAt: '2026-08-02T00:00:00.000Z',
 					turnId: 'turn-active',
+					serverInstanceId: control.serverInstanceId,
 					control,
 				},
 				202,
@@ -720,6 +721,7 @@ describe('chats API contract', () => {
 					status: 'accepted',
 					acceptedAt: '2026-08-02T00:00:00.000Z',
 					turnId: 'turn-active',
+					serverInstanceId: 'server-instance-test',
 					control: { ...emptyControl(), queue: { entries: [] } },
 				},
 				202,
@@ -736,6 +738,38 @@ describe('chats API contract', () => {
 				expectedReorderRevision: 7,
 			}),
 		).rejects.toThrow('Invalid queued steer execution control response');
+	});
+
+	it('rejects missing or mismatched queued-steer server identities', async () => {
+		const response = {
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'request-queue-steer',
+			chatId: 'c-1',
+			status: 'accepted',
+			acceptedAt: '2026-08-02T00:00:00.000Z',
+			turnId: 'turn-active',
+			control: emptyControl(),
+		};
+		const request = {
+			clientRequestId: 'request-queue-steer',
+			clientMessageId: 'message-queue-steer',
+			chatId: 'c-1',
+			entryId: 'entry-1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+		};
+		fetchMock.mockResolvedValueOnce(jsonResponse(response, 202));
+		await expect(steerQueuedEntry(request)).rejects.toThrow(
+			'Invalid queued steer server instance response',
+		);
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ ...response, serverInstanceId: 'server-other' }, 202),
+		);
+		await expect(steerQueuedEntry(request)).rejects.toThrow(
+			'Mismatched queued steer server instance response',
+		);
 	});
 
 	it('rejects queue controls without a bounded opaque server instance ID', async () => {

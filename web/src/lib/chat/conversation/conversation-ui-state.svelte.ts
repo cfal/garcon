@@ -30,6 +30,7 @@ export interface ConversationUiPort {
 	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
 	markExecutionControlSocketDisconnected(): void;
 	confirmExecutionControlSocketInstance(serverInstanceId: string): void;
+	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean;
 	/** Reports whether the incoming control belongs to the authoritative server instance. */
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): boolean;
 	/** Reports whether the incoming control belongs to the authoritative server instance. */
@@ -84,6 +85,10 @@ export class ConversationUiState implements ConversationUiPort {
 	confirmExecutionControlSocketInstance(serverInstanceId: string): void {
 		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId);
 		if (decision.kind === 'replace') this.executionControlByChatId = {};
+	}
+
+	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean {
+		return this.executionControlAuthority.isSocketInstanceConfirmed(serverInstanceId);
 	}
 
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): boolean {

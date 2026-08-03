@@ -36,7 +36,8 @@ const MAX_LINES = 1000;
 // and post-commit pending-status publication isolation.
 // Adversarial hardening adds 12 lines for bounded queue-entry identities and
 // non-throwing delivery-status publication diagnostics.
-const EXECUTION_FOOTPRINT_BUDGET = 8781;
+// Response identity hardening adds one net line for control-free error authority.
+const EXECUTION_FOOTPRINT_BUDGET = 8782;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
