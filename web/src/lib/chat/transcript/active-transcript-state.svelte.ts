@@ -5,6 +5,11 @@ import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { createRandomId } from '$lib/utils/random-id';
+import {
+	EMPTY_CONVERSATION_FEED_MUTATION_REVISIONS,
+	type ConversationFeedMutationClock,
+	type ConversationFeedMutationKind,
+} from './conversation-feed-mutations.js';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
@@ -68,6 +73,7 @@ export interface ActiveTranscriptPort {
 	activeChatId: string | null;
 	readonly entries: readonly ChatViewMessage[];
 	readonly chatMessages: ChatMessage[];
+	readonly feedMutationClock: ConversationFeedMutationClock;
 	isUserScrolledUp: boolean;
 	getCursor(): ChatCursor;
 	applyMessages(
@@ -121,6 +127,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#pageLoadOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
 	#initialRevealPhase = $state<InitialRevealPhase>('complete');
+	#feedDataRevision = $state(0);
+	#feedLastRevisionByKind = $state.raw({ ...EMPTY_CONVERSATION_FEED_MUTATION_REVISIONS });
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
 		this.transcriptCache = transcriptCache;
@@ -202,6 +210,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	get chatMessages(): ChatMessage[] {
 		return this.#renderEntries.map((entry) => entry.message);
+	}
+
+	get feedMutationClock(): ConversationFeedMutationClock {
+		return {
+			dataRevision: this.#feedDataRevision,
+			lastRevisionByKind: this.#feedLastRevisionByKind,
+		};
 	}
 
 	get displayMessages(): ChatMessage[] {
@@ -314,6 +329,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (this.entries.length > 0 && this.loadStatus !== 'error') {
 				this.loadStatus = 'loaded';
 			}
+			if (result.changed) this.#recordFeedMutation('live-append');
 			return 'applied';
 		}
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
@@ -348,6 +364,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
 		}
+		if (result.changed) this.#recordFeedMutation('live-append');
 		return 'applied';
 	}
 
@@ -415,6 +432,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
+		this.#recordFeedMutation('replacement');
 	}
 
 	setFromPage(
@@ -458,6 +476,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
+		this.#recordFeedMutation('replacement');
 		for (const { generationId, messages, noticeRevision } of buffered) {
 			const result = this.applyMessages(chatId, generationId, messages, noticeRevision);
 			if (result !== 'applied') return result;
@@ -604,6 +623,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = page.hasMore;
 		this.totalMessages = this.entries.length;
 		this.visibleMessageCount += page.messages.length;
+		this.#recordFeedMutation('history-earlier');
 		return 'loaded';
 	}
 
@@ -618,6 +638,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
 		this.totalMessages = this.entries.length;
 		this.visibleMessageCount += this.entries.length - previousEntryCount;
+		this.#recordFeedMutation('history-later');
 		return 'loaded';
 	}
 
@@ -653,10 +674,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				revision: ++this.#localNoticeRevision,
 			},
 		];
+		this.#recordFeedMutation('presentation-structure');
 	}
 
 	clearLocalNotices(throughRevision = this.#localNoticeRevision): void {
-		this.localNotices = this.localNotices.filter((notice) => notice.revision > throughRevision);
+		const next = this.localNotices.filter((notice) => notice.revision > throughRevision);
+		if (next.length === this.localNotices.length) return;
+		this.localNotices = next;
+		this.#recordFeedMutation('presentation-structure');
 	}
 
 	setPendingUserInputs(inputs: PendingUserInput[]): void {
@@ -698,6 +723,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#replacePendingUserInputs(inputs: PendingUserInput[]): void {
 		this.#pendingUserInputsRevision += 1;
 		this.pendingUserInputs = sortPendingInputs(inputs);
+		this.#recordFeedMutation('presentation-structure');
 	}
 
 	clearMessages(): void {
@@ -717,6 +743,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
 		this.#initialRevealPhase = 'complete';
+		this.#recordFeedMutation('replacement');
 	}
 
 	compactToRecentMessages(): boolean {
@@ -726,6 +753,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = this.entries.length;
 		this.hasEarlierMessages = true;
 		this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+		this.#recordFeedMutation('presentation-structure');
 		return true;
 	}
 
@@ -733,7 +761,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const previousCount = this.visibleMessageCount;
 		this.visibleMessageCount = Math.min(this.displayMessageCount, previousCount + 100);
 		const changed = this.visibleMessageCount > previousCount;
-		if (changed) this.pageStates.earlier = idlePageState();
+		if (changed) {
+			this.pageStates.earlier = idlePageState();
+			this.#recordFeedMutation('history-earlier');
+		}
 		return changed;
 	}
 
@@ -752,16 +783,25 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return;
 		}
 		this.visibleMessageCount = nextCount;
+		this.#recordFeedMutation('initial');
 	}
 
 	completeInitialMessagesReveal(): void {
+		const changed =
+			this.visibleMessageCount < INITIAL_VISIBLE_MESSAGES ||
+			this.#initialRevealPhase !== 'complete';
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		this.#initialRevealPhase = 'complete';
+		if (changed) this.#recordFeedMutation('initial');
 	}
 
 	revealAllLoadedMessages(): void {
+		const changed =
+			this.visibleMessageCount < this.displayMessageCount ||
+			this.#initialRevealPhase !== 'complete';
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 		this.#initialRevealPhase = 'complete';
+		if (changed) this.#recordFeedMutation('initial');
 	}
 
 	async navigateToWindow(
@@ -841,6 +881,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			}
 			this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 			this.loadError = null;
+			this.#recordFeedMutation('replacement');
 			return 'loaded';
 		} catch (error) {
 			if (
@@ -898,6 +939,15 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	removeCachedMessages(chatId: string): void {
 		this.transcriptCache.remove(chatId);
+	}
+
+	#recordFeedMutation(kind: ConversationFeedMutationKind): void {
+		const revision = this.#feedDataRevision + 1;
+		this.#feedDataRevision = revision;
+		this.#feedLastRevisionByKind = {
+			...this.#feedLastRevisionByKind,
+			[kind]: revision,
+		};
 	}
 }
 

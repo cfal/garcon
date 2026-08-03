@@ -30,6 +30,7 @@ export type ConversationFeedRenderItem =
 	| {
 			kind: 'message';
 			id: string;
+			rowIds: readonly [string];
 			message: ChatMessage;
 			index: number;
 			seq?: number;
@@ -38,6 +39,7 @@ export type ConversationFeedRenderItem =
 	| {
 			kind: 'bash-group';
 			id: string;
+			rowIds: readonly string[];
 			rows: GroupedTranscriptRow<BashToolUseMessage>[];
 			index: number;
 			prevMessage: ChatMessage | null;
@@ -45,6 +47,7 @@ export type ConversationFeedRenderItem =
 	| {
 			kind: 'read-group';
 			id: string;
+			rowIds: readonly string[];
 			rows: GroupedTranscriptRow<ReadToolUseMessage>[];
 			index: number;
 			prevMessage: ChatMessage | null;
@@ -52,6 +55,7 @@ export type ConversationFeedRenderItem =
 	| {
 			kind: 'local-notice';
 			id: string;
+			rowIds: readonly [string];
 			notice: LocalNoticeRow;
 			index: number;
 			prevMessage: ChatMessage | null;
@@ -63,10 +67,10 @@ export interface ConversationFeedRenderModel {
 	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
 
-export function filterHiddenToolRenderItems(
-	items: ConversationFeedRenderItem[],
+export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem>(
+	items: T[],
 	hiddenToolTypes: readonly string[],
-): ConversationFeedRenderItem[] {
+): T[] {
 	if (hiddenToolTypes.length === 0) return items;
 	const hidden = new Set(hiddenToolTypes);
 	return items.filter((item) => {
@@ -245,6 +249,7 @@ export function buildConversationFeedRenderModel(
 			items.push({
 				kind: 'local-notice',
 				id: row.id,
+				rowIds: [row.id],
 				notice: row,
 				index,
 				prevMessage: previousRenderable,
@@ -299,14 +304,16 @@ export function buildConversationFeedRenderModel(
 				items.push({
 					kind: 'bash-group',
 					id: bashGroupId(groupRows),
+					rowIds: groupRows.map((groupRow) => groupRow.id),
 					rows: groupRows,
 					index: firstIndex,
 					prevMessage,
 				});
-		} else {
+			} else {
 				items.push({
 					kind: 'message',
 					id: groupRows[0].id,
+					rowIds: [groupRows[0].id],
 					message: groupRows[0].message,
 					index: firstIndex,
 					seq: groupRows[0].seq,
@@ -340,6 +347,7 @@ export function buildConversationFeedRenderModel(
 				items.push({
 					kind: 'read-group',
 					id: readGroupId(groupRows),
+					rowIds: groupRows.map((groupRow) => groupRow.id),
 					rows: groupRows,
 					index: firstIndex,
 					prevMessage,
@@ -348,6 +356,7 @@ export function buildConversationFeedRenderModel(
 				items.push({
 					kind: 'message',
 					id: groupRows[0].id,
+					rowIds: [groupRows[0].id],
 					message: groupRows[0].message,
 					index: firstIndex,
 					seq: groupRows[0].seq,
@@ -360,6 +369,7 @@ export function buildConversationFeedRenderModel(
 		items.push({
 			kind: 'message',
 			id: row.id,
+			rowIds: [row.id],
 			message,
 			index,
 			seq: row.seq,

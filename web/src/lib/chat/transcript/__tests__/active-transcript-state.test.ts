@@ -81,6 +81,28 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.getCursor()).toEqual({ generationId: '', lastSeq: 0 });
 		expect(chat.chatMessages).toEqual([]);
+		expect(chat.feedMutationClock.dataRevision).toBe(0);
+	});
+
+	it('records applied feed mutations by provenance without counting duplicates', () => {
+		const chat = new ActiveTranscriptState();
+
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('hello'))]);
+		const liveRevision = chat.feedMutationClock.dataRevision;
+		expect(chat.feedMutationClock.lastRevisionByKind['live-append']).toBe(liveRevision);
+
+		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('duplicate'))]);
+		expect(chat.feedMutationClock.dataRevision).toBe(liveRevision);
+
+		chat.appendLocalNotice('warning', 'notice');
+		expect(chat.feedMutationClock.lastRevisionByKind['presentation-structure']).toBe(
+			chat.feedMutationClock.dataRevision,
+		);
+
+		chat.clearMessages();
+		expect(chat.feedMutationClock.lastRevisionByKind.replacement).toBe(
+			chat.feedMutationClock.dataRevision,
+		);
 	});
 
 	it('applies same-generation messages by seq and ignores duplicates', () => {
