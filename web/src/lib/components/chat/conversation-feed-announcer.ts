@@ -227,12 +227,12 @@ export class ConversationFeedAnnouncerState {
 	#permissionIds(rows: ChatDisplayRow[], floatingPermissionIds: readonly string[]): Set<string> {
 		return new Set(
 			[
-				...floatingPermissionIds,
 				...rows.flatMap((row) =>
 					row.kind === 'message' && row.message instanceof PermissionRequestMessage
 						? [row.message.permissionRequestId]
 						: [],
 				),
+				...floatingPermissionIds,
 			].slice(-ANNOUNCEMENT_LINEAGE_LIMIT),
 		);
 	}

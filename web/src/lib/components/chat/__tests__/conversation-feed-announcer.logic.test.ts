@@ -520,4 +520,61 @@ describe('ConversationFeedAnnouncerState', () => {
 			}),
 		).toBeNull();
 	});
+
+	it('retains an active floating permission lineage at the bounded history limit', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing')],
+				mutationClock: clock(2, 0, 2),
+				...enabled,
+				floatingPermissionIds: ['permission-active'],
+			}),
+		).toBe('Permission required');
+
+		const historicalPermissions = Array.from({ length: 513 }, (_, index) =>
+			messageRow(
+				String(index + 2),
+				new PermissionRequestMessage(
+					'',
+					`permission-history-${index}`,
+					new BashToolUseMessage('', `tool-${index}`, 'pwd'),
+				),
+			),
+		);
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), ...historicalPermissions],
+				mutationClock: clock(3, 3, 2),
+				...enabled,
+				visible: false,
+				floatingPermissionIds: ['permission-active'],
+			}),
+		).toBe('');
+
+		const durablePermission = messageRow(
+			'515',
+			new PermissionRequestMessage(
+				'',
+				'permission-active',
+				new BashToolUseMessage('', 'tool-active', 'pwd'),
+			),
+		);
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), ...historicalPermissions, durablePermission],
+				mutationClock: clock(4, 4, 2),
+				...enabled,
+			}),
+		).toBeNull();
+	});
 });
