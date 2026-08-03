@@ -20,6 +20,23 @@ import * as m from '$lib/paraglide/messages.js';
 
 const ANNOUNCEMENT_LINEAGE_LIMIT = 512;
 
+function isAnnounceableResponseMessageType(
+	messageType: string,
+	hiddenToolTypes: readonly string[],
+): boolean {
+	if (messageType === 'assistant-message' || messageType === 'permission-request') return true;
+	if (
+		messageType === 'unknown-tool-use' ||
+		messageType === 'external-tool-use' ||
+		messageType === 'mcp-tool-use' ||
+		hiddenToolTypes.includes(messageType)
+	) {
+		return false;
+	}
+	const displayRule = TOOL_DISPLAY_REGISTRY[messageType];
+	return displayRule !== undefined && displayRule.input.mode !== 'hidden';
+}
+
 function rememberAnnouncementLineage(ids: Set<string>, id: string): void {
 	ids.delete(id);
 	ids.add(id);
@@ -75,6 +92,7 @@ export class ConversationFeedAnnouncerState {
 	#observedPermissionIds = new Set<string>();
 	#dataRevision = 0;
 	#detachedStatusAnnounced = false;
+	#isLiveWindow: boolean | null = null;
 
 	reconcile(input: ConversationFeedAnnouncerInput): string | null {
 		const tailRows = input.rows.slice(-ANNOUNCEMENT_LINEAGE_LIMIT);
@@ -88,10 +106,17 @@ export class ConversationFeedAnnouncerState {
 			this.#observedPermissionIds = this.#permissionIds(tailRows, input.floatingPermissionIds);
 			this.#dataRevision = input.mutationClock.dataRevision;
 			this.#detachedStatusAnnounced = false;
+			this.#isLiveWindow = input.isLiveWindow;
 			return '';
 		}
 
 		const previousDataRevision = this.#dataRevision;
+		const windowModeChanged = this.#isLiveWindow !== input.isLiveWindow;
+		const clearedDetachedStatus = windowModeChanged && this.#detachedStatusAnnounced;
+		if (windowModeChanged) {
+			this.#detachedStatusAnnounced = false;
+			this.#isLiveWindow = input.isLiveWindow;
+		}
 		const kinds = conversationFeedMutationKindsSince(input.mutationClock, previousDataRevision);
 		const priorContent = this.#contentByRowId;
 		const priorRowIds = this.#rowIds;
@@ -133,7 +158,12 @@ export class ConversationFeedAnnouncerState {
 			this.#detachedStatusAnnounced && input.visible && input.isLiveWindow && input.pinnedToBottom;
 		if (resumedLiveEnd) this.#detachedStatusAnnounced = false;
 		const responseUpdatedOutsideWindow =
-			!input.isLiveWindow && input.mutationClock.lastResponseRevision > previousDataRevision;
+			!input.isLiveWindow &&
+			Object.entries(input.mutationClock.lastResponseRevisionByMessageType).some(
+				([messageType, revision]) =>
+					revision > previousDataRevision &&
+					isAnnounceableResponseMessageType(messageType, input.hiddenToolTypes),
+			);
 		const addedPermissionAnnouncements = addedFloatingPermissionIds.filter((permissionId) => {
 			if (this.#observedPermissionIds.has(permissionId)) return false;
 			rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
@@ -149,14 +179,14 @@ export class ConversationFeedAnnouncerState {
 				this.#detachedStatusAnnounced ||
 				(!responseUpdatedOutsideWindow && addedPermissionAnnouncements.length === 0)
 			) {
-				return null;
+				return clearedDetachedStatus ? '' : null;
 			}
 			this.#detachedStatusAnnounced = true;
 			return input.detachedStatus;
 		}
 		const hasRowAppend = kinds.has('live-append') || kinds.has('presentation-structure');
 		if (!hasRowAppend && addedFloatingPermissionIds.length === 0) {
-			return resumedLiveEnd ? '' : null;
+			return resumedLiveEnd || clearedDetachedStatus ? '' : null;
 		}
 
 		const candidatesById = new Map<string, ChatDisplayRow>();
@@ -183,7 +213,9 @@ export class ConversationFeedAnnouncerState {
 				this.#isResponseAnnouncement(row, input.hiddenToolTypes),
 			);
 		if (!input.pinnedToBottom) {
-			if (!responseUpdated || this.#detachedStatusAnnounced) return null;
+			if (!responseUpdated || this.#detachedStatusAnnounced) {
+				return clearedDetachedStatus ? '' : null;
+			}
 			this.#detachedStatusAnnounced = true;
 			return input.detachedStatus;
 		}
@@ -202,7 +234,7 @@ export class ConversationFeedAnnouncerState {
 		for (const _permissionId of addedPermissionAnnouncements) {
 			announcements.push(m.chat_permission_permission_required());
 		}
-		return announcements.join('\n') || null;
+		return announcements.join('\n') || (clearedDetachedStatus ? '' : null);
 	}
 
 	#isResponseAnnouncement(row: ChatDisplayRow, hiddenToolTypes: readonly string[]): boolean {
@@ -274,6 +306,7 @@ export class ConversationFeedAnnouncerState {
 		this.#observedPermissionIds.clear();
 		this.#dataRevision = 0;
 		this.#detachedStatusAnnounced = false;
+		this.#isLiveWindow = null;
 	}
 }
 

@@ -222,6 +222,93 @@ describe('ConversationFeedAnnouncerState', () => {
 		).toBe('New response available');
 	});
 
+	it('filters historical response status through the visible tool contract', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const olderRows = [assistantRow('1', 'older response')];
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(1),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+		});
+
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(2, 2, 0, 2, ['wait-tool-use']),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBeNull();
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(3, 3, 0, 3, ['bash-tool-use']),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+				hiddenToolTypes: ['bash-tool-use'],
+			}),
+		).toBeNull();
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(4, 4, 0, 4, ['bash-tool-use']),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBe('New response available');
+	});
+
+	it('allows a new detached status after returning from a historical window', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const olderRows = [assistantRow('1', 'older response')];
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(1),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+		});
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(2, 2),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+			}),
+		).toBe('New response available');
+
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(2, 2),
+				...enabled,
+				pinnedToBottom: false,
+			}),
+		).toBe('');
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [...olderRows, assistantRow('2', 'new live response')],
+				mutationClock: clock(3, 3),
+				...enabled,
+				pinnedToBottom: false,
+			}),
+		).toBe('New response available');
+	});
+
 	it('treats visible tool output as a detached response update', () => {
 		const announcer = new ConversationFeedAnnouncerState();
 		announcer.reconcile({
