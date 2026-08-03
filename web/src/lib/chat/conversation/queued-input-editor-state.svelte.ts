@@ -4,6 +4,7 @@ export type QueuedInputEditPhase =
 	| 'closed'
 	| 'editable'
 	| 'conflict'
+	| 'steering'
 	| 'dispatching'
 	| 'sent'
 	| 'removed';
@@ -30,6 +31,7 @@ export class QueuedInputEditorState {
 
 	phase = $derived.by<QueuedInputEditPhase>(() => {
 		if (!this.entryId) return 'closed';
+		if (this.options.queue?.steeringEntryId === this.entryId) return 'steering';
 		if (this.liveEntry) {
 			return this.liveEntry.revision === this.baseRevision ? 'editable' : 'conflict';
 		}

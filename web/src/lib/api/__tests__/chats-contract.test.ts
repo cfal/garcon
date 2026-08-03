@@ -20,6 +20,7 @@ import {
 	deleteQueuedInput,
 	moveQueuedInput,
 	steerChat,
+	steerQueuedEntry,
 	submitGoalControl,
 	getChatExecutionControl,
 	clearChatQueue,
@@ -65,6 +66,7 @@ describe('chats API contract', () => {
 			queue: {
 				entries: [],
 				dispatchingEntryId: null,
+				steeringEntryId: null,
 				recentlyDispatched: [],
 				pause: null,
 				reorderRevision: 0,
@@ -664,6 +666,76 @@ describe('chats API contract', () => {
 			chatId: 'c/1',
 			pauseId: 'pause/1',
 		});
+	});
+
+	it('posts queued steering observations without client-supplied content', async () => {
+		const control = emptyControl();
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(
+				{
+					success: true,
+					commandType: 'steer',
+					clientRequestId: 'request-queue-steer',
+					chatId: 'c/1',
+					status: 'accepted',
+					acceptedAt: '2026-08-02T00:00:00.000Z',
+					turnId: 'turn-active',
+					control,
+				},
+				202,
+			),
+		);
+
+		await expect(
+			steerQueuedEntry({
+				clientRequestId: 'request-queue-steer',
+				clientMessageId: 'message-queue-steer',
+				chatId: 'c/1',
+				entryId: 'entry/1',
+				expectedRevision: 3,
+				expectedReorderRevision: 7,
+			}),
+		).resolves.toMatchObject({ control });
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue/entries/steer');
+		expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			clientRequestId: 'request-queue-steer',
+			clientMessageId: 'message-queue-steer',
+			chatId: 'c/1',
+			entryId: 'entry/1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+		});
+	});
+
+	it('rejects malformed present queue-steer control snapshots', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(
+				{
+					success: true,
+					commandType: 'steer',
+					clientRequestId: 'request-queue-steer',
+					chatId: 'c-1',
+					status: 'accepted',
+					acceptedAt: '2026-08-02T00:00:00.000Z',
+					turnId: 'turn-active',
+					control: { ...emptyControl(), queue: { entries: [] } },
+				},
+				202,
+			),
+		);
+
+		await expect(
+			steerQueuedEntry({
+				clientRequestId: 'request-queue-steer',
+				clientMessageId: 'message-queue-steer',
+				chatId: 'c-1',
+				entryId: 'entry-1',
+				expectedRevision: 3,
+				expectedReorderRevision: 7,
+			}),
+		).rejects.toThrow('Invalid queued steer execution control response');
 	});
 
 	it('rejects queue controls without a bounded opaque server instance ID', async () => {

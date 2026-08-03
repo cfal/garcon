@@ -12,6 +12,7 @@ import {
 	runChat,
 	replaceQueuedInput,
 	steerChat,
+	steerQueuedEntry,
 	submitGoalControl,
 	startChat,
 	stopChat,
@@ -52,6 +53,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
 	steerChat: vi.fn(),
+	steerQueuedEntry: vi.fn(),
 	submitGoalControl: vi.fn(),
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
@@ -78,6 +80,7 @@ const mockCreateQueuedInput = vi.mocked(createQueuedInput);
 const mockDeleteQueuedInput = vi.mocked(deleteQueuedInput);
 const mockReplaceQueuedInput = vi.mocked(replaceQueuedInput);
 const mockSteerChat = vi.mocked(steerChat);
+const mockSteerQueuedEntry = vi.mocked(steerQueuedEntry);
 const mockSubmitGoalControl = vi.mocked(submitGoalControl);
 const mockStopChat = vi.mocked(stopChat);
 const mockUpdateChatAgentModel = vi.mocked(updateChatAgentModel);
@@ -151,6 +154,7 @@ function emptyControl(): ChatExecutionControlState {
 		queue: {
 			entries: [],
 			dispatchingEntryId: null,
+			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
 			reorderRevision: 0,
@@ -444,6 +448,7 @@ describe('ConversationSessionController', () => {
 		mockDeleteQueuedInput.mockReset();
 		mockReplaceQueuedInput.mockReset();
 		mockSteerChat.mockReset();
+		mockSteerQueuedEntry.mockReset();
 		mockSubmitGoalControl.mockReset();
 		mockStopChat.mockReset();
 		mockUpdateChatAgentModel.mockReset();
@@ -842,6 +847,7 @@ describe('ConversationSessionController', () => {
 					},
 				],
 				dispatchingEntryId: null,
+				steeringEntryId: null,
 				recentlyDispatched: [],
 				reorderRevision: 0,
 				pause: {
@@ -2183,6 +2189,51 @@ describe('ConversationSessionController', () => {
 			latestControl,
 		);
 		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('steers a rendered queue observation without touching composer turn state', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.composerState.inputText = 'draft stays here';
+		const control = emptyControl();
+		mockSteerQueuedEntry.mockResolvedValueOnce({
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'request-steer',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-08-02T00:00:00.000Z',
+			turnId: 'turn-active',
+			control,
+		});
+		const controller = new ConversationSessionController(deps);
+		const queued = {
+			id: 'entry-1',
+			content: 'queued guidance',
+			revision: 3,
+			createdAt: '2026-08-02T00:00:00.000Z',
+			updatedAt: '2026-08-02T00:00:00.000Z',
+		};
+
+		await controller.handleSteerQueuedInput(queued, 7);
+
+		expect(mockSteerQueuedEntry).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				entryId: 'entry-1',
+				expectedRevision: 3,
+				expectedReorderRevision: 7,
+			}),
+		);
+		expect(deps.composerState.inputText).toBe('draft stays here');
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
+		expect(deps.chatState.upsertPendingUserInput).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				content: 'queued guidance',
+				deliveryStatus: 'accepted',
+			}),
+		);
 	});
 
 	it('applies authoritative pause and resume snapshots using the rendered pause ID', async () => {

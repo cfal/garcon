@@ -17,6 +17,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	forkRunChat: vi.fn(),
 	runChat: vi.fn(),
 	steerChat: vi.fn(),
+	steerQueuedEntry: vi.fn(),
 	submitGoalControl: vi.fn(),
 	startChat: vi.fn(),
 }));

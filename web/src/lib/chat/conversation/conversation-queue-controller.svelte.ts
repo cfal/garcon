@@ -13,6 +13,7 @@ import {
 } from '$shared/chat-execution-control';
 import type {
 	QueueCommandErrorResponse,
+	QueueEntrySteerErrorResponse,
 	QueueEntryMoveCommandRequest,
 	QueueEntryPlacement,
 } from '$shared/chat-command-contracts';
@@ -20,7 +21,8 @@ import type { QueueEntry } from '$shared/queue-state';
 import { createClientCommandId } from './client-command-id.js';
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
-import { errorDetail } from './conversation-submission-helpers.js';
+import { errorDetail, pendingUserInput } from './conversation-submission-helpers.js';
+import { steerFailureNotice } from './steer-failure-notice.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	CommandOutcomeUnknownError,
@@ -35,7 +37,10 @@ interface FailedQueueSubmission {
 
 export interface ConversationQueueControllerOptions {
 	get sessions(): Pick<SessionControllerDeps['sessions'], 'selectedChatId'>;
-	get chatState(): Pick<SessionControllerDeps['chatState'], 'clearLocalNotices' | 'appendLocalNotice'>;
+	get chatState(): Pick<
+		SessionControllerDeps['chatState'],
+		'clearLocalNotices' | 'appendLocalNotice' | 'upsertPendingUserInput'
+	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
 		'inputText' | 'images' | 'saveDraft'
@@ -45,7 +50,8 @@ export interface ConversationQueueControllerOptions {
 		SessionControllerDeps['conversationUi'],
 		'setExecutionControlFromLiveUpdate' | 'setExecutionControlFromRefresh'
 	>;
-	get acceptedInputs(): Pick<AcceptedInputSubmissionService, 'enqueue'>;
+	get acceptedInputs(): Pick<AcceptedInputSubmissionService, 'enqueue' | 'steerQueuedEntry'>;
+	get scrollToBottom(): SessionControllerDeps['scrollToBottom'];
 }
 
 export class ConversationQueueController {
@@ -232,6 +238,56 @@ export class ConversationQueueController {
 		}
 	}
 
+	async steerHeadForChat(
+		chatId: string,
+		entry: QueueEntry,
+		expectedReorderRevision: number,
+	): Promise<void> {
+		this.options.chatState.clearLocalNotices();
+		const submission = this.options.acceptedInputs.steerQueuedEntry({
+			chatId,
+			entryId: entry.id,
+			expectedRevision: entry.revision,
+			expectedReorderRevision,
+		});
+
+		try {
+			const result = await submission.submit();
+			if (result.control) {
+				this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+			}
+			this.#upsertSteeredInput(chatId, entry.content, submission, 'accepted');
+		} catch (error) {
+			const failure = queueEntrySteerFailure(error);
+			if (failure.control) {
+				this.options.conversationUi.setExecutionControlFromRefresh(chatId, failure.control);
+			} else {
+				await this.settleControlRefresh(this.startControlRefresh(chatId));
+			}
+			if (
+				failure.structured &&
+				failure.errorCode !== 'SESSION_NOT_FOUND' &&
+				(failure.deliveryOutcome === 'unknown' || failure.deliveryOutcome === 'accepted')
+			) {
+				this.#upsertSteeredInput(
+					chatId,
+					entry.content,
+					submission,
+					failure.deliveryOutcome === 'accepted' ? 'accepted' : 'unconfirmed',
+				);
+			}
+			if (this.options.sessions.selectedChatId === chatId) {
+				this.options.chatState.appendLocalNotice(
+					'error',
+					failure.deliveryOutcome === 'unknown' || !failure.structured
+						? m.chat_notice_steer_outcome_unconfirmed()
+						: steerFailureNotice(error),
+				);
+			}
+			throw error;
+		}
+	}
+
 	async handleDelete(entryId: string): Promise<void> {
 		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
 		if (!chatId) return;
@@ -250,6 +306,60 @@ export class ConversationQueueController {
 		const control = controlFromMutationError(error);
 		if (control) this.options.conversationUi.setExecutionControlFromRefresh(chatId, control);
 	}
+
+	#upsertSteeredInput(
+		chatId: string,
+		content: string,
+		submission: {
+			clientRequestId: string;
+			clientMessageId: string;
+		},
+		deliveryStatus: 'accepted' | 'unconfirmed',
+	): void {
+		this.options.chatState.upsertPendingUserInput({
+			...pendingUserInput(
+				chatId,
+				content,
+				[],
+				submission.clientRequestId,
+				submission.clientMessageId,
+			),
+			deliveryStatus,
+		});
+		if (this.options.sessions.selectedChatId === chatId) this.options.scrollToBottom();
+	}
+}
+
+interface QueueEntrySteerFailure {
+	structured: boolean;
+	deliveryOutcome: 'not-sent' | 'unknown' | 'accepted';
+	errorCode?: string;
+	control: ChatExecutionControlState | null;
+}
+
+function queueEntrySteerFailure(error: unknown): QueueEntrySteerFailure {
+	const failure = error instanceof CommandOutcomeUnknownError ? error.cause : error;
+	if (!(failure instanceof ApiError) || !isQueueEntrySteerErrorResponse(failure.payload)) {
+		return { structured: false, deliveryOutcome: 'unknown', control: null };
+	}
+	return {
+		structured: true,
+		deliveryOutcome: failure.payload.deliveryOutcome,
+		errorCode: failure.payload.errorCode,
+		control: failure.payload.control
+			? parseChatExecutionControlState(failure.payload.control)
+			: null,
+	};
+}
+
+function isQueueEntrySteerErrorResponse(value: unknown): value is QueueEntrySteerErrorResponse {
+	if (!isQueueCommandErrorResponse(value)) return false;
+	const deliveryOutcome = Reflect.get(value, 'deliveryOutcome');
+	return (
+		deliveryOutcome === 'not-sent' ||
+		deliveryOutcome === 'unknown' ||
+		deliveryOutcome === 'accepted'
+	);
 }
 
 function controlFromMutationError(error: unknown): ChatExecutionControlState | null {

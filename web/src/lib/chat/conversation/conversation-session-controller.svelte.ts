@@ -238,6 +238,7 @@ export class ConversationSessionController {
 			get lifecycle() { return deps.lifecycle; },
 			get conversationUi() { return deps.conversationUi; },
 			get acceptedInputs() { return acceptedInputs; },
+			get scrollToBottom() { return deps.scrollToBottom; },
 		});
 		this.#settings = new ConversationSettingsController({
 			get sessions() { return deps.sessions; },
@@ -774,6 +775,12 @@ export class ConversationSessionController {
 		reorderRevision: number,
 	): Promise<void> {
 		await this.#queue.moveForChat(chatId, source, target, placement, reorderRevision);
+	}
+
+	async handleSteerQueuedInput(entry: QueueEntry, reorderRevision: number): Promise<void> {
+		const chatId = this.deps.sessions.selectedChatId;
+		if (!chatId) return;
+		await this.#queue.steerHeadForChat(chatId, entry, reorderRevision);
 	}
 
 	async handleDeleteQueuedInput(entryId: string): Promise<void> {

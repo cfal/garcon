@@ -9,6 +9,7 @@ function transport(overrides: Partial<AcceptedInputTransport> = {}): AcceptedInp
 		fork: vi.fn(),
 		enqueue: vi.fn(),
 		steer: vi.fn(),
+		steerQueuedEntry: vi.fn(),
 		goalControl: vi.fn(),
 		...overrides,
 	};
@@ -136,6 +137,45 @@ describe('AcceptedInputSubmissionService', () => {
 		expect(steer).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			content: 'focus here',
+			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
+		});
+	});
+
+	it('retries queued steering with the same two identities and queue observation', async () => {
+		const requests: unknown[] = [];
+		const steerQueuedEntry = vi
+			.fn()
+			.mockImplementationOnce(async (request) => {
+				requests.push(request);
+				throw new TypeError('connection closed');
+			})
+			.mockImplementationOnce(async (request) => {
+				requests.push(request);
+				return { success: true, status: 'duplicate' };
+			});
+		const createId = vi.fn().mockReturnValueOnce('request-1').mockReturnValueOnce('message-1');
+		const service = new AcceptedInputSubmissionService(transport({ steerQueuedEntry }), createId);
+
+		const submission = service.steerQueuedEntry({
+			chatId: 'chat-1',
+			entryId: 'entry-1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+		});
+
+		expect(submission).toMatchObject({
+			clientRequestId: 'request-1',
+			clientMessageId: 'message-1',
+		});
+		await expect(submission.submit()).resolves.toMatchObject({ status: 'duplicate' });
+		expect(requests).toHaveLength(2);
+		expect(requests[0]).toBe(requests[1]);
+		expect(requests[0]).toEqual({
+			chatId: 'chat-1',
+			entryId: 'entry-1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
 			clientRequestId: 'request-1',
 			clientMessageId: 'message-1',
 		});

@@ -7,8 +7,8 @@ import type { ConversationQueueController } from './conversation-queue-controlle
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import { errorDetail, pendingUserInput } from './conversation-submission-helpers.js';
 import { settleSubmissionFailure } from './submission-settlement.js';
-import { ApiError } from '$lib/api/client.js';
 import { CommandOutcomeUnknownError } from './idempotent-command.js';
+import { steerFailureNotice } from './steer-failure-notice.js';
 import * as m from '$lib/paraglide/messages.js';
 
 type RouteDeps = Pick<
@@ -268,26 +268,4 @@ function restoreSteerComposer(
 	deps.composerState.inputText = context.previousText;
 	deps.composerState.images = context.previousImages;
 	deps.composerState.saveDraft(context.chatId);
-}
-
-function steerFailureNotice(error: unknown): string {
-	if (error instanceof ApiError) {
-		switch (error.errorCode) {
-			case 'OPERATION_UNSUPPORTED':
-				return m.chat_notice_steer_unsupported();
-			case 'STEER_TURN_UNAVAILABLE':
-				return m.chat_notice_steer_turn_unavailable();
-			case 'STEER_TURN_CHANGED':
-				return m.chat_notice_steer_turn_changed();
-			case 'STEER_TURN_NOT_STEERABLE':
-				return m.chat_notice_steer_turn_not_steerable();
-			case 'STEER_CAPACITY_EXHAUSTED':
-				return m.chat_notice_steer_capacity_exhausted();
-			case 'STEER_PROVIDER_REJECTED':
-				return m.chat_notice_steer_provider_rejected();
-			case 'STEER_NOT_DELIVERED':
-				return m.chat_notice_steer_not_delivered();
-		}
-	}
-	return m.chat_notice_failed_steer({ detail: errorDetail(error) });
 }

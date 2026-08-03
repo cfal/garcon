@@ -49,6 +49,8 @@ import type {
 	QueueEntryDeleteResponse,
 	QueueEntryMoveCommandRequest,
 	QueueEntryReplaceCommandRequest,
+	QueueEntrySteerCommandRequest,
+	QueueEntrySteerCommandResponse,
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
@@ -251,6 +253,19 @@ export async function submitGoalControl(
 
 export async function steerChat(params: SteerCommandRequest): Promise<SteerCommandResponse> {
 	return apiPost<SteerCommandResponse>('/api/v1/chats/steer', params);
+}
+
+export async function steerQueuedEntry(
+	params: QueueEntrySteerCommandRequest,
+): Promise<QueueEntrySteerCommandResponse> {
+	const response = await apiPost<QueueEntrySteerCommandResponse>(
+		'/api/v1/chats/queue/entries/steer',
+		params,
+	);
+	if (!response.control) return response;
+	const control = parseChatExecutionControlState(response.control);
+	if (!control) throw new Error('Invalid queued steer execution control response');
+	return { ...response, control };
 }
 
 export async function getChatExecutionControl(

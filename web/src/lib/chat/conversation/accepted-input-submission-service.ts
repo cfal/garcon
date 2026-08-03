@@ -3,6 +3,7 @@ import {
 	forkRunChat,
 	runChat,
 	steerChat,
+	steerQueuedEntry,
 	submitGoalControl,
 	startChat,
 	type StartChatParams,
@@ -18,6 +19,8 @@ import type {
 	QueueEntryCreateCommandRequest,
 	SteerCommandRequest,
 	SteerCommandResponse,
+	QueueEntrySteerCommandRequest,
+	QueueEntrySteerCommandResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -38,6 +41,7 @@ export interface AcceptedInputTransport {
 	fork(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse>;
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;
 	steer(request: SteerCommandRequest): Promise<SteerCommandResponse>;
+	steerQueuedEntry(request: QueueEntrySteerCommandRequest): Promise<QueueEntrySteerCommandResponse>;
 	goalControl(request: GoalControlCommandRequest): Promise<GoalControlCommandResponse>;
 }
 
@@ -47,6 +51,7 @@ const defaultTransport: AcceptedInputTransport = {
 	fork: forkRunChat,
 	enqueue: createQueuedInput,
 	steer: steerChat,
+	steerQueuedEntry,
 	goalControl: submitGoalControl,
 };
 
@@ -75,6 +80,12 @@ export class AcceptedInputSubmissionService {
 
 	steer(input: Omit<SteerCommandRequest, 'clientRequestId' | 'clientMessageId'>) {
 		return this.#messageSubmission(input, (request) => this.transport.steer(request));
+	}
+
+	steerQueuedEntry(
+		input: Omit<QueueEntrySteerCommandRequest, 'clientRequestId' | 'clientMessageId'>,
+	) {
+		return this.#messageSubmission(input, (request) => this.transport.steerQueuedEntry(request));
 	}
 
 	goalControl(input: Omit<GoalControlCommandRequest, 'clientRequestId'>) {
