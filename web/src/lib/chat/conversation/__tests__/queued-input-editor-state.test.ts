@@ -16,6 +16,7 @@ function queue(entries: QueueEntry[], overrides: Partial<ChatQueueState> = {}): 
 	return {
 		entries,
 		dispatchingEntryId: null,
+		steeringEntryId: null,
 		recentlyDispatched: [],
 		pause: null,
 		reorderRevision: 0,

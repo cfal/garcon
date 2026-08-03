@@ -24,6 +24,7 @@ export interface QueueCommandIdentity {
 export type TransitionRejection =
   | { code: 'QUEUE_ENTRY_NOT_FOUND'; entryId: string }
   | { code: 'QUEUE_ENTRY_ALREADY_SENT'; entryId: string }
+  | { code: 'QUEUE_ENTRY_IN_FLIGHT'; entryId: string }
   | { code: 'QUEUE_ENTRY_REVISION_CONFLICT'; entryId: string; actualRevision: number }
   | { code: 'QUEUE_ENTRY_REORDER_CONFLICT' }
   | { code: 'QUEUE_PAUSE_CHANGED' };
@@ -50,6 +51,14 @@ export interface QueueMoveMutationValue extends QueueMutationValue {
 
 export interface PoppedQueueEntry {
   entry: StoredQueueEntry;
+}
+
+export interface ReservedQueueSteer {
+  entry: StoredQueueEntry;
+}
+
+function isPendingQueueEntry(entry: StoredQueueEntry): boolean {
+  return entry.status === 'queued' || entry.status === 'steering';
 }
 
 function accepted<T>(
@@ -188,7 +197,10 @@ export function replaceQueueEntry(
   const entry = next.entries.find((candidate) => candidate.id === input.entryId);
   if (!entry) return rejected(current, missingEntryRejection(current, input.entryId));
   if (entry.status !== 'queued') {
-    return rejected(current, { code: 'QUEUE_ENTRY_ALREADY_SENT', entryId: input.entryId });
+    return rejected(current, {
+      code: entry.status === 'steering' ? 'QUEUE_ENTRY_IN_FLIGHT' : 'QUEUE_ENTRY_ALREADY_SENT',
+      entryId: input.entryId,
+    });
   }
   if (entry.revision !== input.expectedRevision) {
     return rejected(current, {
@@ -227,11 +239,16 @@ export function deleteQueueEntry(
   const index = next.entries.findIndex((entry) => entry.id === input.entryId);
   if (index < 0) return rejected(current, missingEntryRejection(current, input.entryId));
   if (next.entries[index].status !== 'queued') {
-    return rejected(current, { code: 'QUEUE_ENTRY_ALREADY_SENT', entryId: input.entryId });
+    return rejected(current, {
+      code: next.entries[index].status === 'steering'
+        ? 'QUEUE_ENTRY_IN_FLIGHT'
+        : 'QUEUE_ENTRY_ALREADY_SENT',
+      entryId: input.entryId,
+    });
   }
 
   next.entries.splice(index, 1);
-  if (!next.entries.some((entry) => entry.status === 'queued')) {
+  if (!next.entries.some(isPendingQueueEntry)) {
     next.pause = null;
     delete next.resumePauses;
   }
@@ -270,7 +287,10 @@ export function moveQueueEntry(
   const source = next.entries.find((entry) => entry.id === input.entryId);
   if (!source) return rejected(current, missingEntryRejection(current, input.entryId));
   if (source.status !== 'queued') {
-    return rejected(current, { code: 'QUEUE_ENTRY_ALREADY_SENT', entryId: input.entryId });
+    return rejected(current, {
+      code: source.status === 'steering' ? 'QUEUE_ENTRY_IN_FLIGHT' : 'QUEUE_ENTRY_ALREADY_SENT',
+      entryId: input.entryId,
+    });
   }
   if (source.revision !== input.expectedSourceRevision) {
     return rejected(current, {
@@ -312,12 +332,12 @@ export function moveQueueEntry(
   }
 
   const queuedOrderBefore = next.entries
-    .filter((entry) => entry.status === 'queued')
+    .filter(isPendingQueueEntry)
     .map((entry) => entry.id);
   next.entries.splice(next.entries.indexOf(source), 1);
 
   if (targetWasDispatched) {
-    const firstQueuedIndex = next.entries.findIndex((entry) => entry.status === 'queued');
+    const firstQueuedIndex = next.entries.findIndex(isPendingQueueEntry);
     next.entries.splice(firstQueuedIndex < 0 ? next.entries.length : firstQueuedIndex, 0, source);
   } else {
     const targetIndex = next.entries.findIndex((entry) => entry.id === input.targetEntryId);
@@ -326,7 +346,7 @@ export function moveQueueEntry(
   }
 
   const queuedOrderAfter = next.entries
-    .filter((entry) => entry.status === 'queued')
+    .filter(isPendingQueueEntry)
     .map((entry) => entry.id);
   const orderChanged = queuedOrderBefore.some(
     (entryId, index) => queuedOrderAfter[index] !== entryId,
@@ -361,7 +381,7 @@ export function pauseQueue(
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
-  if (!next.entries.some((entry) => entry.status === 'queued') || next.pause) {
+  if (!next.entries.some(isPendingQueueEntry) || next.pause) {
     return accepted(next, undefined, false);
   }
   next.pause = { id: context.newId(), kind: 'manual', pausedAt: context.now };
@@ -395,7 +415,9 @@ export function popNextQueueEntry(
 ): ControlTransition<PoppedQueueEntry | null> {
   const next = cloneStoredChatExecutionControl(current);
   if (next.pause) return accepted(next, null, false);
-  if (next.entries.some((entry) => entry.status === 'sending')) return accepted(next, null, false);
+  if (next.entries.some((entry) => entry.status === 'sending' || entry.status === 'steering')) {
+    return accepted(next, null, false);
+  }
   const entry = next.entries.find((candidate) => candidate.status === 'queued');
   if (!entry || (input.entryId !== undefined && entry.id !== input.entryId)) {
     return accepted(next, null, false);
@@ -422,6 +444,90 @@ export function removeSentQueueEntry(
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
   next.entries = next.entries.filter((entry) => entry.id !== entryId);
+  bump(next, context.now);
+  return accepted(next, undefined, true);
+}
+
+export function reserveQueueSteer(
+  current: StoredChatExecutionControlState,
+  input: {
+    entryId: string;
+    expectedRevision: number;
+    expectedReorderRevision: number;
+  },
+  context: TransitionContext,
+): ControlTransition<ReservedQueueSteer> {
+  const next = cloneStoredChatExecutionControl(current);
+  const entry = next.entries.find((candidate) => candidate.id === input.entryId);
+  if (!entry) return rejected(current, missingEntryRejection(current, input.entryId));
+  if (entry.status === 'sending') {
+    return rejected(current, { code: 'QUEUE_ENTRY_ALREADY_SENT', entryId: input.entryId });
+  }
+  if (entry.status === 'steering' || next.entries.some((candidate) => candidate.status === 'steering')) {
+    return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId: input.entryId });
+  }
+  if (entry.revision !== input.expectedRevision) {
+    return rejected(current, {
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      entryId: input.entryId,
+      actualRevision: entry.revision,
+    });
+  }
+  if (next.reorderRevision !== input.expectedReorderRevision) {
+    return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
+  }
+  const head = next.entries.find((candidate) => candidate.status === 'queued');
+  if (head?.id !== entry.id) {
+    return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
+  }
+
+  entry.status = 'steering';
+  bump(next, context.now);
+  return accepted(next, {
+    entry: {
+      ...entry,
+      ...(entry.delivery ? { delivery: { ...entry.delivery } } : {}),
+    },
+  }, true);
+}
+
+export function releaseQueueSteer(
+  current: StoredChatExecutionControlState,
+  entryId: string,
+  context: TransitionContext,
+): ControlTransition<void> {
+  const next = cloneStoredChatExecutionControl(current);
+  const entry = next.entries.find((candidate) => candidate.id === entryId);
+  if (!entry) return accepted(next, undefined, false);
+  if (entry.status !== 'steering') {
+    return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId });
+  }
+  entry.status = 'queued';
+  bump(next, context.now);
+  return accepted(next, undefined, true);
+}
+
+export function consumeQueueSteer(
+  current: StoredChatExecutionControlState,
+  entryId: string,
+  context: TransitionContext,
+): ControlTransition<void> {
+  const next = cloneStoredChatExecutionControl(current);
+  const index = next.entries.findIndex((candidate) => candidate.id === entryId);
+  if (index < 0) return accepted(next, undefined, false);
+  const entry = next.entries[index];
+  if (entry.status !== 'steering') {
+    return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId });
+  }
+  next.entries.splice(index, 1);
+  next.recentlyDispatched = [
+    ...next.recentlyDispatched.filter((candidate) => candidate.entryId !== entry.id),
+    { entryId: entry.id, revision: entry.revision, dispatchedAt: context.now },
+  ].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
+  if (!next.entries.some(isPendingQueueEntry)) {
+    next.pause = null;
+    delete next.resumePauses;
+  }
   bump(next, context.now);
   return accepted(next, undefined, true);
 }
@@ -453,7 +559,7 @@ export function requeueAndPause(
       (candidate) => candidate.entryId !== input.entryId,
     );
   }
-  next.pause = next.entries.some((candidate) => candidate.status === 'queued')
+  next.pause = next.entries.some(isPendingQueueEntry)
     ? {
         id: context.newId(),
         kind: input.kind,

@@ -3,7 +3,8 @@ import type {
   AgentRunCommandRequest,
   StartChatCommandRequest,
 } from '../../../common/chat-command-contracts.js';
-import { assistantContents } from '../../support/chat-assertions.js';
+import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
+import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { claudeText } from '../../support/fake-claude-model.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
 import {
@@ -12,6 +13,7 @@ import {
 } from '../../support/integration-fixture.js';
 import {
   expectStoppedTurnEventOrder,
+  expectFinished,
   LIVE_TURN_TIMEOUT_MS,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
@@ -68,6 +70,113 @@ function defineSteeringConformance(
     afterAll(async () => {
       await environment?.dispose();
     });
+
+    test('uses the FIFO queue head as same-turn steering input exactly once', async () => {
+      if (!environment) throw new Error(`${providerName} environment was not initialized.`);
+      const { driver } = environment;
+      const firstPrompt = marker(driver.id, 'QUEUE_FIRST_PROMPT');
+      const steerPrompt = marker(driver.id, 'QUEUE_STEER_PROMPT');
+      const futurePrompt = marker(driver.id, 'QUEUE_FUTURE_PROMPT');
+      const firstReply = marker(driver.id, 'QUEUE_FIRST_REPLY');
+      const steerReply = marker(driver.id, 'QUEUE_STEER_REPLY');
+      const futureReply = marker(driver.id, 'QUEUE_FUTURE_REPLY');
+      const held = driver.holdReply(firstReply);
+      driver.scriptReply(steerReply);
+      driver.scriptReply(futureReply);
+
+      try {
+        await withIntegrationFixture(`${driver.id}-scripted-queue-steering`, async (fixture) => {
+          const chatId = fixture.newChatId();
+          const activeCursor = fixture.client.markEvents();
+          const active = await fixture.client.startChat(driver.startRequest({
+            chatId,
+            projectPath: fixture.dirs.project,
+            command: firstPrompt,
+          }));
+          if (!active.turnId) throw new Error(`${providerName} omitted the active turn id.`);
+          await held.requested;
+
+          await fixture.client.enqueueNew(chatId, steerPrompt);
+          await fixture.client.enqueueNew(chatId, futurePrompt);
+          const paused = await fixture.client.pauseQueue(chatId);
+          expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual([
+            steerPrompt,
+            futurePrompt,
+          ]);
+          const source = paused.control.queue.entries[0];
+          if (!source) throw new Error(`${providerName} omitted the queued steer source.`);
+          const request = {
+            clientRequestId: crypto.randomUUID(),
+            clientMessageId: crypto.randomUUID(),
+            chatId,
+            entryId: source.id,
+            expectedRevision: source.revision,
+            expectedReorderRevision: paused.control.queue.reorderRevision,
+          };
+
+          const steered = await fixture.client.steerQueued(request);
+          const duplicate = await fixture.client.steerQueued(request);
+
+          expect(steered).toMatchObject({ status: 'accepted', turnId: active.turnId });
+          expect(duplicate).toMatchObject({ status: 'duplicate', turnId: active.turnId });
+          expect(steered.control?.queue.entries.map((entry) => entry.content)).toEqual([futurePrompt]);
+          expect(steered.control?.queue.pause).toEqual(paused.control.queue.pause);
+          expect(steered.control?.queue.recentlyDispatched).toContainEqual(expect.objectContaining({
+            entryId: source.id,
+            revision: source.revision,
+          }));
+
+          held.release();
+          expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
+            afterIndex: activeCursor,
+            timeoutMs: LIVE_TURN_TIMEOUT_MS,
+          })).type);
+
+          const stillPaused = await fixture.client.getExecutionControl(chatId);
+          expect(stillPaused.queue.entries.map((entry) => entry.content)).toEqual([futurePrompt]);
+          expect(stillPaused.queue.pause).toEqual(paused.control.queue.pause);
+          expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([
+            firstPrompt,
+            steerPrompt,
+          ]);
+
+          const futureCursor = fixture.client.markEvents();
+          await fixture.client.resumeQueue(chatId, stillPaused.queue.pause!.id);
+          const futureInput = await fixture.client.waitForEvent(
+            (event): event is PendingUserInputUpdatedMessage =>
+              event.type === 'pending-user-input-updated'
+              && event.input.chatId === chatId
+              && event.input.content === futurePrompt
+              && typeof event.input.turnId === 'string',
+            `${providerName} future queued turn identity`,
+            { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+          );
+          expect(futureInput.input.turnId).not.toBe(active.turnId);
+          expectFinished((await fixture.client.waitForTurnTerminal(
+            chatId,
+            futureInput.input.turnId,
+            { afterIndex: futureCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+          )).type);
+
+          const transcript = await fixture.client.getMessages(chatId);
+          expect(userContents(transcript.messages)).toEqual([
+            firstPrompt,
+            steerPrompt,
+            futurePrompt,
+          ]);
+          const assistants = assistantContents(transcript.messages);
+          expect(assistants.some((content) => content.includes(steerReply))).toBe(true);
+          expect(assistants.some((content) => content.includes(futureReply))).toBe(true);
+          driver.assertSettled();
+        }, {
+          serverEnvironment: driver.serverEnvironment,
+          prepareWorkspace: driver.prepareWorkspace,
+        });
+      } finally {
+        held.release();
+        driver.reset();
+      }
+    }, 120_000);
 
     test('does not execute accepted guidance after stop', async () => {
       if (!environment) throw new Error(`${providerName} environment was not initialized.`);

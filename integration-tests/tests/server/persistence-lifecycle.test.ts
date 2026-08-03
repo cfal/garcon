@@ -133,6 +133,7 @@ describe('persistence lifecycle', () => {
           queue: {
             entries: [],
             dispatchingEntryId: null,
+            steeringEntryId: null,
             recentlyDispatched: [],
             pause: null,
             reorderRevision: 0,
@@ -146,6 +147,7 @@ describe('persistence lifecycle', () => {
         queue: {
           entries: [],
           dispatchingEntryId: null,
+          steeringEntryId: null,
           recentlyDispatched: [],
           pause: null,
           reorderRevision: 0,

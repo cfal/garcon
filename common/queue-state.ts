@@ -26,6 +26,7 @@ export type AutomaticQueuePauseKind = Exclude<
 export interface ChatQueueState {
   entries: QueueEntry[];
   dispatchingEntryId: string | null;
+  steeringEntryId: string | null;
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   pause: QueuePause | null;
   reorderRevision: number;
@@ -37,6 +38,7 @@ export function emptyChatQueueState(): ChatQueueState {
   return {
     entries: [],
     dispatchingEntryId: null,
+    steeringEntryId: null,
     recentlyDispatched: [],
     pause: null,
     reorderRevision: 0,
@@ -139,10 +141,17 @@ export function parseChatQueueState(value: unknown): ChatQueueState | null {
       ? raw.dispatchingEntryId
       : undefined;
   if (dispatchingEntryId === undefined) return null;
+  const steeringEntryId = raw.steeringEntryId === null
+    ? null
+    : typeof raw.steeringEntryId === 'string' && raw.steeringEntryId.trim()
+      ? raw.steeringEntryId
+      : undefined;
+  if (steeringEntryId === undefined) return null;
 
   return {
     entries: entries as QueueEntry[],
     dispatchingEntryId,
+    steeringEntryId,
     recentlyDispatched: (recentlyDispatched as RecentlyDispatchedQueueEntry[])
       .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES),
     pause,

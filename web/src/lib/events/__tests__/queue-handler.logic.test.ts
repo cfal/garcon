@@ -25,6 +25,7 @@ describe('queue handler', () => {
 			queue: {
 				entries: [],
 				dispatchingEntryId: null,
+				steeringEntryId: null,
 				recentlyDispatched: [],
 				pause: null,
 				reorderRevision: 0,

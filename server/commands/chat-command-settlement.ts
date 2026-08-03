@@ -9,6 +9,7 @@ import {
   type PreScheduleFailure,
 } from '../chat-execution/types.ts';
 import { DomainError } from '../lib/domain-error.ts';
+import type { SteerDeliveryOutcome } from '../../common/chat-command-contracts.ts';
 
 export class ChatCommandSettlement implements CommandSettlementPort {
   constructor(private readonly ledger: CommandLedger) {}
@@ -77,20 +78,26 @@ export class ChatCommandSettlement implements CommandSettlementPort {
     await this.ledger.update(command.key, {
       status: 'finished',
       turnId,
-      entryId: undefined,
+      entryId: command.entryId,
       error: undefined,
       errorCode: undefined,
+      deliveryOutcome: undefined,
     });
   }
 
-  async settleSteerFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void> {
+  async settleSteerFailure(
+    command: AcceptedExecutionCommand,
+    error: unknown,
+    deliveryOutcome?: SteerDeliveryOutcome,
+  ): Promise<void> {
     const domainError = error instanceof DomainError ? error : null;
     const rejected = domainError !== null && domainError.status < 500;
     await this.ledger.update(command.key, {
       status: rejected ? 'rejected' : 'failed',
       error: domainError?.message ?? (error instanceof Error ? error.message : String(error)),
       errorCode: domainError?.code ?? 'INTERNAL_ERROR',
-      entryId: undefined,
+      entryId: command.entryId,
+      deliveryOutcome,
     });
   }
 

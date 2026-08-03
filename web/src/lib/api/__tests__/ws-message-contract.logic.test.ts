@@ -46,6 +46,7 @@ function emptyExecutionControl(version = 4, serverInstanceId = 'server-instance-
 		queue: {
 			entries: [],
 			dispatchingEntryId: null,
+			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
 			reorderRevision: 0,
@@ -432,6 +433,14 @@ describe('parseServerWsMessage', () => {
 				chatId: 'c-1',
 				clientRequestId: 'req',
 				reason: 'persisted',
+			}),
+		).toBeInstanceOf(PendingUserInputClearedMessage);
+		expect(
+			parseServerWsMessage({
+				type: 'pending-user-input-cleared',
+				chatId: 'c-1',
+				clientRequestId: 'req',
+				reason: 'queue-source-not-sent',
 			}),
 		).toBeInstanceOf(PendingUserInputClearedMessage);
 		expect(

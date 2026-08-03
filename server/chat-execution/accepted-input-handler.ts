@@ -1,10 +1,20 @@
 import crypto from 'crypto';
+import type { CommandErrorCode } from '../../common/chat-command-contracts.ts';
 import type {
   AgentExecutionAdmission,
   AgentSteerOptions,
   RunAgentTurnOptions,
 } from '../agents/session-types.ts';
-import { GoalControlDeliveryError, DomainError } from '../lib/domain-error.ts';
+import {
+  GoalControlDeliveryError,
+  DomainError,
+  QueueEntrySteerError,
+  QUEUE_STEER_FINALIZATION_FAILED_MESSAGE,
+  QUEUE_STEER_RECOVERY_FAILED_MESSAGE,
+  STEER_NOT_DELIVERED_MESSAGE,
+  STEER_OUTCOME_UNKNOWN_MESSAGE,
+  SteerDeliveryError,
+} from '../lib/domain-error.ts';
 import { createLogger } from '../lib/log.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
@@ -19,6 +29,8 @@ import type {
   AcceptedQueueReplace,
   AcceptedSteerInput,
   AcceptedSteerOutcome,
+  AcceptedQueueEntrySteer,
+  AcceptedQueueEntrySteerOutcome,
   CapturedSteerTarget,
   DirectTurnReservation,
   PendingInputsPort,
@@ -61,6 +73,7 @@ export interface AcceptedInputCoordinator {
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
+    notSentDisposition?: 'mark-failed' | 'queue-handler-settles',
   ): Promise<AcceptedSteerOutcome>;
   hasAppliedCreate(chatId: string, commandKey: string, entryId: string): Promise<boolean>;
 }
@@ -297,6 +310,242 @@ export class AcceptedInputHandler {
     }
   }
 
+  async steerQueueEntry(input: AcceptedQueueEntrySteer): Promise<AcceptedQueueEntrySteerOutcome> {
+    let reservation: Awaited<ReturnType<ChatExecutionControlOperations['reserveSteer']>>;
+    try {
+      reservation = await this.#controls.reserveSteer(input.command.chatId, {
+        entryId: input.command.entryId,
+        expectedRevision: input.expectedRevision,
+        expectedReorderRevision: input.expectedReorderRevision,
+      });
+    } catch (error) {
+      const wrapped = this.#queueSteerError(error, 'not-sent');
+      await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
+      throw wrapped;
+    }
+
+    let outcome: AcceptedSteerOutcome;
+    try {
+      outcome = await this.#coordinator.steer(
+        input.command.chatId,
+        reservation.entry.content,
+        input.providerContent,
+        {
+          clientRequestId: input.command.clientRequestId,
+          clientMessageId: input.clientMessageId,
+        },
+        input.target,
+        (turnId) => input.settlement.markScheduled(input.command, turnId),
+        'queue-handler-settles',
+      );
+    } catch (error) {
+      const deliveryOutcome = error instanceof SteerDeliveryError ? error.outcome : 'not-sent';
+      if (deliveryOutcome === 'unknown') {
+        throw await this.#finishUnknownQueueSteer(input, error);
+      }
+      throw await this.#releaseRejectedQueueSteer(input, error);
+    }
+
+    let control: StoredChatExecutionControlState;
+    try {
+      control = await this.#controls.consumeSteer(input.command.chatId, input.command.entryId);
+    } catch (error) {
+      throw await this.#failAcceptedQueueFinalization(input, error);
+    }
+    this.#coordinator.requestDrain(input.command.chatId, 'queued steer consumed');
+    try {
+      await input.settlement.settleSteerSuccess(input.command, outcome.turnId);
+    } catch (error) {
+      logger.error('queued steer ledger settlement failed', {
+        chatId: input.command.chatId,
+        entryId: input.command.entryId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return { ...outcome, control };
+  }
+
+  async recoverQueueEntrySteer(
+    chatId: string,
+    entryId: string,
+  ): Promise<StoredChatExecutionControlState> {
+    const control = await this.#controls.read(chatId);
+    const source = control.entries.find((entry) => entry.id === entryId);
+    if (source?.status !== 'queued' && source?.status !== 'steering') return control;
+    return this.#controls.requeueAndPause(chatId, entryId, 'completion-uncertain');
+  }
+
+  async #finishUnknownQueueSteer(
+    input: AcceptedQueueEntrySteer,
+    error: unknown,
+  ): Promise<QueueEntrySteerError> {
+    try {
+      const control = await this.#controls.consumeSteer(input.command.chatId, input.command.entryId);
+      this.#coordinator.requestDrain(input.command.chatId, 'unconfirmed queued steer consumed');
+      const wrapped = this.#queueSteerError(error, 'unknown', control);
+      await this.#settleQueueSteerFailure(input, wrapped, 'unknown');
+      return wrapped;
+    } catch (consumeError) {
+      if (this.#isMissingSession(consumeError)) {
+        const wrapped = this.#queueSteerError(consumeError, 'unknown');
+        await this.#settleQueueSteerFailure(input, wrapped, 'unknown');
+        return wrapped;
+      }
+      let control: StoredChatExecutionControlState | undefined;
+      try {
+        control = await this.#controls.requeueAndPause(
+          input.command.chatId,
+          input.command.entryId,
+          'completion-uncertain',
+        );
+      } catch (pauseError) {
+        logger.error('unconfirmed queued steer recovery failed', {
+          chatId: input.command.chatId,
+          entryId: input.command.entryId,
+          error: pauseError instanceof Error ? pauseError.message : String(pauseError),
+        });
+      }
+      const wrapped = this.#queueSteerError(error, 'unknown', control);
+      await this.#settleQueueSteerFailure(input, wrapped, 'unknown');
+      return wrapped;
+    }
+  }
+
+  async #releaseRejectedQueueSteer(
+    input: AcceptedQueueEntrySteer,
+    error: unknown,
+  ): Promise<QueueEntrySteerError> {
+    try {
+      const control = await this.#controls.releaseSteer(input.command.chatId, input.command.entryId);
+      this.#pendingInputs.clear(
+        input.command.chatId,
+        input.command.clientRequestId,
+        'queue-source-not-sent',
+      );
+      this.#coordinator.requestDrain(input.command.chatId, 'rejected queued steer released');
+      const wrapped = this.#queueSteerError(error, 'not-sent', control);
+      await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
+      return wrapped;
+    } catch (releaseError) {
+      if (this.#isMissingSession(releaseError)) {
+        const wrapped = this.#queueSteerError(releaseError, 'not-sent');
+        await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
+        return wrapped;
+      }
+      try {
+        const control = await this.#controls.requeueAndPause(
+          input.command.chatId,
+          input.command.entryId,
+          'completion-uncertain',
+        );
+        this.#pendingInputs.clear(
+          input.command.chatId,
+          input.command.clientRequestId,
+          'queue-source-not-sent',
+        );
+        const wrapped = this.#queueSteerError(error, 'not-sent', control);
+        await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
+        return wrapped;
+      } catch (recoveryError) {
+        this.#pendingInputs.markFailed(input.command.chatId, input.command.clientRequestId);
+        const wrapped = new QueueEntrySteerError(
+          'QUEUE_STEER_RECOVERY_FAILED',
+          QUEUE_STEER_RECOVERY_FAILED_MESSAGE,
+          500,
+          'not-sent',
+          undefined,
+          { cause: new AggregateError([releaseError, recoveryError]) },
+        );
+        await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
+        return wrapped;
+      }
+    }
+  }
+
+  async #failAcceptedQueueFinalization(
+    input: AcceptedQueueEntrySteer,
+    error: unknown,
+  ): Promise<QueueEntrySteerError> {
+    if (this.#isMissingSession(error)) {
+      const wrapped = this.#queueSteerError(error, 'accepted');
+      await this.#settleQueueSteerFailure(input, wrapped, 'accepted');
+      return wrapped;
+    }
+    let control: StoredChatExecutionControlState | undefined;
+    try {
+      control = await this.#controls.requeueAndPause(
+        input.command.chatId,
+        input.command.entryId,
+        'completion-uncertain',
+      );
+    } catch (pauseError) {
+      logger.error('accepted queued steer recovery failed', {
+        chatId: input.command.chatId,
+        entryId: input.command.entryId,
+        error: pauseError instanceof Error ? pauseError.message : String(pauseError),
+      });
+    }
+    const wrapped = new QueueEntrySteerError(
+      'QUEUE_STEER_FINALIZATION_FAILED',
+      QUEUE_STEER_FINALIZATION_FAILED_MESSAGE,
+      500,
+      'accepted',
+      control,
+      { cause: error },
+    );
+    await this.#settleQueueSteerFailure(input, wrapped, 'accepted');
+    return wrapped;
+  }
+
+  async #settleQueueSteerFailure(
+    input: AcceptedQueueEntrySteer,
+    error: unknown,
+    deliveryOutcome: 'not-sent' | 'unknown' | 'accepted',
+  ): Promise<void> {
+    try {
+      await input.settlement.settleSteerFailure(input.command, error, deliveryOutcome);
+    } catch (settlementError) {
+      logger.error('queued steer failure settlement failed', {
+        chatId: input.command.chatId,
+        entryId: input.command.entryId,
+        error: settlementError instanceof Error ? settlementError.message : String(settlementError),
+      });
+    }
+  }
+
+  #queueSteerError(
+    error: unknown,
+    deliveryOutcome: 'not-sent' | 'unknown' | 'accepted',
+    control?: StoredChatExecutionControlState,
+  ): QueueEntrySteerError {
+    if (error instanceof QueueEntrySteerError) return error;
+    if (error instanceof DomainError) {
+      const errorControl = 'control' in error
+        ? (error as DomainError & { control?: StoredChatExecutionControlState }).control
+        : undefined;
+      return new QueueEntrySteerError(
+        queueSteerDomainErrorCode(error.code),
+        error.message,
+        error.status,
+        deliveryOutcome,
+        control ?? errorControl,
+        { cause: error },
+      );
+    }
+    return new QueueEntrySteerError(
+      deliveryOutcome === 'unknown' ? 'STEER_OUTCOME_UNKNOWN' : 'STEER_NOT_DELIVERED',
+      deliveryOutcome === 'unknown' ? STEER_OUTCOME_UNKNOWN_MESSAGE : STEER_NOT_DELIVERED_MESSAGE,
+      500,
+      deliveryOutcome,
+      control,
+      { cause: error },
+    );
+  }
+
+  #isMissingSession(error: unknown): boolean {
+    return error instanceof DomainError && error.code === 'SESSION_NOT_FOUND';
+  }
+
   async recoverGoalControl(input: AcceptedGoalControl): Promise<AcceptedGoalControlOutcome> {
     const applied = await this.#coordinator.hasAppliedCreate(
       input.command.chatId,
@@ -454,4 +703,30 @@ function withTurnIdentifiers(command: AcceptedDirectOperation['command']): RunAg
 
 function aggregateFailure(primary: unknown, secondary: unknown, message: string): AggregateError {
   return new AggregateError([primary, secondary], message);
+}
+
+function queueSteerDomainErrorCode(code: DomainError['code']): CommandErrorCode {
+  switch (code) {
+    case 'VALIDATION_FAILED':
+    case 'SESSION_NOT_FOUND':
+    case 'QUEUE_ENTRY_NOT_FOUND':
+    case 'QUEUE_ENTRY_ALREADY_SENT':
+    case 'QUEUE_ENTRY_IN_FLIGHT':
+    case 'QUEUE_ENTRY_REVISION_CONFLICT':
+    case 'QUEUE_ENTRY_REORDER_CONFLICT':
+    case 'STEER_NOT_DELIVERED':
+    case 'STEER_OUTCOME_UNKNOWN':
+    case 'STEER_PROVIDER_REJECTED':
+    case 'STEER_TURN_UNAVAILABLE':
+    case 'STEER_TURN_CHANGED':
+    case 'STEER_TURN_NOT_STEERABLE':
+    case 'STEER_CAPACITY_EXHAUSTED':
+    case 'QUEUE_STEER_FINALIZATION_FAILED':
+    case 'QUEUE_STEER_RECOVERY_FAILED':
+    case 'OPERATION_UNSUPPORTED':
+    case 'SERVER_SHUTTING_DOWN':
+      return code;
+    default:
+      return 'INTERNAL_ERROR';
+  }
 }

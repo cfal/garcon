@@ -683,7 +683,9 @@ export function parseServerWsMessage(
     case 'pending-user-input-cleared': {
       const chatId = requiredStr(data.chatId);
       const clientRequestId = requiredStr(data.clientRequestId);
-      const reason = data.reason === 'chat-removed' || data.reason === 'persisted'
+      const reason = data.reason === 'chat-removed'
+        || data.reason === 'persisted'
+        || data.reason === 'queue-source-not-sent'
         ? data.reason
         : null;
       return chatId && clientRequestId && reason

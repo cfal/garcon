@@ -32,6 +32,7 @@ function controlState(
 					]
 				: [],
 			dispatchingEntryId: null,
+			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: paused ? { id: 'pause-1', kind: 'manual', pausedAt: TS } : null,
 			reorderRevision: 0,

@@ -7,6 +7,7 @@ import {
 const BASE_QUEUE = {
   entries: [],
   dispatchingEntryId: null,
+  steeringEntryId: null,
   recentlyDispatched: [],
   pause: null,
   reorderRevision: 0,
@@ -15,6 +16,15 @@ const BASE_QUEUE = {
 describe('queue state', () => {
   it('initializes a zero reorder revision', () => {
     expect(emptyChatQueueState().reorderRevision).toBe(0);
+    expect(emptyChatQueueState().steeringEntryId).toBeNull();
+  });
+
+  it('requires an explicit steering entry identity', () => {
+    expect(parseChatQueueState({ ...BASE_QUEUE, steeringEntryId: 'entry-1' })?.steeringEntryId)
+      .toBe('entry-1');
+    const { steeringEntryId: _omitted, ...missing } = BASE_QUEUE;
+    expect(parseChatQueueState(missing)).toBeNull();
+    expect(parseChatQueueState({ ...BASE_QUEUE, steeringEntryId: '' })).toBeNull();
   });
 
   it('parses non-negative safe reorder revisions', () => {

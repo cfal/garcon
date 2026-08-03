@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { ChatStopOutcome } from '../../common/chat-types.js';
+import type { SteerDeliveryOutcome } from '../../common/chat-command-contracts.ts';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -29,6 +30,7 @@ export interface CommandLedgerRecord {
   entryId?: string;
   error?: string;
   errorCode?: string;
+  deliveryOutcome?: SteerDeliveryOutcome;
   forkPreparation?: ForkPreparationState;
   stopOutcome?: ChatStopOutcome;
   assistantMessages?: string[];
@@ -47,7 +49,7 @@ export interface CommandLedgerRecord {
 
 type SteerCommandTombstone = Omit<
   CommandLedgerRecord,
-  'payload' | 'entryId' | 'forkPreparation' | 'stopOutcome'
+  'payload' | 'forkPreparation' | 'stopOutcome'
 >;
 
 export interface LedgerAcceptInput {
@@ -412,6 +414,7 @@ export class CommandLedger {
           entryId: input.entryId,
           error: undefined,
           errorCode: undefined,
+          deliveryOutcome: undefined,
           forkPreparation: undefined,
           assistantMessages: [],
           assistantBytes: 0,
@@ -557,7 +560,6 @@ export class CommandLedger {
       if (record.commandType === 'steer') {
         const {
           payload: _payload,
-          entryId: _entryId,
           forkPreparation: _forkPreparation,
           stopOutcome: _stopOutcome,
           ...tombstone

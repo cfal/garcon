@@ -72,6 +72,7 @@ export interface PendingUserInputServiceContract {
   listForTransport(chatId: string): PendingUserInput[];
   hasInFlightForChat(chatId: string): boolean;
   clearChat(chatId: string, reason?: PendingUserInputClearReason): void;
+  clear(chatId: string, clientRequestId: string, reason: PendingUserInputClearReason): boolean;
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
@@ -124,6 +125,10 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {
     this.store.clearChat(chatId, reason);
     this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
+  }
+
+  clear(chatId: string, clientRequestId: string, reason: PendingUserInputClearReason): boolean {
+    return this.store.clear(chatId, clientRequestId, reason);
   }
 
   discardChat(chatId: string): number {

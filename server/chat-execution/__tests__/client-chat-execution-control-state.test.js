@@ -50,6 +50,19 @@ describe('chat execution-control projection', () => {
     expect(result.version).toBe(4);
   });
 
+  it('projects a steering row separately from a dispatching queued turn', () => {
+    const result = toClientChatExecutionControlState(control([
+      entry('sending', 'sending'),
+      entry('steering', 'steering'),
+      entry('queued', 'queued'),
+    ]));
+
+    expect(result.queue.entries.map((item) => item.id)).toEqual(['steering', 'queued']);
+    expect(result.queue.dispatchingEntryId).toBe('sending');
+    expect(result.queue.steeringEntryId).toBe('steering');
+    expect(result.queue.entries[0]).not.toHaveProperty('status');
+  });
+
   it('retains bounded recently-dispatched markers after the sending entry leaves', () => {
     const markers = Array.from({ length: MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES + 3 }, (_, index) => ({
       entryId: `q${index}`,

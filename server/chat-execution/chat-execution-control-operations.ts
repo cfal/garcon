@@ -16,8 +16,11 @@ import {
   moveQueueEntry,
   pauseQueue,
   popNextQueueEntry,
+  consumeQueueSteer,
+  releaseQueueSteer,
   removeSentQueueEntry,
   replaceQueueEntry,
+  reserveQueueSteer,
   requeueAndPause,
   restoreStoppedQueueEntry,
   resumeQueue,
@@ -293,6 +296,62 @@ export class ChatExecutionControlOperations {
     });
   }
 
+  async reserveSteer(
+    chatId: string,
+    input: {
+      entryId: string;
+      expectedRevision: number;
+      expectedReorderRevision: number;
+    },
+  ): Promise<{ entry: StoredQueueEntry; control: StoredChatExecutionControlState }> {
+    return this.host.runExclusive(chatId, async () => {
+      this.#assertChatExists(chatId);
+      const current = await this.#load(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        reserveQueueSteer(current, input, transitionContext()),
+      );
+      const entry = committed.control.entries.find((candidate) => candidate.id === input.entryId)!;
+      this.#logMutation('steer-reserve', chatId, entry.id, committed.control, entry.revision);
+      return { entry, control: committed.control };
+    });
+  }
+
+  async releaseSteer(
+    chatId: string,
+    entryId: string,
+  ): Promise<StoredChatExecutionControlState> {
+    return this.host.runExclusive(chatId, async () => {
+      this.#assertChatExists(chatId);
+      const current = await this.#load(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        releaseQueueSteer(current, entryId, transitionContext()),
+      );
+      if (committed.changed) this.#logMutation('steer-release', chatId, entryId, committed.control);
+      return committed.control;
+    });
+  }
+
+  async consumeSteer(
+    chatId: string,
+    entryId: string,
+  ): Promise<StoredChatExecutionControlState> {
+    return this.host.runExclusive(chatId, async () => {
+      this.#assertChatExists(chatId);
+      const current = await this.#load(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        consumeQueueSteer(current, entryId, transitionContext()),
+      );
+      if (committed.changed) this.#logMutation('steer-consume', chatId, entryId, committed.control);
+      return committed.control;
+    });
+  }
+
   async removeSent(chatId: string, entryId: string): Promise<StoredChatExecutionControlState> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
@@ -386,6 +445,12 @@ export class ChatExecutionControlOperations {
     return result;
   }
 
+  #assertChatExists(chatId: string): void {
+    if (!this.host.chatExists(chatId)) {
+      throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
+    }
+  }
+
   async #commitTransition<T>(
     chatId: string,
     current: StoredChatExecutionControlState,
@@ -409,7 +474,16 @@ export class ChatExecutionControlOperations {
   }
 
   #logMutation(
-    operation: 'create' | 'replace' | 'delete' | 'pop' | 'requeue' | 'sent',
+    operation:
+      | 'create'
+      | 'replace'
+      | 'delete'
+      | 'pop'
+      | 'requeue'
+      | 'sent'
+      | 'steer-reserve'
+      | 'steer-release'
+      | 'steer-consume',
     chatId: string,
     entryId: string,
     control: StoredChatExecutionControlState,
@@ -422,7 +496,7 @@ export class ChatExecutionControlOperations {
       entryId,
       ...(revision === undefined ? {} : { revision }),
       queueVersion: control.version,
-      queuedCount: control.entries.filter((entry) => entry.status === 'queued').length,
+      queuedCount: control.entries.filter(isPendingQueueEntry).length,
       ...(errorCode ? { errorCode } : {}),
     });
   }
@@ -448,7 +522,7 @@ export class ChatExecutionControlOperations {
       expectedReorderRevision: input.expectedReorderRevision,
       reorderRevision: control.reorderRevision,
       queueVersion: control.version,
-      queuedCount: control.entries.filter((entry) => entry.status === 'queued').length,
+      queuedCount: control.entries.filter(isPendingQueueEntry).length,
       ...(rebased === null ? {} : { rebased }),
       ...(errorCode ? { errorCode } : {}),
     });
@@ -466,8 +540,12 @@ export class ChatExecutionControlOperations {
       ...(entryId ? { entryId } : {}),
       ...(control.pause ? { pauseId: control.pause.id, pauseKind: control.pause.kind } : {}),
       queueVersion: control.version,
-      queuedCount: control.entries.filter((entry) => entry.status === 'queued').length,
+      queuedCount: control.entries.filter(isPendingQueueEntry).length,
     });
   }
 
+}
+
+function isPendingQueueEntry(entry: StoredQueueEntry): boolean {
+  return entry.status === 'queued' || entry.status === 'steering';
 }

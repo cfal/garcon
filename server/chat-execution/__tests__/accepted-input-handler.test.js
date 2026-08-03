@@ -1,6 +1,11 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
-import { GoalControlDeliveryError, DomainError } from '../../lib/domain-error.ts';
+import {
+  DomainError,
+  GoalControlDeliveryError,
+  QueueEntrySteerError,
+  SteerDeliveryError,
+} from '../../lib/domain-error.ts';
 
 function command(overrides = {}) {
   return {
@@ -40,6 +45,20 @@ function settlement(overrides = {}) {
   };
 }
 
+function queueSteerInput(overrides = {}) {
+  return {
+    command: command(),
+    content: 'observed queue content',
+    providerContent: 'observed queue content\n\nresolved context',
+    clientMessageId: 'message-steer',
+    target: { attempt: {}, identity: { turnId: 'turn-current' }, providerTarget: null },
+    expectedRevision: 2,
+    expectedReorderRevision: 4,
+    settlement: settlement(),
+    ...overrides,
+  };
+}
+
 // Builds the handler over its injected collaborators while exposing every mock
 // flatly for assertions. Queue mutations map to the control operations, pending
 // bookkeeping to the pending-input store, and the rest to the coordinator port.
@@ -66,7 +85,32 @@ function scaffold(overrides = {}) {
     })),
     removeSent: mock(async () => control()),
     returnUnsent: mock(async () => control({ entries: [{ id: 'entry-1', status: 'queued' }] })),
+    reserveSteer: mock(async () => ({
+      entry: {
+        id: 'entry-1',
+        content: 'queued guidance',
+        createdAt: '2026-08-02T00:00:00.000Z',
+        revision: 2,
+        status: 'steering',
+      },
+      control: control({
+        entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'steering' }],
+      }),
+    })),
+    releaseSteer: mock(async () => control({
+      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+    })),
+    consumeSteer: mock(async () => control({ recentlyDispatched: [{
+      entryId: 'entry-1',
+      revision: 2,
+      dispatchedAt: '2026-08-02T00:00:01.000Z',
+    }] })),
+    requeueAndPause: mock(async () => control({
+      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+      pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
+    })),
     read: mock(async () => control()),
+    clearPending: mock(() => true),
     markFailed: mock(() => false),
     requestDrain: mock(() => undefined),
     reserveDirect: mock(() => reservation),
@@ -89,9 +133,13 @@ function scaffold(overrides = {}) {
       move: m.move,
       removeSent: m.removeSent,
       returnUnsent: m.returnUnsent,
+      reserveSteer: m.reserveSteer,
+      releaseSteer: m.releaseSteer,
+      consumeSteer: m.consumeSteer,
+      requeueAndPause: m.requeueAndPause,
       read: m.read,
     },
-    pendingInputs: { markFailed: m.markFailed },
+    pendingInputs: { clear: m.clearPending, markFailed: m.markFailed },
     coordinator: {
       requestDrain: m.requestDrain,
       reserveDirect: m.reserveDirect,
@@ -352,6 +400,183 @@ describe('AcceptedInputHandler', () => {
     );
     expect(m.stageGoalControlFallback).not.toHaveBeenCalled();
     expect(m.create).not.toHaveBeenCalled();
+  });
+
+  test('reserves and consumes the queue head around accepted native steering', async () => {
+    const events = [];
+    const settle = settlement({
+      markScheduled: mock(async () => { events.push('scheduled'); }),
+      settleSteerSuccess: mock(async () => { events.push('settled'); }),
+    });
+    const { handler, m } = scaffold({
+      reserveSteer: mock(async () => {
+        events.push('reserved');
+        return {
+          entry: {
+            id: 'entry-1',
+            content: 'authoritative queue content',
+            createdAt: '2026-08-02T00:00:00.000Z',
+            revision: 2,
+            status: 'steering',
+          },
+          control: control(),
+        };
+      }),
+      steer: mock(async (
+        _chatId,
+        content,
+        _providerContent,
+        _options,
+        _target,
+        beforeDelivery,
+        notSentDisposition,
+      ) => {
+        expect(content).toBe('authoritative queue content');
+        expect(notSentDisposition).toBe('queue-handler-settles');
+        await beforeDelivery('turn-current');
+        events.push('delivered');
+        return { turnId: 'turn-current' };
+      }),
+      consumeSteer: mock(async () => {
+        events.push('consumed');
+        return control();
+      }),
+      requestDrain: mock(() => { events.push('drain'); }),
+    });
+
+    await expect(handler.steerQueueEntry(queueSteerInput({ settlement: settle }))).resolves
+      .toEqual({ turnId: 'turn-current', control: control() });
+
+    expect(events).toEqual(['reserved', 'scheduled', 'delivered', 'consumed', 'drain', 'settled']);
+    expect(m.releaseSteer).not.toHaveBeenCalled();
+    expect(m.clearPending).not.toHaveBeenCalled();
+  });
+
+  test('releases and clears the queue source after definite non-delivery', async () => {
+    const deliveryError = new SteerDeliveryError(new Error('provider unavailable'), 'not-sent');
+    const settle = settlement();
+    const released = control({
+      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+    });
+    const { handler, m } = scaffold({
+      steer: mock(async () => { throw deliveryError; }),
+      releaseSteer: mock(async () => released),
+    });
+
+    const rejection = await handler.steerQueueEntry(queueSteerInput({ settlement: settle }))
+      .catch((error) => error);
+
+    expect(rejection).toBeInstanceOf(QueueEntrySteerError);
+    expect(rejection).toMatchObject({
+      code: 'STEER_NOT_DELIVERED',
+      deliveryOutcome: 'not-sent',
+      control: released,
+    });
+    expect(m.releaseSteer).toHaveBeenCalledWith('chat-1', 'entry-1');
+    expect(m.clearPending).toHaveBeenCalledWith(
+      'chat-1',
+      'request-1',
+      'queue-source-not-sent',
+    );
+    expect(m.requestDrain).toHaveBeenCalledWith('chat-1', 'rejected queued steer released');
+    expect(m.consumeSteer).not.toHaveBeenCalled();
+    expect(settle.settleSteerFailure).toHaveBeenCalledWith(
+      command(),
+      rejection,
+      'not-sent',
+    );
+  });
+
+  test('consumes the queue source after an unknown native outcome', async () => {
+    const deliveryError = new SteerDeliveryError(new Error('ack lost'), 'unknown');
+    const settle = settlement();
+    const consumed = control();
+    const { handler, m } = scaffold({
+      steer: mock(async () => { throw deliveryError; }),
+      consumeSteer: mock(async () => consumed),
+    });
+
+    const rejection = await handler.steerQueueEntry(queueSteerInput({ settlement: settle }))
+      .catch((error) => error);
+
+    expect(rejection).toMatchObject({
+      code: 'STEER_OUTCOME_UNKNOWN',
+      deliveryOutcome: 'unknown',
+      control: consumed,
+    });
+    expect(m.consumeSteer).toHaveBeenCalledWith('chat-1', 'entry-1');
+    expect(m.releaseSteer).not.toHaveBeenCalled();
+    expect(m.requestDrain).toHaveBeenCalledWith('chat-1', 'unconfirmed queued steer consumed');
+    expect(settle.settleSteerFailure).toHaveBeenCalledWith(command(), rejection, 'unknown');
+  });
+
+  test('pauses the source when accepted steering cannot be consumed', async () => {
+    const consumeError = new Error('consume failed');
+    const paused = control({
+      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+      pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
+    });
+    const settle = settlement();
+    const { handler, m } = scaffold({
+      consumeSteer: mock(async () => { throw consumeError; }),
+      requeueAndPause: mock(async () => paused),
+    });
+
+    const rejection = await handler.steerQueueEntry(queueSteerInput({ settlement: settle }))
+      .catch((error) => error);
+
+    expect(rejection).toMatchObject({
+      code: 'QUEUE_STEER_FINALIZATION_FAILED',
+      deliveryOutcome: 'accepted',
+      control: paused,
+    });
+    expect(m.requeueAndPause).toHaveBeenCalledWith(
+      'chat-1',
+      'entry-1',
+      'completion-uncertain',
+    );
+    expect(settle.settleSteerFailure).toHaveBeenCalledWith(command(), rejection, 'accepted');
+  });
+
+  test('reports recovery failure when release and compensation both fail', async () => {
+    const settle = settlement();
+    const { handler, m } = scaffold({
+      steer: mock(async () => {
+        throw new SteerDeliveryError(new Error('provider unavailable'), 'not-sent');
+      }),
+      releaseSteer: mock(async () => { throw new Error('release failed'); }),
+      requeueAndPause: mock(async () => { throw new Error('pause failed'); }),
+    });
+
+    const rejection = await handler.steerQueueEntry(queueSteerInput({ settlement: settle }))
+      .catch((error) => error);
+
+    expect(rejection).toMatchObject({
+      code: 'QUEUE_STEER_RECOVERY_FAILED',
+      deliveryOutcome: 'not-sent',
+      control: undefined,
+    });
+    expect(m.markFailed).toHaveBeenCalledWith('chat-1', 'request-1');
+    expect(settle.settleSteerFailure).toHaveBeenCalledWith(command(), rejection, 'not-sent');
+  });
+
+  test('preserves a reservation rejection when ledger settlement also fails', async () => {
+    const reservationError = new DomainError('QUEUE_ENTRY_REVISION_CONFLICT', 'changed', 409);
+    const settle = settlement({
+      settleSteerFailure: mock(async () => { throw new Error('ledger unavailable'); }),
+    });
+    const { handler, m } = scaffold({
+      reserveSteer: mock(async () => { throw reservationError; }),
+    });
+
+    const rejection = await handler.steerQueueEntry(queueSteerInput({ settlement: settle }))
+      .catch((error) => error);
+
+    expect(rejection).toMatchObject({
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      deliveryOutcome: 'not-sent',
+    });
+    expect(m.steer).not.toHaveBeenCalled();
   });
 
   test('requeues a staged active fallback exactly once during accepted-command recovery', async () => {

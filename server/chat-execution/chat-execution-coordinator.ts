@@ -40,6 +40,8 @@ import {
   type AcceptedQueueReplace,
   type AcceptedSteerInput,
   type AcceptedSteerOutcome,
+  type AcceptedQueueEntrySteer,
+  type AcceptedQueueEntrySteerOutcome,
   type AgentTurnRunnerPort,
   type ChatExecutionService,
   type ChatExistsResolver,
@@ -204,16 +206,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         deliverGoalControl: (chatId, content, options, beforeDelivery) => (
           this.deliverGoalControlInput(chatId, content, options, beforeDelivery)
         ),
-        steer: (chatId, content, providerContent, options, target, afterPendingRegistered) => (
-          this.steerInput(
-            chatId,
-            content,
-            providerContent,
-            options,
-            target,
-            afterPendingRegistered,
-          )
-        ),
+        steer: (...args) => this.steerInput(...args),
         hasAppliedCreate: (chatId, commandKey, entryId) => (
           this.hasAppliedQueueCreateCommand(chatId, commandKey, entryId)
         ),
@@ -323,8 +316,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (this.#turnRunner.isChatRunning(chatId)) return;
     const queue = await this.readChatExecutionControl(chatId);
     if (this.#isDrainSuppressed(chatId)) {
-      const hasPending = queue.entries.some((e) => e.status === 'queued' || e.status === 'sending');
-      if (!hasPending) {
+      if (queue.entries.length === 0) {
         this.#ownership.consumeDrainRequest(chatId);
         this.emit('chat-idle', chatId);
       }
@@ -335,8 +327,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       await this.triggerDrain(chatId);
       return;
     }
-    const hasPending = queue.entries.some((e) => e.status === 'queued' || e.status === 'sending');
-    if (!hasPending) {
+    if (queue.entries.length === 0) {
       this.#ownership.consumeDrainRequest(chatId);
       this.emit('chat-idle', chatId);
     }
@@ -432,6 +423,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
+    notSentDisposition: 'mark-failed' | 'queue-handler-settles' = 'mark-failed',
   ): Promise<AcceptedSteerOutcome> {
     return this.#steerInputDelivery.deliver(
       chatId,
@@ -440,6 +432,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       options,
       target,
       afterPendingRegistered,
+      notSentDisposition,
     );
   }
 
@@ -467,6 +460,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#acceptedInputHandler.steer(input);
   }
 
+  async deliverAcceptedQueueEntrySteer(input: AcceptedQueueEntrySteer): Promise<AcceptedQueueEntrySteerOutcome> {
+    return this.#acceptedInputHandler.steerQueueEntry(input);
+  }
+
+  async recoverQueueEntrySteer(chatId: string, entryId: string): Promise<StoredChatExecutionControlState> {
+    return this.#acceptedInputHandler.recoverQueueEntrySteer(chatId, entryId);
+  }
   async recoverAcceptedGoalControl(
     input: AcceptedGoalControl,
   ): Promise<AcceptedGoalControlOutcome> {

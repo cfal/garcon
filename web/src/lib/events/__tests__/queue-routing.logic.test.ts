@@ -20,6 +20,7 @@ describe('queue routing integration', () => {
 			queue: {
 				entries: [],
 				dispatchingEntryId: null,
+				steeringEntryId: null,
 				recentlyDispatched: [],
 				pause: null,
 				reorderRevision: 0,

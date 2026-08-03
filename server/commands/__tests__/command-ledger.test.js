@@ -491,6 +491,47 @@ describe('CommandLedger', () => {
     }))).toMatchObject({ kind: 'conflict' });
   });
 
+  it('retains queued source identity and delivery outcome in compact steering records', async () => {
+    const ledger = new CommandLedger();
+    const steerInput = acceptedInput({
+      commandType: 'steer',
+      clientRequestId: 'queued-steer-retained',
+      entryId: 'entry-head',
+      payload: {
+        chatId: 'chat-1',
+        clientMessageId: 'message-retained',
+        source: {
+          kind: 'queue-entry',
+          entryId: 'entry-head',
+          expectedRevision: 2,
+          expectedReorderRevision: 4,
+        },
+      },
+    });
+    const steer = await ledger.accept(steerInput);
+    await ledger.settleTerminal(steer.record.key, 'failed', {
+      error: 'Delivery uncertain',
+      errorCode: 'STEER_OUTCOME_UNKNOWN',
+      deliveryOutcome: 'unknown',
+    });
+
+    for (let index = 0; index < LEDGER_RECORD_LIMIT + 5; index += 1) {
+      const result = await ledger.accept(acceptedInput({ clientRequestId: `queued-terminal-${index}` }));
+      await ledger.settleTerminal(result.record.key, 'finished');
+    }
+
+    expect(await ledger.accept(steerInput)).toMatchObject({
+      kind: 'duplicate',
+      record: {
+        payload: {},
+        status: 'failed',
+        entryId: 'entry-head',
+        errorCode: 'STEER_OUTCOME_UNKNOWN',
+        deliveryOutcome: 'unknown',
+      },
+    });
+  });
+
   it('bounds retained steering identities without evicting known outcomes', async () => {
     const ledger = new CommandLedger(undefined, { steerIdentityLimit: 2 });
     const first = acceptedInput({ commandType: 'steer', clientRequestId: 'steer-1' });

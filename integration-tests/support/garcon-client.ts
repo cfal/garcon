@@ -27,6 +27,8 @@ import type {
   QueueEntryDeleteResponse,
   QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
+  QueueEntrySteerCommandRequest,
+  QueueEntrySteerCommandResponse,
   QueueMutationResponse,
   SteerCommandRequest,
   SteerCommandResponse,
@@ -617,6 +619,10 @@ export class GarconTestClient {
 
   steer(request: SteerCommandRequest): Promise<SteerCommandResponse> {
     return this.post<SteerCommandResponse>('/api/v1/chats/steer', request);
+  }
+
+  steerQueued(request: QueueEntrySteerCommandRequest): Promise<QueueEntrySteerCommandResponse> {
+    return this.post<QueueEntrySteerCommandResponse>('/api/v1/chats/queue/entries/steer', request);
   }
 
   enqueueNew(chatId: string, content: string): Promise<QueueEntryCommandResponse> {

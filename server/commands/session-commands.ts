@@ -532,6 +532,15 @@ export class SessionCommands {
         true,
       );
     }
+    const steeringEntry = queue.entries.find((entry) => entry.status === 'steering');
+    if (steeringEntry) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        'Cannot update project path while a queued message is being steered',
+        409,
+        true,
+      );
+    }
     const queuedEntry = queue.entries.find((entry) => entry.status === 'queued');
     if (queuedEntry) {
       throw new CommandValidationError(

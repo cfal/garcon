@@ -30,7 +30,9 @@ const MAX_LINES = 1000;
 // increment for the consultation CLI.
 // Runtime-scoped execution controls add 9 lines for repository identity injection,
 // client projection, and rejection of foreign-instance state.
-const EXECUTION_FOOTPRINT_BUDGET = 7938;
+// Atomic queue-sourced steering adds 823 lines for head reservation, delivery
+// settlement, idempotent recovery, and provider-neutral pending-input cleanup.
+const EXECUTION_FOOTPRINT_BUDGET = 8761;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

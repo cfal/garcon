@@ -9,6 +9,7 @@ function control(overrides: Record<string, unknown> = {}) {
 		queue: {
 			entries: [],
 			dispatchingEntryId: null,
+			steeringEntryId: null,
 			recentlyDispatched: [],
 			pause: null,
 			reorderRevision: 0,
@@ -55,6 +56,7 @@ describe('chat execution-control WS contract', () => {
 						},
 					],
 					dispatchingEntryId: null,
+					steeringEntryId: null,
 					recentlyDispatched: [],
 					pause,
 					reorderRevision: 0,
@@ -84,6 +86,7 @@ describe('chat execution-control WS contract', () => {
 							},
 						],
 						dispatchingEntryId: null,
+						steeringEntryId: null,
 						recentlyDispatched: [],
 						pause: null,
 						reorderRevision: 0,
@@ -101,6 +104,7 @@ describe('chat execution-control WS contract', () => {
 				queue: {
 					entries: [],
 					dispatchingEntryId: 'entry-1',
+					steeringEntryId: null,
 					recentlyDispatched: [{ entryId: 'entry-1', revision: 2, dispatchedAt: installedAt }],
 					pause: null,
 					reorderRevision: 0,

@@ -8,6 +8,7 @@ import {
   parseGoalControlCommandRequest,
   parsePermissionDecisionCommandRequest,
   parseQueueEntryMoveCommandRequest,
+  parseQueueEntrySteerCommandRequest,
   parseQueueEntryReplaceCommandRequest,
   parseStartChatCommandRequest,
   parseSteerCommandRequest,
@@ -120,6 +121,40 @@ describe('chat command request parsers', () => {
       chatId: CHAT_ID,
       content: 'focus here',
     })).toThrow(CommandRequestValidationError);
+  });
+
+  it('parses queue steering with explicit entry concurrency preconditions', () => {
+    expect(parseQueueEntrySteerCommandRequest({
+      clientRequestId: ' request-steer-queue ',
+      clientMessageId: ' message-steer-queue ',
+      chatId: CHAT_ID,
+      entryId: ' entry-1 ',
+      expectedRevision: 2,
+      expectedReorderRevision: 4,
+    })).toEqual({
+      clientRequestId: 'request-steer-queue',
+      clientMessageId: 'message-steer-queue',
+      chatId: CHAT_ID,
+      entryId: 'entry-1',
+      expectedRevision: 2,
+      expectedReorderRevision: 4,
+    });
+    expect(() => parseQueueEntrySteerCommandRequest({
+      clientRequestId: 'request-steer-queue',
+      clientMessageId: 'message-steer-queue',
+      chatId: CHAT_ID,
+      entryId: 'entry-1',
+      expectedRevision: 0,
+      expectedReorderRevision: 0,
+    })).toThrow('expectedRevision must be a positive integer');
+    expect(() => parseQueueEntrySteerCommandRequest({
+      clientRequestId: 'request-steer-queue',
+      clientMessageId: 'message-steer-queue',
+      chatId: CHAT_ID,
+      entryId: 'entry-1',
+      expectedRevision: 1,
+      expectedReorderRevision: -1,
+    })).toThrow('expectedReorderRevision must be a non-negative integer');
   });
 
   it('bounds command correlation identities by UTF-8 byte length', () => {

@@ -28,6 +28,7 @@ describe('steer outcome logging', () => {
       clientRequestId: 'request-1',
       integrationId: 'codex',
       turnId: 'turn-1',
+      source: 'inline',
       status: 'accepted',
     });
   });
@@ -54,6 +55,7 @@ describe('steer outcome logging', () => {
       clientRequestId: 'request-1',
       integrationId: 'codex',
       turnId: 'turn-1',
+      source: 'inline',
       errorCode: 'STEER_TURN_CHANGED',
     });
   });
@@ -72,6 +74,7 @@ describe('steer outcome logging', () => {
     expect(outcomeLogger.error).toHaveBeenCalledWith('steer failed', {
       chatId: 'chat-1',
       clientRequestId: 'request-1',
+      source: 'inline',
       errorCode: 'STEER_OUTCOME_UNKNOWN',
       sendAttempted: true,
     });

@@ -54,6 +54,7 @@ import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
 import {
   DomainError,
+  QueueEntrySteerError,
   SteerDeliveryError,
   TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
 } from '../../lib/domain-error.js';
@@ -301,6 +302,15 @@ function createRouteAgent(sessionOverrides = {}) {
       await input.settlement.settleSteerSuccess(input.command, input.target.identity.turnId);
       return { turnId: input.target.identity.turnId };
     }),
+    deliverAcceptedQueueEntrySteer: mock(async (input) => {
+      await input.settlement.markScheduled(input.command, input.target.identity.turnId);
+      await input.settlement.settleSteerSuccess(input.command, input.target.identity.turnId);
+      return {
+        turnId: input.target.identity.turnId,
+        control: await queue.readChatExecutionControl(input.command.chatId),
+      };
+    }),
+    recoverQueueEntrySteer: mock((chatId) => queue.readChatExecutionControl(chatId)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
@@ -962,6 +972,129 @@ describe('REST chat command routes', () => {
 	    expect(agent.queue.deliverAcceptedSteer).toHaveBeenCalledOnce();
 	    expect(agent.routes['/api/v1/chats/active-input']).toBeUndefined();
 	  });
+
+  it('POST /queue/entries/steer consumes the authoritative queue head idempotently', async () => {
+    const agent = createRouteAgent();
+    const queued = storedQueue([
+      queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+    ], { reorderRevision: 7, version: 4 });
+    const consumed = storedQueue([], {
+      reorderRevision: 7,
+      version: 6,
+      recentlyDispatched: [{
+        entryId: 'entry-head',
+        revision: 3,
+        dispatchedAt: '2026-08-02T00:00:01.000Z',
+      }],
+    });
+    let currentControl = queued;
+    agent.queue.readChatExecutionControl.mockImplementation(async () => currentControl);
+    agent.queue.deliverAcceptedQueueEntrySteer.mockImplementation(async (input) => {
+      expect(input).toMatchObject({
+        content: 'authoritative guidance',
+        clientMessageId: 'message-queue-steer',
+        expectedRevision: 3,
+        expectedReorderRevision: 7,
+      });
+      await input.settlement.markScheduled(input.command, 'turn-active');
+      currentControl = consumed;
+      await input.settlement.settleSteerSuccess(input.command, 'turn-active');
+      return { turnId: 'turn-active', control: consumed };
+    });
+    const request = {
+      clientRequestId: 'request-queue-steer',
+      clientMessageId: 'message-queue-steer',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: 3,
+      expectedReorderRevision: 7,
+    };
+
+    const accepted = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/steer'].POST,
+      request,
+    );
+    const duplicate = await callJson(
+      agent.routes['/api/v1/chats/queue/entries/steer'].POST,
+      request,
+    );
+
+    expect(accepted.response.status).toBe(202);
+    expect(accepted.body).toMatchObject({
+      commandType: 'steer',
+      status: 'accepted',
+      turnId: 'turn-active',
+      control: { queue: { entries: [], steeringEntryId: null } },
+    });
+    expect(duplicate.response.status).toBe(202);
+    expect(duplicate.body).toMatchObject({
+      status: 'duplicate',
+      turnId: 'turn-active',
+      control: { queue: { entries: [], steeringEntryId: null } },
+    });
+    expect(agent.queue.deliverAcceptedQueueEntrySteer).toHaveBeenCalledOnce();
+  });
+
+  it('POST /queue/entries/steer rejects malformed revisions before command delivery', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-invalid',
+      clientMessageId: 'message-queue-steer-invalid',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: -1,
+      expectedReorderRevision: 7,
+    });
+
+    expect(result.response.status).toBe(400);
+    expect(result.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
+  it('POST /queue/entries/steer preserves typed finalization failure state', async () => {
+    const agent = createRouteAgent();
+    const queued = storedQueue([
+      queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+    ], { reorderRevision: 7, version: 4 });
+    const paused = storedQueue([
+      queueEntry('entry-head', 'authoritative guidance', 'queued', 3),
+    ], {
+      reorderRevision: 7,
+      version: 6,
+      pause: { kind: 'completion-uncertain', entryId: 'entry-head' },
+    });
+    agent.queue.readChatExecutionControl.mockResolvedValue(queued);
+    agent.queue.deliverAcceptedQueueEntrySteer.mockRejectedValue(new QueueEntrySteerError(
+      'QUEUE_STEER_FINALIZATION_FAILED',
+      'finalization failed',
+      500,
+      'accepted',
+      paused,
+    ));
+
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-finalization',
+      clientMessageId: 'message-queue-steer-finalization',
+      chatId: CHAT_ID,
+      entryId: 'entry-head',
+      expectedRevision: 3,
+      expectedReorderRevision: 7,
+    });
+
+    expect(result.response.status).toBe(500);
+    expect(result.body).toMatchObject({
+      success: false,
+      errorCode: 'QUEUE_STEER_FINALIZATION_FAILED',
+      deliveryOutcome: 'accepted',
+      control: {
+        queue: {
+          entries: [{ id: 'entry-head' }],
+          steeringEntryId: null,
+          pause: { kind: 'completion-uncertain', entryId: 'entry-head' },
+        },
+      },
+    });
+  });
 
   it('POST /steer does not duplicate command-boundary delivery logging', async () => {
     const agent = createRouteAgent();

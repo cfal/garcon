@@ -5,6 +5,7 @@ import type {
   QueueEntryDeleteCommandRequest,
   QueueEntryMoveCommandRequest,
   QueueEntryReplaceCommandRequest,
+  QueueEntrySteerCommandRequest,
   SteerCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import {
@@ -106,6 +107,10 @@ export class ChatCommandService {
 
   submitSteer(input: SteerCommandRequest) {
     return this.#steer.submit(input);
+  }
+
+  submitQueueEntrySteer(input: QueueEntrySteerCommandRequest) {
+    return this.#steer.submitQueueEntry(input);
   }
 
   submitScheduledExistingChat(input: ScheduledExistingChatInput) {

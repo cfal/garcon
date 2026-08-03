@@ -92,7 +92,9 @@ export class QueueDrainer {
       const result = await this.#controls.pop(chatId);
       if (!result) {
         const control = await this.#controls.read(chatId);
-        if (!control.entries.some((entry) => entry.status === 'queued' || entry.status === 'sending')) {
+        if (!control.entries.some((entry) => (
+          entry.status === 'queued' || entry.status === 'sending' || entry.status === 'steering'
+        ))) {
           this.#callbacks.publishIdle(chatId);
         }
         return;

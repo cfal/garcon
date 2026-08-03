@@ -35,6 +35,7 @@ export type CommandErrorCode = Extract<
   | 'CHAT_ID_COLLISION'
   | 'QUEUE_ENTRY_NOT_FOUND'
   | 'QUEUE_ENTRY_ALREADY_SENT'
+  | 'QUEUE_ENTRY_IN_FLIGHT'
   | 'QUEUE_ENTRY_REVISION_CONFLICT'
   | 'QUEUE_ENTRY_REORDER_CONFLICT'
   | 'QUEUE_PAUSE_CHANGED'
@@ -45,6 +46,8 @@ export type CommandErrorCode = Extract<
   | 'STEER_TURN_CHANGED'
   | 'STEER_TURN_NOT_STEERABLE'
   | 'STEER_CAPACITY_EXHAUSTED'
+  | 'QUEUE_STEER_FINALIZATION_FAILED'
+  | 'QUEUE_STEER_RECOVERY_FAILED'
   | 'GOAL_CONTROL_NOT_DELIVERED'
   | 'GOAL_CONTROL_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
@@ -218,6 +221,27 @@ export interface SteerCommandResponse extends CommandAcceptedResponse {
   commandType: 'steer';
   chatId: string;
   turnId: string;
+}
+
+export interface QueueEntrySteerCommandRequest {
+  clientRequestId: string;
+  clientMessageId: string;
+  chatId: string;
+  entryId: string;
+  expectedRevision: number;
+  expectedReorderRevision: number;
+}
+
+export interface QueueEntrySteerCommandResponse extends SteerCommandResponse {
+  control?: ChatExecutionControlState;
+}
+
+export type SteerDeliveryOutcome = 'not-sent' | 'unknown' | 'accepted';
+
+export interface QueueEntrySteerErrorResponse extends HttpErrorResponse {
+  errorCode: CommandErrorCode;
+  deliveryOutcome: SteerDeliveryOutcome;
+  control?: ChatExecutionControlState;
 }
 
 export interface GoalControlCommandRequest {
@@ -615,6 +639,29 @@ export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     content: requiredContent(body, 'content'),
+  };
+}
+
+export function parseQueueEntrySteerCommandRequest(value: unknown): QueueEntrySteerCommandRequest {
+  const body = requestRecord(value);
+  if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 1) {
+    throw new CommandRequestValidationError('expectedRevision must be a positive integer');
+  }
+  if (
+    !Number.isSafeInteger(body.expectedReorderRevision)
+    || Number(body.expectedReorderRevision) < 0
+  ) {
+    throw new CommandRequestValidationError(
+      'expectedReorderRevision must be a non-negative integer',
+    );
+  }
+  return {
+    clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
+    clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
+    chatId: requiredChatId(body, 'chatId'),
+    entryId: requiredString(body, 'entryId'),
+    expectedRevision: Number(body.expectedRevision),
+    expectedReorderRevision: Number(body.expectedReorderRevision),
   };
 }
 

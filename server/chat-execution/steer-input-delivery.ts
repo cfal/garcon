@@ -25,6 +25,8 @@ interface SteerInputDeliveryOptions {
   ): Promise<void>;
 }
 
+export type SteerNotSentDisposition = 'mark-failed' | 'queue-handler-settles';
+
 export class SteerInputDelivery {
   constructor(private readonly options: SteerInputDeliveryOptions) {}
 
@@ -49,6 +51,7 @@ export class SteerInputDelivery {
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
+    notSentDisposition: SteerNotSentDisposition = 'mark-failed',
   ): Promise<AcceptedSteerOutcome> {
     let pendingRegistered = false;
     let deliveryPrepared = false;
@@ -73,7 +76,12 @@ export class SteerInputDelivery {
       );
     } catch (error) {
       if (pendingRegistered) {
-        this.#settlePending(chatId, options.clientRequestId, deliveryPrepared ? 'unknown' : 'not-sent');
+        this.#settlePending(
+          chatId,
+          options.clientRequestId,
+          deliveryPrepared ? 'unknown' : 'not-sent',
+          notSentDisposition,
+        );
       }
       if (error instanceof DomainError) throw error;
       throw new SteerDeliveryError(error, deliveryPrepared ? 'unknown' : 'not-sent');
@@ -89,10 +97,14 @@ export class SteerInputDelivery {
       return { turnId: target.identity.turnId };
     }
     if (result.kind === 'rejected') {
-      if (pendingRegistered) this.#settlePending(chatId, options.clientRequestId, 'not-sent');
+      if (pendingRegistered) {
+        this.#settlePending(chatId, options.clientRequestId, 'not-sent', notSentDisposition);
+      }
       throw steerRejectionError(result.reason);
     }
-    if (pendingRegistered) this.#settlePending(chatId, options.clientRequestId, result.outcome);
+    if (pendingRegistered) {
+      this.#settlePending(chatId, options.clientRequestId, result.outcome, notSentDisposition);
+    }
     throw new SteerDeliveryError(new Error(result.message), result.outcome);
   }
 
@@ -120,10 +132,11 @@ export class SteerInputDelivery {
     chatId: string,
     clientRequestId: string,
     outcome: 'not-sent' | 'unknown',
+    notSentDisposition: SteerNotSentDisposition,
   ): void {
     if (outcome === 'unknown') {
       this.options.pendingInputs.markUnconfirmed(chatId, clientRequestId);
-    } else {
+    } else if (notSentDisposition === 'mark-failed') {
       this.options.pendingInputs.markFailed(chatId, clientRequestId);
     }
   }

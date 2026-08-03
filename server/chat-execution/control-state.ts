@@ -15,7 +15,7 @@ export interface StoredQueueDeliveryIdentity {
 }
 
 export interface StoredQueueEntry extends QueueEntry {
-  status: 'queued' | 'sending';
+  status: 'queued' | 'sending' | 'steering';
   delivery?: StoredQueueDeliveryIdentity;
 }
 
@@ -85,9 +85,10 @@ export function toClientChatExecutionControlState(
     serverInstanceId: control.serverInstanceId,
     queue: {
       entries: control.entries
-        .filter((entry) => entry.status === 'queued')
+        .filter((entry) => entry.status === 'queued' || entry.status === 'steering')
         .map(({ status: _status, delivery: _delivery, ...entry }) => ({ ...entry })),
       dispatchingEntryId: control.entries.find((entry) => entry.status === 'sending')?.id ?? null,
+      steeringEntryId: control.entries.find((entry) => entry.status === 'steering')?.id ?? null,
       recentlyDispatched: control.recentlyDispatched
         .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)
         .map((entry) => ({ ...entry })),
