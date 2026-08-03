@@ -18,6 +18,18 @@ import {
 } from '$lib/chat/tools/tool-display-registry.js';
 import * as m from '$lib/paraglide/messages.js';
 
+const ANNOUNCEMENT_LINEAGE_LIMIT = 512;
+
+function rememberAnnouncementLineage(ids: Set<string>, id: string): void {
+	ids.delete(id);
+	ids.add(id);
+	while (ids.size > ANNOUNCEMENT_LINEAGE_LIMIT) {
+		const oldest = ids.values().next().value;
+		if (oldest === undefined) return;
+		ids.delete(oldest);
+	}
+}
+
 interface ConversationFeedAnnouncerInput {
 	surfaceIdentity: string;
 	rows: ChatDisplayRow[];
@@ -59,6 +71,8 @@ export class ConversationFeedAnnouncerState {
 	#rowIds = new Set<string>();
 	#tailRowId: string | null = null;
 	#floatingPermissionIds = new Set<string>();
+	#observedUserRequestIds = new Set<string>();
+	#observedPermissionIds = new Set<string>();
 	#dataRevision = 0;
 	#detachedStatusAnnounced = false;
 
@@ -69,6 +83,8 @@ export class ConversationFeedAnnouncerState {
 			this.#rowIds = new Set(input.rows.map((row) => row.id));
 			this.#tailRowId = input.rows.at(-1)?.id ?? null;
 			this.#floatingPermissionIds = new Set(input.floatingPermissionIds);
+			this.#observedUserRequestIds = this.#userRequestIds(input.rows);
+			this.#observedPermissionIds = this.#permissionIds(input.rows, input.floatingPermissionIds);
 			this.#dataRevision = input.mutationClock.dataRevision;
 			this.#detachedStatusAnnounced = false;
 			return '';
@@ -123,9 +139,29 @@ export class ConversationFeedAnnouncerState {
 		const candidatesById = new Map<string, ChatDisplayRow>();
 		for (const row of [...appendedRows, ...streamedRows]) candidatesById.set(row.id, row);
 		const candidates = [...candidatesById.values()];
+		const announcementCandidates = candidates.filter((row) => {
+			if (row.kind !== 'message') return true;
+			if (row.message instanceof UserMessage) {
+				const requestId = row.message.metadata?.clientRequestId;
+				if (!requestId) return true;
+				if (this.#observedUserRequestIds.has(requestId)) return false;
+				rememberAnnouncementLineage(this.#observedUserRequestIds, requestId);
+			}
+			if (row.message instanceof PermissionRequestMessage) {
+				const permissionId = row.message.permissionRequestId;
+				if (this.#observedPermissionIds.has(permissionId)) return false;
+				rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
+			}
+			return true;
+		});
+		const addedPermissionAnnouncements = addedFloatingPermissionIds.filter((permissionId) => {
+			if (this.#observedPermissionIds.has(permissionId)) return false;
+			rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
+			return true;
+		});
 		const responseUpdated =
-			addedFloatingPermissionIds.length > 0 ||
-			candidates.some(
+			addedPermissionAnnouncements.length > 0 ||
+			announcementCandidates.some(
 				(row) =>
 					row.kind === 'message' &&
 					(row.message instanceof AssistantMessage ||
@@ -137,7 +173,7 @@ export class ConversationFeedAnnouncerState {
 			return input.detachedStatus;
 		}
 
-		const announcements = candidates.flatMap((row) => {
+		const announcements = announcementCandidates.flatMap((row) => {
 			if (row.kind === 'message' && row.message instanceof AssistantMessage) {
 				const next = nextContent.get(row.id) ?? '';
 				const prior = priorContent.get(row.id) ?? '';
@@ -148,10 +184,35 @@ export class ConversationFeedAnnouncerState {
 			const content = announcementForAppendedRow(row, input.hiddenToolTypes);
 			return content ? [content] : [];
 		});
-		for (const _permissionId of addedFloatingPermissionIds) {
+		for (const _permissionId of addedPermissionAnnouncements) {
 			announcements.push(m.chat_permission_permission_required());
 		}
 		return announcements.join('\n') || null;
+	}
+
+	#userRequestIds(rows: ChatDisplayRow[]): Set<string> {
+		return new Set(
+			rows
+				.flatMap((row) => {
+					if (row.kind !== 'message' || !(row.message instanceof UserMessage)) return [];
+					const requestId = row.message.metadata?.clientRequestId;
+					return requestId ? [requestId] : [];
+				})
+				.slice(-ANNOUNCEMENT_LINEAGE_LIMIT),
+		);
+	}
+
+	#permissionIds(rows: ChatDisplayRow[], floatingPermissionIds: readonly string[]): Set<string> {
+		return new Set(
+			[
+				...floatingPermissionIds,
+				...rows.flatMap((row) =>
+					row.kind === 'message' && row.message instanceof PermissionRequestMessage
+						? [row.message.permissionRequestId]
+						: [],
+				),
+			].slice(-ANNOUNCEMENT_LINEAGE_LIMIT),
+		);
 	}
 
 	#visibleContentByRowId(rows: ChatDisplayRow[]): Map<string, string> {
@@ -172,6 +233,8 @@ export class ConversationFeedAnnouncerState {
 		this.#rowIds.clear();
 		this.#tailRowId = null;
 		this.#floatingPermissionIds.clear();
+		this.#observedUserRequestIds.clear();
+		this.#observedPermissionIds.clear();
 		this.#dataRevision = 0;
 		this.#detachedStatusAnnounced = false;
 	}

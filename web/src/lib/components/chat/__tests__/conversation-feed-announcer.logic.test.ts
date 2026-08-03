@@ -322,4 +322,66 @@ describe('ConversationFeedAnnouncerState', () => {
 			}),
 		).toBe('response 201');
 	});
+
+	it('does not repeat a pending user message when its durable echo replaces it', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		const pending = messageRow(
+			'2',
+			new UserMessage('', 'send once', undefined, { clientRequestId: 'request-1' }),
+		);
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), pending],
+				mutationClock: clock(2, 0, 2),
+				...enabled,
+			}),
+		).toBe('send once');
+		const durable = { ...pending, id: '3', seq: 3 };
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), durable],
+				mutationClock: clock(3, 3, 2),
+				...enabled,
+			}),
+		).toBeNull();
+	});
+
+	it('does not repeat a floating permission when its transcript row replaces it', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing')],
+				mutationClock: clock(2, 0, 2),
+				...enabled,
+				floatingPermissionIds: ['permission-1'],
+			}),
+		).toBe('Permission required');
+		const permission = messageRow(
+			'2',
+			new PermissionRequestMessage('', 'permission-1', new BashToolUseMessage('', 'tool-1', 'pwd')),
+		);
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), permission],
+				mutationClock: clock(3, 3, 2),
+				...enabled,
+			}),
+		).toBeNull();
+	});
 });
