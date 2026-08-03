@@ -102,8 +102,20 @@ describe('GitSurfaceToolbar', () => {
 			onClose,
 			closeDisabled: false,
 		});
-		expect(
-			screen.queryByRole('button', { name: m.workspace_close_view() }),
-		).toBeNull();
+		expect(screen.queryByRole('button', { name: m.workspace_close_view() })).toBeNull();
+	});
+
+	it('places persistent Git controls in the responsive action menu', async () => {
+		render(GitSurfaceToolbarTestHost, {
+			props: {
+				target: target(),
+				presentation: 'main',
+				showMenuLeadingContent: true,
+			},
+		});
+
+		expect(screen.getAllByRole('button', { name: m.git_more_actions() })).toHaveLength(1);
+		await fireEvent.click(screen.getByRole('button', { name: m.git_more_actions() }));
+		expect(document.querySelector('[data-test-diff-settings]')).toBeTruthy();
 	});
 });

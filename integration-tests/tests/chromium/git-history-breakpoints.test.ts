@@ -13,6 +13,8 @@ const WEB_BUILD_INDEX = join(REPO_ROOT, 'web', 'build', 'index.html');
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
 const PANEL_SELECTOR =
   '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]';
+const COMPARE_PANEL_SELECTOR =
+  '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"][aria-hidden="false"]';
 const DETAILS_SELECTOR = `${PANEL_SELECTOR} [data-git-diff-document]`;
 const SEGMENTED_SELECTOR = `${DETAILS_SELECTOR} [data-git-history-segmented-navigation]`;
 const FILES_PANE_SELECTOR = `${DETAILS_SELECTOR} [data-git-history-files-pane]`;
@@ -182,38 +184,48 @@ async function waitForLayout(page: Page, layout: 'narrow' | 'wide'): Promise<voi
   );
 }
 
-describe('Chromium Git History breakpoint presentation', () => {
+async function openChatWorkspace(
+  fixture: ChromiumFixture,
+  projectPath: string,
+  seed: string,
+): Promise<void> {
+  const chatId = fixture.integration.newChatId();
+  const started = await fixture.integration.client.startDirectChat({
+    chatId,
+    content: seed,
+    projectPath,
+    agent: fixture.integration.directAgents.openAi,
+  });
+  await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId);
+
+  const response = await fixture.page.goto(
+    `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
+  await fixture.page.locator('[data-floating-workspace-toolbar]').waitFor({
+    state: 'visible',
+    timeout: 20_000,
+  });
+}
+
+async function openWorkspaceSurface(page: Page, label: string): Promise<void> {
+  await page
+    .locator(
+      '[data-floating-workspace-toolbar] [data-workspace-taskbar-end]' +
+        ' [data-slot="dropdown-menu-trigger"]',
+    )
+    .click();
+  await page.getByRole('menuitem', { name: label }).click();
+}
+
+describe('Chromium Git responsive presentation', () => {
   test('segments commit details in the 560-839px band and keeps the tree toggle in wide', async () => {
     await withChromiumFixture('git-history-breakpoints', async (fixture) => {
       const project = fixture.integration.dirs.project;
       await createHistoryFixture(project);
-
-      const chatId = fixture.integration.newChatId();
-      const started = await fixture.integration.client.startDirectChat({
-        chatId,
-        content: 'history-breakpoints-seed',
-        projectPath: project,
-        agent: fixture.integration.directAgents.openAi,
-      });
-      await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId);
-
-      const response = await fixture.page.goto(
-        `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
-        { waitUntil: 'domcontentloaded' },
-      );
-      if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-      await fixture.page.locator('[data-floating-workspace-toolbar]').waitFor({
-        state: 'visible',
-        timeout: 20_000,
-      });
-
-      await fixture.page
-        .locator(
-          '[data-floating-workspace-toolbar] [data-workspace-taskbar-end]'
-            + ' [data-slot="dropdown-menu-trigger"]',
-        )
-        .click();
-      await fixture.page.getByRole('menuitem', { name: 'Open Git History' }).click();
+      await openChatWorkspace(fixture, project, 'history-breakpoints-seed');
+      await openWorkspaceSurface(fixture.page, 'Open Git History');
       await fixture.page.locator(PANEL_SELECTOR).waitFor({ state: 'visible', timeout: 20_000 });
       await fixture.page.waitForFunction(
         (selector) => document.querySelector(selector)?.textContent?.includes('second revision')
@@ -292,6 +304,99 @@ describe('Chromium Git History breakpoint presentation', () => {
       });
       expect(await fixture.page.locator(`${DETAILS_SELECTOR} [data-git-tree-resizer]`).count())
         .toBe(1);
+      expect(fixture.browserErrors).toEqual([]);
+    });
+  });
+
+  test('keeps narrow Compare controls in one ordered non-overlapping menu', async () => {
+    await withChromiumFixture('git-compare-responsive-actions', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      await createHistoryFixture(project);
+      await writeFile(join(project, 'review.txt'), 'working tree revision\n', 'utf8');
+      await openChatWorkspace(fixture, project, 'compare-responsive-actions-seed');
+      await openWorkspaceSurface(fixture.page, 'Open Git Compare');
+
+      await fixture.page.locator(COMPARE_PANEL_SELECTOR).waitFor({
+        state: 'visible',
+        timeout: 20_000,
+      });
+      await fixture.page.locator(`${COMPARE_PANEL_SELECTOR} [data-git-diff-document]`).waitFor({
+        state: 'visible',
+        timeout: 20_000,
+      });
+      const actionRoot = fixture.page.locator(
+        `${COMPARE_PANEL_SELECTOR} [data-responsive-surface-actions]`,
+      );
+      await actionRoot.evaluate((element: HTMLElement) => {
+        element.style.flex = '0 0 32px';
+        element.style.width = '32px';
+      });
+      await fixture.page.waitForFunction(
+        (selector) => {
+          const root = document.querySelector(selector);
+          return root?.querySelectorAll('[data-surface-action-id]').length === 0;
+        },
+        `${COMPARE_PANEL_SELECTOR} [data-responsive-surface-actions]`,
+        { timeout: 20_000 },
+      );
+
+      const visibleButtons = await actionRoot.locator('button').evaluateAll((buttons) =>
+        buttons
+          .filter((button) => {
+            const style = getComputedStyle(button);
+            return style.visibility !== 'hidden' && button.getBoundingClientRect().width > 0;
+          })
+          .map((button) => {
+            const rect = button.getBoundingClientRect();
+            return {
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+            };
+          }),
+      );
+      expect(visibleButtons).toHaveLength(1);
+      expect(visibleButtons[0]?.width).toBe(32);
+      expect(await actionRoot.locator('[data-responsive-surface-menu-trigger]').count()).toBe(1);
+      expect(
+        await fixture.page
+          .locator(COMPARE_PANEL_SELECTOR)
+          .getByRole('button', { name: 'Diff settings' })
+          .count(),
+      ).toBe(0);
+
+      await actionRoot.locator('[data-responsive-surface-menu-trigger]').click();
+      const menu = fixture.page.locator('[data-slot="dropdown-menu-content"]');
+      await menu.getByText('Diff settings', { exact: true }).waitFor({ state: 'visible' });
+      const order = await menu.evaluate((element) => {
+        const settings = Array.from(element.querySelectorAll('*')).find(
+          (candidate) => candidate.textContent?.trim() === 'Diff settings',
+        );
+        const separator = element.querySelector('[data-slot="dropdown-menu-separator"]');
+        const edit = Array.from(element.querySelectorAll('[role="menuitem"]')).find(
+          (candidate) => candidate.textContent?.trim() === 'Edit',
+        );
+        const refresh = Array.from(element.querySelectorAll('[role="menuitem"]')).find(
+          (candidate) => candidate.textContent?.trim() === 'Refresh',
+        );
+        if (!settings || !separator || !edit || !refresh) return null;
+        return {
+          settingsBeforeSeparator: Boolean(
+            settings.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+          separatorBeforeEdit: Boolean(
+            separator.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+          editBeforeRefresh: Boolean(
+            edit.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        };
+      });
+      expect(order).toEqual({
+        settingsBeforeSeparator: true,
+        separatorBeforeEdit: true,
+        editBeforeRefresh: true,
+      });
       expect(fixture.browserErrors).toEqual([]);
     });
   });

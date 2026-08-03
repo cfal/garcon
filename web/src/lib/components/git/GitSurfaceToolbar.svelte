@@ -12,22 +12,18 @@
 		target,
 		presentation,
 		actions,
-		fixed,
+		menuLeadingContent,
 		onClose,
 		closeDisabled = false,
 	}: {
 		target: GitTargetSessionController;
 		presentation: 'main' | 'sidebar' | 'mobile';
 		actions: readonly ResponsiveSurfaceAction[];
-		fixed?: Snippet;
+		menuLeadingContent?: Snippet;
 		onClose?: () => void;
 		closeDisabled?: boolean;
 	} = $props();
 </script>
-
-{#snippet fixedControls()}
-	{@render fixed?.()}
-{/snippet}
 
 <div
 	class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border bg-background px-2"
@@ -38,7 +34,7 @@
 		isMobile={presentation === 'mobile'}
 		disabled={!target.canChangeTarget}
 	/>
-	<ResponsiveSurfaceActions {actions} menuLabel={m.git_more_actions()} fixed={fixedControls} />
+	<ResponsiveSurfaceActions {actions} menuLabel={m.git_more_actions()} {menuLeadingContent} />
 	{#if presentation === 'mobile' && onClose}
 		<button
 			type="button"

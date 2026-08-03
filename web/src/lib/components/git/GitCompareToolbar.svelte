@@ -3,11 +3,8 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
 	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
-	import {
-		getGitReviewDisplay,
-		getLocalSettings,
-	} from '$lib/context';
-	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
+	import { getGitReviewDisplay, getLocalSettings } from '$lib/context';
+	import GitDiffSettingsMenuContent from './GitDiffSettingsMenuContent.svelte';
 	import GitSurfaceToolbar from './GitSurfaceToolbar.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -49,21 +46,22 @@
 	]);
 </script>
 
+{#snippet diffSettings()}
+	<GitDiffSettingsMenuContent
+		diffMode={reviewDisplay.diffMode}
+		contextLines={reviewDisplay.contextLines}
+		diffFontSize={localSettings.gitDiffFontSize}
+		onSetDiffMode={(mode) => reviewDisplay.setDiffMode(mode)}
+		onSetContextLines={(lines) => reviewDisplay.setContextLines(lines)}
+		onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
+	/>
+{/snippet}
+
 <GitSurfaceToolbar
 	target={controller.target}
 	{presentation}
 	{actions}
 	{onClose}
 	{closeDisabled}
->
-	{#snippet fixed()}
-		<GitDiffSettingsMenu
-			diffMode={reviewDisplay.diffMode}
-			contextLines={reviewDisplay.contextLines}
-			diffFontSize={localSettings.gitDiffFontSize}
-			onSetDiffMode={(mode) => reviewDisplay.setDiffMode(mode)}
-			onSetContextLines={(lines) => reviewDisplay.setContextLines(lines)}
-			onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
-		/>
-	{/snippet}
-</GitSurfaceToolbar>
+	menuLeadingContent={diffSettings}
+/>

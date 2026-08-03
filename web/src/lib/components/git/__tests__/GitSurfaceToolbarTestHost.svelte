@@ -3,10 +3,7 @@
 	import GitSurfaceToolbar from '../GitSurfaceToolbar.svelte';
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
 	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
-	import {
-		setRemoteSettings,
-		setTransientLayers,
-	} from '$lib/context';
+	import { setRemoteSettings, setTransientLayers } from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
@@ -16,11 +13,13 @@
 		presentation,
 		onClose,
 		closeDisabled = false,
+		showMenuLeadingContent = false,
 	}: {
 		target: GitTargetSessionController;
 		presentation: 'main' | 'sidebar' | 'mobile';
 		onClose?: () => void;
 		closeDisabled?: boolean;
+		showMenuLeadingContent?: boolean;
 	} = $props();
 
 	setRemoteSettings(createRemoteSettingsStore());
@@ -37,10 +36,15 @@
 	];
 </script>
 
+{#snippet menuLeadingContent()}
+	<span data-test-diff-settings>Diff settings</span>
+{/snippet}
+
 <GitSurfaceToolbar
 	{target}
 	{presentation}
 	{actions}
 	{onClose}
 	{closeDisabled}
+	menuLeadingContent={showMenuLeadingContent ? menuLeadingContent : undefined}
 />
