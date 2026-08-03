@@ -9,6 +9,7 @@
 	import Pause from '@lucide/svelte/icons/pause';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Play from '@lucide/svelte/icons/play';
+	import Route from '@lucide/svelte/icons/route';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
@@ -20,7 +21,9 @@
 		chatId: string | null;
 		queue: ChatQueueState | null;
 		canInterrupt?: boolean;
+		canSteer?: boolean;
 		onInterrupt?: () => void | Promise<void>;
+		onSteer?: (entry: QueueEntry, expectedReorderRevision: number) => void | Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
 		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
@@ -33,7 +36,9 @@
 		chatId,
 		queue,
 		canInterrupt = false,
+		canSteer = false,
 		onInterrupt,
+		onSteer,
 		onPause,
 		onResume,
 		onQueueControlError,
@@ -52,6 +57,10 @@
 	const queuedEntryCount = $derived(entries.length);
 	const previewIndex = $derived.by(() => {
 		if (entries.length === 0) return -1;
+		const steeringIndex = queue?.steeringEntryId
+			? entries.findIndex((entry) => entry.id === queue?.steeringEntryId)
+			: -1;
+		if (steeringIndex >= 0) return steeringIndex;
 		if (!chatId || previewSelection?.chatId !== chatId) return 0;
 
 		const retainedIndex = entries.findIndex((entry) => entry.id === previewSelection?.entryId);
@@ -61,15 +70,46 @@
 	const canBrowsePrevious = $derived(previewIndex > 0);
 	const canBrowseNext = $derived(previewIndex >= 0 && previewIndex < queuedEntryCount - 1);
 	const showQueueManager = $derived(queuedEntryCount > 1);
+	const queueSteering = $derived(queue?.steeringEntryId != null);
+	const previewSteering = $derived(queue?.steeringEntryId === previewEntry?.id);
+	const showSteerAction = $derived(
+		((previewIndex === 0 && canSteer) || previewSteering) && Boolean(onSteer),
+	);
 	const showInterruptAction = $derived(
-		previewIndex === 0 && !queue?.pause && canInterrupt && Boolean(onInterrupt),
+		previewIndex === 0 && !queue?.pause && !queueSteering && canInterrupt && Boolean(onInterrupt),
 	);
 	let deletingEntryIds = $state<Set<string>>(new Set());
-	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting'>('idle');
+	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting' | 'steering'>(
+		'idle',
+	);
+	const queueActionPending = $derived(dispatchMutation !== 'idle');
+	const queueMutationsBlocked = $derived(queueActionPending || queueSteering);
 	const queueActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
 		const neutralButtonClass =
 			'rounded-lg px-2.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground';
+
+		if (showSteerAction && onSteer && previewEntry && queue) {
+			const observedEntry = previewEntry;
+			const expectedReorderRevision = queue.reorderRevision;
+			const steerBusy = dispatchMutation === 'steering' || previewSteering;
+			actions.push({
+				id: 'steer',
+				label: m.chat_queue_steer(),
+				title: m.chat_queue_steer_queue(),
+				icon: steerBusy ? Loader2 : Route,
+				iconClass: steerBusy ? 'animate-spin' : undefined,
+				onclick: () => {
+					if (previewSteering) return;
+					void mutateDispatch('steering', () => onSteer(observedEntry, expectedReorderRevision));
+				},
+				disabled: queueActionPending && dispatchMutation !== 'steering',
+				busy: steerBusy,
+				priority: 1,
+				showLabel: true,
+				buttonClass: neutralButtonClass,
+			});
+		}
 
 		if (showInterruptAction && onInterrupt) {
 			actions.push({
@@ -79,7 +119,7 @@
 				icon: dispatchMutation === 'interrupting' ? Loader2 : FastForward,
 				iconClass: dispatchMutation === 'interrupting' ? 'animate-spin' : undefined,
 				onclick: () => void mutateDispatch('interrupting', onInterrupt),
-				disabled: dispatchMutation !== 'idle',
+				disabled: queueMutationsBlocked,
 				busy: dispatchMutation === 'interrupting',
 				priority: 0,
 				showLabel: true,
@@ -93,7 +133,8 @@
 				label: m.chat_queue_edit_queue(),
 				icon: ListTodo,
 				onclick: onOpenManager,
-				priority: 2,
+				disabled: queueMutationsBlocked,
+				priority: 3,
 				showLabel: true,
 				buttonClass: neutralButtonClass,
 			});
@@ -107,9 +148,9 @@
 				icon: dispatchMutation === 'resuming' ? Loader2 : Play,
 				iconClass: dispatchMutation === 'resuming' ? 'animate-spin' : undefined,
 				onclick: () => void mutateDispatch('resuming', () => onResume(queue.pause!.id)),
-				disabled: dispatchMutation !== 'idle',
+				disabled: queueMutationsBlocked,
 				busy: dispatchMutation === 'resuming',
-				priority: 1,
+				priority: 2,
 				showLabel: true,
 				buttonClass:
 					'rounded-lg bg-queue-action-bg px-2.5 text-sm text-queue-foreground hover:bg-queue-action-hover-bg hover:text-queue-foreground',
@@ -122,9 +163,9 @@
 				icon: dispatchMutation === 'pausing' ? Loader2 : Pause,
 				iconClass: dispatchMutation === 'pausing' ? 'animate-spin' : undefined,
 				onclick: () => void mutateDispatch('pausing', onPause),
-				disabled: dispatchMutation !== 'idle',
+				disabled: queueMutationsBlocked,
 				busy: dispatchMutation === 'pausing',
-				priority: 1,
+				priority: 2,
 				showLabel: true,
 				buttonClass: neutralButtonClass,
 			});
@@ -156,7 +197,7 @@
 		mutation: Exclude<typeof dispatchMutation, 'idle'>,
 		action: () => void | Promise<void>,
 	): Promise<void> {
-		if (dispatchMutation !== 'idle') return;
+		if (dispatchMutation !== 'idle' || queueSteering) return;
 		dispatchMutation = mutation;
 		try {
 			await action();
@@ -188,7 +229,7 @@
 				<button
 					type="button"
 					onclick={() => onEdit(previewEntry)}
-					disabled={deletingEntryIds.has(previewEntry.id)}
+					disabled={deletingEntryIds.has(previewEntry.id) || queueMutationsBlocked}
 					class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					title={m.chat_queue_edit_message()}
 					aria-label={m.chat_queue_edit_message()}
@@ -198,7 +239,7 @@
 				<button
 					type="button"
 					onclick={() => void deleteEntry(previewEntry.id)}
-					disabled={deletingEntryIds.has(previewEntry.id)}
+					disabled={deletingEntryIds.has(previewEntry.id) || queueMutationsBlocked}
 					class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					title={m.chat_queue_remove_from_queue()}
 					aria-label={m.chat_queue_remove_from_queue()}
@@ -223,7 +264,7 @@
 						<button
 							type="button"
 							onclick={() => selectPreview(previewIndex - 1)}
-							disabled={!canBrowsePrevious || dispatchMutation === 'interrupting'}
+							disabled={!canBrowsePrevious || queueMutationsBlocked}
 							class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
 							title={m.chat_queue_previous_message()}
 							aria-label={m.chat_queue_previous_message()}
@@ -243,7 +284,7 @@
 						<button
 							type="button"
 							onclick={() => selectPreview(previewIndex + 1)}
-							disabled={!canBrowseNext || dispatchMutation === 'interrupting'}
+							disabled={!canBrowseNext || queueMutationsBlocked}
 							class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
 							title={m.chat_queue_next_message()}
 							aria-label={m.chat_queue_next_message()}

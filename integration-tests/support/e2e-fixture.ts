@@ -8,7 +8,11 @@ import {
   type Page,
 } from 'puppeteer-core';
 import type { ServerWsMessage } from '../../common/ws-events.js';
-import { createIntegrationFixture, type IntegrationFixture } from './integration-fixture.js';
+import {
+  createIntegrationFixture,
+  type IntegrationFixture,
+  type IntegrationFixtureOptions,
+} from './integration-fixture.js';
 import { LightpandaProcess } from './lightpanda-process.js';
 import { withTimeout } from './deferred.js';
 
@@ -45,9 +49,9 @@ export class E2eFixture {
     });
   }
 
-  static async create(): Promise<E2eFixture> {
+  static async create(options: IntegrationFixtureOptions = {}): Promise<E2eFixture> {
     await access(WEB_BUILD_INDEX);
-    const integration = await createIntegrationFixture();
+    const integration = await createIntegrationFixture(options);
     let lightpanda: LightpandaProcess | null = null;
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
@@ -262,8 +266,9 @@ export class E2eFixture {
 export async function withE2eFixture<T>(
   testName: string,
   run: (fixture: E2eFixture) => Promise<T>,
+  options: IntegrationFixtureOptions = {},
 ): Promise<T> {
-  const fixture = await E2eFixture.create();
+  const fixture = await E2eFixture.create(options);
   let failure: unknown;
   try {
     return await run(fixture);

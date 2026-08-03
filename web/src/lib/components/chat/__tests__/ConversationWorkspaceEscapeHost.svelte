@@ -26,7 +26,7 @@
 	import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 
-	const selectedChat: ChatSessionRecord = {
+	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
 		projectPath: '/workspace/project',
 		effectiveProjectKey: '/workspace/project',
@@ -48,7 +48,7 @@
 		isUnread: false,
 		status: 'running',
 		tags: [],
-	};
+	});
 
 	const sessions = {
 		get selectedChatId() {
@@ -69,7 +69,7 @@
 			startupByChatId: {},
 			hasChat: (chatId: string) => chatId === selectedChat.id,
 			isDraft: () => false,
-			processingPhase: () => 'running',
+			processingPhase: () => selectedChat.processingPhase,
 			patchDraftStartup: () => {},
 		patchPreview: () => {},
 		patchChat: () => {},
@@ -128,7 +128,7 @@
 		getThinkingModes: () => ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
 			supportsFork: () => true,
 			supportsForkWhileRunning: () => true,
-			supportsSteering: (agentId: string) => agentId === 'codex',
+			supportsSteering: (agentId: string) => agentId === 'claude' || agentId === 'codex',
 			supportsGoals: (agentId: string) => agentId === 'codex',
 		} as never);
 
@@ -182,6 +182,16 @@
 
 <KeyboardShortcuts />
 <button type="button" onclick={() => (showTestLayer = true)}>Open test layer</button>
+<button type="button" onclick={() => (selectedChat.agentId = 'claude')}>Use Claude</button>
+<button type="button" onclick={() => (selectedChat.agentId = 'codex')}>Use Codex</button>
+<button type="button" onclick={() => (selectedChat.agentId = 'opencode')}>Use unsupported agent</button>
+<button
+	type="button"
+	onclick={() => {
+		selectedChat.isProcessing = !selectedChat.isProcessing;
+		selectedChat.processingPhase = selectedChat.isProcessing ? 'running' : null;
+	}}
+>Toggle processing</button>
 {#if showTestLayer}
 	<div bind:this={testLayerElement} role="dialog" tabindex="-1" aria-label="Test dialog"></div>
 {/if}

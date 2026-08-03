@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import QueueControls from '../QueueControls.svelte';
-import type {
-	ChatQueueState,
-	QueueEntry,
-	QueuePause,
-} from '$lib/types/chat';
+import type { ChatQueueState, QueueEntry, QueuePause } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	installResizeObserverHarness,
@@ -40,6 +36,7 @@ function makeQueue(count: number, pause: QueuePause | null = null): ChatQueueSta
 	return {
 		entries: Array.from({ length: count }, (_, index) => makeEntry(index)),
 		dispatchingEntryId: null,
+		steeringEntryId: null,
 		recentlyDispatched: [],
 		pause: count > 0 ? pause : null,
 		reorderRevision: 0,
@@ -62,7 +59,9 @@ function renderControls(
 	props: Partial<{
 		chatId: string | null;
 		canInterrupt: boolean;
+		canSteer: boolean;
 		onInterrupt: () => void | Promise<void>;
+		onSteer: (entry: QueueEntry, expectedReorderRevision: number) => void | Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
 		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
@@ -116,6 +115,100 @@ describe('QueueControls', () => {
 		expect(sendNow.querySelector('.lucide-fast-forward')).toBeTruthy();
 		await fireEvent.click(sendNow);
 		expect(onInterrupt).toHaveBeenCalledOnce();
+	});
+
+	it('shows Steer only for a capable FIFO head with a callback', async () => {
+		const onSteer = vi.fn().mockResolvedValue(undefined);
+		const queue = makeQueueWithIds(['q0', 'q1']);
+		queue.reorderRevision = 5;
+		renderControls(queue, { canSteer: true, onSteer });
+
+		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
+		expect(steer.querySelector('.lucide-route')).toBeTruthy();
+		await fireEvent.click(steer);
+		expect(onSteer).toHaveBeenCalledWith(queue.entries[0], 5);
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
+		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_previous_message() }));
+		expect(screen.getByRole('button', { name: m.chat_queue_steer() })).toBeTruthy();
+	});
+
+	it('hides Steer without both capability and a callback', () => {
+		const first = renderControls(makeQueue(1), { onSteer: vi.fn() });
+		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
+		first.unmount();
+
+		renderControls(makeQueue(1), { canSteer: true });
+		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
+	});
+
+	it('keeps Steer available for the paused FIFO head', () => {
+		renderControls(makeQueue(1, manualPause()), {
+			canSteer: true,
+			onSteer: vi.fn(),
+		});
+
+		expect(screen.getByRole('button', { name: m.chat_queue_steer() })).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
+	});
+
+	it('guards a pending queued steer and keeps the captured render observation', async () => {
+		const pending = deferred<void>();
+		const onSteer = vi.fn(() => pending.promise);
+		const queue = makeQueueWithIds(['q0', 'q1']);
+		queue.reorderRevision = 4;
+		renderControls(queue, {
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+			canSteer: true,
+			onSteer,
+		});
+		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
+
+		await fireEvent.click(steer);
+		await fireEvent.click(steer);
+
+		expect(onSteer).toHaveBeenCalledOnce();
+		expect(onSteer).toHaveBeenCalledWith(queue.entries[0], 4);
+		expect(steer.getAttribute('aria-busy')).toBe('true');
+		expect(steer.getAttribute('aria-disabled')).toBe('true');
+		expect(steer.querySelector('.lucide-loader-circle, .lucide-loader-2')).toBeTruthy();
+		pending.resolve();
+		await waitFor(() => expect(steer.getAttribute('aria-busy')).toBeNull());
+	});
+
+	it('uses authoritative steering state to block every conflicting queue affordance', async () => {
+		const queue = makeQueueWithIds(['q0', 'q1']);
+		queue.steeringEntryId = 'q0';
+		const view = renderControls(queue, {
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+			canSteer: true,
+			onSteer: vi.fn(),
+		});
+
+		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
+		expect(steer.getAttribute('aria-busy')).toBe('true');
+		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+		for (const name of [
+			m.chat_queue_edit_message(),
+			m.chat_queue_remove_from_queue(),
+			m.chat_queue_previous_message(),
+			m.chat_queue_next_message(),
+			m.chat_queue_edit_queue(),
+			m.chat_queue_pause(),
+		]) {
+			expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+		}
+
+		const reordered = makeQueueWithIds(['q1', 'q0']);
+		reordered.steeringEntryId = 'q0';
+		await view.rerender({ queue: reordered });
+		expect(screen.getByText('queued q0')).toBeTruthy();
+		expect(
+			screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy'),
+		).toBe('true');
 	});
 
 	it.each([
@@ -371,12 +464,30 @@ describe('QueueControls', () => {
 		expect(onInterrupt).toHaveBeenCalledOnce();
 	});
 
+	it('orders Steer immediately before Send now while preserving Send now priority', () => {
+		const { container } = renderControls(makeQueueWithIds(['q0', 'q1']), {
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+			canSteer: true,
+			onSteer: vi.fn(),
+		});
+
+		expect(
+			[...container.querySelectorAll<HTMLElement>('[data-surface-action-id]')].map(
+				(element) => element.dataset.surfaceActionId,
+			),
+		).toEqual(['steer', 'send-now', 'edit-queue', 'pause-queue']);
+	});
+
 	it('moves lower-priority queue actions into an overflow menu when space contracts', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		const onPause = vi.fn().mockResolvedValue(undefined);
+		const onSteer = vi.fn().mockResolvedValue(undefined);
 		const rendered = renderControls(makeQueueWithIds(['q0', 'q1']), {
 			canInterrupt: true,
 			onInterrupt: vi.fn(),
+			canSteer: true,
+			onSteer,
 			onPause,
 		});
 
@@ -393,9 +504,11 @@ describe('QueueControls', () => {
 				const width =
 					element.dataset.surfaceActionMeasure === 'send-now'
 						? 96
-						: element.dataset.surfaceActionMeasure === 'edit-queue'
-							? 64
-							: 68;
+						: element.dataset.surfaceActionMeasure === 'steer'
+							? 72
+							: element.dataset.surfaceActionMeasure === 'edit-queue'
+								? 64
+								: 68;
 				element.getBoundingClientRect = () => ({ width }) as DOMRect;
 			}
 			const menuMeasure = rendered.container.querySelector<HTMLElement>(
@@ -406,10 +519,20 @@ describe('QueueControls', () => {
 
 			ResizeObserverHarness.emit(root, 140);
 			await waitFor(() => {
+				expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
 				expect(screen.queryByRole('button', { name: m.chat_queue_edit_queue() })).toBeNull();
 				expect(screen.queryByRole('button', { name: m.chat_queue_pause() })).toBeNull();
 			});
 			expect(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_actions() }));
+			expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+				m.chat_queue_steer(),
+				m.chat_queue_edit_queue(),
+				m.chat_queue_pause(),
+			]);
+			await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_steer() }));
+			expect(onSteer).toHaveBeenCalledWith(expect.objectContaining({ id: 'q0' }), 0);
 
 			await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_actions() }));
 			await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_pause() }));

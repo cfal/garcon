@@ -110,6 +110,10 @@
 			<p class="font-medium">{m.chat_queue_changed_elsewhere()}</p>
 			<p class="mt-0.5 text-xs">{m.chat_queue_changed_elsewhere_detail()}</p>
 		</div>
+	{:else if editor.phase === 'steering'}
+		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">
+			<p class="font-medium">{m.chat_queue_steering()}</p>
+		</div>
 	{:else if editor.phase === 'dispatching' || editor.phase === 'sent'}
 		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">
 			<p class="font-medium">{m.chat_queue_already_sent()}</p>

@@ -60,6 +60,7 @@
 	const queuedCount = $derived(entries.length);
 	const editorOpen = $derived(editor.phase !== 'closed');
 	const pause = $derived(queue?.pause ?? null);
+	const queueSteering = $derived(queue?.steeringEntryId != null);
 	const pauseDetail = $derived(pause ? queuePauseDetail(pause) : null);
 	const affectedEntryRemoved = $derived(
 		Boolean(
@@ -70,7 +71,7 @@
 		),
 	);
 	const movesBlocked = $derived(
-		editorOpen || deletingIds.size > 0 || movingEntryId !== null,
+		editorOpen || deletingIds.size > 0 || movingEntryId !== null || queueSteering,
 	);
 
 	onMount(() => {
@@ -146,7 +147,7 @@
 	}
 
 	function beginEdit(entry: QueueEntry): void {
-		if (editorOpen || editor.mutation !== 'idle') return;
+		if (editorOpen || editor.mutation !== 'idle' || queueSteering) return;
 		editor.begin(entry);
 	}
 
@@ -169,7 +170,7 @@
 		mutation: Exclude<typeof queueMutation, 'idle'>,
 		action: () => Promise<void>,
 	): Promise<void> {
-		if (queueMutation !== 'idle') return;
+		if (queueMutation !== 'idle' || queueSteering) return;
 		queueMutation = mutation;
 		queueMutationError = null;
 		try {
@@ -182,7 +183,7 @@
 	}
 
 	async function deleteEntry(entryId: string): Promise<void> {
-		if (deletingIds.has(entryId)) return;
+		if (deletingIds.has(entryId) || queueSteering) return;
 		deletingIds = new Set([...deletingIds, entryId]);
 		const nextErrors = { ...rowErrors };
 		delete nextErrors[entryId];
@@ -315,7 +316,7 @@
 					<button
 						type="button"
 						onclick={() => void mutateQueueControl('resuming', () => onResume(pause.id))}
-						disabled={queueMutation !== 'idle'}
+						disabled={queueMutation !== 'idle' || queueSteering}
 						class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					>
 						{#if queueMutation === 'resuming'}
@@ -331,7 +332,7 @@
 					<button
 						type="button"
 						onclick={() => void mutateQueueControl('pausing', onPause)}
-						disabled={queueMutation !== 'idle'}
+						disabled={queueMutation !== 'idle' || queueSteering}
 						class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					>
 						{#if queueMutation === 'pausing'}
@@ -376,16 +377,18 @@
 								error={rowErrors[entry.id]}
 								deleting={deletingIds.has(entry.id)}
 								editDisabled={editorOpen ||
+									queueSteering ||
 									deletingIds.has(entry.id) ||
 									movingEntryId === entry.id}
 								deleteDisabled={deletingIds.has(entry.id) ||
+									queueSteering ||
 									(editor.entryId === entry.id && editor.mutation !== 'idle') ||
 									movingEntryId === entry.id}
 								movePending={movingEntryId === entry.id}
 								moveBlocked={movesBlocked}
 								canMoveUp={index > 0}
 								canMoveDown={index < entries.length - 1}
-								{dragEnabled}
+								dragEnabled={dragEnabled && !queueSteering}
 								onEdit={beginEdit}
 								onDelete={(entryId) => void deleteEntry(entryId)}
 								onMove={moveEntry}

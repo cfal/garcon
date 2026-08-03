@@ -42,6 +42,7 @@
 	import { isAcceptedConversationSubmission } from '$lib/chat/conversation/conversation-submission-outcome.js';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import type { QueueEntry } from '$lib/types/chat';
+	import type { SessionAgentId } from '$lib/types/app';
 	import {
 		CHAT_DOCK_SHELL_BASE_CLASS,
 		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
@@ -259,6 +260,12 @@
 	);
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
+	);
+	const selectedAgentId = $derived(
+		(sessions.selectedChat?.agentId ?? agentState.agentId) as SessionAgentId,
+	);
+	const canSteerSelectedChat = $derived(
+		selectedIsProcessing && modelCatalog.supportsSteering(selectedAgentId),
 	);
 	const quickGitBranchSelectorControls = $derived.by<GitQuickBranchSelectorControls | null>(() => {
 		if (!projectPath || !quickGitSummaryForProject) return null;
@@ -695,7 +702,10 @@
 				chatId={sessions.selectedChatId}
 				queue={activeQueue}
 				canInterrupt={canInterruptSelectedChat}
+				canSteer={canSteerSelectedChat}
 				onInterrupt={() => controller.handleInterruptAndSend()}
+				onSteer={(entry, reorderRevision) =>
+					controller.handleSteerQueuedInput(entry, reorderRevision)}
 				onPause={() => controller.handleQueuePause()}
 				onResume={(pauseId) => controller.handleQueueResume(pauseId)}
 				onQueueControlError={(action, error) => controller.handleQueueControlError(action, error)}

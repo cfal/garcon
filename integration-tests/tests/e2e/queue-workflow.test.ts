@@ -152,6 +152,7 @@ describe('Lightpanda queue workflow', () => {
       await app.sendComposer('ui-queue-c');
       await app.waitForText('1 of 2');
       expect(await app.hasResponsiveAction('Send now')).toBe(true);
+      expect(await app.hasResponsiveAction('Steer')).toBe(false);
 
       await app.clickButton('Next queued message');
       await app.waitForQueuedPreview('ui-queue-c');

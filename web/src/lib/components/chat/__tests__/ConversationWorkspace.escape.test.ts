@@ -17,6 +17,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
 	steerChat: vi.fn(),
+	steerQueuedEntry: vi.fn(),
 	submitGoalControl: vi.fn(),
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
@@ -49,7 +50,7 @@ vi.mock('$lib/components/git/NewBranchModal.svelte', async () => ({
 }));
 
 vi.mock('$lib/components/chat/QueueControls.svelte', async () => ({
-	default: (await import('./GenericStub.svelte')).default,
+	default: (await import('./QueueControlsCapabilityStub.svelte')).default,
 }));
 
 vi.mock('$lib/components/chat/QueuedInputsDialog.svelte', async () => ({
@@ -80,6 +81,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				queue: {
 					entries: [],
 					dispatchingEntryId: null,
+					steeringEntryId: null,
 					recentlyDispatched: [],
 					pause: null,
 					reorderRevision: 0,
@@ -100,6 +102,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				queue: {
 					entries: [],
 					dispatchingEntryId: null,
+					steeringEntryId: null,
 					recentlyDispatched: [],
 					pause: null,
 					reorderRevision: 0,
@@ -133,6 +136,22 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			chatId: 'chat-1',
 			agentId: 'claude',
 		});
+	});
+
+	it('derives queued steering from the selected agent capability and processing state', async () => {
+		render(ConversationWorkspaceEscapeHost);
+
+		expect(screen.getByTestId('queue-can-steer').textContent).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle processing' }));
+		await waitFor(() => expect(screen.getByTestId('queue-can-steer').textContent).toBe('false'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Use Codex' }));
+		expect(screen.getByTestId('queue-can-steer').textContent).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: 'Toggle processing' }));
+		await waitFor(() => expect(screen.getByTestId('queue-can-steer').textContent).toBe('true'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Use unsupported agent' }));
+		await waitFor(() => expect(screen.getByTestId('queue-can-steer').textContent).toBe('false'));
 	});
 
 	it('does not abort when an Escape handler already prevented default', async () => {
