@@ -304,6 +304,116 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 	});
 
+	it('applies buffered live messages when a snapshot load fails', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.appendLocalNotice('warning', 'stale notice');
+		let rejectSnapshot!: (reason: Error) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((_resolve, reject) => {
+				rejectSnapshot = reject;
+			}),
+		);
+
+		const snapshotLoad = chat.loadMessages('chat-1');
+		expect(chat.applyMessages('chat-1', 'generation-1', [entry(2, assistant('live'))])).toBe(
+			'applied',
+		);
+		rejectSnapshot(new Error('snapshot unavailable'));
+
+		await expect(snapshotLoad).rejects.toThrow('snapshot unavailable');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['existing', 'live']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'live']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+		expect(chat.loadStatus).toBe('error');
+		expect(chat.loadError).toBe('snapshot unavailable');
+	});
+
+	it('preserves buffered live messages across overlapping snapshot loads', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		let resolveFirstSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		let resolveSecondSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveFirstSnapshot = resolve;
+				}),
+			)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveSecondSnapshot = resolve;
+				}),
+			);
+
+		const firstLoad = chat.loadMessages('chat-1');
+		chat.applyMessages('chat-1', 'generation-1', [entry(2, assistant('live'))]);
+		const secondLoad = chat.loadMessages('chat-1');
+		resolveSecondSnapshot({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({ messages: [entry(1, assistant('existing'))], lastSeq: 1 }),
+		});
+
+		await expect(secondLoad).resolves.toEqual([
+			expect.objectContaining({ content: 'existing' }),
+			expect.objectContaining({ content: 'live' }),
+		]);
+		resolveFirstSnapshot({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({ messages: [entry(1, assistant('existing'))], lastSeq: 1 }),
+		});
+		await expect(firstLoad).resolves.toEqual([
+			expect.objectContaining({ content: 'existing' }),
+			expect.objectContaining({ content: 'live' }),
+		]);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+	});
+
+	it('does not let a stale snapshot failure overwrite the active chat load state', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('one'))], {
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		let rejectFirstSnapshot!: (reason: Error) => void;
+		vi.mocked(getChatMessages)
+			.mockReturnValueOnce(
+				new Promise((_resolve, reject) => {
+					rejectFirstSnapshot = reject;
+				}),
+			)
+			.mockResolvedValueOnce({
+				chatId: 'chat-2',
+				limit: 50,
+				...page({
+					generationId: 'generation-2',
+					messages: [entry(1, assistant('two'))],
+				}),
+			});
+
+		const firstLoad = chat.loadMessages('chat-1');
+		chat.activateChat('chat-2');
+		await chat.loadMessages('chat-2');
+		rejectFirstSnapshot(new Error('old chat failed'));
+
+		await expect(firstLoad).rejects.toThrow('old chat failed');
+		expect(chat.activeChatId).toBe('chat-2');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['two']);
+		expect(chat.loadStatus).toBe('loaded');
+		expect(chat.loadError).toBeNull();
+	});
+
 	it('surfaces buffered same-generation gaps during snapshot load', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const chat = new ActiveTranscriptState();

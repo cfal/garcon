@@ -318,7 +318,9 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'applied';
 		}
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
+		let visibleChanged = false;
 		if (applied.status === 'applied') {
+			visibleChanged = applied.changed;
 			const shouldCompact =
 				!this.isUserScrolledUp && this.visibleMessageCount <= INITIAL_VISIBLE_MESSAGES;
 			const nextEntries =
@@ -341,7 +343,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.lastSeq = restored.lastSeq;
 			this.oldestSeq = restored.oldestSeq;
 		}
-		if (result.changed) {
+		if (result.changed || visibleChanged) {
 			this.localNotices = [];
 		}
 		this.totalMessages = this.entries.length;
@@ -353,7 +355,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	beginSnapshotLoad(): number {
 		const epoch = this.#beginLoadEpoch();
-		this.#snapshotBuffer = [];
+		// Carries live events into a superseding snapshot load.
+		this.#snapshotBuffer ??= [];
 		this.isLoadingMessages = true;
 		this.loadStatus = 'loading';
 		this.loadError = null;
@@ -364,6 +367,23 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (epoch !== this.#loadEpoch) return;
 		this.#snapshotBuffer = null;
 		this.isLoadingMessages = false;
+	}
+
+	#finishFailedSnapshotLoad(chatId: string, epoch: number): boolean {
+		if (epoch !== this.#loadEpoch) return false;
+		if (this.activeChatId && this.activeChatId !== chatId) {
+			this.abortSnapshotLoad(epoch);
+			return false;
+		}
+
+		const buffered = this.#snapshotBuffer ?? [];
+		this.#snapshotBuffer = null;
+		this.isLoadingMessages = false;
+		// Replays live batches already accepted into the cache so a failed snapshot cannot hide them.
+		for (const batch of buffered) {
+			if (this.applyMessages(chatId, batch.generationId, batch.messages) !== 'applied') break;
+		}
+		return true;
 	}
 
 	replaceGeneration(
@@ -476,9 +496,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 				this.abortSnapshotLoad(epoch);
 			} catch (error) {
-				this.abortSnapshotLoad(epoch);
-				this.loadStatus = 'error';
-				this.loadError = error instanceof Error ? error.message : 'Failed to load messages';
+				if (this.#finishFailedSnapshotLoad(chatId, epoch)) {
+					this.loadStatus = 'error';
+					this.loadError = error instanceof Error ? error.message : 'Failed to load messages';
+				}
 				throw error;
 			}
 		}
