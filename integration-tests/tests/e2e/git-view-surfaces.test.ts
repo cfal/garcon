@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -69,6 +70,26 @@ async function appendEmptyHistoryCommits(projectPath: string, count: number): Pr
     process.exited,
   ]);
   if (exitCode !== 0) throw new Error(`git fast-import failed: ${stderr.trim()}`);
+}
+
+async function loadDeepHistoryPages(page: Page, viewportSelector: string): Promise<void> {
+  for (const expectedPosition of [100, 150, 200, 250, 262]) {
+    await page.$eval(viewportSelector, (element) => {
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForFunction(
+      (selector, minimumPosition) => {
+        const virtualList = document.querySelector<HTMLElement>(
+          `${selector} [data-git-history-virtual-spacer]`,
+        );
+        return Number(virtualList?.dataset.gitHistoryLoadedCount) >= minimumPosition;
+      },
+      { timeout: 20_000 },
+      viewportSelector,
+      expectedPosition,
+    );
+  }
 }
 
 describe('Lightpanda standalone Git views', () => {
@@ -226,23 +247,7 @@ describe('Lightpanda standalone Git views', () => {
       const viewportSelector = `${panelSelector} [data-git-history-commit-list]`;
       await fixture.page.waitForSelector(`${viewportSelector} [data-git-history-virtual-row]`);
 
-      for (const expectedPosition of [100, 150, 200, 250, 262]) {
-        await fixture.page.$eval(viewportSelector, (element) => {
-          element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-          element.dispatchEvent(new Event('scroll'));
-        });
-        await fixture.page.waitForFunction(
-          (selector, minimumPosition) => {
-            const virtualList = document.querySelector<HTMLElement>(
-              `${selector} [data-git-history-virtual-spacer]`,
-            );
-            return Number(virtualList?.dataset.gitHistoryLoadedCount) >= minimumPosition;
-          },
-          { timeout: 20_000 },
-          viewportSelector,
-          expectedPosition,
-        );
-      }
+      await loadDeepHistoryPages(fixture.page, viewportSelector);
 
       const mountedDesktopRows = await fixture.page.$$eval(
         `${viewportSelector} [data-git-history-virtual-row]`,
@@ -299,28 +304,34 @@ describe('Lightpanda standalone Git views', () => {
         anchor.hash,
         anchor.offset,
       );
+      fixture.assertNoBrowserErrors();
+    });
+  });
 
+  test('virtualizes deep History pages in the mobile view', async () => {
+    await withE2eFixture('git-view-virtual-history-mobile', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      await createHistoryFixture(project);
+      await appendEmptyHistoryCommits(project, 260);
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-view-virtual-history-mobile-seed');
+      await app.waitForText('echo:git-view-virtual-history-mobile-seed');
       await app.setViewport(390, 844);
-      await fixture.page.waitForSelector(
-        `${viewportSelector} [data-git-history-virtual-row]`,
-      );
-      for (const expectedPosition of [100, 150, 200, 250, 262]) {
-        await fixture.page.$eval(viewportSelector, (element) => {
-          element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-          element.dispatchEvent(new Event('scroll'));
-        });
-        await fixture.page.waitForFunction(
-          (selector, minimumPosition) => {
-            const virtualList = document.querySelector<HTMLElement>(
-              `${selector} [data-git-history-virtual-spacer]`,
-            );
-            return Number(virtualList?.dataset.gitHistoryLoadedCount) >= minimumPosition;
-          },
-          { timeout: 20_000 },
-          viewportSelector,
-          expectedPosition,
-        );
-      }
+      await fixture.page.waitForSelector('nav[aria-label="Workspace navigation"]');
+      await app.waitForButton('Settings');
+      await app.clickButton('Settings');
+      await app.waitForMenuItemEnabled('Open Git History');
+      await app.clickMenuItem('Open Git History');
+
+      const viewportSelector =
+        '[data-workspace-surface-id="singleton:git-history"]'
+        + ' [data-git-history-commit-list]';
+      await fixture.page.waitForSelector(`${viewportSelector} [data-git-history-virtual-row]`);
+      await loadDeepHistoryPages(fixture.page, viewportSelector);
       expect(await fixture.page.$eval(
         `${viewportSelector} [data-git-history-virtual-spacer]`,
         (element) => Number(element.getAttribute('data-git-history-loaded-count')),
@@ -419,6 +430,7 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-mobile-seed');
       await app.waitForText('echo:git-view-mobile-seed');
       await app.setViewport(390, 844);
+      await fixture.page.waitForSelector('nav[aria-label="Workspace navigation"]');
       await app.waitForButton('Settings');
 
       await app.clickButton('Settings');
