@@ -218,25 +218,62 @@ async function clickPanelButton(
   await fixture.page.waitForFunction(
     ({ panelSelector, label }) => {
       const panel = document.querySelector(panelSelector);
-      const button = [...(panel?.querySelectorAll('button') ?? [])].find((element) => {
+      const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((element) => {
+        if (element.hasAttribute('data-surface-action-measure')) return false;
         const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
         return accessible === label;
       });
-      return button instanceof HTMLButtonElement && !button.disabled;
+      if (button) return !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+      const menuTrigger = panel?.querySelector<HTMLButtonElement>(
+        '[data-responsive-surface-menu-trigger]',
+      );
+      return Boolean(menuTrigger && !menuTrigger.disabled);
     },
     { timeout: 20_000 },
     { panelSelector: GIT_PANEL, label: name },
   );
-  await fixture.page.evaluate(
+  const destination = await fixture.page.evaluate(
     ({ panelSelector, label }) => {
       const panel = document.querySelector(panelSelector);
-      const button = [...(panel?.querySelectorAll('button') ?? [])].find((element) => {
+      const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((element) => {
+        if (element.hasAttribute('data-surface-action-measure')) return false;
         const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
         return accessible === label;
       });
-      if (!(button instanceof HTMLButtonElement)) throw new Error(`Missing panel button: ${label}`);
-      button.click();
+      if (button) {
+        button.click();
+        return 'direct';
+      }
+      const menuTrigger = panel?.querySelector<HTMLButtonElement>(
+        '[data-responsive-surface-menu-trigger]',
+      );
+      if (!menuTrigger) throw new Error(`Missing panel action: ${label}`);
+      menuTrigger.click();
+      return 'menu';
     },
     { panelSelector: GIT_PANEL, label: name },
   );
+  if (destination === 'direct') return;
+
+  await fixture.page.waitForFunction(
+    (label) => {
+      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) => {
+        const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+        return accessible === label;
+      });
+      return Boolean(
+        item && !item.hasAttribute('data-disabled') && item.getAttribute('aria-disabled') !== 'true',
+      );
+    },
+    { timeout: 20_000 },
+    name,
+  );
+  await fixture.page.evaluate((label) => {
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) => {
+      const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+      return accessible === label;
+    });
+    if (!item) throw new Error(`Missing panel menu action: ${label}`);
+    item.click();
+  }, name);
 }
