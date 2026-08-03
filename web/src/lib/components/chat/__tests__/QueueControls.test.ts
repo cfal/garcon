@@ -180,12 +180,15 @@ describe('QueueControls', () => {
 
 	it('pins local steering feedback to its source while live queue order changes', async () => {
 		const pending = deferred<void>();
+		const onSteer = vi.fn(() => pending.promise);
 		const view = renderControls(makeQueueWithIds(['q0', 'q1']), {
 			canSteer: true,
-			onSteer: vi.fn(() => pending.promise),
+			onSteer,
 		});
+		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
+		steer.focus();
 
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_steer() }));
+		await fireEvent.click(steer);
 		await view.rerender({ queue: makeQueueWithIds(['q1', 'q0']) });
 
 		expect(screen.getByText('queued q0')).toBeTruthy();
@@ -198,9 +201,14 @@ describe('QueueControls', () => {
 		expect(screen.getByText('queued q1')).toBeTruthy();
 		expect(nextHeadSteer.getAttribute('aria-busy')).toBeNull();
 		expect(nextHeadSteer.hasAttribute('disabled')).toBe(true);
+		expect(nextHeadSteer).not.toBe(steer);
+		expect(steer.isConnected).toBe(false);
+		expect(document.activeElement).not.toBe(nextHeadSteer);
 
 		pending.resolve();
 		await waitFor(() => expect(nextHeadSteer.hasAttribute('disabled')).toBe(false));
+		await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter', code: 'Enter' });
+		expect(onSteer).toHaveBeenCalledOnce();
 	});
 
 	it('keeps pending queue actions scoped to their originating chat', async () => {

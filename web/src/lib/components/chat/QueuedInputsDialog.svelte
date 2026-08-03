@@ -158,7 +158,7 @@
 			const editButton = [
 				...(listContainer?.querySelectorAll<HTMLButtonElement>('[data-queue-edit-id]') ?? []),
 			].find((button) => button.dataset.queueEditId === restoreEntryId);
-			if (editButton) {
+			if (editButton && !editButton.disabled) {
 				editButton.focus();
 				return;
 			}

@@ -432,6 +432,25 @@ describe('QueuedInputsDialog', () => {
 		expect((save as HTMLButtonElement).disabled).toBe(false);
 	});
 
+	it('returns focus to the queue heading when steering disables the edited row action', async () => {
+		const { component } = renderDialog(queue([entry(0), entry(1)]));
+		await fireEvent.click(screen.getAllByRole('button', { name: m.chat_queue_edit_message() })[1]);
+		component.setQueue(queue([entry(0), entry(1)], { steeringEntryId: 'entry-0' }));
+
+		await waitFor(() => {
+			expect((screen.getByRole('textbox') as HTMLTextAreaElement).readOnly).toBe(true);
+		});
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_discard() }));
+
+		const editedRowButton = screen.getAllByRole('button', {
+			name: m.chat_queue_edit_message(),
+		})[1] as HTMLButtonElement;
+		expect(editedRowButton.disabled).toBe(true);
+		await waitFor(() => {
+			expect(document.activeElement).toBe(document.querySelector('[data-queue-list-heading]'));
+		});
+	});
+
 	it('ignores a late save result after a newer editor session begins', async () => {
 		const pendingSave = deferred<void>();
 		const { component, onReplace } = renderDialog(queue([entry(0), entry(1)]));

@@ -108,6 +108,7 @@
 			const steerBusy = previewSteering;
 			actions.push({
 				id: 'steer',
+				renderKey: `steer:${chatId ?? ''}:${observedEntry.id}`,
 				label: m.chat_queue_steer(),
 				title: m.chat_queue_steer_queue(),
 				icon: steerBusy ? Loader2 : Route,

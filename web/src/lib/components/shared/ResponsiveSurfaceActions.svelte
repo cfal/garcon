@@ -12,6 +12,7 @@
 
 	export interface ResponsiveSurfaceAction {
 		id: string;
+		renderKey?: string;
 		label: string;
 		title?: string;
 		icon: Component<{ class?: string }>;
@@ -117,6 +118,7 @@
 			.map(
 				({
 					id,
+					renderKey,
 					label,
 					title,
 					disabled,
@@ -127,7 +129,7 @@
 					iconClass,
 					buttonClass,
 				}) =>
-					`${id}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}:${buttonClass}`,
+					`${id}:${renderKey}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}:${buttonClass}`,
 			)
 			.join('|');
 		untrack(() => queueMicrotask(recompute));
@@ -167,7 +169,7 @@
 			{@render fixed()}
 		</div>
 	{/if}
-	{#each visibleActions as action (action.id)}
+	{#each visibleActions as action (action.renderKey ?? action.id)}
 		{@render actionButton(action)}
 	{/each}
 	{#if showMenu}
@@ -184,7 +186,7 @@
 				{#if menuContent}
 					{@render menuContent(overflowActions)}
 				{:else}
-					{#each overflowActions as action (action.id)}
+					{#each overflowActions as action (action.renderKey ?? action.id)}
 						{@const Icon = action.icon}
 						<DropdownMenuItem
 							variant={action.variant === 'destructive' ? 'destructive' : undefined}
@@ -206,7 +208,7 @@
 		class="pointer-events-none invisible absolute -left-[10000px] top-0 flex items-center gap-1"
 		aria-hidden="true"
 	>
-		{#each actions as action (action.id)}
+		{#each actions as action (action.renderKey ?? action.id)}
 			{@render actionButton(action, true)}
 		{/each}
 		<button
