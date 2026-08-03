@@ -5,6 +5,7 @@
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
+		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import { cn } from '$lib/utils/cn';
@@ -30,6 +31,7 @@
 		actions,
 		menuLabel,
 		menuContent,
+		menuLeadingContent,
 		menuIcon: MenuIcon = Ellipsis,
 		fixed,
 		class: className,
@@ -37,6 +39,7 @@
 		actions: readonly ResponsiveSurfaceAction[];
 		menuLabel: string;
 		menuContent?: Snippet<[readonly ResponsiveSurfaceAction[]]>;
+		menuLeadingContent?: Snippet;
 		menuIcon?: Component<{ class?: string }>;
 		fixed?: Snippet;
 		class?: string;
@@ -57,7 +60,8 @@
 			(action) => !(visibleActionIds ?? new Set(actions.map(({ id }) => id))).has(action.id),
 		),
 	);
-	const showMenu = $derived(Boolean(menuContent) || overflowActions.length > 0);
+	const hasPersistentMenuContent = $derived(Boolean(menuContent) || Boolean(menuLeadingContent));
+	const showMenu = $derived(hasPersistentMenuContent || overflowActions.length > 0);
 
 	function actionClass(action: ResponsiveSurfaceAction): string {
 		return cn(
@@ -87,13 +91,13 @@
 				.querySelector<HTMLElement>('[data-surface-action-overflow-measure]')
 				?.getBoundingClientRect().width ?? 0;
 		const fixedWidth = fixedControl?.getBoundingClientRect().width ?? 0;
-		const fixedGap = fixedWidth > 0 && (actions.length > 0 || Boolean(menuContent)) ? gap : 0;
+		const fixedGap = fixedWidth > 0 && (actions.length > 0 || hasPersistentMenuContent) ? gap : 0;
 		visibleActionIds = selectVisibleSurfaceActionIds({
 			actions: actions.map(({ id, priority = 100 }) => ({ id, priority })),
 			availableWidth: Math.max(0, actionRoot.clientWidth - fixedWidth - fixedGap),
 			widths,
 			menuButtonWidth,
-			menuVisibility: menuContent ? 'persistent' : 'overflow',
+			menuVisibility: hasPersistentMenuContent ? 'persistent' : 'overflow',
 			gap,
 		});
 	}
@@ -182,7 +186,13 @@
 			>
 				<MenuIcon class="h-4 w-4" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" class={menuContent ? 'w-64' : 'w-56'}>
+			<DropdownMenuContent align="end" class={hasPersistentMenuContent ? 'w-64' : 'w-56'}>
+				{#if menuLeadingContent}
+					{@render menuLeadingContent()}
+					{#if overflowActions.length > 0 || menuContent}
+						<DropdownMenuSeparator />
+					{/if}
+				{/if}
 				{#if menuContent}
 					{@render menuContent(overflowActions)}
 				{:else}
