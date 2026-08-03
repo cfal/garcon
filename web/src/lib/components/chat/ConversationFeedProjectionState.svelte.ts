@@ -8,6 +8,7 @@ import {
 } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import {
 	ConversationFeedRenderModelController,
+	type ConversationFeedRenderModelReconciliation,
 	type ReconciledConversationFeedRenderModel,
 } from '$lib/chat/transcript/conversation-feed-render-model.js';
 import { filterHiddenToolRenderItems } from '$lib/chat/transcript/conversation-feed-items.js';
@@ -15,6 +16,8 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 import {
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
+	appendConversationVirtualTranscriptTail,
+	replaceConversationVirtualTranscriptTail,
 	type ConversationVirtualFeedModel,
 } from './conversation-feed-virtual-items.js';
 
@@ -78,6 +81,29 @@ function sameInput(
 	);
 }
 
+function sameProjectionConfiguration(
+	left: ConversationFeedProjectionInput | null,
+	right: ConversationFeedProjectionInput,
+): boolean {
+	return Boolean(
+		left &&
+		left.surfaceIdentity === right.surfaceIdentity &&
+		left.hiddenToolTypes === right.hiddenToolTypes &&
+		left.showThinking === right.showThinking &&
+		left.textScale === right.textScale &&
+		left.isLiveWindow === right.isLiveWindow &&
+		left.showTopToolbarSpacer === right.showTopToolbarSpacer &&
+		left.showRefreshError === right.showRefreshError &&
+		left.showEarlierBoundary === right.showEarlierBoundary &&
+		left.showLaterBoundary === right.showLaterBoundary &&
+		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
+		left.floatingPermissions.length === right.floatingPermissions.length &&
+		left.floatingPermissions.every(
+			(permission, index) => permission === right.floatingPermissions[index],
+		),
+	);
+}
+
 export class ConversationFeedProjectionState {
 	#renderModel = new ConversationFeedRenderModelController();
 	#lastInput: ConversationFeedProjectionInput | null = null;
@@ -88,7 +114,14 @@ export class ConversationFeedProjectionState {
 	reconcile(input: ConversationFeedProjectionInput): ConversationFeedProjection {
 		if (sameInput(this.#lastInput, input) && this.#lastProjection) return this.#lastProjection;
 
-		const renderModel = this.#renderModel.reconcile(input.surfaceIdentity, input.rows);
+		const reconciliation = this.#renderModel.reconcileDetailed(input.surfaceIdentity, input.rows);
+		const renderModel = reconciliation.model;
+		const mutationKinds = new Set(
+			conversationFeedMutationKindsSince(input.mutationClock, this.#lastProjectedDataRevision),
+		);
+		const incremental = this.#reconcileIncremental(input, reconciliation, mutationKinds);
+		if (incremental) return incremental;
+
 		const visibleTranscriptItems = filterHiddenToolRenderItems(
 			renderModel.items,
 			input.hiddenToolTypes,
@@ -119,9 +152,6 @@ export class ConversationFeedProjectionState {
 			!arraysEqual(previousGeometry.keys, keys) ||
 			!arraysEqual(previousGeometry.estimates, estimates);
 
-		const mutationKinds = new Set(
-			conversationFeedMutationKindsSince(input.mutationClock, this.#lastProjectedDataRevision),
-		);
 		if (!previousGeometry) mutationKinds.add('initial');
 		else if (geometryChanged && mutationKinds.size === 0) {
 			mutationKinds.add('presentation-structure');
@@ -144,6 +174,80 @@ export class ConversationFeedProjectionState {
 		this.#lastInput = input;
 		this.#lastProjection = {
 			renderModel,
+			model,
+			geometry,
+			projectedDataRevision: input.mutationClock.dataRevision,
+		};
+		return this.#lastProjection;
+	}
+
+	#reconcileIncremental(
+		input: ConversationFeedProjectionInput,
+		reconciliation: ConversationFeedRenderModelReconciliation,
+		mutationKinds: Set<ConversationFeedMutationKind>,
+	): ConversationFeedProjection | null {
+		const previous = this.#lastProjection;
+		if (!previous || !sameProjectionConfiguration(this.#lastInput, input)) return null;
+
+		let model: ConversationVirtualFeedModel;
+		let geometry = previous.geometry;
+		if (reconciliation.change.kind === 'unchanged') {
+			model = previous.model;
+		} else if (reconciliation.change.kind === 'tail-replaced') {
+			const replaced = replaceConversationVirtualTranscriptTail(
+				previous.model,
+				reconciliation.change.nextItem,
+			);
+			if (!replaced) return null;
+			model = replaced;
+		} else if (reconciliation.change.kind === 'tail-appended') {
+			const appended = appendConversationVirtualTranscriptTail(
+				previous.model,
+				input.surfaceIdentity,
+				reconciliation.change.appendedItems,
+			);
+			if (!appended) return null;
+			model = appended;
+			const keys = previous.geometry.keys.slice();
+			const estimates = previous.geometry.estimates.slice();
+			const insertIndex = previous.model.transcriptEndIndex;
+			if (insertIndex > previous.model.transcriptStartIndex) {
+				estimates[insertIndex - 1] = estimateConversationFeedItemSize(
+					model.items[insertIndex - 1],
+					input.textScale,
+				);
+			}
+			keys.splice(
+				insertIndex,
+				0,
+				...model.items
+					.slice(insertIndex, insertIndex + reconciliation.change.appendedItems.length)
+					.map((item) => item.key),
+			);
+			estimates.splice(
+				insertIndex,
+				0,
+				...model.items
+					.slice(insertIndex, insertIndex + reconciliation.change.appendedItems.length)
+					.map((item) => estimateConversationFeedItemSize(item, input.textScale)),
+			);
+			geometry = {
+				surfaceIdentity: input.surfaceIdentity,
+				geometryRevision: ++this.#geometryRevision,
+				keys,
+				estimates,
+				measurementReset: 'none',
+				mutationKinds,
+				endBehavior: conversationFeedEndBehavior(mutationKinds, input.isLiveWindow),
+			};
+		} else {
+			return null;
+		}
+
+		this.#lastProjectedDataRevision = input.mutationClock.dataRevision;
+		this.#lastInput = input;
+		this.#lastProjection = {
+			renderModel: reconciliation.model,
 			model,
 			geometry,
 			projectedDataRevision: input.mutationClock.dataRevision,

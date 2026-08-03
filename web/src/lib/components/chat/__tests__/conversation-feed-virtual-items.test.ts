@@ -3,6 +3,7 @@ import { BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import type { ReconciledConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-render-model.js';
 import {
+	appendConversationVirtualTranscriptTail,
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
 } from '../conversation-feed-virtual-items.js';
@@ -117,5 +118,41 @@ describe('conversation virtual feed model', () => {
 		expect(model.items[2]).toMatchObject({ leadingSpacing: true, spacingAfter: 'responsive-feed' });
 		expect(model.items[3]).toMatchObject({ leadingSpacing: false, spacingAfter: 'none' });
 		expect(estimateConversationFeedItemSize(model.items.at(-1), 1)).toBe(56);
+	});
+
+	it('updates suffix indexes when transcript items append incrementally', () => {
+		const permission: PendingPermissionRequest = {
+			chatId: 'chat-1',
+			permissionRequestId: 'permission-1',
+			requestedTool: new BashToolUseMessage('', 'tool-1', 'pwd'),
+		};
+		const model = buildConversationVirtualFeedModel({
+			showTopToolbarSpacer: false,
+			showRefreshError: false,
+			showEarlierBoundary: false,
+			showLaterBoundary: true,
+			reserveComposerTraySpace: false,
+			surfaceIdentity: 'chat-1:generation-1',
+			transcriptItems: [userItem(1)],
+			floatingPermissions: [permission],
+		});
+
+		const appended = appendConversationVirtualTranscriptTail(model, 'chat-1:generation-1', [
+			userItem(2),
+		]);
+
+		expect(appended?.items.map((item) => item.kind)).toEqual([
+			'viewport-start-spacer',
+			'transcript',
+			'transcript',
+			'later-boundary',
+			'permission',
+			'viewport-end-spacer',
+		]);
+		expect(appended?.items[1]).toMatchObject({ spacingAfter: 'scaled-transcript' });
+		expect(appended?.indexByRowId.get('generation-1:2')).toBe(2);
+		for (const [index, item] of appended?.items.entries() ?? []) {
+			expect(appended?.indexByKey.get(item.key)).toBe(index);
+		}
 	});
 });

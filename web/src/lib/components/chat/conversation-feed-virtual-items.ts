@@ -40,6 +40,8 @@ export interface ConversationVirtualFeedModel {
 	indexByKey: Map<string, number>;
 	indexByRowId: Map<string, number>;
 	targetByDomAnchorId: Map<string, ConversationVirtualTarget>;
+	transcriptStartIndex: number;
+	transcriptEndIndex: number;
 }
 
 export interface ConversationVirtualFeedInput {
@@ -101,6 +103,7 @@ export function buildConversationVirtualFeedModel(
 			spacingAfter: 'none',
 		});
 	}
+	const transcriptStartIndex = items.length;
 
 	for (const [transcriptIndex, item] of input.transcriptItems.entries()) {
 		items.push({
@@ -111,6 +114,7 @@ export function buildConversationVirtualFeedModel(
 				transcriptIndex < input.transcriptItems.length - 1 ? 'scaled-transcript' : 'none',
 		});
 	}
+	const transcriptEndIndex = items.length;
 
 	if (input.showLaterBoundary) {
 		items.push({
@@ -157,7 +161,84 @@ export function buildConversationVirtualFeedModel(
 		}
 	}
 
-	return { items, indexByKey, indexByRowId, targetByDomAnchorId };
+	return {
+		items,
+		indexByKey,
+		indexByRowId,
+		targetByDomAnchorId,
+		transcriptStartIndex,
+		transcriptEndIndex,
+	};
+}
+
+export function replaceConversationVirtualTranscriptTail(
+	model: ConversationVirtualFeedModel,
+	item: ReconciledConversationFeedRenderItem,
+): ConversationVirtualFeedModel | null {
+	if (item.rowIds.length !== 1) return null;
+	const index = model.indexByRowId.get(item.rowIds[0]);
+	const previous = index === undefined ? undefined : model.items[index];
+	if (
+		index === undefined ||
+		index !== model.transcriptEndIndex - 1 ||
+		previous?.kind !== 'transcript' ||
+		previous.item.virtualKey !== item.virtualKey
+	) {
+		return null;
+	}
+
+	const items = model.items.slice();
+	items[index] = { ...previous, item };
+	return { ...model, items };
+}
+
+export function appendConversationVirtualTranscriptTail(
+	model: ConversationVirtualFeedModel,
+	surfaceIdentity: string,
+	appendedItems: ReconciledConversationFeedRenderItem[],
+): ConversationVirtualFeedModel | null {
+	if (appendedItems.length === 0 || appendedItems.some((item) => item.rowIds.length !== 1)) {
+		return null;
+	}
+	const insertIndex = model.transcriptEndIndex;
+	const appendedVirtualItems = appendedItems.map((item, index): ConversationVirtualFeedItem => ({
+		kind: 'transcript',
+		key: namespacedKey(surfaceIdentity, `transcript:${item.virtualKey}`),
+		item,
+		spacingAfter: index < appendedItems.length - 1 ? 'scaled-transcript' : 'none',
+	}));
+	if (appendedVirtualItems.some((item) => model.indexByKey.has(item.key))) return null;
+
+	const items = model.items.slice();
+	if (insertIndex > model.transcriptStartIndex) {
+		const priorTail = items[insertIndex - 1];
+		if (priorTail?.kind !== 'transcript') return null;
+		items[insertIndex - 1] = { ...priorTail, spacingAfter: 'scaled-transcript' };
+	}
+	items.splice(insertIndex, 0, ...appendedVirtualItems);
+
+	for (let index = insertIndex; index < items.length; index += 1) {
+		model.indexByKey.set(items[index].key, index);
+	}
+	for (const [offset, virtualItem] of appendedVirtualItems.entries()) {
+		if (virtualItem.kind !== 'transcript') continue;
+		const index = insertIndex + offset;
+		for (const rowId of virtualItem.item.rowIds) {
+			model.indexByRowId.set(rowId, index);
+			model.targetByDomAnchorId.set(rowId, { index, innerRowId: rowId });
+		}
+		for (const member of toolMembers(virtualItem.item)) {
+			const target = { index, innerRowId: member.rowId };
+			model.targetByDomAnchorId.set(`tool-input-${member.toolId}`, target);
+			model.targetByDomAnchorId.set(`tool-result-${member.toolId}`, target);
+		}
+	}
+
+	return {
+		...model,
+		items,
+		transcriptEndIndex: insertIndex + appendedVirtualItems.length,
+	};
 }
 
 export function estimateConversationFeedItemSize(

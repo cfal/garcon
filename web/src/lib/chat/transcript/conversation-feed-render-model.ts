@@ -1,4 +1,4 @@
-import { BashToolUseMessage, ReadToolUseMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, ReadToolUseMessage } from '$shared/chat-types';
 import type { ChatDisplayRow } from './active-transcript-state.svelte.js';
 import {
 	buildConversationFeedRenderModel,
@@ -17,6 +17,24 @@ export interface ReconciledConversationFeedRenderModel extends Omit<
 	'items'
 > {
 	items: ReconciledConversationFeedRenderItem[];
+}
+
+export type ConversationFeedRenderModelChange =
+	| { kind: 'rebuilt' }
+	| { kind: 'unchanged' }
+	| {
+			kind: 'tail-replaced';
+			previousItem: ReconciledConversationFeedRenderItem;
+			nextItem: ReconciledConversationFeedRenderItem;
+	  }
+	| {
+			kind: 'tail-appended';
+			appendedItems: ReconciledConversationFeedRenderItem[];
+	  };
+
+export interface ConversationFeedRenderModelReconciliation {
+	model: ReconciledConversationFeedRenderModel;
+	change: ConversationFeedRenderModelChange;
 }
 
 interface PriorRun {
@@ -42,6 +60,8 @@ function runKind(item: ConversationFeedRenderItem): RunKind | null {
 
 export class ConversationFeedRenderModelController {
 	#surfaceIdentity: string | null = null;
+	#rows: ChatDisplayRow[] = [];
+	#model: ReconciledConversationFeedRenderModel | null = null;
 	#runByMember = new Map<string, PriorRun>();
 	#runOrderById = new Map<string, number>();
 	#nextRunSerial = 0;
@@ -50,7 +70,26 @@ export class ConversationFeedRenderModelController {
 		surfaceIdentity: string,
 		rows: ChatDisplayRow[],
 	): ReconciledConversationFeedRenderModel {
+		return this.reconcileDetailed(surfaceIdentity, rows).model;
+	}
+
+	reconcileDetailed(
+		surfaceIdentity: string,
+		rows: ChatDisplayRow[],
+	): ConversationFeedRenderModelReconciliation {
 		if (surfaceIdentity !== this.#surfaceIdentity) this.#resetForSurface(surfaceIdentity);
+		if (this.#model) {
+			if (this.#sameRows(rows)) {
+				this.#rows = rows;
+				return { model: this.#model, change: { kind: 'unchanged' } };
+			}
+
+			const replaced = this.#replaceAssistantTail(rows);
+			if (replaced) return replaced;
+
+			const appended = this.#appendAssistantTail(rows);
+			if (appended) return appended;
+		}
 
 		const model = buildConversationFeedRenderModel(rows);
 		const candidates = this.#candidates(model.items);
@@ -82,11 +121,16 @@ export class ConversationFeedRenderModelController {
 		this.#runOrderById = new Map(
 			items.flatMap((item, index) => (runKind(item) ? ([[item.virtualKey, index]] as const) : [])),
 		);
-		return { ...model, items };
+		const reconciled = { ...model, items };
+		this.#rows = rows;
+		this.#model = reconciled;
+		return { model: reconciled, change: { kind: 'rebuilt' } };
 	}
 
 	reset(): void {
 		this.#surfaceIdentity = null;
+		this.#rows = [];
+		this.#model = null;
 		this.#runByMember.clear();
 		this.#runOrderById.clear();
 		this.#nextRunSerial = 0;
@@ -95,6 +139,101 @@ export class ConversationFeedRenderModelController {
 	#resetForSurface(surfaceIdentity: string): void {
 		this.reset();
 		this.#surfaceIdentity = surfaceIdentity;
+	}
+
+	#sameRows(rows: ChatDisplayRow[]): boolean {
+		return rows.length === this.#rows.length && this.#samePrefix(rows, rows.length);
+	}
+
+	#samePrefix(rows: ChatDisplayRow[], count: number): boolean {
+		for (let index = 0; index < count; index += 1) {
+			const previous = this.#rows[index];
+			const next = rows[index];
+			if (!previous || !next || previous.kind !== next.kind || previous.id !== next.id)
+				return false;
+			if (previous.kind === 'message' && next.kind === 'message') {
+				if (previous.seq !== next.seq || previous.message !== next.message) return false;
+			} else if (previous !== next) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	#replaceAssistantTail(rows: ChatDisplayRow[]): ConversationFeedRenderModelReconciliation | null {
+		if (!this.#model || rows.length === 0 || rows.length !== this.#rows.length) return null;
+		if (!this.#samePrefix(rows, rows.length - 1)) return null;
+		const previousRow = this.#rows.at(-1);
+		const nextRow = rows.at(-1);
+		const previousItem = this.#model.items.at(-1);
+		if (
+			previousRow?.kind !== 'message' ||
+			nextRow?.kind !== 'message' ||
+			previousRow.id !== nextRow.id ||
+			previousRow.seq !== nextRow.seq ||
+			!(previousRow.message instanceof AssistantMessage) ||
+			!(nextRow.message instanceof AssistantMessage) ||
+			previousItem?.kind !== 'message' ||
+			previousItem.rowIds[0] !== nextRow.id
+		) {
+			return null;
+		}
+
+		const nextItem: ReconciledConversationFeedRenderItem = {
+			...previousItem,
+			message: nextRow.message,
+			seq: nextRow.seq,
+		};
+		const items = this.#model.items.slice();
+		items[items.length - 1] = nextItem;
+		const model = { ...this.#model, items };
+		this.#rows = rows;
+		this.#model = model;
+		return { model, change: { kind: 'tail-replaced', previousItem, nextItem } };
+	}
+
+	#appendAssistantTail(rows: ChatDisplayRow[]): ConversationFeedRenderModelReconciliation | null {
+		if (!this.#model || rows.length <= this.#rows.length) return null;
+		if (!this.#samePrefix(rows, this.#rows.length)) return null;
+		const appendedRows = rows.slice(this.#rows.length);
+		if (
+			appendedRows.some(
+				(row) => row.kind !== 'message' || !(row.message instanceof AssistantMessage),
+			)
+		) {
+			return null;
+		}
+
+		let previousRenderable = this.#lastRenderableMessage();
+		const appendedItems = appendedRows.map((row, offset): ReconciledConversationFeedRenderItem => {
+			if (row.kind !== 'message') throw new Error('Expected an assistant transcript row');
+			const item: ReconciledConversationFeedRenderItem = {
+				kind: 'message',
+				id: row.id,
+				rowIds: [row.id],
+				message: row.message,
+				index: this.#rows.length + offset,
+				seq: row.seq,
+				prevMessage: previousRenderable,
+				virtualKey: row.id,
+			};
+			previousRenderable = row.message;
+			return item;
+		});
+		const model = { ...this.#model, items: [...this.#model.items, ...appendedItems] };
+		this.#rows = rows;
+		this.#model = model;
+		return {
+			model,
+			change: { kind: 'tail-appended', appendedItems },
+		};
+	}
+
+	#lastRenderableMessage() {
+		const item = this.#model?.items.at(-1);
+		if (!item || item.kind === 'local-notice') return null;
+		if (item.kind === 'message') return item.message;
+		return item.rows.at(-1)?.message ?? null;
 	}
 
 	#candidates(items: ConversationFeedRenderItem[]): RunCandidate[] {

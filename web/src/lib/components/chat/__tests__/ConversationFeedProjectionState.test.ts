@@ -3,6 +3,7 @@ import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
+import { estimateConversationFeedItemSize } from '../conversation-feed-virtual-items.js';
 
 const TS = '2026-08-03T00:00:00.000Z';
 
@@ -12,6 +13,7 @@ function clock(
 ): ConversationFeedMutationClock {
 	return {
 		dataRevision,
+		lastResponseRevision: overrides['live-append'] ?? 0,
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': 0,
@@ -74,6 +76,76 @@ describe('ConversationFeedProjectionState', () => {
 		expect(streamed.projectedDataRevision).toBe(2);
 		expect(streamed.geometry).toBe(first.geometry);
 		expect(streamed.renderModel).not.toBe(first.renderModel);
+	});
+
+	it('reconciles a streamed tail without rebuilding a deep transcript', () => {
+		const projections = new ConversationFeedProjectionState();
+		const deepRows = Array.from({ length: 20_000 }, (_, index): ChatDisplayRow => ({
+			kind: 'message',
+			id: `generation-1:${index + 1}`,
+			seq: index + 1,
+			message: new AssistantMessage(TS, `response ${index + 1}`),
+		}));
+		const first = projections.reconcile(
+			input({ rows: deepRows, mutationClock: clock(1, { replacement: 1 }) }),
+		);
+		const nextRows = deepRows.slice();
+		nextRows[nextRows.length - 1] = {
+			...nextRows[nextRows.length - 1],
+			message: new AssistantMessage(TS, 'streamed response'),
+		};
+
+		const streamed = projections.reconcile(
+			input({ rows: nextRows, mutationClock: clock(2, { 'live-append': 2 }) }),
+		);
+
+		expect(streamed.renderModel.items[10_000]).toBe(first.renderModel.items[10_000]);
+		expect(streamed.model.items[10_001]).toBe(first.model.items[10_001]);
+		expect(streamed.model.indexByRowId).toBe(first.model.indexByRowId);
+		expect(streamed.model.items.at(-2)).toMatchObject({
+			kind: 'transcript',
+			item: { message: nextRows.at(-1)?.message },
+		});
+		expect(streamed.geometry).toBe(first.geometry);
+	});
+
+	it('extends deep transcript indexes incrementally for assistant appends', () => {
+		const projections = new ConversationFeedProjectionState();
+		const deepRows = Array.from({ length: 20_000 }, (_, index): ChatDisplayRow => ({
+			kind: 'message',
+			id: `generation-1:${index + 1}`,
+			seq: index + 1,
+			message: new AssistantMessage(TS, `response ${index + 1}`),
+		}));
+		const first = projections.reconcile(
+			input({ rows: deepRows, mutationClock: clock(1, { replacement: 1 }) }),
+		);
+		const appendedRows = [
+			...deepRows,
+			{
+				kind: 'message' as const,
+				id: 'generation-1:20001',
+				seq: 20_001,
+				message: new AssistantMessage(TS, 'new response'),
+			},
+		];
+
+		const appended = projections.reconcile(
+			input({ rows: appendedRows, mutationClock: clock(2, { 'live-append': 2 }) }),
+		);
+
+		expect(appended.renderModel.items[10_000]).toBe(first.renderModel.items[10_000]);
+		expect(appended.model.indexByRowId).toBe(first.model.indexByRowId);
+		expect(appended.model.indexByRowId.get('generation-1:20001')).toBe(20_001);
+		expect(appended.model.items.at(-2)).toMatchObject({
+			kind: 'transcript',
+			item: { message: appendedRows.at(-1)?.message },
+		});
+		expect(appended.geometry.geometryRevision).toBeGreaterThan(first.geometry.geometryRevision);
+		expect(appended.geometry.keys).toEqual(appended.model.items.map((item) => item.key));
+		expect(appended.geometry.estimates).toEqual(
+			appended.model.items.map((item) => estimateConversationFeedItemSize(item, 1)),
+		);
 	});
 
 	it('marks text scale as a full measurement reset while retaining stable keys', () => {
