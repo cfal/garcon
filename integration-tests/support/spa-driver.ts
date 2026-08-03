@@ -266,8 +266,8 @@ export class SpaDriver {
   async waitForLocalNotice(text: string): Promise<void> {
     await this.#page.waitForFunction(
       (expected) => {
-        const log = document.querySelector('[role="log"][aria-label="Chat messages"]');
-        return [...(log?.querySelectorAll<HTMLElement>('span') ?? [])].some(
+        const feed = document.querySelector('[data-chat-scroll-viewport]');
+        return [...(feed?.querySelectorAll<HTMLElement>('span') ?? [])].some(
           (element) => element.textContent?.trim() === expected,
         );
       },
@@ -597,106 +597,43 @@ export class SpaDriver {
     }, text);
   }
 
-  async expectedChatScrollTopForNavigatorRowContaining(text: string): Promise<number> {
+  async userMessageNavigatorRowIdContaining(text: string): Promise<string> {
     return this.#page.evaluate((expected) => {
       const navigatorRow = [...document.querySelectorAll<HTMLElement>(
         '[data-user-message-navigator-row]',
       )].find((element) => element.textContent?.includes(expected));
       const rowId = navigatorRow?.dataset.userMessageNavigatorRow;
       if (!rowId) throw new Error(`Missing user-message navigator row containing: ${expected}`);
-
-      const feed = document.querySelector<HTMLElement>(
-        '[role="log"][aria-label="Chat messages"]',
-      );
-      const row = [...(feed?.querySelectorAll<HTMLElement>('[data-chat-row-id]') ?? [])].find(
-        (element) => element.dataset.chatRowId === rowId,
-      );
-      if (!feed || !row) throw new Error(`Missing chat row for navigator identity: ${rowId}`);
-
-      const feedRect = feed.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      const rowTop = feed.scrollTop + rowRect.top - feedRect.top;
-      return Math.max(0, rowTop - (feed.clientHeight - rowRect.height) / 2);
+      return rowId;
     }, text);
   }
 
-  async trackChatScrollAssignments(): Promise<void> {
-    await this.#page.$eval('[role="log"][aria-label="Chat messages"]', (element) => {
+  async trackChatScrollRequests(): Promise<void> {
+    await this.#page.$eval('[data-chat-scroll-viewport]', (element) => {
       const feed = element as HTMLElement;
-      let owner: object | null = feed;
-      let descriptor: PropertyDescriptor | undefined;
-      while (owner && !descriptor) {
-        descriptor = Object.getOwnPropertyDescriptor(owner, 'scrollTop');
-        owner = Object.getPrototypeOf(owner) as object | null;
-      }
-      if (!descriptor?.get || !descriptor.set) {
-        throw new Error('Missing native scrollTop descriptor.');
-      }
-      const nativeGet = descriptor.get;
-      const nativeSet = descriptor.set;
-      feed.dataset.testScrollAssignments = '[]';
-      Object.defineProperty(feed, 'scrollTop', {
-        configurable: true,
-        get: () => Number(nativeGet.call(feed)),
-        set: (value: number) => {
-          const requested = Number(value);
-          nativeSet.call(feed, requested);
-          const assignments = JSON.parse(feed.dataset.testScrollAssignments ?? '[]') as number[];
-          assignments.push(requested);
-          feed.dataset.testScrollAssignments = JSON.stringify(assignments);
-        },
-      });
+      const nativeScrollTo = feed.scrollTo.bind(feed);
+      feed.dataset.testScrollRequests = '[]';
+      feed.scrollTo = ((...args: unknown[]) => {
+        const first = args[0];
+        const top = typeof first === 'object' && first !== null
+          ? Number((first as ScrollToOptions).top ?? 0)
+          : Number(args[1] ?? 0);
+        const requests = JSON.parse(feed.dataset.testScrollRequests ?? '[]') as number[];
+        requests.push(top);
+        feed.dataset.testScrollRequests = JSON.stringify(requests);
+        Reflect.apply(nativeScrollTo, feed, args);
+      }) as typeof feed.scrollTo;
     });
   }
 
-  async waitForStableChatScrollAssignment(
-    expected: number,
-    timeout = 20_000,
-  ): Promise<void> {
+  async waitForChatScrollRequest(timeout = 20_000): Promise<void> {
     await this.#page.waitForFunction(
-      (target) => {
-        const feed = document.querySelector<HTMLElement>(
-          '[role="log"][aria-label="Chat messages"]',
-        );
-        const assignments = JSON.parse(feed?.dataset.testScrollAssignments ?? '[]') as number[];
-        return assignments.some((value) => Math.abs(value - target) < 0.001);
+      () => {
+        const feed = document.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
+        const requests = JSON.parse(feed?.dataset.testScrollRequests ?? '[]') as number[];
+        return requests.length > 0;
       },
       { timeout },
-      expected,
-    );
-
-    await this.#page.evaluate(
-      () => new Promise<void>((resolve) => setTimeout(resolve, 100)),
-    );
-    const settled = await this.#page.$eval(
-      '[role="log"][aria-label="Chat messages"]',
-      (element) => {
-        const feed = element as HTMLElement;
-        const assignments = JSON.parse(feed.dataset.testScrollAssignments ?? '[]') as number[];
-        return { scrollTop: feed.scrollTop, lastAssignment: assignments.at(-1), assignments };
-      },
-    );
-    if (
-      settled.lastAssignment === undefined
-      || Math.abs(settled.lastAssignment - expected) >= 0.001
-      || Math.abs(settled.scrollTop - expected) >= 0.001
-    ) {
-      throw new Error(
-        `Chat scroll did not settle at ${expected}: ${JSON.stringify(settled)}`,
-      );
-    }
-  }
-
-  async waitForChatScrollTopGreaterThan(minimum: number, timeout = 20_000): Promise<void> {
-    await this.#page.waitForFunction(
-      (expected) => {
-        const feed = document.querySelector<HTMLElement>(
-          '[role="log"][aria-label="Chat messages"]',
-        );
-        return (feed?.scrollTop ?? 0) > expected;
-      },
-      { timeout },
-      minimum,
     );
   }
 

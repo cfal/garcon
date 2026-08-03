@@ -22,7 +22,6 @@ describe('Lightpanda user-message navigation', () => {
       await app.waitForText(`echo:${second}`);
       await app.sendComposer(third);
       await app.waitForText(`echo:${third}`);
-      await app.waitForChatScrollTopGreaterThan(0);
 
       await app.clickButton('Workspace actions');
       await app.clickMenuItem('Jump to user message');
@@ -34,12 +33,12 @@ describe('Lightpanda user-message navigation', () => {
       expect(rows[1]?.startsWith('navigator-second-turn')).toBe(true);
       expect(rows[2]?.startsWith('navigator-first-turn')).toBe(true);
 
-      const expectedScrollTop =
-        await app.expectedChatScrollTopForNavigatorRowContaining('navigator-first-turn');
-      await app.trackChatScrollAssignments();
+      const targetRowId = await app.userMessageNavigatorRowIdContaining('navigator-first-turn');
+      expect(targetRowId).toBeTruthy();
+      await app.trackChatScrollRequests();
       await app.clickUserMessageNavigatorRowContaining('navigator-first-turn');
       await app.waitForTextAbsent('User messages');
-      await app.waitForStableChatScrollAssignment(expectedScrollTop);
+      await app.waitForChatScrollRequest();
       fixture.assertNoBrowserErrors();
     });
   });

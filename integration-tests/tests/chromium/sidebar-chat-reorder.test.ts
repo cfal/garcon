@@ -1,22 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { access, mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium, type Browser, type BrowserContext, type Page, type Request } from 'playwright';
+import type { Page, Request } from 'playwright';
 import {
   parseReorderChatRequest,
   parseReorderChatResponse,
   type ReorderChatRequest,
   type ReorderChatResponse,
 } from '../../../common/chat-order-contracts.js';
+import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
-  createIntegrationFixture,
-  type IntegrationFixture,
-} from '../../support/integration-fixture.js';
+  withChromiumFixture,
+  type ChromiumFixture as BaseChromiumFixture,
+} from '../../support/chromium-fixture.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const WEB_BUILD_INDEX = join(REPO_ROOT, 'web', 'build', 'index.html');
-const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
 const CHAT_ROW_SELECTOR = '[data-sidebar-virtual-row][data-sidebar-virtual-list-row="normal"]';
 
 interface ReorderExchange {
@@ -31,91 +26,12 @@ interface ReorderExchange {
   };
 }
 
-interface ChromiumFixture {
-  integration: IntegrationFixture;
-  browser: Browser;
-  context: BrowserContext;
-  page: Page;
-  browserErrors: string[];
+interface ChromiumFixture extends BaseChromiumFixture {
   reorderExchanges: ReorderExchange[];
 }
 
 function isReorderRequest(request: Request): boolean {
   return request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/chats/reorder';
-}
-
-async function createChromiumFixture(): Promise<ChromiumFixture> {
-  await access(WEB_BUILD_INDEX);
-  const integration = await createIntegrationFixture();
-  let browser: Browser | null = null;
-  let context: BrowserContext | null = null;
-
-  try {
-    browser = await chromium.launch({ headless: true });
-    context = await browser.newContext({
-      viewport: { width: 1440, height: 900 },
-    });
-    await context.addInitScript(() => {
-      const localSettingsKey = 'pref_local_settings';
-      try {
-        const stored = JSON.parse(globalThis.localStorage.getItem(localSettingsKey) ?? '{}');
-        const snapshot =
-          stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
-        globalThis.localStorage.setItem(
-          localSettingsKey,
-          JSON.stringify({ ...snapshot, allowDirectChats: true }),
-        );
-      } catch {
-        globalThis.localStorage.setItem(
-          localSettingsKey,
-          JSON.stringify({ allowDirectChats: true }),
-        );
-      }
-    });
-
-    const page = await context.newPage();
-    const browserErrors: string[] = [];
-    const reorderExchanges: ReorderExchange[] = [];
-    const exchangesByRequest = new Map<Request, ReorderExchange>();
-    page.on('pageerror', (error) => browserErrors.push(`pageerror: ${error.message}`));
-    page.on('console', (message) => {
-      if (message.type() === 'error') browserErrors.push(`console.error: ${message.text()}`);
-    });
-    page.on('request', (request) => {
-      if (!isReorderRequest(request)) return;
-      const exchange: ReorderExchange = {
-        request: {
-          method: request.method(),
-          url: request.url(),
-          body: request.postData(),
-        },
-      };
-      reorderExchanges.push(exchange);
-      exchangesByRequest.set(request, exchange);
-    });
-    page.on('response', async (response) => {
-      const exchange = exchangesByRequest.get(response.request());
-      if (!exchange) return;
-      exchange.response = {
-        status: response.status(),
-        body: await response.text().catch(() => null),
-      };
-    });
-
-    return {
-      integration,
-      browser,
-      context,
-      page,
-      browserErrors,
-      reorderExchanges,
-    };
-  } catch (error) {
-    await context?.close().catch(() => undefined);
-    await browser?.close().catch(() => undefined);
-    await integration.dispose().catch(() => undefined);
-    throw error;
-  }
 }
 
 async function normalOrder(integration: IntegrationFixture): Promise<string[]> {
@@ -316,33 +232,42 @@ async function createChats(integration: IntegrationFixture, count: number): Prom
   return chatIds;
 }
 
-async function writeDiagnostics(
+async function withSidebarChromiumFixture<T>(
   testName: string,
-  fixture: ChromiumFixture,
-  error: unknown,
-): Promise<string> {
-  const safeName = testName
-    .replace(/[^a-z0-9_-]+/gi, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase();
-  const prefix = join(ARTIFACT_ROOT, `${safeName || 'chromium'}-${Date.now()}`);
-  await mkdir(dirname(prefix), { recursive: true });
-
-  await fixture.page.screenshot({ path: `${prefix}.png`, fullPage: true }).catch(() => undefined);
-  await writeFile(`${prefix}.html`, await fixture.page.content().catch(() => '')).catch(
-    () => undefined,
-  );
-  await writeFile(
-    `${prefix}.json`,
-    JSON.stringify(
-      {
-        testName,
-        error:
-          error instanceof Error
-            ? { name: error.name, message: error.message, stack: error.stack }
-            : String(error),
-        url: fixture.page.url(),
-        browserErrors: fixture.browserErrors,
+  run: (fixture: ChromiumFixture) => Promise<T>,
+): Promise<T> {
+  return withChromiumFixture(
+    testName,
+    async (baseFixture) => {
+      const fixture = Object.assign(baseFixture, {
+        reorderExchanges: [] as ReorderExchange[],
+      });
+      const exchangesByRequest = new Map<Request, ReorderExchange>();
+      fixture.page.on('request', (request) => {
+        if (!isReorderRequest(request)) return;
+        const exchange: ReorderExchange = {
+          request: {
+            method: request.method(),
+            url: request.url(),
+            body: request.postData(),
+          },
+        };
+        fixture.reorderExchanges.push(exchange);
+        exchangesByRequest.set(request, exchange);
+      });
+      fixture.page.on('response', async (response) => {
+        const exchange = exchangesByRequest.get(response.request());
+        if (!exchange) return;
+        exchange.response = {
+          status: response.status(),
+          body: await response.text().catch(() => null),
+        };
+      });
+      return run(fixture);
+    },
+    async (baseFixture) => {
+      const fixture = baseFixture as ChromiumFixture;
+      return {
         reorderExchanges: fixture.reorderExchanges,
         sidebarOrder: await sidebarOrder(fixture.page).catch(() => []),
         serverOrder: await normalOrder(fixture.integration).catch(() => []),
@@ -354,63 +279,14 @@ async function writeDiagnostics(
           .locator(`${CHAT_ROW_SELECTOR} > div.pointer-events-none`)
           .count()
           .catch(() => -1),
-        integration: fixture.integration.diagnostics(),
-      },
-      null,
-      2,
-    ),
+      };
+    },
   );
-  return `${prefix}.json`;
-}
-
-async function disposeChromiumFixture(fixture: ChromiumFixture): Promise<void> {
-  const errors: unknown[] = [];
-  try {
-    await fixture.context.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  try {
-    await fixture.browser.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  try {
-    await fixture.integration.dispose();
-  } catch (error) {
-    errors.push(error);
-  }
-  if (errors.length > 0) throw new AggregateError(errors, 'Chromium fixture cleanup failed.');
-}
-
-async function withChromiumFixture<T>(
-  testName: string,
-  run: (fixture: ChromiumFixture) => Promise<T>,
-): Promise<T> {
-  const fixture = await createChromiumFixture();
-  let failure: unknown;
-  try {
-    return await run(fixture);
-  } catch (error) {
-    failure = error;
-    const artifact = await writeDiagnostics(testName, fixture, error).catch(() => null);
-    if (artifact && error instanceof Error) {
-      error.message = `${error.message}\nChromium diagnostics: ${artifact}`;
-    }
-    throw error;
-  } finally {
-    try {
-      await disposeChromiumFixture(fixture);
-    } catch (disposeError) {
-      if (failure === undefined) throw disposeError;
-      console.error(disposeError);
-    }
-  }
 }
 
 describe('Chromium sidebar chat reorder', () => {
   test('survives repeated inverse drags, chat creation, and subsequent reorder actions', async () => {
-    await withChromiumFixture('sidebar-chat-reorder', async (fixture) => {
+    await withSidebarChromiumFixture('sidebar-chat-reorder', async (fixture) => {
       const chatIds = await createChats(fixture.integration, 4);
       const original = await normalOrder(fixture.integration);
       expect(original).toHaveLength(chatIds.length);
