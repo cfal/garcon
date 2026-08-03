@@ -238,6 +238,73 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages).toHaveLength(1);
 	});
 
+	it('fails an empty earlier page that still claims more history', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
+			lastSeq: 100,
+			pageOldestSeq: 51,
+			hasMore: true,
+		});
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({ messages: [], lastSeq: 100, pageOldestSeq: 0, hasMore: true }),
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await expect(chat.loadEarlierPage('chat-1')).resolves.toBe('failed');
+		expect(chat.pageStates.earlier).toMatchObject({
+			status: 'error',
+			error: 'Earlier transcript page did not advance the loaded window',
+		});
+		expect(chat.hasEarlierMessages).toBe(true);
+	});
+
+	it('invalidates an earlier page when gap recovery replaces the loaded window', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 50 }, (_, index) =>
+				entry(index + 51, assistant(`message-${index + 51}`)),
+			),
+			{ lastSeq: 100, pageOldestSeq: 51, hasMore: true },
+		);
+		let resolveEarlier!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveEarlier = resolve;
+			}),
+		);
+		const earlierLoad = chat.loadEarlierPage('chat-1');
+
+		chat.entries = Array.from({ length: 50 }, (_, index) =>
+			entry(index + 1, assistant(`stale-${index + 1}`)),
+		);
+		chat.oldestSeq = 1;
+		chat.lastSeq = 50;
+		expect(chat.applyMessages('chat-1', 'generation-1', [entry(101, assistant('live'))])).toBe(
+			'applied',
+		);
+		resolveEarlier({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: Array.from({ length: 50 }, (_, index) =>
+					entry(index + 1, assistant(`earlier-${index + 1}`)),
+				),
+				lastSeq: 101,
+				pageOldestSeq: 1,
+				hasMore: false,
+			}),
+		});
+
+		await expect(earlierLoad).resolves.toBe('invalidated');
+		expect(chat.entries.map((message) => message.seq)).toEqual(
+			Array.from({ length: 51 }, (_, index) => index + 51),
+		);
+	});
+
 	it('signals generation changes without replacing the current generation', () => {
 		const chat = new ActiveTranscriptState();
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('old'))]);

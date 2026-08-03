@@ -318,6 +318,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		} else {
 			const restored = this.transcriptCache.get(chatId);
 			if (!restored || restored.generationId !== generationId) return 'gap-detected';
+			this.#invalidatePageLoad();
 			this.generationId = restored.generationId;
 			this.entries = restored.messages;
 			this.lastSeq = restored.lastSeq;
@@ -580,6 +581,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	#applyEarlierPage(page: ChatPage): TranscriptPageLoadResult {
 		if (page.messages.length === 0) {
+			if (page.hasMore)
+				throw new Error('Earlier transcript page did not advance the loaded window');
 			this.hasEarlierMessages = false;
 			return 'exhausted';
 		}

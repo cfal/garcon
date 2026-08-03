@@ -32,7 +32,8 @@ describe('ConversationFeedRetentionState', () => {
 	it('continues closing transients after one callback fails', () => {
 		const retention = new ConversationFeedRetentionState();
 		const second = vi.fn();
-		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		consoleError.mockClear();
 		retention.acquireTransient('row-1', () => {
 			throw new Error('close failed');
 		});
@@ -41,7 +42,8 @@ describe('ConversationFeedRetentionState', () => {
 		retention.closeAllTransients();
 
 		expect(second).toHaveBeenCalledOnce();
-		expect(console.error).toHaveBeenCalledOnce();
+		expect(consoleError).toHaveBeenCalledOnce();
+		expect(retention.retainedKeys).toEqual([]);
 	});
 
 	it('prunes missing stable keys and closes their portals', () => {
@@ -52,6 +54,24 @@ describe('ConversationFeedRetentionState', () => {
 		retention.prune(['kept']);
 
 		expect(close).toHaveBeenCalledOnce();
+		expect(retention.retainedKeys).toEqual(['kept']);
+	});
+
+	it('continues pruning and releases failed transient closures', () => {
+		const retention = new ConversationFeedRetentionState();
+		const second = vi.fn();
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		consoleError.mockClear();
+		retention.acquireTransient('removed-1', () => {
+			throw new Error('close failed');
+		});
+		retention.acquireTransient('removed-2', second);
+		retention.acquire('kept', 'focus');
+
+		retention.prune(['kept']);
+
+		expect(second).toHaveBeenCalledOnce();
+		expect(consoleError).toHaveBeenCalledOnce();
 		expect(retention.retainedKeys).toEqual(['kept']);
 	});
 

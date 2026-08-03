@@ -3,6 +3,7 @@ export type ConversationFeedRetentionReason = 'focus' | 'transient' | 'selection
 interface TransientRegistration {
 	key: string;
 	close: () => void;
+	release: () => void;
 }
 
 export class ConversationFeedRetentionState {
@@ -48,14 +49,15 @@ export class ConversationFeedRetentionState {
 	acquireTransient(key: string, close: () => void): () => void {
 		const token = Symbol('transient');
 		const releaseLease = this.acquire(key, 'transient');
-		this.#transients.set(token, { key, close });
 		let released = false;
-		return () => {
+		const release = () => {
 			if (released) return;
 			released = true;
 			this.#transients.delete(token);
 			releaseLease();
 		};
+		this.#transients.set(token, { key, close, release });
+		return release;
 	}
 
 	closeAllTransients(): void {
@@ -65,6 +67,8 @@ export class ConversationFeedRetentionState {
 				registration.close();
 			} catch (error) {
 				console.error('Failed to close retained Chat UI', error);
+			} finally {
+				registration.release();
 			}
 		}
 	}
@@ -76,12 +80,16 @@ export class ConversationFeedRetentionState {
 
 		const removedKeys = new Set(removed);
 		for (const registration of [...this.#transients.values()]) {
-			if (removedKeys.has(registration.key)) registration.close();
+			if (!removedKeys.has(registration.key)) continue;
+			try {
+				registration.close();
+			} catch (error) {
+				console.error('Failed to close retained Chat UI', error);
+			} finally {
+				registration.release();
+			}
 		}
 		for (const key of removed) this.#leases.delete(key);
-		for (const [token, registration] of this.#transients) {
-			if (removedKeys.has(registration.key)) this.#transients.delete(token);
-		}
 		this.#publishKeys();
 	}
 
