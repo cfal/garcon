@@ -10,7 +10,6 @@
 	import {
 		containerPresentationForWidth,
 		observeContainerWidth,
-		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
 	import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
@@ -120,8 +119,12 @@
 	const observeDetailsWidth = observeContainerWidth((width) => {
 		containerWidth = width;
 	});
-	let containerPresentation = $derived<ContainerPresentation>(
-		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, gitContainerBreakpoints),
+	// Matches GitWorkbench: below the wide breakpoint the panes collapse into a
+	// single segmented pane, so the resizable tree and its toggle only exist in wide.
+	let containerPresentation = $derived<'narrow' | 'wide'>(
+		isMobile || containerPresentationForWidth(containerWidth, gitContainerBreakpoints) !== 'wide'
+			? 'narrow'
+			: 'wide',
 	);
 	let isSinglePane = $derived(containerPresentation === 'narrow');
 	let isWide = $derived(containerPresentation === 'wide');
@@ -212,7 +215,6 @@
 			<div
 				class={cn(
 					'flex min-h-0 flex-col overflow-hidden bg-background',
-					!isSinglePane && !isWide && 'w-72 shrink-0 border-r border-border',
 					isWide && fileTreeVisible && 'border-r border-border',
 					isSinglePane && 'absolute inset-0',
 					filePaneHidden && 'invisible pointer-events-none',
