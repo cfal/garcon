@@ -117,6 +117,10 @@
 		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">
 			<p class="font-medium">{m.chat_queue_steering()}</p>
 		</div>
+	{:else if editor.mutationBlocked}
+		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">
+			<p class="font-medium">{m.chat_queue_other_message_steering()}</p>
+		</div>
 	{:else if editor.phase === 'dispatching' || editor.phase === 'sent'}
 		<div class="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm" role="status">
 			<p class="font-medium">{m.chat_queue_already_sent()}</p>
@@ -136,9 +140,10 @@
 			bind:this={editorTextarea}
 			bind:value={editor.draft}
 			onkeydown={handleEditorKeydown}
-			disabled={editor.mutation !== 'idle' || editor.mutationBlocked}
+			disabled={editor.mutation !== 'idle'}
+			readonly={editor.mutationBlocked}
 			rows="4"
-			class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-base leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70 sm:pointer-fine:text-sm"
+			class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-base leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70 read-only:cursor-wait read-only:opacity-70 sm:pointer-fine:text-sm"
 		></textarea>
 	</label>
 

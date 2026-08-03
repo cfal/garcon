@@ -375,6 +375,7 @@
 								{entry}
 								position={index + 1}
 								error={rowErrors[entry.id]}
+								steering={queue?.steeringEntryId === entry.id}
 								deleting={deletingIds.has(entry.id)}
 								editDisabled={editorOpen ||
 									queueSteering ||

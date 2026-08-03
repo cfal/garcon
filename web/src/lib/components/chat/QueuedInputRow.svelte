@@ -29,6 +29,7 @@
 		entry: QueueEntry;
 		position: number;
 		error?: string;
+		steering: boolean;
 		deleting: boolean;
 		editDisabled: boolean;
 		deleteDisabled: boolean;
@@ -52,6 +53,7 @@
 		entry,
 		position,
 		error,
+		steering,
 		deleting,
 		editDisabled,
 		deleteDisabled,
@@ -132,6 +134,7 @@
 
 <li
 	bind:this={rowElement}
+	aria-busy={steering}
 	class="relative flex items-start gap-3 px-5 py-4 transition-opacity sm:px-6"
 	class:opacity-50={isDragging}
 >
@@ -160,6 +163,15 @@
 	</span>
 	<div class="min-w-0 flex-1">
 		<p class="whitespace-pre-wrap break-words text-sm leading-5">{entry.content}</p>
+		{#if steering}
+			<p
+				class="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"
+				role="status"
+			>
+				<Loader2 class="size-3.5 animate-spin" aria-hidden="true" />
+				{m.chat_queue_steering()}
+			</p>
+		{/if}
 		{#if error}
 			<p class="mt-2 text-xs text-destructive" role="alert">{error}</p>
 		{/if}

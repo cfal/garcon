@@ -372,8 +372,11 @@ describe('QueuedInputsDialog', () => {
 
 		component.setQueue(queue([entry(0), entry(1)], { steeringEntryId: 'entry-0' }));
 
-		await waitFor(() => expect(screen.getByText(m.chat_queue_steering())).toBeTruthy());
+		await waitFor(() => expect(screen.getAllByText(m.chat_queue_steering())).toHaveLength(2));
 		expect((textarea as HTMLTextAreaElement).value).toBe('Keep this steering draft');
+		expect(document.querySelector('li[aria-busy="true"]')?.textContent).toContain(
+			'Queued message 0',
+		);
 		expect(screen.queryByRole('button', { name: m.chat_queue_save_edit() })).toBeNull();
 		expect(
 			(screen.getByRole('button', { name: m.chat_queue_pause() }) as HTMLButtonElement).disabled,
@@ -408,17 +411,24 @@ describe('QueuedInputsDialog', () => {
 		await fireEvent.click(screen.getAllByRole('button', { name: m.chat_queue_edit_message() })[1]);
 		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
 		await fireEvent.input(textarea, { target: { value: 'Sibling draft' } });
+		textarea.focus();
 
 		component.setQueue(queue([entry(0), entry(1)], { steeringEntryId: 'entry-0' }));
 
-		await waitFor(() => expect((textarea as HTMLTextAreaElement).disabled).toBe(true));
+		await waitFor(() => expect((textarea as HTMLTextAreaElement).readOnly).toBe(true));
+		expect((textarea as HTMLTextAreaElement).disabled).toBe(false);
+		expect(document.activeElement).toBe(textarea);
+		expect(screen.getByText(m.chat_queue_other_message_steering())).toBeTruthy();
+		expect(document.querySelector('li[aria-busy="true"]')?.textContent).toContain(
+			'Queued message 0',
+		);
 		const save = screen.getByRole('button', { name: m.chat_queue_save_edit() });
 		expect((save as HTMLButtonElement).disabled).toBe(true);
 		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 		expect(onReplace).not.toHaveBeenCalled();
 
 		component.setQueue(queue([entry(0), entry(1)]));
-		await waitFor(() => expect((textarea as HTMLTextAreaElement).disabled).toBe(false));
+		await waitFor(() => expect((textarea as HTMLTextAreaElement).readOnly).toBe(false));
 		expect((save as HTMLButtonElement).disabled).toBe(false);
 	});
 
