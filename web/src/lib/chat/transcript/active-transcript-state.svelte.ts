@@ -23,12 +23,20 @@ import type {
 	ChatRestoreResult,
 } from './active-transcript-port.js';
 import { collectEarlierTranscriptMessages } from './transcript-page-progress.js';
+import {
+	applyPendingDeliveryStatuses,
+	mergeRowsWithPendingInputs,
+	sortPendingInputs,
+	uniqueEntriesByClientRequestId,
+	type ChatTranscriptRow,
+} from './transcript-row-projection.js';
 export type {
 	ActiveTranscriptPort,
 	ChatCursor,
 	ChatLoadMessagesOptions,
 	ChatRestoreResult,
 } from './active-transcript-port.js';
+export type { ChatTranscriptRow } from './transcript-row-projection.js';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
@@ -55,13 +63,6 @@ export interface TranscriptPageState {
 
 function idlePageState(): TranscriptPageState {
 	return { status: 'idle', error: null };
-}
-
-export interface ChatTranscriptRow {
-	kind: 'message';
-	id: string;
-	message: ChatMessage;
-	seq?: number;
 }
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
@@ -296,25 +297,31 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			return 'gap-detected';
 		}
-		const responseUpdated = messages.some(
-			(entry) => entry.seq > previousLastSeq && isResponseMessage(entry.message),
-		);
+		const responseMessageTypes = messages.flatMap((entry) => {
+			if (entry.seq <= previousLastSeq) return [];
+			const type = responseMessageType(entry.message);
+			return type ? [type] : [];
+		});
+		const cursorAdvanced = result.lastSeq > previousLastSeq;
 		if (this.hasLaterMessages) {
 			this.generationId = generationId;
 			this.lastSeq = result.lastSeq;
-			if (result.changed) {
+			if (result.changed || cursorAdvanced) {
 				this.clearLocalNotices(noticeRevision);
 			}
 			if (this.entries.length > 0 && this.loadStatus !== 'error') {
 				this.loadStatus = 'loaded';
 			}
-			if (result.changed) {
-				this.#recordFeedMutation('live-append', responseUpdated);
+			if (result.changed || cursorAdvanced) {
+				this.#recordFeedMutation('live-append', responseMessageTypes);
 			}
 			return 'applied';
 		}
+		const preserveExpandedVisibleWindow =
+			this.visibleMessageCount > INITIAL_VISIBLE_MESSAGES &&
+			this.visibleMessageCount >= this.displayMessageCount;
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
-		const visibleChanged = applied.status === 'applied' && applied.changed;
+		let entriesChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
 			const shouldCompact =
 				!this.isUserScrolledUp && this.visibleMessageCount <= INITIAL_VISIBLE_MESSAGES;
@@ -334,20 +341,24 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			const restored = this.transcriptCache.get(chatId);
 			if (!restored || restored.generationId !== generationId) return 'gap-detected';
 			this.#invalidatePageLoad();
+			entriesChanged = true;
 			this.generationId = restored.generationId;
 			this.entries = restored.messages;
 			this.lastSeq = restored.lastSeq;
 			this.oldestSeq = restored.oldestSeq;
 		}
-		if (result.changed || visibleChanged) {
+		if (entriesChanged) {
 			this.clearLocalNotices(noticeRevision);
 		}
 		this.totalMessages = this.entries.length;
+		if (entriesChanged && preserveExpandedVisibleWindow) {
+			this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
+		}
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
 		}
-		if (result.changed) {
-			this.#recordFeedMutation('live-append', responseUpdated);
+		if (entriesChanged) {
+			this.#recordFeedMutation('live-append', responseMessageTypes);
 		}
 		return 'applied';
 	}
@@ -938,110 +949,20 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.transcriptCache.remove(chatId);
 	}
 
-	#recordFeedMutation(kind: ConversationFeedMutationKind, responseUpdated = false): void {
-		this.#feedMutations.record(kind, responseUpdated);
+	#recordFeedMutation(
+		kind: ConversationFeedMutationKind,
+		responseMessageTypes: readonly string[] = [],
+	): void {
+		this.#feedMutations.record(kind, responseMessageTypes);
 	}
 }
 
-function isResponseMessage(message: ChatMessage): boolean {
-	return (
-		message instanceof AssistantMessage ||
+function responseMessageType(message: ChatMessage): string | null {
+	return message instanceof AssistantMessage ||
 		message instanceof ThinkingMessage ||
 		message instanceof ErrorMessage ||
 		message instanceof PermissionRequestMessage ||
 		isToolUseMessage(message)
-	);
-}
-
-function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
-	return inputs.slice().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-}
-
-function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMessage[] {
-	const seenClientRequestIds = new Set<string>();
-	return entries.filter((entry) => {
-		const message = entry.message;
-		if (!(message instanceof UserMessage) || !message.metadata?.clientRequestId) return true;
-		if (seenClientRequestIds.has(message.metadata.clientRequestId)) return false;
-		seenClientRequestIds.add(message.metadata.clientRequestId);
-		return true;
-	});
-}
-
-function applyPendingDeliveryStatuses(
-	entries: ChatViewMessage[],
-	pendingInputs: PendingUserInput[],
-): ChatViewMessage[] {
-	const unsettledStatuses = new Map(
-		pendingInputs
-			.filter(
-				(input) => input.deliveryStatus === 'failed' || input.deliveryStatus === 'unconfirmed',
-			)
-			.map((input) => [input.clientRequestId, input.deliveryStatus] as const),
-	);
-	if (unsettledStatuses.size === 0) return entries;
-
-	return entries.map((entry) => {
-		const message = entry.message;
-		if (!(message instanceof UserMessage)) return entry;
-		const clientRequestId = message.metadata?.clientRequestId;
-		const deliveryStatus = clientRequestId ? unsettledStatuses.get(clientRequestId) : undefined;
-		if (!deliveryStatus) return entry;
-		return {
-			...entry,
-			message: new UserMessage(message.timestamp, message.content, message.images, {
-				...message.metadata,
-				deliveryStatus,
-			}),
-		};
-	});
-}
-
-function pendingInputToMessage(input: PendingUserInput): UserMessage {
-	const placeholderAttachments = input.attachments?.map((attachment) => ({
-		name: attachment.name,
-		mimeType: 'application/octet-stream',
-		data: '',
-	}));
-	return new UserMessage(input.createdAt, input.content, input.images ?? placeholderAttachments, {
-		clientRequestId: input.clientRequestId,
-		turnId: input.turnId,
-		deliveryStatus: input.deliveryStatus,
-	});
-}
-
-function pendingInputToRow(input: PendingUserInput): ChatTranscriptRow {
-	return {
-		kind: 'message',
-		id: `pending:${input.clientRequestId}`,
-		message: pendingInputToMessage(input),
-	};
-}
-
-function mergeRowsWithPendingInputs(
-	rows: ChatTranscriptRow[],
-	pendingInputs: PendingUserInput[],
-): ChatTranscriptRow[] {
-	if (rows.length === 0) return pendingInputs.map(pendingInputToRow);
-
-	const pendingRows = pendingInputs.map(pendingInputToRow);
-	const merged: ChatTranscriptRow[] = [];
-	let messageIndex = 0;
-	let pendingIndex = 0;
-
-	while (messageIndex < rows.length && pendingIndex < pendingRows.length) {
-		const row = rows[messageIndex];
-		const pending = pendingRows[pendingIndex];
-		if (row.message.timestamp.localeCompare(pending.message.timestamp) < 0) {
-			merged.push(row);
-			messageIndex += 1;
-		} else {
-			merged.push(pending);
-			pendingIndex += 1;
-		}
-	}
-
-	if (messageIndex < rows.length) merged.push(...rows.slice(messageIndex));
-	if (pendingIndex < pendingRows.length) merged.push(...pendingRows.slice(pendingIndex));
-	return merged;
+		? message.type
+		: null;
 }

@@ -12,6 +12,7 @@ function mutationClock(dataRevision = 0): ConversationFeedMutationClock {
 	return {
 		dataRevision,
 		lastResponseRevision: 0,
+		lastResponseRevisionByMessageType: {},
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': 0,
@@ -702,9 +703,7 @@ describe('ConversationScrollController', () => {
 		let resolveTarget!: (result: 'completed') => void;
 		const viewport = fakeViewport({
 			isAtEnd: vi.fn(() => false),
-			scrollToTarget: vi.fn(
-				() => new Promise<'completed'>((resolve) => (resolveTarget = resolve)),
-			),
+			scrollToTarget: vi.fn(() => new Promise<'completed'>((resolve) => (resolveTarget = resolve))),
 		});
 		const { controller } = controllerFixture({ viewport });
 		controller.prepareInitialBottomRestore('chat-1');

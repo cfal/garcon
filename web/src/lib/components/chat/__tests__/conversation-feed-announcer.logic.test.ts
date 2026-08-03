@@ -23,10 +23,14 @@ function clock(
 	liveAppendRevision = 0,
 	presentationRevision = 0,
 	responseRevision = liveAppendRevision,
+	responseMessageTypes: readonly string[] = responseRevision > 0 ? ['assistant-message'] : [],
 ): ConversationFeedMutationClock {
 	return {
 		dataRevision,
 		lastResponseRevision: responseRevision,
+		lastResponseRevisionByMessageType: Object.fromEntries(
+			responseMessageTypes.map((messageType) => [messageType, responseRevision]),
+		),
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': liveAppendRevision,

@@ -11,6 +11,7 @@ function clock(
 	return {
 		dataRevision: Math.max(...Object.values(lastRevisionByKind)),
 		lastResponseRevision: 0,
+		lastResponseRevisionByMessageType: {},
 		lastRevisionByKind,
 	};
 }

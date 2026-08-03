@@ -93,11 +93,17 @@ describe('ActiveTranscriptState', () => {
 		const liveRevision = chat.feedMutationClock.dataRevision;
 		expect(chat.feedMutationClock.lastRevisionByKind['live-append']).toBe(liveRevision);
 		expect(chat.feedMutationClock.lastResponseRevision).toBe(liveRevision);
+		expect(chat.feedMutationClock.lastResponseRevisionByMessageType).toEqual({
+			'assistant-message': liveRevision,
+		});
 
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('duplicate'))]);
 		expect(chat.feedMutationClock.dataRevision).toBe(liveRevision);
 		chat.applyMessages('chat-1', 'generation-1', [entry(2, user('next prompt'))]);
 		expect(chat.feedMutationClock.lastResponseRevision).toBe(liveRevision);
+		expect(chat.feedMutationClock.lastResponseRevisionByMessageType).toEqual({
+			'assistant-message': liveRevision,
+		});
 
 		chat.appendLocalNotice('warning', 'notice');
 		expect(chat.feedMutationClock.lastRevisionByKind['presentation-structure']).toBe(
@@ -496,6 +502,7 @@ describe('ActiveTranscriptState', () => {
 		);
 
 		const snapshotLoad = chat.loadMessages('chat-1');
+		const revisionBeforeLiveMessage = chat.feedMutationClock.dataRevision;
 		expect(chat.applyMessages('chat-1', 'generation-1', [entry(2, assistant('live'))])).toBe(
 			'applied',
 		);
@@ -506,6 +513,12 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.chatMessages.map(contentOf)).toEqual(['existing', 'live']);
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'live', 'newer notice']);
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
+		expect(chat.feedMutationClock.lastRevisionByKind['live-append']).toBeGreaterThan(
+			revisionBeforeLiveMessage,
+		);
+		expect(chat.feedMutationClock.lastResponseRevisionByMessageType['assistant-message']).toBe(
+			chat.feedMutationClock.lastRevisionByKind['live-append'],
+		);
 		expect(chat.loadStatus).toBe('error');
 		expect(chat.loadError).toBe('snapshot unavailable');
 	});
@@ -989,7 +1002,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasInitialMessagesToReveal).toBe(false);
 	});
 
-	it('reveals every already-loaded row for explicit navigation', () => {
+	it('keeps every explicitly revealed row visible as live messages append', () => {
 		const chat = new ActiveTranscriptState();
 		const messages = Array.from({ length: 175 }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
@@ -1006,6 +1019,11 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows).toHaveLength(175);
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 		expect(chat.hasInitialMessagesToReveal).toBe(false);
+
+		chat.applyMessages('chat-1', 'generation-1', [entry(176, assistant('message-176'))]);
+
+		expect(chat.visibleRows).toHaveLength(176);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 	});
 
 	it.each([0, 20])(

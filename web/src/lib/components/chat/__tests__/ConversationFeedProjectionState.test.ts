@@ -19,6 +19,10 @@ function clock(
 	return {
 		dataRevision,
 		lastResponseRevision: overrides['live-append'] ?? 0,
+		lastResponseRevisionByMessageType:
+			overrides['live-append'] === undefined
+				? {}
+				: { 'assistant-message': overrides['live-append'] },
 		lastRevisionByKind: {
 			initial: 0,
 			'live-append': 0,
