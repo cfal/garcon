@@ -65,7 +65,7 @@
 		{:else}
 			<ChevronDown class="size-3.5" />
 		{/if}
-		<span role="status" aria-live="polite" aria-atomic="true">{label()}</span>
+		<span>{label()}</span>
 	</Button>
 	<div class="h-px flex-1 bg-border/70"></div>
 </div>

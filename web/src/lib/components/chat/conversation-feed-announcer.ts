@@ -130,7 +130,10 @@ export class ConversationFeedAnnouncerState {
 		const resumedLiveEnd =
 			this.#detachedStatusAnnounced && input.visible && input.isLiveWindow && input.pinnedToBottom;
 		if (resumedLiveEnd) this.#detachedStatusAnnounced = false;
-		if (!input.visible || !input.isLiveWindow) return '';
+		if (!input.visible || !input.isLiveWindow) {
+			this.#rememberLineages(input.rows, input.floatingPermissionIds);
+			return '';
+		}
 		const hasRowAppend = kinds.has('live-append') || kinds.has('presentation-structure');
 		if (!hasRowAppend && addedFloatingPermissionIds.length === 0) {
 			return resumedLiveEnd ? '' : null;
@@ -161,11 +164,8 @@ export class ConversationFeedAnnouncerState {
 		});
 		const responseUpdated =
 			addedPermissionAnnouncements.length > 0 ||
-			announcementCandidates.some(
-				(row) =>
-					row.kind === 'message' &&
-					(row.message instanceof AssistantMessage ||
-						row.message instanceof PermissionRequestMessage),
+			announcementCandidates.some((row) =>
+				this.#isResponseAnnouncement(row, input.hiddenToolTypes),
 			);
 		if (!input.pinnedToBottom) {
 			if (!responseUpdated || this.#detachedStatusAnnounced) return null;
@@ -188,6 +188,28 @@ export class ConversationFeedAnnouncerState {
 			announcements.push(m.chat_permission_permission_required());
 		}
 		return announcements.join('\n') || null;
+	}
+
+	#isResponseAnnouncement(row: ChatDisplayRow, hiddenToolTypes: readonly string[]): boolean {
+		if (row.kind !== 'message') return false;
+		if (
+			row.message instanceof AssistantMessage ||
+			row.message instanceof PermissionRequestMessage
+		) {
+			return true;
+		}
+		return (
+			isToolUseMessage(row.message) && announcementForAppendedRow(row, hiddenToolTypes) !== null
+		);
+	}
+
+	#rememberLineages(rows: ChatDisplayRow[], floatingPermissionIds: readonly string[]): void {
+		for (const requestId of this.#userRequestIds(rows)) {
+			rememberAnnouncementLineage(this.#observedUserRequestIds, requestId);
+		}
+		for (const permissionId of this.#permissionIds(rows, floatingPermissionIds)) {
+			rememberAnnouncementLineage(this.#observedPermissionIds, permissionId);
+		}
 	}
 
 	#userRequestIds(rows: ChatDisplayRow[]): Set<string> {

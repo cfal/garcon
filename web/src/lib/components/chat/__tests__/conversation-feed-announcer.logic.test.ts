@@ -161,6 +161,62 @@ describe('ConversationFeedAnnouncerState', () => {
 		).toBe('');
 	});
 
+	it('treats visible tool output as a detached response update', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		const firstTool = messageRow('2', new BashToolUseMessage('', 'tool-1', 'pwd'));
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), firstTool],
+				mutationClock: clock(2, 2),
+				...enabled,
+				pinnedToBottom: false,
+			}),
+		).toBe('New response available');
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [
+					assistantRow('1', 'existing'),
+					firstTool,
+					messageRow('3', new BashToolUseMessage('', 'tool-2', 'ls')),
+				],
+				mutationClock: clock(3, 3),
+				...enabled,
+				pinnedToBottom: false,
+			}),
+		).toBeNull();
+	});
+
+	it('does not treat suppressed tool output as a detached response update', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [
+					assistantRow('1', 'existing'),
+					messageRow('2', new BashToolUseMessage('', 'tool-1', 'pwd')),
+				],
+				mutationClock: clock(2, 2),
+				...enabled,
+				pinnedToBottom: false,
+				hiddenToolTypes: ['bash-tool-use'],
+			}),
+		).toBeNull();
+	});
+
 	it('announces only the newly streamed suffix at the live end', () => {
 		const announcer = new ConversationFeedAnnouncerState();
 		announcer.reconcile({
@@ -371,6 +427,86 @@ describe('ConversationFeedAnnouncerState', () => {
 				floatingPermissionIds: ['permission-1'],
 			}),
 		).toBe('Permission required');
+		const permission = messageRow(
+			'2',
+			new PermissionRequestMessage('', 'permission-1', new BashToolUseMessage('', 'tool-1', 'pwd')),
+		);
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), permission],
+				mutationClock: clock(3, 3, 2),
+				...enabled,
+			}),
+		).toBeNull();
+	});
+
+	it('does not replay a hidden pending user message after its durable echo arrives', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		const pending = messageRow(
+			'2',
+			new UserMessage('', 'send once', undefined, { clientRequestId: 'request-1' }),
+		);
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), pending],
+				mutationClock: clock(2, 0, 2),
+				...enabled,
+				visible: false,
+			}),
+		).toBe('');
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), pending],
+				mutationClock: clock(2, 0, 2),
+				...enabled,
+			}),
+		).toBeNull();
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing'), { ...pending, id: '3', seq: 3 }],
+				mutationClock: clock(3, 3, 2),
+				...enabled,
+			}),
+		).toBeNull();
+	});
+
+	it('does not replay a hidden floating permission after its transcript row arrives', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing')],
+				mutationClock: clock(2, 0, 2),
+				...enabled,
+				visible: false,
+				floatingPermissionIds: ['permission-1'],
+			}),
+		).toBe('');
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [assistantRow('1', 'existing')],
+				mutationClock: clock(2, 0, 2),
+				...enabled,
+				floatingPermissionIds: ['permission-1'],
+			}),
+		).toBeNull();
 		const permission = messageRow(
 			'2',
 			new PermissionRequestMessage('', 'permission-1', new BashToolUseMessage('', 'tool-1', 'pwd')),
