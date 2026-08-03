@@ -3,6 +3,7 @@ import {
 	classifyMeasuredConversationViewportFill,
 	classifyConversationVirtualStructure,
 	attainableConversationTargetOffset,
+	isConversationTargetLayoutReady,
 	retainedConversationRange,
 	shouldPreserveConversationVirtualEdge,
 } from '../ConversationFeedVirtualController.svelte';
@@ -135,5 +136,22 @@ describe('ConversationFeedVirtualController helpers', () => {
 				maximumOffset: 900,
 			}),
 		).toBe(375);
+	});
+
+	it('waits for pending rich content and image dimensions before settling a target', () => {
+		const row = document.createElement('div');
+		const pending = document.createElement('div');
+		pending.dataset.chatLayoutPending = 'true';
+		row.append(pending);
+		expect(isConversationTargetLayoutReady(row)).toBe(false);
+
+		pending.dataset.chatLayoutPending = 'false';
+		const image = document.createElement('img');
+		Object.defineProperty(image, 'complete', { configurable: true, value: false });
+		row.append(image);
+		expect(isConversationTargetLayoutReady(row)).toBe(false);
+
+		Object.defineProperty(image, 'complete', { configurable: true, value: true });
+		expect(isConversationTargetLayoutReady(row)).toBe(true);
 	});
 });

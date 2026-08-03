@@ -15,6 +15,7 @@ interface ReadingAnchor {
 interface TranscriptGeometry {
   distanceFromEnd: number;
   itemCount: number;
+  transcriptItemCount: number;
   modelCount: number;
   overlaps: Array<{ previous: string; next: string; amount: number }>;
   horizontalOverflow: Array<{ key: string; left: number; right: number }>;
@@ -241,8 +242,24 @@ async function verifyDetachedNearEndGrowth(page: Page): Promise<void> {
     for (let frame = 0; frame < 4; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
-    return { before, after, movement: Math.abs(after.scrollTop - before.scrollTop) };
+    return {
+      before,
+      after,
+      movement: Math.abs(after.scrollTop - before.scrollTop),
+    };
   }, ITEM_SELECTOR);
+  expect(
+    growth.after.itemHeight - growth.before.itemHeight,
+    JSON.stringify(growth, null, 2),
+  ).toBeGreaterThan(100);
+  expect(
+    growth.after.scrollHeight - growth.before.scrollHeight,
+    JSON.stringify(growth, null, 2),
+  ).toBeGreaterThan(100);
+  expect(
+    (growth.after.virtualHeight ?? 0) - (growth.before.virtualHeight ?? 0),
+    JSON.stringify(growth, null, 2),
+  ).toBeGreaterThan(100);
   expect(growth.movement, JSON.stringify(growth, null, 2)).toBeLessThanOrEqual(1);
 }
 
@@ -480,30 +497,81 @@ async function installDelayedTargetGrowth(page: Page, rowId: string): Promise<vo
       __stopDelayedTargetGrowth?: () => void;
     };
     browserGlobal.__stopDelayedTargetGrowth?.();
+    let cancelled = false;
+    let observer: MutationObserver | null = null;
+    let growingRow: HTMLElement | null = null;
+    browserGlobal.__stopDelayedTargetGrowth = () => {
+      cancelled = true;
+      observer?.disconnect();
+      growingRow?.style.removeProperty('padding-bottom');
+      growingRow?.removeAttribute('data-chat-layout-pending');
+    };
     const growTarget = (): boolean => {
       const row = [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
         (candidate) => candidate.dataset.chatRowId === expectedRowId,
       );
-      const wrapper = row?.closest<HTMLElement>('[data-chat-virtual-item]');
-      if (!wrapper) return false;
+      if (!row) return false;
+      growingRow = row;
+      row.dataset.chatLayoutPending = 'true';
       let frame = 0;
       const grow = () => {
-        if (frame >= 60 || !wrapper.isConnected) return;
+        if (cancelled || frame >= 60 || !row.isConnected) return;
         frame += 1;
-        wrapper.style.paddingBottom = `${frame * 40}px`;
+        row.style.paddingBottom = `${frame * 40}px`;
         requestAnimationFrame(grow);
       };
       requestAnimationFrame(grow);
       return true;
     };
     if (growTarget()) return;
-    const observer = new MutationObserver(() => {
+    observer = new MutationObserver(() => {
       if (!growTarget()) return;
+      observer?.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }, rowId);
+}
+
+async function installDelayedTargetCompletion(page: Page, rowId: string): Promise<void> {
+  await page.evaluate((expectedRowId) => {
+    const completeTarget = (): boolean => {
+      const row = [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
+        (candidate) => candidate.dataset.chatRowId === expectedRowId,
+      );
+      if (!row) return false;
+      row.dataset.chatLayoutPending = 'true';
+      let frame = 0;
+      const complete = () => {
+        if (!row.isConnected) return;
+        frame += 1;
+        if (frame === 12) row.style.paddingBottom = '600px';
+        if (frame >= 16) {
+          row.removeAttribute('data-chat-layout-pending');
+          return;
+        }
+        requestAnimationFrame(complete);
+      };
+      requestAnimationFrame(complete);
+      return true;
+    };
+    if (completeTarget()) return;
+    const observer = new MutationObserver(() => {
+      if (!completeTarget()) return;
       observer.disconnect();
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    browserGlobal.__stopDelayedTargetGrowth = () => observer.disconnect();
   }, rowId);
+}
+
+async function selectAndVerifyDelayedNavigatorTarget(page: Page, marker: string): Promise<void> {
+  await openMainWorkspaceActions(page);
+  await clickMenuItem(page, 'Jump to user message');
+  await page.getByText('User messages', { exact: true }).waitFor();
+  const rowId = await userMessageNavigatorRowIdContaining(page, marker);
+  await installDelayedTargetCompletion(page, rowId);
+  await clickUserMessageNavigatorRowContaining(page, marker);
+  await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+  await waitForRowCentered(page, rowId);
 }
 
 async function interruptNavigatorJump(page: Page, marker: string): Promise<void> {
@@ -512,23 +580,8 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
   await installDelayedTargetGrowth(page, rowId);
-  await clickUserMessageNavigatorRowContaining(page, marker);
-  await page.waitForFunction(
-    (expectedRowId) =>
-      [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].some(
-        (candidate) => candidate.dataset.chatRowId === expectedRowId,
-      ),
-    rowId,
-    { timeout: 20_000 },
-  );
-  const box = await page.locator(FEED_SELECTOR).boundingBox();
-  if (!box) throw new Error('Transcript viewport has no interaction bounds.');
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -600);
-  await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+  await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
     const feed = feedElement as HTMLElement;
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     const browserGlobal = globalThis as typeof globalThis & {
       __chatProgrammaticScrollWrites?: number[];
       __restoreChatScrollTo?: () => void;
@@ -539,24 +592,64 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
       feed.scrollTo = originalScrollTo;
     };
     feed.scrollTo = ((options: ScrollToOptions | number, y?: number) => {
-      const top = typeof options === 'number' ? (y ?? feed.scrollTop) : (options.top ?? feed.scrollTop);
+      const top =
+        typeof options === 'number' ? (y ?? feed.scrollTop) : (options.top ?? feed.scrollTop);
       browserGlobal.__chatProgrammaticScrollWrites?.push(top);
       if (typeof options === 'number') originalScrollTo(options, y ?? feed.scrollTop);
       else originalScrollTo(options);
     }) as typeof feed.scrollTo;
   });
-  await page.waitForTimeout(750);
-  const writes = await page.evaluate(() => {
+  await clickUserMessageNavigatorRowContaining(page, marker);
+  await page.waitForFunction(
+    (expectedRowId) =>
+      [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].some(
+        (candidate) => candidate.dataset.chatRowId === expectedRowId,
+      ),
+    rowId,
+    { timeout: 20_000 },
+  );
+  await page.waitForFunction(
+    () => {
+      const browserGlobal = globalThis as typeof globalThis & {
+        __chatProgrammaticScrollWrites?: number[];
+      };
+      return (browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0) > 0;
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  const writesBeforeIntent = await page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatProgrammaticScrollWrites?: number[];
+    };
+    return browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
+  });
+  const box = await page.locator(FEED_SELECTOR).boundingBox();
+  if (!box) throw new Error('Transcript viewport has no interaction bounds.');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -600);
+  const writes = await page.evaluate(async () => {
     const browserGlobal = globalThis as typeof globalThis & {
       __chatProgrammaticScrollWrites?: number[];
       __restoreChatScrollTo?: () => void;
+      __stopDelayedTargetGrowth?: () => void;
     };
-    const recorded = browserGlobal.__chatProgrammaticScrollWrites ?? [];
+    for (let frame = 0; frame < 2; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const afterCancellation = browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
+    for (let frame = 0; frame < 45; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const final = browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
     browserGlobal.__restoreChatScrollTo?.();
+    browserGlobal.__stopDelayedTargetGrowth?.();
     delete browserGlobal.__restoreChatScrollTo;
-    return recorded;
+    delete browserGlobal.__stopDelayedTargetGrowth;
+    return { afterCancellation, final };
   });
-  expect(writes).toEqual([]);
+  expect(writesBeforeIntent).toBeGreaterThan(0);
+  expect(writes.final).toBe(writes.afterCancellation);
   await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
 }
 
@@ -571,6 +664,7 @@ async function transcriptGeometry(page: Page): Promise<TranscriptGeometry> {
         .map((item) => ({
           key: item.dataset.chatVirtualItem ?? '',
           rect: item.getBoundingClientRect(),
+          hasTranscriptRow: Boolean(item.querySelector('[data-chat-row-id]')),
         }))
         .sort((left, right) => left.rect.top - right.rect.top);
       const overlaps: TranscriptGeometry['overlaps'] = [];
@@ -588,6 +682,7 @@ async function transcriptGeometry(page: Page): Promise<TranscriptGeometry> {
       return {
         distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
         itemCount: items.length,
+        transcriptItemCount: items.filter((item) => item.hasTranscriptRow).length,
         modelCount: Number(sizer.dataset.chatVirtualModelCount ?? 0),
         overlaps,
         horizontalOverflow: items
@@ -657,6 +752,7 @@ describe('Chromium transcript virtualization', () => {
 
         const expandedGeometry = await transcriptGeometry(fixture.page);
         expect(expandedGeometry.modelCount).toBeGreaterThanOrEqual(100);
+        expect(expandedGeometry.transcriptItemCount).toBeGreaterThan(0);
         expect(expandedGeometry.itemCount).toBeLessThan(60);
         expect(expandedGeometry.overlaps).toEqual([]);
         expect(expandedGeometry.horizontalOverflow).toEqual([]);
@@ -671,16 +767,9 @@ describe('Chromium transcript virtualization', () => {
         await clickUserMessageNavigatorRowContaining(fixture.page, 'chromium-virtual-turn-45');
         await fixture.page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
         await waitForRowCentered(fixture.page, targetRowId);
-        await selectAndVerifyEdgeNavigatorTarget(
-          fixture.page,
-          'chromium-virtual-turn-11',
-          'start',
-        );
-        await selectAndVerifyEdgeNavigatorTarget(
-          fixture.page,
-          'chromium-generation-prime',
-          'end',
-        );
+        await selectAndVerifyDelayedNavigatorTarget(fixture.page, 'chromium-virtual-turn-38');
+        await selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-virtual-turn-11', 'start');
+        await selectAndVerifyEdgeNavigatorTarget(fixture.page, 'chromium-generation-prime', 'end');
         await interruptNavigatorJump(fixture.page, 'chromium-virtual-turn-40');
 
         await scrollToPosition(fixture.page, 'middle');

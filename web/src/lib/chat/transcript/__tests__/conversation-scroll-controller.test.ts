@@ -235,6 +235,29 @@ describe('ConversationScrollController', () => {
 		expect(state.isUserScrolledUp).toBe(true);
 	});
 
+	it('requires an explicit retry after a directional page failure', async () => {
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const { controller, scroller } = controllerFixture({
+			state: {
+				canLoadEarlier: true,
+				loadEarlierPage,
+				pageStates: {
+					earlier: { status: 'error', error: 'network unavailable' },
+					later: { status: 'idle', error: null },
+				},
+			},
+			scroller: { scrollTop: 0 },
+		});
+
+		controller.noteUserScrollIntent('earlier');
+		controller.handleScroll();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+
+		await expect(controller.requestPage('earlier', 'button')).resolves.toBe('loaded');
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		expect(scroller.scrollTop).toBe(0);
+	});
+
 	it('invalidates a page mutation when layout is superseded', async () => {
 		const waitForLayout = vi
 			.fn<ConversationViewportPort['waitForLayout']>()
@@ -415,6 +438,61 @@ describe('ConversationScrollController', () => {
 		});
 		await controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('does not automatically retry a failed page while filling the viewport', async () => {
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const { controller } = controllerFixture({
+			viewport: fakeViewport({
+				measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
+					async () => 'underfilled',
+				),
+			}),
+			state: {
+				canAutoFillEarlier: true,
+				canLoadEarlier: true,
+				loadEarlierPage,
+				pageStates: {
+					earlier: { status: 'error', error: 'network unavailable' },
+					later: { status: 'idle', error: null },
+				},
+			},
+		});
+
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+	});
+
+	it('does not let viewport autofill cancel an explicit target navigation', async () => {
+		let resolveFill!: (result: 'underfilled') => void;
+		let resolveTarget!: (result: 'completed') => void;
+		const measureViewportFill = vi.fn(
+			() => new Promise<'underfilled'>((resolve) => (resolveFill = resolve)),
+		);
+		const scrollToTarget = vi.fn<ConversationViewportPort['scrollToTarget']>(
+			() => new Promise<'completed'>((resolve) => (resolveTarget = resolve)),
+		);
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
+		const viewport = fakeViewport({ measureViewportFill, scrollToTarget });
+		const { controller } = controllerFixture({
+			viewport,
+			state: { canAutoFillEarlier: true, canLoadEarlier: true, loadEarlierPage },
+		});
+
+		const fill = controller.fillUnderfilledViewport();
+		await vi.waitFor(() => expect(measureViewportFill).toHaveBeenCalledOnce());
+		const navigation = controller.jumpToMessageRow({
+			chatId: 'chat-1',
+			generationId: 'generation-1',
+			rowId: 'generation-1:7',
+		});
+		await vi.waitFor(() => expect(scrollToTarget).toHaveBeenCalledOnce());
+
+		resolveFill('underfilled');
+		await fill;
+		expect(loadEarlierPage).not.toHaveBeenCalled();
+		resolveTarget('completed');
+		await expect(navigation).resolves.toBe('completed');
 	});
 
 	it('reconciles queue height through the viewport without row geometry', () => {

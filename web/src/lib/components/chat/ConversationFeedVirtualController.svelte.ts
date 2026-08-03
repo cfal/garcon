@@ -26,7 +26,7 @@ export const CHAT_VIRTUAL_OVERSCAN = 6;
 export const CHAT_GEOMETRY_END_THRESHOLD_PX = 1;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
-const MAX_TARGET_SETTLE_ITERATIONS = 60;
+const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
 const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
 
@@ -130,6 +130,16 @@ export function attainableConversationTargetOffset(input: {
 	maximumOffset: number;
 }): number {
 	return Math.max(0, Math.min(input.maximumOffset, input.currentOffset + input.alignmentDelta));
+}
+
+export function isConversationTargetLayoutReady(node: HTMLElement): boolean {
+	if (
+		node.matches('[data-chat-layout-pending="true"]') ||
+		node.querySelector('[data-chat-layout-pending="true"]')
+	) {
+		return false;
+	}
+	return Array.from(node.querySelectorAll('img')).every((image) => image.complete);
 }
 
 export class ConversationFeedVirtualController implements ConversationViewportPort {
@@ -281,6 +291,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return;
 		}
 		this.#cancelTargetScroll();
+		this.cancelPendingLayoutMutation();
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		void this.#restoreInitialEndAfterCommit(operationEpoch);
 	}
@@ -332,7 +343,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
 				await tick();
 				await nextAnimationFrame();
-				if (token !== this.#layoutMutationToken || !this.isReady()) return 'unsettled';
+				if (
+					token !== this.#layoutMutationToken ||
+					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
+					!this.isReady()
+				) {
+					return 'unsettled';
+				}
 				const viewport = this.options.viewport;
 				if (!viewport) return 'unsettled';
 				const instance = this.#instance();
@@ -356,8 +373,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				if (nextUnmeasuredIndex < 0) return 'unsettled';
 				instance.scrollToIndex(nextUnmeasuredIndex, { align: 'start', behavior: 'auto' });
 			}
-			if (restoreEnd && this.isReady()) this.#instance().scrollToEnd({ behavior: 'auto' });
-			else if (readingAnchor) await this.#restoreVirtualAnchor(readingAnchor, false, false);
+			if (
+				restoreEnd &&
+				this.#isCurrentProgrammaticScrollOperation(operationEpoch) &&
+				this.isReady()
+			) {
+				this.#instance().scrollToEnd({ behavior: 'auto' });
+			} else if (readingAnchor) await this.#restoreVirtualAnchor(readingAnchor, false, false);
 			return 'unsettled';
 		} finally {
 			this.#finishProgrammaticScrollOperation(operationEpoch);
@@ -445,10 +467,20 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			for (let attempt = 0; attempt < MAX_TARGET_SETTLE_ITERATIONS; attempt += 1) {
 				await tick();
 				await nextAnimationFrame();
-				if (token !== this.#targetToken) return 'cancelled';
+				if (
+					token !== this.#targetToken ||
+					!this.#isCurrentProgrammaticScrollOperation(operationEpoch)
+				) {
+					return 'cancelled';
+				}
 				if (!this.isReady()) return 'not-ready';
 				const node = this.#findTargetNode(resolved.innerRowId);
 				if (!node) continue;
+				if (!isConversationTargetLayoutReady(node)) {
+					previousRect = null;
+					stableFrames = 0;
+					continue;
+				}
 				const viewport = this.options.viewport;
 				if (!viewport) return 'not-ready';
 				const attainableOffset = attainableConversationTargetOffset({
@@ -696,10 +728,19 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			if (clearMeasurements) this.#instance().measure();
 			if (restoreEnd) {
 				await tick();
-				if (token !== this.#layoutMutationToken || !this.isReady()) return false;
+				if (
+					token !== this.#layoutMutationToken ||
+					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
+					!this.isReady()
+				) {
+					return false;
+				}
 				this.#instance().scrollToEnd({ behavior: 'auto' });
 				await this.#completeEndRestore(token, operationEpoch);
-				return token === this.#layoutMutationToken;
+				return (
+					token === this.#layoutMutationToken &&
+					this.#isCurrentProgrammaticScrollOperation(operationEpoch)
+				);
 			}
 			const index = model.indexByKey.get(key);
 			if (index === undefined) return false;
@@ -707,7 +748,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
 				await tick();
 				await nextAnimationFrame();
-				if (token !== this.#layoutMutationToken || !this.isReady()) return false;
+				if (
+					token !== this.#layoutMutationToken ||
+					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
+					!this.isReady()
+				) {
+					return false;
+				}
 				const item = this.#instance()
 					.getVirtualItems()
 					.find((candidate) => candidate.key === key);
@@ -715,7 +762,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				const offset = key === anchor.key ? anchor.offsetWithinItem : 0;
 				this.#instance().scrollToOffset(item.start + offset, { behavior: 'auto' });
 				await nextAnimationFrame();
-				if (token !== this.#layoutMutationToken || !this.isReady()) return false;
+				if (
+					token !== this.#layoutMutationToken ||
+					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
+					!this.isReady()
+				) {
+					return false;
+				}
 				const settledItem = this.#instance()
 					.getVirtualItems()
 					.find((candidate) => candidate.key === key);
@@ -791,14 +844,26 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
 				await tick();
 				await nextAnimationFrame();
-				if (token !== this.#layoutMutationToken || !this.isReady()) return;
+				if (
+					token !== this.#layoutMutationToken ||
+					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
+					!this.isReady()
+				) {
+					return;
+				}
 				if (this.isAtEnd()) {
 					this.options.onInitialEndRestored?.();
 					return;
 				}
 				this.#instance().scrollToEnd({ behavior: 'auto' });
 			}
-			if (token !== this.#layoutMutationToken || !this.isReady()) return;
+			if (
+				token !== this.#layoutMutationToken ||
+				!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
+				!this.isReady()
+			) {
+				return;
+			}
 			this.#instance().scrollToEnd({ behavior: 'auto' });
 			this.options.onInitialEndRestored?.();
 		} finally {
@@ -822,7 +887,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		for (let attempt = 0; attempt < MAX_SETTLE_ITERATIONS; attempt += 1) {
 			await tick();
 			await nextAnimationFrame();
-			if (token !== this.#layoutMutationToken || !this.isReady()) break;
+			if (
+				token !== this.#layoutMutationToken ||
+				!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
+				!this.isReady()
+			) {
+				break;
+			}
 			const viewport = this.options.viewport;
 			if (!viewport) break;
 			if (
@@ -872,6 +943,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#beginProgrammaticScrollOperation(): number {
 		this.#programmaticScrollActive = true;
 		return ++this.#programmaticScrollEpoch;
+	}
+
+	#isCurrentProgrammaticScrollOperation(epoch: number): boolean {
+		return epoch === this.#programmaticScrollEpoch;
 	}
 
 	#finishProgrammaticScrollOperation(epoch: number): void {

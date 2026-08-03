@@ -67,6 +67,7 @@ export class ConversationScrollController {
 	#previousScrollTop: number | null = null;
 	#viewportOperationEpoch = 0;
 	#isPageMutationInProgress = false;
+	#activeTargetNavigations = 0;
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -214,7 +215,7 @@ export class ConversationScrollController {
 		reason: PageRequestReason,
 	): Promise<TranscriptPageLoadResult> {
 		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId || !this.#canRequestPage(direction)) return 'invalidated';
+		if (!chatId || !this.#canRequestPage(direction, reason === 'button')) return 'invalidated';
 
 		this.#boundaryArmed[direction] = false;
 		this.#followLiveRequiresIntentAfter = Math.max(
@@ -285,35 +286,40 @@ export class ConversationScrollController {
 		) {
 			return 'unavailable';
 		}
-		this.deps.chatState.invalidatePendingHistoryLoad();
-		await tick();
-		if (
-			this.deps.sessions.selectedChatId !== target.chatId ||
-			this.deps.chatState.generationId !== target.generationId
-		) {
-			return 'cancelled';
-		}
-		const operationEpoch = ++this.#viewportOperationEpoch;
-		const viewport = this.deps.getViewport();
-		if (!viewport) return 'unavailable';
 		const wasPinned = this.isPinnedToBottom;
-		this.#preserveHistoryBrowsing();
-		const result = await viewport.scrollToTarget(
-			{ kind: 'row', id: target.rowId },
-			{ align: 'center' },
-		);
-		if (!this.#isCurrentViewportOperation(target.chatId, operationEpoch)) return 'cancelled';
-		if (result === 'cancelled') return 'cancelled';
-		if (result !== 'completed') {
-			if (wasPinned) {
-				viewport.scrollToEnd();
-				this.setPinnedToBottom(true);
+		this.#activeTargetNavigations += 1;
+		try {
+			this.deps.chatState.invalidatePendingHistoryLoad();
+			await tick();
+			if (
+				this.deps.sessions.selectedChatId !== target.chatId ||
+				this.deps.chatState.generationId !== target.generationId
+			) {
+				return 'cancelled';
 			}
-			return 'unavailable';
+			const operationEpoch = ++this.#viewportOperationEpoch;
+			const viewport = this.deps.getViewport();
+			if (!viewport) return 'unavailable';
+			this.#preserveHistoryBrowsing();
+			const result = await viewport.scrollToTarget(
+				{ kind: 'row', id: target.rowId },
+				{ align: 'center' },
+			);
+			if (!this.#isCurrentViewportOperation(target.chatId, operationEpoch)) return 'cancelled';
+			if (result === 'cancelled') return 'cancelled';
+			if (result !== 'completed') {
+				if (wasPinned) {
+					viewport.scrollToEnd();
+					this.setPinnedToBottom(true);
+				}
+				return 'unavailable';
+			}
+			const atLiveEnd = viewport.isAtEnd();
+			this.setPinnedToBottom(atLiveEnd);
+			return 'completed';
+		} finally {
+			this.#activeTargetNavigations -= 1;
 		}
-		const atLiveEnd = viewport.isAtEnd();
-		this.setPinnedToBottom(atLiveEnd);
-		return 'completed';
 	}
 
 	async jumpToDomAnchor(anchorId: string): Promise<boolean> {
@@ -330,7 +336,14 @@ export class ConversationScrollController {
 
 	async fillUnderfilledViewport(): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId || !this.#isViewportVisible || this.#isAutoFillingViewport) return;
+		if (
+			!chatId ||
+			!this.#isViewportVisible ||
+			this.#isAutoFillingViewport ||
+			this.#activeTargetNavigations > 0
+		) {
+			return;
+		}
 		if (!this.deps.chatState.hasLaterMessages) {
 			if (this.deps.chatState.isUserScrolledUp || this.deps.chatState.hasInitialMessagesToReveal)
 				return;
@@ -343,19 +356,27 @@ export class ConversationScrollController {
 		this.#isAutoFillingViewport = true;
 		try {
 			while (this.deps.sessions.selectedChatId === chatId && this.#isViewportVisible) {
+				if (this.#activeTargetNavigations > 0) return;
 				const layout = await viewport.waitForLayout({
 					minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
 				});
 				if (layout !== 'settled') return;
 				if ((await viewport.measureViewportFill()) !== 'underfilled') return;
+				if (this.#activeTargetNavigations > 0) return;
 
 				let result: TranscriptPageLoadResult;
 				if (this.deps.chatState.hasLaterMessages) {
+					if (!this.#canRequestPage('later')) return;
 					result = await this.#mutatePage('later', () => this.deps.chatState.loadLaterPage(chatId));
 				} else if (this.deps.chatState.canAutoFillEarlier) {
-					result = this.deps.chatState.revealEarlierLoadedRows()
-						? await this.#waitForCurrentLayout('loaded')
-						: await this.#mutatePage('earlier', () => this.deps.chatState.loadEarlierPage(chatId));
+					if (this.deps.chatState.revealEarlierLoadedRows()) {
+						result = await this.#waitForCurrentLayout('loaded');
+					} else {
+						if (!this.#canRequestPage('earlier')) return;
+						result = await this.#mutatePage('earlier', () =>
+							this.deps.chatState.loadEarlierPage(chatId),
+						);
+					}
 				} else {
 					return;
 				}
@@ -496,10 +517,12 @@ export class ConversationScrollController {
 		void this.requestPage(direction, 'scroll');
 	}
 
-	#canRequestPage(direction: TranscriptPageDirection): boolean {
+	#canRequestPage(direction: TranscriptPageDirection, allowRetry = false): boolean {
 		if (
+			this.#activeTargetNavigations > 0 ||
 			this.#isPageMutationInProgress ||
-			this.deps.chatState.pageStates[direction].status === 'loading'
+			this.deps.chatState.pageStates[direction].status === 'loading' ||
+			(!allowRetry && this.deps.chatState.pageStates[direction].status === 'error')
 		) {
 			return false;
 		}
