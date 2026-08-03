@@ -9,6 +9,7 @@ import type {
 } from '../../common/chat-command-contracts.js';
 
 export const LIVE_CLAUDE_THINKING_MODE = 'low';
+const SCRIPTED_CLAUDE_MODEL = 'haiku';
 
 export const CLAUDE_BINARY = fileURLToPath(
   new URL('../node_modules/.bin/claude', import.meta.url),
@@ -27,14 +28,14 @@ function requiredTestingEnvironment(name: string): string {
   return value;
 }
 
-function liveClaudeModel(): string {
-  return requiredTestingEnvironment('CLAUDE_TESTING_MODEL');
+function claudeRequestModel(): string {
+  return process.env.CLAUDE_TESTING_MODEL?.trim() || SCRIPTED_CLAUDE_MODEL;
 }
 
 export async function liveClaudeServerEnvironment(): Promise<Record<string, string>> {
   const testingKey = requiredTestingEnvironment('CLAUDE_TESTING_KEY');
   const testingBaseUrl = requiredTestingEnvironment('CLAUDE_TESTING_BASE_URL');
-  const testingModel = liveClaudeModel();
+  const testingModel = requiredTestingEnvironment('CLAUDE_TESTING_MODEL');
   await access(CLAUDE_BINARY, constants.X_OK);
 
   // The fixture isolates HOME and passes the testing provider only to its Garcon child.
@@ -59,7 +60,7 @@ export function liveClaudeStartRequest(input: {
     chatId: input.chatId,
     agentId: 'claude',
     projectPath: input.projectPath,
-    model: liveClaudeModel(),
+    model: claudeRequestModel(),
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CLAUDE_THINKING_MODE,
     agentSettings: CLAUDE_AGENT_SETTINGS,
@@ -80,7 +81,7 @@ export function liveClaudeRunRequest(input: {
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CLAUDE_THINKING_MODE,
     agentSettings: CLAUDE_AGENT_SETTINGS,
-    model: liveClaudeModel(),
+    model: claudeRequestModel(),
   };
 }
 
@@ -99,6 +100,6 @@ export function liveClaudeForkRunRequest(input: {
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CLAUDE_THINKING_MODE,
     agentSettings: CLAUDE_AGENT_SETTINGS,
-    model: liveClaudeModel(),
+    model: claudeRequestModel(),
   };
 }
