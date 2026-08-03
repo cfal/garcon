@@ -311,6 +311,7 @@
 			data-chat-virtual-sizer
 			data-chat-virtual-count={virtualItems.length}
 			data-chat-virtual-model-count={projection.model.items.length}
+			data-chat-virtual-data-revision={projection.projectedDataRevision}
 			data-chat-transcript-scale={String(textScale)}
 		>
 			{#each virtualItems as virtualItem (virtualItem.key)}

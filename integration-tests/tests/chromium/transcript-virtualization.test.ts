@@ -66,6 +66,22 @@ async function waitForModelCount(page: Page, minimum: number): Promise<number> {
     .evaluate((sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0));
 }
 
+async function virtualDataRevision(page: Page): Promise<number> {
+  return page
+    .locator(SIZER_SELECTOR)
+    .evaluate((sizer) => Number((sizer as HTMLElement).dataset.chatVirtualDataRevision ?? 0));
+}
+
+async function waitForVirtualDataRevisionAfter(page: Page, previous: number): Promise<void> {
+  await page.waitForFunction(
+    ({ selector, previousRevision }) =>
+      Number(document.querySelector<HTMLElement>(selector)?.dataset.chatVirtualDataRevision ?? 0) >
+      previousRevision,
+    { selector: SIZER_SELECTOR, previousRevision: previous },
+    { timeout: 20_000 },
+  );
+}
+
 async function waitForDistanceFromEnd(page: Page, maximum: number): Promise<void> {
   await page.waitForFunction(
     ({ selector, maximumDistance }) => {
@@ -569,7 +585,11 @@ async function selectNavigatorTargetDuringAppend(
   await clickMenuItem(fixture.page, 'Jump to user message');
   await fixture.page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(fixture.page, marker);
-  const modelCount = await waitForModelCount(fixture.page, 1);
+  const appendedContent = 'chromium-target-concurrent-append';
+  const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({
+    lastUserText: appendedContent,
+  });
+  const dataRevision = await virtualDataRevision(fixture.page);
   await installHeldTargetCompletion(fixture.page, rowId);
   await clickUserMessageNavigatorRowContaining(fixture.page, marker);
   await fixture.page.waitForFunction(
@@ -581,17 +601,37 @@ async function selectNavigatorTargetDuringAppend(
     { timeout: 20_000 },
   );
 
-  await appendTurn(fixture.integration, chatId, 'chromium-target-concurrent-append');
-  await waitForModelCount(fixture.page, modelCount + 2);
-  await fixture.page.evaluate(() => {
-    const browserGlobal = globalThis as typeof globalThis & {
-      __completeHeldChatTarget?: () => void;
-    };
-    browserGlobal.__completeHeldChatTarget?.();
-  });
+  let turnId: string | null = null;
+  try {
+    const accepted = await fixture.integration.client.runDirectChat({
+      chatId,
+      content: appendedContent,
+      agent: fixture.integration.directAgents.openAi,
+    });
+    turnId = accepted.turnId ?? null;
+    await heldCompletion.received;
+    await waitForVirtualDataRevisionAfter(fixture.page, dataRevision);
+    expect(
+      await fixture.page
+        .locator(`[data-chat-row-id="${rowId}"]`)
+        .getAttribute('data-chat-layout-pending'),
+    ).toBe('true');
+    await fixture.page.evaluate(() => {
+      const browserGlobal = globalThis as typeof globalThis & {
+        __completeHeldChatTarget?: () => void;
+      };
+      browserGlobal.__completeHeldChatTarget?.();
+    });
 
-  await waitForRowCentered(fixture.page, rowId);
-  await fixture.page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+    await waitForRowCentered(fixture.page, rowId);
+    await fixture.page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+  } finally {
+    heldCompletion.releaseEcho();
+  }
+  if (turnId === null) throw new Error('Concurrent append turn was not accepted.');
+  expect((await fixture.integration.client.waitForTurnTerminal(chatId, turnId)).type).toBe(
+    'agent-run-finished',
+  );
 }
 
 async function installDelayedTargetCompletion(page: Page, rowId: string): Promise<void> {
@@ -715,6 +755,7 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
     const final = browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
+    const growthFrames = browserGlobal.__chatDelayedTargetGrowthFrame ?? 0;
     browserGlobal.__restoreChatScrollTo?.();
     browserGlobal.__stopDelayedTargetGrowth?.();
     delete browserGlobal.__restoreChatScrollTo;
@@ -722,7 +763,7 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
     return {
       afterCancellation,
       final,
-      growthFrames: browserGlobal.__chatDelayedTargetGrowthFrame ?? 0,
+      growthFrames,
     };
   });
   expect(writesBeforeIntent).toBeGreaterThan(writesAtMount);
