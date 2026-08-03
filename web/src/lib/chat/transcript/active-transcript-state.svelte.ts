@@ -107,6 +107,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#pageLoadOperationEpoch = 0;
 	#windowNavigationEpoch = 0;
 	#initialRevealPhase = $state<InitialRevealPhase>('complete');
+	#preserveExpandedVisibleWindow = false;
 	#feedMutations = new ConversationFeedMutationState();
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
@@ -317,9 +318,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			}
 			return 'applied';
 		}
-		const preserveExpandedVisibleWindow =
-			this.visibleMessageCount > INITIAL_VISIBLE_MESSAGES &&
-			this.visibleMessageCount >= this.displayMessageCount;
 		const applied = applyChatViewMessages(this.entries, messages, this.lastSeq);
 		let entriesChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
@@ -336,6 +334,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			if (nextEntries.length < applied.messages.length) {
 				this.hasEarlierMessages = true;
 				this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+				this.#preserveExpandedVisibleWindow = false;
 			}
 		} else {
 			const restored = this.transcriptCache.get(chatId);
@@ -351,7 +350,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.clearLocalNotices(noticeRevision);
 		}
 		this.totalMessages = this.entries.length;
-		if (entriesChanged && preserveExpandedVisibleWindow) {
+		if (entriesChanged && this.#preserveExpandedVisibleWindow) {
 			this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 		}
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
@@ -403,6 +402,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		},
 	): void {
 		this.#invalidatePageLoad();
+		this.#preserveExpandedVisibleWindow = false;
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
@@ -627,6 +627,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.hasEarlierMessages = page.hasMore;
 		this.totalMessages = this.entries.length;
 		this.visibleMessageCount += addedMessages.length;
+		this.#rememberExpandedVisibleWindow();
 		this.#recordFeedMutation('history-earlier');
 		return 'loaded';
 	}
@@ -642,6 +643,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
 		this.totalMessages = this.entries.length;
 		this.visibleMessageCount += this.entries.length - previousEntryCount;
+		this.#rememberExpandedVisibleWindow();
 		this.#recordFeedMutation('history-later');
 		return 'loaded';
 	}
@@ -682,6 +684,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				revision: ++this.#localNoticeRevision,
 			},
 		];
+		this.#growExpandedVisibleWindow();
 		this.#recordFeedMutation('presentation-structure');
 	}
 
@@ -731,11 +734,13 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	#replacePendingUserInputs(inputs: PendingUserInput[]): void {
 		this.#pendingUserInputsRevision += 1;
 		this.pendingUserInputs = sortPendingInputs(inputs);
+		this.#growExpandedVisibleWindow();
 		this.#recordFeedMutation('presentation-structure');
 	}
 
 	clearMessages(): void {
 		this.#invalidatePageLoad();
+		this.#preserveExpandedVisibleWindow = false;
 		this.#loadEpoch += 1;
 		this.windowRevision += 1;
 		this.entries = [];
@@ -761,6 +766,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.totalMessages = this.entries.length;
 		this.hasEarlierMessages = true;
 		this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+		this.#preserveExpandedVisibleWindow = false;
 		this.#recordFeedMutation('presentation-structure');
 		return true;
 	}
@@ -771,6 +777,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const changed = this.visibleMessageCount > previousCount;
 		if (changed) {
 			this.pageStates.earlier = idlePageState();
+			this.#rememberExpandedVisibleWindow();
 			this.#recordFeedMutation('history-earlier');
 		}
 		return changed;
@@ -809,6 +816,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.#initialRevealPhase !== 'complete';
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 		this.#initialRevealPhase = 'complete';
+		this.#rememberExpandedVisibleWindow();
 		if (changed) this.#recordFeedMutation('initial');
 	}
 
@@ -877,6 +885,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					: 'invalidated';
 			}
 
+			this.#preserveExpandedVisibleWindow = false;
 			this.windowRevision += 1;
 			this.entries = page.messages;
 			this.oldestSeq = page.pageOldestSeq;
@@ -954,6 +963,21 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		responseMessageTypes: readonly string[] = [],
 	): void {
 		this.#feedMutations.record(kind, responseMessageTypes);
+	}
+
+	#rememberExpandedVisibleWindow(): void {
+		if (
+			this.visibleMessageCount > INITIAL_VISIBLE_MESSAGES &&
+			this.visibleMessageCount >= this.#renderEntries.length
+		) {
+			this.#preserveExpandedVisibleWindow = true;
+			this.#growExpandedVisibleWindow();
+		}
+	}
+
+	#growExpandedVisibleWindow(): void {
+		if (!this.#preserveExpandedVisibleWindow) return;
+		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
 	}
 }
 

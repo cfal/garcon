@@ -1020,9 +1020,16 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 		expect(chat.hasInitialMessagesToReveal).toBe(false);
 
-		chat.applyMessages('chat-1', 'generation-1', [entry(176, assistant('message-176'))]);
+		chat.upsertPendingUserInput(
+			pendingInput({ clientRequestId: 'request-176', content: 'message-176' }),
+		);
+		chat.applyMessages('chat-1', 'generation-1', [
+			entry(176, user('message-176', { clientRequestId: 'request-176' })),
+		]);
+		chat.clearPendingUserInput('request-176');
+		chat.applyMessages('chat-1', 'generation-1', [entry(177, assistant('message-177'))]);
 
-		expect(chat.visibleRows).toHaveLength(176);
+		expect(chat.visibleRows).toHaveLength(177);
 		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', seq: 1 });
 	});
 
