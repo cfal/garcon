@@ -181,6 +181,71 @@ async function signalScrollIntent(page: Page, direction: 'earlier' | 'later'): P
   }, direction);
 }
 
+async function verifyDetachedNearEndGrowth(page: Page): Promise<void> {
+  await signalScrollIntent(page, 'earlier');
+  await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    feed.scrollTop = Math.max(0, feed.scrollHeight - feed.clientHeight - 80);
+    feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    await settle();
+    await settle();
+    feed.scrollTop = Math.max(0, feed.scrollHeight - feed.clientHeight - 12);
+    feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+    await settle();
+    await settle();
+  });
+  await page.waitForFunction(
+    (selector) =>
+      document.querySelector<HTMLElement>(selector)?.dataset.chatPinnedToBottom === 'false',
+    FEED_SELECTOR,
+    { timeout: 20_000 },
+  );
+  const growth = await page.locator(FEED_SELECTOR).evaluate(async (feedElement, itemSelector) => {
+    const feed = feedElement as HTMLElement;
+    const items = [...feed.querySelectorAll<HTMLElement>(itemSelector)].filter((item) =>
+      item.querySelector('[data-chat-row-id]'),
+    );
+    const lastItem = items.at(-1);
+    if (!lastItem) throw new Error('Detached growth target is missing.');
+    const viewportRect = feed.getBoundingClientRect();
+    const before = {
+      scrollTop: feed.scrollTop,
+      distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
+      scrollHeight: feed.scrollHeight,
+      clientHeight: feed.clientHeight,
+      virtualHeight:
+        feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]')?.getBoundingClientRect()
+          .height ?? null,
+      itemTop: lastItem.getBoundingClientRect().top - viewportRect.top,
+      itemBottom: lastItem.getBoundingClientRect().bottom - viewportRect.top,
+      itemHeight: lastItem.getBoundingClientRect().height,
+    };
+    lastItem.style.paddingBottom = '160px';
+    for (let frame = 0; frame < 8; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const after = {
+      scrollTop: feed.scrollTop,
+      distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
+      scrollHeight: feed.scrollHeight,
+      clientHeight: feed.clientHeight,
+      virtualHeight:
+        feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]')?.getBoundingClientRect()
+          .height ?? null,
+      itemTop: lastItem.getBoundingClientRect().top - viewportRect.top,
+      itemBottom: lastItem.getBoundingClientRect().bottom - viewportRect.top,
+      itemHeight: lastItem.getBoundingClientRect().height,
+    };
+    lastItem.style.paddingBottom = '';
+    for (let frame = 0; frame < 4; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return { before, after, movement: Math.abs(after.scrollTop - before.scrollTop) };
+  }, ITEM_SELECTOR);
+  expect(growth.movement, JSON.stringify(growth, null, 2)).toBeLessThanOrEqual(1);
+}
+
 async function readingAnchor(page: Page): Promise<ReadingAnchor> {
   return page.locator(FEED_SELECTOR).evaluate((feedElement, itemSelector) => {
     const feed = feedElement as HTMLElement;
@@ -207,16 +272,25 @@ async function anchorByKey(page: Page, key: string): Promise<ReadingAnchor> {
     { timeout: 20_000 },
   );
   return page.locator(FEED_SELECTOR).evaluate(
-    (feedElement, input) => {
+    async (feedElement, input) => {
       const feed = feedElement as HTMLElement;
-      const item = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].find(
-        (candidate) => candidate.dataset.chatVirtualItem === input.key,
-      );
-      if (!item) throw new Error(`Reading anchor ${input.key} is not mounted.`);
-      return {
-        key: input.key,
-        offset: item.getBoundingClientRect().top - feed.getBoundingClientRect().top,
-      };
+      let previousOffset: number | null = null;
+      let stableFrames = 0;
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const item = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].find(
+          (candidate) => candidate.dataset.chatVirtualItem === input.key,
+        );
+        if (!item) throw new Error(`Reading anchor ${input.key} became unmounted.`);
+        const offset = item.getBoundingClientRect().top - feed.getBoundingClientRect().top;
+        stableFrames =
+          previousOffset !== null && Math.abs(offset - previousOffset) <= 0.5
+            ? stableFrames + 1
+            : 0;
+        previousOffset = offset;
+        if (stableFrames >= 3) return { key: input.key, offset };
+      }
+      throw new Error(`Reading anchor ${input.key} did not settle.`);
     },
     { itemSelector: ITEM_SELECTOR, key },
   );
@@ -369,6 +443,37 @@ async function viewportPolicy(page: Page): Promise<{ pinned: boolean; userScroll
   });
 }
 
+async function selectAndVerifyEdgeNavigatorTarget(
+  page: Page,
+  marker: string,
+  edge: 'start' | 'end',
+): Promise<void> {
+  await openMainWorkspaceActions(page);
+  await clickMenuItem(page, 'Jump to user message');
+  await page.getByText('User messages', { exact: true }).waitFor();
+  const rowId = await userMessageNavigatorRowIdContaining(page, marker);
+  await clickUserMessageNavigatorRowContaining(page, marker);
+  await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+  await page.waitForTimeout(1_250);
+  expect(await page.getByText('User messages', { exact: true }).isVisible()).toBe(false);
+  expect(
+    await page.locator(FEED_SELECTOR).evaluate(
+      (feedElement, input) => {
+        const feed = feedElement as HTMLElement;
+        const row = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(
+          (candidate) => candidate.dataset.chatRowId === input.rowId,
+        );
+        const atEdge =
+          input.edge === 'start'
+            ? feed.scrollTop <= 1
+            : feed.scrollHeight - feed.clientHeight - feed.scrollTop <= 1;
+        return Boolean(row && atEdge);
+      },
+      { rowId, edge },
+    ),
+  ).toBe(true);
+}
+
 async function installDelayedTargetGrowth(page: Page, rowId: string): Promise<void> {
   await page.evaluate((expectedRowId) => {
     const browserGlobal = globalThis as typeof globalThis & {
@@ -383,7 +488,7 @@ async function installDelayedTargetGrowth(page: Page, rowId: string): Promise<vo
       if (!wrapper) return false;
       let frame = 0;
       const grow = () => {
-        if (frame >= 8 || !wrapper.isConnected) return;
+        if (frame >= 60 || !wrapper.isConnected) return;
         frame += 1;
         wrapper.style.paddingBottom = `${frame * 40}px`;
         requestAnimationFrame(grow);
@@ -419,16 +524,39 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
   const box = await page.locator(FEED_SELECTOR).boundingBox();
   if (!box) throw new Error('Transcript viewport has no interaction bounds.');
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, 600);
-  const afterIntent = await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+  await page.mouse.wheel(0, -600);
+  await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    return (feedElement as HTMLElement).scrollTop;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatProgrammaticScrollWrites?: number[];
+      __restoreChatScrollTo?: () => void;
+    };
+    browserGlobal.__chatProgrammaticScrollWrites = [];
+    const originalScrollTo = feed.scrollTo.bind(feed);
+    browserGlobal.__restoreChatScrollTo = () => {
+      feed.scrollTo = originalScrollTo;
+    };
+    feed.scrollTo = ((options: ScrollToOptions | number, y?: number) => {
+      const top = typeof options === 'number' ? (y ?? feed.scrollTop) : (options.top ?? feed.scrollTop);
+      browserGlobal.__chatProgrammaticScrollWrites?.push(top);
+      if (typeof options === 'number') originalScrollTo(options, y ?? feed.scrollTop);
+      else originalScrollTo(options);
+    }) as typeof feed.scrollTo;
   });
   await page.waitForTimeout(750);
-  const finalOffset = await page
-    .locator(FEED_SELECTOR)
-    .evaluate((feedElement) => (feedElement as HTMLElement).scrollTop);
-  expect(finalOffset + 2).toBeGreaterThanOrEqual(afterIntent);
+  const writes = await page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatProgrammaticScrollWrites?: number[];
+      __restoreChatScrollTo?: () => void;
+    };
+    const recorded = browserGlobal.__chatProgrammaticScrollWrites ?? [];
+    browserGlobal.__restoreChatScrollTo?.();
+    delete browserGlobal.__restoreChatScrollTo;
+    return recorded;
+  });
+  expect(writes).toEqual([]);
   await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
 }
 
@@ -511,6 +639,7 @@ describe('Chromium transcript virtualization', () => {
         const initialModelCount = await waitForModelCount(fixture.page, 50);
         await scrollToPosition(fixture.page, 'end');
         await waitForDistanceFromEnd(fixture.page, 1);
+        await verifyDetachedNearEndGrowth(fixture.page);
         await scrollToPosition(fixture.page, 'middle');
         await signalScrollIntent(fixture.page, 'later');
         await scrollToPosition(fixture.page, 'start', false);
@@ -542,6 +671,16 @@ describe('Chromium transcript virtualization', () => {
         await clickUserMessageNavigatorRowContaining(fixture.page, 'chromium-virtual-turn-45');
         await fixture.page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
         await waitForRowCentered(fixture.page, targetRowId);
+        await selectAndVerifyEdgeNavigatorTarget(
+          fixture.page,
+          'chromium-virtual-turn-11',
+          'start',
+        );
+        await selectAndVerifyEdgeNavigatorTarget(
+          fixture.page,
+          'chromium-generation-prime',
+          'end',
+        );
         await interruptNavigatorJump(fixture.page, 'chromium-virtual-turn-40');
 
         await scrollToPosition(fixture.page, 'middle');
@@ -567,6 +706,7 @@ describe('Chromium transcript virtualization', () => {
         await openMainWorkspaceActions(fixture.page);
         await clickMenuItem(fixture.page, 'New Terminal');
         await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
+        await appendTurn(fixture.integration, chatId, 'chromium-hidden-append');
         await selectMainWorkspaceSurface(fixture.page, chatSurfaceLabel);
         await waitForTranscriptReady(fixture.page);
         expect(await viewportPolicy(fixture.page)).toEqual({

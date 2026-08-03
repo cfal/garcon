@@ -30,6 +30,7 @@ export interface ConversationFeedProjectionInput {
 	showRefreshError: boolean;
 	showEarlierBoundary: boolean;
 	showLaterBoundary: boolean;
+	reserveComposerTraySpace: boolean;
 	floatingPermissions: PendingPermissionRequest[];
 }
 
@@ -72,6 +73,7 @@ function sameInput(
 		left.showRefreshError === right.showRefreshError &&
 		left.showEarlierBoundary === right.showEarlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
+		left.reserveComposerTraySpace === right.reserveComposerTraySpace &&
 		left.floatingPermissions === right.floatingPermissions,
 	);
 }
@@ -100,6 +102,7 @@ export class ConversationFeedProjectionState {
 			showRefreshError: input.showRefreshError,
 			showEarlierBoundary: input.showEarlierBoundary,
 			showLaterBoundary: input.showLaterBoundary,
+			reserveComposerTraySpace: input.reserveComposerTraySpace,
 			transcriptItems: visibleTranscriptItems,
 			floatingPermissions: input.floatingPermissions,
 		});

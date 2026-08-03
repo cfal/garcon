@@ -348,9 +348,9 @@ describe('ConversationScrollController', () => {
 		).resolves.toBe('cancelled');
 	});
 
-	it('restores live following when target navigation is unavailable at the end', async () => {
+	it('restores live following when pinned target navigation becomes unavailable', async () => {
 		const viewport = fakeViewport({
-			isAtEnd: vi.fn(() => true),
+			isAtEnd: vi.fn(() => false),
 			scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>(
 				async () => 'target-missing',
 			),
@@ -366,6 +366,7 @@ describe('ConversationScrollController', () => {
 		).resolves.toBe('unavailable');
 		expect(controller.isPinnedToBottom).toBe(true);
 		expect(state.isUserScrolledUp).toBe(false);
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 	});
 
 	it('reveals earlier rows until measured content overflows', async () => {

@@ -79,7 +79,15 @@
 	}
 </script>
 
-{#if item.kind === 'top-toolbar-spacer'}
+{#if item.kind === 'viewport-start-spacer'}
+	<div aria-hidden="true" class="h-3 sm:h-4" data-chat-feed-viewport-start-spacer></div>
+{:else if item.kind === 'viewport-end-spacer'}
+	<div
+		aria-hidden="true"
+		class={item.reserveComposerTraySpace ? 'h-14' : 'h-3 sm:h-4'}
+		data-chat-feed-viewport-end-spacer
+	></div>
+{:else if item.kind === 'top-toolbar-spacer'}
 	<div
 		aria-hidden="true"
 		class="h-[var(--workspace-floating-taskbar-inset)] shrink-0"
@@ -112,16 +120,21 @@
 {:else if item.kind === 'later-boundary'}
 	<TranscriptPageBoundary direction="later" pageState={laterPageState} onRequest={onLoadLater} />
 {:else if item.kind === 'permission'}
-	{#if onPermissionDecision}
-		<PermissionRequestRow
-			request={permissionRequestMessage(item.request)}
-			onDecision={onPermissionDecision}
-			draft={itemState.permissionDraft(item.request.permissionRequestId)}
-			{acquireTransientActivity}
-			onDraftChange={(draft) =>
-				itemState.setPermissionDraft(item.request.permissionRequestId, draft)}
-		/>
-	{/if}
+	<div class:pt-2={item.leadingSpacing}>
+		{#if onPermissionDecision}
+			<PermissionRequestRow
+				request={permissionRequestMessage(item.request)}
+				onDecision={onPermissionDecision}
+				draft={itemState.permissionDraft(item.request.permissionRequestId)}
+				{acquireTransientActivity}
+				onDraftChange={(draft) =>
+					itemState.setPermissionDraft(item.request.permissionRequestId, draft)}
+			/>
+		{/if}
+		{#if item.spacingAfter === 'responsive-feed'}
+			<div aria-hidden="true" class="h-2 sm:h-3"></div>
+		{/if}
+	</div>
 {:else}
 	<div class="flow-root" style:zoom={textScale}>
 		<ConversationTranscriptItem

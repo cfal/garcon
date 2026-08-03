@@ -16,6 +16,7 @@
 
 	interface Props {
 		reserveTopFloatingToolbar?: boolean;
+		showAnnouncementTrigger?: boolean;
 		transcriptScenario?:
 			| 'empty'
 			| 'initial-reveal'
@@ -26,7 +27,11 @@
 			| 'twenty-thousand';
 	}
 
-	const { reserveTopFloatingToolbar = false, transcriptScenario = 'empty' }: Props = $props();
+	const {
+		reserveTopFloatingToolbar = false,
+		showAnnouncementTrigger = false,
+		transcriptScenario = 'empty',
+	}: Props = $props();
 	const initialTranscriptScenario = untrack(() => transcriptScenario);
 
 	const chatState = new ActiveTranscriptState();
@@ -124,3 +129,8 @@
 	pinnedToBottom={true}
 	surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.generationId}`}
 />
+{#if showAnnouncementTrigger}
+	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}
+		>Announce</button
+	>
+{/if}

@@ -2,9 +2,10 @@ import { isToolUseMessage } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import type { ReconciledConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-render-model.js';
 
-export type ConversationFeedSpacing = 'scaled-transcript' | 'none';
+export type ConversationFeedSpacing = 'responsive-feed' | 'scaled-transcript' | 'none';
 
 export type ConversationVirtualFeedItem =
+	| { kind: 'viewport-start-spacer'; key: string; spacingAfter: 'none' }
 	| { kind: 'top-toolbar-spacer'; key: string; spacingAfter: 'none' }
 	| { kind: 'refresh-error'; key: string; spacingAfter: 'none' }
 	| { kind: 'earlier-boundary'; key: string; spacingAfter: 'none' }
@@ -19,6 +20,13 @@ export type ConversationVirtualFeedItem =
 			kind: 'permission';
 			key: string;
 			request: PendingPermissionRequest;
+			leadingSpacing: boolean;
+			spacingAfter: 'responsive-feed' | 'none';
+	  }
+	| {
+			kind: 'viewport-end-spacer';
+			key: string;
+			reserveComposerTraySpace: boolean;
 			spacingAfter: 'none';
 	  };
 
@@ -39,6 +47,7 @@ export interface ConversationVirtualFeedInput {
 	showRefreshError: boolean;
 	showEarlierBoundary: boolean;
 	showLaterBoundary: boolean;
+	reserveComposerTraySpace: boolean;
 	surfaceIdentity: string;
 	transcriptItems: ReconciledConversationFeedRenderItem[];
 	floatingPermissions: PendingPermissionRequest[];
@@ -65,6 +74,11 @@ export function buildConversationVirtualFeedModel(
 ): ConversationVirtualFeedModel {
 	const items: ConversationVirtualFeedItem[] = [];
 	const key = (localKey: string): string => namespacedKey(input.surfaceIdentity, localKey);
+	items.push({
+		kind: 'viewport-start-spacer',
+		key: key('prefix:viewport-start-spacer'),
+		spacingAfter: 'none',
+	});
 
 	if (input.showTopToolbarSpacer) {
 		items.push({
@@ -105,14 +119,22 @@ export function buildConversationVirtualFeedModel(
 			spacingAfter: 'none',
 		});
 	}
-	for (const request of input.floatingPermissions) {
+	for (const [permissionIndex, request] of input.floatingPermissions.entries()) {
 		items.push({
 			kind: 'permission',
 			key: key(`suffix:permission:${request.permissionRequestId}`),
 			request,
-			spacingAfter: 'none',
+			leadingSpacing: permissionIndex === 0,
+			spacingAfter:
+				permissionIndex < input.floatingPermissions.length - 1 ? 'responsive-feed' : 'none',
 		});
 	}
+	items.push({
+		kind: 'viewport-end-spacer',
+		key: key('suffix:viewport-end-spacer'),
+		reserveComposerTraySpace: input.reserveComposerTraySpace,
+		spacingAfter: 'none',
+	});
 
 	const indexByKey = new Map<string, number>();
 	const indexByRowId = new Map<string, number>();
@@ -143,6 +165,8 @@ export function estimateConversationFeedItemSize(
 	textScale: number,
 ): number {
 	if (!item) return 120;
+	if (item.kind === 'viewport-start-spacer') return 16;
+	if (item.kind === 'viewport-end-spacer') return item.reserveComposerTraySpace ? 56 : 16;
 	if (item.kind === 'top-toolbar-spacer') return 48;
 	if (
 		item.kind === 'refresh-error' ||
@@ -151,7 +175,11 @@ export function estimateConversationFeedItemSize(
 	) {
 		return 44;
 	}
-	if (item.kind === 'permission') return 240;
+	if (item.kind === 'permission') {
+		const leadingSpacing = item.leadingSpacing ? 8 : 0;
+		const trailingSpacing = item.spacingAfter === 'responsive-feed' ? 12 : 0;
+		return 240 + leadingSpacing + trailingSpacing;
+	}
 
 	const renderItem = item.item;
 	const scale = Math.max(0.5, Math.min(textScale, 2));

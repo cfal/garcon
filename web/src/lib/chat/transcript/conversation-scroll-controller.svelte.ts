@@ -305,11 +305,13 @@ export class ConversationScrollController {
 		if (!this.#isCurrentViewportOperation(target.chatId, operationEpoch)) return 'cancelled';
 		if (result === 'cancelled') return 'cancelled';
 		if (result !== 'completed') {
-			if (wasPinned && viewport.isAtEnd()) this.setPinnedToBottom(true);
+			if (wasPinned) {
+				viewport.scrollToEnd();
+				this.setPinnedToBottom(true);
+			}
 			return 'unavailable';
 		}
 		const atLiveEnd = viewport.isAtEnd();
-		this.deps.chatState.isUserScrolledUp = !atLiveEnd;
 		this.setPinnedToBottom(atLiveEnd);
 		return 'completed';
 	}

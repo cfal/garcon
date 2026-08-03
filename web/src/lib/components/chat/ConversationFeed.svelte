@@ -116,8 +116,6 @@
 	const feedViewportClass = $derived(
 		cn(
 			'h-full overflow-y-auto overflow-x-hidden relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
-			'pt-3 sm:pt-4',
-			reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4',
 			CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[localSettings.chatMaxWidth],
 		),
 	);
@@ -125,6 +123,8 @@
 		cn(
 			CHAT_FEED_CONTENT_BASE_CLASS,
 			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
+			chatState.displayMessageCount === 0 && 'pt-3 sm:pt-4',
+			chatState.displayMessageCount === 0 && (reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4'),
 			isPreparingInitialScroll && 'invisible',
 		),
 	);
@@ -140,7 +140,7 @@
 	const retention = new ConversationFeedRetentionState();
 	const itemState = new ConversationFeedItemState();
 	const announcerState = new ConversationFeedAnnouncerState();
-	let announcement = $state('');
+	let announcement = $state.raw({ sequence: 0, text: '' });
 	const projectionInput = $derived({
 		surfaceIdentity,
 		rows: chatState.visibleRows,
@@ -153,6 +153,7 @@
 		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
 		showEarlierBoundary: chatState.canLoadEarlier || chatState.pageStates.earlier.status !== 'idle',
 		showLaterBoundary: chatState.canLoadLater || chatState.pageStates.later.status !== 'idle',
+		reserveComposerTraySpace,
 		floatingPermissions:
 			floatingPendingPermissionRequests.length > 0 && onPermissionDecision
 				? floatingPendingPermissionRequests
@@ -192,7 +193,9 @@
 		};
 		untrack(() => {
 			const nextAnnouncement = announcerState.reconcile(input);
-			if (nextAnnouncement !== null) announcement = nextAnnouncement;
+			if (nextAnnouncement !== null) {
+				announcement = { sequence: announcement.sequence + 1, text: nextAnnouncement };
+			}
 		});
 	});
 
@@ -378,5 +381,13 @@
 	</ScrollAreaPrimitive.Viewport>
 	<Scrollbar orientation="vertical" class="w-1.5" onpointerdown={onUserScrollIntent} />
 	<ScrollAreaPrimitive.Corner />
-	<div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
+	<div
+		class="sr-only"
+		role="status"
+		aria-live="polite"
+		aria-atomic="true"
+		data-chat-feed-announcement-sequence={announcement.sequence}
+	>
+		{#key announcement.sequence}<span>{announcement.text}</span>{/key}
+	</div>
 </ScrollAreaPrimitive.Root>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	classifyMeasuredConversationViewportFill,
 	classifyConversationVirtualStructure,
+	attainableConversationTargetOffset,
 	retainedConversationRange,
 	shouldPreserveConversationVirtualEdge,
 } from '../ConversationFeedVirtualController.svelte';
@@ -110,5 +111,29 @@ describe('ConversationFeedVirtualController helpers', () => {
 				viewportHeight: 400,
 			}),
 		).toBe('underfilled');
+	});
+
+	it('clamps target alignment to attainable scroll boundaries', () => {
+		expect(
+			attainableConversationTargetOffset({
+				currentOffset: 0,
+				alignmentDelta: -120,
+				maximumOffset: 900,
+			}),
+		).toBe(0);
+		expect(
+			attainableConversationTargetOffset({
+				currentOffset: 850,
+				alignmentDelta: 100,
+				maximumOffset: 900,
+			}),
+		).toBe(900);
+		expect(
+			attainableConversationTargetOffset({
+				currentOffset: 300,
+				alignmentDelta: 75,
+				maximumOffset: 900,
+			}),
+		).toBe(375);
 	});
 });

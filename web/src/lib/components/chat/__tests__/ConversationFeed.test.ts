@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
@@ -82,6 +82,18 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-bottom-anchor]')).toBeNull();
 	});
 
+	it('represents viewport insets as measured virtual items', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
+		const viewport = screen.getByRole('region', { name: 'Chat messages' });
+
+		await waitFor(() =>
+			expect(container.querySelector('[data-chat-feed-viewport-start-spacer]')).toBeTruthy(),
+		);
+		expect(container.querySelector('[data-chat-feed-viewport-end-spacer]')).toBeTruthy();
+		expect(viewport.classList.contains('pt-3')).toBe(false);
+		expect(viewport.classList.contains('pb-3')).toBe(false);
+	});
+
 	it('reserves toolbar space above empty feed states', () => {
 		const { container } = render(ConversationFeedTestHost, { reserveTopFloatingToolbar: true });
 		const viewport = screen.getByRole('region', { name: 'Chat messages' });
@@ -150,11 +162,34 @@ describe('ConversationFeed', () => {
 		expect(announcer?.closest('[data-chat-virtual-sizer]')).toBeNull();
 	});
 
+	it('publishes a fresh live-region node for repeated identical announcements', async () => {
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'row-ids',
+			showAnnouncementTrigger: true,
+		});
+		const status = container.querySelector<HTMLElement>('[role="status"]');
+		const button = screen.getByRole('button', { name: 'Announce' });
+
+		await fireEvent.click(button);
+		await waitFor(() => expect(status?.textContent).toBe('Repeated update'));
+		const firstNode = status?.firstElementChild;
+		const firstSequence = status?.dataset.chatFeedAnnouncementSequence;
+		await fireEvent.click(button);
+		await waitFor(() =>
+			expect(status?.dataset.chatFeedAnnouncementSequence).not.toBe(firstSequence),
+		);
+
+		expect(status?.textContent).toBe('Repeated update');
+		expect(status?.firstElementChild).not.toBe(firstNode);
+	});
+
 	it('renders a bounded virtual range instead of every loaded transcript row', () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'local-truncation',
 		});
-		expect(container.querySelectorAll('[data-chat-virtual-item]').length).toBeLessThan(120);
+		const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
+		expect(mountedItems).toBeGreaterThan(0);
+		expect(mountedItems).toBeLessThan(120);
 		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
 	});
 
@@ -165,8 +200,10 @@ describe('ConversationFeed', () => {
 		await waitFor(
 			() => {
 				const sizer = container.querySelector('[data-chat-virtual-sizer]');
-				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('20000');
-				expect(container.querySelectorAll('[data-chat-virtual-item]').length).toBeLessThan(60);
+				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('20002');
+				const mountedItems = container.querySelectorAll('[data-chat-virtual-item]').length;
+				expect(mountedItems).toBeGreaterThan(0);
+				expect(mountedItems).toBeLessThan(60);
 			},
 			{ timeout: 10_000 },
 		);

@@ -46,6 +46,7 @@ function input(
 		showRefreshError: false,
 		showEarlierBoundary: false,
 		showLaterBoundary: false,
+		reserveComposerTraySpace: false,
 		floatingPermissions: [],
 		...overrides,
 	};
@@ -56,7 +57,7 @@ describe('ConversationFeedProjectionState', () => {
 		const projection = new ConversationFeedProjectionState().reconcile(input());
 
 		expect(projection.model.items[0]?.key).toContain('chat-1:generation-1');
-		expect(projection.model.indexByRowId.get('generation-1:1')).toBe(0);
+		expect(projection.model.indexByRowId.get('generation-1:1')).toBe(1);
 		expect(projection.renderModel.items[0]?.id).toBe('generation-1:1');
 	});
 
@@ -83,6 +84,16 @@ describe('ConversationFeedProjectionState', () => {
 		expect(scaled.geometry.keys).toEqual(first.geometry.keys);
 		expect(scaled.geometry.geometryRevision).toBeGreaterThan(first.geometry.geometryRevision);
 		expect(scaled.geometry.measurementReset).toBe('all');
+	});
+
+	it('publishes changed end geometry when the composer tray reservation changes', () => {
+		const projections = new ConversationFeedProjectionState();
+		const first = projections.reconcile(input());
+		const reserved = projections.reconcile(input({ reserveComposerTraySpace: true }));
+
+		expect(reserved.geometry.keys).toEqual(first.geometry.keys);
+		expect(reserved.geometry.geometryRevision).toBeGreaterThan(first.geometry.geometryRevision);
+		expect(reserved.geometry.estimates.at(-1)).toBe(56);
 	});
 
 	it('reduces coalesced replacement and live append to explicit navigation', () => {
