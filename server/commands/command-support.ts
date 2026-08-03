@@ -3,7 +3,9 @@ import type { ApiProtocol } from '../../common/api-providers.js';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import {
   COMMAND_CORRELATION_ID_MAX_BYTES,
+  QUEUE_ENTRY_ID_MAX_BYTES,
   isCommandCorrelationIdWithinLimit,
+  isQueueEntryIdWithinLimit,
   type AgentInterruptAndSendCommandRequest,
   type AgentRunCommandRequest,
   type AgentStopCommandRequest,
@@ -347,6 +349,20 @@ export class CommandSupport {
       throw new CommandValidationError(
         'VALIDATION_FAILED',
         `${field} must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`,
+      );
+    }
+    return normalized;
+  }
+
+  requireQueueEntryId(value: string | undefined, field = 'entryId'): string {
+    const normalized = value?.trim();
+    if (!normalized) {
+      throw new CommandValidationError('VALIDATION_FAILED', `${field} is required`);
+    }
+    if (!isQueueEntryIdWithinLimit(normalized)) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        `${field} must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`,
       );
     }
     return normalized;

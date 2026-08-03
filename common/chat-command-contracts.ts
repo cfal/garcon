@@ -21,10 +21,15 @@ import type { ChatStopOutcome } from './chat-types.js';
 export type CommandStatus = 'accepted' | 'duplicate';
 
 export const COMMAND_CORRELATION_ID_MAX_BYTES = 256;
-const commandCorrelationIdEncoder = new TextEncoder();
+export const QUEUE_ENTRY_ID_MAX_BYTES = 128;
+const utf8Encoder = new TextEncoder();
 
 export function isCommandCorrelationIdWithinLimit(value: string): boolean {
-  return commandCorrelationIdEncoder.encode(value).byteLength <= COMMAND_CORRELATION_ID_MAX_BYTES;
+  return utf8Encoder.encode(value).byteLength <= COMMAND_CORRELATION_ID_MAX_BYTES;
+}
+
+export function isQueueEntryIdWithinLimit(value: string): boolean {
+  return utf8Encoder.encode(value).byteLength <= QUEUE_ENTRY_ID_MAX_BYTES;
 }
 
 export type CommandErrorCode = Extract<
@@ -577,7 +582,7 @@ export function parseQueueEntryReplaceCommandRequest(value: unknown): QueueEntry
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
-    entryId: requiredString(body, 'entryId'),
+    entryId: requiredQueueEntryId(body, 'entryId'),
     content: requiredContent(body, 'content'),
     expectedRevision: Number(body.expectedRevision),
   };
@@ -588,14 +593,14 @@ export function parseQueueEntryDeleteCommandRequest(value: unknown): QueueEntryD
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
-    entryId: requiredString(body, 'entryId'),
+    entryId: requiredQueueEntryId(body, 'entryId'),
   };
 }
 
 export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMoveCommandRequest {
   const body = requestRecord(value);
-  const entryId = requiredString(body, 'entryId');
-  const targetEntryId = requiredString(body, 'targetEntryId');
+  const entryId = requiredQueueEntryId(body, 'entryId');
+  const targetEntryId = requiredQueueEntryId(body, 'targetEntryId');
   if (entryId === targetEntryId) {
     throw new CommandRequestValidationError('entryId and targetEntryId must differ');
   }
@@ -659,7 +664,7 @@ export function parseQueueEntrySteerCommandRequest(value: unknown): QueueEntrySt
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
-    entryId: requiredString(body, 'entryId'),
+    entryId: requiredQueueEntryId(body, 'entryId'),
     expectedRevision: Number(body.expectedRevision),
     expectedReorderRevision: Number(body.expectedReorderRevision),
   };
@@ -757,6 +762,16 @@ function requiredCommandCorrelationId(body: Record<string, unknown>, field: stri
   if (!isCommandCorrelationIdWithinLimit(value)) {
     throw new CommandRequestValidationError(
       `${field} must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`,
+    );
+  }
+  return value;
+}
+
+function requiredQueueEntryId(body: Record<string, unknown>, field: string): string {
+  const value = requiredString(body, field);
+  if (!isQueueEntryIdWithinLimit(value)) {
+    throw new CommandRequestValidationError(
+      `${field} must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`,
     );
   }
   return value;

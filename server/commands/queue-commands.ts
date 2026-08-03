@@ -38,15 +38,12 @@ export class QueueCommands {
   async submitQueueEntryReplace(input: QueueEntryReplaceCommandRequest): Promise<QueueEntryCommandResponse> {
     this.support.requireChat(input.chatId);
     this.support.assertContent(input.content);
-    if (!input.entryId.trim()) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
-    }
+    const entryId = this.support.requireQueueEntryId(input.entryId);
     if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
       throw new CommandValidationError('VALIDATION_FAILED', 'expectedRevision must be a positive integer');
     }
     return this.support.withChatMutationLock(input.chatId, async () => {
       const content = input.content;
-      const entryId = input.entryId.trim();
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-replace',
         chatId: input.chatId,
@@ -96,11 +93,8 @@ export class QueueCommands {
 
   async submitQueueEntryDelete(input: QueueEntryDeleteCommandRequest): Promise<QueueEntryDeleteResponse> {
     this.support.requireChat(input.chatId);
-    if (!input.entryId.trim()) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
-    }
+    const entryId = this.support.requireQueueEntryId(input.entryId);
     return this.support.withChatMutationLock(input.chatId, async () => {
-      const entryId = input.entryId.trim();
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-delete',
         chatId: input.chatId,
@@ -145,9 +139,9 @@ export class QueueCommands {
     input: QueueEntryMoveCommandRequest,
   ): Promise<QueueEntryCommandResponse> {
     this.support.requireChat(input.chatId);
-    const entryId = input.entryId.trim();
-    const targetEntryId = input.targetEntryId.trim();
-    if (!entryId || !targetEntryId || entryId === targetEntryId) {
+    const entryId = this.support.requireQueueEntryId(input.entryId);
+    const targetEntryId = this.support.requireQueueEntryId(input.targetEntryId, 'targetEntryId');
+    if (entryId === targetEntryId) {
       throw new CommandValidationError(
         'VALIDATION_FAILED',
         'entryId and a different targetEntryId are required',

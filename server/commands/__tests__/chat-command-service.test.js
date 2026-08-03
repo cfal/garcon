@@ -27,6 +27,7 @@ import { PendingUserInputService } from '../../chats/pending-user-input-service.
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import {
   COMMAND_CORRELATION_ID_MAX_BYTES,
+  QUEUE_ENTRY_ID_MAX_BYTES,
   parseForkChatCommandRequest,
   parseStartChatCommandRequest,
 } from '../../../common/chat-command-contracts.ts';
@@ -3283,6 +3284,27 @@ describe('ChatCommandService', () => {
       code: 'VALIDATION_FAILED',
       status: 400,
       message: `clientRequestId must be at most ${COMMAND_CORRELATION_ID_MAX_BYTES} bytes`,
+    });
+
+    expect(queue.captureSteerTarget).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'steer', clientRequestId)).toBeNull();
+  });
+
+  it('rejects oversized queued-steer source identities before target capture or ledger admission', async () => {
+    const { service, queue, ledger } = makeService();
+    const clientRequestId = 'request-queue-steer-oversized-source';
+
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId,
+      clientMessageId: 'message-queue-steer-oversized-source',
+      entryId: 'x'.repeat(QUEUE_ENTRY_ID_MAX_BYTES + 1),
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+      message: `entryId must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`,
     });
 
     expect(queue.captureSteerTarget).not.toHaveBeenCalled();

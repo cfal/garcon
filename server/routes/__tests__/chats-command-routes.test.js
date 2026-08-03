@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { QUEUE_ENTRY_ID_MAX_BYTES } from '../../../common/chat-command-contracts.ts';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -1048,6 +1049,25 @@ describe('REST chat command routes', () => {
 
     expect(result.response.status).toBe(400);
     expect(result.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
+  it('POST /queue/entries/steer rejects oversized source identities before command delivery', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(agent.routes['/api/v1/chats/queue/entries/steer'].POST, {
+      clientRequestId: 'request-queue-steer-invalid-entry',
+      clientMessageId: 'message-queue-steer-invalid-entry',
+      chatId: CHAT_ID,
+      entryId: 'x'.repeat(QUEUE_ENTRY_ID_MAX_BYTES + 1),
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    });
+
+    expect(result.response.status).toBe(400);
+    expect(result.body).toMatchObject({
+      errorCode: 'VALIDATION_FAILED',
+      error: `entryId must be at most ${QUEUE_ENTRY_ID_MAX_BYTES} bytes`,
+    });
     expect(agent.queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
   });
 

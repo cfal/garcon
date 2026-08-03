@@ -179,8 +179,7 @@ export class SteerCommands {
       input.clientMessageId,
       'clientMessageId',
     );
-    const entryId = input.entryId.trim();
-    if (!entryId) throw new CommandValidationError('VALIDATION_FAILED', 'entryId is required');
+    const entryId = this.support.requireQueueEntryId(input.entryId);
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
       throw new CommandValidationError(
         'VALIDATION_FAILED',
