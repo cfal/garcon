@@ -34,7 +34,9 @@ const MAX_LINES = 1000;
 // settlement, idempotent recovery, and provider-neutral pending-input cleanup.
 // Follow-up hardening adds 8 lines for uncertainty-token invalidation
 // and post-commit pending-status publication isolation.
-const EXECUTION_FOOTPRINT_BUDGET = 8769;
+// Adversarial hardening adds 12 lines for bounded queue-entry identities and
+// non-throwing delivery-status publication diagnostics.
+const EXECUTION_FOOTPRINT_BUDGET = 8781;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,
