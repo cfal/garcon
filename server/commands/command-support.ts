@@ -81,7 +81,6 @@ export interface CarryOverDep {
 export type PendingInputsDep = Pick<
   PendingUserInputServiceContract,
   | 'clearChat'
-  | 'clear'
   | 'hasInFlightForChat'
   | 'markFailed'
   | 'markUnconfirmed'
