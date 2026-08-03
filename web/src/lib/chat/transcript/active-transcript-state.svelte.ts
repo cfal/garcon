@@ -376,12 +376,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		const buffered = this.#snapshotBuffer ?? [];
 		this.#snapshotBuffer = null;
 		this.isLoadingMessages = false;
-		for (const batch of buffered) {
-			if (
-				this.applyMessages(chatId, batch.generationId, batch.messages, batch.noticeRevision) !==
-				'applied'
-			)
-				break;
+		for (const { generationId, messages, noticeRevision } of buffered) {
+			if (this.applyMessages(chatId, generationId, messages, noticeRevision) !== 'applied') break;
 		}
 		return true;
 	}
@@ -462,8 +458,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		for (const batch of buffered) {
-			const result = this.applyMessages(chatId, batch.generationId, batch.messages);
+		for (const { generationId, messages, noticeRevision } of buffered) {
+			const result = this.applyMessages(chatId, generationId, messages, noticeRevision);
 			if (result !== 'applied') return result;
 		}
 		this.#resolvePendingInitialReveal();

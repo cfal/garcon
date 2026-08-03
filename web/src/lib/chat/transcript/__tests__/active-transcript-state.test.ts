@@ -304,6 +304,29 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 	});
 
+	it('preserves notices created after buffered live messages across successful snapshots', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chat.appendLocalNotice('warning', 'stale notice');
+		const epoch = chat.beginSnapshotLoad();
+
+		chat.applyMessages('chat-1', 'generation-1', [entry(2, assistant('live'))]);
+		chat.appendLocalNotice('error', 'newer notice');
+		const result = chat.setFromPage(
+			'chat-1',
+			page({ messages: [entry(1, assistant('existing'))], lastSeq: 1 }),
+			epoch,
+		);
+
+		expect(result).toBe('applied');
+		expect(chat.chatMessages.map(contentOf)).toEqual(['existing', 'live']);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'live', 'newer notice']);
+	});
+
 	it('applies buffered live messages when a snapshot load fails', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
