@@ -39,7 +39,7 @@ export interface ConversationQueueControllerOptions {
 	get sessions(): Pick<SessionControllerDeps['sessions'], 'selectedChatId'>;
 	get chatState(): Pick<
 		SessionControllerDeps['chatState'],
-		'clearLocalNotices' | 'appendLocalNotice'
+		'clearLocalNotices' | 'appendLocalNotice' | 'loadMessages'
 	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
@@ -257,6 +257,12 @@ export class ConversationQueueController {
 			if (result.control) {
 				this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 			}
+			const instanceConfirmed = this.options.conversationUi
+				.isExecutionControlSocketInstanceConfirmed(result.serverInstanceId);
+			if (!instanceConfirmed) {
+				await this.#reconcileSelectedSteerTranscript(chatId);
+				this.#appendUnconfirmedSteerNotice(chatId);
+			}
 		} catch (error) {
 			const failure = queueEntrySteerFailure(error);
 			if (failure.control) {
@@ -268,10 +274,11 @@ export class ConversationQueueController {
 				&& this.options.conversationUi.isExecutionControlSocketInstanceConfirmed(
 					failure.serverInstanceId,
 				);
-			if (instanceConfirmed && this.options.sessions.selectedChatId === chatId) {
+			if (!instanceConfirmed) await this.#reconcileSelectedSteerTranscript(chatId);
+			if (this.options.sessions.selectedChatId === chatId) {
 				this.options.chatState.appendLocalNotice(
 					'error',
-					failure.deliveryOutcome === 'unknown' || !failure.structured
+					!instanceConfirmed || failure.deliveryOutcome === 'unknown' || !failure.structured
 						? m.chat_notice_steer_outcome_unconfirmed()
 						: steerFailureNotice(error),
 				);
@@ -292,6 +299,20 @@ export class ConversationQueueController {
 				m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
 			);
 		}
+	}
+
+	async #reconcileSelectedSteerTranscript(chatId: string): Promise<void> {
+		if (this.options.sessions.selectedChatId !== chatId) return;
+		try {
+			await this.options.chatState.loadMessages(chatId);
+		} catch {
+			// A later WebSocket reconnect or chat activation retries the authoritative snapshot.
+		}
+	}
+
+	#appendUnconfirmedSteerNotice(chatId: string): void {
+		if (this.options.sessions.selectedChatId !== chatId) return;
+		this.options.chatState.appendLocalNotice('error', m.chat_notice_steer_outcome_unconfirmed());
 	}
 
 	#applyMutationErrorControl(chatId: string, error: unknown): void {
