@@ -20,7 +20,6 @@ function clock(
 ): ConversationFeedMutationClock {
 	return {
 		dataRevision,
-		lastResponseRevision: overrides['live-append'] ?? 0,
 		lastResponseRevisionByMessageType:
 			overrides['live-append'] === undefined
 				? {}
@@ -113,6 +112,8 @@ describe('ConversationFeedProjectionState', () => {
 			{ seq: 20_001, message: new AssistantMessage(TS, 'new response') },
 		]);
 		const appendedRows = transcript.visibleRows;
+		const appendedTail = appendedRows.at(-1);
+		if (appendedTail?.kind !== 'message') throw new Error('Expected an appended transcript row');
 
 		const appended = projections.reconcile(
 			input({ rows: appendedRows, mutationClock: transcript.feedMutationClock }),
@@ -132,7 +133,7 @@ describe('ConversationFeedProjectionState', () => {
 		expect(appended.model.indexByRowId.get('generation-1:20001')).toBe(20_001);
 		expect(appended.model.items.at(-2)).toMatchObject({
 			kind: 'transcript',
-			item: { message: appendedRows.at(-1)?.message },
+			item: { message: appendedTail.message },
 		});
 		expect(appended.geometry.geometryRevision).toBeGreaterThan(first.geometry.geometryRevision);
 		expect(appended.geometry.keys).toEqual(appended.model.items.map((item) => item.key));
