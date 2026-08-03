@@ -29,6 +29,21 @@ describe('ConversationFeedRetentionState', () => {
 		expect(closes).toEqual(['first', 'second']);
 	});
 
+	it('continues closing transients after one callback fails', () => {
+		const retention = new ConversationFeedRetentionState();
+		const second = vi.fn();
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		retention.acquireTransient('row-1', () => {
+			throw new Error('close failed');
+		});
+		retention.acquireTransient('row-2', second);
+
+		retention.closeAllTransients();
+
+		expect(second).toHaveBeenCalledOnce();
+		expect(console.error).toHaveBeenCalledOnce();
+	});
+
 	it('prunes missing stable keys and closes their portals', () => {
 		const retention = new ConversationFeedRetentionState();
 		const close = vi.fn();

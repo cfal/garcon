@@ -814,7 +814,7 @@ export class SpaDriver {
   async waitForExactTextCount(text: string, count: number, timeout = 20_000): Promise<void> {
     await this.#page.waitForFunction(
       (expected, expectedCount) => {
-        const log = document.querySelector('[role="log"][aria-label="Chat messages"]');
+        const log = document.querySelector('[data-chat-scroll-viewport]');
         if (!log) return expectedCount === 0;
         const actual = [...log.querySelectorAll('*')].filter((element) =>
           element.children.length === 0 && element.textContent?.trim() === expected).length;
@@ -878,7 +878,7 @@ export class SpaDriver {
 
   async exactTextCount(text: string): Promise<number> {
     return this.#page.evaluate((expected) => {
-      const log = document.querySelector('[role="log"][aria-label="Chat messages"]');
+      const log = document.querySelector('[data-chat-scroll-viewport]');
       if (!log) return 0;
       return [...log.querySelectorAll('*')].filter((element) =>
         element.children.length === 0 && element.textContent?.trim() === expected).length;

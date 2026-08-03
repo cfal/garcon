@@ -34,7 +34,6 @@
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
 	import { ConversationFeedAnnouncerState } from './conversation-feed-announcer.js';
-	import MessageRenderFallback from './MessageRenderFallback.svelte';
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
@@ -186,6 +185,10 @@
 			pinnedToBottom,
 			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),
+			hiddenToolTypes: localSettings.hiddenToolTypes,
+			floatingPermissionIds: projectionInput.floatingPermissions.map(
+				(request) => request.permissionRequestId,
+			),
 		};
 		untrack(() => {
 			const nextAnnouncement = announcerState.reconcile(input);
@@ -265,6 +268,9 @@
 </script>
 
 {#snippet feedContent()}
+	{#if reserveTopFloatingToolbar && chatState.displayMessageCount === 0}
+		<div class="h-12" aria-hidden="true" data-chat-top-toolbar-spacer></div>
+	{/if}
 	{#if chatState.isLoadingMessages && chatState.displayMessageCount === 0}
 		<div class="text-center text-muted-foreground mt-8">
 			<div class="flex items-center justify-center space-x-2">
@@ -305,36 +311,32 @@
 			data-chat-transcript-scale={String(textScale)}
 		>
 			{#each virtualItems as virtualItem (virtualItem.key)}
-				{@const item = projection.model.items[virtualItem.index]}
+				{@const itemIndex = projection.model.indexByKey.get(String(virtualItem.key))}
+				{@const item = itemIndex === undefined ? undefined : projection.model.items[itemIndex]}
 				{#if item}
-					<svelte:boundary>
-						<ConversationFeedVirtualRow
-							{virtualItem}
-							{item}
-							controller={virtualController}
-							{retention}
-							{itemState}
-							renderModel={projection.renderModel}
-							agentId={agentState.agentId}
-							showThinking={localSettings.showThinking}
-							{textScale}
-							{pendingPermissionRequests}
-							earlierPageState={chatState.pageStates.earlier}
-							laterPageState={chatState.pageStates.later}
-							loadError={chatState.loadError}
-							{onRetry}
-							{onLoadEarlier}
-							{onLoadLater}
-							{onPermissionDecision}
-							{onExitPlanMode}
-							onForkChat={canShowForkAtMessage ? onForkChat : undefined}
-							{onGenerateTitleFromMessage}
-							canForkAtMessageNow={canUseForkAtMessage}
-						/>
-						{#snippet failed(error)}
-							<MessageRenderFallback {error} />
-						{/snippet}
-					</svelte:boundary>
+					<ConversationFeedVirtualRow
+						{virtualItem}
+						{item}
+						controller={virtualController}
+						{retention}
+						{itemState}
+						renderModel={projection.renderModel}
+						agentId={agentState.agentId}
+						showThinking={localSettings.showThinking}
+						{textScale}
+						{pendingPermissionRequests}
+						earlierPageState={chatState.pageStates.earlier}
+						laterPageState={chatState.pageStates.later}
+						loadError={chatState.loadError}
+						{onRetry}
+						{onLoadEarlier}
+						{onLoadLater}
+						{onPermissionDecision}
+						{onExitPlanMode}
+						onForkChat={canShowForkAtMessage ? onForkChat : undefined}
+						{onGenerateTitleFromMessage}
+						canForkAtMessageNow={canUseForkAtMessage}
+					/>
 				{/if}
 			{/each}
 		</div>
@@ -366,6 +368,8 @@
 		aria-live="off"
 		aria-label={m.chat_messages_region()}
 		data-chat-scroll-viewport
+		data-chat-pinned-to-bottom={pinnedToBottom}
+		data-chat-user-scrolled-up={chatState.isUserScrolledUp}
 		class={feedViewportClass}
 	>
 		<div class={feedContentClass}>

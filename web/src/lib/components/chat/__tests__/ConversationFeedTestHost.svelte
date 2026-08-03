@@ -22,7 +22,8 @@
 			| 'local-truncation'
 			| 'loading-later'
 			| 'error-earlier'
-			| 'row-ids';
+			| 'row-ids'
+			| 'twenty-thousand';
 	}
 
 	const { reserveTopFloatingToolbar = false, transcriptScenario = 'empty' }: Props = $props();
@@ -55,11 +56,13 @@
 		});
 	} else if (initialTranscriptScenario !== 'empty') {
 		const messageCount =
-			initialTranscriptScenario === 'initial-reveal'
-				? 50
-				: initialTranscriptScenario === 'loading-later'
-					? 5
-					: 120;
+			initialTranscriptScenario === 'twenty-thousand'
+				? 20_000
+				: initialTranscriptScenario === 'initial-reveal'
+					? 50
+					: initialTranscriptScenario === 'loading-later'
+						? 5
+						: 120;
 		const messages = Array.from({ length: messageCount }, (_, index) => ({
 			seq: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
@@ -84,6 +87,9 @@
 			}
 			if (initialTranscriptScenario === 'error-earlier') {
 				chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
+			}
+			if (initialTranscriptScenario === 'twenty-thousand') {
+				chatState.revealAllLoadedMessages();
 			}
 		}
 	}

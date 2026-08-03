@@ -63,12 +63,10 @@
 	const chatTitle = $derived(chatRecord?.title || m.chat_pane_untitled());
 	const providerLabel = $derived(chatRecord?.agentId || '');
 	const previewAgentId = $derived(providerLabel || 'unknown');
-	const previewChatContext = $derived.by(
-		(): ConversationMessageChatContext => ({
-			chatId,
-			projectPath: chatRecord?.projectPath ?? null,
-		}),
-	);
+	const previewChatContext = $derived.by((): ConversationMessageChatContext => ({
+		chatId,
+		projectPath: chatRecord?.projectPath ?? null,
+	}));
 	const previewContentClass = $derived(
 		cn(CHAT_FEED_CONTENT_BASE_CLASS, CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth]),
 	);
@@ -282,6 +280,7 @@
 					bind:ref={previewScrollContainer}
 					class={previewViewportClass}
 					role="log"
+					aria-live="polite"
 					aria-label={m.chat_pane_preview({ title: chatTitle })}
 				>
 					{#if isPreviewLoading && previewRows.length === 0}

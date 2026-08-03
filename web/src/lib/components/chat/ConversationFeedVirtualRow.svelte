@@ -12,6 +12,7 @@
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
+	import MessageRenderFallback from './MessageRenderFallback.svelte';
 
 	interface PermissionDecision {
 		allow: PermissionDecisionPayload['allow'];
@@ -100,26 +101,31 @@
 	onfocusout={handleFocusOut}
 	{@attach controller.measureItem}
 >
-	<ConversationFeedVirtualItem
-		{item}
-		{renderModel}
-		{agentId}
-		{showThinking}
-		{textScale}
-		{pendingPermissionRequests}
-		{chatContext}
-		{earlierPageState}
-		{laterPageState}
-		{loadError}
-		{onRetry}
-		{onLoadEarlier}
-		{onLoadLater}
-		{onPermissionDecision}
-		{onExitPlanMode}
-		{onForkChat}
-		{onGenerateTitleFromMessage}
-		{canForkAtMessageNow}
-		{itemState}
-		acquireTransientActivity={(close) => retention.acquireTransient(item.key, close)}
-	/>
+	<svelte:boundary>
+		<ConversationFeedVirtualItem
+			{item}
+			{renderModel}
+			{agentId}
+			{showThinking}
+			{textScale}
+			{pendingPermissionRequests}
+			{chatContext}
+			{earlierPageState}
+			{laterPageState}
+			{loadError}
+			{onRetry}
+			{onLoadEarlier}
+			{onLoadLater}
+			{onPermissionDecision}
+			{onExitPlanMode}
+			{onForkChat}
+			{onGenerateTitleFromMessage}
+			{canForkAtMessageNow}
+			{itemState}
+			acquireTransientActivity={(close) => retention.acquireTransient(item.key, close)}
+		/>
+		{#snippet failed(error)}
+			<MessageRenderFallback {error} />
+		{/snippet}
+	</svelte:boundary>
 </div>

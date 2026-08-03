@@ -60,7 +60,13 @@ export class ConversationFeedRetentionState {
 
 	closeAllTransients(): void {
 		const registrations = [...this.#transients.values()];
-		for (const registration of registrations) registration.close();
+		for (const registration of registrations) {
+			try {
+				registration.close();
+			} catch (error) {
+				console.error('Failed to close retained Chat UI', error);
+			}
+		}
 	}
 
 	prune(validKeys: Iterable<string>): void {

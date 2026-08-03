@@ -13,7 +13,13 @@ describe('ConversationFeed', () => {
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
 			this: HTMLElement,
 		) {
-			const height = this.hasAttribute('data-scroll-area-viewport') ? 720 : 100;
+			const itemIndex = Number(this.dataset.index ?? 0);
+			const itemHeights = [48, 96, 180, 240];
+			const height = this.hasAttribute('data-scroll-area-viewport')
+				? 720
+				: this.hasAttribute('data-chat-virtual-item')
+					? itemHeights[itemIndex % itemHeights.length]
+					: 100;
 			return {
 				x: 0,
 				y: 0,
@@ -29,7 +35,9 @@ describe('ConversationFeed', () => {
 		Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
 			configurable: true,
 			get() {
-				return this.hasAttribute('data-chat-virtual-item') ? 100 : 0;
+				if (!this.hasAttribute('data-chat-virtual-item')) return 0;
+				const itemHeights = [48, 96, 180, 240];
+				return itemHeights[Number(this.dataset.index ?? 0) % itemHeights.length];
 			},
 		});
 	});
@@ -72,6 +80,15 @@ describe('ConversationFeed', () => {
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);
 		expect(container.querySelector('[data-chat-bottom-anchor]')).toBeNull();
+	});
+
+	it('reserves toolbar space above empty feed states', () => {
+		const { container } = render(ConversationFeedTestHost, { reserveTopFloatingToolbar: true });
+		const viewport = screen.getByRole('region', { name: 'Chat messages' });
+		const spacer = container.querySelector('[data-chat-top-toolbar-spacer]');
+
+		expect(spacer).toBeTruthy();
+		expect(viewport.contains(spacer)).toBe(true);
 	});
 
 	it('hides the local truncation control during the automatic initial reveal', () => {
@@ -139,5 +156,19 @@ describe('ConversationFeed', () => {
 		});
 		expect(container.querySelectorAll('[data-chat-virtual-item]').length).toBeLessThan(120);
 		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
+	});
+
+	it('keeps a varied twenty-thousand-item transcript below the mounted DOM budget', async () => {
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'twenty-thousand',
+		});
+		await waitFor(
+			() => {
+				const sizer = container.querySelector('[data-chat-virtual-sizer]');
+				expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe('20000');
+				expect(container.querySelectorAll('[data-chat-virtual-item]').length).toBeLessThan(60);
+			},
+			{ timeout: 10_000 },
+		);
 	});
 });

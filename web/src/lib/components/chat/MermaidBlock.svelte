@@ -43,10 +43,11 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	}
 
 	async function closeViewer(): Promise<void> {
+		const release = releaseViewer;
+		releaseViewer = null;
 		viewerOpen = false;
 		await tick();
-		releaseViewer?.();
-		releaseViewer = null;
+		release?.();
 	}
 
 	function handleViewerOpenChange(open: boolean): void {

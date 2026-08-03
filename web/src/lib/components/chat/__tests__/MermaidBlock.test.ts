@@ -91,6 +91,31 @@ describe('MermaidBlock', () => {
 		expect(release).toHaveBeenCalledOnce();
 	});
 
+	it('does not release a reopened viewer through an overlapping close', async () => {
+		const firstRelease = vi.fn();
+		const secondRelease = vi.fn();
+		const acquireTransientActivity = vi
+			.fn()
+			.mockReturnValueOnce(firstRelease)
+			.mockReturnValueOnce(secondRelease);
+		render(MermaidBlock, {
+			text: 'flowchart LR\nA --> B',
+			acquireTransientActivity,
+		});
+
+		const expandButton = await screen.findByRole('button', { name: 'Expand diagram' });
+		await waitFor(() => expect((expandButton as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(expandButton);
+		await fireEvent.click(screen.getByRole('button', { name: 'Close (Escape)' }));
+		await fireEvent.click(expandButton);
+		await tick();
+
+		expect(acquireTransientActivity).toHaveBeenCalledTimes(2);
+		expect(firstRelease).toHaveBeenCalledOnce();
+		expect(secondRelease).not.toHaveBeenCalled();
+		expect(screen.getByRole('dialog')).toBeTruthy();
+	});
+
 	it('isolates drag ownership and releases it after capture loss and close', async () => {
 		render(MermaidBlock, { text: 'flowchart LR\nA --> B' });
 
