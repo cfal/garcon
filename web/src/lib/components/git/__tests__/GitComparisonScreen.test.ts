@@ -100,6 +100,34 @@ describe('GitComparisonScreen', () => {
 		},
 	);
 
+	it('collapses comparison panes into segmented navigation below the wide breakpoint', async () => {
+		const comparison = new GitComparisonController();
+		comparison.snapshot = readySnapshot();
+		const { container } = render(GitComparisonScreen, {
+			comparison,
+			isLoading: false,
+			presentation: 'main',
+			fontSize: 12,
+			onRefresh: vi.fn(),
+			onOpenChat: vi.fn(),
+		});
+		const document = container.querySelector<HTMLElement>('[data-git-diff-document]');
+		expect(document).toBeTruthy();
+		if (!document) return;
+
+		ResizeObserverHarness.emit(document, 560);
+		await vi.waitFor(() => expect(document.dataset.gitHistoryLayout).toBe('narrow'));
+		expect(container.querySelector('[data-git-history-segmented-navigation]')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Hide file tree' })).toBeNull();
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeNull();
+
+		ResizeObserverHarness.emit(document, 840);
+		await vi.waitFor(() => expect(document.dataset.gitHistoryLayout).toBe('wide'));
+		expect(container.querySelector('[data-git-history-segmented-navigation]')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Hide file tree' })).toBeTruthy();
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
+	});
+
 	it('omits the inline fullscreen control from mobile comparison', () => {
 		const comparison = new GitComparisonController();
 		comparison.snapshot = readySnapshot();
