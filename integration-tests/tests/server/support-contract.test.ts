@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred } from '../../support/deferred.js';
@@ -33,6 +33,7 @@ import {
   OPENCODE_VERSION,
   writeOpenCodePluginSeed,
 } from '../../support/scripted-opencode.js';
+import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
 import {
   linuxProcessStartTimeTicks,
   processIdentityAlive,
@@ -85,6 +86,36 @@ function anthropicStreamText(body: string): string {
 }
 
 describe('integration support contracts', () => {
+  test('exposes Node to scripted Pi without exposing sibling ambient agent binaries', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-pi-path-'));
+    const environment = startScriptedPiTestEnvironment();
+    const directories = {
+      root,
+      config: join(root, 'config'),
+      workspace: join(root, 'workspace'),
+      project: join(root, 'project'),
+      home: join(root, 'home'),
+    };
+
+    try {
+      await Promise.all(Object.values(directories).map((directory) => (
+        mkdir(directory, { recursive: true })
+      )));
+      await environment.prepareWorkspace(directories);
+
+      const pathEntries = environment.serverEnvironment.PATH.split(':');
+      const fixtureBin = join(directories.home, '.garcon-test-bin');
+      const runnerNode = Bun.which('node');
+      expect(runnerNode).not.toBeNull();
+      expect(pathEntries[0]).toBe(fixtureBin);
+      expect(pathEntries).not.toContain(dirname(runnerNode!));
+      expect(await realpath(join(fixtureBin, 'node'))).toBe(await realpath(runnerNode!));
+    } finally {
+      environment.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('redacts credential environment values from process diagnostics', () => {
     const text = 'key=sk-testing-secret token=auth-testing-secret path=/tmp/test-home';
     expect(redactSensitiveEnvironmentText(text, {

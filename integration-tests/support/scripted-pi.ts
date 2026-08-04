@@ -5,8 +5,8 @@
 // ~/.pi untouched: both the spawned CLI and the in-server SDK discovery resolve ~/.pi/agent
 // inside the temp home.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
@@ -41,8 +41,8 @@ export interface ScriptedPiTestEnvironment {
 
 export function startScriptedPiTestEnvironment(): ScriptedPiTestEnvironment {
   const model = FakeChatCompletionsModel.start();
-  // The pi bin is a #!/usr/bin/env node shim; the fixture PATH is system-only, so inject the
-  // runner's node directory (precedent: live-codex.ts does exactly this for the codex shim).
+  // The Pi bin uses /usr/bin/env node, so only the runner's node executable is exposed below.
+  // Adding its whole directory would also expose ambient agent binaries to catalog discovery.
   const nodeBinary = Bun.which('node');
   if (!nodeBinary) {
     model.stop();
@@ -50,14 +50,20 @@ export function startScriptedPiTestEnvironment(): ScriptedPiTestEnvironment {
   }
   const serverEnvironment: Record<string, string> = {
     GARCON_PI_BINARY: fileURLToPath(new URL('../node_modules/.bin/pi', import.meta.url)),
-    PATH: `${dirname(nodeBinary)}:${SYSTEM_PATH}`,
+    PATH: SYSTEM_PATH,
   };
   return {
     model,
     serverEnvironment,
     async prepareWorkspace(directories) {
+      const binDir = join(directories.home, '.garcon-test-bin');
       const agentDir = join(directories.home, '.pi', 'agent');
-      await mkdir(agentDir, { recursive: true });
+      await Promise.all([
+        mkdir(binDir, { recursive: true }),
+        mkdir(agentDir, { recursive: true }),
+      ]);
+      await symlink(nodeBinary, join(binDir, 'node'));
+      serverEnvironment.PATH = `${binDir}:${SYSTEM_PATH}`;
       await writeFile(join(agentDir, 'models.json'), JSON.stringify({
         providers: {
           [PI_TEST_PROVIDER]: {
