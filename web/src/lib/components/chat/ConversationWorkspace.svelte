@@ -362,7 +362,7 @@
 			},
 		},
 		reloadTranscript: (chatId) => reloadChatFromNative(ws, chatState, chatId),
-		requestProcessingSnapshot: () => ws.requestProcessingSnapshot(),
+		requestProcessingSnapshot: (source) => ws.requestProcessingSnapshot(source),
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.setPinnedToBottom(v);
 		},

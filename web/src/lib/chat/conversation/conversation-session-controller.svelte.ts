@@ -138,6 +138,19 @@ type SessionConversationUiState = Pick<
 
 type SessionStartupCoordinator = Pick<StartupCoordinator, 'beginLocalStartup' | 'completeStartup'>;
 
+interface DirectAdmissionBarrier {
+	settled: Promise<void>;
+	release: () => void;
+}
+
+function createDirectAdmissionBarrier(): DirectAdmissionBarrier {
+	let release!: () => void;
+	const settled = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return { settled, release };
+}
+
 export interface SessionControllerDeps {
 	sessions: Pick<
 		ChatSessionsPort,
@@ -201,7 +214,7 @@ export interface SessionControllerDeps {
 	navigation: { navigateToChat?: (chatId: string) => void };
 	/** Rebuilds the chat transcript from native history (e.g. after an agent switch). */
 	reloadTranscript?: (chatId: string) => Promise<void>;
-	requestProcessingSnapshot: () => Promise<unknown>;
+	requestProcessingSnapshot: (source: 'admission' | 'stop-probe') => Promise<unknown>;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;
 	scrollToBottom: () => void;
@@ -217,7 +230,7 @@ function isExecutionControlAdmissionConflict(error: unknown): boolean {
 
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
-	#pendingDirectAdmissions = $state.raw<ReadonlySet<string>>(new Set());
+	#pendingDirectAdmissions = $state.raw<ReadonlyMap<string, DirectAdmissionBarrier>>(new Map());
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
 	readonly #acceptedInputs: AcceptedInputSubmissionService;
@@ -469,35 +482,68 @@ export class ConversationSessionController {
 		return chatId !== null && this.#pendingDirectAdmissions.has(chatId);
 	}
 
-	#setDirectAdmissionPending(chatId: string, pending: boolean): void {
-		if (this.#pendingDirectAdmissions.has(chatId) === pending) return;
-		const next = new Set(this.#pendingDirectAdmissions);
-		if (pending) next.add(chatId);
-		else next.delete(chatId);
+	#claimDirectAdmission(chatId: string): DirectAdmissionBarrier | null {
+		if (this.#pendingDirectAdmissions.has(chatId)) return null;
+		const barrier = createDirectAdmissionBarrier();
+		const next = new Map(this.#pendingDirectAdmissions);
+		next.set(chatId, barrier);
 		this.#pendingDirectAdmissions = next;
+		return barrier;
+	}
+
+	#releaseDirectAdmission(chatId: string, barrier: DirectAdmissionBarrier): void {
+		if (this.#pendingDirectAdmissions.get(chatId) !== barrier) return;
+		const next = new Map(this.#pendingDirectAdmissions);
+		next.delete(chatId);
+		this.#pendingDirectAdmissions = next;
+		barrier.release();
+	}
+
+	#restorePreflightSubmission(
+		chatId: string,
+		text: string,
+		images: File[],
+		composerRevisionAfterClear: number | null,
+	): void {
+		const { composerState, sessions } = this.deps;
+		if (
+			composerRevisionAfterClear === null ||
+			sessions.selectedChatId !== chatId ||
+			composerState.contentRevision !== composerRevisionAfterClear
+		)
+			return;
+		composerState.inputText = text;
+		composerState.images = images;
+		composerState.saveDraft(chatId);
 	}
 
 	// Accepts an explicit chat ID so draft startup cannot race selection changes.
-	async submitForChat(chatId: string, messageOverride?: string, imageOverride?: File[]): Promise<ConversationSubmissionOutcome> {
+	async submitForChat(
+		chatId: string,
+		messageOverride?: string,
+		imageOverride?: File[],
+	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
+		const ownsComposer = messageOverride === undefined && imageOverride === undefined;
+		while (this.isDirectAdmissionPending(chatId)) {
+			if (ownsComposer) return 'no-op';
+			await this.#pendingDirectAdmissions.get(chatId)?.settled;
+		}
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
-		if (this.isDirectAdmissionPending(chatId)) return 'no-op';
 		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
 		const text = messageOverride ?? deps.composerState.inputText.trim();
 		const submissionImages = imageOverride ?? deps.composerState.images;
 		if (!text && submissionImages.length === 0) return 'no-op';
 
-		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		const composerRevision = deps.composerState.contentRevision;
 		const slash = this.#slashCommands.dispatchSubmission({
 			chatId,
 			chat: selected,
 			text,
 			images: [...submissionImages],
-			ownsComposer: restoreComposerOnFailure,
+			ownsComposer,
 		});
 		if (slash.kind === 'handled') return slash.outcome;
 
@@ -510,7 +556,8 @@ export class ConversationSessionController {
 			images: [] as ChatImage[],
 			previousText,
 			previousImages,
-			restoreComposerOnFailure,
+			ownsComposer,
+			composerRevisionAfterClear: null,
 		};
 		if (slash.kind === 'steer') {
 			return submitSteerRoute(deps, this.#acceptedInputs, specializedContext);
@@ -521,65 +568,82 @@ export class ConversationSessionController {
 
 		const isDraft = selected.status === 'draft';
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
-		let directAdmissionClaimed = false;
+		let directAdmission: DirectAdmissionBarrier | null = null;
 		if (!isDraft && !activeTurn) {
-			this.#setDirectAdmissionPending(chatId, true);
-			directAdmissionClaimed = true;
-		}
-		const pendingControlRefresh = this.#queue.pendingControlRefresh(chatId);
-		if (!isDraft && !activeTurn && pendingControlRefresh) {
-			await this.#queue.settleControlRefresh(pendingControlRefresh);
-		}
-		const route = classifySubmission({
-			isDraft,
-			isProcessing: activeTurn,
-			control: deps.conversationUi.getExecutionControl(chatId),
-			hasAttachments: submissionImages.length > 0,
-		});
-		if (route === 'queue-attachments-unsupported') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
-			if (directAdmissionClaimed) this.#setDirectAdmissionPending(chatId, false);
-			return 'rejected';
-		}
-		const directAdmission = route === 'direct';
-		if (!directAdmission && directAdmissionClaimed) {
-			this.#setDirectAdmissionPending(chatId, false);
-			directAdmissionClaimed = false;
+			directAdmission = this.#claimDirectAdmission(chatId);
+			if (!directAdmission) return 'no-op';
 		}
 
-		if (route === 'draft') {
-			deps.composerState.isSubmitting = true;
-		}
-		let imagePayload: ChatImage[] = [];
-		try {
-			if (submissionImages.length > 0) imagePayload = await prepareChatImages(submissionImages);
-		} catch (error) {
-			console.error('[SessionController] Failed to prepare attachment payload:', error);
-			if (route === 'draft') deps.composerState.isSubmitting = false;
-			if (directAdmissionClaimed) this.#setDirectAdmissionPending(chatId, false);
-			deps.chatState.appendLocalNotice('error', m.chat_notice_failed_prepare_attachments({
-				detail: errorDetail(error),
-			}));
-			return 'rejected';
+		let composerRevisionAfterClear: number | null = null;
+		if (ownsComposer) {
+			deps.composerState.clearAfterSubmit(chatId);
+			composerRevisionAfterClear = deps.composerState.contentRevision;
 		}
 
-		const context = {
-			chatId,
-			chat: selected,
-			startup: deps.sessions.startupByChatId[chatId],
-			text,
-			content: slash.content,
-			images: imagePayload,
-			previousText,
-			previousImages,
-			restoreComposerOnFailure:
-				restoreComposerOnFailure && deps.composerState.contentRevision === composerRevision,
-		};
-		if (route === 'queue') {
-			return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context);
-		}
-		if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
 		try {
+			const pendingControlRefresh = this.#queue.pendingControlRefresh(chatId);
+			if (!isDraft && !activeTurn && pendingControlRefresh) {
+				await this.#queue.settleControlRefresh(pendingControlRefresh);
+			}
+			const route = classifySubmission({
+				isDraft,
+				isProcessing: activeTurn,
+				control: deps.conversationUi.getExecutionControl(chatId),
+				hasAttachments: submissionImages.length > 0,
+			});
+			if (route === 'queue-attachments-unsupported') {
+				this.#restorePreflightSubmission(
+					chatId,
+					previousText,
+					previousImages,
+					composerRevisionAfterClear,
+				);
+				deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
+				return 'rejected';
+			}
+			if (route !== 'direct' && directAdmission) {
+				this.#releaseDirectAdmission(chatId, directAdmission);
+				directAdmission = null;
+			}
+
+			if (route === 'draft') deps.composerState.isSubmitting = true;
+			let imagePayload: ChatImage[] = [];
+			try {
+				if (submissionImages.length > 0) imagePayload = await prepareChatImages(submissionImages);
+			} catch (error) {
+				console.error('[SessionController] Failed to prepare attachment payload:', error);
+				if (route === 'draft') deps.composerState.isSubmitting = false;
+				this.#restorePreflightSubmission(
+					chatId,
+					previousText,
+					previousImages,
+					composerRevisionAfterClear,
+				);
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_prepare_attachments({
+						detail: errorDetail(error),
+					}),
+				);
+				return 'rejected';
+			}
+
+			const context = {
+				chatId,
+				chat: selected,
+				startup: deps.sessions.startupByChatId[chatId],
+				text,
+				content: slash.content,
+				images: imagePayload,
+				previousText,
+				previousImages,
+				ownsComposer,
+				composerRevisionAfterClear,
+			};
+			if (route === 'queue') {
+				return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context);
+			}
+			if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
 			const outcome = await submitRunRoute(
 				deps,
 				this.#acceptedInputs,
@@ -587,10 +651,10 @@ export class ConversationSessionController {
 				context,
 				this.#executionModelSelection(),
 			);
-			await deps.requestProcessingSnapshot().catch(() => undefined);
+			await deps.requestProcessingSnapshot('admission').catch(() => undefined);
 			return outcome;
 		} finally {
-			if (directAdmissionClaimed) this.#setDirectAdmissionPending(chatId, false);
+			if (directAdmission) this.#releaseDirectAdmission(chatId, directAdmission);
 		}
 	}
 
@@ -641,7 +705,7 @@ export class ConversationSessionController {
 		})
 			.then(async (result) => {
 				onResult?.(chatId, result);
-				await deps.requestProcessingSnapshot().catch(() => undefined);
+				await deps.requestProcessingSnapshot('stop-probe').catch(() => undefined);
 				if (isStopSatisfied(result.outcome)) return;
 				restore();
 				appendFailure(m.chat_notice_stop_request_failed());

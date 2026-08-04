@@ -20,7 +20,7 @@ export interface SubmissionFailureContext {
 	chatId: string;
 	previousText: string;
 	previousImages: File[];
-	restoreComposerOnFailure: boolean;
+	ownsComposer: boolean;
 }
 
 export interface SubmissionFailureOptions {
@@ -63,7 +63,7 @@ export async function settleSubmissionFailure(
 			typeof options.composerRevisionAfterClear === 'number'
 			&& deps.composerState.contentRevision === options.composerRevisionAfterClear
 		);
-	if (context.restoreComposerOnFailure && !outcomeUnknown && composerCanBeRestored) {
+	if (context.ownsComposer && !outcomeUnknown && composerCanBeRestored) {
 		if (options.restoreRejected) {
 			options.restoreRejected();
 		} else {

@@ -52,8 +52,8 @@ const failures = [
 
 describe('settleSubmissionFailure', () => {
 	for (const failure of failures) {
-		for (const restoreComposerOnFailure of [true, false]) {
-			it(`${failure.kind} with restore=${restoreComposerOnFailure}`, async () => {
+		for (const ownsComposer of [true, false]) {
+			it(`${failure.kind} with composer ownership=${ownsComposer}`, async () => {
 				const deps = createDeps();
 				const refreshControl = vi.fn(async () => undefined);
 				const onRejected = vi.fn();
@@ -63,7 +63,7 @@ describe('settleSubmissionFailure', () => {
 						chatId: 'chat-1',
 						previousText: 'previous',
 						previousImages: [],
-						restoreComposerOnFailure,
+						ownsComposer,
 					},
 					failure.error(),
 					{
@@ -89,7 +89,7 @@ describe('settleSubmissionFailure', () => {
 					expect(deps.chatState.updatePendingUserInputDeliveryStatus).not.toHaveBeenCalled();
 				}
 				expect(refreshControl).toHaveBeenCalledTimes(failure.refreshes ? 1 : 0);
-				const restores = restoreComposerOnFailure && failure.outcome === 'rejected';
+				const restores = ownsComposer && failure.outcome === 'rejected';
 				expect(deps.composerState.inputText).toBe(restores ? 'previous' : 'current');
 				expect(deps.composerState.saveDraft).toHaveBeenCalledTimes(restores ? 1 : 0);
 				expect(onRejected).toHaveBeenCalledTimes(failure.outcome === 'rejected' ? 1 : 0);
@@ -111,7 +111,7 @@ describe('settleSubmissionFailure', () => {
 				chatId: 'chat-1',
 				previousText: 'queued text',
 				previousImages: [],
-				restoreComposerOnFailure: true,
+				ownsComposer: true,
 			},
 			new Error('queue failed'),
 			{
@@ -137,7 +137,7 @@ describe('settleSubmissionFailure', () => {
 				chatId: 'chat-1',
 				previousText: 'submitted text',
 				previousImages: [],
-				restoreComposerOnFailure: true,
+				ownsComposer: true,
 			},
 			new Error('request rejected'),
 			{
