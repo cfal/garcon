@@ -359,6 +359,10 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#chatNames.setSessionName(chatId, title);
   }
 
+  async setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean> {
+    return this.#chatNames.setSessionNameIfAbsent(chatId, title);
+  }
+
   async removeSessionName(chatId: string): Promise<void> {
     return this.#chatNames.removeSessionName(chatId);
   }

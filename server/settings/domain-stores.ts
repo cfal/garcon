@@ -200,18 +200,35 @@ export class ChatNameStore {
     return settings.chatNames[chatId] ?? null;
   }
 
+  async #persistSessionName(
+    settings: ProjectSettings,
+    chatId: string,
+    title: string,
+  ): Promise<void> {
+    if (!settings.chatNames) settings.chatNames = {};
+    const trimmed = typeof title === 'string' ? title.trim() : '';
+    if (!trimmed) {
+      delete settings.chatNames[String(chatId)];
+    } else {
+      settings.chatNames[String(chatId)] = trimmed;
+    }
+    await this.#context.save(settings);
+    this.#context.emitSessionNameChanged(chatId, trimmed || '');
+  }
+
   async setSessionName(chatId: string, title: string): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
-      if (!settings.chatNames) settings.chatNames = {};
-      const trimmed = typeof title === 'string' ? title.trim() : '';
-      if (!trimmed) {
-        delete settings.chatNames[String(chatId)];
-      } else {
-        settings.chatNames[String(chatId)] = trimmed;
-      }
-      await this.#context.save(settings);
-      this.#context.emitSessionNameChanged(chatId, trimmed || '');
+      await this.#persistSessionName(settings, chatId, title);
+    });
+  }
+
+  async setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      if (settings.chatNames?.[String(chatId)]) return false;
+      await this.#persistSessionName(settings, chatId, title);
+      return true;
     });
   }
 

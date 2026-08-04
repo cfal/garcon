@@ -20,6 +20,7 @@ const mockAgents = {
 };
 
 const setSessionNameMock = mock(() => Promise.resolve(undefined));
+const setSessionNameIfAbsentMock = mock(() => Promise.resolve(true));
 const getChatNameMock = mock(() => null);
 const getUiSettingsMock = mock(() => Promise.resolve({
   chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
@@ -28,13 +29,14 @@ const mockSettings = {
   getUiSettings: getUiSettingsMock,
   getChatName: getChatNameMock,
   setSessionName: setSessionNameMock,
+  setSessionNameIfAbsent: setSessionNameIfAbsentMock,
 };
 const recentTitleIcons = {
   getRecentIcons: () => [],
 };
 
 const allMocks = [
-  runSingleQueryMock, setSessionNameMock,
+  runSingleQueryMock, setSessionNameMock, setSessionNameIfAbsentMock,
   getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock,
   getAgentReadinessMapMock, getAgentCatalogEntriesMock, getModelsMock, mockAgents.getAgentCatalog,
 ];
@@ -55,6 +57,7 @@ describe('maybeGenerateChatTitle', () => {
     getModelsMock.mockImplementation(() => Promise.resolve([]));
     runSingleQueryMock.mockImplementation(() => Promise.resolve('Test Chat Title'));
     getChatNameMock.mockImplementation(() => null);
+    setSessionNameIfAbsentMock.mockImplementation(() => Promise.resolve(true));
   });
 
   it('generates and persists a title when enabled', async () => {
@@ -75,7 +78,7 @@ describe('maybeGenerateChatTitle', () => {
     expect(opts.thinkingMode).toBe('none');
     expect(opts.timeoutMs).toBe(110_000);
 
-    expect(setSessionNameMock).toHaveBeenCalledWith('100', 'Test Chat Title');
+    expect(setSessionNameIfAbsentMock).toHaveBeenCalledWith('100', 'Test Chat Title');
   });
 
   it('asks automatic generation to avoid recent icons and keep the icon first', async () => {
@@ -281,6 +284,37 @@ describe('maybeGenerateChatTitle', () => {
     expect(runSingleQueryMock).not.toHaveBeenCalled();
   });
 
+  it('preserves a manual title set while automatic generation is running', async () => {
+    let resolveGeneration;
+    let markGenerationStarted;
+    const generationStarted = new Promise((resolve) => {
+      markGenerationStarted = resolve;
+    });
+    runSingleQueryMock.mockImplementation(() => {
+      markGenerationStarted();
+      return new Promise((resolve) => {
+        resolveGeneration = resolve;
+      });
+    });
+    getChatNameMock.mockImplementation(() => null);
+    setSessionNameIfAbsentMock.mockImplementation(() => Promise.resolve(false));
+
+    const generation = maybeGenerateChatTitle({
+      chatId: '501',
+      projectPath: '/proj',
+      firstPrompt: 'Some prompt',
+      agents: mockAgents,
+      settings: mockSettings,
+      recentTitleIcons,
+    });
+    await generationStarted;
+    resolveGeneration('Generated Title');
+    await generation;
+
+    expect(setSessionNameIfAbsentMock).toHaveBeenCalledWith('501', 'Generated Title');
+    expect(setSessionNameMock).not.toHaveBeenCalled();
+  });
+
   it('strips surrounding quotes from generated title', async () => {
     runSingleQueryMock.mockImplementation(() => Promise.resolve('"Quoted Title"'));
 
@@ -293,7 +327,7 @@ describe('maybeGenerateChatTitle', () => {
       recentTitleIcons,
     });
 
-    expect(setSessionNameMock).toHaveBeenCalledWith('600', 'Quoted Title');
+    expect(setSessionNameIfAbsentMock).toHaveBeenCalledWith('600', 'Quoted Title');
   });
 
   it('does not persist an empty generated title', async () => {

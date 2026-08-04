@@ -116,6 +116,20 @@ describe('settings store', () => {
       expect(name).toBe('Trimmed Title');
     });
 
+    it('setSessionNameIfAbsent preserves an explicit title queued first', async () => {
+      const explicitWrite = store.setSessionName('abc', 'Explicit Title');
+      const generatedWrite = store.setSessionNameIfAbsent('abc', 'Generated Title');
+
+      await expect(generatedWrite).resolves.toBe(false);
+      await explicitWrite;
+      expect(store.getChatName('abc')).toBe('Explicit Title');
+    });
+
+    it('setSessionNameIfAbsent persists when no title exists', async () => {
+      await expect(store.setSessionNameIfAbsent('abc', 'Generated Title')).resolves.toBe(true);
+      expect(store.getChatName('abc')).toBe('Generated Title');
+    });
+
     it('removeSessionName deletes the entry', async () => {
       await store.setSessionName('abc', 'My Title');
       await store.removeSessionName('abc');

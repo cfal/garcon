@@ -43,6 +43,7 @@ interface TitleGenerationSettings {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
+  setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
 }
 
 interface MaybeGenerateChatTitleInput {
@@ -225,6 +226,10 @@ async function runTitleGeneration({
       );
     }
 
+    if (skipExistingTitle) {
+      const persisted = await settings.setSessionNameIfAbsent(chatId, title);
+      return persisted ? { chatId, title } : null;
+    }
     await settings.setSessionName(chatId, title);
     return { chatId, title };
   } catch (error) {
