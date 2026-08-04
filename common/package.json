@@ -19,6 +19,7 @@
     "./chat-list": "./chat-list.ts",
     "./chat-modes": "./chat-modes.ts",
     "./chat-order-contracts": "./chat-order-contracts.ts",
+    "./chat-snapshot": "./chat-snapshot.ts",
     "./chat-search": "./chat-search.ts",
     "./chat-title-contracts": "./chat-title-contracts.ts",
     "./chat-types": "./chat-types.ts",

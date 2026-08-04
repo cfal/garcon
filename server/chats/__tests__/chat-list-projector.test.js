@@ -99,6 +99,47 @@ describe('ChatListProjector', () => {
     });
   });
 
+  it('builds a path-independent normalized summary', () => {
+    const { deps, session } = makeDeps();
+    session.tags = ['Review Needed', 'cli', 'review-needed'];
+    session.modelProtocol = 'anthropic-messages';
+    deps.pathCache.resolveProjectPath.mockImplementation(() => {
+      throw new Error('summary must not resolve the project path');
+    });
+    const projector = new ChatListProjector(deps);
+
+    expect(projector.buildSummary(CHAT_ID)).toEqual({
+      chat: {
+        id: CHAT_ID,
+        agentId: 'claude',
+        model: 'opus',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: 'anthropic-messages',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        title: 'First line',
+        projectPath: '/alias',
+        tags: ['cli', 'review-needed'],
+        activity: {
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastActivityAt: '2026-01-02T00:00:00.000Z',
+        },
+      },
+      processingPhase: 'running',
+    });
+    expect(deps.pathCache.resolveProjectPath).not.toHaveBeenCalled();
+    expect(deps.processing.phase).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns no summary for an unknown chat', () => {
+    const { deps } = makeDeps();
+    deps.registry.getChat.mockReturnValue(null);
+
+    expect(new ChatListProjector(deps).buildSummary(CHAT_ID)).toBeNull();
+    expect(deps.processing.phase).not.toHaveBeenCalled();
+  });
+
   it('uses pinned, normal, archived precedence for corrupt overlap', async () => {
     const { deps } = makeDeps();
     deps.settings.getPinnedChatIds.mockReturnValue([CHAT_ID]);
