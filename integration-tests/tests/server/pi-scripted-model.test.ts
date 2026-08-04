@@ -25,8 +25,8 @@ import {
 } from '../../support/scripted-pi.js';
 
 // The real pinned Pi CLI runs the whole turn -- spawn, local tool execution, JSONL session
-// persistence -- while the model behind it is a deterministic script. This suite locks the
-// CURRENT transport's observable behavior before the RPC switch.
+// persistence -- while the model behind it is a deterministic script. This suite remains the
+// transport-neutral regression contract for the long-lived RPC runtime.
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('Pi against a scripted model', () => {
@@ -215,8 +215,8 @@ describe('Pi against a scripted model', () => {
       const pi = catalog.agents.find((agent) => agent.id === 'pi');
       if (!pi) throw new Error('Pi agent was not listed in the catalog.');
       expect(pi.models.map((model) => model.value)).toContain(PI_TEST_MODEL);
-      // Baseline capability; flips to true with the steering facet.
-      expect((pi as { supportsSteering?: boolean }).supportsSteering ?? false).toBe(false);
+      // The catalog derives the capability from the integration facet.
+      expect((pi as { supportsSteering?: boolean }).supportsSteering ?? false).toBe(true);
 
       testEnvironment.model.scriptTurn([chatCompletionsText(marker('UNUSED_DEFAULT_REPLY'))]);
       await expect(fixture.client.startChat(scriptedPiStartRequest({

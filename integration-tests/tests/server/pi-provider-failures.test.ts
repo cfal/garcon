@@ -20,12 +20,8 @@ import {
   type ScriptedPiTestEnvironment,
 } from '../../support/scripted-pi.js';
 
-// Locks the CURRENT transport's failure contract. Observed current behavior for a failed
-// model request (HTTP 500 or truncated stream): Pi surfaces the failure as an ErrorMessage,
-// the Garcon-visible run still reaches its finished terminal, and the CLI process then makes
-// three more orphaned auto-retry attempts (~15s apart) that Garcon does not see. The retry
-// budget is four attempts per process. Tests script all four attempts so nothing leaks into
-// later turns, and drain the orphaned attempts before continuing.
+// Locks Pi's provider-failure contract. Pi surfaces the final failure as an ErrorMessage and
+// the Garcon-visible run finishes only after agent_settled closes the four-attempt retry cycle.
 const PI_ATTEMPTS_PER_PROCESS = 4;
 
 let environment: ScriptedPiTestEnvironment | undefined;
@@ -44,6 +40,7 @@ describe('scripted Pi provider failures', () => {
     const prompt = marker('HTTP500_PROMPT');
     const faultMessage = 'scripted http failure';
     const recoveryReply = marker('HTTP500_RECOVERY_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
     for (let attempt = 0; attempt < PI_ATTEMPTS_PER_PROCESS; attempt += 1) {
       testEnvironment.model.scriptFault({
         kind: 'http-error',
@@ -78,8 +75,11 @@ describe('scripted Pi provider failures', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
 
-      // Drain the orphaned retry attempts before scripting the recovery turn.
-      await waitForRequestCount(testEnvironment.model, PI_ATTEMPTS_PER_PROCESS);
+      await waitForNewRequestCount(
+        testEnvironment.model,
+        requestCursor,
+        PI_ATTEMPTS_PER_PROCESS,
+      );
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
       const recoveryCursor = fixture.client.markEvents();
       const recovery = await fixture.client.runChat(scriptedPiRunRequest({
@@ -100,6 +100,7 @@ describe('scripted Pi provider failures', () => {
   test('surfaces a truncated stream the same way and recovers', async () => {
     const testEnvironment = requireEnvironment();
     const recoveryReply = marker('TRUNCATED_RECOVERY_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
     for (let attempt = 0; attempt < PI_ATTEMPTS_PER_PROCESS; attempt += 1) {
       testEnvironment.model.scriptFault({
         kind: 'stream-error',
@@ -129,7 +130,11 @@ describe('scripted Pi provider failures', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
 
-      await waitForRequestCount(testEnvironment.model, PI_ATTEMPTS_PER_PROCESS);
+      await waitForNewRequestCount(
+        testEnvironment.model,
+        requestCursor,
+        PI_ATTEMPTS_PER_PROCESS,
+      );
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
       const recoveryCursor = fixture.client.markEvents();
       const recovery = await fixture.client.runChat(scriptedPiRunRequest({
@@ -149,9 +154,9 @@ describe('scripted Pi provider failures', () => {
 
   test('never wedges the chat when the model has no scripted response', async () => {
     const testEnvironment = requireEnvironment();
-    // No scripted turn: the fake answers 500 and records a protocol violation. The locked
-    // contract is that the turn still terminates and processing drops. The orphaned retry
-    // attempts then consume scripted faults so their appetite is observable and bounded.
+    const requestCursor = testEnvironment.model.markRequests();
+    // With no scripted turn, every retry receives a 500 and records a protocol violation.
+    // The run still settles and the bounded retry appetite remains observable.
     await withIntegrationFixture('pi-scripted-exhaustion', async (fixture) => {
       const chatId = fixture.newChatId();
       const cursor = fixture.client.markEvents();
@@ -171,14 +176,11 @@ describe('scripted Pi provider failures', () => {
       });
       expect(testEnvironment.model.protocolViolations().length).toBeGreaterThanOrEqual(1);
 
-      for (let attempt = 1; attempt < PI_ATTEMPTS_PER_PROCESS; attempt += 1) {
-        testEnvironment.model.scriptFault({
-          kind: 'http-error',
-          status: 500,
-          message: 'orphan drain fault',
-        });
-      }
-      await waitForRequestCount(testEnvironment.model, PI_ATTEMPTS_PER_PROCESS);
+      await waitForNewRequestCount(
+        testEnvironment.model,
+        requestCursor,
+        PI_ATTEMPTS_PER_PROCESS,
+      );
       // The violations above were provoked on purpose; clear them before recovery.
       testEnvironment.model.clearProtocolViolations();
 
@@ -221,19 +223,19 @@ function marker(label: string): string {
   return `SCRIPTED_PI_FAILURES_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
-// Waits until the CLI process has consumed the expected number of model requests (the visible
-// run plus its orphaned auto-retries), so later scripted turns cannot be eaten by retries.
-async function waitForRequestCount(
+// Waits for one complete retry cycle before another scripted turn is installed.
+async function waitForNewRequestCount(
   model: FakeChatCompletionsModel,
+  cursor: number,
   count: number,
   timeoutMs: number = LIVE_TURN_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (model.requests().length >= count) return;
+    if (model.requestsSince(cursor).length >= count) return;
     await Bun.sleep(250);
   }
   throw new Error(
-    `Pi never reached ${count} model requests (saw ${model.requests().length}).`,
+    `Pi never made ${count} new model requests (saw ${model.requestsSince(cursor).length}).`,
   );
 }

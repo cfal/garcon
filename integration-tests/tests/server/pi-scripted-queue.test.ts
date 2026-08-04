@@ -32,7 +32,7 @@ describe('scripted Pi queue lifecycle', () => {
     const secondReply = marker('SECOND_REPLY');
     const thirdPrompt = marker('THIRD_PROMPT');
     const thirdReply = marker('THIRD_REPLY');
-    testEnvironment.model.scriptTurn([chatCompletionsText(firstReply)]);
+    const firstHeld = testEnvironment.model.scriptHeldTurn([chatCompletionsText(firstReply)]);
     testEnvironment.model.scriptTurn([chatCompletionsText(secondReply)]);
     testEnvironment.model.scriptTurn([chatCompletionsText(thirdReply)]);
 
@@ -48,6 +48,7 @@ describe('scripted Pi queue lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await firstHeld.requested;
 
       const queueCursor = fixture.client.markEvents();
       const secondEntry = await fixture.client.enqueueNew(chatId, secondPrompt);
@@ -55,6 +56,7 @@ describe('scripted Pi queue lifecycle', () => {
       expect(thirdEntry.control.queue.entries.map((entry) => entry.content))
         .toEqual([secondPrompt, thirdPrompt]);
 
+      firstHeld.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -109,7 +111,7 @@ describe('scripted Pi queue lifecycle', () => {
     const firstReply = marker('PAUSE_ACTIVE_REPLY');
     const queuedPrompt = marker('PAUSE_QUEUED_PROMPT');
     const queuedReply = marker('PAUSE_QUEUED_REPLY');
-    testEnvironment.model.scriptTurn([chatCompletionsText(firstReply)]);
+    const firstHeld = testEnvironment.model.scriptHeldTurn([chatCompletionsText(firstReply)]);
     testEnvironment.model.scriptTurn([chatCompletionsText(queuedReply)]);
 
     await withIntegrationFixture('pi-scripted-queue-pause', async (fixture) => {
@@ -124,10 +126,12 @@ describe('scripted Pi queue lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await firstHeld.requested;
       await fixture.client.enqueueNew(chatId, queuedPrompt);
       const paused = await fixture.client.pauseQueue(chatId);
       expect(paused.control.queue.pause?.kind).toBe('manual');
 
+      firstHeld.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -167,7 +171,7 @@ describe('scripted Pi queue lifecycle', () => {
     const firstReply = marker('DUP_ACTIVE_REPLY');
     const queuedPrompt = marker('DUP_QUEUED_PROMPT');
     const queuedReply = marker('DUP_QUEUED_REPLY');
-    testEnvironment.model.scriptTurn([chatCompletionsText(firstReply)]);
+    const firstHeld = testEnvironment.model.scriptHeldTurn([chatCompletionsText(firstReply)]);
     testEnvironment.model.scriptTurn([chatCompletionsText(queuedReply)]);
 
     await withIntegrationFixture('pi-scripted-queue-duplicate', async (fixture) => {
@@ -182,7 +186,9 @@ describe('scripted Pi queue lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await firstHeld.requested;
 
+      const queueCursor = fixture.client.markEvents();
       const clientRequestId = crypto.randomUUID();
       const queued = await fixture.client.enqueue({
         clientRequestId,
@@ -199,11 +205,11 @@ describe('scripted Pi queue lifecycle', () => {
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries)
         .toHaveLength(1);
 
+      firstHeld.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
-      const cursor = fixture.client.markEvents();
       const queuedInput = await fixture.client.waitForEvent(
         (event): event is PendingUserInputUpdatedMessage =>
           event.type === 'pending-user-input-updated'
@@ -211,10 +217,10 @@ describe('scripted Pi queue lifecycle', () => {
           && event.input.content === queuedPrompt
           && typeof event.input.turnId === 'string',
         'scripted Pi duplicate queued turn identity',
-        { afterIndex: firstCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, queuedInput.input.turnId, {
-        afterIndex: cursor,
+        afterIndex: queueCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 
@@ -231,7 +237,7 @@ describe('scripted Pi queue lifecycle', () => {
     const cancelledPrompt = marker('CANCEL_QUEUED_PROMPT');
     const survivorPrompt = marker('CANCEL_SURVIVOR_PROMPT');
     const survivorReply = marker('CANCEL_SURVIVOR_REPLY');
-    testEnvironment.model.scriptTurn([chatCompletionsText(firstReply)]);
+    const firstHeld = testEnvironment.model.scriptHeldTurn([chatCompletionsText(firstReply)]);
     testEnvironment.model.scriptTurn([chatCompletionsText(survivorReply)]);
 
     await withIntegrationFixture('pi-scripted-queue-cancel', async (fixture) => {
@@ -246,6 +252,7 @@ describe('scripted Pi queue lifecycle', () => {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await firstHeld.requested;
 
       const cancelled = await fixture.client.enqueueNew(chatId, cancelledPrompt);
       const survivor = await fixture.client.enqueueNew(chatId, survivorPrompt);
@@ -257,11 +264,12 @@ describe('scripted Pi queue lifecycle', () => {
       expect(deleted.control.queue.entries.map((entry) => entry.content))
         .toEqual([survivorPrompt]);
 
+      const queueCursor = fixture.client.markEvents();
+      firstHeld.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
         afterIndex: firstCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
-      const cursor = fixture.client.markEvents();
       const survivorInput = await fixture.client.waitForEvent(
         (event): event is PendingUserInputUpdatedMessage =>
           event.type === 'pending-user-input-updated'
@@ -269,10 +277,10 @@ describe('scripted Pi queue lifecycle', () => {
           && event.input.content === survivorPrompt
           && typeof event.input.turnId === 'string',
         'scripted Pi surviving queued turn identity',
-        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, survivorInput.input.turnId, {
-        afterIndex: cursor,
+        afterIndex: queueCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
 

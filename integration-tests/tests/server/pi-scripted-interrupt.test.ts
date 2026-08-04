@@ -2,7 +2,11 @@ import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { ServerWsMessage } from '../../../common/ws-events.js';
-import { assistantContents } from '../../support/chat-assertions.js';
+import {
+  assistantContents,
+  messagesOfType,
+  userContents,
+} from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
@@ -19,8 +23,8 @@ import {
   type ScriptedPiTestEnvironment,
 } from '../../support/scripted-pi.js';
 
-// Locks the CURRENT transport's stop contract: the JSON runtime stops by killing the process,
-// and the RPC switch must preserve the same observable behavior.
+// Locks Pi's process-kill stop contract. The RPC abort command is deliberately not used because
+// it can restart queued steering as a continuation.
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('scripted Pi interrupt lifecycle', () => {
@@ -42,6 +46,7 @@ describe('scripted Pi interrupt lifecycle', () => {
     testEnvironment.model.scriptTurn([chatCompletionsToolUse('call_stopped', 'bash', {
       command: `touch ${startedFile} && sleep 30`,
     })]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(stoppedReply)]);
 
     await withIntegrationFixture('pi-scripted-interrupt', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -68,9 +73,14 @@ describe('scripted Pi interrupt lifecycle', () => {
         chatId,
         active.turnId,
       );
-      expect(assistantContents((await fixture.client.getMessages(chatId)).messages).join('\n'))
-        .not.toContain(stoppedReply);
+      const stoppedTranscript = (await fixture.client.getMessages(chatId)).messages;
+      expect(userContents(stoppedTranscript)).toContain(stoppedPrompt);
+      expect(messagesOfType(stoppedTranscript, 'bash-tool-use')).toContainEqual(
+        expect.objectContaining({ command: `touch ${startedFile} && sleep 30` }),
+      );
+      expect(assistantContents(stoppedTranscript).join('\n')).not.toContain(stoppedReply);
 
+      testEnvironment.model.reset();
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
       const recoveryCursor = fixture.client.markEvents();
       const recovery = await fixture.client.runChat(scriptedPiRunRequest({
@@ -90,10 +100,8 @@ describe('scripted Pi interrupt lifecycle', () => {
     }, withScriptedPi());
   }, 120_000);
 
-  // A stop before Pi has persisted anything leaves no session file, and the current
-  // transport then fails the next turn's --session lookup ("No session found"). That wart is
-  // not locked here on purpose: the RPC runtime establishes identity before the first prompt,
-  // and Suite D covers the held-model stop after the switch.
+  // A stop before Pi persists the first turn leaves only the ready-time session identity. The
+  // steering stop suite bootstraps history before testing recovery from a held model response.
 });
 
 function requireEnvironment(): ScriptedPiTestEnvironment {
@@ -112,9 +120,7 @@ function withScriptedPi(): {
   };
 }
 
-// Pi's current stop order differs from Claude's: the provider-level kill drops processing to
-// idle before the coordinator publishes chat-session-stopped (Claude publishes stopped before
-// idle). The RPC switch must preserve this exact observable sequence.
+// Pi drops processing to idle before the coordinator publishes chat-session-stopped.
 function expectPiStoppedTurnEventOrder(
   events: readonly ServerWsMessage[],
   chatId: string,

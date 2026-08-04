@@ -205,7 +205,6 @@ export class FakeChatCompletionsModel {
   readonly #server: Bun.Server<undefined>;
   readonly #turns: Array<ChatCompletionsTurn | ChatCompletionsFault> = [];
   readonly #requests: RecordedChatCompletionsRequest[] = [];
-  readonly #issues: string[] = [];
   readonly #violations: string[] = [];
   readonly #otherRequests: string[] = [];
   readonly #pendingReleases = new Set<() => void>();
@@ -293,16 +292,17 @@ export class FakeChatCompletionsModel {
 
   reset(): void {
     this.#turns.length = 0;
-    this.#issues.length = 0;
     for (const release of [...this.#pendingReleases]) release();
   }
 
   assertSettled(): void {
     const problems = [
-      ...this.#issues,
       ...this.#violations,
       ...(this.#turns.length > 0
         ? [`${this.#turns.length} scripted turn(s) were never requested`]
+        : []),
+      ...(this.#pendingReleases.size > 0
+        ? [`${this.#pendingReleases.size} held turn(s) were never released`]
         : []),
     ];
     if (problems.length > 0) {
@@ -335,7 +335,12 @@ export class FakeChatCompletionsModel {
       }, { status: 400 });
     }
     this.#violations.push(...validateRequest(body));
-    const record = body as Record<string, unknown>;
+    if (!isRecord(body)) {
+      return Response.json({
+        error: { message: 'invalid request body', type: 'invalid_request_error' },
+      }, { status: 400 });
+    }
+    const record = body;
     const recordedUserTexts = userTexts(record);
     const recorded: RecordedChatCompletionsRequest = {
       id: ++this.#requestId,
