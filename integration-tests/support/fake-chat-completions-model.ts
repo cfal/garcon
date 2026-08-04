@@ -280,6 +280,11 @@ export class FakeChatCompletionsModel {
     return this.#violations.slice();
   }
 
+  // For tests that provoke violations on purpose (e.g. scripted exhaustion).
+  clearProtocolViolations(): void {
+    this.#violations.length = 0;
+  }
+
   // Non-completions traffic the CLI generated, kept for inspection rather than failure:
   // catalog or auxiliary endpoints are the CLI's business, not the conversation contract.
   otherRequests(): readonly string[] {
