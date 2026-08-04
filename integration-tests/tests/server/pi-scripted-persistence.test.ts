@@ -1,5 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import {
   assistantContents,
   userContents,
@@ -12,6 +14,9 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  PI_TEST_MODEL,
+  PI_TEST_MODEL_ID,
+  PI_TEST_PROVIDER,
   piNativeSession,
   scriptedPiRunRequest,
   scriptedPiStartRequest,
@@ -89,6 +94,63 @@ describe('scripted Pi persistence', () => {
       expect(userContents(transcript.messages)).toEqual([firstPrompt, secondPrompt]);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
+  }, 120_000);
+
+  test('resumes a Pi 0.80.10 JSON-mode session through the RPC runtime', async () => {
+    const testEnvironment = requireEnvironment();
+    const chatId = String(Date.now() * 1_000 + 901);
+    const agentSessionId = crypto.randomUUID();
+    const legacyPrompt = marker('LEGACY_PROMPT');
+    const legacyReply = marker('LEGACY_REPLY');
+    const resumedPrompt = marker('LEGACY_RESUME_PROMPT');
+    const resumedReply = marker('LEGACY_RESUME_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptTurn([chatCompletionsText(resumedReply)]);
+    let nativePath = '';
+
+    await withIntegrationFixture('pi-scripted-legacy-resume', async (fixture) => {
+      const restored = await fixture.client.getMessages(chatId);
+      expect(userContents(restored.messages)).toEqual([legacyPrompt]);
+      expect(assistantContents(restored.messages)).toEqual([legacyReply]);
+
+      const turnCursor = fixture.client.markEvents();
+      const turn = await fixture.client.runChat(scriptedPiRunRequest({
+        chatId,
+        command: resumedPrompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: resumedReply,
+        afterIndex: turnCursor,
+      });
+
+      expect(await piNativeSession(fixture, chatId)).toEqual({
+        agentSessionId,
+        path: nativePath,
+      });
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.userTexts).toEqual([legacyPrompt, resumedPrompt]);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages))
+        .toEqual([legacyPrompt, resumedPrompt]);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+      async prepareWorkspace(directories) {
+        await testEnvironment.prepareWorkspace(directories);
+        nativePath = await writeLegacyPiSession({
+          workspace: directories.workspace,
+          projectPath: directories.project,
+          sessionRoot: directories.home,
+          chatId,
+          agentSessionId,
+          legacyPrompt,
+          legacyReply,
+        });
+      },
+    });
   }, 120_000);
 
   test('restarts empty after a crash and resumes the session on the next turn', async () => {
@@ -274,4 +336,96 @@ function withScriptedPi(): {
 
 function marker(label: string): string {
   return `SCRIPTED_PI_PERSIST_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+async function writeLegacyPiSession(input: {
+  workspace: string;
+  projectPath: string;
+  sessionRoot: string;
+  chatId: string;
+  agentSessionId: string;
+  legacyPrompt: string;
+  legacyReply: string;
+}): Promise<string> {
+  // Recreates Pi 0.80.10's v3 header and message-entry contract.
+  // https://github.com/earendil-works/pi-mono/blob/8dc78834cde4e329284cf505f9e3f99763df5529/packages/coding-agent/src/core/session-manager.ts#L30-L58
+  const sessionDirectory = join(input.sessionRoot, '.pi', 'agent', 'sessions');
+  const nativePath = join(
+    sessionDirectory,
+    `2026-01-01T00-00-00-000Z_${input.agentSessionId}.jsonl`,
+  );
+  const userId = 'legacy-user';
+  const assistantId = 'legacy-assistant';
+  const timestamp = '2026-01-01T00:00:00.000Z';
+  await mkdir(sessionDirectory, { recursive: true });
+  await writeFile(nativePath, `${[
+    {
+      type: 'session',
+      version: 3,
+      id: input.agentSessionId,
+      timestamp,
+      cwd: input.projectPath,
+    },
+    {
+      type: 'message',
+      id: userId,
+      parentId: null,
+      timestamp: '2026-01-01T00:00:01.000Z',
+      message: { role: 'user', content: input.legacyPrompt, timestamp: 1767225601000 },
+    },
+    {
+      type: 'message',
+      id: assistantId,
+      parentId: userId,
+      timestamp: '2026-01-01T00:00:02.000Z',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: input.legacyReply }],
+        api: 'openai-completions',
+        provider: PI_TEST_PROVIDER,
+        model: PI_TEST_MODEL_ID,
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: 'stop',
+        timestamp: 1767225602000,
+      },
+    },
+  ].map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+  await writeFile(
+    join(input.workspace, 'workspace-version.json'),
+    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
+  );
+  await writeFile(join(input.workspace, 'chats.json'), JSON.stringify({
+    version: 3,
+    sessions: {
+      [input.chatId]: {
+        agentId: 'pi',
+        nativeSession: {
+          ownerId: 'pi',
+          schemaVersion: 1,
+          value: { path: nativePath, agentSessionId: input.agentSessionId, modelEndpointId: null },
+        },
+        agentOwnershipEpoch: crypto.randomUUID(),
+        agentSettingsById: {},
+        projectPath: input.projectPath,
+        tags: [],
+        agentSessionId: input.agentSessionId,
+        nextForkOrdinal: 1,
+        model: PI_TEST_MODEL,
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+        lastReadAt: null,
+        permissionMode: 'default',
+        thinkingMode: 'none',
+      },
+    },
+  }));
+  return nativePath;
 }
