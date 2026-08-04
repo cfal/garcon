@@ -16,6 +16,7 @@ function createDeps() {
 		composerState: {
 			inputText: 'current',
 			images: [] as File[],
+			contentRevision: 1,
 			saveDraft: vi.fn(),
 		},
 	} satisfies SubmissionSettlementDeps;
@@ -122,6 +123,31 @@ describe('settleSubmissionFailure', () => {
 
 		expect(restoreRejected).toHaveBeenCalledOnce();
 		expect(deps.composerState.inputText).toBe('current');
+		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+	});
+
+	it('preserves a newer draft when a cleared submission is rejected', async () => {
+		const deps = createDeps();
+		deps.composerState.inputText = 'new draft';
+		deps.composerState.contentRevision = 2;
+
+		await settleSubmissionFailure(
+			deps,
+			{
+				chatId: 'chat-1',
+				previousText: 'submitted text',
+				previousImages: [],
+				restoreComposerOnFailure: true,
+			},
+			new Error('request rejected'),
+			{
+				unknownNotice: 'unknown',
+				rejectedNotice: () => 'rejected',
+				composerRevisionAfterClear: 1,
+			},
+		);
+
+		expect(deps.composerState.inputText).toBe('new draft');
 		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
 	});
 });

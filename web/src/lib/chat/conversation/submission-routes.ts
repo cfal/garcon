@@ -178,7 +178,12 @@ export async function submitDraftRoute(
 		images: context.images.length > 0 ? context.images : undefined,
 		tags: startup?.tags,
 	}));
-	beginOptimisticInput(deps, context, submission.clientRequestId, submission.clientMessageId);
+	const composerRevisionAfterClear = beginOptimisticInput(
+		deps,
+		context,
+		submission.clientRequestId,
+		submission.clientMessageId,
+	);
 	deps.startupCoordinator.beginLocalStartup(chatId);
 	try {
 		const response = await submission.submit();
@@ -192,6 +197,7 @@ export async function submitDraftRoute(
 		deps.startupCoordinator.completeStartup(chatId);
 		return settleSubmissionFailure(deps, context, error, {
 			clientRequestId: submission.clientRequestId,
+			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
 			onRejected: () => {
@@ -220,7 +226,12 @@ export async function submitRunRoute(
 		agentSettings: deps.agentState.agentSettings,
 		...selection,
 	});
-	beginOptimisticInput(deps, context, submission.clientRequestId, submission.clientMessageId);
+	const composerRevisionAfterClear = beginOptimisticInput(
+		deps,
+		context,
+		submission.clientRequestId,
+		submission.clientMessageId,
+	);
 	try {
 		await submission.submit();
 		deps.chatState.updatePendingUserInputDeliveryStatus(submission.clientRequestId, 'accepted');
@@ -229,6 +240,7 @@ export async function submitRunRoute(
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {
 			clientRequestId: submission.clientRequestId,
+			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
 			rejectedNotice: (failure) => m.chat_notice_failed_send_message({ detail: errorDetail(failure) }),
 			clearPendingOnAdmissionConflict: true,
@@ -244,13 +256,18 @@ function beginOptimisticInput(
 	context: SubmissionContext,
 	clientRequestId: string,
 	clientMessageId: string,
-): void {
+): number | null {
 	deps.chatState.upsertPendingUserInput(
 		pendingUserInput(context.chatId, context.text, context.images, clientRequestId, clientMessageId),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
-	if (context.restoreComposerOnFailure) deps.composerState.clearAfterSubmit(context.chatId);
+	let composerRevisionAfterClear: number | null = null;
+	if (context.restoreComposerOnFailure) {
+		deps.composerState.clearAfterSubmit(context.chatId);
+		composerRevisionAfterClear = deps.composerState.contentRevision;
+	}
 	deps.composerState.isSubmitting = true;
+	return composerRevisionAfterClear;
 }
 
 function restoreSteerComposer(

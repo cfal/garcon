@@ -12,7 +12,7 @@ export interface SubmissionSettlementDeps {
 	>;
 	composerState: Pick<
 		SessionControllerDeps['composerState'],
-		'inputText' | 'images' | 'saveDraft'
+		'inputText' | 'images' | 'contentRevision' | 'saveDraft'
 	>;
 }
 
@@ -28,6 +28,7 @@ export interface SubmissionFailureOptions {
 	unknownNotice: string;
 	rejectedNotice(error: unknown): string;
 	clearPendingOnAdmissionConflict?: boolean;
+	composerRevisionAfterClear?: number | null;
 	refreshControl?: () => Promise<void>;
 	restoreRejected?: () => void;
 	onRejected?: () => void | Promise<void>;
@@ -56,7 +57,13 @@ export async function settleSubmissionFailure(
 	}
 
 	if (!outcomeUnknown) await options.onRejected?.();
-	if (context.restoreComposerOnFailure && !outcomeUnknown) {
+	const composerCanBeRestored =
+		options.composerRevisionAfterClear === undefined
+		|| (
+			typeof options.composerRevisionAfterClear === 'number'
+			&& deps.composerState.contentRevision === options.composerRevisionAfterClear
+		);
+	if (context.restoreComposerOnFailure && !outcomeUnknown && composerCanBeRestored) {
 		if (options.restoreRejected) {
 			options.restoreRejected();
 		} else {

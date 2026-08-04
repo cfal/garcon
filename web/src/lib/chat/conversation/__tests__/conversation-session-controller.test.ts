@@ -1288,6 +1288,107 @@ describe('ConversationSessionController', () => {
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('blocks a second direct submission until the first admission can enter queue mode', async () => {
+		const firstRequest = deferred<Awaited<ReturnType<typeof runChat>>>();
+		const processingSnapshot = deferred<unknown>();
+		const processingSnapshotRequested = deferred<void>();
+		mockRunChat.mockReturnValueOnce(firstRequest.promise);
+		const { deps } = createDeps();
+		deps.requestProcessingSnapshot.mockImplementationOnce(() => {
+			processingSnapshotRequested.resolve(undefined);
+			return processingSnapshot.promise;
+		});
+		deps.composerState.inputText = 'first message';
+		const controller = new ConversationSessionController(deps);
+
+		const firstSubmission = controller.submitForChat('chat-1');
+		await flushPromises();
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(true);
+
+		deps.composerState.inputText = 'second message';
+		await expect(controller.submitForChat('chat-1')).resolves.toBe('no-op');
+		expect(mockRunChat).toHaveBeenCalledTimes(1);
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('second message');
+
+		firstRequest.resolve({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-first',
+			chatId: 'chat-1',
+			turnId: 'turn-first',
+			status: 'accepted',
+			acceptedAt: '2026-08-04T00:00:00.000Z',
+		});
+		await processingSnapshotRequested.promise;
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(true);
+		expect(deps.requestProcessingSnapshot).toHaveBeenCalledOnce();
+
+		processingSnapshot.resolve({ outcome: 'snapshot', chats: [] });
+		await expect(firstSubmission).resolves.toBe('accepted');
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(false);
+
+		deps.sessions.byId['chat-1'].isProcessing = true;
+		deps.sessions.byId['chat-1'].processingPhase = 'running';
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-second',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-08-04T00:00:01.000Z',
+			entryId: 'entry-second',
+			control: emptyControl(),
+		});
+
+		await expect(controller.submitForChat('chat-1')).resolves.toBe('accepted');
+		expect(mockRunChat).toHaveBeenCalledTimes(1);
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({ chatId: 'chat-1', content: 'second message' }),
+		);
+	});
+
+	it('claims direct admission before a pending control refresh settles', async () => {
+		const controlRefresh = deferred<Awaited<ReturnType<typeof getChatExecutionControl>>>();
+		mockGetChatExecutionControl.mockReturnValueOnce(controlRefresh.promise);
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-first',
+			chatId: 'chat-1',
+			turnId: 'turn-first',
+			status: 'accepted',
+			acceptedAt: '2026-08-04T00:00:00.000Z',
+		});
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps);
+		controller.handleChatSwitch('chat-1');
+		deps.composerState.inputText = 'first message';
+		deps.composerState.contentRevision = 1;
+
+		const firstSubmission = controller.submitForChat('chat-1');
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(true);
+		deps.composerState.inputText = 'second message';
+		deps.composerState.contentRevision = 2;
+
+		await expect(controller.submitForChat('chat-1')).resolves.toBe('no-op');
+		controlRefresh.resolve({
+			success: true,
+			chatId: 'chat-1',
+			control: emptyControl(),
+		});
+		await expect(firstSubmission).resolves.toBe('accepted');
+
+		expect(mockRunChat).toHaveBeenCalledOnce();
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({ chatId: 'chat-1', command: 'first message' }),
+		);
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('second message');
+		expect(controller.isDirectAdmissionPending('chat-1')).toBe(false);
+	});
+
 	it('submits follow-up messages with the current integration settings', async () => {
 		mockRunChat.mockResolvedValueOnce({
 			success: true,

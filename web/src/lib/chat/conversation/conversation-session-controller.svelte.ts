@@ -201,7 +201,7 @@ export interface SessionControllerDeps {
 	navigation: { navigateToChat?: (chatId: string) => void };
 	/** Rebuilds the chat transcript from native history (e.g. after an agent switch). */
 	reloadTranscript?: (chatId: string) => Promise<void>;
-	requestProcessingSnapshot?: () => Promise<unknown>;
+	requestProcessingSnapshot: () => Promise<unknown>;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;
 	scrollToBottom: () => void;
@@ -217,6 +217,7 @@ function isExecutionControlAdmissionConflict(error: unknown): boolean {
 
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
+	#pendingDirectAdmissions = $state.raw<ReadonlySet<string>>(new Set());
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
 	readonly #acceptedInputs: AcceptedInputSubmissionService;
@@ -464,11 +465,24 @@ export class ConversationSessionController {
 		});
 	}
 
+	isDirectAdmissionPending(chatId: string | null): boolean {
+		return chatId !== null && this.#pendingDirectAdmissions.has(chatId);
+	}
+
+	#setDirectAdmissionPending(chatId: string, pending: boolean): void {
+		if (this.#pendingDirectAdmissions.has(chatId) === pending) return;
+		const next = new Set(this.#pendingDirectAdmissions);
+		if (pending) next.add(chatId);
+		else next.delete(chatId);
+		this.#pendingDirectAdmissions = next;
+	}
+
 	// Accepts an explicit chat ID so draft startup cannot race selection changes.
 	async submitForChat(chatId: string, messageOverride?: string, imageOverride?: File[]): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
+		if (this.isDirectAdmissionPending(chatId)) return 'no-op';
 		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
 		const text = messageOverride ?? deps.composerState.inputText.trim();
 		const submissionImages = imageOverride ?? deps.composerState.images;
@@ -477,6 +491,7 @@ export class ConversationSessionController {
 		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
+		const composerRevision = deps.composerState.contentRevision;
 		const slash = this.#slashCommands.dispatchSubmission({
 			chatId,
 			chat: selected,
@@ -506,6 +521,11 @@ export class ConversationSessionController {
 
 		const isDraft = selected.status === 'draft';
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
+		let directAdmissionClaimed = false;
+		if (!isDraft && !activeTurn) {
+			this.#setDirectAdmissionPending(chatId, true);
+			directAdmissionClaimed = true;
+		}
 		const pendingControlRefresh = this.#queue.pendingControlRefresh(chatId);
 		if (!isDraft && !activeTurn && pendingControlRefresh) {
 			await this.#queue.settleControlRefresh(pendingControlRefresh);
@@ -518,7 +538,13 @@ export class ConversationSessionController {
 		});
 		if (route === 'queue-attachments-unsupported') {
 			deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
+			if (directAdmissionClaimed) this.#setDirectAdmissionPending(chatId, false);
 			return 'rejected';
+		}
+		const directAdmission = route === 'direct';
+		if (!directAdmission && directAdmissionClaimed) {
+			this.#setDirectAdmissionPending(chatId, false);
+			directAdmissionClaimed = false;
 		}
 
 		if (route === 'draft') {
@@ -530,6 +556,7 @@ export class ConversationSessionController {
 		} catch (error) {
 			console.error('[SessionController] Failed to prepare attachment payload:', error);
 			if (route === 'draft') deps.composerState.isSubmitting = false;
+			if (directAdmissionClaimed) this.#setDirectAdmissionPending(chatId, false);
 			deps.chatState.appendLocalNotice('error', m.chat_notice_failed_prepare_attachments({
 				detail: errorDetail(error),
 			}));
@@ -545,19 +572,26 @@ export class ConversationSessionController {
 			images: imagePayload,
 			previousText,
 			previousImages,
-			restoreComposerOnFailure,
+			restoreComposerOnFailure:
+				restoreComposerOnFailure && deps.composerState.contentRevision === composerRevision,
 		};
 		if (route === 'queue') {
 			return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context);
 		}
 		if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
-		return submitRunRoute(
-			deps,
-			this.#acceptedInputs,
-			this.#queue,
-			context,
-			this.#executionModelSelection(),
-		);
+		try {
+			const outcome = await submitRunRoute(
+				deps,
+				this.#acceptedInputs,
+				this.#queue,
+				context,
+				this.#executionModelSelection(),
+			);
+			await deps.requestProcessingSnapshot().catch(() => undefined);
+			return outcome;
+		} finally {
+			if (directAdmissionClaimed) this.#setDirectAdmissionPending(chatId, false);
+		}
 	}
 
 	// Forks a chat without sending a new message, then selects the fork. Backs
@@ -607,7 +641,7 @@ export class ConversationSessionController {
 		})
 			.then(async (result) => {
 				onResult?.(chatId, result);
-				await deps.requestProcessingSnapshot?.().catch(() => undefined);
+				await deps.requestProcessingSnapshot().catch(() => undefined);
 				if (isStopSatisfied(result.outcome)) return;
 				restore();
 				appendFailure(m.chat_notice_stop_request_failed());

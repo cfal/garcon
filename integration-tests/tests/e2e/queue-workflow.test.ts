@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 import {
@@ -6,7 +7,148 @@ import {
   waitForAcceptedResponseRequestBodies,
 } from '../../support/accepted-response-loss.js';
 
+interface BrowserRequestGate {
+	path: string;
+	requestCount: number;
+	release: (() => void) | null;
+}
+
+type RequestGateGlobal = typeof globalThis & {
+	__garconBrowserRequestGate?: BrowserRequestGate;
+};
+
+async function holdFirstBrowserRequest(page: Page, path: string): Promise<void> {
+	await page.evaluate((targetPath) => {
+		const originalFetch = globalThis.fetch.bind(globalThis);
+		const testGlobal = globalThis as RequestGateGlobal;
+		testGlobal.__garconBrowserRequestGate = {
+			path: targetPath,
+			requestCount: 0,
+			release: null,
+		};
+		const gatedFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+			const inputUrl = typeof input === 'string'
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+			const gate = testGlobal.__garconBrowserRequestGate;
+			if (gate && new URL(inputUrl, globalThis.location.href).pathname === gate.path) {
+				gate.requestCount += 1;
+				if (gate.requestCount === 1) {
+					await new Promise<void>((resolve) => {
+						gate.release = resolve;
+					});
+				}
+			}
+			return originalFetch(input, init);
+		};
+		Object.defineProperty(globalThis, 'fetch', {
+			configurable: true,
+			writable: true,
+			value: gatedFetch,
+		});
+	}, path);
+}
+
+async function waitForHeldBrowserRequest(page: Page): Promise<void> {
+	await page.waitForFunction(
+		() => (globalThis as RequestGateGlobal).__garconBrowserRequestGate?.requestCount === 1,
+		{ timeout: 10_000 },
+	);
+}
+
+async function browserRequestCount(page: Page): Promise<number> {
+	return page.evaluate(() => (
+		(globalThis as RequestGateGlobal).__garconBrowserRequestGate?.requestCount ?? 0
+	));
+}
+
+async function releaseHeldBrowserRequest(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const gate = (globalThis as RequestGateGlobal).__garconBrowserRequestGate;
+		if (!gate?.release) throw new Error('No browser request is waiting for release.');
+		const release = gate.release;
+		gate.release = null;
+		release();
+	});
+}
+
 describe('Lightpanda queue workflow', () => {
+	test('keeps a second message as a draft until direct admission is confirmed', async () => {
+		await withE2eFixture('queue-direct-admission', async (fixture) => {
+			const app = new SpaDriver(fixture.page, fixture.integration);
+			await app.open();
+			await fixture.waitForSpaWebSocket();
+			await app.startOpenAiDirectChat('ui-admission-seed');
+			await app.waitForText('echo:ui-admission-seed');
+			const chat = (await fixture.integration.client.listChats()).sessions.find(
+				(entry) => entry.preview.firstMessage === 'ui-admission-seed',
+			);
+			if (!chat) throw new Error('Admission-race chat was not listed.');
+
+			await holdFirstBrowserRequest(fixture.page, '/api/v1/chats/run');
+			const active = fixture.integration.fakeProviders.openAi.holdNext({
+				lastUserText: 'ui-admission-first',
+			});
+			await app.sendComposer('ui-admission-first');
+			await waitForHeldBrowserRequest(fixture.page);
+			await app.fill('textarea[placeholder="Reply..."]', 'ui-admission-second');
+
+			const composer = await fixture.page.evaluate(() => {
+				const textarea = document.querySelector<HTMLTextAreaElement>(
+					'textarea[placeholder="Reply..."]',
+				);
+				const send = [...document.querySelectorAll('button')].find((element) => (
+					!element.closest('[aria-hidden="true"]')
+					&& element.getAttribute('aria-label') === 'Send message'
+				)) as HTMLButtonElement | undefined;
+				return {
+					text: textarea?.value,
+					textareaDisabled: textarea?.disabled,
+					sendDisabled: send?.disabled,
+				};
+			});
+			expect(composer).toEqual({
+				text: 'ui-admission-second',
+				textareaDisabled: false,
+				sendDisabled: true,
+			});
+			await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => {
+				element.dispatchEvent(new KeyboardEvent('keydown', {
+					key: 'Enter',
+					bubbles: true,
+					cancelable: true,
+				}));
+			});
+			expect(await browserRequestCount(fixture.page)).toBe(1);
+			expect(await app.exactTextCount('ui-admission-second')).toBe(0);
+
+			await releaseHeldBrowserRequest(fixture.page);
+			await active.received;
+			await app.submitComposerWithEnter('ui-admission-second', 'Queue message');
+			await app.waitForQueuedPreview('ui-admission-second');
+			const control = await fixture.integration.client.getExecutionControl(chat.id);
+			expect(control.queue.entries.map((entry) => entry.content)).toEqual([
+				'ui-admission-second',
+			]);
+
+			active.releaseEcho();
+			await fixture.integration.fakeProviders.openAi.waitForRequest({
+				lastUserText: 'ui-admission-second',
+			});
+			await app.waitForText('echo:ui-admission-second');
+			expect(fixture.integration.fakeProviders.openAi.requests()
+				.map((request) => request.lastUserText)
+				.filter((text) => text.startsWith('ui-admission-'))).toEqual([
+				'ui-admission-seed',
+				'ui-admission-first',
+				'ui-admission-second',
+			]);
+			fixture.assertNoBrowserErrors();
+		});
+	});
+
 	test('clears stale controls and shows an Enter-queued message after restart', async () => {
 		await withE2eFixture('queue-controls-after-restart', async (fixture) => {
 			const app = new SpaDriver(fixture.page, fixture.integration);
