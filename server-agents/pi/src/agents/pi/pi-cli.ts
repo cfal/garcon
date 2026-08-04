@@ -26,7 +26,6 @@ const PI_NESTED_SESSION_ENV = [
   'PI_MODEL',
   'PI_REASONING_LEVEL',
   'PI_CODING_AGENT_SESSION_DIR',
-  'PI_MODELS_DEV_OVERRIDE_PROVIDERS',
 ] as const;
 
 // Pi --thinking tops out at xhigh, so Garcon's larger modes clamp down.

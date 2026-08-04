@@ -130,7 +130,7 @@ describe('Pi single-query and spawn helpers', () => {
     }, testPiConfig)).rejects.toThrow('Pi command failed with code 3: no session found');
   });
 
-  it('scrubs nested Pi session environment and keeps Garcon offline flags', async () => {
+  it('scrubs nested Pi session environment and preserves extension configuration', async () => {
     process.env.PI_CODING_AGENT = '1';
     process.env.PI_SESSION_FILE = '/home/someone/session.jsonl';
     process.env.PI_SESSION_ID = 'outer-session';
@@ -159,7 +159,6 @@ describe('Pi single-query and spawn helpers', () => {
       'PI_MODEL',
       'PI_REASONING_LEVEL',
       'PI_CODING_AGENT_SESSION_DIR',
-      'PI_MODELS_DEV_OVERRIDE_PROVIDERS',
       'PI_PACKAGE_DIR',
       'GARCON_EMBEDDED_PI_PACKAGE_DIR',
     ]) {
@@ -169,6 +168,7 @@ describe('Pi single-query and spawn helpers', () => {
     expect(env.PI_OFFLINE).toBe('1');
     expect(env.PI_SKIP_VERSION_CHECK).toBe('1');
     expect(env.PI_TELEMETRY).toBe('0');
+    expect(env.PI_MODELS_DEV_OVERRIDE_PROVIDERS).toBe('all');
   });
 
   it('prefixes plan-mode prompts and leaves other modes untouched', async () => {

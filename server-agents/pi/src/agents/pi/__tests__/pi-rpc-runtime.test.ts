@@ -322,10 +322,11 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('scrubs nested Pi session environment and keeps the offline flags', async () => {
+  it('scrubs nested Pi session environment and preserves extension configuration', async () => {
     process.env.PI_SESSION_FILE = '/home/someone/session.jsonl';
     process.env.PI_SESSION_ID = 'outer-session';
     process.env.PI_CODING_AGENT_SESSION_DIR = path.join(tempRoot, 'sessions');
+    process.env.PI_MODELS_DEV_OVERRIDE_PROVIDERS = 'all';
     process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = '/tmp/embedded-pi';
     process.env.PI_PACKAGE_DIR = '/tmp/embedded-pi';
     const runtime = createRuntime();
@@ -340,6 +341,7 @@ describe('PiRpcRuntime', () => {
     expect(env.PI_OFFLINE).toBe('1');
     expect(env.PI_SKIP_VERSION_CHECK).toBe('1');
     expect(env.PI_TELEMETRY).toBe('0');
+    expect(env.PI_MODELS_DEV_OVERRIDE_PROVIDERS).toBe('all');
     await runtime.shutdown();
   });
 
