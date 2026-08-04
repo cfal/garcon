@@ -1118,6 +1118,32 @@ async function transcriptGeometry(page: Page): Promise<TranscriptGeometry> {
   );
 }
 
+async function mountedConversationDiscontinuities(
+  page: Page,
+): Promise<Array<{ previous: string; next: string; delta: number }>> {
+  return page.locator(FEED_SELECTOR).evaluate((feedElement, itemSelector) => {
+    const items = [...feedElement.querySelectorAll<HTMLElement>(itemSelector)]
+      .map((item) => ({
+        index: Number(item.dataset.index),
+        key: item.dataset.chatVirtualItem ?? '',
+        rect: item.getBoundingClientRect(),
+      }))
+      .filter((item) => Number.isFinite(item.index))
+      .sort((left, right) => left.index - right.index);
+    const discontinuities: Array<{ previous: string; next: string; delta: number }> = [];
+    for (let index = 1; index < items.length; index += 1) {
+      const previous = items[index - 1];
+      const next = items[index];
+      if (!previous || !next || next.index !== previous.index + 1) continue;
+      const delta = next.rect.top - previous.rect.bottom;
+      if (Math.abs(delta) > 1) {
+        discontinuities.push({ previous: previous.key, next: next.key, delta });
+      }
+    }
+    return discontinuities;
+  }, ITEM_SELECTOR);
+}
+
 async function diagnostics(fixture: ChromiumFixture): Promise<unknown> {
   return {
     geometry: await transcriptGeometry(fixture.page).catch(() => null),
@@ -1708,6 +1734,38 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyCountShrinkMeasurements(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 110, 'chromium-count-shrink');
+  const { initialModelCount } = await prepareTranscript(fixture, chatId);
+  let expandedModelCount = initialModelCount;
+  for (let pageIndex = 0; pageIndex < 4 && expandedModelCount <= 200; pageIndex += 1) {
+    await revealEarlierTranscript(fixture.page, expandedModelCount);
+    expandedModelCount = await waitForStableModelCount(fixture.page, expandedModelCount + 1);
+  }
+  expect(expandedModelCount).toBeGreaterThan(200);
+
+  await scrollToPosition(fixture.page, 'end', false);
+  expect((await viewportPolicy(fixture.page)).pinned).toBe(false);
+  await signalScrollIntent(fixture.page, 'later');
+  await fixture.page.locator(FEED_SELECTOR).dispatchEvent('scroll');
+  await fixture.page.waitForFunction(
+    ({ selector, previousCount }) => {
+      const sizer = document.querySelector<HTMLElement>(selector);
+      const current = Number(sizer?.dataset.chatVirtualModelCount ?? 0);
+      return current > 0 && current < previousCount;
+    },
+    { selector: SIZER_SELECTOR, previousCount: expandedModelCount },
+    { timeout: 20_000 },
+  );
+  await waitForDistanceFromEnd(fixture.page, 1);
+
+  const compactedGeometry = await transcriptGeometry(fixture.page);
+  expect(compactedGeometry.modelCount).toBeLessThan(expandedModelCount);
+  expect(compactedGeometry.overlaps).toEqual([]);
+  expect(await mountedConversationDiscontinuities(fixture.page)).toEqual([]);
+  fixture.assertNoBrowserErrors();
+}
+
 async function seedPermissionTranscript(
   fixture: ChromiumFixture,
   environment: ScriptedClaudeTestEnvironment,
@@ -1917,4 +1975,18 @@ describe('Chromium transcript virtualization', () => {
       browser,
     );
   }, 120_000);
+
+  test('remeasures surviving rows after live-edge compaction', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-count-shrink-measurements',
+      async (fixture, markPhase) => {
+        markPhase('expanding and compacting the transcript window');
+        await verifyCountShrinkMeasurements(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
 });

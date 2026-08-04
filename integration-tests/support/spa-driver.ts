@@ -627,6 +627,7 @@ export class SpaDriver {
   }
 
   async waitForChatScrollRequest(timeout = 20_000): Promise<void> {
+    // Lightpanda proves that navigation reaches the viewport; Chromium owns landing geometry.
     await this.#page.waitForFunction(
       () => {
         const feed = document.querySelector<HTMLElement>('[data-chat-scroll-viewport]');

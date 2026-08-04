@@ -1,6 +1,6 @@
 # Integration Tests
 
-This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses deterministic OpenAI-compatible and Anthropic Messages fake providers. The E2E lane adds the production SPA and Lightpanda.
+This suite validates Garcon across real process and transport boundaries. It starts an isolated Garcon server, drives its HTTP and WebSocket contracts through a typed client, and uses deterministic OpenAI-compatible and Anthropic Messages fake providers. The E2E lane adds the production SPA and Lightpanda; the Chromium lane owns rendered layout and browser geometry.
 
 Integration coverage is required, not optional, when a change can fail only after multiple owners interact. Queueing, transcript stability, reconnect, restart recovery, command idempotency, concurrent chats, provider failures, forks, and deletion all belong here. A focused unit test should still cover the underlying component behavior.
 
@@ -11,6 +11,7 @@ Integration coverage is required, not optional, when a change can fail only afte
 | Pure logic, parsers, stores, reducers, adapters, and isolated components | A unit test beside the owning production module |
 | Server behavior spanning HTTP, WebSocket, provider IO, persistence, process lifecycle, or multiple server services | `tests/server/` |
 | User behavior whose contract includes SPA routing, rendering, dialogs, browser events, or client/server coordination | `tests/e2e/` |
+| User behavior whose contract depends on rendered layout, measurement, scrolling, focus, or selection geometry | `tests/chromium/` |
 
 Prefer the lowest layer that can reproduce the failure, but do not mock away the boundary under test. Cross-boundary production regressions generally require both a focused unit test and a regression test in this package. Lightpanda tests complement server integration tests; they do not replace them.
 
@@ -28,9 +29,11 @@ integration-tests/
     e2e-fixture.ts           Server fixture plus Lightpanda and production SPA
     spa-driver.ts            Reusable user-level SPA actions and waits
     lightpanda-process.ts    Isolated Lightpanda CDP lifecycle
+    chromium-fixture.ts      Server fixture plus real Chromium and failure diagnostics
   tests/
     server/                  Black-box server integration tests
     e2e/                     Lightpanda SPA workflows
+    chromium/                Rendered-browser geometry and interaction workflows
   artifacts/                 Failure diagnostics; generated and gitignored
 ```
 
@@ -117,6 +120,7 @@ CODEX_TESTING_KEY=... bun run test:live:codex
 
 bun run build
 LIGHTPANDA_BIN=/path/to/lightpanda bun run test:integration:e2e
+bun run test:integration:chromium
 
 bun run check
 bun run test
@@ -130,6 +134,7 @@ Focused runs are useful while iterating:
 cd integration-tests
 bun test --max-concurrency=1 --timeout=30000 tests/server/queue-lifecycle.test.ts
 bun test --max-concurrency=1 --timeout=60000 tests/e2e/queue-workflow.test.ts
+bun test --max-concurrency=1 --timeout=120000 tests/chromium/transcript-virtualization.test.ts
 ```
 
 Keep the configured single-test concurrency. The suites exercise process lifecycle and ordered race scenarios deliberately.
