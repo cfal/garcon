@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import type { PendingUserInputUpdatedMessage } from '../../../common/ws-events.js';
+import { userContents } from '../../support/chat-assertions.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -97,6 +99,14 @@ function startArguments(
     '--endpoint', agent.provider.endpointId,
     '--model', agent.provider.model,
     prompt,
+  ];
+}
+
+function controlArguments(fixture: IntegrationFixture, command: string[]): string[] {
+  return [
+    '--config-dir', fixture.dirs.config,
+    '--workspace', WORKSPACE,
+    ...command,
   ];
 }
 
@@ -293,6 +303,163 @@ describe('garcon-cli', () => {
       expect(started.exitCode).toBe(0);
       expect(started.stderr).toBe('');
       expect(started.stdout).toMatch(/^chat id: \d{16}\necho:cli-authenticated\n$/);
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('send-async delivers a new turn to an idle non-CLI chat and exits before it settles', async () => {
+    await withIntegrationFixture('garcon-cli-send-async-idle', async (fixture) => {
+      const agent = fixture.directAgents.openAi;
+      const chatId = fixture.newChatId();
+      const initial = await fixture.client.startDirectChat({
+        chatId,
+        projectPath: fixture.dirs.project,
+        agent,
+        content: 'cli-async-initial',
+      });
+      if (!initial.turnId) throw new Error('Direct start did not return a turn identity.');
+      await fixture.client.waitForTurnTerminal(chatId, initial.turnId, { timeoutMs: 30_000 });
+
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-async-message' });
+      const cursor = fixture.client.markEvents();
+      const sent = await runCli(controlArguments(fixture, [
+        'send-async', chatId, 'cli-async-message',
+      ]));
+
+      expect(sent.exitCode).toBe(0);
+      expect(sent.stderr).toBe('');
+      expect(sent.stdout).toMatch(/^chat id: \d{16}\ndelivery: new-turn\nturn id: [0-9a-f-]+\n$/);
+      const turnId = sent.stdout.match(/turn id: ([0-9a-f-]+)\n/)?.[1];
+      expect(turnId).toBeString();
+      const pending = await fixture.client.waitForEvent(
+        (event): event is PendingUserInputUpdatedMessage =>
+          event.type === 'pending-user-input-updated'
+          && event.input.chatId === chatId
+          && event.input.content === 'cli-async-message'
+          && typeof event.input.turnId === 'string',
+        'send-async accepted turn identity',
+        { afterIndex: cursor, timeoutMs: 30_000 },
+      );
+      expect(pending.input.turnId).toBe(turnId);
+
+      const chatsAfter = await fixture.client.listChats();
+      expect(chatsAfter.sessions.find((chat) => chat.id === chatId)?.tags).not.toContain('cli');
+
+      held.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, turnId, { timeoutMs: 30_000 });
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(userContents(transcript.messages)).toEqual(['cli-async-initial', 'cli-async-message']);
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('send-async without --allow-steer reports busy without queueing', async () => {
+    await withIntegrationFixture('garcon-cli-send-async-busy', async (fixture) => {
+      const before = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-busy-turn' });
+      const cli = startCli(startArguments(fixture, 'cli-busy-turn'));
+      await held.received;
+      const busyChat = (await fixture.client.listChats()).sessions.find(
+        (chat) => !before.has(chat.id),
+      );
+      expect(busyChat).toBeDefined();
+
+      const sent = await runCli(controlArguments(fixture, [
+        'send-async', busyChat!.id, 'cli-busy-follow-up',
+      ]));
+
+      expect(sent.exitCode).toBe(3);
+      expect(sent.stdout).toBe('');
+      expect(sent.stderr).toContain('busy');
+      expect(sent.stderr).toContain('--allow-steer');
+      const control = await fixture.client.getExecutionControl(busyChat!.id);
+      expect(control.queue.entries).toEqual([]);
+      expect(fixture.fakeProviders.openAi.requests().filter(
+        (request) => request.lastUserText.includes('cli-busy-follow-up'),
+      )).toHaveLength(0);
+
+      held.releaseEcho();
+      const completed = await cli;
+      expect(completed.exitCode).toBe(0);
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('garcon-cli stop interrupts a CLI-attached turn and pauses its queue', async () => {
+    await withIntegrationFixture('garcon-cli-stop-active', async (fixture) => {
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-stop-turn' });
+      const cli = startObservedCli(startArguments(fixture, 'cli-stop-turn'));
+      await held.received;
+      const chatId = await cli.acceptedChatId;
+      await fixture.client.enqueueNew(chatId, 'pending-after-stop');
+      const aborted = held.expectAbort();
+
+      const stopped = await runCli(controlArguments(fixture, ['stop', chatId]));
+
+      expect(stopped).toEqual({
+        exitCode: 0,
+        stdout: `chat id: ${chatId}\nstop: interrupt-requested\n`,
+        stderr: '',
+      });
+      await aborted;
+      const control = await fixture.client.getExecutionControl(chatId);
+      expect(control.queue.pause?.kind).toBe('manual');
+      expect(control.queue.entries.map((entry) => entry.content)).toEqual(['pending-after-stop']);
+
+      held.releaseEcho();
+      const interrupted = await cli.result;
+      expect(interrupted.exitCode).toBe(4);
+      expect(interrupted.stderr).toContain('the turn was stopped');
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('garcon-cli stop treats an idle chat as already-idle', async () => {
+    await withIntegrationFixture('garcon-cli-stop-idle', async (fixture) => {
+      const before = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-idle-turn' });
+      const cli = startCli(startArguments(fixture, 'cli-idle-turn'));
+      await held.received;
+      const chat = (await fixture.client.listChats()).sessions.find(
+        (entry) => !before.has(entry.id),
+      );
+      expect(chat).toBeDefined();
+      held.releaseEcho();
+      const completed = await cli;
+      expect(completed.exitCode).toBe(0);
+
+      const stopped = await runCli(controlArguments(fixture, ['stop', chat!.id]));
+
+      expect(stopped).toEqual({
+        exitCode: 0,
+        stdout: `chat id: ${chat!.id}\nstop: already-idle\n`,
+        stderr: '',
+      });
+    }, { namedWorkspace: WORKSPACE });
+  });
+
+  test('resuming a non-CLI chat never adds the cli tag', async () => {
+    await withIntegrationFixture('garcon-cli-resume-no-cli', async (fixture) => {
+      const agent = fixture.directAgents.openAi;
+      const chatId = fixture.newChatId();
+      const initial = await fixture.client.startDirectChat({
+        chatId,
+        projectPath: fixture.dirs.project,
+        agent,
+        content: 'cli-no-tag-initial',
+      });
+      if (!initial.turnId) throw new Error('Direct start did not return a turn identity.');
+      await fixture.client.waitForTurnTerminal(chatId, initial.turnId, { timeoutMs: 30_000 });
+      const before = await fixture.client.listChats();
+      expect(before.sessions.find((chat) => chat.id === chatId)?.tags).not.toContain('cli');
+
+      const resumed = await runCli(controlArguments(fixture, [
+        '--resume', chatId, 'cli-no-tag-follow-up',
+      ]));
+
+      expect(resumed).toEqual({
+        exitCode: 0,
+        stdout: `chat id: ${chatId}\necho:cli-no-tag-follow-up\n`,
+        stderr: '',
+      });
+      const after = await fixture.client.listChats();
+      expect(after.sessions.find((chat) => chat.id === chatId)?.tags).not.toContain('cli');
     }, { namedWorkspace: WORKSPACE });
   });
 });
