@@ -129,23 +129,15 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       // Garcon's outer retry owns the replacement stream.
       await controller.waitForGlobalConnectionCount(2);
 
-      // The provider finishes its prompt after the held model response releases; the retired
-      // turn must not leak those late events onto the wire.
-      held.release();
-      const native = await openCodeNativeSession(fixture, chatId);
-      await waitForNativeAssistantText(native.databasePath, native.agentSessionId, heldReply);
-      expect(fixture.client.eventsSince(cursor).slice(terminalIndex + 1).some((event) =>
-        event.type === 'chat-messages'
-        && event.chatId === chatId
-        && event.turnId === turn.turnId
-      )).toBe(false);
-
+      // The successor is admitted while the retired provider request remains held. Garcon
+      // must quiesce that provider run before submitting the next prompt.
       testEnvironment.model.scriptTurn([chatCompletionsText(successorReply)]);
       const successorCursor = fixture.client.markEvents();
       const successor = await fixture.client.runChat(scriptedOpenCodeRunRequest({
         chatId,
         command: marker('RESET_SUCCESSOR_PROMPT'),
       }));
+      held.release();
       await waitForVisibleResponse({
         fixture,
         chatId,
@@ -158,6 +150,11 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
         event.type === 'chat-messages'
         && event.chatId === chatId
         && event.turnId === turn.turnId
+      )).toBe(false);
+      const native = await openCodeNativeSession(fixture, chatId);
+      const rows = readOpenCodeSessionRows(native);
+      expect(rows.parts.some((row) =>
+        row.data.type === 'text' && row.data.text === heldReply
       )).toBe(false);
 
       const paths = (await controller.requests()).map((request) => request.path);
@@ -186,20 +183,6 @@ function withScriptedOpenCode(): IntegrationFixtureOptions {
 function nativeSessionCount(fixture: IntegrationFixture): number {
   const databasePath = openCodePaths(fixture.dirs).database;
   return existsSync(databasePath) ? readOpenCodeSessionCount(databasePath) : 0;
-}
-
-async function waitForNativeAssistantText(
-  databasePath: string,
-  agentSessionId: string,
-  expected: string,
-): Promise<void> {
-  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const rows = readOpenCodeSessionRows({ agentSessionId, artificialPath: '', databasePath });
-    if (rows.parts.some((row) => row.data.type === 'text' && row.data.text === expected)) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('OpenCode never persisted the released assistant text.');
 }
 
 function marker(label: string): string {

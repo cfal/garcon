@@ -173,6 +173,64 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
+  test('pins OpenCode clean-close truncation as an empty success and recovers', async () => {
+    const testEnvironment = requireEnvironment();
+    const recoveryReply = marker('TRUNCATION_RECOVERY_REPLY');
+    const requestCursor = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptFault({
+      kind: 'stream-error',
+      message: marker('TRUNCATION_FAULT'),
+    });
+
+    await withIntegrationFixture('opencode-clean-close-truncation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('TRUNCATION_PROMPT'),
+      }));
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expectFinished(terminal.type);
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(assistantContents(transcript.messages)).toEqual([]);
+      expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      const terminals = fixture.client.eventsSince(cursor).filter((event) =>
+        (event.type === 'agent-run-failed' || event.type === 'agent-run-finished')
+        && event.chatId === chatId
+        && event.turnId === turn.turnId);
+      expect(terminals).toHaveLength(1);
+      expect(terminals[0]?.type).toBe('agent-run-finished');
+
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: marker('TRUNCATION_RECOVERY_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: recovery.turnId,
+        marker: recoveryReply,
+        afterIndex: recoveryCursor,
+      });
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'error',
+      )).toEqual([]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('retries one HTTP 500 through OpenCode and then succeeds without duplicate user rows', async () => {
     const testEnvironment = requireEnvironment();
     const prompt = marker('HTTP500_PROMPT');
