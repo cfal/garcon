@@ -30,6 +30,7 @@
 			| 'error-earlier'
 			| 'row-ids'
 			| 'count-shrink'
+			| 'count-shrink-survivors'
 			| 'twenty-thousand';
 	}
 
@@ -101,7 +102,8 @@
 			}
 			if (
 				initialTranscriptScenario === 'twenty-thousand' ||
-				initialTranscriptScenario === 'count-shrink'
+				initialTranscriptScenario === 'count-shrink' ||
+				initialTranscriptScenario === 'count-shrink-survivors'
 			) {
 				chatState.revealAllLoadedMessages();
 			}
@@ -116,6 +118,19 @@
 		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
 			lastSeq: messages.length,
 			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chatState.revealAllLoadedMessages();
+	}
+
+	function shrinkTranscriptKeepingTail(): void {
+		const messages = Array.from({ length: 20 }, (_, index) => ({
+			seq: index + 101,
+			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 101}`),
+		}));
+		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq: 120,
+			pageOldestSeq: 101,
 			hasMore: false,
 		});
 		chatState.revealAllLoadedMessages();
@@ -161,4 +176,7 @@
 {/if}
 {#if transcriptScenario === 'count-shrink'}
 	<button onclick={shrinkTranscript}>Shrink transcript</button>
+{/if}
+{#if transcriptScenario === 'count-shrink-survivors'}
+	<button onclick={shrinkTranscriptKeepingTail}>Shrink transcript keeping tail</button>
 {/if}

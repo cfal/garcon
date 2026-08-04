@@ -30,6 +30,16 @@ import {
 	shouldPreserveConversationVirtualEdge,
 } from './conversation-feed-viewport-geometry.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
+import {
+	conversationAnchorFallbackKeys,
+	conversationTargetAlignmentDelta,
+	findConversationTargetNode,
+	isConversationVirtualKeyMeasured,
+	nextConversationAnimationFrame as nextAnimationFrame,
+	resetMountedConversationMeasurements,
+	sameConversationNumberArrays,
+	scrollConversationToPhysicalEnd,
+} from './conversation-feed-virtual-runtime.js';
 import type { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
@@ -37,7 +47,6 @@ const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
-const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
 interface ConversationVirtualAnchor {
 	key: string;
 	offsetWithinItem: number;
@@ -53,16 +62,6 @@ interface ConversationFeedVirtualControllerOptions {
 	get pinned(): boolean;
 	get retention(): ConversationFeedRetentionState;
 	onInitialEndRestored?(): void;
-}
-function nextAnimationFrame(): Promise<void> {
-	return new Promise((resolve) => {
-		if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
-		else queueMicrotask(resolve);
-	});
-}
-
-function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
-	return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 export class ConversationFeedVirtualController implements ConversationViewportPort {
 	readonly virtualizer: Readable<SvelteVirtualizer<HTMLElement, HTMLDivElement>>;
@@ -225,8 +224,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		if (this.#measureOnShow) {
-			this.#instance().measure();
 			this.#measureOnShow = false;
+			void this.#resetMeasurementsAfterCommit(this.options.geometry, false, this.#userIntentEpoch);
 		}
 		this.#hiddenAnchor = null;
 		this.#pendingEndScroll = false;
@@ -347,7 +346,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const userIntentEpoch = this.#userIntentEpoch;
 		this.#measureOnShow = false;
 		if (!anchor) {
-			if (clearMeasurements) this.#instance().measure();
+			if (clearMeasurements) {
+				const surfaceIdentity = this.options.geometry.surfaceIdentity;
+				const measured = await this.#resetMountedMeasurements(
+					() => this.isReady() && this.options.geometry.surfaceIdentity === surfaceIdentity,
+				);
+				if (!measured) return this.isReady() ? 'missing-anchor' : 'not-ready';
+			}
 			if (scrollOffset !== null) {
 				this.#instance().scrollToOffset(scrollOffset, { behavior: 'auto' });
 				return 'restored';
@@ -429,7 +434,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 						return 'cancelled';
 					}
 					if (!this.isReady()) return 'not-ready';
-					const node = this.#findTargetNode(resolved.innerRowId);
+					const node = findConversationTargetNode(this.options.virtualRoot, resolved.innerRowId);
 					if (!node) continue;
 					if (!isConversationTargetLayoutReady(node)) {
 						previousRect = null;
@@ -440,7 +445,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					if (!viewport) return 'not-ready';
 					const attainableOffset = attainableConversationTargetOffset({
 						currentOffset: viewport.scrollTop,
-						alignmentDelta: this.#targetAlignmentDelta(node, options.align ?? 'center'),
+						alignmentDelta: conversationTargetAlignmentDelta(
+							viewport,
+							node,
+							options.align ?? 'center',
+						),
 						maximumOffset: Math.max(viewport.scrollHeight - viewport.clientHeight, 0),
 					});
 					const offsetDelta = attainableOffset - viewport.scrollTop;
@@ -590,7 +599,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			const index = indexByKey.get(key);
 			return index === undefined ? [] : [index];
 		});
-		if (arraysEqual(retainedIndexes, this.#configuredRetainedIndexes)) return;
+		if (sameConversationNumberArrays(retainedIndexes, this.#configuredRetainedIndexes)) return;
 		this.#configuredRetainedIndexes = retainedIndexes;
 		this.#instance().setOptions({
 			rangeExtractor: this.#createRangeExtractor(),
@@ -682,15 +691,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			: itemAtOffset;
 		if (!item || typeof item.key !== 'string') return null;
 		const index = this.#configuredKeys.indexOf(item.key);
-		const fallbackKeys: string[] = [];
-		if (index >= 0) {
-			for (let distance = 1; distance <= HIDDEN_ANCHOR_FALLBACK_RADIUS; distance += 1) {
-				const before = this.#configuredKeys[index - distance];
-				const after = this.#configuredKeys[index + distance];
-				if (before) fallbackKeys.push(before);
-				if (after) fallbackKeys.push(after);
-			}
-		}
+		const fallbackKeys =
+			index < 0 ? [] : conversationAnchorFallbackKeys(this.#configuredKeys, index);
 		return { key: item.key, offsetWithinItem: offset - item.start, fallbackKeys };
 	}
 
@@ -708,9 +710,21 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		const release = this.options.retention.acquire(key, 'target');
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
 		try {
-			if (clearMeasurements) this.#instance().measure();
-			if (restoreEnd) {
+			if (clearMeasurements) {
 				await tick();
+				await nextAnimationFrame();
+				if (!this.#isCurrentLayoutOperation(token, operationEpoch)) return false;
+				if (
+					!(await this.#resetMountedMeasurements(() =>
+						this.#isCurrentLayoutOperation(token, operationEpoch),
+					))
+				) {
+					if (!this.options.visible) this.#measureOnShow = true;
+					return false;
+				}
+			}
+			if (restoreEnd) {
+				if (!clearMeasurements) await tick();
 				if (
 					token !== this.#layoutMutationToken ||
 					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
@@ -817,7 +831,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return;
 		}
 		if (!this.isReady()) return;
-		this.#instance().measure();
+		const measured = await this.#resetMountedMeasurements(
+			() => this.isReady() && this.options.geometry.geometryRevision === snapshot.geometryRevision,
+		);
+		if (!measured) {
+			if (!this.options.visible) this.#measureOnShow = true;
+			return;
+		}
 		await tick();
 		await nextAnimationFrame();
 		if (
@@ -885,13 +905,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#scrollToPhysicalEnd(behavior: 'auto' | 'instant'): void {
-		const viewport = this.options.viewport;
-		if (!viewport) return;
-		// Count growth can turn TanStack's retained last-index target into an interior target.
-		// The product end is the browser's current maximum after the Svelte sizer commit.
-		this.#instance().scrollToOffset(Math.max(viewport.scrollHeight - viewport.clientHeight, 0), {
-			behavior,
-		});
+		scrollConversationToPhysicalEnd(this.#instance(), this.options.viewport, behavior);
 	}
 
 	async #completeSimpleScroll(operationEpoch: number, token: number): Promise<void> {
@@ -920,36 +934,15 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#isKeyMeasured(key: string): boolean {
-		return (
-			this.#instance().itemSizeCache.has(key) &&
-			this.#instance()
-				.getVirtualItems()
-				.some((item) => item.key === key)
-		);
+		return isConversationVirtualKeyMeasured(this.#instance(), key);
 	}
 
-	#findTargetNode(rowId: string): HTMLElement | null {
-		const root = this.options.virtualRoot;
-		if (!root) return null;
-		const candidates = root.querySelectorAll<HTMLElement>(
-			'[data-chat-row-id], [data-chat-anchor-id]',
+	#resetMountedMeasurements(canMeasure: () => boolean): Promise<boolean> {
+		return resetMountedConversationMeasurements(
+			this.#instance(),
+			() => this.options.virtualRoot,
+			canMeasure,
 		);
-		for (const candidate of candidates) {
-			if (candidate.dataset.chatRowId === rowId || candidate.dataset.chatAnchorId === rowId) {
-				return candidate;
-			}
-		}
-		return null;
-	}
-
-	#targetAlignmentDelta(node: HTMLElement, align: 'center' | 'start' | 'end'): number {
-		const viewport = this.options.viewport;
-		if (!viewport) return 0;
-		const viewportRect = viewport.getBoundingClientRect();
-		const nodeRect = node.getBoundingClientRect();
-		if (align === 'start') return nodeRect.top - viewportRect.top;
-		if (align === 'end') return nodeRect.bottom - viewportRect.bottom;
-		return nodeRect.top + nodeRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
 	}
 
 	#beginProgrammaticScrollOperation(): number {
@@ -959,6 +952,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	#isCurrentProgrammaticScrollOperation(epoch: number): boolean {
 		return epoch === this.#programmaticScrollEpoch;
+	}
+	#isCurrentLayoutOperation(token: number, epoch: number): boolean {
+		return (
+			token === this.#layoutMutationToken &&
+			this.#isCurrentProgrammaticScrollOperation(epoch) &&
+			this.isReady()
+		);
 	}
 
 	#finishProgrammaticScrollOperation(epoch: number): void {

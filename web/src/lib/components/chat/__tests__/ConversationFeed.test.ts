@@ -275,4 +275,58 @@ describe('ConversationFeed', () => {
 			restoreResizeObserver();
 		}
 	});
+
+	it('remeasures mounted rows that survive an item count shrink', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		try {
+			const { container } = render(ConversationFeedTestHost, {
+				transcriptScenario: 'count-shrink-survivors',
+			});
+			await waitFor(() =>
+				expect(
+					container
+						.querySelector('[data-chat-virtual-sizer]')
+						?.getAttribute('data-chat-virtual-model-count'),
+				).toBe('122'),
+			);
+			const measuredRow = container
+				.querySelector('[data-chat-row-id="generation-1:120"]')
+				?.closest<HTMLElement>('[data-chat-virtual-item]');
+			const followingRow = measuredRow?.nextElementSibling as HTMLElement | null;
+			if (!measuredRow || !followingRow) {
+				throw new Error('Expected a mounted tail row and end spacer');
+			}
+			let measurementReads = 0;
+			Object.defineProperty(measuredRow, 'offsetHeight', {
+				configurable: true,
+				get() {
+					measurementReads += 1;
+					return 600;
+				},
+			});
+			ResizeObserverHarness.emit(measuredRow, 900, 600);
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Shrink transcript keeping tail' }));
+			await waitFor(() =>
+				expect(
+					container
+						.querySelector('[data-chat-virtual-sizer]')
+						?.getAttribute('data-chat-virtual-model-count'),
+				).toBe('22'),
+			);
+			expect(measuredRow.isConnected).toBe(true);
+			expect(followingRow.isConnected).toBe(true);
+			for (let frame = 0; frame < 4; frame += 1) {
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			}
+			expect(measurementReads).toBeGreaterThan(0);
+			await waitFor(() => {
+				const start = (element: HTMLElement): number =>
+					Number(element.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? Number.NaN);
+				expect(start(followingRow) - start(measuredRow)).toBe(600);
+			});
+		} finally {
+			restoreResizeObserver();
+		}
+	});
 });
