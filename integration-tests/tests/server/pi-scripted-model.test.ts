@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ChatSessionCreatedMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
@@ -31,12 +31,13 @@ import {
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('Pi against a scripted model', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedPiTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('creates the session identity before the first turn settles', async () => {

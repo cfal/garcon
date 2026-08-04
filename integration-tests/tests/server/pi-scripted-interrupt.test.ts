@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ServerWsMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
@@ -28,12 +28,13 @@ import {
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('scripted Pi interrupt lifecycle', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedPiTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('stops an active tool turn and preserves the stopped transcript shape', async () => {

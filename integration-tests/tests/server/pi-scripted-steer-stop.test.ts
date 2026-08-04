@@ -1,6 +1,6 @@
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
@@ -21,12 +21,13 @@ import {
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('scripted Pi steering stop semantics', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedPiTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('discards queued steering but preserves steering already delivered at a boundary', async () => {

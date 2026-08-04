@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -15,12 +15,13 @@ import {
 let environment: ScriptedPiTestEnvironment | undefined;
 
 describe('Pi RPC lifecycle', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedPiTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('fails resume instead of silently creating a session when the native file disappears', async () => {
