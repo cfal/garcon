@@ -177,7 +177,7 @@ repeatable tags with `--tag review --tag delegated`; every new chat receives the
 automatically, and `cli` records creation through `garcon-cli` and nothing else. `--title` sets
 an explicit title on either a new or resumed chat.
 
-The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, or `wait`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `status`, or `wait`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
 Every accepted start or resume prints an exact handle before waiting:
 
