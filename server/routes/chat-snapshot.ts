@@ -14,6 +14,9 @@ import type { PendingUserInputServiceContract } from '../chats/pending-user-inpu
 import { transcriptUnavailableMessage } from '../lib/domain-error.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
+import { createLogger, type Logger } from '../lib/log.js';
+
+const defaultLogger = createLogger('routes:chat-snapshot');
 
 interface ChatSnapshotRouteDeps {
   summaries: Pick<ChatListProjector, 'buildSummary'>;
@@ -23,6 +26,7 @@ interface ChatSnapshotRouteDeps {
     PendingUserInputServiceContract,
     'reconcileRetainedHistory' | 'listForTransport'
   >;
+  logger?: Pick<Logger, 'error'>;
   now?: () => Date;
 }
 
@@ -62,6 +66,7 @@ export function createChatSnapshotRoutes(deps: ChatSnapshotRouteDeps): RouteMap 
           } satisfies ChatSnapshotResponse;
           return noStore(Response.json(response));
         } catch (error) {
+          (deps.logger ?? defaultLogger).error(`snapshot failed for chat ${chatId}:`, error);
           return noStore(jsonErrorFromUnknown(error));
         }
       },

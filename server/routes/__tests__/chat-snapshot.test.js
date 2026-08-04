@@ -4,6 +4,14 @@ import { parseChatSnapshotResponse } from '../../../common/chat-snapshot.js';
 import {
   TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE,
 } from '../../lib/domain-error.js';
+
+const routeLogger = {
+  debug: mock(() => undefined),
+  info: mock(() => undefined),
+  warn: mock(() => undefined),
+  error: mock(() => undefined),
+};
+
 import { createChatSnapshotRoutes } from '../chat-snapshot.js';
 
 const CHAT_ID = '1785337200123456';
@@ -97,6 +105,7 @@ function fixture(overrides = {}) {
     execution,
     chatViews,
     pendingInputs,
+    logger: routeLogger,
     now: () => new Date(TIMESTAMP),
   });
   return { calls, summaries, execution, chatViews, pendingInputs, routes };
@@ -212,6 +221,7 @@ describe('GET /api/v1/chats/snapshot', () => {
   });
 
   test('uses the standard error envelope for unexpected transcript failures', async () => {
+    routeLogger.error.mockClear();
     const testFixture = fixture({
       chatViews: { getOrCreatePage: mock(async () => { throw new Error('private path'); }) },
     });
@@ -225,5 +235,10 @@ describe('GET /api/v1/chats/snapshot', () => {
       retryable: true,
     });
     expect(JSON.stringify(body)).not.toContain('private path');
+    expect(routeLogger.error).toHaveBeenCalledTimes(1);
+    expect(routeLogger.error.mock.calls[0]?.[0]).toBe(
+      `snapshot failed for chat ${CHAT_ID}:`,
+    );
+    expect(routeLogger.error.mock.calls[0]?.[1]).toBeInstanceOf(Error);
   });
 });
