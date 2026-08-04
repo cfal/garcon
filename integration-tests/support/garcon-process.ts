@@ -1,3 +1,5 @@
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
 
@@ -44,12 +46,12 @@ function isolatedEnvironment(
     HOME: homeDir,
     XDG_CONFIG_HOME: `${homeDir}/.config`,
     XDG_DATA_HOME: `${homeDir}/.local/share`,
+    TMPDIR: join(homeDir, 'tmp'),
     PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
     NO_COLOR: '1',
     ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
     ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
     ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
-    ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
     ...overrides,
   };
 }
@@ -123,6 +125,8 @@ export class GarconProcess {
 
   static async start(options: GarconProcessOptions): Promise<GarconProcess> {
     const ready = new Deferred<string>();
+    const environment = isolatedEnvironment(options.homeDir, options.environment);
+    await mkdir(environment.TMPDIR, { recursive: true });
     const workspaceArguments = options.workspaceName
       ? ['--workspace', options.workspaceName]
       : ['--workspace-dir', options.workspaceDir];
@@ -142,7 +146,7 @@ export class GarconProcess {
         options.projectDir,
       ],
       cwd: options.repoRoot,
-      env: isolatedEnvironment(options.homeDir, options.environment),
+      env: environment,
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

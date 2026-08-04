@@ -18,9 +18,11 @@ import {
 import {
   openCodeNativeSession,
   readOpenCodeSessionRows,
+  readSupervisorStates,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
+  waitForSupervisorExit,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
 
@@ -74,6 +76,20 @@ describeOnLinux('scripted OpenCode provider failures', () => {
       expect(assistantContents(transcript.messages)).toEqual([]);
       // A non-retryable 401 produced exactly one provider request.
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      expectSingleFailedTerminal(
+        fixture.client.eventsSince(cursor),
+        chatId,
+        turn.turnId,
+      );
+
+      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      expect(previousSupervisors).toHaveLength(1);
+      await fixture.restartGarcon({
+        beforeStart: () => waitForSupervisorExit(previousSupervisors),
+      });
+      const restored = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(restored.messages, 'error')).toHaveLength(1);
+      expect(assistantContents(restored.messages)).toEqual([]);
 
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
       const recoveryCursor = fixture.client.markEvents();
@@ -88,11 +104,6 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         marker: recoveryReply,
         afterIndex: recoveryCursor,
       });
-      expectSingleFailedTerminal(
-        fixture.client.eventsSince(cursor),
-        chatId,
-        turn.turnId,
-      );
       expect(messagesOfType(
         (await fixture.client.getMessages(chatId)).messages,
         'error',

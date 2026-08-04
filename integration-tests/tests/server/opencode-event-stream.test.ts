@@ -133,7 +133,7 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       // turn must not leak those late events onto the wire.
       held.release();
       const native = await openCodeNativeSession(fixture, chatId);
-      await waitForNativeAssistant(native.databasePath, native.agentSessionId);
+      await waitForNativeAssistantText(native.databasePath, native.agentSessionId, heldReply);
       expect(fixture.client.eventsSince(cursor).slice(terminalIndex + 1).some((event) =>
         event.type === 'chat-messages'
         && event.chatId === chatId
@@ -153,6 +153,12 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
         marker: successorReply,
         afterIndex: successorCursor,
       });
+      // The successor terminal is a stream-order barrier after the provider's late completion.
+      expect(fixture.client.eventsSince(cursor).slice(terminalIndex + 1).some((event) =>
+        event.type === 'chat-messages'
+        && event.chatId === chatId
+        && event.turnId === turn.turnId
+      )).toBe(false);
 
       const paths = (await controller.requests()).map((request) => request.path);
       expect(paths).toContain('/global/event');
@@ -182,17 +188,18 @@ function nativeSessionCount(fixture: IntegrationFixture): number {
   return existsSync(databasePath) ? readOpenCodeSessionCount(databasePath) : 0;
 }
 
-async function waitForNativeAssistant(
+async function waitForNativeAssistantText(
   databasePath: string,
   agentSessionId: string,
+  expected: string,
 ): Promise<void> {
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const rows = readOpenCodeSessionRows({ agentSessionId, artificialPath: '', databasePath });
-    if (rows.messages.some((row) => row.data.role === 'assistant')) return;
+    if (rows.parts.some((row) => row.data.type === 'text' && row.data.text === expected)) return;
     await Bun.sleep(50);
   }
-  throw new Error('OpenCode never persisted the released assistant message.');
+  throw new Error('OpenCode never persisted the released assistant text.');
 }
 
 function marker(label: string): string {

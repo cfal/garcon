@@ -1,4 +1,4 @@
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type {
@@ -26,11 +26,17 @@ import {
 import {
   openCodeNativeSession,
   readOpenCodeSessionRows,
+  readSupervisorStates,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
+  waitForSupervisorExit,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
+import {
+  linuxProcessStartTimeTicks,
+  processIdentityAlive,
+} from '../../support/opencode-process-supervisor.js';
 
 // Stop flows through the real binary: Garcon's abort reaches OpenCode's session.abort, the
 // active model request or shell tool dies, and no provider failure is fabricated for a
@@ -134,7 +140,13 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
     const stoppedReply = marker('TOOL_SHOULD_NOT_COMPLETE');
     const recoveryReply = marker('TOOL_RECOVERY_REPLY');
     const stoppedPrompt = marker('TOOL_STOPPED_PROMPT');
-    const command = 'touch stop-started.marker && sleep 30 && touch stop-completed.marker';
+    const command = [
+      'sleep 30 & child=$!',
+      'printf "%s %s" "$$" "$child" > stop-pids.marker',
+      'touch stop-started.marker',
+      'wait "$child"',
+      'touch stop-completed.marker',
+    ].join('; ');
     testEnvironment.model.scriptTurn([chatCompletionsToolUse('call_stopped_tool', 'bash', {
       command,
     })]);
@@ -149,6 +161,17 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       }));
       if (!active.turnId) throw new Error('OpenCode start response omitted its turn id.');
       await waitForFile(join(fixture.dirs.project, 'stop-started.marker'));
+      const processIds = (await readFile(
+        join(fixture.dirs.project, 'stop-pids.marker'),
+        'utf8',
+      )).trim().split(/\s+/).map(Number);
+      const processIdentities = processIds.map((pid) => ({
+        pid,
+        startTimeTicks: linuxProcessStartTimeTicks(pid),
+      }));
+      expect(processIdentities.every((identity) =>
+        processIdentityAlive(identity.pid, identity.startTimeTicks)
+      )).toBe(true);
 
       const stopCursor = fixture.client.markEvents();
       const stopped = await fixture.client.stopChat({
@@ -174,8 +197,8 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         active.turnId,
       );
       await waitForAbortedAssistant(fixture, chatId);
-      // The stopped shell died before its completion marker; the 30s sleep far outlasts the
-      // assertion window.
+      await waitForProcessesExit(processIdentities);
+      // Both the command shell and its active child died before the completion marker.
       await expect(access(join(fixture.dirs.project, 'stop-completed.marker')))
         .rejects.toMatchObject({ code: 'ENOENT' });
 
@@ -194,6 +217,19 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       const abortedAssistant = rows.messages.find((row) => row.data.role === 'assistant');
       expect((abortedAssistant?.data.error as { name?: string } | undefined)?.name)
         .toBe('MessageAbortedError');
+
+      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      expect(previousSupervisors).toHaveLength(1);
+      await fixture.restartGarcon({
+        beforeStart: () => waitForSupervisorExit(previousSupervisors),
+      });
+      const restored = (await fixture.client.getMessages(chatId)).messages;
+      expect(userContents(restored)).toContain(stoppedPrompt);
+      expect(assistantContents(restored).join('\n')).not.toContain(stoppedReply);
+      expect(messagesOfType(restored, 'error')).toEqual([]);
+      expect(messagesOfType(restored, 'bash-tool-use').some(
+        (message) => message.command === command,
+      )).toBe(false);
 
       testEnvironment.model.reset();
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
@@ -298,4 +334,20 @@ async function waitForFile(path: string): Promise<void> {
     }
   }
   throw new Error(`OpenCode never created ${path}.`);
+}
+
+async function waitForProcessesExit(
+  identities: Array<{ pid: number; startTimeTicks: string | null }>,
+): Promise<void> {
+  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (identities.every((identity) =>
+      !processIdentityAlive(identity.pid, identity.startTimeTicks)
+    )) return;
+    await Bun.sleep(25);
+  }
+  const survivors = identities.filter((identity) =>
+    processIdentityAlive(identity.pid, identity.startTimeTicks)
+  ).map(({ pid }) => pid);
+  throw new Error(`OpenCode shell processes survived abort: ${survivors.join(', ')}`);
 }

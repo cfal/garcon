@@ -149,6 +149,15 @@ describeOnLinux('scripted OpenCode permissions', () => {
         entry.message.type === 'permission-resolved'
         && entry.message.permissionRequestId === permissionRequestId
         && !entry.message.allowed)).toBe(true);
+      const rejectedTool = messagesOfType(transcript.messages, 'bash-tool-use').find(
+        (message) => message.command === command,
+      );
+      if (!rejectedTool) throw new Error('Rejected OpenCode shell tool use was not rendered.');
+      const rejectedResult = messagesOfType(transcript.messages, 'tool-result').find(
+        (message) => message.toolId === rejectedTool.toolId,
+      );
+      expect(rejectedResult?.isError).toBe(true);
+      expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());

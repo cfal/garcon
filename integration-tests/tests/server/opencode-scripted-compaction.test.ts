@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { messagesOfType } from '../../support/chat-assertions.js';
+import {
+  assistantContents,
+  messagesOfType,
+  userContents,
+} from '../../support/chat-assertions.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
@@ -7,8 +11,10 @@ import {
 } from '../../support/integration-fixture.js';
 import { waitForVisibleResponse } from '../../support/live-agent.js';
 import {
+  readSupervisorStates,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
+  waitForSupervisorExit,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
 
@@ -30,6 +36,7 @@ describeOnLinux('OpenCode automatic compaction against a scripted model', () => 
     const testEnvironment = requireEnvironment();
     const summary = marker('SUMMARY');
     const reply = marker('REPLY');
+    const prompt = marker('PROMPT');
     testEnvironment.model.scriptFault({
       kind: 'http-error',
       status: 400,
@@ -45,7 +52,7 @@ describeOnLinux('OpenCode automatic compaction against a scripted model', () => 
       const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
         chatId,
         projectPath: fixture.dirs.project,
-        command: marker('PROMPT'),
+        command: prompt,
       }));
 
       await waitForVisibleResponse({
@@ -61,7 +68,19 @@ describeOnLinux('OpenCode automatic compaction against a scripted model', () => 
       expect(messagesOfType(transcript.messages, 'assistant-message').map(
         (message) => message.content,
       )).toEqual([reply]);
+      expect(userContents(transcript.messages)).toEqual([prompt]);
       expect(testEnvironment.model.requests()).toHaveLength(3);
+
+      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      expect(previousSupervisors).toHaveLength(1);
+      await fixture.restartGarcon({
+        beforeStart: () => waitForSupervisorExit(previousSupervisors),
+      });
+
+      const restored = await fixture.client.getMessages(chatId);
+      expect(userContents(restored.messages)).toEqual([prompt]);
+      expect(assistantContents(restored.messages)).toEqual([reply]);
+      expect(messagesOfType(restored.messages, 'error')).toEqual([]);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
