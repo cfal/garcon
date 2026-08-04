@@ -243,14 +243,18 @@ export class IntegrationFixture {
       openAiResponses: FakeOpenAiResponsesServer.start(),
       anthropic: FakeAnthropicServer.start(),
     };
-    const serverEnvironment = {
-      ...(options.serverEnvironment ?? {}),
-      ...(options.resolveServerEnvironment?.(dirs) ?? {}),
-    };
+    // The resolver runs before prepareWorkspace so preparation can depend on derived paths;
+    // the static record is spread afterwards because legacy tests mutate it during
+    // preparation. Resolver values still win on conflicts.
+    const resolvedEnvironment = options.resolveServerEnvironment?.(dirs) ?? {};
     let garcon: GarconProcess | null = null;
     let client: GarconTestClient | null = null;
     try {
       await options.prepareWorkspace?.(dirs);
+      const serverEnvironment = {
+        ...(options.serverEnvironment ?? {}),
+        ...resolvedEnvironment,
+      };
       garcon = await GarconProcess.start({
         repoRoot: REPO_ROOT,
         configDir: dirs.config,

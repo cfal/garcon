@@ -65,6 +65,8 @@ const MAX_OBSERVED_REQUESTS = 500;
 const DIRECTIVE_POLL_MS = 15;
 const PARENT_WATCH_MS = 25;
 const PROVIDER_STOP_GRACE_MS = 250;
+// Shutdown kills must land well inside Garcon's 500ms wrapper SIGKILL budget.
+const SHUTDOWN_KILL_GRACE_MS = 100;
 
 export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.tmp-${process.pid}-${crypto.randomUUID()}`;
@@ -190,29 +192,34 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
   const writeState = async () => writeJsonAtomic(statePath, state);
   await writeState();
 
-  // Signals can arrive while the version check or backend startup is still in flight, so the
-  // in-flight child is tracked from the beginning and shutdown waits for startup to settle.
+  // Garcon SIGKILLs this wrapper 500ms after SIGTERM, so shutdown must kill the provider
+  // well inside that budget: the final state write is the only one on the critical path and
+  // children are killed with a short grace. Startup checks stopping between spawns so a
+  // shutdown requested mid-startup cannot orphan the provider.
   let stopping = false;
-  let starting = true;
   let exitCode = 0;
   let versionChild: SupervisedChild | null = null;
   let provider: Bun.Subprocess | null = null;
   let frontend: Server | null = null;
-  const shutdown = async (reason: NonNullable<OpenCodeProcessState['reason']>) => {
-    if (stopping) return;
+  let shutdownPromise: Promise<void> | null = null;
+  const shutdown = (reason: NonNullable<OpenCodeProcessState['reason']>): void => {
+    if (shutdownPromise) return;
     stopping = true;
     clearInterval(parentWatcher);
-    while (starting) {
-      await Bun.sleep(10);
-    }
     state.status = 'stopping';
     state.reason = reason;
-    await writeState().catch(() => undefined);
-    if (versionChild) await stopChildWithEscalation(versionChild).catch(() => 1);
-    if (provider) exitCode = await stopChildWithEscalation(provider);
-    frontend?.close();
-    state.status = 'stopped';
-    await writeState().catch(() => undefined);
+    shutdownPromise = (async () => {
+      const victims = [versionChild, provider].filter(
+        (child): child is SupervisedChild => child !== null,
+      );
+      const codes = await Promise.all(victims.map(
+        (child) => stopChildWithEscalation(child, SHUTDOWN_KILL_GRACE_MS).catch(() => 1),
+      ));
+      if (provider) exitCode = codes[codes.length - 1];
+      frontend?.close();
+      state.status = 'stopped';
+      await writeState().catch(() => undefined);
+    })();
   };
 
   const parentPid = process.ppid;
@@ -225,12 +232,12 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         alive = false;
       }
     }
-    if (!alive) void shutdown('parent-exited');
+    if (!alive) shutdown('parent-exited');
   }, PARENT_WATCH_MS);
   parentWatcher.unref?.();
 
-  process.on('SIGTERM', () => void shutdown('signal'));
-  process.on('SIGINT', () => void shutdown('signal'));
+  process.on('SIGTERM', () => shutdown('signal'));
+  process.on('SIGINT', () => shutdown('signal'));
 
   try {
     const version = await verifyPinnedBinaryVersion({
@@ -244,14 +251,14 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
     state.version = version;
     await writeState();
 
-    if (mode === 'direct') {
+    if (!stopping && mode === 'direct') {
       provider = Bun.spawn([binary, ...argv], {
         env: childEnv,
         stdin: 'ignore',
         stdout: 'inherit',
         stderr: 'inherit',
       });
-    } else {
+    } else if (!stopping) {
       const serve = parseServeArguments(argv);
       const backendPort = await freePort();
       const backend = Bun.spawn([
@@ -281,19 +288,24 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         `opencode server listening on http://${serve.hostname}:${serve.port}\n`,
       );
     }
-    state.providerPid = provider.pid ?? 0;
-    await writeState();
-  } finally {
-    starting = false;
+    if (provider) {
+      state.providerPid = provider.pid ?? 0;
+      await writeState();
+    }
+  } catch (error) {
+    if (!stopping) throw error;
   }
 
-  void provider!.exited.then(() => {
-    if (!stopping) void shutdown('provider-exited');
-  });
-
-  while (!stopping) {
-    await Bun.sleep(50);
+  if (provider) {
+    void provider.exited.then(() => {
+      if (!stopping) shutdown('provider-exited');
+    });
   }
+
+  while (!shutdownPromise) {
+    await Bun.sleep(25);
+  }
+  await shutdownPromise;
   return exitCode;
 }
 
