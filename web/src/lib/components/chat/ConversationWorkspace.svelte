@@ -597,6 +597,9 @@
 			throw new Error(m.sidebar_chats_reload_failed());
 		}
 		await reloadChatFromNative(ws, chatState, chatId);
+		if (chatId === sessions.selectedChatId && scroll.isPinnedToBottom) {
+			scroll.prepareInitialBottomRestore(chatId);
+		}
 	}
 
 	function openCommit(): void {

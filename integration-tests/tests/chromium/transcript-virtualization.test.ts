@@ -705,6 +705,28 @@ async function addSidebarChatToSplit(page: Page, chatId: string): Promise<void> 
 }
 
 async function userMessageNavigatorRowIdContaining(page: Page, text: string): Promise<string> {
+  const hasTarget = await page.evaluate(
+    (expected) =>
+      [...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]')].some(
+        (candidate) => candidate.textContent?.includes(expected),
+      ),
+    text,
+  );
+  if (!hasTarget) {
+    await page.locator('[data-user-message-navigator-list]').evaluate((listElement) => {
+      const list = listElement as HTMLElement;
+      list.scrollTop = list.scrollHeight;
+      list.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await page.waitForFunction(
+      (expected) =>
+        [...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]')].some(
+          (candidate) => candidate.textContent?.includes(expected),
+        ),
+      text,
+      { timeout: 20_000 },
+    );
+  }
   return page.evaluate((expected) => {
     const row = [
       ...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]'),
@@ -1445,9 +1467,11 @@ async function verifyChatSwitchBottomRestore(
   const secondaryChatId = await seedTranscript(fixture.integration, 12, secondaryMarker);
   await selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker);
   expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
+  expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
 
   await selectSidebarChat(fixture.page, primaryChatId, 'chromium-virtual-turn-0');
   expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
+  expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
     userScrolledUp: false,
@@ -1456,8 +1480,8 @@ async function verifyChatSwitchBottomRestore(
 }
 
 async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture): Promise<void> {
-  const chatId = await seedTranscript(fixture.integration, 1, 'chromium-native-reload-base');
-  await prepareTranscript(fixture, chatId, 1);
+  const chatId = await seedTranscript(fixture.integration, 15, 'chromium-native-reload-base');
+  await prepareTranscript(fixture, chatId, 20);
   await scrollToPosition(fixture.page, 'end');
   await waitForDistanceFromEnd(fixture.page, 1);
 
@@ -1486,25 +1510,36 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
     { afterIndex: eventCursor },
   );
 
-  await fixture.page.waitForFunction(
-    ({ feedSelector, oldGenerationId, nextGenerationId, expectedRowCount }) => {
-      const rows = [
-        ...document.querySelectorAll<HTMLElement>(`${feedSelector} [data-chat-row-id]`),
-      ];
+  // Includes the two viewport spacers and the desktop floating-toolbar spacer.
+  const expectedModelCount = beforeReload.messages.length + 3;
+  await waitForStableModelCount(fixture.page, expectedModelCount);
+  const replacement = await fixture.page.locator(FEED_SELECTOR).evaluate(
+    (feedElement, { oldGenerationId, nextGenerationId }) => {
+      const feed = feedElement as HTMLElement;
+      const rows = [...feed.querySelectorAll<HTMLElement>('[data-chat-row-id]')];
       const rowIds = rows.flatMap((row) => row.dataset.chatRowId ?? []);
-      return (
-        rowIds.length === expectedRowCount &&
-        rowIds.every((rowId) => rowId.startsWith(`${nextGenerationId}:`)) &&
-        rowIds.every((rowId) => !rowId.startsWith(`${oldGenerationId}:`))
-      );
+      const sizer = feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
+      return {
+        modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
+        mountedRowCount: rowIds.length,
+        onlyNextGeneration: rowIds.every((rowId) => rowId.startsWith(`${nextGenerationId}:`)),
+        oldGenerationMounted: rowIds.some((rowId) => rowId.startsWith(`${oldGenerationId}:`)),
+      };
     },
     {
-      feedSelector: FEED_SELECTOR,
       oldGenerationId: beforeReload.generationId,
       nextGenerationId: reset.generationId,
-      expectedRowCount: beforeReload.messages.length,
     },
   );
+  expect(replacement).toEqual({
+    modelCount: expectedModelCount,
+    mountedRowCount: expect.any(Number),
+    onlyNextGeneration: true,
+    oldGenerationMounted: false,
+  });
+  expect(replacement.mountedRowCount).toBeGreaterThan(0);
+  expect(replacement.mountedRowCount).toBeLessThan(beforeReload.messages.length);
+  expect(await surfaceIdentity(fixture.page)).toBe(`${chatId}:${reset.generationId}`);
   const exactTextCounts = await fixture.page.locator(FEED_SELECTOR).evaluate(
     (feed, expected) => {
       const leafTexts = [...feed.querySelectorAll<HTMLElement>('*')].flatMap((element) =>
@@ -1516,6 +1551,7 @@ async function verifyNativeHistoryReloadAfterStreaming(fixture: ChromiumFixture)
   );
   expect(exactTextCounts).toEqual([1, 1]);
   expect(await settledDistanceFromEnd(fixture.page)).toBeLessThanOrEqual(1);
+  expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
     userScrolledUp: false,
