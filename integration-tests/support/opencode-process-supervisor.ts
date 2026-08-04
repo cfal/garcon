@@ -1,16 +1,22 @@
 // Test-only supervisor between Garcon and the pinned OpenCode binary. The fixture PATH shim
-// executes this module; it verifies the pinned binary hermetically, records exact wrapper and
-// provider PIDs, stops the provider child when a deliberately crashed Garcon parent disappears,
-// and optionally reverse-proxies the real server so transport tests can hold the connected
+// executes this module; it verifies the pinned binary hermetically, records the exact provider
+// process tree, and stops every recorded descendant when a crashed Garcon parent disappears.
+// It optionally reverse-proxies the real server so transport tests can hold the connected
 // frame or reset the real /global/event socket. It records and signals only PIDs it created.
 
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const PINNED_OPENCODE_VERSION = '1.18.4';
+const PROVIDER_OWNER_ENV = 'GARCON_TEST_OPENCODE_OWNER_GENERATION';
+
+export interface OpenCodeProcessIdentity {
+  pid: number;
+  startTimeTicks: string;
+}
 
 export interface OpenCodeProcessState {
   generationId: string;
@@ -18,6 +24,8 @@ export interface OpenCodeProcessState {
   wrapperStartTimeTicks: string;
   providerPid: number;
   providerStartTimeTicks: string | null;
+  providerProcessGroupId: number | null;
+  providerOwnedProcesses: OpenCodeProcessIdentity[];
   parentPid: number;
   parentStartTimeTicks: string;
   mode: 'direct' | 'proxy';
@@ -79,6 +87,7 @@ interface TransportObservations {
 const MAX_OBSERVED_REQUESTS = 500;
 const DIRECTIVE_POLL_MS = 15;
 const PARENT_WATCH_MS = 25;
+const PROVIDER_PROCESS_WATCH_MS = 50;
 const PROVIDER_STOP_GRACE_MS = 250;
 // Shutdown kills must land well inside Garcon's 500ms wrapper SIGKILL budget.
 const SHUTDOWN_KILL_GRACE_MS = 100;
@@ -112,6 +121,42 @@ export async function stopChildWithEscalation(
   ]);
   if (!graceful) child.kill('SIGKILL');
   return await exit;
+}
+
+async function stopProviderProcesses(input: {
+  provider: Bun.Subprocess;
+  state: OpenCodeProcessState;
+  refreshMembers: () => void;
+}): Promise<number> {
+  const termSignaled = new Set<string>();
+  const signalNewMembers = (signal: NodeJS.Signals, signaled?: Set<string>) => {
+    input.refreshMembers();
+    for (const identity of input.state.providerOwnedProcesses) {
+      const key = `${identity.pid}:${identity.startTimeTicks}`;
+      if (signaled?.has(key)) continue;
+      signalProcessIdentity(identity, signal);
+      signaled?.add(key);
+    }
+  };
+
+  const termDeadline = Date.now() + SHUTDOWN_KILL_GRACE_MS;
+  while (Date.now() < termDeadline) {
+    signalNewMembers('SIGTERM', termSignaled);
+    if (!input.state.providerOwnedProcesses.some((identity) =>
+      processIdentityAlive(identity.pid, identity.startTimeTicks)
+    )) break;
+    await Bun.sleep(10);
+  }
+
+  const killDeadline = Date.now() + SHUTDOWN_KILL_GRACE_MS;
+  while (Date.now() < killDeadline) {
+    signalNewMembers('SIGKILL');
+    if (!input.state.providerOwnedProcesses.some((identity) =>
+      processIdentityAlive(identity.pid, identity.startTimeTicks)
+    )) break;
+    await Bun.sleep(10);
+  }
+  return await input.provider.exited;
 }
 
 // Runs the pinned binary's --version under the exact sanitized environment the provider child
@@ -170,21 +215,116 @@ export function buildOpenCodeProviderEnvironment(
   return env;
 }
 
-// Linux start-time ticks distinguish a live test process from a later process that reused its PID.
-export function linuxProcessStartTimeTicks(pid: number): string | null {
+interface LinuxProcessStat {
+  parentProcessId: number;
+  processGroupId: number;
+  startTimeTicks: string;
+}
+
+function linuxProcessStat(pid: number): LinuxProcessStat | null {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
     const commandEnd = stat.lastIndexOf(') ');
     if (commandEnd < 0) return null;
-    // The suffix begins at field 3 (state); process start time is field 22.
-    return stat.slice(commandEnd + 2).trim().split(/\s+/)[19] ?? null;
+    // The suffix begins at field 3 (state); parent/group are fields 4/5 and start time is field 22.
+    const fields = stat.slice(commandEnd + 2).trim().split(/\s+/);
+    const parentProcessId = Number(fields[1]);
+    const processGroupId = Number(fields[2]);
+    const startTimeTicks = fields[19];
+    if (!Number.isInteger(parentProcessId) || !Number.isInteger(processGroupId) || !startTimeTicks) {
+      return null;
+    }
+    return { parentProcessId, processGroupId, startTimeTicks };
   } catch {
     return null;
   }
 }
 
+// Linux start-time ticks distinguish a live test process from a later process that reused its PID.
+export function linuxProcessStartTimeTicks(pid: number): string | null {
+  return linuxProcessStat(pid)?.startTimeTicks ?? null;
+}
+
+export function linuxProcessGroupId(pid: number): number | null {
+  return linuxProcessStat(pid)?.processGroupId ?? null;
+}
+
+function linuxProviderOwnedProcesses(
+  roots: readonly OpenCodeProcessIdentity[],
+  ownerGeneration: string,
+): OpenCodeProcessIdentity[] {
+  let entries: string[];
+  try {
+    entries = readdirSync('/proc');
+  } catch {
+    return [];
+  }
+  const stats = new Map<number, LinuxProcessStat>();
+  const ownerMarker = `${PROVIDER_OWNER_ENV}=${ownerGeneration}`;
+  const ownerRoots: OpenCodeProcessIdentity[] = [];
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    const pid = Number(entry);
+    const stat = linuxProcessStat(pid);
+    if (!stat) continue;
+    stats.set(pid, stat);
+    try {
+      if (readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(ownerMarker)) {
+        ownerRoots.push({ pid, startTimeTicks: stat.startTimeTicks });
+      }
+    } catch {
+      // Exited and inaccessible processes are omitted from the current snapshot.
+    }
+  }
+  const children = new Map<number, number[]>();
+  for (const [pid, stat] of stats) {
+    const siblings = children.get(stat.parentProcessId) ?? [];
+    siblings.push(pid);
+    children.set(stat.parentProcessId, siblings);
+  }
+  const members = new Map<string, OpenCodeProcessIdentity>();
+  const pending = [
+    ...roots.filter((root) => stats.get(root.pid)?.startTimeTicks === root.startTimeTicks),
+    ...ownerRoots,
+  ];
+  for (let index = 0; index < pending.length; index += 1) {
+    const identity = pending[index];
+    const key = `${identity.pid}:${identity.startTimeTicks}`;
+    if (members.has(key)) continue;
+    members.set(key, identity);
+    for (const childPid of children.get(identity.pid) ?? []) {
+      const child = stats.get(childPid);
+      if (child) pending.push({ pid: childPid, startTimeTicks: child.startTimeTicks });
+    }
+  }
+  return [...members.values()].sort((left, right) => left.pid - right.pid);
+}
+
 export function processIdentityAlive(pid: number, startTimeTicks: string | null): boolean {
   return startTimeTicks !== null && linuxProcessStartTimeTicks(pid) === startTimeTicks;
+}
+
+function mergeProcessIdentities(
+  previous: readonly OpenCodeProcessIdentity[],
+  current: readonly OpenCodeProcessIdentity[],
+): OpenCodeProcessIdentity[] {
+  const identities = new Map(previous.map((identity) => [
+    `${identity.pid}:${identity.startTimeTicks}`,
+    identity,
+  ]));
+  for (const identity of current) {
+    identities.set(`${identity.pid}:${identity.startTimeTicks}`, identity);
+  }
+  return [...identities.values()].sort((left, right) => left.pid - right.pid);
+}
+
+function signalProcessIdentity(identity: OpenCodeProcessIdentity, signal: NodeJS.Signals): void {
+  if (!processIdentityAlive(identity.pid, identity.startTimeTicks)) return;
+  try {
+    process.kill(identity.pid, signal);
+  } catch {
+    // The exact process exited between identity verification and delivery.
+  }
 }
 
 function parseServeArguments(argv: string[]): { hostname: string; port: number } {
@@ -245,7 +385,9 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
     return 2;
   }
   const mode: OpenCodeProcessState['mode'] = proxyDir ? 'proxy' : 'direct';
+  const generationId = crypto.randomUUID();
   const childEnv = buildOpenCodeProviderEnvironment(process.env);
+  childEnv[PROVIDER_OWNER_ENV] = generationId;
   const wrapperStartTimeTicks = linuxProcessStartTimeTicks(process.pid);
   if (!wrapperStartTimeTicks) {
     process.stderr.write('OpenCode supervisor could not establish its Linux process identity.\n');
@@ -254,11 +396,13 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
 
   const statePath = join(processStateDir, `wrapper-${process.pid}.json`);
   const state: OpenCodeProcessState = {
-    generationId: crypto.randomUUID(),
+    generationId,
     wrapperPid: process.pid,
     wrapperStartTimeTicks,
     providerPid: 0,
     providerStartTimeTicks: null,
+    providerProcessGroupId: null,
+    providerOwnedProcesses: [],
     parentPid,
     parentStartTimeTicks,
     mode,
@@ -266,7 +410,10 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
   };
   let stateWriteTail = Promise.resolve();
   const writeState = (): Promise<void> => {
-    const snapshot = { ...state };
+    const snapshot = {
+      ...state,
+      providerOwnedProcesses: [...state.providerOwnedProcesses],
+    };
     const write = stateWriteTail.then(async () => {
       await mkdir(processStateDir, { recursive: true });
       await writeJsonAtomic(statePath, snapshot);
@@ -277,13 +424,32 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
 
   // Garcon SIGKILLs this wrapper 500ms after SIGTERM, so shutdown must kill the provider
   // well inside that budget. Every await before spawn is followed by a stopping check, and
-  // registration is synchronous with spawn, so shutdown always owns every created child.
+  // the child is registered before process-group verification, so shutdown owns every spawn.
   let stopping = false;
   let exitCode = 0;
   let provider: Bun.Subprocess | null = null;
   let frontend: Server | null = null;
   let shutdownPromise: Promise<void> | null = null;
   let parentWatcher: ReturnType<typeof setInterval> | null = null;
+  let providerProcessWatcher: ReturnType<typeof setInterval> | null = null;
+  const refreshProviderProcesses = (): boolean => {
+    if (!state.providerPid || !state.providerStartTimeTicks) return false;
+    const roots = mergeProcessIdentities(state.providerOwnedProcesses, [{
+      pid: state.providerPid,
+      startTimeTicks: state.providerStartTimeTicks,
+    }]);
+    const members = mergeProcessIdentities(
+      state.providerOwnedProcesses,
+      linuxProviderOwnedProcesses(roots, state.generationId),
+    );
+    const changed = members.length !== state.providerOwnedProcesses.length
+      || members.some((member, index) => {
+        const previous = state.providerOwnedProcesses[index];
+        return previous?.pid !== member.pid || previous.startTimeTicks !== member.startTimeTicks;
+      });
+    if (changed) state.providerOwnedProcesses = members;
+    return changed;
+  };
   let announceShutdown!: () => void;
   const shutdownStarted = new Promise<void>((resolve) => {
     announceShutdown = resolve;
@@ -293,14 +459,20 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
     stopping = true;
     announceShutdown();
     if (parentWatcher) clearInterval(parentWatcher);
+    if (providerProcessWatcher) clearInterval(providerProcessWatcher);
+    refreshProviderProcesses();
     state.status = 'stopping';
     state.reason = reason;
     shutdownPromise = (async () => {
       await writeState().catch(() => undefined);
       if (provider) {
-        exitCode = await stopChildWithEscalation(provider, SHUTDOWN_KILL_GRACE_MS)
-          .catch(() => 1);
+        exitCode = await stopProviderProcesses({
+          provider,
+          state,
+          refreshMembers: refreshProviderProcesses,
+        }).catch(() => 1);
       }
+      refreshProviderProcesses();
       frontend?.closeAllConnections?.();
       frontend?.close();
       state.status = 'stopped';
@@ -348,16 +520,37 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
       return exitCode;
     }
 
-    const registerProvider = (child: Bun.Subprocess): void => {
+    const setsidBinary = Bun.which('setsid');
+    if (!setsidBinary) {
+      throw new Error('Scripted OpenCode tests require the Linux setsid utility.');
+    }
+
+    const registerProvider = async (child: Bun.Subprocess): Promise<void> => {
       provider = child;
       state.providerPid = child.pid ?? 0;
       state.providerStartTimeTicks = linuxProcessStartTimeTicks(state.providerPid);
       if (!state.providerPid || !state.providerStartTimeTicks) {
         throw new Error('OpenCode supervisor could not establish the provider process identity.');
       }
+      refreshProviderProcesses();
       void child.exited.then(() => {
         if (!stopping) shutdown('provider-exited');
       });
+      const groupDeadline = Date.now() + 1_000;
+      while (!stopping && Date.now() < groupDeadline) {
+        if (linuxProcessGroupId(state.providerPid) === state.providerPid) {
+          state.providerProcessGroupId = state.providerPid;
+          refreshProviderProcesses();
+          providerProcessWatcher = setInterval(() => {
+            if (refreshProviderProcesses()) void writeState().catch(() => undefined);
+          }, PROVIDER_PROCESS_WATCH_MS);
+          providerProcessWatcher.unref?.();
+          return;
+        }
+        await Bun.sleep(5);
+      }
+      if (stopping) return;
+      throw new Error('OpenCode supervisor could not establish the provider process group.');
     };
 
     if (mode === 'direct') {
@@ -369,7 +562,7 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         await shutdownPromise;
         return exitCode;
       }
-      registerProvider(Bun.spawn([binary, ...argv], {
+      await registerProvider(Bun.spawn([setsidBinary, binary, ...argv], {
         env: childEnv,
         stdin: 'ignore',
         stdout: 'inherit',
@@ -388,6 +581,7 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         return exitCode;
       }
       const backend = Bun.spawn([
+        setsidBinary,
         binary,
         'serve',
         `--hostname=${serve.hostname}`,
@@ -398,7 +592,7 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         stdout: 'pipe',
         stderr: 'inherit',
       });
-      registerProvider(backend);
+      await registerProvider(backend);
       await writeState();
       if (stopping) {
         await shutdownPromise;

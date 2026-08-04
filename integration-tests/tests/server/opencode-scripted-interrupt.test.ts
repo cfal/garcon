@@ -36,6 +36,8 @@ import {
 import {
   linuxProcessStartTimeTicks,
   processIdentityAlive,
+  type OpenCodeProcessIdentity,
+  type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
 
 // Stop flows through the real binary: Garcon's abort reaches OpenCode's session.abort, the
@@ -98,11 +100,8 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         active.turnId,
       );
 
-      // OpenCode acknowledges abort asynchronously; the recovery prompt must wait until the
-      // aborted assistant message is settled in the native DB, or the late abort kills it.
-      await waitForAbortedAssistant(fixture, chatId);
-      // The held response is released only after OpenCode acknowledged the abort; the
-      // recovery turn below provides the happens-after window for leak assertions.
+      // The recovery begins immediately after Garcon confirms the stop. The abort endpoint
+      // does not return until OpenCode has interrupted its session runner.
       held.release();
 
       testEnvironment.model.reset();
@@ -248,6 +247,75 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
+
+  test('kills the provider process tree before replacing a crashed Garcon', async () => {
+    const testEnvironment = requireEnvironment();
+    const command = [
+      "trap '' TERM",
+      'sleep 30 & child=$!',
+      'printf "%s %s" "$$" "$child" > crash-pids.marker',
+      'touch crash-started.marker',
+      'wait "$child"',
+      'touch crash-completed.marker',
+    ].join('; ');
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse('call_crash_tool', 'bash', {
+      command,
+    })]);
+
+    await withIntegrationFixture('opencode-crash-active-tool', async (fixture) => {
+      await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId: fixture.newChatId(),
+        projectPath: fixture.dirs.project,
+        command: marker('CRASH_TOOL_PROMPT'),
+      }));
+      await waitForFile(join(fixture.dirs.project, 'crash-started.marker'));
+      const processIds = (await readFile(
+        join(fixture.dirs.project, 'crash-pids.marker'),
+        'utf8',
+      )).trim().split(/\s+/).map(Number);
+      const processIdentities = processIds.map((pid) => ({
+        pid,
+        startTimeTicks: linuxProcessStartTimeTicks(pid),
+      }));
+      expect(processIdentities.every((identity) =>
+        processIdentityAlive(identity.pid, identity.startTimeTicks)
+      )).toBe(true);
+
+      const crashedSupervisors = await waitForRecordedProviderProcessTree(
+        fixture,
+        processIdentities,
+      );
+      await fixture.crashAndRestartGarcon({
+        beforeStart: async () => {
+          await waitForSupervisorExit(crashedSupervisors);
+          expect(processIdentities.every((identity) =>
+            !processIdentityAlive(identity.pid, identity.startTimeTicks)
+          )).toBe(true);
+          await expect(access(join(fixture.dirs.project, 'crash-completed.marker')))
+            .rejects.toMatchObject({ code: 'ENOENT' });
+        },
+      });
+
+      testEnvironment.model.reset();
+      const recoveryReply = marker('CRASH_TOOL_RECOVERY_REPLY');
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
+      const recoveryChatId = fixture.newChatId();
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId: recoveryChatId,
+        projectPath: fixture.dirs.project,
+        command: marker('CRASH_TOOL_RECOVERY_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: recoveryChatId,
+        turnId: recovery.turnId,
+        marker: recoveryReply,
+        afterIndex: recoveryCursor,
+      });
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
 });
 
 function requireEnvironment(): ScriptedOpenCodeTestEnvironment {
@@ -350,4 +418,24 @@ async function waitForProcessesExit(
     processIdentityAlive(identity.pid, identity.startTimeTicks)
   ).map(({ pid }) => pid);
   throw new Error(`OpenCode shell processes survived abort: ${survivors.join(', ')}`);
+}
+
+async function waitForRecordedProviderProcessTree(
+  fixture: IntegrationFixture,
+  identities: Array<{ pid: number; startTimeTicks: string | null }>,
+): Promise<OpenCodeProcessState[]> {
+  const expected = identities.filter((identity): identity is OpenCodeProcessIdentity =>
+    identity.startTimeTicks !== null);
+  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const states = await readSupervisorStates(fixture.dirs);
+    const recorded = states.flatMap((state) => state.providerOwnedProcesses);
+    if (expected.every((identity) => recorded.some((candidate) =>
+      candidate.pid === identity.pid && candidate.startTimeTicks === identity.startTimeTicks
+    ))) return states;
+    await Bun.sleep(25);
+  }
+  throw new Error(
+    `OpenCode supervisor never recorded tool identities ${expected.map(({ pid }) => pid).join(', ')}.`,
+  );
 }

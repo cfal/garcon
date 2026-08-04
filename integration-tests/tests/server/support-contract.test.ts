@@ -31,6 +31,7 @@ import {
   assertScriptedOpenCodePlatform,
   OPENCODE_PLUGIN_SEED_FILES,
   OPENCODE_VERSION,
+  startScriptedOpenCodeTestEnvironment,
   writeOpenCodePluginSeed,
 } from '../../support/scripted-opencode.js';
 import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
@@ -110,6 +111,35 @@ describe('integration support contracts', () => {
       expect(pathEntries[0]).toBe(fixtureBin);
       expect(pathEntries).not.toContain(dirname(runnerNode!));
       expect(await realpath(join(fixtureBin, 'node'))).toBe(await realpath(runnerNode!));
+    } finally {
+      environment.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('exposes only the OpenCode shim and system commands to the provider runtime', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-opencode-path-'));
+    const environment = startScriptedOpenCodeTestEnvironment();
+    const directories = {
+      root,
+      config: join(root, 'config'),
+      workspace: join(root, 'workspace'),
+      project: join(root, 'project'),
+      home: join(root, 'home'),
+    };
+
+    try {
+      const pathEntries = environment.resolveServerEnvironment(directories).PATH.split(':');
+      expect(pathEntries[0]).toBe(join(root, 'opencode', 'bin'));
+      expect(pathEntries).not.toContain(dirname(process.execPath));
+      expect(pathEntries.slice(1)).toEqual([
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin',
+      ]);
     } finally {
       environment.dispose();
       await rm(root, { recursive: true, force: true });
