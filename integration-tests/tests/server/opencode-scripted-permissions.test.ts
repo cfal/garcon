@@ -1,6 +1,6 @@
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
@@ -30,12 +30,13 @@ let environment: ScriptedOpenCodeTestEnvironment | undefined;
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
 
 describeOnLinux('scripted OpenCode permissions', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('asks in default mode, resolves allow-once, executes the tool, and continues', async () => {

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ChatSessionCreatedMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
@@ -44,12 +44,13 @@ let environment: ScriptedOpenCodeTestEnvironment | undefined;
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
 
 describeOnLinux('OpenCode against a scripted model', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('lists only the fake model, rejects a non-catalog model, and keeps all provider paths inside the fixture', async () => {

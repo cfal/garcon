@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   assistantContents,
   userContents,
@@ -36,12 +36,13 @@ let environment: ScriptedOpenCodeTestEnvironment | undefined;
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
 
 describeOnLinux('scripted OpenCode persistence', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('keeps native identity and transcript stable across graceful restart', async () => {
@@ -70,8 +71,12 @@ describeOnLinux('scripted OpenCode persistence', () => {
       });
       const nativeBefore = await openCodeNativeSession(fixture, chatId);
       const transcriptBefore = await fixture.client.getMessages(chatId);
+      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      expect(previousSupervisors).toHaveLength(1);
 
-      await fixture.restartGarcon();
+      await fixture.restartGarcon({
+        beforeStart: () => waitForSupervisorExit(previousSupervisors),
+      });
 
       const nativeAfter = await openCodeNativeSession(fixture, chatId);
       expect(nativeAfter).toEqual(nativeBefore);
@@ -124,8 +129,12 @@ describeOnLinux('scripted OpenCode persistence', () => {
         afterIndex: firstCursor,
       });
       const nativeBefore = await openCodeNativeSession(fixture, chatId);
+      const crashedSupervisors = await readSupervisorStates(fixture.dirs);
+      expect(crashedSupervisors).toHaveLength(1);
 
-      await fixture.crashAndRestartGarcon();
+      await fixture.crashAndRestartGarcon({
+        beforeStart: () => waitForSupervisorExit(crashedSupervisors),
+      });
 
       const control = await fixture.client.getExecutionControl(chatId);
       expect(control.queue.entries).toEqual([]);
@@ -231,9 +240,12 @@ describeOnLinux('scripted OpenCode persistence', () => {
         afterIndex: firstCursor,
       });
       const databasePath = openCodePaths(fixture.dirs).database;
+      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      expect(previousSupervisors).toHaveLength(1);
 
       await fixture.restartGarcon({
         beforeStart: async () => {
+          await waitForSupervisorExit(previousSupervisors);
           await rm(databasePath, { force: true });
           await rm(`${databasePath}-wal`, { force: true });
           await rm(`${databasePath}-shm`, { force: true });

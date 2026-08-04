@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
@@ -32,12 +32,13 @@ let environment: ScriptedOpenCodeTestEnvironment | undefined;
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
 
 describeOnLinux('OpenCode global event stream through a real proxy', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment({ proxy: true });
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('does not create a session or prompt before the global connected frame', async () => {

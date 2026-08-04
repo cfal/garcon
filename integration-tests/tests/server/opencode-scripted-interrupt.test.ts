@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type {
   ChatSessionStoppedMessage,
   ServerWsMessage,
@@ -40,12 +40,13 @@ let environment: ScriptedOpenCodeTestEnvironment | undefined;
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
 
 describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     environment = startScriptedOpenCodeTestEnvironment();
   });
 
-  afterAll(() => {
+  afterEach(() => {
     environment?.dispose();
+    environment = undefined;
   });
 
   test('stops a held active model turn exactly once and recovers on the next turn', async () => {
