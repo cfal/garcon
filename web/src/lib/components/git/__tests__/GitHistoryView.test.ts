@@ -276,7 +276,7 @@ describe('GitHistoryView', () => {
 		expect(history.screen).toBe('list');
 	});
 
-	it('loads the next commit page automatically near the bottom', async () => {
+	it('loads the next commit page automatically one viewport before the bottom', async () => {
 		const nextPage = deferred<Awaited<ReturnType<typeof getGitHistoryCommits>>>();
 		vi.mocked(getGitHistoryCommits)
 			.mockResolvedValueOnce({
@@ -311,11 +311,11 @@ describe('GitHistoryView', () => {
 			scrollHeight: { configurable: true, value: 1_000 },
 		});
 
-		list.scrollTop = 650;
+		list.scrollTop = 590;
 		await fireEvent.scroll(list);
 		expect(getGitHistoryCommits).toHaveBeenCalledOnce();
 
-		list.scrollTop = 710;
+		list.scrollTop = 600;
 		await fireEvent.scroll(list);
 		await fireEvent.scroll(list);
 		await waitFor(() => expect(getGitHistoryCommits).toHaveBeenCalledTimes(2));
@@ -383,7 +383,7 @@ describe('GitHistoryView', () => {
 			clientHeight: { configurable: true, value: 200 },
 			scrollHeight: { configurable: true, value: 1_000 },
 		});
-		list.scrollTop = 710;
+		list.scrollTop = 600;
 		await fireEvent.scroll(list);
 
 		const retry = await screen.findByRole('button', { name: 'Retry loading commits' });

@@ -40,6 +40,8 @@ function createFakePiProcess(options = {}) {
       ?? path.join(tempRoot, 'sessions', 'pi-session-1.jsonl'),
     modelProvider: options.modelProvider ?? 'github-copilot',
     modelId: options.modelId ?? 'gpt-5.4',
+    modelReasoning: options.modelReasoning ?? true,
+    thinkingLevelMap: options.thinkingLevelMap ?? { xhigh: 'xhigh' },
     thinkingLevel: options.thinkingLevel ?? 'off',
     steering: [],
   };
@@ -136,7 +138,12 @@ function createFakePiProcess(options = {}) {
             sessionFile: state.sessionFile,
             steeringMode: 'all',
             thinkingLevel: state.thinkingLevel,
-            model: { provider: state.modelProvider, id: state.modelId },
+            model: {
+              provider: state.modelProvider,
+              id: state.modelId,
+              reasoning: state.modelReasoning,
+              thinkingLevelMap: state.thinkingLevelMap,
+            },
           },
         });
         return;
@@ -351,6 +358,25 @@ describe('PiRpcRuntime', () => {
     await expect(runtime.startSession(baseStartRequest())).rejects.toThrow(
       /resolved model/,
     );
+    await runtime.shutdown();
+  });
+
+  it('accepts a requested thinking level that Pi clamps for the resolved model', async () => {
+    spawnOptions.push({
+      modelProvider: 'fireworks',
+      modelId: 'accounts/fireworks/models/kimi-k3',
+      thinkingLevel: 'minimal',
+      thinkingLevelMap: { off: null, minimal: 'low' },
+    });
+    const runtime = createRuntime();
+    const started = await runtime.startSession(baseStartRequest({
+      model: 'fireworks/accounts/fireworks/models/kimi-k3',
+      thinkingMode: 'none',
+    }));
+
+    expect(started.agentSessionId).toBe('pi-session-1');
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await settleIo();
     await runtime.shutdown();
   });
 
