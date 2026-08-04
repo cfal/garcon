@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
-import { extractSessionId, extractTextParts, streamGlobalEvents, type SSEEvent } from './sse-events.js';
+import { extractSessionId, extractTextParts, openCodeSessionError, streamGlobalEvents, type SSEEvent } from './sse-events.js';
 import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -51,7 +51,10 @@ const SILENT_LOGGER: AgentLogger = Object.freeze({
   error() {},
 });
 
-const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 5_000;
+// Matches OpenCode's own subprocess harness: cold starts of the platform binary are
+// dominated by transpile and plugin init, not the listen() call.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/test/lib/cli-process.ts#L363
+const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
 const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
@@ -773,6 +776,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       && event.type !== 'message.part.delta'
       && event.type !== 'permission.asked'
       && event.type !== 'session.status'
+      && event.type !== 'session.error'
     ) {
       return true;
     }
@@ -899,9 +903,11 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
             continue;
           }
 
+          // Turn-bound dispatch is running-only: a turn retired by a stream failure or a
+          // session.error must not accept late provider events under its old metadata.
           const session = this.#sessions.get(sessionId);
-          if (!session || session.status === 'aborted') {
-            this.#logger.debug('OpenCode SSE event targets an unknown or aborted session', {
+          if (!session || session.status !== 'running') {
+            this.#logger.debug('OpenCode SSE event targets a non-running session', {
               eventType: event.type,
               sessionId,
               knownSessionIds: [...this.#sessions.keys()],
@@ -917,6 +923,21 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
               eventType: event.type,
               sessionId,
             });
+            continue;
+          }
+
+          const sessionError = openCodeSessionError(event);
+          if (sessionError) {
+            // A non-retryable provider error is terminal for the turn; retire it before a
+            // later idle status can claim success. The error row precedes the terminal.
+            const metadata = session.turn.eventMetadata;
+            session.status = 'completed';
+            session.lastActivityAt = Date.now();
+            this.#cancelPendingPermissionsForSession(sessionId, 'cancelled');
+            this.#rejectTurnWaiter(sessionId, new Error(sessionError));
+            this.emitMessages(chatId, [new ErrorMessage(new Date().toISOString(), sessionError)], metadata);
+            this.emitProcessing(chatId, false);
+            this.emitFailed(chatId, sessionError, metadata);
             continue;
           }
 

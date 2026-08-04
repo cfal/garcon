@@ -69,6 +69,18 @@ export async function* streamGlobalEvents(
     : 'OpenCode event stream ended before server.connected');
 }
 
+// Non-retryable provider failures are published as session.error with a structured error
+// union; the data message is the most specific human-readable detail.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/sdk/js/src/v2/gen/types.gen.ts#L6672-L6680
+export function openCodeSessionError(event: SSEEvent): string | null {
+  if (event.type !== 'session.error') return null;
+  const error = isRecord(event.properties?.error) ? event.properties.error : null;
+  const data = error && isRecord(error.data) ? error.data : null;
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message.trim();
+  if (typeof error?.name === 'string' && error.name.trim()) return error.name.trim();
+  return 'OpenCode session failed';
+}
+
 export function extractSessionId(event: SSEEvent): string | undefined {
   const props = event.properties || {};
   return props.sessionID

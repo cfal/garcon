@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
+import { openCodeSessionError } from '../sse-events.js';
 
 function deferred() {
   let resolve;
@@ -696,6 +697,273 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
+  it('fails a running turn on session.error before a later idle can claim success', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const messages = [];
+    const failures = [];
+    const finishes = [];
+    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
+    runtime.onFailed((_chatId, message, metadata) => failures.push({ message, metadata }));
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ProviderError', data: { message: 'provider said no' } },
+      },
+    }));
+    await waitFor(() => failures.length === 1);
+
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.isRunning('session-1')).toBe(false);
+    expect(failures).toEqual([{
+      message: 'provider said no',
+      metadata: expect.objectContaining({ clientRequestId: 'req-a', turnId: 'turn-a' }),
+    }]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].emitted[0]).toMatchObject({ type: 'error', content: 'provider said no' });
+    expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-a', turnId: 'turn-a' });
+    expect(finishes).toEqual([]);
+
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('settles the pending turn waiter with the session error without an unhandled rejection', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const failures = [];
+    const unhandled = [];
+    const onUnhandledRejection = (reason) => unhandled.push(reason);
+    runtime.onFailed((_chatId, message) => failures.push(message));
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      const turn = runtime.runTurn({
+        command: 'hello',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+      });
+      const outcome = turn.then(
+        () => null,
+        (error) => error,
+      );
+      await waitFor(() => promptAsync.mock.calls.length === 1);
+
+      eventStream.push(envelope({
+        id: 'evt_0001',
+        type: 'session.error',
+        properties: {
+          sessionID: 'session-1',
+          error: { name: 'ProviderError', data: { message: 'truncated stream' } },
+        },
+      }));
+
+      expect(await outcome).toMatchObject({ message: 'truncated stream' });
+      expect(failures).toEqual(['truncated stream']);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+      runtime.shutdown();
+    }
+  });
+
+  it('ignores a session.error that arrives after the session was aborted', async () => {
+    const eventStream = createEventStream();
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      mock(() => Promise.resolve({})),
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const failures = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+
+    await start(runtime);
+    await expect(runtime.abort('session-1')).resolves.toBe(true);
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ProviderError', data: { message: 'late provider error' } },
+      },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(failures).toEqual([]);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('ignores late events for a stream-failed session while a successor turn still works', async () => {
+    const firstStream = createEventStream();
+    const secondStream = createEventStream();
+    const streams = [firstStream, secondStream];
+    let subscriptionCount = 0;
+    const subscribe = mock(() => {
+      const stream = streams[subscriptionCount] ?? secondStream;
+      subscriptionCount += 1;
+      return Promise.resolve({ stream: stream.stream() });
+    });
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      subscribe,
+    );
+    const messages = [];
+    const failures = [];
+    const finishes = [];
+    runtime.onMessages((_chatId, emitted, metadata) => messages.push({ emitted, metadata }));
+    runtime.onFailed((_chatId, message) => failures.push(message));
+    runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
+
+    await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
+    firstStream.close();
+    await waitFor(() => failures.length === 1);
+    expect(runtime.isRunning('session-1')).toBe(false);
+
+    const successor = runtime.runTurn({
+      command: 'successor',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      clientRequestId: 'req-b',
+      turnId: 'turn-b',
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+
+    // Late output from the retired turn carries its old provider identity and is dropped.
+    secondStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-a', role: 'user', time: { created: Date.now() } },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0002',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0003',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0004',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'part-a', messageID: 'assistant-a', type: 'text', text: 'stale' },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0005',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runtime.isRunning('session-1')).toBe(true);
+    expect(messages).toEqual([]);
+    expect(finishes).toEqual([]);
+
+    secondStream.push(envelope({
+      id: 'evt_0006',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-b', role: 'user', time: { created: Date.now() } },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0007',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[1][0].parts[0].id,
+          messageID: 'user-b',
+          type: 'text',
+          text: 'successor',
+        },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0008',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-b', role: 'assistant', parentID: 'user-b' },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0009',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'part-b', messageID: 'assistant-b', type: 'text', text: 'current' },
+      },
+    }));
+    secondStream.push(envelope({
+      id: 'evt_0010',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+
+    await expect(successor).resolves.toBeUndefined();
+    expect(messages).toHaveLength(1);
+    expect(messages[0].emitted[0].content).toBe('current');
+    expect(messages[0].metadata).toMatchObject({ clientRequestId: 'req-b', turnId: 'turn-b' });
+    expect(finishes).toEqual([
+      expect.objectContaining({ clientRequestId: 'req-b', turnId: 'turn-b' }),
+    ]);
+
+    secondStream.close();
+    runtime.shutdown();
+  });
+
   it('surfaces SDK stream errors instead of silently reconnecting', async () => {
     const eventStream = createEventStream();
     let subscriptionOptions;
@@ -719,5 +987,30 @@ describe('OpenCodeRuntime abort', () => {
     expect(failures).toEqual(['socket reset']);
     expect(subscribe).toHaveBeenCalledTimes(1);
     runtime.shutdown();
+  });
+});
+
+describe('openCodeSessionError', () => {
+  it('extracts the provider data message, falling back to the error name', () => {
+    expect(openCodeSessionError({
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ProviderError', data: { message: '  model exploded  ' } },
+      },
+    })).toBe('model exploded');
+    expect(openCodeSessionError({
+      type: 'session.error',
+      properties: { sessionID: 'session-1', error: { name: 'ProviderError' } },
+    })).toBe('ProviderError');
+    expect(openCodeSessionError({
+      type: 'session.error',
+      properties: { sessionID: 'session-1' },
+    })).toBe('OpenCode session failed');
+  });
+
+  it('ignores non-error events', () => {
+    expect(openCodeSessionError({ type: 'session.status', properties: {} })).toBeNull();
+    expect(openCodeSessionError({ type: 'message.updated', properties: {} })).toBeNull();
   });
 });
