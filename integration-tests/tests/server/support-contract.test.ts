@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
@@ -33,10 +34,15 @@ import {
   writeOpenCodePluginSeed,
 } from '../../support/scripted-opencode.js';
 import {
+  linuxProcessStartTimeTicks,
+  processIdentityAlive,
   readJsonFile,
   stopChildWithEscalation,
   verifyPinnedBinaryVersion,
+  waitForBackendReady,
   writeJsonAtomic,
+  type BackendReadinessProcess,
+  type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
 
 class ControlledWebSocket extends EventTarget {
@@ -202,6 +208,23 @@ describe('integration support contracts', () => {
     expect(hookCalls[0].replace('prepare:', '')).toBe(hookCalls[1].replace('cleanup:', ''));
   }, 120_000);
 
+  test('cleans fixture resources when the environment resolver throws', async () => {
+    let root = '';
+    const cleanupRoots: string[] = [];
+    await expect(createIntegrationFixture({
+      resolveServerEnvironment: (directories) => {
+        root = directories.root;
+        throw new Error('deliberate resolver failure');
+      },
+      afterGarconStop: async (directories) => {
+        cleanupRoots.push(directories.root);
+      },
+    })).rejects.toThrow('deliberate resolver failure');
+
+    expect(cleanupRoots).toEqual([root]);
+    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   test('includes diagnostic extensions in failure artifacts', async () => {
     let failure: unknown;
     try {
@@ -293,6 +316,111 @@ describe('integration support contracts', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test('recognizes backend readiness when one line spans stream chunks', async () => {
+    const encoder = new TextEncoder();
+    const stdout = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('opencode server listen'));
+        controller.enqueue(encoder.encode('ing on http://127.0.0.1:43123\n'));
+        controller.close();
+      },
+    });
+    const backend = {
+      stdout,
+      exited: new Promise<number>(() => undefined),
+    } satisfies BackendReadinessProcess;
+
+    await expect(waitForBackendReady(backend, 43123))
+      .resolves.toBe('http://127.0.0.1:43123');
+  });
+
+  test('does not spawn a provider when shutdown lands inside startup', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-opencode-supervisor-race-'));
+    const stateDir = join(root, 'state');
+    const verification = join(root, 'verification.json');
+    const binary = join(root, 'fake-opencode');
+    const spawnMarker = join(root, 'provider-spawned');
+    const startGate = join(root, 'start-gate');
+    const supervisorModule = fileURLToPath(
+      new URL('../../support/opencode-process-supervisor.ts', import.meta.url),
+    );
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(binary, [
+      '#!/bin/sh',
+      `printf started > ${JSON.stringify(spawnMarker)}`,
+      'exit 0',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    await writeJsonAtomic(verification, { binary, version: OPENCODE_VERSION });
+
+    const supervisor = Bun.spawn([
+      process.execPath,
+      supervisorModule,
+      'serve',
+      '--hostname=127.0.0.1',
+      '--port=43124',
+    ], {
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        GARCON_TEST_OPENCODE_REAL_BINARY: binary,
+        GARCON_TEST_OPENCODE_VERIFICATION: verification,
+        GARCON_TEST_OPENCODE_PROCESS_STATE: stateDir,
+        GARCON_TEST_OPENCODE_START_GATE: startGate,
+      },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const supervisorStartTimeTicks = linuxProcessStartTimeTicks(supervisor.pid);
+    if (!supervisorStartTimeTicks) {
+      supervisor.kill('SIGKILL');
+      await supervisor.exited;
+      await rm(root, { recursive: true, force: true });
+      throw new Error('Could not establish the test supervisor process identity.');
+    }
+    try {
+      const deadline = Date.now() + 5_000;
+      let statePath = '';
+      while (Date.now() < deadline) {
+        const entries = await readdir(stateDir);
+        const stateEntry = entries.find((entry) =>
+          entry.startsWith('wrapper-') && entry.endsWith('.json'));
+        if (stateEntry) {
+          statePath = join(stateDir, stateEntry);
+          break;
+        }
+        await Bun.sleep(10);
+      }
+      expect(statePath).not.toBe('');
+
+      supervisor.kill('SIGTERM');
+      const exitCode = await Promise.race([
+        supervisor.exited,
+        Bun.sleep(5_000).then(() => -1),
+      ]);
+      expect(exitCode).toBe(0);
+      await expect(access(spawnMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+      const state = await readJsonFile<OpenCodeProcessState>(statePath);
+      expect(state).toMatchObject({ status: 'stopped', providerPid: 0, reason: 'signal' });
+    } finally {
+      if (processIdentityAlive(
+        supervisor.pid,
+        supervisorStartTimeTicks,
+      )) {
+        supervisor.kill('SIGKILL');
+        await supervisor.exited;
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a live PID when its Linux start identity differs', () => {
+    const startTimeTicks = linuxProcessStartTimeTicks(process.pid);
+    expect(startTimeTicks).not.toBeNull();
+    expect(processIdentityAlive(process.pid, startTimeTicks)).toBe(true);
+    expect(processIdentityAlive(process.pid, `${startTimeTicks}-reused`)).toBe(false);
   });
 
   test('settles deferred values only once', async () => {

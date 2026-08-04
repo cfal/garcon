@@ -6,24 +6,39 @@
 
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const PINNED_OPENCODE_VERSION = '1.18.4';
 
 export interface OpenCodeProcessState {
+  generationId: string;
   wrapperPid: number;
+  wrapperStartTimeTicks: string;
   providerPid: number;
+  providerStartTimeTicks: string | null;
   parentPid: number;
+  parentStartTimeTicks: string;
   mode: 'direct' | 'proxy';
   status: 'running' | 'stopping' | 'stopped';
-  reason?: 'signal' | 'parent-exited' | 'provider-exited';
+  reason?: 'signal' | 'parent-exited' | 'provider-exited' | 'startup-failed';
   version?: string;
+}
+
+export interface OpenCodeBinaryVerification {
+  binary: string;
+  version: string;
 }
 
 export interface SupervisedChild {
   readonly exited: Promise<number>;
   kill(signal?: NodeJS.Signals): void;
+}
+
+export interface BackendReadinessProcess {
+  readonly exited: Promise<number>;
+  readonly stdout: ReadableStream<Uint8Array>;
 }
 
 interface TransportDirective {
@@ -105,7 +120,7 @@ export async function verifyPinnedBinaryVersion(input: {
   binary: string;
   env: Record<string, string>;
   expectedVersion?: string;
-  onChild?: (child: SupervisedChild) => void;
+  timeoutMs?: number;
 }): Promise<string> {
   const expected = input.expectedVersion ?? PINNED_OPENCODE_VERSION;
   const child = Bun.spawn([input.binary, '--version'], {
@@ -114,10 +129,23 @@ export async function verifyPinnedBinaryVersion(input: {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  input.onChild?.(child);
-  const stdout = await new Response(child.stdout).text();
-  const stderr = await new Response(child.stderr).text();
-  const exitCode = await child.exited;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const completion = Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  const timedOut = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      void stopChildWithEscalation(child).finally(() => {
+        reject(new Error(`Pinned OpenCode version check timed out after ${input.timeoutMs ?? 15_000}ms.`));
+      });
+    }, input.timeoutMs ?? 15_000);
+    timeout.unref?.();
+  });
+  const [stdout, stderr, exitCode] = await Promise.race([completion, timedOut]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
   const version = stdout.trim();
   if (exitCode !== 0 || version !== expected) {
     throw new Error(
@@ -128,7 +156,9 @@ export async function verifyPinnedBinaryVersion(input: {
   return version;
 }
 
-function sanitizedProviderEnv(source: NodeJS.ProcessEnv): Record<string, string> {
+export function buildOpenCodeProviderEnvironment(
+  source: NodeJS.ProcessEnv | Record<string, string>,
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
@@ -138,6 +168,23 @@ function sanitizedProviderEnv(source: NodeJS.ProcessEnv): Record<string, string>
   // Empty auth is injected here, never through the Garcon environment audit surface.
   env.OPENCODE_AUTH_CONTENT = '{}';
   return env;
+}
+
+// Linux start-time ticks distinguish a live test process from a later process that reused its PID.
+export function linuxProcessStartTimeTicks(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const commandEnd = stat.lastIndexOf(') ');
+    if (commandEnd < 0) return null;
+    // The suffix begins at field 3 (state); process start time is field 22.
+    return stat.slice(commandEnd + 2).trim().split(/\s+/)[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function processIdentityAlive(pid: number, startTimeTicks: string | null): boolean {
+  return startTimeTicks !== null && linuxProcessStartTimeTicks(pid) === startTimeTicks;
 }
 
 function parseServeArguments(argv: string[]): { hostname: string; port: number } {
@@ -166,73 +213,108 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+async function waitForProviderStartGate(
+  path: string | undefined,
+  isStopping: () => boolean,
+): Promise<void> {
+  if (!path) return;
+  while (!isStopping()) {
+    try {
+      await access(path);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await Bun.sleep(10);
+  }
+}
+
 export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<number> {
+  // Capturing the original parent before any await prevents adoption from changing the owner
+  // that this wrapper is responsible for watching.
+  const parentPid = process.ppid;
+  const parentStartTimeTicks = linuxProcessStartTimeTicks(parentPid);
   const binary = process.env.GARCON_TEST_OPENCODE_REAL_BINARY;
   const processStateDir = process.env.GARCON_TEST_OPENCODE_PROCESS_STATE;
+  const verificationPath = process.env.GARCON_TEST_OPENCODE_VERIFICATION;
   const proxyDir = process.env.GARCON_TEST_OPENCODE_PROXY_DIR || null;
-  if (!binary || !processStateDir) {
+  if (!binary || !processStateDir || !verificationPath || !parentStartTimeTicks) {
     process.stderr.write(
-      'GARCON_TEST_OPENCODE_REAL_BINARY and GARCON_TEST_OPENCODE_PROCESS_STATE are required.\n',
+      'OpenCode supervisor requires its binary, verification, process state, and original parent identity.\n',
     );
     return 2;
   }
   const mode: OpenCodeProcessState['mode'] = proxyDir ? 'proxy' : 'direct';
-  const childEnv = sanitizedProviderEnv(process.env);
-  await mkdir(processStateDir, { recursive: true });
-  if (proxyDir) await mkdir(proxyDir, { recursive: true });
+  const childEnv = buildOpenCodeProviderEnvironment(process.env);
+  const wrapperStartTimeTicks = linuxProcessStartTimeTicks(process.pid);
+  if (!wrapperStartTimeTicks) {
+    process.stderr.write('OpenCode supervisor could not establish its Linux process identity.\n');
+    return 2;
+  }
 
   const statePath = join(processStateDir, `wrapper-${process.pid}.json`);
   const state: OpenCodeProcessState = {
+    generationId: crypto.randomUUID(),
     wrapperPid: process.pid,
+    wrapperStartTimeTicks,
     providerPid: 0,
-    parentPid: process.ppid,
+    providerStartTimeTicks: null,
+    parentPid,
+    parentStartTimeTicks,
     mode,
     status: 'running',
   };
-  const writeState = async () => writeJsonAtomic(statePath, state);
-  await writeState();
+  let stateWriteTail = Promise.resolve();
+  const writeState = (): Promise<void> => {
+    const snapshot = { ...state };
+    const write = stateWriteTail.then(async () => {
+      await mkdir(processStateDir, { recursive: true });
+      await writeJsonAtomic(statePath, snapshot);
+    });
+    stateWriteTail = write.catch(() => undefined);
+    return write;
+  };
 
   // Garcon SIGKILLs this wrapper 500ms after SIGTERM, so shutdown must kill the provider
-  // well inside that budget: the final state write is the only one on the critical path and
-  // children are killed with a short grace. Startup checks stopping between spawns so a
-  // shutdown requested mid-startup cannot orphan the provider.
+  // well inside that budget. Every await before spawn is followed by a stopping check, and
+  // registration is synchronous with spawn, so shutdown always owns every created child.
   let stopping = false;
   let exitCode = 0;
-  let versionChild: SupervisedChild | null = null;
   let provider: Bun.Subprocess | null = null;
   let frontend: Server | null = null;
   let shutdownPromise: Promise<void> | null = null;
+  let parentWatcher: ReturnType<typeof setInterval> | null = null;
+  let announceShutdown!: () => void;
+  const shutdownStarted = new Promise<void>((resolve) => {
+    announceShutdown = resolve;
+  });
   const shutdown = (reason: NonNullable<OpenCodeProcessState['reason']>): void => {
     if (shutdownPromise) return;
     stopping = true;
-    clearInterval(parentWatcher);
+    announceShutdown();
+    if (parentWatcher) clearInterval(parentWatcher);
     state.status = 'stopping';
     state.reason = reason;
     shutdownPromise = (async () => {
-      const victims = [versionChild, provider].filter(
-        (child): child is SupervisedChild => child !== null,
-      );
-      const codes = await Promise.all(victims.map(
-        (child) => stopChildWithEscalation(child, SHUTDOWN_KILL_GRACE_MS).catch(() => 1),
-      ));
-      if (provider) exitCode = codes[codes.length - 1];
+      await writeState().catch(() => undefined);
+      if (provider) {
+        exitCode = await stopChildWithEscalation(provider, SHUTDOWN_KILL_GRACE_MS)
+          .catch(() => 1);
+      }
+      frontend?.closeAllConnections?.();
       frontend?.close();
       state.status = 'stopped';
       await writeState().catch(() => undefined);
     })();
   };
 
-  const parentPid = process.ppid;
-  const parentWatcher = setInterval(() => {
-    let alive = process.ppid === parentPid;
-    if (alive) {
-      try {
-        process.kill(parentPid, 0);
-      } catch {
-        alive = false;
-      }
+  parentWatcher = setInterval(() => {
+    if (
+      process.ppid !== parentPid
+      || !processIdentityAlive(parentPid, parentStartTimeTicks)
+    ) {
+      shutdown('parent-exited');
     }
-    if (!alive) shutdown('parent-exited');
   }, PARENT_WATCH_MS);
   parentWatcher.unref?.();
 
@@ -240,27 +322,71 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
   process.on('SIGINT', () => shutdown('signal'));
 
   try {
-    const version = await verifyPinnedBinaryVersion({
-      binary,
-      env: childEnv,
-      onChild: (child) => {
-        versionChild = child;
-      },
-    });
-    versionChild = null;
-    state.version = version;
-    await writeState();
+    await mkdir(processStateDir, { recursive: true });
+    if (proxyDir) await mkdir(proxyDir, { recursive: true });
+    if (stopping) {
+      await shutdownPromise;
+      return exitCode;
+    }
 
-    if (!stopping && mode === 'direct') {
-      provider = Bun.spawn([binary, ...argv], {
+    const verification = await readJsonFile<OpenCodeBinaryVerification>(verificationPath);
+    if (
+      verification?.binary !== binary
+      || verification.version !== PINNED_OPENCODE_VERSION
+    ) {
+      throw new Error('Pinned OpenCode binary was not verified during fixture preparation.');
+    }
+    state.version = verification.version;
+    await writeState();
+    if (
+      stopping
+      || process.ppid !== parentPid
+      || !processIdentityAlive(parentPid, parentStartTimeTicks)
+    ) {
+      shutdown('parent-exited');
+      await shutdownPromise;
+      return exitCode;
+    }
+
+    const registerProvider = (child: Bun.Subprocess): void => {
+      provider = child;
+      state.providerPid = child.pid ?? 0;
+      state.providerStartTimeTicks = linuxProcessStartTimeTicks(state.providerPid);
+      if (!state.providerPid || !state.providerStartTimeTicks) {
+        throw new Error('OpenCode supervisor could not establish the provider process identity.');
+      }
+      void child.exited.then(() => {
+        if (!stopping) shutdown('provider-exited');
+      });
+    };
+
+    if (mode === 'direct') {
+      await waitForProviderStartGate(
+        process.env.GARCON_TEST_OPENCODE_START_GATE,
+        () => stopping,
+      );
+      if (stopping) {
+        await shutdownPromise;
+        return exitCode;
+      }
+      registerProvider(Bun.spawn([binary, ...argv], {
         env: childEnv,
         stdin: 'ignore',
         stdout: 'inherit',
         stderr: 'inherit',
-      });
-    } else if (!stopping) {
+      }));
+      await writeState();
+    } else {
       const serve = parseServeArguments(argv);
       const backendPort = await freePort();
+      await waitForProviderStartGate(
+        process.env.GARCON_TEST_OPENCODE_START_GATE,
+        () => stopping,
+      );
+      if (stopping) {
+        await shutdownPromise;
+        return exitCode;
+      }
       const backend = Bun.spawn([
         binary,
         'serve',
@@ -272,34 +398,42 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         stdout: 'pipe',
         stderr: 'inherit',
       });
-      provider = backend;
+      registerProvider(backend);
+      await writeState();
+      if (stopping) {
+        await shutdownPromise;
+        return exitCode;
+      }
       const backendUrl = await waitForBackendReady(backend, backendPort);
+      if (stopping) {
+        await shutdownPromise;
+        return exitCode;
+      }
       frontend = startTransportProxy({
         backendUrl,
         listen: serve,
         proxyDir: proxyDir!,
       });
-      await new Promise<void>((resolve, reject) => {
+      const listening = new Promise<void>((resolve, reject) => {
         frontend!.once('error', reject);
         frontend!.listen(serve.port, serve.hostname, () => resolve());
       });
+      await Promise.race([listening, shutdownStarted]);
+      if (stopping) {
+        await shutdownPromise;
+        return exitCode;
+      }
       // Garcon parses the readiness line it would have seen from the real server.
       process.stdout.write(
         `opencode server listening on http://${serve.hostname}:${serve.port}\n`,
       );
     }
-    if (provider) {
-      state.providerPid = provider.pid ?? 0;
-      await writeState();
-    }
   } catch (error) {
-    if (!stopping) throw error;
-  }
-
-  if (provider) {
-    void provider.exited.then(() => {
-      if (!stopping) shutdown('provider-exited');
-    });
+    if (!stopping) {
+      shutdown('startup-failed');
+      await shutdownPromise;
+      throw error;
+    }
   }
 
   while (!shutdownPromise) {
@@ -309,23 +443,45 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
   return exitCode;
 }
 
-function waitForBackendReady(
-  backend: Bun.Subprocess<'ignore', 'pipe', 'inherit'>,
+export function waitForBackendReady(
+  backend: BackendReadinessProcess,
   port: number,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     let output = '';
+    let pendingLine = '';
     let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
     const succeed = (url: string) => {
       if (settled) return;
       settled = true;
+      if (timeout) clearTimeout(timeout);
       resolve(url);
     };
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      if (timeout) clearTimeout(timeout);
       reject(error);
     };
+    const consume = (text: string, flush: boolean): void => {
+      pendingLine += text;
+      const lines = pendingLine.split('\n');
+      pendingLine = flush ? '' : lines.pop() ?? '';
+      for (const line of lines) {
+        // The backend readiness line is consumed here; the supervisor prints the proxy URL.
+        const match = /^opencode server listening on\s+(https?:\/\/[^\s]+)/.exec(line.trim());
+        if (match) {
+          succeed(match[1]);
+        } else if (line.trim()) {
+          process.stdout.write(`${line}\n`);
+        }
+      }
+    };
+    timeout = setTimeout(() => {
+      fail(new Error(`Pinned OpenCode backend never listened on port ${port}.\n${output}`));
+    }, 15_000);
+    timeout.unref();
     void backend.exited.then((code) => {
       fail(new Error(`Pinned OpenCode backend exited with code ${code} before readiness.\n${output}`));
     });
@@ -334,20 +490,12 @@ function waitForBackendReady(
       for await (const chunk of backend.stdout) {
         const text = decoder.decode(chunk, { stream: true });
         output += text;
-        for (const line of text.split('\n')) {
-          // The backend readiness line is consumed here; the supervisor prints the proxy URL.
-          const match = /^opencode server listening on\s+(https?:\/\/[^\s]+)/.exec(line.trim());
-          if (match) {
-            succeed(match[1]);
-            continue;
-          }
-          if (line.trim()) process.stdout.write(`${line}\n`);
-        }
+        consume(text, false);
       }
+      const tail = decoder.decode();
+      output += tail;
+      consume(tail, true);
     })().catch(fail);
-    setTimeout(() => {
-      fail(new Error(`Pinned OpenCode backend never listened on port ${port}.\n${output}`));
-    }, 15_000).unref();
   });
 }
 

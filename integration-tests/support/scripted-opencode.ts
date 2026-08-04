@@ -20,8 +20,13 @@ import type {
 import { FakeChatCompletionsModel } from './fake-chat-completions-model.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
 import {
+  buildOpenCodeProviderEnvironment,
   PINNED_OPENCODE_VERSION,
+  processIdentityAlive,
   readJsonFile,
+  verifyPinnedBinaryVersion,
+  writeJsonAtomic,
+  type OpenCodeBinaryVerification,
   type OpenCodeProcessState,
 } from './opencode-process-supervisor.js';
 
@@ -69,6 +74,7 @@ export interface OpenCodePaths {
   config: string;
   database: string;
   bin: string;
+  verification: string;
   processState: string;
   proxy: string;
   xdgConfig: string;
@@ -88,6 +94,7 @@ export function openCodePaths(directories: IntegrationDirectories): OpenCodePath
     config: join(root, 'opencode.json'),
     database: join(root, 'opencode.db'),
     bin: join(root, 'bin'),
+    verification: join(root, 'binary-verification.json'),
     processState: join(root, 'process-state'),
     proxy: join(root, 'proxy'),
     xdgConfig: join(root, 'xdg-config'),
@@ -210,6 +217,7 @@ export function startScriptedOpenCodeTestEnvironment(options: {
       npm_config_registry: `${model.baseUrl}/npm/`,
       npm_config_cache: paths.npmCache,
       GARCON_TEST_OPENCODE_REAL_BINARY: OPENCODE_BINARY,
+      GARCON_TEST_OPENCODE_VERIFICATION: paths.verification,
       GARCON_TEST_OPENCODE_PROCESS_STATE: paths.processState,
       PATH: [
         paths.bin,
@@ -256,28 +264,59 @@ export function startScriptedOpenCodeTestEnvironment(options: {
         '',
       ].join('\n'), { mode: 0o755 });
       await chmod(shim, 0o755);
+      const version = await verifyPinnedBinaryVersion({
+        binary: OPENCODE_BINARY,
+        env: buildOpenCodeProviderEnvironment(resolveServerEnvironment(directories)),
+      });
+      await writeJsonAtomic(paths.verification, {
+        binary: OPENCODE_BINARY,
+        version,
+      } satisfies OpenCodeBinaryVerification);
     },
     async afterGarconStop(directories) {
-      const states = await readSupervisorStates(directories);
+      const records = await readSupervisorStateRecords(directories);
       const failures: string[] = [];
       const deadline = Date.now() + 5_000;
-      for (const state of states) {
-        const pids = [state.wrapperPid, state.providerPid].filter((pid) => pid > 0);
-        while (Date.now() < deadline && pids.some(pidAlive)) {
-          await Bun.sleep(20);
-        }
-        const survivors = pids.filter(pidAlive);
+      const identities = records.flatMap(({ state }) => processIdentities(state));
+      while (Date.now() < deadline && identities.some(identityAlive)) {
+        await Bun.sleep(20);
+      }
+      for (const record of records) {
+        const survivors = processIdentities(record.state).filter(identityAlive);
         if (survivors.length === 0) continue;
-        for (const pid of survivors) {
+
+        // Re-reading immediately before signaling prevents an old state snapshot from acting
+        // on a later wrapper generation that reused the same state-file PID.
+        const latest = await readJsonFile<OpenCodeProcessState>(record.path);
+        if (
+          !latest
+          || latest.generationId !== record.state.generationId
+          || latest.status === 'stopped'
+        ) {
+          failures.push(
+            `OpenCode generation ${record.state.generationId} survived without a signal-safe running record`,
+          );
+          continue;
+        }
+        const signalable = processIdentities(latest).filter(identityAlive);
+        for (const identity of signalable) {
           try {
-            process.kill(pid, 'SIGKILL');
+            // The final identity check narrows the unavoidable /proc-to-kill interval and
+            // refuses any PID whose Linux start time no longer matches the test record.
+            if (identityAlive(identity)) process.kill(identity.pid, 'SIGKILL');
           } catch {
             // Already gone between the check and the signal.
           }
         }
+        const signalDeadline = Date.now() + 1_000;
+        while (Date.now() < signalDeadline && signalable.some(identityAlive)) {
+          await Bun.sleep(10);
+        }
+        const remaining = signalable.filter(identityAlive).map(({ pid }) => pid);
         failures.push(
-          `OpenCode wrapper ${state.wrapperPid} (provider ${state.providerPid}, mode ${state.mode})`
-          + ` survived Garcon stop; killed PIDs ${survivors.join(', ')}`,
+          `OpenCode wrapper ${latest.wrapperPid} (provider ${latest.providerPid}, mode ${latest.mode})`
+          + ` survived Garcon stop; signaled identities ${signalable.map(({ pid }) => pid).join(', ')}`,
+          ...remaining.map((pid) => `OpenCode identity ${pid} survived its cleanup SIGKILL`),
         );
       }
       if (failures.length > 0) {
@@ -348,6 +387,40 @@ export async function writeOpenCodePluginSeed(globalConfigDir: string): Promise<
 export async function readSupervisorStates(
   directories: IntegrationDirectories,
 ): Promise<OpenCodeProcessState[]> {
+  return (await readSupervisorStateRecords(directories)).map(({ state }) => state);
+}
+
+interface OpenCodeSupervisorStateRecord {
+  path: string;
+  state: OpenCodeProcessState;
+}
+
+interface OpenCodeProcessIdentity {
+  pid: number;
+  startTimeTicks: string;
+}
+
+function processIdentities(state: OpenCodeProcessState): OpenCodeProcessIdentity[] {
+  const identities: OpenCodeProcessIdentity[] = [{
+    pid: state.wrapperPid,
+    startTimeTicks: state.wrapperStartTimeTicks,
+  }];
+  if (state.providerPid > 0 && state.providerStartTimeTicks) {
+    identities.push({
+      pid: state.providerPid,
+      startTimeTicks: state.providerStartTimeTicks,
+    });
+  }
+  return identities;
+}
+
+function identityAlive(identity: OpenCodeProcessIdentity): boolean {
+  return processIdentityAlive(identity.pid, identity.startTimeTicks);
+}
+
+async function readSupervisorStateRecords(
+  directories: IntegrationDirectories,
+): Promise<OpenCodeSupervisorStateRecord[]> {
   const processStateDir = openCodePaths(directories).processState;
   let entries: string[];
   try {
@@ -355,15 +428,16 @@ export async function readSupervisorStates(
   } catch {
     return [];
   }
-  const states: OpenCodeProcessState[] = [];
+  const records: OpenCodeSupervisorStateRecord[] = [];
   for (const entry of entries) {
     if (!entry.startsWith('wrapper-') || !entry.endsWith('.json') || entry.includes('.tmp-')) {
       continue;
     }
-    const state = await readJsonFile<OpenCodeProcessState>(join(processStateDir, entry));
-    if (state) states.push(state);
+    const path = join(processStateDir, entry);
+    const state = await readJsonFile<OpenCodeProcessState>(path);
+    if (state) records.push({ path, state });
   }
-  return states;
+  return records;
 }
 
 function readSupervisorStatesSync(processStateDir: string): OpenCodeProcessState[] {
@@ -387,30 +461,22 @@ function readSupervisorStatesSync(processStateDir: string): OpenCodeProcessState
   return states;
 }
 
-export function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// Waits until the exact test-recorded wrapper and provider PIDs are gone; used before a crash
-// replacement starts so two OpenCode servers never share the fixture DB.
+// Waits until the exact test-recorded wrapper and provider identities are gone so a crash
+// replacement cannot share the fixture DB with its predecessor.
 export async function waitForSupervisorExit(
   states: readonly OpenCodeProcessState[],
   timeoutMs = 10_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  const pids = [...new Set(
-    states.flatMap((state) => [state.wrapperPid, state.providerPid]).filter((pid) => pid > 0),
-  )];
+  const identities = states.flatMap(processIdentities);
   while (Date.now() < deadline) {
-    if (pids.every((pid) => !pidAlive(pid))) return;
+    if (identities.every((identity) => !identityAlive(identity))) return;
     await Bun.sleep(20);
   }
-  throw new Error(`OpenCode supervisor PIDs still alive after Garcon crash: ${pids.join(', ')}`);
+  const survivors = identities.filter(identityAlive).map(({ pid }) => pid);
+  throw new Error(
+    `OpenCode supervisor identities still alive after Garcon crash: ${survivors.join(', ')}`,
+  );
 }
 
 export function scriptedOpenCodeStartRequest(input: {
