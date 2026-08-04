@@ -13,7 +13,7 @@ import { convertOpencodePermissionTool } from '../permission-tool-converter.js';
 import { EnterPlanModeToolUseMessage, PermissionRequestMessage, RequestPermissionsToolUseMessage, UnknownToolUseMessage } from '@garcon/common/chat-types';
 
 function createAsyncEventStream() {
-  const events = [];
+  const events = [{ payload: { id: 'evt_connected', type: 'server.connected', properties: {} } }];
   const waiters = [];
   let closed = false;
 
@@ -48,6 +48,7 @@ function createAsyncEventStream() {
 }
 
 async function* neverEndingStream() {
+  yield { payload: { id: 'evt_connected', type: 'server.connected', properties: {} } };
   await new Promise(() => {});
 }
 
@@ -260,7 +261,7 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
     const { OpenCodeRuntime } = await import('../opencode.js');
     client = {
       permission: { reply: mock(() => Promise.resolve({ data: true })) },
-      event: { subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+      global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
       session: {
         create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
         promptAsync: mock(() => Promise.resolve()),
@@ -299,7 +300,7 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
 
   it('auto-replies once for manual bypass permission events without emitting a permission row', async () => {
     const eventStream = createAsyncEventStream();
-    client.event.subscribe.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
+    client.global.event.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
     const emitted = [];
     provider.onMessages((_chatId, messages) => emitted.push(...messages));
 
@@ -310,12 +311,15 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
     });
 
     eventStream.push({
-      id: 'evt_permission_manual',
-      type: 'permission.asked',
-      properties: {
-        sessionID: 'sess-1',
-        requestID: 'req-manual',
-        permission: 'bash',
+      directory: '/repo',
+      payload: {
+        id: 'evt_permission_manual',
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'sess-1',
+          requestID: 'req-manual',
+          permission: 'bash',
+        },
       },
     });
 

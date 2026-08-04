@@ -5,6 +5,8 @@ import crypto from 'crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
+import { extractSessionId, extractTextParts, streamGlobalEvents, type SSEEvent } from './sse-events.js';
 import { normalizeToolResultContent }  from '@garcon/server-agent-common/shared/normalize-util';
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from '@garcon/common/chat-types';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -53,6 +55,7 @@ const DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS = 5_000;
 const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
 const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
+const DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS = 3_000;
 const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
 const OPENCODE_SERVER_CONFIG_CONTENT = JSON.stringify({});
 
@@ -98,59 +101,6 @@ export function mapPermissionMode(mode: string): Array<{ permission: string; pat
   }));
 }
 
-function buildPromptBody(
-  command: string,
-  model: string | undefined,
-  providerMessageId: string,
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    messageID: providerMessageId,
-    parts: [{ type: 'text', text: command }],
-  };
-  if (model && model.includes('/')) {
-    const idx = model.indexOf('/');
-    body.model = {
-      providerID: model.slice(0, idx),
-      modelID: model.slice(idx + 1),
-    };
-  }
-  return body;
-}
-
-interface SSEEvent {
-  id?: string;
-  type: string;
-  properties?: Record<string, any>;
-}
-
-function extractSessionId(event: SSEEvent): string | undefined {
-  const props = event.properties || {};
-  return props.sessionID
-    || props.part?.sessionID
-    || props.info?.sessionID
-    || (event.type?.startsWith('session.') ? props.info?.id : undefined);
-}
-
-function extractTextParts(parts: unknown): string {
-  if (!Array.isArray(parts)) return '';
-  return parts
-    .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-    .map((part: any) => part.text.trim())
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
-
-function parseOpenCodeModel(model: string | undefined): { providerID: string; modelID: string } | null {
-  if (!model || typeof model !== 'string') return null;
-  const idx = model.indexOf('/');
-  if (idx < 1 || idx === model.length - 1) return null;
-  return {
-    providerID: model.slice(0, idx),
-    modelID: model.slice(idx + 1),
-  };
-}
-
 // Maps a permission decision to V2 reply value.
 export function mapPermissionDecision(decision: { allow?: boolean; alwaysAllow?: boolean } | null | undefined): string {
   const allow = Boolean(decision?.allow);
@@ -187,7 +137,9 @@ export function extractPermissionRequest(event: SSEEvent): {
 
 interface OpenCodeTurnContext {
   eventMetadata: RuntimeEventMetadata;
-  providerMessageId: string;
+  // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
+  providerMessageId: string | null;
+  providerPromptPartId: string;
   providerObservedEventId: string | null;
   assistantMessageIds: Set<string>;
   messageRoles: Map<string, string>;
@@ -207,9 +159,8 @@ interface OpenCodeSession {
 }
 
 interface PendingTurnWaiter {
-  promise: Promise<void>;
-  resolve: () => void;
-  reject: (error: Error) => void;
+  promise: Promise<Error | null>;
+  settle: (failure: Error | null) => void;
 }
 
 interface PendingPermission {
@@ -227,6 +178,7 @@ interface OpenCodeRuntimeOptions {
   modelDiscoveryTimeoutMs?: number;
   requestTimeoutMs?: number;
   unavailableRetryMs?: number;
+  sseRetryDelayMs?: number;
   modelCacheTtlMs?: number;
   now?: () => number;
   createInstance?: (input: {
@@ -240,6 +192,7 @@ interface NormalizedOpenCodeRuntimeOptions {
   modelDiscoveryTimeoutMs: number;
   requestTimeoutMs: number;
   unavailableRetryMs: number;
+  sseRetryDelayMs: number;
   modelCacheTtlMs: number;
   now: () => number;
   requiresExecutable: boolean;
@@ -274,6 +227,7 @@ function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRu
     modelDiscoveryTimeoutMs: options.modelDiscoveryTimeoutMs ?? DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS,
     requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS,
     unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
+    sseRetryDelayMs: options.sseRetryDelayMs ?? DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS,
     modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
     now: options.now ?? (() => Date.now()),
     requiresExecutable: options.createInstance === undefined,
@@ -427,6 +381,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #sseListenerGeneration = 0;
   #sseReadyPromise: Promise<void> | null = null;
   #rejectSseReady: ((error: Error) => void) | null = null;
+  #sseAbortController: AbortController | null = null;
   #sseRetryTimer: ReturnType<typeof setTimeout> | null = null;
   #sessions = new Map<string, OpenCodeSession>();
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
@@ -551,6 +506,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#rejectSseReady = null;
     this.#sseReadyPromise = null;
     this.#sseListenerGeneration += 1;
+    this.#sseAbortController?.abort(new Error('OpenCode event listener closed'));
+    this.#sseAbortController = null;
     if (this.#sseRetryTimer) {
       clearTimeout(this.#sseRetryTimer);
       this.#sseRetryTimer = null;
@@ -575,7 +532,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #createTurnContext(eventMetadata: RuntimeEventMetadata): OpenCodeTurnContext {
     return {
       eventMetadata,
-      providerMessageId: `msg_${crypto.randomUUID().replaceAll('-', '')}`,
+      providerMessageId: null,
+      providerPromptPartId: `prt_${crypto.randomUUID().replaceAll('-', '')}`,
       providerObservedEventId: null,
       assistantMessageIds: new Set(),
       messageRoles: new Map(),
@@ -587,13 +545,11 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     if (this.#pendingTurnWaiters.has(agentSessionId)) {
       throw new Error(`Turn already in progress for session ${agentSessionId}`);
     }
-    let resolveFn!: () => void;
-    let rejectFn!: (error: Error) => void;
-    const promise = new Promise<void>((resolve, reject) => {
-      resolveFn = resolve;
-      rejectFn = reject;
+    let settle!: (failure: Error | null) => void;
+    const promise = new Promise<Error | null>((resolve) => {
+      settle = resolve;
     });
-    const waiter: PendingTurnWaiter = { promise, resolve: resolveFn, reject: rejectFn };
+    const waiter: PendingTurnWaiter = { promise, settle };
     this.#pendingTurnWaiters.set(agentSessionId, waiter);
     return waiter;
   }
@@ -602,14 +558,14 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const waiter = this.#pendingTurnWaiters.get(agentSessionId);
     if (!waiter) return;
     this.#pendingTurnWaiters.delete(agentSessionId);
-    waiter.resolve();
+    waiter.settle(null);
   }
 
   #rejectTurnWaiter(agentSessionId: string, error: unknown): void {
     const waiter = this.#pendingTurnWaiters.get(agentSessionId);
     if (!waiter) return;
     this.#pendingTurnWaiters.delete(agentSessionId);
-    waiter.reject(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
+    waiter.settle(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
   }
 
   #failRunningTurnsForListenerError(error: unknown): void {
@@ -841,31 +797,56 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       const info = event.properties?.info;
       const messageId = typeof info?.id === 'string' ? info.id : '';
       if (info?.role === 'user') {
-        if (messageId !== turn.providerMessageId) return false;
-        turn.providerObservedEventId = event.id ?? null;
+        if (turn.providerMessageId && messageId === turn.providerMessageId) {
+          turn.providerObservedEventId = event.id ?? null;
+        }
         return false;
       }
-      if (info?.role !== 'assistant' || info.parentID !== turn.providerMessageId || !messageId) {
+      if (
+        info?.role !== 'assistant'
+        || !turn.providerMessageId
+        || info.parentID !== turn.providerMessageId
+        || !messageId
+      ) {
         return false;
       }
       turn.providerObservedEventId = event.id ?? null;
       turn.assistantMessageIds.add(messageId);
       return true;
     }
-    if (event.type === 'message.part.updated' || event.type === 'message.part.delta') {
-      const messageId = event.properties?.part?.messageID;
+    if (event.type === 'message.part.updated') {
+      const part = event.properties?.part;
+      const messageId = typeof part?.messageID === 'string' ? part.messageID : '';
+      if (turn.providerMessageId === null) {
+        // OpenCode preserves caller-owned part IDs while assigning the ordered message ID.
+        // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/prompt.ts#L693-L697
+        if (!messageId || part?.id !== turn.providerPromptPartId) return false;
+        turn.providerMessageId = messageId;
+        turn.providerObservedEventId = event.id ?? null;
+        return false;
+      }
+      return Boolean(messageId) && turn.assistantMessageIds.has(messageId);
+    }
+    if (event.type === 'message.part.delta') {
+      const messageId = event.properties?.messageID;
       return typeof messageId === 'string' && turn.assistantMessageIds.has(messageId);
     }
     return true;
   }
 
   async #startGlobalSSEListener(): Promise<void> {
+    if (this.#sseRetryTimer) {
+      clearTimeout(this.#sseRetryTimer);
+      this.#sseRetryTimer = null;
+    }
     if (this.#sseListenerStarted) {
       if (this.#sseReadyPromise) await this.#sseReadyPromise;
       return;
     }
     this.#sseListenerStarted = true;
     const generation = ++this.#sseListenerGeneration;
+    const abortController = new AbortController();
+    this.#sseAbortController = abortController;
     let readySettled = false;
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
@@ -874,30 +855,41 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       rejectReady = reject;
     });
     this.#sseReadyPromise = readyPromise;
-    this.#rejectSseReady = (error) => {
+    const settleReady = () => {
       if (readySettled) return;
       readySettled = true;
+      clearTimeout(readyTimer);
+      resolveReady();
+      if (this.#sseReadyPromise === readyPromise) {
+        this.#sseReadyPromise = null;
+        this.#rejectSseReady = null;
+      }
+    };
+    const settleNotReady = (error: Error) => {
+      if (readySettled) return;
+      readySettled = true;
+      clearTimeout(readyTimer);
       rejectReady(error);
     };
+    this.#rejectSseReady = settleNotReady;
+    const readyTimer = setTimeout(() => {
+      const error = new OpenCodeTimeoutError(
+        'OpenCode event stream readiness',
+        this.#options.requestTimeoutMs,
+      );
+      abortController.abort(error);
+      settleNotReady(error);
+    }, this.#options.requestTimeoutMs);
+    readyTimer.unref?.();
 
     const runListener = async () => {
       try {
         const client = await this.getClient();
-        const result: any = await this.#runRequest<any>(
-          'OpenCode event subscribe',
-          (signal) => client.event.subscribe(undefined, { signal }),
-        );
         if (generation !== this.#sseListenerGeneration) {
           throw new Error('OpenCode event listener was superseded during startup');
         }
-        readySettled = true;
-        resolveReady();
-        if (this.#sseReadyPromise === readyPromise) {
-          this.#sseReadyPromise = null;
-          this.#rejectSseReady = null;
-        }
 
-        for await (const event of result.stream) {
+        for await (const event of streamGlobalEvents(client, abortController.signal, settleReady)) {
           if (generation !== this.#sseListenerGeneration) return;
           const sessionId = extractSessionId(event);
           if (!sessionId) {
@@ -997,20 +989,23 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
             }
           }
         }
-        throw new Error('OpenCode event stream ended');
-      } catch (err: any) {
-        if (!readySettled) {
-          readySettled = true;
-          rejectReady(err instanceof Error ? err : new Error(String(err)));
+      } catch (err: unknown) {
+        const failure = err instanceof Error ? err : new Error(String(err));
+        settleNotReady(failure);
+        if (failure instanceof OpenCodeTimeoutError) {
+          const reason = errorMessage(failure);
+          if (this.#markTemporarilyUnavailable(reason)) {
+            this.#logger.warn('OpenCode event stream readiness timed out', { reason });
+          }
         }
         if (generation !== this.#sseListenerGeneration) return;
-        this.#failRunningTurnsForListenerError(err);
+        this.#failRunningTurnsForListenerError(failure);
         const retryMs = this.isTemporarilyUnavailable()
-          ? Math.max(3000, Math.min(this.getUnavailableRetryAfterMs(), 30_000))
-          : 3000;
+          ? Math.max(this.#options.sseRetryDelayMs, Math.min(this.getUnavailableRetryAfterMs(), 30_000))
+          : this.#options.sseRetryDelayMs;
         this.#logger.error('OpenCode SSE listener failed and will reconnect', {
           retrySeconds: Math.round(retryMs / 1000),
-          error: err.message,
+          error: failure.message,
         });
         this.#sseListenerStarted = false;
         if (this.#sseReadyPromise === readyPromise) {
@@ -1026,6 +1021,11 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           });
         }, retryMs);
         this.#sseRetryTimer.unref?.();
+      } finally {
+        clearTimeout(readyTimer);
+        if (this.#sseAbortController === abortController) {
+          this.#sseAbortController = null;
+        }
       }
     };
 
@@ -1231,7 +1231,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       throw error;
     }
 
-    const promptBody = buildPromptBody(command, model, turn.providerMessageId);
+    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId);
 
     const promptRequest = this.#runScopedSessionRequest(
       'OpenCode prompt submit',
@@ -1315,7 +1315,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         turn,
       });
     }
-    const promptBody = buildPromptBody(command, model, turn.providerMessageId);
+    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId);
 
     try {
       await this.#startGlobalSSEListener();
@@ -1356,7 +1356,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       throw err;
     }
 
-    await waiter.promise;
+    const turnFailure = await waiter.promise;
+    if (turnFailure) throw turnFailure;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
     }

@@ -11,8 +11,16 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function createEventStream() {
-  const events = [];
+function envelope(event) {
+  return { directory: '/repo', payload: event };
+}
+
+function connectedEnvelope() {
+  return { payload: { id: 'evt_connected', type: 'server.connected', properties: {} } };
+}
+
+function createEventStream({ connected = true } = {}) {
+  const events = connected ? [connectedEnvelope()] : [];
   const waiters = [];
   let closed = false;
   return {
@@ -45,6 +53,7 @@ async function waitFor(predicate) {
 }
 
 async function* neverEndingStream() {
+  yield connectedEnvelope();
   await new Promise(() => {});
 }
 
@@ -52,13 +61,15 @@ function createRuntime(
   abort,
   promptAsync = mock(() => Promise.resolve({})),
   subscribe = mock(() => Promise.resolve({ stream: neverEndingStream() })),
+  runtimeOptions = {},
 ) {
   const runtime = new OpenCodeRuntime({
+    ...runtimeOptions,
     createInstance: mock(() => Promise.resolve({
       client: {
         permission: { reply: mock(() => Promise.resolve({})) },
-        event: {
-          subscribe,
+        global: {
+          event: subscribe,
         },
         session: {
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
@@ -84,14 +95,15 @@ async function start(runtime, overrides = {}) {
 
 describe('OpenCodeRuntime abort', () => {
   it('establishes the event stream before creating or prompting a session', async () => {
-    const subscribed = deferred();
+    const eventStream = createEventStream({ connected: false });
     const create = mock(() => Promise.resolve({ data: { id: 'session-1' } }));
     const promptAsync = mock(() => Promise.resolve({}));
+    const subscribe = mock(() => Promise.resolve({ stream: eventStream.stream() }));
     const runtime = new OpenCodeRuntime({
       createInstance: mock(() => Promise.resolve({
         client: {
           permission: { reply: mock(() => Promise.resolve({})) },
-          event: { subscribe: mock(() => subscribed.promise) },
+          global: { event: subscribe },
           session: {
             create,
             promptAsync,
@@ -103,24 +115,26 @@ describe('OpenCodeRuntime abort', () => {
     });
 
     const starting = start(runtime);
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitFor(() => subscribe.mock.calls.length === 1);
 
     expect(create).not.toHaveBeenCalled();
     expect(promptAsync).not.toHaveBeenCalled();
+    expect(subscribe.mock.calls[0][0]).toMatchObject({
+      signal: expect.any(AbortSignal),
+      sseMaxRetryAttempts: 0,
+      onSseError: expect.any(Function),
+    });
 
-    subscribed.resolve({ stream: neverEndingStream() });
+    eventStream.push(connectedEnvelope());
     await starting;
     expect(create).toHaveBeenCalledTimes(1);
     expect(promptAsync).toHaveBeenCalledTimes(1);
+    eventStream.close();
     runtime.shutdown();
   });
 
-  it('re-establishes a stream that ends before the session is registered', async () => {
-    const stableStream = createEventStream();
-    const subscribe = mock()
-      .mockImplementationOnce(() => Promise.resolve({ stream: (async function* () {})() }))
-      .mockImplementationOnce(() => Promise.resolve({ stream: stableStream.stream() }));
+  it('rejects a stream that ends before server.connected', async () => {
+    const subscribe = mock(() => Promise.resolve({ stream: (async function* () {})() }));
     const promptAsync = mock(() => Promise.resolve({}));
     const runtime = createRuntime(
       mock(() => Promise.resolve({ data: true })),
@@ -128,12 +142,50 @@ describe('OpenCodeRuntime abort', () => {
       subscribe,
     );
 
-    await start(runtime);
+    await expect(start(runtime)).rejects.toThrow(
+      'OpenCode event stream ended before server.connected',
+    );
 
-    expect(subscribe).toHaveBeenCalledTimes(2);
-    expect(promptAsync).toHaveBeenCalledTimes(1);
-    expect(runtime.isRunning('session-1')).toBe(true);
-    stableStream.close();
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(promptAsync).not.toHaveBeenCalled();
+    runtime.shutdown();
+  });
+
+  it('times out a stream that never reaches server.connected', async () => {
+    const create = mock(() => Promise.resolve({ data: { id: 'session-1' } }));
+    const subscribe = mock((options) => Promise.resolve({
+      stream: (async function* () {
+        await new Promise((resolve) => {
+          if (options.signal.aborted) {
+            resolve();
+            return;
+          }
+          options.signal.addEventListener('abort', resolve, { once: true });
+        });
+      })(),
+    }));
+    const runtime = new OpenCodeRuntime({
+      requestTimeoutMs: 10,
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          permission: { reply: mock(() => Promise.resolve({})) },
+          global: { event: subscribe },
+          session: {
+            create,
+            promptAsync: mock(() => Promise.resolve({})),
+            abort: mock(() => Promise.resolve({ data: true })),
+          },
+        },
+        server: { close: mock(() => undefined) },
+      })),
+    });
+
+    await expect(start(runtime)).rejects.toThrow(
+      'OpenCode event stream readiness timed out after 10ms',
+    );
+
+    expect(create).not.toHaveBeenCalled();
+    expect(subscribe.mock.calls[0][0].signal.aborted).toBe(true);
     runtime.shutdown();
   });
 
@@ -243,20 +295,32 @@ describe('OpenCodeRuntime abort', () => {
     runtime.onFinished((_chatId, _exitCode, metadata) => finishes.push(metadata));
 
     await start(runtime, { clientRequestId: 'req-a', turnId: 'turn-a' });
-    const firstProviderMessageId = promptAsync.mock.calls[0][0].messageID;
-    eventStream.push({
+    eventStream.push(envelope({
       id: 'evt_0001',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
-        info: { id: firstProviderMessageId, role: 'user' },
+        info: { id: 'user-a', role: 'user', time: { created: Date.now() } },
       },
-    });
-    eventStream.push({
+    }));
+    eventStream.push(envelope({
       id: 'evt_0002',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    }));
     await waitFor(() => finishes.length === 1);
 
     const successor = runtime.runTurn({
@@ -269,29 +333,28 @@ describe('OpenCodeRuntime abort', () => {
       turnId: 'turn-b',
     });
     await waitFor(() => promptAsync.mock.calls.length === 2);
-    const secondProviderMessageId = promptAsync.mock.calls[1][0].messageID;
 
-    eventStream.push({
+    eventStream.push(envelope({
       id: 'evt_0002',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
-    eventStream.push({
+    }));
+    eventStream.push(envelope({
       id: 'evt_0003',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
-        info: { id: 'assistant-a', role: 'assistant', parentID: firstProviderMessageId },
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
       },
-    });
-    eventStream.push({
+    }));
+    eventStream.push(envelope({
       id: 'evt_0004',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
         part: { id: 'part-a', messageID: 'assistant-a', type: 'text', text: 'stale' },
       },
-    });
+    }));
     await Promise.resolve();
     await Promise.resolve();
 
@@ -299,35 +362,48 @@ describe('OpenCodeRuntime abort', () => {
     expect(messages).toEqual([]);
     expect(finishes).toHaveLength(1);
 
-    eventStream.push({
+    eventStream.push(envelope({
       id: 'evt_0005',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
-        info: { id: secondProviderMessageId, role: 'user' },
+        info: { id: 'user-b', role: 'user', time: { created: Date.now() } },
       },
-    });
-    eventStream.push({
+    }));
+    eventStream.push(envelope({
       id: 'evt_0006',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[1][0].parts[0].id,
+          messageID: 'user-b',
+          type: 'text',
+          text: 'successor',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0007',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
-        info: { id: 'assistant-b', role: 'assistant', parentID: secondProviderMessageId },
+        info: { id: 'assistant-b', role: 'assistant', parentID: 'user-b' },
       },
-    });
-    eventStream.push({
-      id: 'evt_0007',
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0008',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
         part: { id: 'part-b', messageID: 'assistant-b', type: 'text', text: 'current' },
       },
-    });
-    eventStream.push({
-      id: 'evt_0008',
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0009',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
-    });
+    }));
 
     await expect(successor).resolves.toBeUndefined();
     expect(messages).toHaveLength(1);
@@ -340,6 +416,256 @@ describe('OpenCodeRuntime abort', () => {
 
     eventStream.close();
     runtime.shutdown();
+  });
+
+  it('ignores durable sync frames while completing a turn from global envelopes', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const finishes = [];
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    eventStream.push(envelope({
+      id: 'evt_sync_0001',
+      type: 'sync',
+      syncEvent: { type: 'message.updated.v1', id: 'evt_inner', seq: 1, aggregateID: 'session-1', data: {} },
+    }));
+    eventStream.push({ directory: '/repo' });
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-a', role: 'user', time: { created: Date.now() } },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+
+    await waitFor(() => finishes.length === 1);
+    expect(runtime.isRunning('session-1')).toBe(false);
+
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('binds only the user message that owns the submitted prompt part', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const messages = [];
+    const finishes = [];
+    runtime.onMessages((_chatId, emitted) => messages.push(...emitted));
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-internal', role: 'user', time: { created: Date.now() } },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'prt_internal',
+          messageID: 'user-internal',
+          type: 'text',
+          text: 'provider-generated continuation',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-internal', role: 'assistant', parentID: 'user-internal' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-internal',
+          messageID: 'assistant-internal',
+          type: 'text',
+          text: 'stale',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0005',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-new', role: 'user', time: { created: Date.now() } },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0006',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-new',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0007',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-new', role: 'assistant', parentID: 'user-new' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0008',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'part-new', messageID: 'assistant-new', type: 'text', text: 'current' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0009',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+
+    await waitFor(() => finishes.length === 1);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe('current');
+
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('does not leave a rejected turn waiter unhandled while prompt submission is pending', async () => {
+    const eventStream = createEventStream();
+    const prompt = deferred();
+    const promptAsync = mock(() => prompt.promise);
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const failures = [];
+    const unhandled = [];
+    const onUnhandledRejection = (reason) => unhandled.push(reason);
+    runtime.onFailed((_chatId, message) => failures.push(message));
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      const turn = runtime.runTurn({
+        command: 'hello',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+      });
+      const outcome = turn.then(
+        () => null,
+        (error) => error,
+      );
+      await waitFor(() => promptAsync.mock.calls.length === 1);
+
+      eventStream.close();
+      await waitFor(() => failures.length === 1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      prompt.reject(new Error('prompt submit failed after stream loss'));
+      expect(await outcome).toMatchObject({ message: 'prompt submit failed after stream loss' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+      runtime.shutdown();
+    }
+  });
+
+  it('cancels an older reconnect timer when user admission starts a replacement listener', async () => {
+    const firstStream = createEventStream();
+    const secondStream = createEventStream();
+    const unexpectedStream = createEventStream();
+    const streams = [firstStream, secondStream, unexpectedStream];
+    let subscriptionCount = 0;
+    const subscribe = mock(() => {
+      const stream = streams[subscriptionCount] ?? unexpectedStream;
+      subscriptionCount += 1;
+      return Promise.resolve({ stream: stream.stream() });
+    });
+    const promptAsync = mock(() => Promise.resolve({}));
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      subscribe,
+      { sseRetryDelayMs: 1_000 },
+    );
+    const failures = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+
+    await start(runtime);
+    firstStream.close();
+    await waitFor(() => failures.length === 1);
+
+    const successor = runtime.runTurn({
+      command: 'successor',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+    });
+    const successorOutcome = successor.then(
+      () => null,
+      (error) => error,
+    );
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+    secondStream.close();
+    await waitFor(() => failures.length === 2);
+    expect(await successorOutcome).toMatchObject({ message: 'OpenCode event stream ended' });
+
+    runtime.shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
+    unexpectedStream.close();
+    runtime.shutdown();
+    expect(subscribe).toHaveBeenCalledTimes(2);
   });
 
   it('fails an owned turn exactly when the provider event stream ends', async () => {
@@ -367,6 +693,31 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(failures).toHaveLength(1);
+    runtime.shutdown();
+  });
+
+  it('surfaces SDK stream errors instead of silently reconnecting', async () => {
+    const eventStream = createEventStream();
+    let subscriptionOptions;
+    const subscribe = mock((options) => {
+      subscriptionOptions = options;
+      return Promise.resolve({ stream: eventStream.stream() });
+    });
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      mock(() => new Promise(() => {})),
+      subscribe,
+    );
+    const failures = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+
+    await start(runtime);
+    subscriptionOptions.onSseError(new Error('socket reset'));
+    eventStream.close();
+    await waitFor(() => failures.length === 1);
+
+    expect(failures).toEqual(['socket reset']);
+    expect(subscribe).toHaveBeenCalledTimes(1);
     runtime.shutdown();
   });
 });
