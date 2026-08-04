@@ -17,9 +17,16 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] <prompt>
   garcon-cli [options] --resume <chat-id> <prompt>
   garcon-cli [options] list <resource>
+  garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
+  garcon-cli [options] stop <chat-id>
 
 Starts or resumes a visible chat through an already-running Garcon server.
 The selected permission mode may allow the agent to edit files and run tools.
+send-async submits one turn and returns immediately; it inherits the chat's
+saved execution settings, so it may edit files or run tools. Use - as the
+message to read UTF-8 text from stdin. stop uses the same command as the SPA
+Stop button and interrupts the active turn. If queued messages exist, stop
+pauses the queue; resume it in Garcon before sending a new direct turn.
 
 List resources:
   agents
@@ -41,14 +48,16 @@ Options:
   --permissions <mode>         Permission mode: ${PERMISSION_MODE_VALUES.join(', ')}
   --reasoning-effort <mode>    Reasoning effort: ${THINKING_MODE_VALUES.join(', ')}
   --title <title>              Set the chat title after the turn is accepted
-  --tag <name>                 Add a tag in addition to cli; repeatable
+  --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --resume <chat-id>           Resume an existing chat
+  --allow-steer                With send-async, steer the active turn when busy; never queues
   --json                       Print list results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list.`;
+Use -- before a positional prompt whose first word is list, send-async, or stop.
+The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
   GARCON_CONFIG_DIR?: string;
@@ -113,10 +122,25 @@ export interface ListCliCommand extends CliConnectionOptions {
   endpointId?: string;
 }
 
+export interface SendAsyncCliCommand extends CliConnectionOptions {
+  kind: 'send-async';
+  chatId: ChatId;
+  allowSteer: boolean;
+  message: string | null;
+  readsMessageFromStdin: boolean;
+}
+
+export interface StopCliCommand extends CliConnectionOptions {
+  kind: 'stop';
+  chatId: ChatId;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
   | ListCliCommand
+  | SendAsyncCliCommand
+  | StopCliCommand
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
@@ -190,6 +214,96 @@ function rejectListOption(value: unknown, flag: string): void {
   if (value !== undefined) throw argumentError(`${flag} cannot be used with list`);
 }
 
+// Reserved subcommands are recognized only when the first positional token appears
+// before an option terminator, so `-- send-async ...` remains a new-chat prompt.
+function startsReservedCommand(
+  tokens: NonNullable<ReturnType<typeof parseArgs>['tokens']>,
+  name: string,
+): boolean {
+  const positional = tokens.find((token) => token.kind === 'positional');
+  if (positional?.value !== name) return false;
+  const terminator = tokens.find((token) => token.kind === 'option-terminator');
+  return terminator === undefined || positional.index < terminator.index;
+}
+
+type ControlCommandKind = 'send-async' | 'stop';
+
+const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
+  ['cwd', '--cwd'],
+  ['agent', '--agent'],
+  ['provider', '--provider'],
+  ['endpoint', '--endpoint'],
+  ['model', '--model'],
+  ['permissions', '--permissions'],
+  ['reasoning-effort', '--reasoning-effort'],
+  ['title', '--title'],
+  ['tag', '--tag'],
+  ['resume', '--resume'],
+  ['json', '--json'],
+] as const;
+
+function rejectControlForbiddenOptions(
+  values: Record<string, ParsedOptionValue>,
+  command: ControlCommandKind,
+): void {
+  for (const [key, flag] of CONTROL_FORBIDDEN_OPTIONS) {
+    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
+  }
+}
+
+function parseControlChatId(value: string, command: ControlCommandKind): ChatId {
+  try {
+    return parseChatId(value);
+  } catch (error) {
+    throw argumentError(`${command} requires a valid Garcon chat ID`, { cause: error });
+  }
+}
+
+function parseSendAsync(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): SendAsyncCliCommand {
+  rejectControlForbiddenOptions(values, 'send-async');
+  if (parsed.positionals.length !== 3) {
+    throw argumentError('send-async requires a chat ID and one message');
+  }
+  const chatId = parseControlChatId(parsed.positionals[1]!, 'send-async');
+  const messageArgument = parsed.positionals[2]!;
+  const readsMessageFromStdin = messageArgument === '-';
+  const message = readsMessageFromStdin ? null : messageArgument;
+  if (message !== null && message.trim().length === 0) {
+    throw argumentError('the message must not be empty');
+  }
+  return {
+    kind: 'send-async',
+    ...connection,
+    chatId,
+    allowSteer: values['allow-steer'] === true,
+    message,
+    readsMessageFromStdin,
+  };
+}
+
+function parseStop(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): StopCliCommand {
+  rejectControlForbiddenOptions(values, 'stop');
+  if (values['allow-steer'] !== undefined) {
+    throw argumentError('--allow-steer cannot be used with stop');
+  }
+  if (parsed.positionals.length !== 2) {
+    throw argumentError('stop requires exactly one chat ID');
+  }
+  return {
+    kind: 'stop',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'stop'),
+  };
+}
+
 export function parseCliArgs(
   argv: readonly string[],
   environment: CliEnvironment = process.env as CliEnvironment,
@@ -215,6 +329,7 @@ export function parseCliArgs(
         title: { type: 'string' },
         tag: { type: 'string', multiple: true },
         resume: { type: 'string' },
+        'allow-steer': { type: 'boolean' },
         json: { type: 'boolean' },
         help: { type: 'boolean' },
         version: { type: 'boolean' },
@@ -266,11 +381,21 @@ export function parseCliArgs(
   const resume = nonEmptyOption(values.resume as string | undefined, '--resume');
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const additionalTags = parseAdditionalTags(values.tag);
-  const explicitPromptBoundary = parsed.tokens?.some(
-    (token) => token.kind === 'option-terminator',
-  ) ?? false;
+  const tokens = parsed.tokens ?? [];
+  const connection = {
+    workspace,
+    configDir,
+    ...(serverUrl === undefined ? {} : { serverUrl }),
+  };
 
-  if (parsed.positionals[0] === 'list' && !explicitPromptBoundary) {
+  if (startsReservedCommand(tokens, 'send-async')) {
+    return parseSendAsync(parsed, values, connection);
+  }
+  if (startsReservedCommand(tokens, 'stop')) {
+    return parseStop(parsed, values, connection);
+  }
+
+  if (startsReservedCommand(tokens, 'list')) {
     const resource = parsed.positionals[1] ?? '';
     if (parsed.positionals.length !== 2 || !isListResource(resource)) {
       throw argumentError(`list requires one resource: ${LIST_RESOURCE_VALUES.join(', ')}`);
@@ -282,6 +407,7 @@ export function parseCliArgs(
     rejectListOption(values.title, '--title');
     rejectListOption(values.tag, '--tag');
     rejectListOption(resume, '--resume');
+    rejectListOption(values['allow-steer'], '--allow-steer');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -318,6 +444,9 @@ export function parseCliArgs(
   }
 
   if (values.json !== undefined) throw argumentError('--json can only be used with list');
+  if (values['allow-steer'] !== undefined) {
+    throw argumentError('--allow-steer can only be used with send-async');
+  }
   const modes = parseModeOptions(values);
 
   if (endpointId !== undefined && providerId === undefined) {

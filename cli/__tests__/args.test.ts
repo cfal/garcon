@@ -154,4 +154,145 @@ describe('parseCliArgs', () => {
   test('returns help without requiring submission arguments', () => {
     expect(parseCliArgs(['--help'], ENV)).toEqual({ kind: 'help' });
   });
+
+  test('parses a minimal send-async command', () => {
+    expect(parseCliArgs(['send-async', CHAT_ID, 'Implement the review'], ENV)).toEqual({
+      kind: 'send-async',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      allowSteer: false,
+      message: 'Implement the review',
+      readsMessageFromStdin: false,
+    });
+  });
+
+  test('parses a connection-qualified send-async with --allow-steer before or after the chat ID', () => {
+    expect(parseCliArgs([
+      '--workspace', 'work',
+      '--config-dir', '/conf',
+      '--server', 'http://127.0.0.1:8080',
+      'send-async',
+      '--allow-steer',
+      CHAT_ID,
+      'Follow up',
+    ], ENV)).toEqual({
+      kind: 'send-async',
+      workspace: 'work',
+      configDir: '/conf',
+      serverUrl: 'http://127.0.0.1:8080',
+      chatId: CHAT_ID,
+      allowSteer: true,
+      message: 'Follow up',
+      readsMessageFromStdin: false,
+    });
+    expect(parseCliArgs(['send-async', CHAT_ID, '--allow-steer', 'Follow up'], ENV)).toMatchObject({
+      kind: 'send-async',
+      chatId: CHAT_ID,
+      allowSteer: true,
+      message: 'Follow up',
+    });
+  });
+
+  test('reads the send-async message from stdin and preserves quoted whitespace', () => {
+    expect(parseCliArgs(['send-async', CHAT_ID, '-'], ENV)).toMatchObject({
+      kind: 'send-async',
+      chatId: CHAT_ID,
+      message: null,
+      readsMessageFromStdin: true,
+    });
+    expect(parseCliArgs(['send-async', CHAT_ID, '  preserve  spacing  '], ENV)).toMatchObject({
+      kind: 'send-async',
+      message: '  preserve  spacing  ',
+    });
+  });
+
+  test('parses a minimal stop command with connection options', () => {
+    expect(parseCliArgs(['stop', CHAT_ID], ENV)).toEqual({
+      kind: 'stop',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+    });
+    expect(parseCliArgs(['--workspace', 'work', 'stop', CHAT_ID], ENV)).toMatchObject({
+      kind: 'stop',
+      workspace: 'work',
+      chatId: CHAT_ID,
+    });
+  });
+
+  test('accepts a send-async message after the option terminator', () => {
+    expect(parseCliArgs(['send-async', CHAT_ID, '--', '--fix-the-parser'], ENV)).toMatchObject({
+      kind: 'send-async',
+      chatId: CHAT_ID,
+      message: '--fix-the-parser',
+    });
+  });
+
+  test('treats -- send-async and -- stop as new-chat prompts', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--', 'send-async', 'is', 'the', 'command', 'to', 'review',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      prompt: 'send-async is the command to review',
+    });
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--', 'stop', 'the', 'agent',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      prompt: 'stop the agent',
+    });
+  });
+
+  test.each([
+    { args: ['send-async'], message: 'requires a chat ID and one message' },
+    { args: ['send-async', CHAT_ID], message: 'requires a chat ID and one message' },
+    { args: ['send-async', CHAT_ID, 'a', 'b'], message: 'requires a chat ID and one message' },
+    { args: ['send-async', '123', 'message'], message: 'valid Garcon chat ID' },
+    { args: ['send-async', CHAT_ID, '   '], message: 'message must not be empty' },
+    { args: ['stop', CHAT_ID, 'extra'], message: 'exactly one chat ID' },
+    { args: ['stop', '123'], message: 'valid Garcon chat ID' },
+    { args: ['stop'], message: 'exactly one chat ID' },
+    { args: ['send-async', CHAT_ID, '--cwd', '.', 'message'], message: '--cwd cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--agent', 'codex', 'message'], message: '--agent cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--provider', 'p', 'message'], message: '--provider cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--endpoint', 'e', 'message'], message: '--endpoint cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--model', 'gpt', 'message'], message: '--model cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--permissions', 'acceptEdits', 'message'], message: '--permissions cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--reasoning-effort', 'high', 'message'], message: '--reasoning-effort cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--title', 'T', 'message'], message: '--title cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--tag', 'review', 'message'], message: '--tag cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--resume', CHAT_ID, 'message'], message: '--resume cannot be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--json', 'message'], message: '--json cannot be used with send-async' },
+    { args: ['stop', CHAT_ID, '--cwd', '.'], message: '--cwd cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--agent', 'codex'], message: '--agent cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--provider', 'p'], message: '--provider cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--endpoint', 'e'], message: '--endpoint cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--permissions', 'acceptEdits'], message: '--permissions cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--reasoning-effort', 'high'], message: '--reasoning-effort cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--title', 'T'], message: '--title cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--resume', CHAT_ID], message: '--resume cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--model', 'gpt'], message: '--model cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--tag', 'review'], message: '--tag cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--json'], message: '--json cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--allow-steer'], message: '--allow-steer cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '-'], message: 'exactly one chat ID' },
+    { args: ['list', 'agents', '--allow-steer'], message: '--allow-steer cannot be used with list' },
+    { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
+    { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
+    { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
+    { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
+  ])('rejects invalid control arguments: $message', ({ args, message }) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+    try {
+      parseCliArgs(args, ENV);
+    } catch (error) {
+      expect(error).toBeInstanceOf(CliError);
+      expect((error as CliError).exitCode).toBe(2);
+    }
+  });
 });

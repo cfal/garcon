@@ -173,10 +173,59 @@ garcon-cli list reasoning-efforts --agent codex
 ```
 
 List commands print compact tables by default and accept `--json` for scripts and agents. Add
-repeatable tags with `--tag review --tag delegated`; every started or resumed chat still receives
-the `cli` tag automatically. `--title` sets an explicit title on either a new or resumed chat.
+repeatable tags with `--tag review --tag delegated`; every new chat receives the `cli` tag
+automatically, and `cli` records creation through `garcon-cli` and nothing else. `--title` sets
+an explicit title on either a new or resumed chat.
 
-The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, or `stop`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+
+### One-Shot Chat Control From The CLI
+
+`send-async` submits one turn to an existing chat and returns immediately after Garcon accepts it, without waiting for the agent to finish. The turn runs in Garcon and stays fully visible and stoppable in the SPA. It inherits the chat's saved execution settings, so it may edit files or run tools when the chat permits them; it accepts no model, permission, or other execution overrides.
+
+```bash
+garcon-cli --workspace default send-async 1785337200123456 \
+  "Implement the reviewed changes and run the focused tests."
+```
+
+```text
+chat id: 1785337200123456
+delivery: new-turn
+turn id: 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
+```
+
+If the chat is busy running another turn, `send-async` reports the busy state and exits `3` without queueing or steering. Pass `--allow-steer` to deliver the message into the active turn instead; `--allow-steer` never queues:
+
+```bash
+garcon-cli --workspace default send-async 1785337200123456 \
+  --allow-steer "Also update the migration test."
+```
+
+```text
+chat id: 1785337200123456
+delivery: steer
+turn id: 7fc16cb7-53e0-4c10-a4a4-cd85900eb548
+```
+
+When the chat state changes between the run and steer checks, `send-async` alternates between the two endpoints for at most three total attempts with a short delay, then reports the race instead of risking a duplicate delivery. Use a single `-` as the message to read UTF-8 text from stdin:
+
+```bash
+printf '%s' "Apply the patch described in /tmp/review.md" | \
+  garcon-cli --workspace default send-async 1785337200123456 --allow-steer -
+```
+
+`stop` interrupts the active turn through the same REST command the SPA Stop button uses, and treats an already-idle chat as success. If queued messages exist, stopping pauses the queue so they do not start after the interruption; resume the queue in Garcon before sending a new direct turn:
+
+```bash
+garcon-cli --workspace default stop 1785337200123456
+```
+
+```text
+chat id: 1785337200123456
+stop: interrupt-requested
+```
+
+Ctrl-C detaches the terminal without sending `stop`; interrupting a `send-async` or `stop` invocation reports that the command may have reached Garcon, so inspect the chat before retrying. Neither `send-async` nor `stop` adds the `cli` tag; only starting a chat through `garcon-cli` does.
 
 Discovery requires the server to use a named `--workspace`; servers launched with `--workspace-dir` are intentionally not discoverable. `--server` may assert the descriptor's exact URL but cannot redirect credentials to another listener. Run `garcon-cli --help` for provider, endpoint, and complete mode options.
 

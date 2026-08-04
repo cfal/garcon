@@ -44,8 +44,15 @@ export interface ConsultationDependencies {
 
 const START_CHAT_ID_ATTEMPTS = 3;
 
-function consultationTags(invocation: CliInvocation): string[] {
-  return normalizeTags(['cli', ...(invocation.additionalTags ?? [])]);
+// The cli tag records creation provenance only. Every started chat receives it;
+// resumes, send-async, steer, and stop never add it.
+function startTags(additionalTags: readonly string[] | undefined): string[] {
+  return normalizeTags(['cli', ...(additionalTags ?? [])]);
+}
+
+function resumeTags(additionalTags: readonly string[] | undefined): string[] | undefined {
+  const tags = normalizeTags(additionalTags ?? []).filter((tag) => tag !== 'cli');
+  return tags.length === 0 ? undefined : tags;
 }
 
 function terminalResult(receipt: AgentTurnReceipt, output: CliOutput): void {
@@ -113,7 +120,7 @@ async function submitStart(
       projectPath: invocation.cwd,
       ...selection,
       command: prompt,
-      tags: consultationTags(invocation),
+      tags: startTags(invocation.additionalTags),
     };
     try {
       return await client.startChat(request, signal);
@@ -139,13 +146,14 @@ async function submitResume(
   signal: AbortSignal | undefined,
   createId: () => string,
 ): Promise<AgentTurnCommandResponse> {
+  const tagsToAdd = resumeTags(invocation.additionalTags);
   const request: AgentRunCommandRequest = {
     clientRequestId: createId(),
     clientMessageId: createId(),
     chatId: invocation.chatId,
     command: prompt,
     ...(invocation.agentId === undefined ? {} : { expectedAgentId: invocation.agentId }),
-    tagsToAdd: consultationTags(invocation),
+    ...(tagsToAdd === undefined ? {} : { tagsToAdd }),
     permissionFallbackPolicy: 'require-explicit-bypass',
   };
   const needsCatalog = invocation.model !== undefined

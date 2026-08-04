@@ -5,6 +5,16 @@ import path from 'node:path';
 import { main } from '../main.js';
 import type { CliOutput } from '../output.js';
 
+const CHAT_ID = '1785337200123456';
+
+// Local discovery stub exercises control-command routing without a workspace descriptor.
+const stubDiscovery = async () => ({
+  baseUrl: 'http://127.0.0.1:8080',
+  instanceId: 'instance',
+  localCapability: 'cap',
+  workspaceDir: '/tmp/ws',
+});
+
 function capturedOutput(): { output: CliOutput; diagnostics: string[] } {
   const diagnostics: string[] = [];
   return {
@@ -13,9 +23,24 @@ function capturedOutput(): { output: CliOutput; diagnostics: string[] } {
       accepted() {},
       completed() {},
       listing() {},
+      sent() {},
+      stopped() {},
       diagnostic(message) { diagnostics.push(message); },
     },
   };
+}
+
+function acceptedControlResponse(_input: string | URL | Request, init?: RequestInit): Response {
+  const body = JSON.parse(String(init?.body)) as Record<string, string>;
+  return Response.json({
+    success: true,
+    commandType: 'agent-run',
+    clientRequestId: body.clientRequestId,
+    chatId: body.chatId,
+    turnId: 'turn-1',
+    status: 'accepted',
+    acceptedAt: new Date().toISOString(),
+  });
 }
 
 describe('main', () => {
@@ -90,5 +115,197 @@ describe('main', () => {
       child.stdin.end();
       if (child.exitCode === null) child.kill('SIGKILL');
     }
+  });
+
+  test('send-async delivers to an idle chat and exits after acceptance', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main([
+      'send-async', CHAT_ID, 'Implement the review',
+    ], {
+      fetch: acceptedControlResponse,
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+    expect(exitCode).toBe(0);
+    expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('send-async without --allow-steer reports busy and exits 3', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main([
+      'send-async', CHAT_ID, 'Implement the review',
+    ], {
+      fetch: async () => Response.json({
+        success: false,
+        error: 'Chat is busy',
+        errorCode: 'SESSION_BUSY',
+        retryable: true,
+      }, { status: 409 }),
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+    expect(exitCode).toBe(3);
+    expect(capture.diagnostics[0]).toContain('--allow-steer');
+  });
+
+  test('send-async with --allow-steer steers the active turn', async () => {
+    const capture = capturedOutput();
+    let runCalls = 0;
+    const exitCode = await main([
+      'send-async', CHAT_ID, '--allow-steer', 'Also update the migration test.',
+    ], {
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.endsWith('/api/v1/chats/run')) {
+          runCalls += 1;
+          return Response.json({
+            success: false,
+            error: 'Chat is busy',
+            errorCode: 'SESSION_BUSY',
+            retryable: true,
+          }, { status: 409 });
+        }
+        const body = JSON.parse(String(init?.body)) as Record<string, string>;
+        return Response.json({
+          success: true,
+          commandType: 'steer',
+          clientRequestId: body.clientRequestId,
+          chatId: body.chatId,
+          turnId: 'turn-active',
+          status: 'accepted',
+          acceptedAt: new Date().toISOString(),
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+    expect(exitCode).toBe(0);
+    expect(runCalls).toBe(1);
+    expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('send-async rejects empty stdin content before any network submission', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main([
+      'send-async', CHAT_ID, '-',
+    ], {
+      fetch: async () => { throw new Error('network must not be reached'); },
+      discoverRuntime: stubDiscovery,
+      readStdin: async () => '   ',
+      output: capture.output,
+    });
+    expect(exitCode).toBe(2);
+    expect(capture.diagnostics[0]).toContain('message read from stdin must not be empty');
+  });
+
+  test('stop exits 0 for a satisfied outcome', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main(['stop', CHAT_ID], {
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, string>;
+        return Response.json({
+          success: true,
+          commandType: 'agent-stop',
+          clientRequestId: body.clientRequestId,
+          chatId: body.chatId,
+          status: 'accepted',
+          acceptedAt: new Date().toISOString(),
+          outcome: 'interrupt-requested',
+          control: {
+            serverInstanceId: 'instance',
+            queue: {
+              entries: [],
+              dispatchingEntryId: null,
+              steeringEntryId: null,
+              recentlyDispatched: [],
+              pause: null,
+              reorderRevision: 0,
+            },
+            version: 0,
+            updatedAt: null,
+          },
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+    expect(exitCode).toBe(0);
+    expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('stop exits 3 when the server reports failure', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main(['stop', CHAT_ID], {
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, string>;
+        return Response.json({
+          success: true,
+          commandType: 'agent-stop',
+          clientRequestId: body.clientRequestId,
+          chatId: body.chatId,
+          status: 'accepted',
+          acceptedAt: new Date().toISOString(),
+          outcome: 'failed',
+          control: {
+            serverInstanceId: 'instance',
+            queue: {
+              entries: [],
+              dispatchingEntryId: null,
+              steeringEntryId: null,
+              recentlyDispatched: [],
+              pause: null,
+              reorderRevision: 0,
+            },
+            version: 0,
+            updatedAt: null,
+          },
+        });
+      },
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+    });
+    expect(exitCode).toBe(3);
+    expect(capture.diagnostics[0]).toContain('could not stop');
+  });
+
+  test('interrupts a send-async stdin read with the control-aware diagnostic', async () => {
+    const controller = new AbortController();
+    const capture = capturedOutput();
+    const result = main([
+      'send-async', CHAT_ID, '-',
+    ], {
+      signal: controller.signal,
+      readStdin: () => new Promise(() => undefined),
+      output: capture.output,
+    });
+
+    controller.abort(new Error('terminal interrupted'));
+
+    await expect(result).resolves.toBe(130);
+    expect(capture.diagnostics).toEqual([
+      'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying',
+    ]);
+  });
+
+  test('interrupts a stop command with the control-aware diagnostic', async () => {
+    const controller = new AbortController();
+    const capture = capturedOutput();
+    const result = main(['stop', CHAT_ID], {
+      signal: controller.signal,
+      discoverRuntime: async () => {
+        await new Promise<never>((_resolve, reject) => {
+          controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+        });
+        throw new Error('unreachable');
+      },
+      output: capture.output,
+    });
+
+    controller.abort(new Error('terminal interrupted'));
+
+    await expect(result).resolves.toBe(130);
+    expect(capture.diagnostics).toEqual([
+      'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying',
+    ]);
   });
 });
