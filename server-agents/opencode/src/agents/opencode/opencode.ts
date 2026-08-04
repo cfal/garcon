@@ -421,6 +421,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       markTemporarilyUnavailable: (reason) => this.#markTemporarilyUnavailable(reason),
       failRunningTurns: (error) => this.#failRunningTurnsForListenerError(error),
       closeUnavailableInstanceIfIdle: () => this.#closeInstanceIfIdle(),
+      confirmEventDelivery: this.#options.requiresExecutable
+        ? (input) => this.#confirmGlobalEventDelivery(input)
+        : async () => undefined,
       handleEvent: (client, event) => this.#handleGlobalSSEEvent(client, event),
     });
   }
@@ -1073,6 +1076,51 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}), control);
   }
 
+  async #confirmGlobalEventDelivery(input: {
+    client: any;
+    directory?: string;
+    signal: AbortSignal;
+    waitForEvent(matches: (event: SSEEvent) => boolean): Promise<SSEEvent>;
+  }): Promise<void> {
+    const marker = `garcon-event-stream-readiness-${crypto.randomUUID()}`;
+    let observed = false;
+    let deliveryFailure: unknown;
+    const delivery = input.waitForEvent((event) =>
+      event.type === 'tui.toast.show'
+      && event.properties?.message === marker
+    );
+    void delivery.then(
+      () => {
+        observed = true;
+      },
+      (error) => {
+        deliveryFailure = error;
+      },
+    );
+    const scope = { directory: input.directory };
+    // The global route registers its bus listener lazily after server.connected. An echoed
+    // transient TUI event proves that later session events cannot fall in that gap without
+    // creating or changing provider sessions.
+    // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/server/routes/instance/httpapi/handlers/global.ts#L33-L50
+    // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/server/routes/instance/httpapi/handlers/tui.ts#L79-L83
+    while (!observed) {
+      if (deliveryFailure) throw deliveryFailure;
+      const published: any = await this.#runScopedSessionRequest(
+        'OpenCode event stream delivery probe',
+        scope,
+        (signal, requestScope) => input.client.tui.showToast(withOpenCodeRequestScope({
+          message: marker,
+          variant: 'info',
+          duration: 1,
+        }, requestScope), { signal }),
+        { signal: input.signal },
+      );
+      throwOpenCodeResultError(published, 'OpenCode event stream delivery probe failed');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    await delivery;
+  }
+
   async #quiesceRetiredProviderWork(
     client: any,
     agentSessionId: string,
@@ -1111,13 +1159,13 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     } = request;
     void images;
     void thinkingMode;
+    const scope = createOpenCodeRequestScope(projectPath);
 
     await this.#ensureOpenCodeServer();
-    await this.#globalEventListener.start();
+    await this.#globalEventListener.start(scope.directory);
 
     const client = await this.getClient();
     assertOpenCodeExecutionOpen(request);
-    const scope = createOpenCodeRequestScope(projectPath);
     const sessionResult: any = await this.#runRequest<any>(
       'OpenCode session create',
       (signal) => client.session.create(withOpenCodeRequestScope({
@@ -1155,7 +1203,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#logger.info('OpenCode session created and registered', { agentSessionId });
 
     try {
-      await this.#globalEventListener.start();
+      await this.#globalEventListener.start(scope.directory);
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
@@ -1229,16 +1277,16 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     } = request;
     void images;
     void thinkingMode;
-
-    await this.#ensureOpenCodeServer();
-    await this.#globalEventListener.start();
-    assertOpenCodeExecutionOpen(request);
-
     const session = this.#sessions.get(agentSessionId);
-    const eventMetadata = openCodeEventMetadata({ clientRequestId, turnId });
-    const turn = createOpenCodeTurnContext(eventMetadata, command);
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
+
+    await this.#ensureOpenCodeServer();
+    await this.#globalEventListener.start(scope.directory);
+    assertOpenCodeExecutionOpen(request);
+
+    const eventMetadata = openCodeEventMetadata({ clientRequestId, turnId });
+    const turn = createOpenCodeTurnContext(eventMetadata, command);
     const client = await this.getClient();
     if (session) {
       await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
@@ -1271,7 +1319,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const promptBody = buildPromptBody(command, model, turn.providerPromptPartId);
 
     try {
-      await this.#globalEventListener.start();
+      await this.#globalEventListener.start(scope.directory);
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');

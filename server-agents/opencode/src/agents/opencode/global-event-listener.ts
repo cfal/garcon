@@ -15,7 +15,19 @@ interface OpenCodeGlobalEventListenerOptions {
   markTemporarilyUnavailable(reason: string): boolean;
   failRunningTurns(error: Error): void;
   closeUnavailableInstanceIfIdle(): boolean;
+  confirmEventDelivery(input: {
+    client: any;
+    directory?: string;
+    signal: AbortSignal;
+    waitForEvent(matches: (event: SSEEvent) => boolean): Promise<SSEEvent>;
+  }): Promise<void>;
   handleEvent(client: any, event: SSEEvent): void;
+}
+
+interface EventWaiter {
+  matches(event: SSEEvent): boolean;
+  resolve(event: SSEEvent): void;
+  reject(error: Error): void;
 }
 
 // Owns readiness, liveness, and retry state for the single process-wide OpenCode event stream.
@@ -28,6 +40,7 @@ export class OpenCodeGlobalEventListener {
   #abortController: AbortController | null = null;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  #readinessDirectory: string | undefined;
 
   constructor(options: OpenCodeGlobalEventListenerOptions) {
     this.#options = options;
@@ -47,7 +60,8 @@ export class OpenCodeGlobalEventListener {
     this.#started = false;
   }
 
-  async start(): Promise<void> {
+  async start(directory?: string): Promise<void> {
+    if (directory) this.#readinessDirectory = directory;
     if (this.#retryTimer) clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
     if (this.#started) {
@@ -60,7 +74,7 @@ export class OpenCodeGlobalEventListener {
     const abortController = new AbortController();
     this.#abortController = abortController;
     let readySettled = false;
-    let connected = false;
+    let ready = false;
     let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
@@ -72,6 +86,7 @@ export class OpenCodeGlobalEventListener {
     const settleReady = () => {
       if (readySettled) return;
       readySettled = true;
+      ready = true;
       clearTimeout(readyTimer);
       resolveReady();
       if (this.#readyPromise === readyPromise) {
@@ -116,15 +131,15 @@ export class OpenCodeGlobalEventListener {
     void this.#run({
       generation,
       abortController,
+      directory: this.#readinessDirectory,
       readyPromise,
-      settleReady: () => {
-        connected = true;
-        settleReady();
+      markConnected: () => {
         armHeartbeatWatchdog();
       },
+      settleReady,
       armHeartbeatWatchdog,
       settleNotReady,
-      connected: () => connected,
+      ready: () => ready,
       clearReadyTimer: () => clearTimeout(readyTimer),
       clearHeartbeatWatchdog,
     });
@@ -134,14 +149,30 @@ export class OpenCodeGlobalEventListener {
   async #run(input: {
     generation: number;
     abortController: AbortController;
+    directory?: string;
     readyPromise: Promise<void>;
+    markConnected(): void;
     settleReady(): void;
     armHeartbeatWatchdog(): void;
     settleNotReady(error: Error): void;
-    connected(): boolean;
+    ready(): boolean;
     clearReadyTimer(): void;
     clearHeartbeatWatchdog(): void;
   }): Promise<void> {
+    const eventWaiters = new Set<EventWaiter>();
+    const rejectEventWaiters = (error: Error) => {
+      for (const waiter of eventWaiters) waiter.reject(error);
+      eventWaiters.clear();
+    };
+    const waitForEvent = (matches: (event: SSEEvent) => boolean): Promise<SSEEvent> =>
+      new Promise((resolve, reject) => {
+        if (input.abortController.signal.aborted) {
+          reject(input.abortController.signal.reason);
+          return;
+        }
+        eventWaiters.add({ matches, resolve, reject });
+      });
+    let confirmationStarted = false;
     try {
       const client = await this.#options.getClient();
       if (input.generation !== this.#generation) {
@@ -150,17 +181,39 @@ export class OpenCodeGlobalEventListener {
       for await (const event of streamGlobalEvents(
         client,
         input.abortController.signal,
-        input.settleReady,
+        () => {
+          if (confirmationStarted) return;
+          confirmationStarted = true;
+          input.markConnected();
+          void this.#options.confirmEventDelivery({
+            client,
+            directory: input.directory,
+            signal: input.abortController.signal,
+            waitForEvent,
+          }).then(() => {
+            if (input.generation === this.#generation) input.settleReady();
+          }).catch((error) => {
+            const failure = error instanceof Error ? error : new Error(String(error));
+            input.settleNotReady(failure);
+            input.abortController.abort(failure);
+          });
+        },
       )) {
         if (input.generation !== this.#generation) return;
         input.armHeartbeatWatchdog();
+        for (const waiter of eventWaiters) {
+          if (!waiter.matches(event)) continue;
+          eventWaiters.delete(waiter);
+          waiter.resolve(event);
+        }
         this.#options.handleEvent(client, event);
       }
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
       input.settleNotReady(failure);
+      if (!input.abortController.signal.aborted) input.abortController.abort(failure);
       if (input.generation !== this.#generation) return;
-      if (!input.connected() || failure instanceof OpenCodeTimeoutError) {
+      if (!input.ready() || failure instanceof OpenCodeTimeoutError) {
         const reason = errorMessage(failure);
         if (this.#options.markTemporarilyUnavailable(reason)) {
           this.#options.logger.warn('OpenCode event stream marked the runtime unavailable', { reason });
@@ -197,6 +250,7 @@ export class OpenCodeGlobalEventListener {
       }, retryMs);
       this.#retryTimer.unref?.();
     } finally {
+      rejectEventWaiters(new Error('OpenCode event stream ended before event delivery confirmation'));
       input.clearReadyTimer();
       input.clearHeartbeatWatchdog();
       if (this.#abortController === input.abortController) this.#abortController = null;

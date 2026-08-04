@@ -24,9 +24,9 @@ import {
 } from '../../support/scripted-opencode.js';
 
 // Locks the 119ecb4f transport contracts against the real pinned binary through the
-// supervisor's reverse proxy: readiness waits for the actual connected frame, a genuine
-// socket reset fails the active turn before any reconnect, late provider events cannot leak
-// under the retired turn, and the replacement global stream recovers.
+// supervisor's reverse proxy: readiness waits for the connected frame and a transient event
+// echo, a genuine socket reset fails the active turn before any reconnect, late provider events
+// cannot leak under the retired turn, and the replacement global stream recovers.
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
@@ -80,9 +80,17 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       expect(nativeSessionCount(fixture)).toBe(1);
       expect(testEnvironment.model.requests()).toHaveLength(1);
 
-      const paths = (await controller.requests()).map((request) => request.path);
+      const requests = await controller.requests();
+      const paths = requests.map((request) => request.path);
       expect(paths).toContain('/global/event');
       expect(paths).not.toContain('/event');
+      const globalStreamIndex = requests.findIndex((request) => request.path === '/global/event');
+      const deliveryProbeIndex = requests.findIndex((request) =>
+        request.method === 'POST' && request.path === '/tui/show-toast'
+      );
+      const promptIndex = requests.findIndex((request) => request.path.endsWith('/prompt_async'));
+      expect(deliveryProbeIndex).toBeGreaterThan(globalStreamIndex);
+      expect(promptIndex).toBeGreaterThan(deliveryProbeIndex);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
@@ -137,7 +145,6 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
         chatId,
         command: marker('RESET_SUCCESSOR_PROMPT'),
       }));
-      held.release();
       await waitForVisibleResponse({
         fixture,
         chatId,
@@ -145,6 +152,9 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
         marker: successorReply,
         afterIndex: successorCursor,
       });
+      // The successor response proves that OpenCode cancelled the held request and started a
+      // new one. Releasing earlier lets the retired response beat the provider abort.
+      held.release();
       // The successor terminal is a stream-order barrier after the provider's late completion.
       expect(fixture.client.eventsSince(cursor).slice(terminalIndex + 1).some((event) =>
         event.type === 'chat-messages'
