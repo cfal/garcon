@@ -368,7 +368,7 @@ describe('garcon-cli', () => {
 
       expect(sent.exitCode).toBe(3);
       expect(sent.stdout).toBe('');
-      expect(sent.stderr).toContain('busy');
+      expect(sent.stderr).toContain('cannot accept a new turn');
       expect(sent.stderr).toContain('--allow-steer');
       const control = await fixture.client.getExecutionControl(busyChat!.id);
       expect(control.queue.entries).toEqual([]);
@@ -407,6 +407,26 @@ describe('garcon-cli', () => {
       const interrupted = await cli.result;
       expect(interrupted.exitCode).toBe(4);
       expect(interrupted.stderr).toContain('the turn was stopped');
+
+      const blocked = await runCli(controlArguments(fixture, [
+        'send-async', chatId, 'blocked-after-stop',
+      ]));
+      expect(blocked.exitCode).toBe(3);
+      expect(blocked.stdout).toBe('');
+      expect(blocked.stderr).toContain('pending control state');
+      expect(blocked.stderr).toContain('paused or queued work in Garcon');
+
+      const blockedWithSteer = await runCli(controlArguments(fixture, [
+        'send-async', chatId, '--allow-steer', 'still-blocked-after-stop',
+      ]));
+      expect(blockedWithSteer.exitCode).toBe(3);
+      expect(blockedWithSteer.stdout).toBe('');
+      expect(blockedWithSteer.stderr).toContain('pending control state');
+      expect(blockedWithSteer.stderr).toContain('paused or queued work in Garcon');
+      expect(blockedWithSteer.stderr).not.toContain('changed execution state repeatedly');
+
+      const controlAfter = await fixture.client.getExecutionControl(chatId);
+      expect(controlAfter.queue.entries.map((entry) => entry.content)).toEqual(['pending-after-stop']);
     }, { namedWorkspace: WORKSPACE });
   });
 

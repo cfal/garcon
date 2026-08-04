@@ -214,7 +214,7 @@ printf '%s' "Apply the patch described in /tmp/review.md" | \
   garcon-cli --workspace default send-async 1785337200123456 --allow-steer -
 ```
 
-`stop` interrupts the active turn through the same REST command the SPA Stop button uses, and treats an already-idle chat as success:
+`stop` interrupts the active turn through the same REST command the SPA Stop button uses, and treats an already-idle chat as success. If queued messages exist, stopping pauses the queue so they do not start after the interruption; resume the queue in Garcon before sending a new direct turn:
 
 ```bash
 garcon-cli --workspace default stop 1785337200123456

@@ -25,7 +25,8 @@ The selected permission mode may allow the agent to edit files and run tools.
 send-async submits one turn and returns immediately; it inherits the chat's
 saved execution settings, so it may edit files or run tools. Use - as the
 message to read UTF-8 text from stdin. stop uses the same command as the SPA
-Stop button and interrupts the active turn.
+Stop button and interrupts the active turn. If queued messages exist, stop
+pauses the queue; resume it in Garcon before sending a new direct turn.
 
 List resources:
   agents

@@ -103,6 +103,21 @@ describe('sendChatAsync', () => {
     expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
   });
 
+  test('uses a new turn for an idle chat even when steering is allowed', async () => {
+    const testClient = client();
+    const testOutput = output();
+    await sendChatAsync(
+      { chatId: CHAT_ID, content: 'Implement it', allowSteer: true },
+      testClient,
+      testOutput,
+      undefined,
+      noDelayDependencies(),
+    );
+    expect(testClient.runs).toHaveLength(1);
+    expect(testClient.steers).toHaveLength(0);
+    expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
+  });
+
   test('fails without steering when the chat is busy and --allow-steer is absent', async () => {
     const testClient = client({ async runChat() { throw busyError(); } });
     const testOutput = output();
@@ -111,7 +126,7 @@ describe('sendChatAsync', () => {
       testClient, testOutput, undefined, noDelayDependencies(),
     )).rejects.toMatchObject({
       phase: 'submission',
-      message: expect.stringContaining('--allow-steer'),
+      message: expect.stringMatching(/chat is busy.*paused or queued work in Garcon/),
       exitCode: 3,
     });
     expect(testClient.runs).toHaveLength(1);
@@ -158,7 +173,7 @@ describe('sendChatAsync', () => {
       { chatId: CHAT_ID, content: 'Message', allowSteer: true },
       testClient, testOutput, undefined, noDelayDependencies(),
     )).rejects.toMatchObject({
-      message: expect.stringContaining('not sent after 3 attempts'),
+      message: expect.stringMatching(/not sent after 3 attempts.*last result: chat is busy/),
       exitCode: 3,
     });
     expect(testClient.runs).toHaveLength(2);

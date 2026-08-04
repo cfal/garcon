@@ -35,7 +35,7 @@ export interface ChatControlDependencies {
   delay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 }
 
-function hasDefinitiveConflictCode(error: unknown, code: string): boolean {
+function hasDefinitiveConflictCode(error: unknown, code: string): error is GarconHttpError {
   // Route switches require the definitive HTTP 409 conflict plus the exact code;
   // an identical code on another status must propagate unchanged.
   return error instanceof GarconHttpError
@@ -99,7 +99,9 @@ export async function sendChatAsync(
         if (!input.allowSteer) {
           throw new CliError(
             'submission',
-            `chat ${input.chatId} is busy; retry later or pass --allow-steer`,
+            `chat ${input.chatId} cannot accept a new turn: ${error.message}; `
+              + 'wait for the active turn, pass --allow-steer to steer it, '
+              + 'or resolve paused or queued work in Garcon',
             3,
             { cause: error },
           );
@@ -119,8 +121,9 @@ export async function sendChatAsync(
 
   throw new CliError(
     'submission',
-    `chat ${input.chatId} changed execution state repeatedly; the message was not sent after 3 attempts`
-      + (lastStateFlip?.errorCode ? ` (last result: ${lastStateFlip.errorCode})` : ''),
+    `chat ${input.chatId} could not find a valid delivery route; the message was not sent after `
+      + `${MAX_CONTROL_DISPATCH_ATTEMPTS} attempts; inspect its active turn and paused or queued work `
+      + `in Garcon before retrying; last result: ${lastStateFlip?.message ?? 'execution state conflict'}`,
     3,
     { cause: lastStateFlip },
   );
