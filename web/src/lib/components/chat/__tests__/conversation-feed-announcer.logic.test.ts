@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	AssistantMessage,
 	BashToolUseMessage,
@@ -13,6 +13,8 @@ import {
 } from '$shared/chat-types';
 import {
 	announcementForAppendedRow,
+	CHAT_FEED_ANNOUNCEMENT_BATCH_MS,
+	ConversationFeedAnnouncementBatcher,
 	ConversationFeedAnnouncerState,
 	plainAnnouncementText,
 } from '../conversation-feed-announcer';
@@ -820,5 +822,62 @@ describe('ConversationFeedAnnouncerState', () => {
 				...enabled,
 			}),
 		).toBeNull();
+	});
+});
+
+describe('ConversationFeedAnnouncementBatcher', () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it('batches rapid streamed fragments without splitting words', () => {
+		const publish = vi.fn<(text: string) => void>();
+		const batcher = new ConversationFeedAnnouncementBatcher(publish);
+
+		batcher.enqueue({
+			kind: 'announce',
+			chunks: [{ kind: 'stream', rowId: 'assistant-1', source: 'hel' }],
+		});
+		vi.advanceTimersByTime(100);
+		batcher.enqueue({
+			kind: 'announce',
+			chunks: [{ kind: 'stream', rowId: 'assistant-1', source: 'lo world' }],
+		});
+
+		expect(publish).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS - 100);
+		expect(publish).toHaveBeenCalledOnce();
+		expect(publish).toHaveBeenCalledWith('hello world');
+	});
+
+	it('keeps distinct rows and actions as separate semantic chunks', () => {
+		const publish = vi.fn<(text: string) => void>();
+		const batcher = new ConversationFeedAnnouncementBatcher(publish);
+
+		batcher.enqueue({
+			kind: 'announce',
+			chunks: [
+				{ kind: 'stream', rowId: 'assistant-1', source: 'First response' },
+				{ kind: 'discrete', text: 'Permission required' },
+				{ kind: 'stream', rowId: 'assistant-2', source: 'Second response' },
+			],
+		});
+		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+
+		expect(publish).toHaveBeenCalledWith('First response\nPermission required\nSecond response');
+	});
+
+	it('cancels queued speech when the announcement surface clears', () => {
+		const publish = vi.fn<(text: string) => void>();
+		const batcher = new ConversationFeedAnnouncementBatcher(publish);
+		batcher.enqueue({
+			kind: 'announce',
+			chunks: [{ kind: 'stream', rowId: 'assistant-1', source: 'stale response' }],
+		});
+
+		batcher.enqueue({ kind: 'clear' });
+		expect(publish).toHaveBeenCalledOnce();
+		expect(publish).toHaveBeenCalledWith('');
+		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+		expect(publish).toHaveBeenCalledOnce();
 	});
 });

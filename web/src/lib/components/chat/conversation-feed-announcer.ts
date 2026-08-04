@@ -19,6 +19,13 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 
 const ANNOUNCEMENT_LINEAGE_LIMIT = 512;
+export const CHAT_FEED_ANNOUNCEMENT_BATCH_MS = 350;
+
+export type ConversationFeedAnnouncementChunk =
+	{ kind: 'stream'; rowId: string; source: string } | { kind: 'discrete'; text: string };
+
+export type ConversationFeedAnnouncementUpdate =
+	{ kind: 'clear' } | { kind: 'announce'; chunks: ConversationFeedAnnouncementChunk[] };
 
 function isAnnounceableResponseMessageType(
 	messageType: string,
@@ -59,6 +66,62 @@ interface ConversationFeedAnnouncerInput {
 	floatingPermissionIds: readonly string[];
 }
 
+function announcementText(update: ConversationFeedAnnouncementUpdate): string {
+	if (update.kind === 'clear') return '';
+	return update.chunks
+		.map((chunk) => (chunk.kind === 'stream' ? plainAnnouncementText(chunk.source) : chunk.text))
+		.filter(Boolean)
+		.join('\n');
+}
+
+export class ConversationFeedAnnouncementBatcher {
+	#pending: ConversationFeedAnnouncementChunk[] = [];
+	#timer: ReturnType<typeof setTimeout> | null = null;
+
+	constructor(private readonly publish: (text: string) => void) {}
+
+	enqueue(update: ConversationFeedAnnouncementUpdate): void {
+		if (update.kind === 'clear') {
+			this.#cancelPending();
+			this.publish('');
+			return;
+		}
+
+		for (const chunk of update.chunks) {
+			const previous = this.#pending.at(-1);
+			if (
+				chunk.kind === 'stream' &&
+				previous?.kind === 'stream' &&
+				previous.rowId === chunk.rowId
+			) {
+				previous.source += chunk.source;
+			} else {
+				this.#pending.push({ ...chunk });
+			}
+		}
+		if (this.#timer !== null || this.#pending.length === 0) return;
+		this.#timer = setTimeout(() => this.#flush(), CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+	}
+
+	destroy(): void {
+		this.#cancelPending();
+	}
+
+	#flush(): void {
+		this.#timer = null;
+		const update = { kind: 'announce' as const, chunks: this.#pending };
+		this.#pending = [];
+		const text = announcementText(update);
+		if (text) this.publish(text);
+	}
+
+	#cancelPending(): void {
+		if (this.#timer !== null) clearTimeout(this.#timer);
+		this.#timer = null;
+		this.#pending = [];
+	}
+}
+
 export function announcementForAppendedRow(
 	row: ChatDisplayRow,
 	hiddenToolTypes: readonly string[],
@@ -95,6 +158,14 @@ export class ConversationFeedAnnouncerState {
 	#isLiveWindow: boolean | null = null;
 
 	reconcile(input: ConversationFeedAnnouncerInput): string | null {
+		const update = this.reconcileUpdate(input);
+		if (update === null) return null;
+		return announcementText(update) || (update.kind === 'clear' ? '' : null);
+	}
+
+	reconcileUpdate(
+		input: ConversationFeedAnnouncerInput,
+	): ConversationFeedAnnouncementUpdate | null {
 		const tailRows = input.rows.slice(-ANNOUNCEMENT_LINEAGE_LIMIT);
 		if (input.surfaceIdentity !== this.#surfaceIdentity) {
 			this.#surfaceIdentity = input.surfaceIdentity;
@@ -107,7 +178,7 @@ export class ConversationFeedAnnouncerState {
 			this.#dataRevision = input.mutationClock.dataRevision;
 			this.#detachedStatusAnnounced = false;
 			this.#isLiveWindow = input.isLiveWindow;
-			return '';
+			return { kind: 'clear' };
 		}
 
 		const previousDataRevision = this.#dataRevision;
@@ -171,7 +242,7 @@ export class ConversationFeedAnnouncerState {
 		});
 		if (!input.visible) {
 			this.#rememberLineages(tailRows, input.floatingPermissionIds);
-			return '';
+			return { kind: 'clear' };
 		}
 		if (!input.isLiveWindow) {
 			this.#rememberLineages(tailRows, input.floatingPermissionIds);
@@ -179,14 +250,17 @@ export class ConversationFeedAnnouncerState {
 				this.#detachedStatusAnnounced ||
 				(!responseUpdatedOutsideWindow && addedPermissionAnnouncements.length === 0)
 			) {
-				return clearedDetachedStatus ? '' : null;
+				return clearedDetachedStatus ? { kind: 'clear' } : null;
 			}
 			this.#detachedStatusAnnounced = true;
-			return input.detachedStatus;
+			return {
+				kind: 'announce',
+				chunks: [{ kind: 'discrete', text: input.detachedStatus }],
+			};
 		}
 		const hasRowAppend = kinds.has('live-append') || kinds.has('presentation-structure');
 		if (!hasRowAppend && addedFloatingPermissionIds.length === 0) {
-			return resumedLiveEnd || clearedDetachedStatus ? '' : null;
+			return resumedLiveEnd || clearedDetachedStatus ? { kind: 'clear' } : null;
 		}
 
 		const candidatesById = new Map<string, ChatDisplayRow>();
@@ -214,27 +288,35 @@ export class ConversationFeedAnnouncerState {
 			);
 		if (!input.pinnedToBottom) {
 			if (!responseUpdated || this.#detachedStatusAnnounced) {
-				return clearedDetachedStatus ? '' : null;
+				return clearedDetachedStatus ? { kind: 'clear' } : null;
 			}
 			this.#detachedStatusAnnounced = true;
-			return input.detachedStatus;
+			return {
+				kind: 'announce',
+				chunks: [{ kind: 'discrete', text: input.detachedStatus }],
+			};
 		}
 
-		const announcements = announcementCandidates.flatMap((row) => {
-			if (row.kind === 'message' && row.message instanceof AssistantMessage) {
-				const next = nextContent.get(row.id) ?? '';
-				const prior = priorContent.get(row.id) ?? '';
-				const suffix = prior && next.startsWith(prior) ? next.slice(prior.length) : next;
-				const content = plainAnnouncementText(suffix);
-				return content ? [content] : [];
-			}
-			const content = announcementForAppendedRow(row, input.hiddenToolTypes);
-			return content ? [content] : [];
-		});
+		const announcements = announcementCandidates.flatMap(
+			(row): ConversationFeedAnnouncementChunk[] => {
+				if (row.kind === 'message' && row.message instanceof AssistantMessage) {
+					const next = nextContent.get(row.id) ?? '';
+					const prior = priorContent.get(row.id) ?? '';
+					const suffix = prior && next.startsWith(prior) ? next.slice(prior.length) : next;
+					return suffix ? [{ kind: 'stream', rowId: row.id, source: suffix }] : [];
+				}
+				const content = announcementForAppendedRow(row, input.hiddenToolTypes);
+				return content ? [{ kind: 'discrete', text: content }] : [];
+			},
+		);
 		for (const _permissionId of addedPermissionAnnouncements) {
-			announcements.push(m.chat_permission_permission_required());
+			announcements.push({
+				kind: 'discrete',
+				text: m.chat_permission_permission_required(),
+			});
 		}
-		return announcements.join('\n') || (clearedDetachedStatus ? '' : null);
+		if (announcements.length > 0) return { kind: 'announce', chunks: announcements };
+		return clearedDetachedStatus ? { kind: 'clear' } : null;
 	}
 
 	#isResponseAnnouncement(row: ChatDisplayRow, hiddenToolTypes: readonly string[]): boolean {

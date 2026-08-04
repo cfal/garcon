@@ -33,7 +33,10 @@
 	import { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
-	import { ConversationFeedAnnouncerState } from './conversation-feed-announcer.js';
+	import {
+		ConversationFeedAnnouncementBatcher,
+		ConversationFeedAnnouncerState,
+	} from './conversation-feed-announcer.js';
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
@@ -141,6 +144,9 @@
 	const itemState = new ConversationFeedItemState();
 	const announcerState = new ConversationFeedAnnouncerState();
 	let announcement = $state.raw({ sequence: 0, text: '' });
+	const announcementBatcher = new ConversationFeedAnnouncementBatcher((text) => {
+		announcement = { sequence: announcement.sequence + 1, text };
+	});
 	const projectionInput = $derived({
 		surfaceIdentity,
 		rows: chatState.visibleRows,
@@ -192,10 +198,8 @@
 			),
 		};
 		untrack(() => {
-			const nextAnnouncement = announcerState.reconcile(input);
-			if (nextAnnouncement !== null) {
-				announcement = { sequence: announcement.sequence + 1, text: nextAnnouncement };
-			}
+			const update = announcerState.reconcileUpdate(input);
+			if (update !== null) announcementBatcher.enqueue(update);
 		});
 	});
 
@@ -266,6 +270,7 @@
 		retention.clear();
 		projectionState.reset();
 		itemState.clear();
+		announcementBatcher.destroy();
 		announcerState.reset();
 	});
 </script>
