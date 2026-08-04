@@ -102,8 +102,12 @@ describe('ActiveTranscriptState', () => {
 			'assistant-message': liveRevision,
 		});
 
+		const entriesBeforeDuplicate = chat.entries;
+		const rowsBeforeDuplicate = chat.visibleRows;
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, assistant('duplicate'))]);
 		expect(chat.feedMutationClock.dataRevision).toBe(liveRevision);
+		expect(chat.entries).toBe(entriesBeforeDuplicate);
+		expect(chat.visibleRows).toBe(rowsBeforeDuplicate);
 		chat.applyMessages('chat-1', 'generation-1', [entry(2, user('next prompt'))]);
 		expect(chat.feedMutationClock.lastResponseRevisionByMessageType).toEqual({
 			'assistant-message': liveRevision,

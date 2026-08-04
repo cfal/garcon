@@ -328,7 +328,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					? applied.messages.slice(-ACTIVE_TRANSCRIPT_RETENTION_LIMIT)
 					: applied.messages;
 			this.generationId = generationId;
-			this.entries = nextEntries;
+			if (nextEntries !== this.entries) this.entries = nextEntries;
 			this.lastSeq = applied.lastSeq;
 			this.oldestSeq = this.entries[0]?.seq ?? 0;
 			if (nextEntries.length < applied.messages.length) {
