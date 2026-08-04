@@ -3,11 +3,12 @@ import {
 	classifyMeasuredConversationViewportFill,
 	classifyConversationVirtualStructure,
 	attainableConversationTargetOffset,
+	createRetainedConversationRangeExtractor,
 	isConversationTargetLayoutReady,
 	retainedConversationRange,
 	resolveConversationViewportRect,
 	shouldPreserveConversationVirtualEdge,
-} from '../ConversationFeedVirtualController.svelte';
+} from '../conversation-feed-viewport-geometry';
 
 describe('ConversationFeedVirtualController helpers', () => {
 	it('classifies identity, edge, estimate-only, and no-op changes', () => {
@@ -56,6 +57,22 @@ describe('ConversationFeedVirtualController helpers', () => {
 				[9, 1, 5, -1, 12],
 			),
 		).toEqual([1, 4, 5, 6, 9]);
+	});
+
+	it('retains the pinned transcript tail and its trailing surface', () => {
+		expect(
+			retainedConversationRange({ startIndex: 1, endIndex: 2, overscan: 0, count: 10 }, [], 7),
+		).toEqual([1, 2, 7, 8, 9]);
+	});
+
+	it('publishes a fresh range extractor when retention policy changes', () => {
+		const first = createRetainedConversationRangeExtractor([], 7);
+		const second = createRetainedConversationRangeExtractor([0], 7);
+		const range = { startIndex: 2, endIndex: 3, overscan: 0, count: 10 };
+
+		expect(second).not.toBe(first);
+		expect(first(range)).toEqual([2, 3, 7, 8, 9]);
+		expect(second(range)).toEqual([0, 2, 3, 7, 8, 9]);
 	});
 
 	it('preserves detached edge changes without overriding pinned or navigation policy', () => {
@@ -141,7 +158,10 @@ describe('ConversationFeedVirtualController helpers', () => {
 
 	it('retains the last usable viewport rect across pathological observations', () => {
 		const previous = { width: 1_024, height: 720 };
-		expect(resolveConversationViewportRect(previous, { width: 5, height: 5 })).toBe(previous);
+		expect(resolveConversationViewportRect(previous, { width: 5, height: 5 })).toEqual({
+			width: 5,
+			height: 5,
+		});
 		expect(resolveConversationViewportRect(previous, { width: 0, height: 600 })).toBe(previous);
 		expect(resolveConversationViewportRect(previous, { width: 390, height: 24 })).toEqual({
 			width: 390,

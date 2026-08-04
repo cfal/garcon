@@ -3,7 +3,6 @@ import type { Attachment } from 'svelte/attachments';
 import type { Readable, Unsubscriber } from 'svelte/store';
 import {
 	createVirtualizer,
-	defaultRangeExtractor,
 	observeElementRect,
 	type Range,
 	type Rect,
@@ -19,13 +18,21 @@ import type {
 	HiddenReadingRestoreResult,
 } from '$lib/chat/transcript/conversation-viewport-port.js';
 import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProjectionState.svelte.js';
+import {
+	attainableConversationTargetOffset,
+	CHAT_GEOMETRY_END_THRESHOLD_PX,
+	classifyConversationVirtualStructure,
+	classifyMeasuredConversationViewportFill,
+	createRetainedConversationRangeExtractor,
+	isConversationTargetLayoutReady,
+	resolveConversationViewportRect,
+	shouldPreserveConversationVirtualEdge,
+} from './conversation-feed-viewport-geometry.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 import type { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
-export const CHAT_GEOMETRY_END_THRESHOLD_PX = 1;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
-const CHAT_MIN_USABLE_VIEWPORT_HEIGHT = 24;
 const MAX_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
@@ -36,9 +43,6 @@ interface ConversationVirtualAnchor {
 	offsetWithinItem: number;
 	fallbackKeys: readonly string[];
 }
-
-export type ConversationVirtualStructureChange =
-	'none' | 'identity' | 'edge-qualified' | 'interior-only';
 
 interface ConversationFeedVirtualControllerOptions {
 	get model(): ConversationVirtualFeedModel;
@@ -63,93 +67,6 @@ function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
 	return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-export function classifyConversationVirtualStructure(input: {
-	identityChanged: boolean;
-	previousKeys: readonly string[];
-	previousEstimates: readonly number[];
-	nextKeys: readonly string[];
-	nextEstimates: readonly number[];
-}): ConversationVirtualStructureChange {
-	if (input.identityChanged) return 'identity';
-	const keysChanged = !arraysEqual(input.previousKeys, input.nextKeys);
-	const estimatesChanged = !arraysEqual(input.previousEstimates, input.nextEstimates);
-	if (!keysChanged && !estimatesChanged) return 'none';
-	if (
-		input.previousKeys.length !== input.nextKeys.length ||
-		input.previousKeys[0] !== input.nextKeys[0] ||
-		input.previousKeys.at(-1) !== input.nextKeys.at(-1)
-	) {
-		return 'edge-qualified';
-	}
-	return 'interior-only';
-}
-
-export function shouldPreserveConversationVirtualEdge(input: {
-	structure: ConversationVirtualStructureChange;
-	endBehavior: ConversationVirtualGeometrySnapshot['endBehavior'];
-	restorePolicyEnd: boolean;
-}): boolean {
-	return (
-		input.structure === 'edge-qualified' &&
-		input.endBehavior !== 'explicit-navigation' &&
-		!input.restorePolicyEnd
-	);
-}
-
-export function retainedConversationRange(
-	range: Range,
-	retainedIndexes: readonly number[],
-): number[] {
-	const indexes = new Set(defaultRangeExtractor(range));
-	for (const index of retainedIndexes) {
-		if (index >= 0 && index < range.count) indexes.add(index);
-	}
-	return [...indexes].sort((left, right) => left - right);
-}
-
-export function classifyMeasuredConversationViewportFill(input: {
-	keys: readonly string[];
-	measuredSizes: { get(key: string): number | undefined };
-	leadingSize: number;
-	viewportHeight: number;
-}): 'overflow' | 'underfilled' | null {
-	let physicalSize = input.leadingSize;
-	for (const key of input.keys) {
-		const size = input.measuredSizes.get(key);
-		if (size === undefined) return null;
-		physicalSize += size;
-		if (physicalSize > input.viewportHeight + CHAT_GEOMETRY_END_THRESHOLD_PX) {
-			return 'overflow';
-		}
-	}
-	return 'underfilled';
-}
-
-export function attainableConversationTargetOffset(input: {
-	currentOffset: number;
-	alignmentDelta: number;
-	maximumOffset: number;
-}): number {
-	return Math.max(0, Math.min(input.maximumOffset, input.currentOffset + input.alignmentDelta));
-}
-
-export function resolveConversationViewportRect(previous: Rect, observed: Rect): Rect {
-	// Retains usable geometry across hidden transitions and incomplete layout observations.
-	return observed.width > 0 && observed.height >= CHAT_MIN_USABLE_VIEWPORT_HEIGHT
-		? observed
-		: previous;
-}
-
-export function isConversationTargetLayoutReady(node: HTMLElement): boolean {
-	if (
-		node.matches('[data-chat-layout-pending="true"]') ||
-		node.querySelector('[data-chat-layout-pending="true"]')
-	) {
-		return false;
-	}
-	return Array.from(node.querySelectorAll('img')).every((image) => image.complete);
-}
-
 export class ConversationFeedVirtualController implements ConversationViewportPort {
 	readonly virtualizer: Readable<SvelteVirtualizer<HTMLElement, HTMLDivElement>>;
 
@@ -162,6 +79,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#configuredEstimates: readonly number[];
 	#configuredTranscriptKeys: ReadonlySet<string>;
 	#configuredRetainedIndexes: readonly number[] = [];
+	#configuredTrailingStartIndex: number;
+	#configuredPinned: boolean;
 	#appliedDataRevision: number;
 	#configuredVisible: boolean;
 	#layoutMutationToken = 0;
@@ -181,17 +100,28 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
 		const geometry = untrack(() => options.geometry);
+		const model = untrack(() => options.model);
 		this.#configuredGeometryRevision = geometry.geometryRevision;
 		this.#configuredSurfaceIdentity = geometry.surfaceIdentity;
 		this.#configuredKeys = geometry.keys;
 		this.#configuredEstimates = geometry.estimates;
 		this.#configuredTranscriptKeys = new Set(
-			untrack(() => options.model).items.flatMap((item) =>
-				item.kind === 'transcript' ? [item.key] : [],
-			),
+			model.items.flatMap((item) => (item.kind === 'transcript' ? [item.key] : [])),
+		);
+		const indexByKey = new Map(geometry.keys.map((key, index) => [key, index] as const));
+		this.#configuredRetainedIndexes = untrack(() => options.retention.retainedKeys).flatMap(
+			(key) => {
+				const index = indexByKey.get(key);
+				return index === undefined ? [] : [index];
+			},
+		);
+		this.#configuredTrailingStartIndex = Math.max(
+			model.transcriptStartIndex,
+			model.transcriptEndIndex - 1,
 		);
 		this.#appliedDataRevision = untrack(() => options.projectedDataRevision);
 		this.#configuredVisible = untrack(() => options.visible);
+		this.#configuredPinned = untrack(() => options.pinned);
 		this.#virtualScrollElement = this.#configuredVisible ? untrack(() => options.viewport) : null;
 		const keys = geometry.keys;
 		const estimates = geometry.estimates;
@@ -208,6 +138,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			followOnAppend: false,
 			scrollEndThreshold: CHAT_GEOMETRY_END_THRESHOLD_PX,
 			useCachedMeasurements: !this.#configuredVisible,
+			rangeExtractor: this.#createRangeExtractor(),
 		});
 		this.#unsubscribe = this.virtualizer.subscribe((instance) => {
 			this.#instanceValue = instance;
@@ -216,6 +147,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		$effect(() => this.#acknowledgeData(options.projectedDataRevision));
 		$effect(() => this.#publishGeometry(options.geometry));
 		$effect(() => this.#publishRetention(options.retention.retainedKeys));
+		$effect(() => this.#publishPinned(options.pinned));
 		$effect(() => this.#publishVisibility());
 		$effect(() => this.#observeRootOffset());
 	}
@@ -532,6 +464,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	#publishGeometry(snapshot: ConversationVirtualGeometrySnapshot): void {
 		if (snapshot.geometryRevision === this.#configuredGeometryRevision) return;
+		const model = this.options.model;
 		const identityChanged = snapshot.surfaceIdentity !== this.#configuredSurfaceIdentity;
 		const keys = snapshot.keys;
 		const estimates = snapshot.estimates;
@@ -573,6 +506,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			const index = indexByKey.get(key);
 			return index === undefined ? [] : [index];
 		});
+		this.#configuredRetainedIndexes = retainedIndexes;
+		this.#configuredTrailingStartIndex = Math.max(
+			model.transcriptStartIndex,
+			model.transcriptEndIndex - 1,
+		);
 		const instance = this.#instance();
 		instance.setOptions({
 			count: keys.length,
@@ -586,7 +524,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			scrollEndThreshold: CHAT_GEOMETRY_END_THRESHOLD_PX,
 			scrollMargin: this.#scrollMargin,
 			useCachedMeasurements: !this.options.visible,
-			rangeExtractor: (range) => retainedConversationRange(range, retainedIndexes),
+			rangeExtractor: this.#createRangeExtractor(),
 		});
 		instance.getVirtualItems();
 
@@ -595,9 +533,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#configuredKeys = keys;
 		this.#configuredEstimates = estimates;
 		this.#configuredTranscriptKeys = new Set(
-			this.options.model.items.flatMap((item) => (item.kind === 'transcript' ? [item.key] : [])),
+			model.items.flatMap((item) => (item.kind === 'transcript' ? [item.key] : [])),
 		);
-		this.#configuredRetainedIndexes = retainedIndexes;
 		if (identityChanged) this.#publishVisibility(true);
 		const layoutToken = ++this.#layoutMutationToken;
 		if (!this.options.visible) {
@@ -631,8 +568,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (arraysEqual(retainedIndexes, this.#configuredRetainedIndexes)) return;
 		this.#configuredRetainedIndexes = retainedIndexes;
 		this.#instance().setOptions({
-			rangeExtractor: (range) => retainedConversationRange(range, retainedIndexes),
+			rangeExtractor: this.#createRangeExtractor(),
 		});
+	}
+
+	#publishPinned(pinned: boolean): void {
+		if (pinned === this.#configuredPinned) return;
+		this.#configuredPinned = pinned;
+		this.#instance().setOptions({ rangeExtractor: this.#createRangeExtractor() });
 	}
 
 	#publishVisibility(force = false): void {
@@ -981,6 +924,16 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#getScrollElement = (): HTMLDivElement | null => this.#virtualScrollElement;
+
+	#createRangeExtractor(): (range: Range) => number[] {
+		const trailingStartIndex = this.#configuredPinned
+			? this.#configuredTrailingStartIndex
+			: undefined;
+		return createRetainedConversationRangeExtractor(
+			this.#configuredRetainedIndexes,
+			trailingStartIndex,
+		);
+	}
 
 	#observeElementRect = (
 		instance: Virtualizer<HTMLElement, HTMLDivElement>,
