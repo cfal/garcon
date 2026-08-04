@@ -1,8 +1,13 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import ConversationFeed from '../ConversationFeed.svelte';
+	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
+	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { AssistantMessage, UserMessage } from '$shared/chat-types';
 	import {
 		setAgentState,
@@ -24,6 +29,7 @@
 			| 'loading-later'
 			| 'error-earlier'
 			| 'row-ids'
+			| 'count-shrink'
 			| 'twenty-thousand';
 	}
 
@@ -93,34 +99,53 @@
 			if (initialTranscriptScenario === 'error-earlier') {
 				chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
 			}
-			if (initialTranscriptScenario === 'twenty-thousand') {
+			if (
+				initialTranscriptScenario === 'twenty-thousand' ||
+				initialTranscriptScenario === 'count-shrink'
+			) {
 				chatState.revealAllLoadedMessages();
 			}
 		}
 	}
+
+	function shrinkTranscript(): void {
+		const messages = Array.from({ length: 20 }, (_, index) => ({
+			seq: index + 1,
+			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
+		}));
+		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastSeq: messages.length,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		chatState.revealAllLoadedMessages();
+	}
 	setActiveTranscriptState(chatState);
 	setAgentState(new AgentState());
-	setLocalSettings({
-		chatMaxWidth: 'medium',
-		showThinking: true,
-		hiddenToolTypes: [],
-	} as never);
-	setAppShell({
-		projectBasePath: '/workspace',
-		requestSidebarRecenterToSelected() {},
-	} as never);
-	setModelCatalog({
-		supportsForkAtMessage() {
-			return false;
-		},
-		supportsForkWhileRunning() {
-			return false;
-		},
-	} as never);
-	setChatSessions({ selectedChat: null } as never);
-	setFileSessions({
-		async open() {},
-	} as never);
+	const localSettings = createLocalSettingsStore();
+	localSettings.chatMaxWidth = 'medium';
+	localSettings.showThinking = true;
+	localSettings.hiddenToolTypes = [];
+	setLocalSettings(localSettings);
+	const appShell = createAppShellStore();
+	appShell.projectBasePath = '/workspace';
+	setAppShell(appShell);
+	setModelCatalog(createModelCatalogStore());
+	setChatSessions(createChatSessionsStore());
+	setFileSessions(
+		new FileSessionRegistry({
+			getIsMobile: () => false,
+			getDefaultPlacement: () => 'main',
+			getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
+			getPlacement: () => ({
+				async placeFileSession() {
+					return 'cancelled';
+				},
+				async focusFileSession() {},
+			}),
+		}),
+	);
+	onDestroy(() => localSettings.destroy());
 </script>
 
 <ConversationFeed
@@ -133,4 +158,7 @@
 	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}
 		>Announce</button
 	>
+{/if}
+{#if transcriptScenario === 'count-shrink'}
+	<button onclick={shrinkTranscript}>Shrink transcript</button>
 {/if}

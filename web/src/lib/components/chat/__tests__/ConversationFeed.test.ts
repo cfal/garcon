@@ -2,6 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness.js';
 
 describe('ConversationFeed', () => {
 	const originalOffsetHeight = Object.getOwnPropertyDescriptor(
@@ -211,5 +215,64 @@ describe('ConversationFeed', () => {
 			},
 			{ timeout: 10_000 },
 		);
+	});
+
+	it('ignores a connected stale row measurement after the item count shrinks', async () => {
+		const restoreResizeObserver = installResizeObserverHarness();
+		let staleRow: HTMLElement | null = null;
+		try {
+			const { container } = render(ConversationFeedTestHost, {
+				transcriptScenario: 'count-shrink',
+			});
+			await waitFor(() =>
+				expect(
+					container
+						.querySelector('[data-chat-virtual-sizer]')
+						?.getAttribute('data-chat-virtual-model-count'),
+				).toBe('122'),
+			);
+			const mountedRows = [
+				...container.querySelectorAll<HTMLElement>('[data-chat-virtual-item]'),
+			].filter((item) => item.querySelector('[data-chat-row-id]'));
+			staleRow = mountedRows.at(-1) ?? null;
+			if (!staleRow) throw new Error('Expected a measured virtual row');
+			const staleIndex = Number(staleRow.dataset.index);
+			expect(staleIndex).toBeGreaterThanOrEqual(22);
+			const staleObserver = ResizeObserverHarness.instances.find((observer) =>
+				observer.observed.has(staleRow as HTMLElement),
+			);
+			if (!staleObserver) throw new Error('Expected the stale row to be observed');
+			ResizeObserverHarness.emitFrom(staleObserver, staleRow, 900, 240);
+
+			await fireEvent.click(screen.getByRole('button', { name: 'Shrink transcript' }));
+			await waitFor(() =>
+				expect(
+					container
+						.querySelector('[data-chat-virtual-sizer]')
+						?.getAttribute('data-chat-virtual-model-count'),
+				).toBe('22'),
+			);
+			expect(staleRow.isConnected).toBe(false);
+			document.body.append(staleRow);
+			expect(staleRow.isConnected).toBe(true);
+			ResizeObserverHarness.emitFrom(staleObserver, staleRow, 900, 10_000);
+
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			await waitFor(() => {
+				const indexes = [
+					...container.querySelectorAll<HTMLElement>('[data-chat-virtual-item]'),
+				].map((item) => Number(item.dataset.index));
+				expect(indexes.length).toBeGreaterThan(0);
+				expect(indexes.every((index) => index >= 0 && index < 22)).toBe(true);
+				expect(
+					Number.parseFloat(
+						container.querySelector<HTMLElement>('[data-chat-virtual-sizer]')?.style.height ?? '0',
+					),
+				).toBeLessThan(10_000);
+			});
+		} finally {
+			staleRow?.remove();
+			restoreResizeObserver();
+		}
 	});
 });

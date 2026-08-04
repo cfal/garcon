@@ -83,6 +83,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#configuredPinned: boolean;
 	#appliedDataRevision: number;
 	#configuredVisible: boolean;
+	// Layout tokens cancel geometry settling; target tokens cancel explicit navigation. Programmatic
+	// epochs supersede core scroll work, user-intent epochs protect fallback restores, and the active
+	// target count prevents passive geometry work from competing with navigation.
 	#layoutMutationToken = 0;
 	#targetToken = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
@@ -477,6 +480,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		const restorePolicyEnd =
 			snapshot.endBehavior === 'restore-if-pinned' && untrack(() => this.options.pinned);
+		// Core 3.17.7 can accept a connected stale row after count shrink. Measurement resets remain
+		// required until https://github.com/TanStack/virtual/commit/d2cf98beea1696c7187c06b57c9e724d1957963c ships in the pinned release.
 		const resetMeasurements =
 			snapshot.measurementReset === 'all' || keys.length < this.#configuredKeys.length;
 		const preserveEdgeReadingPosition = shouldPreserveConversationVirtualEdge({
