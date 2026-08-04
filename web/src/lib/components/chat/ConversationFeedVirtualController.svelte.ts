@@ -34,7 +34,6 @@ import {
 	conversationAnchorFallbackKeys,
 	conversationTargetAlignmentDelta,
 	findConversationTargetNode,
-	isConversationVirtualKeyMeasured,
 	nextConversationAnimationFrame as nextAnimationFrame,
 	resetMountedConversationMeasurements,
 	sameConversationNumberArrays,
@@ -215,7 +214,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		void this.#completeSimpleScroll(operationEpoch, this.#layoutMutationToken);
 	}
 
-	scrollToEnd(options: { behavior?: 'auto' | 'instant' } = {}): void {
+	scrollToEnd(): void {
 		if (!this.isReady()) {
 			this.#pendingEndScroll = true;
 			return;
@@ -230,7 +229,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#hiddenAnchor = null;
 		this.#pendingEndScroll = false;
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		this.#scrollToPhysicalEnd(options.behavior ?? 'auto');
+		this.#scrollToPhysicalEnd();
 		void this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
 	}
 
@@ -256,7 +255,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	async waitForLayout(
-		options: { targetKey?: string; minimumDataRevision?: number } = {},
+		options: { minimumDataRevision?: number } = {},
 	): Promise<ConversationLayoutWaitResult> {
 		if (!this.isReady()) return 'not-ready';
 		const token = this.#layoutMutationToken;
@@ -271,10 +270,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			const dataReady =
 				options.minimumDataRevision === undefined ||
 				this.#appliedDataRevision >= options.minimumDataRevision;
-			const targetReady = options.targetKey ? this.#isKeyMeasured(options.targetKey) : true;
 			const stable =
 				previousOffset !== null && Math.abs(currentOffset - previousOffset) <= OFFSET_TOLERANCE_PX;
-			if (dataReady && targetReady && stable) return 'settled';
+			if (dataReady && stable) return 'settled';
 			previousOffset = currentOffset;
 		}
 		return 'not-ready';
@@ -310,10 +308,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					viewportHeight: viewport.clientHeight,
 				});
 				if (classification) {
-					if (restoreEnd) this.#scrollToPhysicalEnd('auto');
+					if (restoreEnd) this.#scrollToPhysicalEnd();
 					else if (
 						readingAnchor &&
-						!(await this.#restoreVirtualAnchor(readingAnchor, false, false))
+						!(await this.#restoreVirtualAnchor(readingAnchor, false))
 					) {
 						return 'unsettled';
 					}
@@ -328,8 +326,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				this.#isCurrentProgrammaticScrollOperation(operationEpoch) &&
 				this.isReady()
 			) {
-				this.#scrollToPhysicalEnd('auto');
-			} else if (readingAnchor) await this.#restoreVirtualAnchor(readingAnchor, false, false);
+				this.#scrollToPhysicalEnd();
+			} else if (readingAnchor) await this.#restoreVirtualAnchor(readingAnchor, false);
 			return 'unsettled';
 		} finally {
 			this.#finishProgrammaticScrollOperation(operationEpoch);
@@ -359,7 +357,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			}
 			return 'missing-anchor';
 		}
-		if (await this.#restoreVirtualAnchor(anchor, clearMeasurements, false)) return 'restored';
+		if (await this.#restoreVirtualAnchor(anchor, clearMeasurements)) return 'restored';
 		if (!this.isReady() || scrollOffset === null || userIntentEpoch !== this.#userIntentEpoch) {
 			return 'missing-anchor';
 		}
@@ -583,13 +581,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		if (resetMeasurements && restorePolicyEnd) {
 			void this.#resetMeasurementsAfterCommit(snapshot, true, resetUserIntentEpoch);
 		} else if (resetMeasurements && preservationAnchor) {
-			this.#scheduleReadingRestore(preservationAnchor, true, restorePolicyEnd);
+			this.#scheduleReadingRestore(preservationAnchor, true);
 		} else if (resetMeasurements) {
 			void this.#resetMeasurementsAfterCommit(snapshot, false, resetUserIntentEpoch);
 		} else if (restorePolicyEnd) {
 			void this.#restorePolicyEndAfterCommit(layoutToken, snapshot);
 		} else if (preservationAnchor) {
-			this.#scheduleReadingRestore(preservationAnchor, false, false);
+			this.#scheduleReadingRestore(preservationAnchor, false);
 		}
 	}
 
@@ -699,7 +697,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	async #restoreVirtualAnchor(
 		anchor: ConversationVirtualAnchor,
 		clearMeasurements: boolean,
-		restoreEnd: boolean,
 	): Promise<boolean> {
 		const token = ++this.#layoutMutationToken;
 		const model = this.options.model;
@@ -722,22 +719,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					if (!this.options.visible) this.#measureOnShow = true;
 					return false;
 				}
-			}
-			if (restoreEnd) {
-				if (!clearMeasurements) await tick();
-				if (
-					token !== this.#layoutMutationToken ||
-					!this.#isCurrentProgrammaticScrollOperation(operationEpoch) ||
-					!this.isReady()
-				) {
-					return false;
-				}
-				this.#scrollToPhysicalEnd('auto');
-				await this.#completeEndRestore(token, operationEpoch);
-				return (
-					token === this.#layoutMutationToken &&
-					this.#isCurrentProgrammaticScrollOperation(operationEpoch)
-				);
 			}
 			const index = model.indexByKey.get(key);
 			if (index === undefined) return false;
@@ -788,12 +769,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#scheduleReadingRestore(
 		anchor: ConversationVirtualAnchor,
 		clearMeasurements: boolean,
-		restoreEnd: boolean,
 	): void {
-		void this.#restoreVirtualAnchor(anchor, clearMeasurements, restoreEnd).then((restored) => {
-			if (restored && this.#pendingReadingAnchor === anchor) {
-				this.#pendingReadingAnchor = null;
-			}
+		void this.#restoreVirtualAnchor(anchor, clearMeasurements).then((restored) => {
+			if (this.#pendingReadingAnchor !== anchor) return;
+			const resolvable = [anchor.key, ...anchor.fallbackKeys].some((key) =>
+				this.options.model.indexByKey.has(key),
+			);
+			if (restored || !resolvable) this.#pendingReadingAnchor = null;
 		});
 	}
 
@@ -869,7 +851,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					this.options.onInitialEndRestored?.();
 					return;
 				}
-				this.#scrollToPhysicalEnd('auto');
+				this.#scrollToPhysicalEnd();
 			}
 			if (
 				token !== this.#layoutMutationToken ||
@@ -878,7 +860,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			) {
 				return;
 			}
-			this.#scrollToPhysicalEnd('auto');
+			this.#scrollToPhysicalEnd();
 			this.options.onInitialEndRestored?.();
 		} finally {
 			this.#finishProgrammaticScrollOperation(operationEpoch);
@@ -900,12 +882,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			return;
 		}
 		const operationEpoch = this.#beginProgrammaticScrollOperation();
-		this.#scrollToPhysicalEnd('auto');
+		this.#scrollToPhysicalEnd();
 		await this.#completeEndRestore(this.#layoutMutationToken, operationEpoch);
 	}
 
-	#scrollToPhysicalEnd(behavior: 'auto' | 'instant'): void {
-		scrollConversationToPhysicalEnd(this.#instance(), this.options.viewport, behavior);
+	#scrollToPhysicalEnd(): void {
+		scrollConversationToPhysicalEnd(this.#instance(), this.options.viewport);
 	}
 
 	async #completeSimpleScroll(operationEpoch: number, token: number): Promise<void> {
@@ -933,15 +915,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#finishProgrammaticScrollOperation(operationEpoch);
 	}
 
-	#isKeyMeasured(key: string): boolean {
-		return isConversationVirtualKeyMeasured(this.#instance(), key);
-	}
-
 	#resetMountedMeasurements(canMeasure: () => boolean): Promise<boolean> {
 		return resetMountedConversationMeasurements(
 			this.#instance(),
 			() => this.options.virtualRoot,
 			canMeasure,
+			() => this.#programmaticScrollActive,
 		);
 	}
 

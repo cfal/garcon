@@ -276,7 +276,7 @@ describe('ConversationFeed', () => {
 		}
 	});
 
-	it('remeasures mounted rows that survive an item count shrink', async () => {
+	it('remeasures rows that survive a count shrink after active scrolling settles', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		try {
 			const { container } = render(ConversationFeedTestHost, {
@@ -305,6 +305,9 @@ describe('ConversationFeed', () => {
 				},
 			});
 			ResizeObserverHarness.emit(measuredRow, 900, 600);
+			const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
+			if (!viewport) throw new Error('Expected the Chat viewport');
+			await fireEvent.scroll(viewport);
 
 			await fireEvent.click(screen.getByRole('button', { name: 'Shrink transcript keeping tail' }));
 			await waitFor(() =>
@@ -316,10 +319,7 @@ describe('ConversationFeed', () => {
 			);
 			expect(measuredRow.isConnected).toBe(true);
 			expect(followingRow.isConnected).toBe(true);
-			for (let frame = 0; frame < 4; frame += 1) {
-				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-			}
-			expect(measurementReads).toBeGreaterThan(0);
+			await waitFor(() => expect(measurementReads).toBeGreaterThan(0));
 			await waitFor(() => {
 				const start = (element: HTMLElement): number =>
 					Number(element.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? Number.NaN);

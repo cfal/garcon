@@ -182,8 +182,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		return [...messageRows, ...visibleNotices];
 	});
 
-	#bottomVisibleRowId = $derived.by(() => this.#visibleRows.at(-1)?.id ?? null);
-
 	#visibleMessages = $derived.by(() =>
 		this.#visibleRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
 	);
@@ -206,10 +204,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	get visibleRows(): ChatDisplayRow[] {
 		return this.#visibleRows;
-	}
-
-	get bottomVisibleRowId(): string | null {
-		return this.#bottomVisibleRowId;
 	}
 
 	get displayMessageCount(): number {

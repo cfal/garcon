@@ -371,7 +371,7 @@ describe('ActiveTranscriptState', () => {
 		const chat = new ActiveTranscriptState();
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('server'))]);
 		chat.appendLocalNotice('warning', 'Chat interrupted by user.');
-		const noticeBottomRowId = chat.bottomVisibleRowId;
+		const noticeBottomRowId = chat.visibleRows.at(-1)?.id;
 		expect(chat.displayMessageCount).toBe(2);
 		expect(noticeBottomRowId).toMatch(/^local_/);
 
@@ -386,8 +386,8 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['server', 'continue']);
 		expect(chat.displayMessageCount).toBe(2);
-		expect(chat.bottomVisibleRowId).toBe('pending:req-1');
-		expect(chat.bottomVisibleRowId).not.toBe(noticeBottomRowId);
+		expect(chat.visibleRows.at(-1)?.id).toBe('pending:req-1');
+		expect(chat.visibleRows.at(-1)?.id).not.toBe(noticeBottomRowId);
 	});
 
 	it('keeps transient local messages when replay only overlaps existing server messages', () => {

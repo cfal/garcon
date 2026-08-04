@@ -11,13 +11,10 @@ export interface ConversationViewportPort {
 	isReady(): boolean;
 	isAtEnd(threshold?: number): boolean;
 	scrollToStart(): void;
-	scrollToEnd(options?: { behavior?: 'auto' | 'instant' }): void;
+	scrollToEnd(): void;
 	restoreInitialEnd(): void;
 	scrollBy(delta: number): void;
-	waitForLayout(options?: {
-		targetKey?: string;
-		minimumDataRevision?: number;
-	}): Promise<ConversationLayoutWaitResult>;
+	waitForLayout(options?: { minimumDataRevision?: number }): Promise<ConversationLayoutWaitResult>;
 	measureViewportFill(): Promise<ConversationViewportFillResult>;
 	restoreHiddenReadingPosition(): Promise<HiddenReadingRestoreResult>;
 	cancelPendingLayoutMutation(): void;
