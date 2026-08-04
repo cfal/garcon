@@ -86,15 +86,20 @@ export function classifyMeasuredConversationViewportFill(input: {
 	viewportHeight: number;
 }): 'overflow' | 'underfilled' | null {
 	let physicalSize = input.leadingSize;
+	let allMeasured = true;
 	for (const key of input.keys) {
 		const size = input.measuredSizes.get(key);
-		if (size === undefined) return null;
+		if (size === undefined) {
+			allMeasured = false;
+			physicalSize = 0;
+			continue;
+		}
 		physicalSize += size;
 		if (physicalSize > input.viewportHeight + CHAT_GEOMETRY_END_THRESHOLD_PX) {
 			return 'overflow';
 		}
 	}
-	return 'underfilled';
+	return allMeasured ? 'underfilled' : null;
 }
 
 export function attainableConversationTargetOffset(input: {

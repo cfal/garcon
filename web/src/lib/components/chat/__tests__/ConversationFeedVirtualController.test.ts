@@ -112,26 +112,29 @@ describe('ConversationFeedVirtualController helpers', () => {
 		expect(selectConversationReadingAnchor(items, 98, transcriptKeys)?.key).toBe('prior');
 	});
 
-	it('reports fill only from a contiguous measured physical prefix', () => {
+	it('reports overflow from any contiguous measured run without combining gaps', () => {
 		expect(
 			classifyMeasuredConversationViewportFill({
-				keys: ['a', 'b'],
-				measuredSizes: new Map([['a', 300]]),
-				leadingSize: 16,
-				viewportHeight: 400,
-			}),
-		).toBeNull();
-		expect(
-			classifyMeasuredConversationViewportFill({
-				keys: ['a', 'b'],
+				keys: ['a', 'b', 'c'],
 				measuredSizes: new Map([
-					['a', 300],
-					['b', 120],
+					['b', 300],
+					['c', 120],
 				]),
 				leadingSize: 16,
 				viewportHeight: 400,
 			}),
 		).toBe('overflow');
+		expect(
+			classifyMeasuredConversationViewportFill({
+				keys: ['a', 'b', 'c'],
+				measuredSizes: new Map([
+					['a', 250],
+					['c', 200],
+				]),
+				leadingSize: 16,
+				viewportHeight: 400,
+			}),
+		).toBeNull();
 		expect(
 			classifyMeasuredConversationViewportFill({
 				keys: ['a', 'b'],
