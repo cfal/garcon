@@ -1315,6 +1315,64 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
+  it('preserves a pending context-overflow failure when a rejected abort replays idle', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const acknowledged = deferred();
+    const runtime = createRuntime(
+      mock(() => acknowledged.promise),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+    );
+    const failures = [];
+    const finishes = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+    runtime.onFinished(() => finishes.push('finished'));
+
+    await start(runtime);
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0002',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ContextOverflowError', data: { message: 'cannot compact' } },
+      },
+    }));
+    await Promise.resolve();
+
+    const aborting = runtime.abort('session-1');
+    await Promise.resolve();
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(failures).toEqual([]);
+
+    acknowledged.resolve({ error: { message: 'abort rejected' } });
+    await expect(aborting).resolves.toBe(false);
+    expect(failures).toEqual(['cannot compact']);
+    expect(finishes).toEqual([]);
+    expect(runtime.isRunning('session-1')).toBe(false);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
   it('surfaces SDK stream errors instead of silently reconnecting', async () => {
     const eventStream = createEventStream();
     let subscriptionOptions;

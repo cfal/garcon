@@ -294,7 +294,9 @@ export class ChatViewStore {
         reason: options.replacementReason ?? 'native-replacement',
         previousGenerationId: this.#views.get(chatId)?.generationId,
       });
-      if (options.processErrorNotice) {
+      const trailingNative = nativeMessages.at(-1);
+      const nativeHasNotice = trailingNative?.type === 'error' && trailingNative.content === options.processErrorNotice;
+      if (options.processErrorNotice && !nativeHasNotice) {
         this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
       }
       this.#views.set(chatId, view);

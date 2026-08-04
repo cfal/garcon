@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
   UserMessage,
@@ -90,6 +91,166 @@ describe('OpenCode history loader', () => {
     expect(messages[6]).toBeInstanceOf(ToolResultMessage);
     expect(messages[6].toolId).toBe('tool-2');
     expect(messages[6].isError).toBe(true);
+  });
+
+  it('hides provider-owned compaction messages and an overflow replay', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'text', text: 'original prompt' }],
+            },
+            {
+              info: { role: 'assistant', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:02.000Z' } },
+              parts: [{ type: 'compaction', auto: true, overflow: true }],
+            },
+            {
+              info: {
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                time: { created: '2026-07-04T00:00:03.000Z' },
+              },
+              parts: [{ type: 'text', text: 'internal summary' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:04.000Z' } },
+              parts: [{ type: 'text', text: 'original prompt' }],
+            },
+            {
+              info: { role: 'assistant', time: { created: '2026-07-04T00:00:05.000Z' } },
+              parts: [{ type: 'text', text: 'recovered reply' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:06.000Z' } },
+              parts: [{ type: 'text', text: 'original prompt' }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => [message.type, message.content])).toEqual([
+      ['user-message', 'original prompt'],
+      ['assistant-message', 'recovered reply'],
+      ['user-message', 'original prompt'],
+    ]);
+  });
+
+  it('hides synthetic continuation prompts but keeps real text from mixed user messages', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'text', text: 'internal continuation', synthetic: true }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [
+                { type: 'text', text: 'real prompt' },
+                { type: 'text', text: 'internal context', synthetic: true },
+              ],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toBeInstanceOf(UserMessage);
+    expect(messages[0].content).toBe('real prompt');
+  });
+
+  it('restores provider failures without turning an abort into an error row', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: {
+                role: 'assistant',
+                error: { name: 'ProviderAuthError', data: { message: 'invalid key' } },
+                time: { created: '2026-07-04T00:00:00.000Z' },
+              },
+              parts: [{ type: 'text', text: 'partial reply' }],
+            },
+            {
+              info: {
+                role: 'assistant',
+                error: { name: 'MessageAbortedError', data: { message: 'aborted' } },
+                time: { created: '2026-07-04T00:00:01.000Z' },
+              },
+              parts: [{
+                type: 'tool',
+                tool: 'bash',
+                callID: 'interrupted-tool',
+                state: {
+                  status: 'completed',
+                  input: { command: 'sleep 30' },
+                  output: '(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>',
+                },
+              }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toBeInstanceOf(AssistantMessage);
+    expect(messages[0].content).toBe('partial reply');
+    expect(messages[1]).toBeInstanceOf(ErrorMessage);
+    expect(messages[1].content).toBe('invalid key');
+  });
+
+  it('restores a failed compaction error without exposing its internal summary', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'compaction', auto: true, overflow: true }],
+            },
+            {
+              info: {
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                error: { name: 'ContextOverflowError', data: { message: 'cannot compact' } },
+                time: { created: '2026-07-04T00:00:01.000Z' },
+              },
+              parts: [{ type: 'text', text: 'partial internal summary' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:02.000Z' } },
+              parts: [{ type: 'text', text: 'next real prompt' }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => [message.type, message.content])).toEqual([
+      ['error', 'cannot compact'],
+      ['user-message', 'next real prompt'],
+    ]);
   });
 
   it('returns an empty transcript when the session id is missing', async () => {
@@ -184,6 +345,42 @@ describe('OpenCode history loader', () => {
       lastActivity: '2026-07-04T00:00:02.000Z',
     });
     expect(messages).toHaveBeenCalledWith({ sessionID: 'session-1', limit: 20, directory: '/repo' });
+  });
+
+  it('keeps compaction internals out of preview metadata', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        get: mock(() => Promise.resolve({ data: { title: 'OpenCode title' } })),
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'assistant', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'text', text: 'visible reply' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [{ type: 'compaction', auto: true }],
+            },
+            {
+              info: {
+                role: 'assistant',
+                summary: true,
+                time: { created: '2026-07-04T00:00:02.000Z' },
+              },
+              parts: [{ type: 'text', text: 'internal summary' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:03.000Z' } },
+              parts: [{ type: 'text', text: 'internal continuation', synthetic: true }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const preview = await getOpenCodePreviewFromSessionId('session-1', getClient);
+
+    expect(preview?.lastMessage).toBe('visible reply');
   });
 
   it('returns null preview when the session id is missing', async () => {

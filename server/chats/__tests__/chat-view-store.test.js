@@ -237,6 +237,18 @@ describe('ChatViewStore', () => {
     expect(page.messages[1].message).toBeInstanceOf(ErrorMessage);
   });
 
+  it('does not duplicate a matching native process-error row', async () => {
+    const store = new ChatViewStore(() => false);
+    const reason = 'Provider rejected the request.';
+    const page = await store.replaceFromNative('chat-1', async () => [
+      assistant('partial response'),
+      new ErrorMessage(TS, reason),
+    ], { processErrorNotice: reason });
+
+    expect(contents(page)).toEqual(['partial response', reason]);
+    expect(page.messages[1].message).toBeInstanceOf(ErrorMessage);
+  });
+
   it('eviction causes the next access to mint a new generation', async () => {
     const store = new ChatViewStore(() => false);
     const first = await store.getOrCreatePage('chat-1', fullLoader(async () => [assistant('old')]), 20);

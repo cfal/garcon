@@ -68,6 +68,7 @@ export function acceptSequencedOpenCodeTurnEvent(
     && event.type !== 'permission.asked'
     && event.type !== 'session.status'
     && event.type !== 'session.error'
+    && event.type !== 'session.compacted'
   ) {
     return true;
   }

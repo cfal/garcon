@@ -589,6 +589,23 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.emitFailed(session.chatId, message, metadata);
   }
 
+  #settleIdleSession(agentSessionId: string, session: OpenCodeSession, idleEventId: string | null): void {
+    if (session.status !== 'running' || !session.turn.providerObservedEventId || !idleEventId
+      || idleEventId <= session.turn.providerObservedEventId) return;
+    const contextOverflow = session.turn.pendingContextOverflowError;
+    if (contextOverflow) {
+      this.#failTurnForProviderError(agentSessionId, session, contextOverflow);
+      return;
+    }
+    const eventMetadata = session.turn.eventMetadata;
+    this.#cancelPendingPermissionsForSession(agentSessionId, 'session-complete');
+    session.status = 'completed';
+    session.lastActivityAt = Date.now();
+    this.#resolveTurnWaiter(agentSessionId);
+    this.emitProcessing(session.chatId, false);
+    this.emitFinished(session.chatId, 0, eventMetadata);
+  }
+
   #clearTurnWaiter(agentSessionId: string): void {
     this.#pendingTurnWaiters.delete(agentSessionId);
   }
@@ -614,19 +631,29 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         }
 
         const port = 10000 + Math.floor(Math.random() * 50000);
+        let createdInstance: OpenCodeInstance | null = null;
+        const closeCreatedInstance = () => {
+          if (createdInstance) closeOpenCodeInstance(createdInstance);
+          createdInstance = null;
+        };
         const result: OpenCodeInstance = await withAbortableTimeout(
-          (signal) => this.#options.createInstance({ port, signal }),
+          (signal) => this.#options.createInstance({ port, signal }).then((instance) => {
+            createdInstance = instance;
+            if (signal.aborted) closeCreatedInstance();
+            return instance;
+          }),
           this.#options.startupTimeoutMs,
           'OpenCode startup',
           startupAbortController.signal,
         );
 
         if (this.#shuttingDown || startupAbortController.signal.aborted) {
-          closeOpenCodeInstance(result);
+          closeCreatedInstance();
           throw startupAbortController.signal.reason ?? new Error('OpenCode runtime is shutting down');
         }
 
         if (!result?.client?.permission?.reply) {
+          closeCreatedInstance();
           throw new Error('OpenCode v2 client missing permission.reply; aborting startup');
         }
 
@@ -706,10 +733,23 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
         if (part.type === 'tool') {
           if (part.state?.status === 'completed') {
-            chatMessages.push(convertOpenCodeToolUse(now, part));
-            chatMessages.push(new ToolResultMessage(now, part.callID || '', normalizeToolResultContent(part.state.output), false));
+            const toolUse = convertOpenCodeToolUse(now, part);
+            chatMessages.push(toolUse);
+            chatMessages.push(new ToolResultMessage(
+              now,
+              toolUse.toolId,
+              normalizeToolResultContent(part.state.output),
+              false,
+            ));
           } else if (part.state?.status === 'error') {
-            chatMessages.push(new ErrorMessage(now, 'Tool Error: ' + (part.state.error || 'Unknown')));
+            const toolUse = convertOpenCodeToolUse(now, part);
+            chatMessages.push(toolUse);
+            chatMessages.push(new ToolResultMessage(
+              now,
+              toolUse.toolId,
+              normalizeToolResultContent(part.state.error || 'Error'),
+              true,
+            ));
           }
           break;
         }
@@ -943,25 +983,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
               session.skippedIdleEventId = event.id ?? null;
               continue;
             }
-            if (
-              status?.type === 'idle'
-              && session.status === 'running'
-              && session.turn.providerObservedEventId
-              && event.id
-              && event.id > session.turn.providerObservedEventId
-            ) {
-              const contextOverflow = session.turn.pendingContextOverflowError;
-              if (contextOverflow) {
-                this.#failTurnForProviderError(sessionId, session, contextOverflow);
-                continue;
-              }
-              const eventMetadata = session.turn.eventMetadata;
-              this.#cancelPendingPermissionsForSession(sessionId, 'session-complete');
-              session.status = 'completed';
-              session.lastActivityAt = Date.now();
-              this.#resolveTurnWaiter(sessionId);
-              this.emitProcessing(chatId, false);
-              this.emitFinished(chatId, 0, eventMetadata);
+            if (status?.type === 'idle') {
+              this.#settleIdleSession(sessionId, session, event.id ?? null);
             }
           }
         }
@@ -1380,21 +1403,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       // The SSE listener may have recorded a skip concurrently; reset property narrowing.
       const skippedIdleEventId = session.skippedIdleEventId as string | null;
       session.skippedIdleEventId = null;
-      const providerObservedEventId = session.turn.providerObservedEventId as string | null;
-      if (
-        skippedIdleEventId
-        && session.status === 'running'
-        && providerObservedEventId
-        && skippedIdleEventId > providerObservedEventId
-      ) {
-        const eventMetadata = session.turn.eventMetadata;
-        this.#cancelPendingPermissionsForSession(agentSessionId, 'session-complete');
-        session.status = 'completed';
-        session.lastActivityAt = Date.now();
-        this.#resolveTurnWaiter(agentSessionId);
-        this.emitProcessing(session.chatId, false);
-        this.emitFinished(session.chatId, 0, eventMetadata);
-      }
+      this.#settleIdleSession(agentSessionId, session, skippedIdleEventId);
       return false;
     }
 

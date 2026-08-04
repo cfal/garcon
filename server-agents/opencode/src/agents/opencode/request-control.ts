@@ -12,14 +12,23 @@ export async function withAbortableTimeout<T>(
   callerSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
-  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  let rejectCallerAbort!: (reason: unknown) => void;
+  const callerAbort = new Promise<never>((_, reject) => {
+    rejectCallerAbort = reject;
+  });
+  const abortFromCaller = () => {
+    controller.abort(callerSignal?.reason);
+    rejectCallerAbort(controller.signal.reason);
+  };
   callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
   if (callerSignal?.aborted) abortFromCaller();
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
-    controller.signal.throwIfAborted();
+    const operationResult = controller.signal.aborted
+      ? Promise.reject(controller.signal.reason)
+      : operation(controller.signal);
     return await Promise.race([
-      operation(controller.signal),
+      operationResult,
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => {
           const error = new OpenCodeTimeoutError(label, timeoutMs);
@@ -27,6 +36,7 @@ export async function withAbortableTimeout<T>(
           reject(error);
         }, timeoutMs);
       }),
+      callerAbort,
     ]);
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);

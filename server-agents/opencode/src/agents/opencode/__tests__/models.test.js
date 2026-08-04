@@ -259,6 +259,28 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(createInstance).toHaveBeenCalledTimes(1);
   });
 
+  it('closes an instance that resolves after startup timed out', async () => {
+    const created = deferred();
+    const close = mock(() => {});
+    const createInstance = mock(() => created.promise);
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance, startupTimeoutMs: 5 });
+
+    await expect(provider.getClient()).rejects.toThrow('OpenCode startup timed out after 5ms');
+    expect(close).not.toHaveBeenCalled();
+
+    created.resolve({
+      client: { permission: { reply: mock(() => Promise.resolve({})) } },
+      server: { close },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(provider.getClientIfInitialized()).toBeNull();
+  });
+
   it('closes the SDK v2 server during shutdown', async () => {
     const close = mock(() => {});
     const createInstance = mock(() => Promise.resolve({
@@ -279,7 +301,22 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(provider.getClientIfInitialized()).toBeNull();
   });
 
-  it('aborts startup and closes an instance that resolves during shutdown', async () => {
+  it('closes an incompatible SDK instance before rejecting startup', async () => {
+    const close = mock(() => {});
+    const createInstance = mock(() => Promise.resolve({
+      client: { permission: {} },
+      server: { close },
+    }));
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
+
+    await expect(provider.getClient()).rejects.toThrow('missing permission.reply');
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(provider.getClientIfInitialized()).toBeNull();
+  });
+
+  it('finishes shutdown and closes an instance that resolves after ignoring abort', async () => {
     const created = deferred();
     const close = mock(() => {});
     let startupSignal;
@@ -301,15 +338,18 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(createInstance).toHaveBeenCalledTimes(1);
     const stopping = provider.shutdown();
     expect(startupSignal.aborted).toBe(true);
-    created.resolve({
-      client: { permission: { reply: mock(() => Promise.resolve({})) } },
-      server: { close },
-    });
-
     await stopping;
     const startupError = await observedStartup;
     expect(startupError).toBeInstanceOf(Error);
     expect(startupError.message).toContain('OpenCode runtime shutting down');
+    expect(close).not.toHaveBeenCalled();
+
+    created.resolve({
+      client: { permission: { reply: mock(() => Promise.resolve({})) } },
+      server: { close },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
     expect(close).toHaveBeenCalledTimes(1);
     expect(provider.getClientIfInitialized()).toBeNull();
     await expect(provider.getClient()).rejects.toThrow('OpenCode runtime is shutting down');
