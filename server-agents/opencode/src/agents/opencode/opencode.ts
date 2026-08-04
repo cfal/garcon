@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { isRecord } from '@garcon/common/json';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
-import { extractSessionId, extractTextParts, isOpenCodeAbortError, isOpenCodeContextOverflowError, openCodeSessionError, streamGlobalEvents, type SSEEvent } from './sse-events.js';
+import { extractSessionId, extractTextParts, isOpenCodeAbortError, isOpenCodeContextOverflowError, openCodeSessionError, type SSEEvent } from './sse-events.js';
 import {
   acceptSequencedOpenCodeTurnEvent,
   createOpenCodeTurnContext,
@@ -45,6 +45,12 @@ import {
 } from '@garcon/server-agent-interface';
 import type { RuntimeEventMetadata } from '@garcon/server-agent-common/shared/event-emitter-runtime';
 import { OpenCodeEndpointCoordinator } from './endpoint-coordinator.js';
+import { OpenCodeGlobalEventListener } from './global-event-listener.js';
+import {
+  closeOpenCodeInstance,
+  OpenCodeInstanceCreationTracker,
+  type OpenCodeInstance,
+} from './instance-lifecycle.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import {
   OpenCodeTimeoutError,
@@ -66,7 +72,9 @@ const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
 const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
 const DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS = 3_000;
+const DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS = 30_000;
 const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
+const DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS = 100;
 const OPENCODE_SERVER_CONFIG_CONTENT = JSON.stringify({});
 
 // Source of OpenCode permission keys:
@@ -166,7 +174,9 @@ interface OpenCodeRuntimeOptions {
   requestTimeoutMs?: number;
   unavailableRetryMs?: number;
   sseRetryDelayMs?: number;
+  sseHeartbeatTimeoutMs?: number;
   modelCacheTtlMs?: number;
+  shutdownStartupGraceMs?: number;
   now?: () => number;
   createInstance?: (input: {
     port: number;
@@ -180,22 +190,15 @@ interface NormalizedOpenCodeRuntimeOptions {
   requestTimeoutMs: number;
   unavailableRetryMs: number;
   sseRetryDelayMs: number;
+  sseHeartbeatTimeoutMs: number;
   modelCacheTtlMs: number;
+  shutdownStartupGraceMs: number;
   now: () => number;
   requiresExecutable: boolean;
   createInstance: (input: {
     port: number;
     signal: AbortSignal;
   }) => Promise<OpenCodeInstance>;
-}
-
-interface OpenCodeInstance {
-  client: any;
-  baseUrl?: string;
-  server?: {
-    close?: () => void;
-  };
-  close?: () => void;
 }
 
 interface OpenCodeModelOption {
@@ -215,7 +218,11 @@ function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRu
     requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS,
     unavailableRetryMs: options.unavailableRetryMs ?? DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS,
     sseRetryDelayMs: options.sseRetryDelayMs ?? DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS,
+    sseHeartbeatTimeoutMs:
+      options.sseHeartbeatTimeoutMs ?? DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS,
     modelCacheTtlMs: options.modelCacheTtlMs ?? DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS,
+    shutdownStartupGraceMs:
+      options.shutdownStartupGraceMs ?? DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS,
     now: options.now ?? (() => Date.now()),
     requiresExecutable: options.createInstance === undefined,
     createInstance: options.createInstance ?? createOpenCodeInstance,
@@ -276,18 +283,6 @@ function stopOpenCodeProcess(proc: ChildProcess): void {
   }, 500);
   killTimer.unref?.();
   proc.once('exit', () => clearTimeout(killTimer));
-}
-
-function closeOpenCodeInstance(instance: OpenCodeInstance): void {
-  try {
-    if (typeof instance.server?.close === 'function') {
-      instance.server.close();
-    } else if (typeof instance.close === 'function') {
-      instance.close();
-    }
-  } catch {
-    // Best-effort cleanup.
-  }
 }
 
 async function createOpenCodeInstance(input: {
@@ -379,20 +374,16 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #startupAbortController: AbortController | null = null;
   #shutdownPromise: Promise<void> | null = null;
   #shuttingDown = false;
-  #sseListenerStarted = false;
-  #sseListenerGeneration = 0;
-  #sseReadyPromise: Promise<void> | null = null;
-  #rejectSseReady: ((error: Error) => void) | null = null;
-  #sseAbortController: AbortController | null = null;
-  #sseRetryTimer: ReturnType<typeof setTimeout> | null = null;
   #sessions = new Map<string, OpenCodeSession>();
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
   #pendingPermissions = new Map<string, PendingPermission>();
   readonly #endpointCoordinator: OpenCodeEndpointCoordinator;
+  readonly #globalEventListener: OpenCodeGlobalEventListener;
   #modelCache: OpenCodeModelCache | null = null;
   #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
   #unavailableUntil = 0;
   #unavailableReason = '';
+  readonly #instanceCreations: OpenCodeInstanceCreationTracker;
   #idlePurger = new IdleSessionPurger<OpenCodeSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.status === 'running',
@@ -410,12 +401,27 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#config = options.config ?? { isTestEnvironment: () => false };
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#options = normalizeOptions(options);
+    this.#instanceCreations = new OpenCodeInstanceCreationTracker(() => this.#shuttingDown);
     this.#endpointCoordinator = new OpenCodeEndpointCoordinator({
       assertAvailable: () => this.#assertCanUseOpenCode(),
       ensureUnlocked: () => this.#ensureOpenCodeServerUnlocked(),
       closeInstance: () => this.#closeInstance(),
       hasRunningSessions: () => this.#hasRunningSessions(),
       logger: this.#logger,
+    });
+    this.#globalEventListener = new OpenCodeGlobalEventListener({
+      requestTimeoutMs: this.#options.requestTimeoutMs,
+      heartbeatTimeoutMs: this.#options.sseHeartbeatTimeoutMs,
+      retryDelayMs: this.#options.sseRetryDelayMs,
+      logger: this.#logger,
+      getClient: () => this.getClient(),
+      isShuttingDown: () => this.#shuttingDown,
+      isTemporarilyUnavailable: () => this.isTemporarilyUnavailable(),
+      getUnavailableRetryAfterMs: () => this.getUnavailableRetryAfterMs(),
+      markTemporarilyUnavailable: (reason) => this.#markTemporarilyUnavailable(reason),
+      failRunningTurns: (error) => this.#failRunningTurnsForListenerError(error),
+      closeUnavailableInstanceIfIdle: () => this.#closeInstanceIfIdle(),
+      handleEvent: (client, event) => this.#handleGlobalSSEEvent(client, event),
     });
   }
 
@@ -435,7 +441,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#closeInstance();
     const shutdown = (async () => {
       await startup?.catch(() => undefined);
-      // A custom instance factory may resolve after ignoring its abort signal.
+      await this.#instanceCreations.waitForCleanup(this.#options.shutdownStartupGraceMs);
       this.#closeInstance();
     })();
     this.#shutdownPromise = shutdown;
@@ -509,29 +515,21 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return Array.from(this.#sessions.values()).some((session) => session.status === 'running');
   }
 
-  #closeInstanceIfIdle(): void {
+  #closeInstanceIfIdle(): boolean {
     if (!this.#hasRunningSessions() && this.#endpointCoordinator.idle) {
       this.#closeInstance();
+      return true;
     }
+    return false;
   }
 
   #closeInstance(): void {
-    this.#rejectSseReady?.(new Error('OpenCode event listener closed before it was ready'));
-    this.#rejectSseReady = null;
-    this.#sseReadyPromise = null;
-    this.#sseListenerGeneration += 1;
-    this.#sseAbortController?.abort(new Error('OpenCode event listener closed'));
-    this.#sseAbortController = null;
-    if (this.#sseRetryTimer) {
-      clearTimeout(this.#sseRetryTimer);
-      this.#sseRetryTimer = null;
-    }
+    this.#globalEventListener.close();
     const instance = this.#instance;
     if (instance) {
       closeOpenCodeInstance(instance);
     }
     this.#instance = null;
-    this.#sseListenerStarted = false;
   }
 
   #createTurnWaiter(agentSessionId: string): PendingTurnWaiter {
@@ -566,6 +564,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     for (const [agentSessionId, session] of this.#sessions) {
       if (session.status !== 'running') continue;
       const eventMetadata = session.turn.eventMetadata;
+      session.providerWorkRequiresQuiescence = true;
       session.status = 'completed';
       session.lastActivityAt = Date.now();
       this.#cancelPendingPermissionsForSession(agentSessionId, 'cancelled');
@@ -580,6 +579,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
   #failTurnForProviderError(agentSessionId: string, session: OpenCodeSession, message: string): void {
     const metadata = session.turn.eventMetadata;
+    session.providerWorkRequiresQuiescence = true;
     session.status = 'completed';
     session.lastActivityAt = Date.now();
     this.#cancelPendingPermissionsForSession(agentSessionId, 'cancelled');
@@ -591,7 +591,8 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
   #settleIdleSession(agentSessionId: string, session: OpenCodeSession, idleEventId: string | null): void {
     if (session.status !== 'running' || !session.turn.providerObservedEventId || !idleEventId
-      || idleEventId <= session.turn.providerObservedEventId) return;
+      || idleEventId <= session.turn.providerObservedEventId
+      || session.turn.assistantMessageIds.size === 0) return;
     const contextOverflow = session.turn.pendingContextOverflowError;
     if (contextOverflow) {
       this.#failTurnForProviderError(agentSessionId, session, contextOverflow);
@@ -631,29 +632,23 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         }
 
         const port = 10000 + Math.floor(Math.random() * 50000);
-        let createdInstance: OpenCodeInstance | null = null;
-        const closeCreatedInstance = () => {
-          if (createdInstance) closeOpenCodeInstance(createdInstance);
-          createdInstance = null;
-        };
         const result: OpenCodeInstance = await withAbortableTimeout(
-          (signal) => this.#options.createInstance({ port, signal }).then((instance) => {
-            createdInstance = instance;
-            if (signal.aborted) closeCreatedInstance();
-            return instance;
-          }),
+          (signal) => this.#instanceCreations.track(
+            () => this.#options.createInstance({ port, signal }),
+            signal,
+          ),
           this.#options.startupTimeoutMs,
           'OpenCode startup',
           startupAbortController.signal,
         );
 
         if (this.#shuttingDown || startupAbortController.signal.aborted) {
-          closeCreatedInstance();
+          closeOpenCodeInstance(result);
           throw startupAbortController.signal.reason ?? new Error('OpenCode runtime is shutting down');
         }
 
         if (!result?.client?.permission?.reply) {
-          closeCreatedInstance();
+          closeOpenCodeInstance(result);
           throw new Error('OpenCode v2 client missing permission.reply; aborting startup');
         }
 
@@ -805,6 +800,39 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.emitMessages(chatId, messages, eventMetadata);
   }
 
+  #replyManualBypassPermission(
+    client: any,
+    agentSessionId: string,
+    session: OpenCodeSession,
+    requestId: string,
+  ): void {
+    const turn = session.turn;
+    void this.#runScopedSessionRequest(
+      'OpenCode manual bypass permission reply',
+      { directory: session.directory },
+      (signal, requestScope) => client.permission.reply(
+        withOpenCodeRequestScope({ requestID: requestId, reply: 'once' }, requestScope),
+        { signal },
+      ),
+    ).then((result) => {
+      throwOpenCodeResultError(result, 'OpenCode manual bypass permission reply failed');
+    }).catch((error) => {
+      const current = this.#sessions.get(agentSessionId);
+      if (
+        current !== session
+        || current.status !== 'running'
+        || current.turn !== turn
+      ) {
+        this.#logger.debug('Ignoring a late OpenCode manual bypass reply failure', {
+          agentSessionId,
+          error: errorMessage(error),
+        });
+        return;
+      }
+      this.#failTurnForProviderError(agentSessionId, current, errorMessage(error));
+    });
+  }
+
   #cancelPendingPermissionsForSession(agentSessionId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
     for (const [permissionRequestId, pending] of this.#pendingPermissions.entries()) {
       if (pending.agentSessionId !== agentSessionId) continue;
@@ -821,215 +849,110 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return extractPermissionRequest(event);
   }
 
-  async #startGlobalSSEListener(): Promise<void> {
-    if (this.#sseRetryTimer) {
-      clearTimeout(this.#sseRetryTimer);
-      this.#sseRetryTimer = null;
-    }
-    if (this.#sseListenerStarted) {
-      if (this.#sseReadyPromise) await this.#sseReadyPromise;
+  #handleGlobalSSEEvent(client: any, event: SSEEvent): void {
+    const sessionId = extractSessionId(event);
+    if (!sessionId) {
+      if (event.type !== 'server.heartbeat') {
+        this.#logger.debug('OpenCode SSE event has no session ID', { eventType: event.type });
+      }
       return;
     }
-    this.#sseListenerStarted = true;
-    const generation = ++this.#sseListenerGeneration;
-    const abortController = new AbortController();
-    this.#sseAbortController = abortController;
-    let readySettled = false;
-    let resolveReady!: () => void;
-    let rejectReady!: (error: Error) => void;
-    const readyPromise = new Promise<void>((resolve, reject) => {
-      resolveReady = resolve;
-      rejectReady = reject;
+
+    // Turn-bound dispatch is running-only: retired turns cannot accept late provider events.
+    const session = this.#sessions.get(sessionId);
+    if (!session || session.status !== 'running') {
+      this.#logger.debug('OpenCode SSE event targets a non-running session', {
+        eventType: event.type,
+        sessionId,
+        knownSessionIds: [...this.#sessions.keys()],
+      });
+      return;
+    }
+    if (!acceptSequencedOpenCodeTurnEvent(session, event, this.#logger)) return;
+
+    const chatId = session.chatId;
+    if (!chatId) {
+      this.#logger.debug('OpenCode SSE event arrived before chat assignment', {
+        eventType: event.type,
+        sessionId,
+      });
+      return;
+    }
+    if (
+      session.terminalEventsFencedUntilPrompt
+      && (event.type === 'session.error'
+        || (event.type === 'session.status' && event.properties?.status?.type === 'idle'))
+    ) {
+      this.#logger.debug('Ignoring an OpenCode terminal event before successor prompt binding', {
+        eventType: event.type,
+        sessionId,
+      });
+      return;
+    }
+    if (isOpenCodeAbortError(event)) {
+      this.#logger.debug('Ignoring OpenCode abort unwind for a Garcon-retired turn', { sessionId });
+      return;
+    }
+
+    const sessionError = openCodeSessionError(event);
+    if (sessionError) {
+      if (isOpenCodeContextOverflowError(event)) {
+        session.turn.pendingContextOverflowError = sessionError;
+        return;
+      }
+      // A non-recoverable provider error must retire the turn before idle can claim success.
+      this.#failTurnForProviderError(sessionId, session, sessionError);
+      return;
+    }
+    if (event.type === 'permission.asked') {
+      this.#handlePermissionEvent(client, event, sessionId, session, chatId);
+      return;
+    }
+    if (!openCodeEventBelongsToTurn(session, event)) return;
+    this.#dispatchOpenCodeEvent(event, session);
+
+    if (event.type !== 'session.status' || event.properties?.status?.type !== 'idle') return;
+    if (session.aborting) {
+      session.skippedIdleEventId = event.id ?? null;
+      return;
+    }
+    this.#settleIdleSession(sessionId, session, event.id ?? null);
+  }
+
+  #handlePermissionEvent(
+    client: any,
+    event: SSEEvent,
+    sessionId: string,
+    session: OpenCodeSession,
+    chatId: string,
+  ): void {
+    const toolMessageId = event.properties?.tool?.messageID;
+    if (
+      typeof toolMessageId === 'string'
+      && !session.turn.assistantMessageIds.has(toolMessageId)
+    ) return;
+    const permission = this.#extractPermissionRequestFromEvent(event);
+    if (!permission) return;
+    if (session.permissionMode === 'manualBypass') {
+      this.#replyManualBypassPermission(client, sessionId, session, permission.requestId);
+      return;
+    }
+    const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
+    this.#pendingPermissions.set(permissionRequestId, {
+      originalRequestId: permission.requestId,
+      agentSessionId: sessionId,
+      chatId,
+      directory: session.directory,
+      eventMetadata: session.turn.eventMetadata,
     });
-    this.#sseReadyPromise = readyPromise;
-    const settleReady = () => {
-      if (readySettled) return;
-      readySettled = true;
-      clearTimeout(readyTimer);
-      resolveReady();
-      if (this.#sseReadyPromise === readyPromise) {
-        this.#sseReadyPromise = null;
-        this.#rejectSseReady = null;
-      }
-    };
-    const settleNotReady = (error: Error) => {
-      if (readySettled) return;
-      readySettled = true;
-      clearTimeout(readyTimer);
-      rejectReady(error);
-    };
-    this.#rejectSseReady = settleNotReady;
-    const readyTimer = setTimeout(() => {
-      const error = new OpenCodeTimeoutError(
-        'OpenCode event stream readiness',
-        this.#options.requestTimeoutMs,
-      );
-      abortController.abort(error);
-      settleNotReady(error);
-    }, this.#options.requestTimeoutMs);
-    readyTimer.unref?.();
-
-    const runListener = async () => {
-      try {
-        const client = await this.getClient();
-        if (generation !== this.#sseListenerGeneration) {
-          throw new Error('OpenCode event listener was superseded during startup');
-        }
-
-        for await (const event of streamGlobalEvents(client, abortController.signal, settleReady)) {
-          if (generation !== this.#sseListenerGeneration) return;
-          const sessionId = extractSessionId(event);
-          if (!sessionId) {
-            if (event.type !== 'server.heartbeat') {
-              this.#logger.debug('OpenCode SSE event has no session ID', { eventType: event.type });
-            }
-            continue;
-          }
-
-          // Turn-bound dispatch is running-only: a turn retired by a stream failure or a
-          // session.error must not accept late provider events under its old metadata.
-          const session = this.#sessions.get(sessionId);
-          if (!session || session.status !== 'running') {
-            this.#logger.debug('OpenCode SSE event targets a non-running session', {
-              eventType: event.type,
-              sessionId,
-              knownSessionIds: [...this.#sessions.keys()],
-            });
-            continue;
-          }
-
-          if (!acceptSequencedOpenCodeTurnEvent(session, event, this.#logger)) continue;
-
-          const chatId = session.chatId;
-          if (!chatId) {
-            this.#logger.debug('OpenCode SSE event arrived before chat assignment', {
-              eventType: event.type,
-              sessionId,
-            });
-            continue;
-          }
-
-          if (isOpenCodeAbortError(event)) {
-            this.#logger.debug('Ignoring OpenCode abort unwind for a Garcon-retired turn', {
-              sessionId,
-            });
-            continue;
-          }
-          const sessionError = openCodeSessionError(event);
-          if (sessionError) {
-            if (isOpenCodeContextOverflowError(event)) {
-              session.turn.pendingContextOverflowError = sessionError;
-              continue;
-            }
-            // Non-recoverable provider errors retire the turn before a later idle can claim
-            // success. The visible error row precedes the terminal.
-            this.#failTurnForProviderError(sessionId, session, sessionError);
-            continue;
-          }
-
-          if (event.type === 'permission.asked') {
-            const toolMessageId = event.properties?.tool?.messageID;
-            if (
-              typeof toolMessageId === 'string'
-              && !session.turn.assistantMessageIds.has(toolMessageId)
-            ) {
-              continue;
-            }
-            const permission = this.#extractPermissionRequestFromEvent(event);
-            if (!permission) continue;
-            if (session.permissionMode === 'manualBypass') {
-              const client = await this.getClient();
-              const result = await this.#runScopedSessionRequest(
-                'OpenCode manual bypass permission reply',
-                { directory: session.directory },
-                (signal, requestScope) => client.permission.reply(
-                  withOpenCodeRequestScope({
-                    requestID: permission.requestId,
-                    reply: 'once',
-                  }, requestScope),
-                  { signal },
-                ),
-              );
-              throwOpenCodeResultError(result, 'OpenCode manual bypass permission reply failed');
-              continue;
-            }
-            const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
-            this.#pendingPermissions.set(permissionRequestId, {
-              originalRequestId: permission.requestId,
-              agentSessionId: sessionId,
-              chatId,
-              directory: session.directory,
-              eventMetadata: session.turn.eventMetadata,
-            });
-
-            const now = new Date().toISOString();
-            this.#emitPermissionMessages(chatId, [
-              new PermissionRequestMessage(
-                now,
-                permissionRequestId,
-                convertOpencodePermissionTool(now, permissionRequestId, permission.toolInput),
-              ),
-            ], session.turn.eventMetadata);
-
-            continue;
-          }
-
-          if (!openCodeEventBelongsToTurn(session, event)) continue;
-          this.#dispatchOpenCodeEvent(event, session);
-
-          if (event.type === 'session.status') {
-            const status = event.properties?.status;
-            if (status?.type === 'idle' && session.aborting) {
-              session.skippedIdleEventId = event.id ?? null;
-              continue;
-            }
-            if (status?.type === 'idle') {
-              this.#settleIdleSession(sessionId, session, event.id ?? null);
-            }
-          }
-        }
-      } catch (err: unknown) {
-        const failure = err instanceof Error ? err : new Error(String(err));
-        settleNotReady(failure);
-        if (failure instanceof OpenCodeTimeoutError) {
-          const reason = errorMessage(failure);
-          if (this.#markTemporarilyUnavailable(reason)) {
-            this.#logger.warn('OpenCode event stream readiness timed out', { reason });
-          }
-        }
-        if (generation !== this.#sseListenerGeneration) return;
-        this.#failRunningTurnsForListenerError(failure);
-        const retryMs = this.isTemporarilyUnavailable()
-          ? Math.max(this.#options.sseRetryDelayMs, Math.min(this.getUnavailableRetryAfterMs(), 30_000))
-          : this.#options.sseRetryDelayMs;
-        this.#logger.error('OpenCode SSE listener failed and will reconnect', {
-          retrySeconds: Math.round(retryMs / 1000),
-          error: failure.message,
-        });
-        this.#sseListenerStarted = false;
-        if (this.#sseReadyPromise === readyPromise) {
-          this.#sseReadyPromise = null;
-          this.#rejectSseReady = null;
-        }
-        this.#sseRetryTimer = setTimeout(() => {
-          this.#sseRetryTimer = null;
-          void this.#startGlobalSSEListener().catch((error) => {
-            this.#logger.error('OpenCode SSE listener restart failed', {
-              error: errorMessage(error),
-            });
-          });
-        }, retryMs);
-        this.#sseRetryTimer.unref?.();
-      } finally {
-        clearTimeout(readyTimer);
-        if (this.#sseAbortController === abortController) {
-          this.#sseAbortController = null;
-        }
-      }
-    };
-
-    void runListener();
-    await readyPromise;
+    const now = new Date().toISOString();
+    this.#emitPermissionMessages(chatId, [
+      new PermissionRequestMessage(
+        now,
+        permissionRequestId,
+        convertOpencodePermissionTool(now, permissionRequestId, permission.toolInput),
+      ),
+    ], session.turn.eventMetadata);
   }
 
   async getClient(): Promise<any> {
@@ -1150,6 +1073,26 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}), control);
   }
 
+  async #quiesceRetiredProviderWork(
+    client: any,
+    agentSessionId: string,
+    session: OpenCodeSession,
+    scope: OpenCodeRequestScope,
+  ): Promise<void> {
+    if (!session.providerWorkRequiresQuiescence) return;
+    session.terminalEventsFencedUntilPrompt = true;
+    const result = await this.#runScopedSessionRequest(
+      'OpenCode retired session abort',
+      scope,
+      (signal, requestScope) => client.session.abort(
+        withOpenCodeRequestScope({ sessionID: agentSessionId }, requestScope),
+        { signal },
+      ),
+    );
+    throwOpenCodeResultError(result, 'OpenCode retired session abort failed');
+    session.providerWorkRequiresQuiescence = false;
+  }
+
   async startSession(request: OpenCodeStartRequest): Promise<string> {
     this.#endpointCoordinator.turnAdmissionStarted();
     try {
@@ -1170,7 +1113,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     void thinkingMode;
 
     await this.#ensureOpenCodeServer();
-    await this.#startGlobalSSEListener();
+    await this.#globalEventListener.start();
 
     const client = await this.getClient();
     assertOpenCodeExecutionOpen(request);
@@ -1204,13 +1147,15 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
       lastEventId: null,
+      providerWorkRequiresQuiescence: false,
+      terminalEventsFencedUntilPrompt: false,
       turn,
     });
     this.emitSessionCreated(chatId);
     this.#logger.info('OpenCode session created and registered', { agentSessionId });
 
     try {
-      await this.#startGlobalSSEListener();
+      await this.#globalEventListener.start();
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
@@ -1251,6 +1196,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         || sess.turn !== turn
       ) return;
       this.#logger.error('OpenCode prompt failed', { agentSessionId, error: err.message });
+      sess.providerWorkRequiresQuiescence = true;
       sess.status = 'completed';
       sess.lastActivityAt = Date.now();
       this.emitProcessing(chatId, false);
@@ -1260,6 +1206,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     return agentSessionId;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
+      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
     }
   }
 
@@ -1284,7 +1231,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     void thinkingMode;
 
     await this.#ensureOpenCodeServer();
-    await this.#startGlobalSSEListener();
+    await this.#globalEventListener.start();
     assertOpenCodeExecutionOpen(request);
 
     const session = this.#sessions.get(agentSessionId);
@@ -1293,6 +1240,9 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
     const client = await this.getClient();
+    if (session) {
+      await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+    }
     const waiter = this.#createTurnWaiter(agentSessionId);
     if (session) {
       session.status = 'running';
@@ -1313,13 +1263,15 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         startedAt: new Date().toISOString(),
         lastActivityAt: Date.now(),
         lastEventId: null,
+        providerWorkRequiresQuiescence: false,
+        terminalEventsFencedUntilPrompt: false,
         turn,
       });
     }
     const promptBody = buildPromptBody(command, model, turn.providerPromptPartId);
 
     try {
-      await this.#startGlobalSSEListener();
+      await this.#globalEventListener.start();
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
@@ -1341,6 +1293,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       const sess = this.#sessions.get(agentSessionId);
       if (request.executionAdmission?.signal.aborted) {
         if (sess?.turn === turn) {
+          sess.providerWorkRequiresQuiescence = true;
           sess.status = 'completed';
           sess.lastActivityAt = Date.now();
         }
@@ -1349,6 +1302,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       }
       this.#logger.error('OpenCode query failed', { agentSessionId, error: err.message });
       if (!sess || sess.status !== 'running' || sess.turn !== turn) throw err;
+      sess.providerWorkRequiresQuiescence = true;
       sess.status = 'completed';
       sess.lastActivityAt = Date.now();
       this.#clearTurnWaiter(agentSessionId);
@@ -1361,6 +1315,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     if (turnFailure) throw turnFailure;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
+      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
     }
   }
 

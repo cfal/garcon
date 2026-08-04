@@ -33,6 +33,12 @@ export interface OpenCodeSession {
   startedAt: string;
   lastActivityAt: number;
   lastEventId: string | null;
+  // A transport or control-plane failure can retire Garcon's turn while OpenCode still owns
+  // provider work. The next turn aborts that work before submitting another prompt.
+  providerWorkRequiresQuiescence: boolean;
+  // Terminal session events have no prompt identity. Recovery drops the abort backlog until
+  // OpenCode publishes the exact caller-owned part for the successor prompt.
+  terminalEventsFencedUntilPrompt: boolean;
   turn: OpenCodeTurnContext;
 }
 
@@ -129,6 +135,7 @@ export function openCodeEventBelongsToTurn(
       ) return false;
       turn.providerMessageId = messageId;
       turn.providerObservedEventId = event.id ?? null;
+      session.terminalEventsFencedUntilPrompt = false;
       return false;
     }
     if (messageId && turn.observedUserMessageIds.has(messageId)) {

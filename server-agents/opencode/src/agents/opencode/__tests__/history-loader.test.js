@@ -145,6 +145,45 @@ describe('OpenCode history loader', () => {
     ]);
   });
 
+  it('keeps a different prompt when overflow compaction finishes without replaying the original', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'text', text: 'original prompt' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [{ type: 'compaction', auto: true, overflow: true }],
+            },
+            {
+              info: {
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                time: { created: '2026-07-04T00:00:02.000Z' },
+              },
+              parts: [{ type: 'text', text: 'internal summary' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:03.000Z' } },
+              parts: [{ type: 'text', text: 'different follow-up' }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => [message.type, message.content])).toEqual([
+      ['user-message', 'original prompt'],
+      ['user-message', 'different follow-up'],
+    ]);
+  });
+
   it('hides synthetic continuation prompts but keeps real text from mixed user messages', async () => {
     const getClient = mock(() => Promise.resolve({
       session: {

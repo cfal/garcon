@@ -223,7 +223,8 @@ function isCompactionAssistant(info: NonNullable<OpenCodeMessage['info']>): bool
 function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): OpenCodeMessage[] {
   const visible: OpenCodeMessage[] = [];
   let overflowCompactionPending = false;
-  let replayExpected = false;
+  let replayExpectedText: string | null = null;
+  let lastVisibleUserText: string | null = null;
 
   for (const message of rawMessages) {
     const info = message.info ?? {};
@@ -233,7 +234,7 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
       const compaction = parts.find((part) => part.type === 'compaction');
       if (compaction) {
         overflowCompactionPending = compaction.overflow === true;
-        replayExpected = false;
+        replayExpectedText = null;
         continue;
       }
 
@@ -241,23 +242,27 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
       if (!text.trim()) {
         if (parts.some((part) => part.type === 'text' && part.synthetic === true)) {
           overflowCompactionPending = false;
-          replayExpected = false;
+          replayExpectedText = null;
         }
         continue;
       }
 
       overflowCompactionPending = false;
-      if (replayExpected) {
-        replayExpected = false;
-        continue;
+      if (replayExpectedText !== null) {
+        const isReplay = text === replayExpectedText;
+        replayExpectedText = null;
+        if (isReplay) continue;
       }
       visible.push(message);
+      lastVisibleUserText = text;
       continue;
     }
 
     if (info.role === 'assistant' && isCompactionAssistant(info)) {
       const succeeded = info.error == null;
-      replayExpected = overflowCompactionPending && succeeded;
+      replayExpectedText = overflowCompactionPending && succeeded
+        ? lastVisibleUserText
+        : null;
       overflowCompactionPending = false;
       // A failed summary remains internal, but its provider failure must survive reload.
       if (!succeeded) visible.push({ ...message, parts: [] });
@@ -265,7 +270,7 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
     }
 
     overflowCompactionPending = false;
-    replayExpected = false;
+    replayExpectedText = null;
     visible.push(message);
   }
 

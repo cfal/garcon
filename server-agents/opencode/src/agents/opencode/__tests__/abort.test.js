@@ -190,6 +190,47 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
+  it('fails a running turn when the connected event stream stops delivering heartbeats', async () => {
+    const close = mock(() => undefined);
+    const subscribe = mock((options) => Promise.resolve({
+      stream: (async function* () {
+        yield connectedEnvelope();
+        await new Promise((resolve) => {
+          if (options.signal.aborted) {
+            resolve();
+            return;
+          }
+          options.signal.addEventListener('abort', resolve, { once: true });
+        });
+      })(),
+    }));
+    const runtime = new OpenCodeRuntime({
+      sseHeartbeatTimeoutMs: 10,
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          permission: { reply: mock(() => Promise.resolve({})) },
+          global: { event: subscribe },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            promptAsync: mock(() => Promise.resolve({})),
+            abort: mock(() => Promise.resolve({ data: true })),
+          },
+        },
+        server: { close },
+      })),
+    });
+    const failures = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+
+    await start(runtime);
+    await waitFor(() => failures.length === 1);
+
+    expect(failures).toEqual(['OpenCode event stream heartbeat timed out after 10ms']);
+    expect(runtime.isRunning('session-1')).toBe(false);
+    expect(close).toHaveBeenCalledTimes(1);
+    await runtime.shutdown();
+  });
+
   it('keeps the turn running until the provider acknowledges the abort', async () => {
     const acknowledged = deferred();
     const abort = mock(() => acknowledged.promise);
@@ -319,6 +360,14 @@ describe('OpenCodeRuntime abort', () => {
     }));
     eventStream.push(envelope({
       id: 'evt_0003',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -386,6 +435,16 @@ describe('OpenCodeRuntime abort', () => {
     }));
     eventStream.push(envelope({
       id: 'evt_0007',
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(runtime.isRunning('session-1')).toBe(true);
+    expect(finishes).toHaveLength(1);
+
+    eventStream.push(envelope({
+      id: 'evt_0008',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
@@ -393,7 +452,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0008',
+      id: 'evt_0009',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
@@ -401,7 +460,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0009',
+      id: 'evt_0010',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -460,6 +519,14 @@ describe('OpenCodeRuntime abort', () => {
     }));
     eventStream.push(envelope({
       id: 'evt_0003',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -669,6 +736,64 @@ describe('OpenCodeRuntime abort', () => {
     expect(subscribe).toHaveBeenCalledTimes(2);
   });
 
+  it('replaces a dead instance after a reconnect cannot reach server.connected', async () => {
+    const firstStream = createEventStream();
+    let subscriptionCount = 0;
+    const firstSubscribe = mock(() => {
+      subscriptionCount += 1;
+      if (subscriptionCount === 1) {
+        return Promise.resolve({ stream: firstStream.stream() });
+      }
+      return Promise.reject(new Error('connect ECONNREFUSED'));
+    });
+    const firstClose = mock(() => undefined);
+    const replacementClose = mock(() => undefined);
+    const replacementClient = {
+      permission: { reply: mock(() => Promise.resolve({})) },
+      global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+      session: {
+        create: mock(() => Promise.resolve({ data: { id: 'replacement-session' } })),
+        promptAsync: mock(() => Promise.resolve({})),
+        abort: mock(() => Promise.resolve({ data: true })),
+      },
+    };
+    const createInstance = mock()
+      .mockImplementationOnce(() => Promise.resolve({
+        client: {
+          permission: { reply: mock(() => Promise.resolve({})) },
+          global: { event: firstSubscribe },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            promptAsync: mock(() => Promise.resolve({})),
+            abort: mock(() => Promise.resolve({ data: true })),
+          },
+        },
+        server: { close: firstClose },
+      }))
+      .mockImplementationOnce(() => Promise.resolve({
+        client: replacementClient,
+        server: { close: replacementClose },
+      }));
+    const runtime = new OpenCodeRuntime({
+      createInstance,
+      sseRetryDelayMs: 1,
+      unavailableRetryMs: 5,
+    });
+    const failures = [];
+    runtime.onFailed((_chatId, message) => failures.push(message));
+
+    await start(runtime);
+    firstStream.close();
+    await waitFor(() => failures.length === 1);
+    await waitFor(() => firstClose.mock.calls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await expect(runtime.getClient()).resolves.toBe(replacementClient);
+    expect(createInstance).toHaveBeenCalledTimes(2);
+    await runtime.shutdown();
+    expect(replacementClose).toHaveBeenCalledTimes(1);
+  });
+
   it('fails an owned turn exactly when the provider event stream ends', async () => {
     const eventStream = createEventStream();
     const prompt = deferred();
@@ -781,6 +906,14 @@ describe('OpenCodeRuntime abort', () => {
     }));
     eventStream.push(envelope({
       id: 'evt_0003',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
       type: 'session.error',
       properties: {
         sessionID: 'session-1',
@@ -788,12 +921,12 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0004',
+      id: 'evt_0005',
       type: 'message.updated',
       properties: { sessionID: 'session-1', info: { id: 'compaction-user', role: 'user' } },
     }));
     eventStream.push(envelope({
-      id: 'evt_0005',
+      id: 'evt_0006',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
@@ -801,12 +934,12 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0006',
+      id: 'evt_0007',
       type: 'message.updated',
       properties: { sessionID: 'session-1', info: { id: 'continue-user', role: 'user' } },
     }));
     eventStream.push(envelope({
-      id: 'evt_0007',
+      id: 'evt_0008',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
@@ -820,12 +953,12 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0008',
+      id: 'evt_0009',
       type: 'session.compacted',
       properties: { sessionID: 'session-1' },
     }));
     eventStream.push(envelope({
-      id: 'evt_0009',
+      id: 'evt_0010',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
@@ -833,7 +966,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0010',
+      id: 'evt_0011',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
@@ -841,7 +974,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0011',
+      id: 'evt_0012',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -889,6 +1022,14 @@ describe('OpenCodeRuntime abort', () => {
     }));
     eventStream.push(envelope({
       id: 'evt_0003',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
       type: 'session.error',
       properties: {
         sessionID: 'session-1',
@@ -896,7 +1037,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     eventStream.push(envelope({
-      id: 'evt_0004',
+      id: 'evt_0005',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -994,8 +1135,9 @@ describe('OpenCodeRuntime abort', () => {
       return Promise.resolve({ stream: stream.stream() });
     });
     const promptAsync = mock(() => Promise.resolve({}));
+    const abort = mock(() => Promise.resolve({ data: true }));
     const runtime = createRuntime(
-      mock(() => Promise.resolve({ data: true })),
+      abort,
       promptAsync,
       subscribe,
     );
@@ -1021,6 +1163,10 @@ describe('OpenCodeRuntime abort', () => {
       turnId: 'turn-b',
     });
     await waitFor(() => promptAsync.mock.calls.length === 2);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(abort.mock.invocationCallOrder[0]).toBeLessThan(
+      promptAsync.mock.invocationCallOrder[1],
+    );
 
     // Late output from the retired turn carries its old provider identity and is dropped.
     secondStream.push(envelope({
@@ -1065,15 +1211,24 @@ describe('OpenCodeRuntime abort', () => {
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
+    secondStream.push(envelope({
+      id: 'evt_0006',
+      type: 'session.error',
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'ProviderError', data: { message: 'retired turn failure' } },
+      },
+    }));
     await Promise.resolve();
     await Promise.resolve();
 
     expect(runtime.isRunning('session-1')).toBe(true);
     expect(messages).toEqual([]);
     expect(finishes).toEqual([]);
+    expect(failures).toHaveLength(1);
 
     secondStream.push(envelope({
-      id: 'evt_0006',
+      id: 'evt_0007',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
@@ -1081,7 +1236,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     secondStream.push(envelope({
-      id: 'evt_0007',
+      id: 'evt_0008',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
@@ -1094,7 +1249,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     secondStream.push(envelope({
-      id: 'evt_0008',
+      id: 'evt_0009',
       type: 'message.updated',
       properties: {
         sessionID: 'session-1',
@@ -1102,7 +1257,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     secondStream.push(envelope({
-      id: 'evt_0009',
+      id: 'evt_0010',
       type: 'message.part.updated',
       properties: {
         sessionID: 'session-1',
@@ -1110,7 +1265,7 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
     secondStream.push(envelope({
-      id: 'evt_0010',
+      id: 'evt_0011',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -1251,6 +1406,14 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
     eventStream.push(envelope({
       id: 'evt_0002',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -1300,6 +1463,14 @@ describe('OpenCodeRuntime abort', () => {
     await Promise.resolve();
     eventStream.push(envelope({
       id: 'evt_0002',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));
@@ -1345,6 +1516,14 @@ describe('OpenCodeRuntime abort', () => {
     }));
     eventStream.push(envelope({
       id: 'evt_0002',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'assistant-a', role: 'assistant', parentID: 'user-a' },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0003',
       type: 'session.error',
       properties: {
         sessionID: 'session-1',
@@ -1356,7 +1535,7 @@ describe('OpenCodeRuntime abort', () => {
     const aborting = runtime.abort('session-1');
     await Promise.resolve();
     eventStream.push(envelope({
-      id: 'evt_0003',
+      id: 'evt_0004',
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },
     }));

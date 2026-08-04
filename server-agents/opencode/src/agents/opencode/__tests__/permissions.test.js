@@ -47,17 +47,31 @@ function createAsyncEventStream() {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 async function* neverEndingStream() {
   yield { payload: { id: 'evt_connected', type: 'server.connected', properties: {} } };
   await new Promise(() => {});
 }
 
 async function waitForMockCall(fn) {
+  await waitFor(() => fn.mock.calls.length > 0);
+}
+
+async function waitFor(predicate) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (fn.mock.calls.length > 0) return;
+    if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  throw new Error('Timed out waiting for mock call');
+  throw new Error('Timed out waiting for condition');
 }
 
 describe('mapPermissionDecision', () => {
@@ -332,6 +346,103 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
 
     eventStream.close();
     provider.shutdown();
+  });
+
+  it('isolates a failed manual bypass reply without stalling the global event stream', async () => {
+    const eventStream = createAsyncEventStream();
+    const reply = deferred();
+    client.global.event.mockImplementation(() => Promise.resolve({ stream: eventStream.stream() }));
+    client.session.create
+      .mockImplementationOnce(() => Promise.resolve({ data: { id: 'sess-1' } }))
+      .mockImplementationOnce(() => Promise.resolve({ data: { id: 'sess-2' } }));
+    client.permission.reply.mockImplementation(() => reply.promise);
+    const failures = [];
+    const finishes = [];
+    provider.onFailed((chatId, message) => failures.push({ chatId, message }));
+    provider.onFinished((chatId) => finishes.push(chatId));
+
+    await provider.startSession({
+      command: 'manual command',
+      chatId: 'chat-manual',
+      permissionMode: 'manualBypass',
+    });
+    await provider.startSession({
+      command: 'healthy command',
+      chatId: 'chat-healthy',
+      permissionMode: 'default',
+    });
+
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0001',
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'sess-1',
+          requestID: 'req-manual',
+          permission: 'bash',
+        },
+      },
+    });
+    await waitForMockCall(client.permission.reply);
+
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0002',
+        type: 'message.updated',
+        properties: { sessionID: 'sess-2', info: { id: 'user-2', role: 'user' } },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0003',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-2',
+          part: {
+            id: client.session.promptAsync.mock.calls[1][0].parts[0].id,
+            messageID: 'user-2',
+            type: 'text',
+            text: 'healthy command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0004',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'sess-2',
+          info: { id: 'assistant-2', role: 'assistant', parentID: 'user-2' },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_0005',
+        type: 'session.status',
+        properties: { sessionID: 'sess-2', status: { type: 'idle' } },
+      },
+    });
+    await waitFor(() => finishes.length === 1);
+    expect(finishes).toEqual(['chat-healthy']);
+    expect(failures).toEqual([]);
+
+    reply.reject(new Error('permission endpoint failed'));
+    await waitFor(() => failures.length === 1);
+    expect(failures).toEqual([{
+      chatId: 'chat-manual',
+      message: 'permission endpoint failed',
+    }]);
+    expect(client.global.event).toHaveBeenCalledTimes(1);
+
+    eventStream.close();
+    await provider.shutdown();
   });
 
   it('returns early for null permissionRequestId', async () => {

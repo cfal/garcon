@@ -316,7 +316,7 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(provider.getClientIfInitialized()).toBeNull();
   });
 
-  it('finishes shutdown and closes an instance that resolves after ignoring abort', async () => {
+  it('waits for and closes an instance that resolves during the shutdown grace window', async () => {
     const created = deferred();
     const close = mock(() => {});
     let startupSignal;
@@ -326,7 +326,7 @@ describe('OpenCodeRuntime model discovery', () => {
     });
 
     const OpenCodeRuntime = await importProvider();
-    const provider = new OpenCodeRuntime({ createInstance });
+    const provider = new OpenCodeRuntime({ createInstance, shutdownStartupGraceMs: 20 });
     const starting = provider.getClient();
     const observedStartup = starting.then(
       () => null,
@@ -338,10 +338,35 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(createInstance).toHaveBeenCalledTimes(1);
     const stopping = provider.shutdown();
     expect(startupSignal.aborted).toBe(true);
+    created.resolve({
+      client: { permission: { reply: mock(() => Promise.resolve({})) } },
+      server: { close },
+    });
     await stopping;
     const startupError = await observedStartup;
     expect(startupError).toBeInstanceOf(Error);
     expect(startupError.message).toContain('OpenCode runtime shutting down');
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(provider.getClientIfInitialized()).toBeNull();
+  });
+
+  it('bounds shutdown when an instance factory ignores abort indefinitely', async () => {
+    const created = deferred();
+    const close = mock(() => {});
+    const createInstance = mock(() => created.promise);
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({
+      createInstance,
+      shutdownStartupGraceMs: 5,
+    });
+    const starting = provider.getClient();
+    const observedStartup = starting.catch((error) => error);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await provider.shutdown();
+    expect(await observedStartup).toBeInstanceOf(Error);
     expect(close).not.toHaveBeenCalled();
 
     created.resolve({
