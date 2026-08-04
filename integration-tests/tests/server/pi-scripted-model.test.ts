@@ -17,6 +17,7 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  PI_TEST_CLAMPED_THINKING_MODEL,
   PI_TEST_MODEL,
   piNativeSession,
   scriptedPiStartRequest,
@@ -89,6 +90,32 @@ describe('Pi against a scripted model', () => {
         ? fixture.dirs.home
         : `${fixture.dirs.home}/`;
       expect(native.path.startsWith(sessionDir)).toBe(true);
+      testEnvironment.model.assertSettled();
+    }, withScriptedPi());
+  }, 120_000);
+
+  test('accepts Pi-clamped thinking for a model without an off level', async () => {
+    const testEnvironment = requireEnvironment();
+    const reply = marker('CLAMPED_THINKING_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+
+    await withIntegrationFixture('pi-scripted-clamped-thinking', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedPiStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('CLAMPED_THINKING_PROMPT'),
+        model: PI_TEST_CLAMPED_THINKING_MODEL,
+        thinkingMode: 'none',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
   }, 120_000);

@@ -1,5 +1,6 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
+import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import {
   AgentIntegrationError,
   type AgentSteerResult,
@@ -7,6 +8,16 @@ import {
 import { buildPiPrompt } from './pi-cli.js';
 import { PiRpcCommandError } from './pi-rpc-client.js';
 import type { PiResumeRequest, PiStartRequest } from './runtime-types.js';
+
+const PI_THINKING_LEVELS: readonly ModelThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
 
 export interface PreparedPiRpcPrompt {
   readonly message: string;
@@ -61,6 +72,36 @@ export function occurrenceCounts(values: readonly string[]): Map<string, number>
   const counts = new Map<string, number>();
   for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
   return counts;
+}
+
+// Mirrors Pi's upward-first clamp for levels unsupported by the resolved model.
+// https://github.com/earendil-works/pi-mono/blob/845d6ff1f6643aba440341cce877ce1c43ebbc39/packages/ai/src/models.ts#L661-L692
+export function resolvePiThinkingLevel(
+  model: Readonly<Record<string, unknown>>,
+  requested: ModelThinkingLevel,
+): ModelThinkingLevel {
+  const levelMap = model.thinkingLevelMap && typeof model.thinkingLevelMap === 'object'
+    ? model.thinkingLevelMap as Readonly<Record<string, unknown>>
+    : null;
+  const supported = model.reasoning === true
+    ? PI_THINKING_LEVELS.filter((level) => {
+      const mapped = levelMap?.[level];
+      if (mapped === null) return false;
+      return (level !== 'xhigh' && level !== 'max') || mapped !== undefined;
+    })
+    : ['off'] satisfies ModelThinkingLevel[];
+  if (supported.includes(requested)) return requested;
+
+  const requestedIndex = PI_THINKING_LEVELS.indexOf(requested);
+  for (let index = requestedIndex; index < PI_THINKING_LEVELS.length; index += 1) {
+    const candidate = PI_THINKING_LEVELS[index];
+    if (supported.includes(candidate)) return candidate;
+  }
+  for (let index = requestedIndex - 1; index >= 0; index -= 1) {
+    const candidate = PI_THINKING_LEVELS[index];
+    if (supported.includes(candidate)) return candidate;
+  }
+  return supported[0] ?? 'off';
 }
 
 export function rejectedPiSteer(

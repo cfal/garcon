@@ -37,6 +37,7 @@ import {
   piUserMessageText,
   preparePiRpcPrompt,
   rejectedPiSteer,
+  resolvePiThinkingLevel,
   type PreparedPiRpcPrompt,
 } from './pi-rpc-protocol.js';
 import {
@@ -607,9 +608,12 @@ export class PiRpcRuntime extends AgentEventEmitterRuntime {
       throw new Error(`Pi resolved model ${resolvedModel || 'unknown'} instead of ${session.model}`);
     }
     const expectedThinking = mapThinkingMode(request.thinkingMode);
-    if (expectedThinking && data.thinkingLevel !== expectedThinking) {
+    const effectiveThinking = expectedThinking && model
+      ? resolvePiThinkingLevel(model, expectedThinking)
+      : expectedThinking;
+    if (effectiveThinking && data.thinkingLevel !== effectiveThinking) {
       throw new Error(
-        `Pi thinking level is ${String(data.thinkingLevel)} instead of ${expectedThinking}`,
+        `Pi thinking level is ${String(data.thinkingLevel)} instead of ${effectiveThinking}`,
       );
     }
     assertPiExecutionOpen(request);
