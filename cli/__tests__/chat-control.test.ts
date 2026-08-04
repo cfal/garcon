@@ -132,9 +132,11 @@ describe('sendChatAsync', () => {
   });
 
   test('alternates run-steer-run when the steer target is unavailable', async () => {
+    let runCalls = 0;
     const testClient = client({
       async runChat() {
-        if (this.runs.length === 1) throw busyError();
+        runCalls += 1;
+        if (runCalls === 1) throw busyError();
         return acceptedTurn();
       },
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
@@ -148,10 +150,7 @@ describe('sendChatAsync', () => {
 
   test('reports bounded exhaustion after run-steer-run with a second busy rejection', async () => {
     const testClient = client({
-      async runChat() {
-        if (this.runs.length === 0) throw busyError();
-        throw busyError();
-      },
+      async runChat() { throw busyError(); },
       async steerChat() { throw steerError('STEER_TURN_CHANGED'); },
     });
     const testOutput = output();
@@ -168,9 +167,11 @@ describe('sendChatAsync', () => {
   });
 
   test('reuses the exact run request identity when returning to /run', async () => {
+    let runCalls = 0;
     const testClient = client({
       async runChat(request) {
-        if (this.runs.length === 1) throw busyError();
+        runCalls += 1;
+        if (runCalls === 1) throw busyError();
         return acceptedTurn();
       },
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
@@ -231,6 +232,23 @@ describe('sendChatAsync', () => {
     expect(testClient.steers).toHaveLength(0);
   });
 
+  test('does not steer after an unrelated 409 run rejection', async () => {
+    const rejection = new GarconHttpError(
+      'submission',
+      'agent mismatch',
+      409,
+      'EXPECTED_AGENT_MISMATCH',
+      false,
+    );
+    const testClient = client({ async runChat() { throw rejection; } });
+    await expect(sendChatAsync(
+      { chatId: CHAT_ID, content: 'Message', allowSteer: true },
+      testClient, output(), undefined, noDelayDependencies(),
+    )).rejects.toBe(rejection);
+    expect(testClient.runs).toHaveLength(1);
+    expect(testClient.steers).toHaveLength(0);
+  });
+
   test('does not switch route when a safe-steer code arrives on a non-409 status', async () => {
     const nonConflict = new GarconHttpError(
       'submission',
@@ -255,10 +273,7 @@ describe('sendChatAsync', () => {
     const delays: Array<[number, AbortSignal | undefined]> = [];
     const controller = new AbortController();
     const testClient = client({
-      async runChat() {
-        if (this.runs.length === 1) throw busyError();
-        throw busyError();
-      },
+      async runChat() { throw busyError(); },
       async steerChat() { throw steerError('STEER_TURN_CHANGED'); },
     });
     await expect(sendChatAsync(

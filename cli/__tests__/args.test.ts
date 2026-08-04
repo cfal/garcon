@@ -207,7 +207,7 @@ describe('parseCliArgs', () => {
     });
   });
 
-  test('parses a minimal stop command and rejects stdin read markers', () => {
+  test('parses a minimal stop command with connection options', () => {
     expect(parseCliArgs(['stop', CHAT_ID], ENV)).toEqual({
       kind: 'stop',
       workspace: 'default',

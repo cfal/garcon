@@ -68,6 +68,8 @@ function output(): CliOutput & { acceptedIds: string[]; messages: string[][] } {
     accepted(chatId) { this.acceptedIds.push(chatId); },
     completed(messages) { this.messages.push([...messages]); },
     listing() {},
+    sent() {},
+    stopped() {},
     diagnostic() {},
   };
 }
